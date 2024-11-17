@@ -1,0 +1,29 @@
+use bridgething::{bt, ws};
+
+mod monitoring;
+
+#[tokio::main]
+async fn main() {
+  monitoring::init_logger();
+
+  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
+  let mut conn_man = ws::ConnMan::new();
+
+  loop {
+    tokio::select! {
+      Ok((stream, address)) = server.listen() => {
+        if let Err(err) = conn_man.handle_connection(address, stream).await {
+          tracing::error!("failed to accept tcp stream: {:?}", err);
+          continue;
+        };
+      },
+      Ok(msg) = conn_man.listen() => {
+        // leaving this here...
+      },
+      _ = monitoring::wait_for_signal() => {
+        tracing::info!("signal received - exiting...");
+        break;
+      }
+    }
+  }
+}
