@@ -6,6 +6,7 @@ mod bluetooth;
 mod configuration;
 mod connection;
 mod device;
+mod interapp;
 mod permissions;
 mod settings;
 mod setup;
@@ -17,6 +18,7 @@ pub use bluetooth::*;
 pub use configuration::*;
 pub use connection::*;
 pub use device::*;
+pub use interapp::*;
 pub use permissions::*;
 pub use settings::*;
 pub use setup::*;
@@ -38,6 +40,7 @@ pub struct AddressedRecvMessage {
 #[derive(Debug)]
 pub enum RecvMessageWithMeta {
   Stock(StockRecv),
+  StockInterApp { msg_id: usize, method: StockInterAppRecv },
   ConnectionClosed(tokio_websockets::CloseCode, String),
   Error(tokio_websockets::Error),
 }
@@ -46,6 +49,7 @@ impl From<RecvMessage> for RecvMessageWithMeta {
   fn from(recv: RecvMessage) -> Self {
     match recv {
       RecvMessage::Stock(msg) => RecvMessageWithMeta::Stock(msg),
+      RecvMessage::StockInterApp { msg_id, method } => RecvMessageWithMeta::StockInterApp { msg_id, method },
     }
   }
 }
@@ -54,6 +58,11 @@ impl From<RecvMessage> for RecvMessageWithMeta {
 #[serde(untagged)]
 pub enum RecvMessage {
   Stock(StockRecv),
+  #[serde(rename_all = "snake_case")]
+  StockInterApp {
+    msg_id: usize,
+    method: StockInterAppRecv,
+  },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
