@@ -3,18 +3,24 @@ use std::net::SocketAddr;
 
 mod action;
 mod bluetooth;
+mod configuration;
 mod connection;
 mod device;
+mod permissions;
+mod settings;
 mod setup;
-mod storage;
+mod version;
 mod voice;
 
 pub use action::*;
 pub use bluetooth::*;
+pub use configuration::*;
 pub use connection::*;
 pub use device::*;
+pub use permissions::*;
+pub use settings::*;
 pub use setup::*;
-pub use storage::*;
+pub use version::*;
 pub use voice::*;
 
 pub type RecvTx = tokio::sync::mpsc::Sender<AddressedRecvMessage>;
@@ -77,6 +83,11 @@ pub enum StockSend {
   Storage(StockStorageSend),
   Setup(StockSetupSend),
   Connection(StockConnectionSend),
+  Hardware(StockHardwareSend),
+  PhoneCall(StockPhoneCallSend),
+  Permissions(StockPermissionsSend),
+  Configuration(StockConfigurationSend),
+  Version(StockVersionSend),
 }
 
 pub struct MsgBuilder;
