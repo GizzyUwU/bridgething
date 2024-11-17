@@ -21,7 +21,7 @@ pub enum StockBluetoothSend {
   #[serde(rename = "bluetooth_local_device")]
   LocalDevice { mac: String, name: String },
   #[serde(rename = "bluetooth_current_device")]
-  CurrentDevice { mac: String, name: String },
+  CurrentDevice { address: String, name: String },
   #[serde(rename = "bluetooth_pairing_finished")]
   PairingFinished { success: bool },
   #[serde(rename = "bluetooth_pin")]
@@ -51,9 +51,16 @@ impl From<Vec<StockDevice>> for SendMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StockDeviceInfo {
-  name: String,
+  pub name: String,
   #[serde(rename = "type")]
-  device_type: String,
+  pub device_type: StockDeviceType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StockDeviceType {
+  Android,
+  #[serde(rename = "iOS")]
+  Ios,
 }
 
 #[cfg(test)]

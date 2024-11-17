@@ -73,6 +73,7 @@ impl Connection {
         }
 
         Some(server_msg) = self.rx.recv() => {
+          tracing::trace!("({}) sending message: {:?}", &self.address, server_msg);
           self.send(server_msg).await;
         }
 

@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
 
 use bridgething::ws::{
-  self, AddressedRecvMessage, RecvMessageWithMeta, StockBluetoothRecv, StockRecv, StockSetupSend, StockStoragePayload,
-  StockStorageRecv, StockStorageSend,
+  self, AddressedRecvMessage, RecvMessageWithMeta, StockBluetoothRecv, StockBluetoothSend, StockConnectionSend,
+  StockDevice, StockDeviceInfo, StockDeviceType, StockRecv, StockSetupSend, StockStoragePayload, StockStorageRecv,
+  StockStorageSend,
 };
 
 #[tokio::main]
@@ -42,14 +43,18 @@ impl<'a> MockMsgHandler<'a> {
   }
 
   async fn handle(&mut self, ws_msg: AddressedRecvMessage) {
-    tracing::debug!("handling message: {:?}", &ws_msg);
     let RecvMessageWithMeta::Stock(msg) = ws_msg.data else {
       return tracing::trace!("ignoring message.");
     };
 
+    if StockRecv::Log != msg {
+      tracing::trace!("handling message: {:?}", &msg);
+    }
+
     match msg {
       StockRecv::Storage(msg) => self.handle_storage_msg(ws_msg.from, msg).await,
       StockRecv::Bluetooth(msg) => self.handle_bluetooth_msg(ws_msg.from, msg).await,
+      StockRecv::Log => {} // ignore logs
       _ => tracing::warn!("unhandled stock message!!"),
     }
   }
@@ -58,7 +63,7 @@ impl<'a> MockMsgHandler<'a> {
     match msg {
       StockStorageRecv::Get { key, .. } => match key.as_str() {
         "local-storage-data" => {
-          let _ = self
+          self
             .conn_man
             .send(
               address,
@@ -71,10 +76,11 @@ impl<'a> MockMsgHandler<'a> {
                 },
               },
             )
-            .await;
+            .await
+            .expect("failed to send message");
         }
         "onboarding_status" => {
-          let _ = self
+          self
             .conn_man
             .send(
               address,
@@ -87,9 +93,10 @@ impl<'a> MockMsgHandler<'a> {
                 },
               },
             )
-            .await;
+            .await
+            .expect("failed to send message");
 
-          let _ = self
+          self
             .conn_man
             .send(
               address,
@@ -97,15 +104,70 @@ impl<'a> MockMsgHandler<'a> {
                 payload: "finished".into(),
               },
             )
-            .await;
+            .await
+            .expect("failed to send message");
         }
         _ => {}
       },
-      StockStorageRecv::Put { value_type, key, value } => {}
-    }
+      StockStorageRecv::Put { key, value, .. } => {}
+    };
   }
 
-  async fn handle_bluetooth_msg(&mut self, address: SocketAddr, msg: StockBluetoothRecv) {}
+  async fn handle_bluetooth_msg(&mut self, address: SocketAddr, msg: StockBluetoothRecv) {
+    let devices = vec![StockDevice {
+      address: "mo::ck::ad::re::ss".to_owned(),
+      default: true,
+      device_info: StockDeviceInfo {
+        name: "Mock Device".to_owned(),
+        device_type: StockDeviceType::Ios,
+      },
+    }];
+    match msg {
+      StockBluetoothRecv::List => {
+        self
+          .conn_man
+          .send(address, devices)
+          .await
+          .expect("failed to send message");
+      }
+      StockBluetoothRecv::Select { .. } => {
+        self
+          .conn_man
+          .send(address, StockBluetoothSend::ConnectionStatus { connected: true })
+          .await
+          .expect("failed to send message");
+        self
+          .conn_man
+          .send(
+            address,
+            StockBluetoothSend::CurrentDevice {
+              address: devices[0].address.clone(),
+              name: devices[0].device_info.name.clone(),
+            },
+          )
+          .await
+          .expect("failed to send message");
+        self
+          .conn_man
+          .send(
+            address,
+            StockConnectionSend::RemoteStatus {
+              payload: true,
+              mac: devices[0].address.clone(),
+              phone_type: devices[0].device_info.device_type.clone(),
+            },
+          )
+          .await
+          .expect("failed to send message");
+        self
+          .conn_man
+          .send(address, StockConnectionSend::TransportStatus { payload: true })
+          .await
+          .expect("failed to send message");
+      }
+      _ => {}
+    };
+  }
 }
 
 fn init_logger() {
@@ -121,7 +183,7 @@ fn init_logger() {
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething=trace".to_string()
+    "mock_backend=trace,bridgething=trace".to_string()
   };
 
   let filter = EnvFilter::builder()

@@ -1,13 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
+mod action;
 mod bluetooth;
+mod connection;
+mod device;
 mod setup;
 mod storage;
+mod voice;
 
+pub use action::*;
 pub use bluetooth::*;
+pub use connection::*;
+pub use device::*;
 pub use setup::*;
 pub use storage::*;
+pub use voice::*;
 
 pub type RecvTx = tokio::sync::mpsc::Sender<AddressedRecvMessage>;
 pub type RecvRx = tokio::sync::mpsc::Receiver<AddressedRecvMessage>;
@@ -46,9 +54,9 @@ pub enum RecvMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StockRecv {
   Bluetooth(StockBluetoothRecv),
-  Voice,
+  Voice(StockVoiceRecv),
   Key,
-  Action,
+  Action(StockActionRecv),
   #[serde(rename = "settings")]
   Storage(StockStorageRecv),
   Device,
@@ -68,6 +76,7 @@ pub enum StockSend {
   Bluetooth(StockBluetoothSend),
   Storage(StockStorageSend),
   Setup(StockSetupSend),
+  Connection(StockConnectionSend),
 }
 
 pub struct MsgBuilder;

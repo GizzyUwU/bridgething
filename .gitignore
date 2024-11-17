@@ -1,1 +1,4 @@
 /target
+
+# hide some debug info
+/notes/mitm.txt
