@@ -7,12 +7,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tokio_websockets::ServerBuilder;
 
-use crate::ws::{connection::Connection, RecvMessageWithMeta, WSError};
-
-use super::{
-  message::{AddressedRecvMessage, RecvRx, RecvTx},
-  SendMessage, SendTx, WSResult,
+use crate::{
+  msg::{AddressedRecvMessage, RecvMessageWithMeta, RecvRx, RecvTx, SendMessage, SendTx},
+  ws::{connection::Connection, WSError},
 };
+
+use super::WSResult;
 
 struct ConnectionData {
   handle: JoinHandle<()>,

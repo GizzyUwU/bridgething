@@ -1,11 +1,11 @@
 mod connection;
 mod connman;
-mod message;
 mod server;
 
 pub use connman::ConnMan;
-pub use message::*;
 pub use server::Server;
+
+use crate::msg::SendMessage;
 
 type WSResult<T> = Result<T, WSError>;
 

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bluer = { version = "0.17.3", features = ["bluetoothd"] }
+bluer = { version = "0.17.3", features = ["bluetoothd", "l2cap"] }
 futures = "0.3.31"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"

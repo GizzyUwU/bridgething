@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SendMessage, StockSend};
+use crate::msg::{SendMessage, StockSend};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -66,7 +66,7 @@ pub enum StockDeviceType {
 #[cfg(test)]
 mod test {
   use super::StockBluetoothRecv;
-  use crate::ws::StockRecv;
+  use crate::msg::StockRecv;
 
   #[test]
   fn ser_stock_recv() {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SendMessage, StockSend};
+use crate::msg::{SendMessage, StockSend};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]

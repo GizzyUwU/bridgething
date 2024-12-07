@@ -1,9 +1,14 @@
 use std::net::SocketAddr;
 
-use bridgething::ws::{
-  self, AddressedRecvMessage, RecvMessageWithMeta, StockBluetoothRecv, StockBluetoothSend, StockConnectionSend,
-  StockDevice, StockDeviceInfo, StockDeviceType, StockRecv, StockSetupSend, StockStoragePayload, StockStorageRecv,
-  StockStorageSend,
+use bridgething::{
+  msg::{
+    stock::{
+      StockBluetoothRecv, StockBluetoothSend, StockConnectionSend, StockDevice, StockDeviceInfo, StockDeviceType,
+      StockSetupSend, StockStoragePayload, StockStorageRecv, StockStorageSend,
+    },
+    AddressedRecvMessage, RecvMessageWithMeta, StockRecv,
+  },
+  ws,
 };
 
 #[tokio::main]

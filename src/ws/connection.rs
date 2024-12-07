@@ -4,12 +4,7 @@ use tokio::{net::TcpStream, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tokio_websockets::WebSocketStream;
 
-use crate::ws::RecvMessage;
-
-use super::{
-  message::{AddressedRecvMessage, RecvMessageWithMeta},
-  RecvTx, SendMessage, SendRx,
-};
+use crate::msg::{AddressedRecvMessage, RecvMessage, RecvMessageWithMeta, RecvTx, SendMessage, SendRx};
 
 pub struct Connection {
   address: SocketAddr,

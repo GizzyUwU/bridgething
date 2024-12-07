@@ -1,29 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-mod action;
-mod bluetooth;
-mod configuration;
-mod connection;
-mod device;
-mod interapp;
-mod permissions;
-mod settings;
-mod setup;
-mod version;
-mod voice;
-
-pub use action::*;
-pub use bluetooth::*;
-pub use configuration::*;
-pub use connection::*;
-pub use device::*;
-pub use interapp::*;
-pub use permissions::*;
-pub use settings::*;
-pub use setup::*;
-pub use version::*;
-pub use voice::*;
+pub mod stock;
+use stock::*;
 
 pub type RecvTx = tokio::sync::mpsc::Sender<AddressedRecvMessage>;
 pub type RecvRx = tokio::sync::mpsc::Receiver<AddressedRecvMessage>;
@@ -98,7 +77,3 @@ pub enum StockSend {
   Configuration(StockConfigurationSend),
   Version(StockVersionSend),
 }
-
-pub struct MsgBuilder;
-
-impl MsgBuilder {}

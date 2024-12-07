@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SendMessage, StockDeviceType, StockSend};
+use super::StockDeviceType;
+use crate::msg::{SendMessage, StockSend};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
