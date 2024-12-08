@@ -2,6 +2,7 @@
 name = "bridgething"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.82.0"
 
 [dependencies]
 bluer = { version = "0.17.3", features = ["bluetoothd", "l2cap"] }
@@ -18,6 +19,18 @@ tokio-websockets = { version = "0.10.1", features = [
 ] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+# systemd feature
+sd-notify = { version = "0.4.3", optional = true }
+
+# als feature
+
+
+[features]
+default = []
+als = []
+systemd = ["dep:sd-notify"]
+superbird = ["als", "systemd"]
 
 [[example]]
 name = "mock-backend"

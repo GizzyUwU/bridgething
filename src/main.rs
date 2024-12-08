@@ -1,4 +1,8 @@
-use bridgething::{ble, ws};
+use bridgething::{
+  ble,
+  systemd::{self, Notify},
+  ws,
+};
 
 mod monitoring;
 
@@ -6,8 +10,16 @@ mod monitoring;
 async fn main() {
   monitoring::init_logger();
 
+  #[cfg(feature = "systemd")]
+  let notifier = systemd::SystemdNotify::new();
+
+  #[cfg(not(feature = "systemd"))]
+  let notifier = systemd::DummyNotify::new();
+
   let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
   let mut conn_man = ws::ConnMan::new();
+
+  notifier.ready(true, Some("ready to accept connections..."));
 
   loop {
     tokio::select! {

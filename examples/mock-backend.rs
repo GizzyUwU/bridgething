@@ -4,9 +4,9 @@ use bridgething::{
   msg::{
     stock::{
       StockBluetoothRecv, StockBluetoothSend, StockConnectionSend, StockDevice, StockDeviceInfo, StockDeviceType,
-      StockSetupSend, StockStoragePayload, StockStorageRecv, StockStorageSend,
+      StockRecv, StockSetupSend, StockStoragePayload, StockStorageRecv, StockStorageSend,
     },
-    AddressedRecvMessage, RecvMessageWithMeta, StockRecv,
+    AddressedRecvMessage, RecvMessageWithMeta,
   },
   ws,
 };

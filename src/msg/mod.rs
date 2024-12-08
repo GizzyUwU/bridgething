@@ -44,36 +44,9 @@ pub enum RecvMessage {
   },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum StockRecv {
-  Bluetooth(StockBluetoothRecv),
-  Voice(StockVoiceRecv),
-  Key,
-  Action(StockActionRecv),
-  #[serde(rename = "settings")]
-  Storage(StockStorageRecv),
-  Device,
-  Log,
-}
-
 // --- sends ---
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum SendMessage {
   Stock(StockSend),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum StockSend {
-  Bluetooth(StockBluetoothSend),
-  Storage(StockStorageSend),
-  Setup(StockSetupSend),
-  Connection(StockConnectionSend),
-  Hardware(StockHardwareSend),
-  PhoneCall(StockPhoneCallSend),
-  Permissions(StockPermissionsSend),
-  Configuration(StockConfigurationSend),
-  Version(StockVersionSend),
 }
