@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{SendMessage, StockSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg, SystemRecv};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -19,6 +19,23 @@ pub struct PhoneCallAttributes {
   call_id: String,
 }
 
+impl From<StockDeviceRecv> for SystemRecv {
+  fn from(data: StockDeviceRecv) -> Self {
+    match data {
+      StockDeviceRecv::Reboot => SystemRecv::Reboot,
+      StockDeviceRecv::PowerOff => SystemRecv::PowerOff,
+      StockDeviceRecv::FactoryReset => SystemRecv::FactoryReset,
+      StockDeviceRecv::ReturnToSpotify => SystemRecv::__LegacyStockReturnToSpotify,
+      StockDeviceRecv::PhoneCallAnswer { attributes } => SystemRecv::PhoneCallAccept {
+        call_id: attributes.call_id,
+      },
+      StockDeviceRecv::PhoneCallEnd { attributes } => SystemRecv::PhoneCallEnd {
+        call_id: attributes.call_id,
+      },
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StockHardwareSend {
@@ -27,9 +44,9 @@ pub enum StockHardwareSend {
   AmbientLightUpdate { payload: usize },
 }
 
-impl From<StockHardwareSend> for SendMessage {
+impl From<StockHardwareSend> for PossibleSendMsg {
   fn from(val: StockHardwareSend) -> Self {
-    SendMessage::Stock(StockSend::Hardware(val))
+    PossibleSendMsg::Stock(StockSendMsg::Hardware(val))
   }
 }
 
@@ -62,8 +79,8 @@ pub enum PhoneCallDirection {
   Outgoing,
 }
 
-impl From<StockPhoneCallSend> for SendMessage {
+impl From<StockPhoneCallSend> for PossibleSendMsg {
   fn from(val: StockPhoneCallSend) -> Self {
-    SendMessage::Stock(StockSend::PhoneCall(val))
+    PossibleSendMsg::Stock(StockSendMsg::PhoneCall(val))
   }
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{SendMessage, StockSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -27,8 +27,8 @@ pub enum StockConfigurationSend {
   },
 }
 
-impl From<StockConfigurationSend> for SendMessage {
+impl From<StockConfigurationSend> for PossibleSendMsg {
   fn from(val: StockConfigurationSend) -> Self {
-    SendMessage::Stock(StockSend::Configuration(val))
+    PossibleSendMsg::Stock(StockSendMsg::Configuration(val))
   }
 }

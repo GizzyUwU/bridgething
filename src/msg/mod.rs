@@ -1,52 +1,121 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use uuid::Uuid;
 
-pub mod stock;
+pub(crate) mod stock;
 use stock::*;
 
-pub type RecvTx = tokio::sync::mpsc::Sender<AddressedRecvMessage>;
-pub type RecvRx = tokio::sync::mpsc::Receiver<AddressedRecvMessage>;
-pub type SendTx = tokio::sync::mpsc::Sender<SendMessage>;
-pub type SendRx = tokio::sync::mpsc::Receiver<SendMessage>;
+mod modern;
+pub use modern::*;
+
+pub type RecvTx = tokio::sync::mpsc::Sender<RecvMsg>;
+pub type RecvRx = tokio::sync::mpsc::Receiver<RecvMsg>;
+pub type SendTx = tokio::sync::mpsc::Sender<SendMsg>;
+pub type SendRx = tokio::sync::mpsc::Receiver<SendMsg>;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClientMode {
+  Modern,
+  Stock,
+}
 
 // --- receives ---
 #[derive(Debug)]
-pub struct AddressedRecvMessage {
+pub struct RecvMsg {
+  pub id: Uuid,
   pub from: SocketAddr,
-  pub data: RecvMessageWithMeta,
+  pub data: RecvMsgData,
 }
 
 #[derive(Debug)]
-pub enum RecvMessageWithMeta {
-  Stock(StockRecv),
-  StockInterApp { msg_id: usize, method: StockInterAppRecv },
+pub enum RecvMsgData {
+  Bluetooth(BluetoothRecv),
+  Storage(StorageRecv),
+  System(SystemRecv),
+  Voice(VoiceRecv),
+  Interaction {
+    msg: InteractionRecv,
+    stock_msg_id: Option<usize>,
+  },
+
+  // stock compatibility
+  Hole,
+
+  // errors
   ConnectionClosed(tokio_websockets::CloseCode, String),
   Error(tokio_websockets::Error),
 }
 
-impl From<RecvMessage> for RecvMessageWithMeta {
-  fn from(recv: RecvMessage) -> Self {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PossibleRecvMsg {
+  Modern(ModernRecvMsg),
+  Stock(StockRecvMsg),
+  #[serde(rename_all = "camelCase")]
+  StockInterApp {
+    msg_id: usize,
+    #[serde(flatten)]
+    data: StockInterAppRecv,
+    user_action: bool,
+  },
+}
+
+impl From<PossibleRecvMsg> for RecvMsgData {
+  fn from(recv: PossibleRecvMsg) -> Self {
     match recv {
-      RecvMessage::Stock(msg) => RecvMessageWithMeta::Stock(msg),
-      RecvMessage::StockInterApp { msg_id, method } => RecvMessageWithMeta::StockInterApp { msg_id, method },
+      PossibleRecvMsg::Modern(msg) => msg.into(),
+      PossibleRecvMsg::Stock(msg) => msg.into(),
+      PossibleRecvMsg::StockInterApp { msg_id, data, .. } => (msg_id, data).into(),
     }
   }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum RecvMessage {
-  Stock(StockRecv),
-  #[serde(rename_all = "snake_case")]
-  StockInterApp {
-    msg_id: usize,
-    method: StockInterAppRecv,
-  },
+impl From<&PossibleRecvMsg> for uuid::Uuid {
+  fn from(recv: &PossibleRecvMsg) -> Self {
+    match recv {
+      PossibleRecvMsg::Modern(msg) => msg.id,
+      _ => uuid::Uuid::now_v7(),
+    }
+  }
 }
 
 // --- sends ---
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SendMsgMeta {
+  Request,
+  Response,
+  Info,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SendMsg {
+  pub id: Uuid,
+  #[serde(flatten)]
+  pub data: SendMsgData,
+  pub meta: SendMsgMeta,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+pub enum SendMsgData {
+  Bluetooth(BluetoothSend),
+  Storage(StorageSend),
+  System(SystemSend),
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
-pub enum SendMessage {
-  Stock(StockSend),
+pub enum PossibleSendMsg {
+  Modern(SendMsg),
+  Stock(StockSendMsg),
+}
+
+impl PossibleSendMsg {
+  pub fn from_send_msg(msg: SendMsg, mode: &ClientMode) -> Self {
+    match mode {
+      ClientMode::Modern => Self::Modern(msg),
+      ClientMode::Stock => Self::Stock(msg.into()),
+    }
+  }
 }

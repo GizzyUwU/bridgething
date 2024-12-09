@@ -1,0 +1,14 @@
+query getTipsOnDemand {
+  tipsOnDemand {
+    ... on Tips {
+      tips {
+        id
+        title
+        description
+      }
+    }
+    ... on TipsError {
+      message
+    }
+  }
+}

@@ -25,7 +25,7 @@ impl Notify for SystemdNotify {
   }
 
   fn ready(&self, ready: bool, status: Option<&'a str>) {
-    tracing::debug!("setting ready to: {ready} with status: {:?}", status);
+    tracing::debug!("setting ready to {ready} with status: {:?}", status);
   }
 
   fn status(&self, status: &'a str) {
@@ -43,7 +43,7 @@ impl<'a> Notify<'a> for DummyNotify {
   }
 
   fn ready(&self, ready: bool, status: Option<&'a str>) {
-    tracing::debug!("setting ready to: {ready} with status: {:?}", status);
+    tracing::debug!("setting ready to {ready} with status: {:?}", status);
   }
 
   fn status(&self, status: &'a str) {

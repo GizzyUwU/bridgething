@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{SendMessage, StockSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -11,8 +11,8 @@ pub enum StockPermissionsSend {
   },
 }
 
-impl From<StockPermissionsSend> for SendMessage {
+impl From<StockPermissionsSend> for PossibleSendMsg {
   fn from(val: StockPermissionsSend) -> Self {
-    SendMessage::Stock(StockSend::Permissions(val))
+    PossibleSendMsg::Stock(StockSendMsg::Permissions(val))
   }
 }

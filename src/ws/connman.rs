@@ -6,9 +6,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tokio_websockets::ServerBuilder;
+use uuid::Uuid;
 
 use crate::{
-  msg::{AddressedRecvMessage, RecvMessageWithMeta, RecvRx, RecvTx, SendMessage, SendTx},
+  msg::{RecvMsg, RecvMsgData, RecvRx, RecvTx, SendMsg, SendMsgData, SendMsgMeta, SendTx},
   ws::{connection::Connection, WSError},
 };
 
@@ -45,30 +46,45 @@ impl ConnMan {
   }
 
   /// cancel-safe
-  pub async fn listen(&mut self) -> WSResult<AddressedRecvMessage> {
+  pub async fn listen(&mut self) -> WSResult<RecvMsg> {
     let msg = self.rx.recv().await.ok_or(WSError::ChannelClosed)?;
     tracing::trace!("new parsed message from {:?}", msg.from);
 
-    if let RecvMessageWithMeta::ConnectionClosed(_, _) = msg.data {
+    if let RecvMsgData::ConnectionClosed(_, _) = msg.data {
       self.handle_disconnect(msg.from);
     };
 
     Ok(msg)
   }
 
-  pub async fn send(&self, address: SocketAddr, msg: impl Into<SendMessage>) -> WSResult<()> {
-    let ConnectionData { tx, .. } = self.connections.get(&address).ok_or(WSError::NotConnected)?;
+  pub async fn send(&self, id: Uuid, to: SocketAddr, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
+    let ConnectionData { tx, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
 
-    Ok(tx.send(msg.into()).await?)
+    Ok(
+      tx.send(SendMsg {
+        id,
+        data: data.into(),
+        meta,
+      })
+      .await?,
+    )
   }
 
-  pub async fn broadcast(&self, msg: impl Into<SendMessage> + Clone) -> Vec<WSResult<()>> {
-    futures::future::join_all(
-      self
-        .connections
-        .values()
-        .map(|c| c.tx.send(msg.clone().into()).map_err(WSError::MessageSend)),
-    )
+  pub async fn broadcast(
+    &self,
+    id: Uuid,
+    data: impl Into<SendMsgData> + Clone,
+    meta: SendMsgMeta,
+  ) -> Vec<WSResult<()>> {
+    futures::future::join_all(self.connections.values().map(|c| {
+      c.tx
+        .send(SendMsg {
+          id,
+          data: data.clone().into(),
+          meta,
+        })
+        .map_err(WSError::MessageSend)
+    }))
     .await
   }
 

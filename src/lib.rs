@@ -1,8 +1,7 @@
-pub mod avcrp;
-pub mod ble;
+pub mod bt;
+pub mod ws;
 
 pub mod msg;
-pub mod ws;
 
 pub mod als;
 pub mod systemd;

@@ -1,0 +1,20 @@
+query getShelf($limit: Int!, $overrides: [HomeGraphOverridesReq!]!) {
+  shelf(limit: $limit, overrides: $overrides) {
+    ... on Shelf {
+      items {
+        title
+        id
+        total
+        children {
+          uri
+          title
+          subtitle
+          image_id: imageId
+        }
+      }
+    }
+    ... on ShelfError {
+      message
+    }
+  }
+}

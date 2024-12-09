@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::StockDeviceType;
-use crate::msg::{SendMessage, StockSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -16,8 +16,8 @@ pub enum StockConnectionSend {
   TransportStatus { payload: bool },
 }
 
-impl From<StockConnectionSend> for SendMessage {
+impl From<StockConnectionSend> for PossibleSendMsg {
   fn from(val: StockConnectionSend) -> Self {
-    SendMessage::Stock(StockSend::Connection(val))
+    PossibleSendMsg::Stock(StockSendMsg::Connection(val))
   }
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{SendMessage, StockSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg, StorageRecv, StorageSend};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -16,6 +16,15 @@ pub enum StockStorageRecv {
   },
 }
 
+impl From<StockStorageRecv> for StorageRecv {
+  fn from(data: StockStorageRecv) -> Self {
+    match data {
+      StockStorageRecv::Get { key, .. } => StorageRecv::Get { key },
+      StockStorageRecv::Put { key, value, .. } => StorageRecv::Put { key, value },
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StockStorageSend {
@@ -23,9 +32,24 @@ pub enum StockStorageSend {
   Response { payload: StockStoragePayload },
 }
 
-impl From<StockStorageSend> for SendMessage {
+impl From<StorageSend> for StockStorageSend {
+  fn from(data: StorageSend) -> Self {
+    match data {
+      StorageSend::Response { key, value } => StockStorageSend::Response {
+        payload: StockStoragePayload {
+          key,
+          value,
+          value_type: "string".to_owned(),
+          error: None,
+        },
+      },
+    }
+  }
+}
+
+impl From<StockStorageSend> for PossibleSendMsg {
   fn from(val: StockStorageSend) -> Self {
-    SendMessage::Stock(StockSend::Storage(val))
+    PossibleSendMsg::Stock(StockSendMsg::Storage(val))
   }
 }
 
@@ -37,8 +61,8 @@ pub struct StockStoragePayload {
   pub error: Option<bool>,
 }
 
-impl From<StockStoragePayload> for SendMessage {
+impl From<StockStoragePayload> for PossibleSendMsg {
   fn from(payload: StockStoragePayload) -> Self {
-    SendMessage::Stock(StockSend::Storage(StockStorageSend::Response { payload }))
+    PossibleSendMsg::Stock(StockSendMsg::Storage(StockStorageSend::Response { payload }))
   }
 }

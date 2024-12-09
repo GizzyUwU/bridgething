@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::{RecvMsgData, SendMsg, SendMsgData};
+
 mod action;
 mod bluetooth;
 mod configuration;
@@ -25,21 +27,35 @@ pub use version::*;
 pub use voice::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum StockRecv {
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum StockRecvMsg {
   Bluetooth(StockBluetoothRecv),
   Voice(StockVoiceRecv),
   Key,
   Action(StockActionRecv),
   #[serde(rename = "settings")]
   Storage(StockStorageRecv),
-  Device,
+  Device(StockDeviceRecv),
   Log,
 }
 
+impl From<StockRecvMsg> for RecvMsgData {
+  fn from(msg: StockRecvMsg) -> Self {
+    match msg {
+      StockRecvMsg::Bluetooth(data) => RecvMsgData::Bluetooth(data.into()),
+      StockRecvMsg::Voice(data) => RecvMsgData::Voice(data.into()),
+      StockRecvMsg::Key => RecvMsgData::Hole,
+      StockRecvMsg::Action(data) => RecvMsgData::System(data.into()),
+      StockRecvMsg::Storage(data) => RecvMsgData::Storage(data.into()),
+      StockRecvMsg::Device(data) => RecvMsgData::System(data.into()),
+      StockRecvMsg::Log => RecvMsgData::Hole,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum StockSend {
+#[serde(untagged, rename_all = "camelCase")]
+pub enum StockSendMsg {
   Bluetooth(StockBluetoothSend),
   Storage(StockStorageSend),
   Setup(StockSetupSend),
@@ -49,4 +65,14 @@ pub enum StockSend {
   Permissions(StockPermissionsSend),
   Configuration(StockConfigurationSend),
   Version(StockVersionSend),
+}
+
+impl From<SendMsg> for StockSendMsg {
+  fn from(msg: SendMsg) -> Self {
+    match msg.data {
+      SendMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
+      SendMsgData::Storage(data) => StockSendMsg::Storage(data.into()),
+      SendMsgData::System(data) => data.to_stock(),
+    }
+  }
 }

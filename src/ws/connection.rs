@@ -3,10 +3,12 @@ use std::net::SocketAddr;
 use tokio::{net::TcpStream, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tokio_websockets::WebSocketStream;
+use uuid::Uuid;
 
-use crate::msg::{AddressedRecvMessage, RecvMessage, RecvMessageWithMeta, RecvTx, SendMessage, SendRx};
+use crate::msg::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendMsg, SendRx};
 
 pub struct Connection {
+  mode: ClientMode,
   address: SocketAddr,
   stream: WebSocketStream<TcpStream>,
   cancel_token: CancellationToken,
@@ -23,9 +25,10 @@ impl Connection {
     rx: SendRx,
     cancel_token: CancellationToken,
   ) -> JoinHandle<()> {
-    tracing::debug!("spawning listener for {address}");
+    tracing::debug!("spawning listener for {address} in default modern mode");
     tokio::spawn(async move {
       Self {
+        mode: ClientMode::Modern,
         address,
         stream,
         cancel_token,
@@ -43,14 +46,15 @@ impl Connection {
       tokio::select! {
         ws_msg = self.stream.next() => {
           let Some(ws_msg) = ws_msg else {
-            tracing::warn!("({}) connection ", &self.address);
+            tracing::warn!("({}) connection closed unexpectedly!", &self.address);
             break;
           };
 
           let ws_msg = match ws_msg {
             Ok(msg) => WsMsgType::from(msg),
             Err(err) => {
-              self.forward(RecvMessageWithMeta::Error(err)).await;
+              tracing::warn!("({}) error decoding websocket message: {:?}!", &self.address, &err);
+              self.forward(err).await;
               break;
             }
           };
@@ -81,17 +85,27 @@ impl Connection {
     }
   }
 
-  async fn handle_text(&self, text: String) {
+  async fn handle_text(&mut self, text: String) {
     tracing::trace!("({}) new text message: {}", &self.address, &text);
-    let Ok(msg) = serde_json::from_str::<RecvMessage>(&text) else {
+    let Ok(msg) = serde_json::from_str::<PossibleRecvMsg>(&text) else {
       return tracing::warn!(
         "({}) failed to deserialize incoming message!! message: {text}",
-        self.address
+        &self.address
       );
     };
 
+    if self.mode != ClientMode::Stock
+      && (matches!(msg, PossibleRecvMsg::Stock(_)) || matches!(msg, PossibleRecvMsg::StockInterApp { .. }))
+    {
+      tracing::warn!(
+        "({}) received a stock message, falling back to stock mode...",
+        &self.address
+      );
+      self.mode = ClientMode::Stock;
+    };
+
     tracing::trace!("({}) decoded message: {:?}", &self.address, &msg);
-    self.forward(msg.into()).await;
+    self.forward(msg).await;
   }
 
   async fn handle_binary(&self, payload: tokio_websockets::Payload) {
@@ -102,20 +116,16 @@ impl Connection {
     tracing::trace!("({}) pong received? payload: {:?}", &self.address, payload);
   }
 
-  async fn forward(&self, data: RecvMessageWithMeta) {
-    if let Err(err) = self
-      .tx
-      .send(AddressedRecvMessage {
-        from: self.address,
-        data,
-      })
-      .await
-    {
+  async fn forward(&self, data: impl Into<ForwardMsg>) {
+    let data = data.into();
+
+    if let Err(err) = self.tx.send((self.address, data).into()).await {
       tracing::error!("({}) error sending message to connman: {:?}", &self.address, err);
     };
   }
 
-  async fn send(&mut self, msg: SendMessage) {
+  async fn send(&mut self, msg: SendMsg) {
+    let msg = PossibleSendMsg::from_send_msg(msg, &self.mode);
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => return tracing::error!("({}) error converting message to json!!: {:?}", &self.address, err),
@@ -146,9 +156,7 @@ impl Connection {
       code,
       &reason
     );
-    self
-      .forward(RecvMessageWithMeta::ConnectionClosed(code, reason.to_owned()))
-      .await;
+    self.forward((code, reason.to_owned())).await;
   }
 
   async fn handle_ping(&mut self, payload: tokio_websockets::Payload) {
@@ -190,6 +198,53 @@ impl From<tokio_websockets::Message> for WsMsgType {
       Self::Close(code, reason.to_owned())
     } else {
       Self::Binary(msg.into_payload())
+    }
+  }
+}
+
+#[derive(Debug)]
+enum ForwardMsg {
+  Msg(Uuid, PossibleRecvMsg),
+  ConnectionClosed(tokio_websockets::CloseCode, String),
+  Error(tokio_websockets::Error),
+}
+
+impl From<(tokio_websockets::CloseCode, String)> for ForwardMsg {
+  fn from((close_code, msg): (tokio_websockets::CloseCode, String)) -> Self {
+    Self::ConnectionClosed(close_code, msg)
+  }
+}
+
+impl From<tokio_websockets::Error> for ForwardMsg {
+  fn from(err: tokio_websockets::Error) -> Self {
+    Self::Error(err)
+  }
+}
+
+impl From<PossibleRecvMsg> for ForwardMsg {
+  fn from(msg: PossibleRecvMsg) -> Self {
+    ForwardMsg::Msg((&msg).into(), msg)
+  }
+}
+
+impl From<(SocketAddr, ForwardMsg)> for RecvMsg {
+  fn from((from, fwd): (SocketAddr, ForwardMsg)) -> Self {
+    match fwd {
+      ForwardMsg::Msg(id, data) => Self {
+        id,
+        from,
+        data: data.into(),
+      },
+      ForwardMsg::ConnectionClosed(close_code, msg) => Self {
+        id: Uuid::now_v7(),
+        from,
+        data: RecvMsgData::ConnectionClosed(close_code, msg),
+      },
+      ForwardMsg::Error(err) => Self {
+        id: Uuid::now_v7(),
+        from,
+        data: RecvMsgData::Error(err),
+      },
     }
   }
 }

@@ -1,5 +1,4 @@
 use bridgething::{
-  ble,
   systemd::{self, Notify},
   ws,
 };
@@ -33,9 +32,10 @@ async fn main() {
         // leaving this here...
       },
       _ = monitoring::wait_for_signal() => {
-        tracing::info!("signal received - exiting...");
         break;
       }
     }
   }
+
+  tracing::info!("thank you for using bridgething!");
 }
