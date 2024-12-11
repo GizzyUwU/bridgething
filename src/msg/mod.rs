@@ -10,10 +10,10 @@ pub use modern::*;
 
 pub type RecvTx = tokio::sync::mpsc::Sender<RecvMsg>;
 pub type RecvRx = tokio::sync::mpsc::Receiver<RecvMsg>;
-pub type SendTx = tokio::sync::mpsc::Sender<SendMsg>;
-pub type SendRx = tokio::sync::mpsc::Receiver<SendMsg>;
+pub type SendTx = tokio::sync::mpsc::Sender<PossibleSendMsg>;
+pub type SendRx = tokio::sync::mpsc::Receiver<PossibleSendMsg>;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientMode {
   Modern,
   Stock,
@@ -39,7 +39,10 @@ pub enum RecvMsgData {
   },
 
   // stock compatibility
-  Hole,
+  Hole(Option<usize>),
+
+  // metadata
+  ChangeMode(ClientMode),
 
   // errors
   ConnectionClosed(tokio_websockets::CloseCode, String),
@@ -94,6 +97,7 @@ pub struct SendMsg {
   #[serde(flatten)]
   pub data: SendMsgData,
   pub meta: SendMsgMeta,
+  pub stock_msg_id: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -102,6 +106,8 @@ pub enum SendMsgData {
   Bluetooth(BluetoothSend),
   Storage(StorageSend),
   System(SystemSend),
+  Interaction(InteractionSend),
+  Ack,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -109,6 +115,12 @@ pub enum SendMsgData {
 pub enum PossibleSendMsg {
   Modern(SendMsg),
   Stock(StockSendMsg),
+}
+
+impl From<StockSendMsg> for PossibleSendMsg {
+  fn from(msg: StockSendMsg) -> Self {
+    Self::Stock(msg)
+  }
 }
 
 impl PossibleSendMsg {

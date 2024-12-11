@@ -17,7 +17,7 @@ impl<'a> VoiceHandler<'a> {
   }
 
   pub async fn handle(&self, msg: VoiceRecv) -> HandlerResult {
-    tracing::debug!("({}) handling voice message", &self.handle.id);
+    tracing::debug!("({}) handling voice message", &self.handle.from);
 
     match msg {
       VoiceRecv::Cancel => self.cancel().await,
@@ -28,25 +28,25 @@ impl<'a> VoiceHandler<'a> {
   }
 
   async fn cancel(&self) -> HandlerResult {
-    tracing::debug!("({}) cancelling voice command", &self.handle.id);
+    tracing::debug!("({}) cancelling voice command", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn push_to_talk(&self) -> HandlerResult {
-    tracing::debug!("({}) activating push-to-talk", &self.handle.id);
+    tracing::debug!("({}) activating push-to-talk", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn mute_mic(&self, preserve: bool) -> HandlerResult {
-    tracing::debug!("({}) muting microphone, preserve: {}", &self.handle.id, preserve);
+    tracing::debug!("({}) muting microphone, preserve: {}", &self.handle.from, preserve);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn unmute_mic(&self, preserve: bool) -> HandlerResult {
-    tracing::debug!("({}) unmuting microphone, preserve: {}", &self.handle.id, preserve);
+    tracing::debug!("({}) unmuting microphone, preserve: {}", &self.handle.from, preserve);
     // Ok(self.handle.respond().await?)
     Ok(())
   }

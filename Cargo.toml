@@ -32,10 +32,11 @@ sd-notify = { version = "0.4.3", optional = true }
 
 
 [features]
-default = []                   # TODO: REMOVE THIS
+default = []
 als = []
+mic = []
 systemd = ["dep:sd-notify"]
-superbird = ["als", "systemd"]
+superbird = ["als", "mic", "systemd"]
 
 [[example]]
 name = "mock-backend"

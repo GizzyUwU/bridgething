@@ -5,7 +5,7 @@ mod server;
 pub use connman::ConnMan;
 pub use server::Server;
 
-use crate::msg::SendMsg;
+use crate::msg::PossibleSendMsg;
 
 pub type WSResult<T> = Result<T, WSError>;
 
@@ -18,7 +18,7 @@ pub enum WSError {
   #[error("requested client to send to is not connected to the server!!")]
   NotConnected,
   #[error("could not send a message to requested client: {0}")]
-  MessageSend(#[from] tokio::sync::mpsc::error::SendError<SendMsg>),
+  MessageSend(#[from] tokio::sync::mpsc::error::SendError<PossibleSendMsg>),
   #[error("channel from connections to server struct has been dropped!!! this is bad.")]
   ChannelClosed,
   #[error("failed to broadcast to all devices. check the logs for more info.")]

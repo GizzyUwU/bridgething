@@ -2,17 +2,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::msg::{PossibleSendMsg, StockSendMsg};
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StockPermissionsSend {
   DevicePermissions {
     can_use_superbird: bool,
-    can_play_on_demand: bool,
+    can_play_on_demand: Option<bool>,
   },
+}
+
+impl From<StockPermissionsSend> for StockSendMsg {
+  fn from(val: StockPermissionsSend) -> Self {
+    Self::Permissions(val)
+  }
 }
 
 impl From<StockPermissionsSend> for PossibleSendMsg {
   fn from(val: StockPermissionsSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Permissions(val))
+    Self::Stock(StockSendMsg::Permissions(val))
   }
 }

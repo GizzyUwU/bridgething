@@ -21,8 +21,8 @@ impl<'a> BluetoothHandler<'a> {
     }
   }
 
-  pub async fn handle(&self, msg: BluetoothRecv) -> HandlerResult {
-    tracing::debug!("({}) handling bluetooth message", &self.handle.id);
+  pub async fn handle(&mut self, msg: BluetoothRecv) -> HandlerResult {
+    tracing::debug!("({}) handling bluetooth message", &self.handle.from);
 
     match msg {
       BluetoothRecv::List => self.list().await,
@@ -39,61 +39,66 @@ impl<'a> BluetoothHandler<'a> {
   }
 
   async fn list(&self) -> HandlerResult {
-    tracing::debug!("({}) sending list of paired devices", &self.handle.id);
+    tracing::debug!("({}) sending list of paired devices", &self.handle.from);
 
     let devices = self.state.get_devices().to_owned();
-    tracing::trace!("({}) devices: {:?}", &self.handle.id, &devices);
+    tracing::trace!("({}) devices: {:?}", &self.handle.from, &devices);
 
     Ok(self.handle.respond(BluetoothSend::PairedDevices(devices)).await?)
   }
 
   async fn connect(&self, mac: String) -> HandlerResult {
-    tracing::debug!("({}) connecting to device with MAC: {}", &self.handle.id, mac);
-    Ok(self.bluetooth.connect(mac).await?)
+    tracing::debug!("({}) connecting to device with MAC: {}", &self.handle.from, mac);
+    Ok(self.bluetooth.connect(&mac).await?)
   }
 
   async fn scan(&self) -> HandlerResult {
-    tracing::debug!("({}) scanning for devices", &self.handle.id);
+    tracing::debug!("({}) scanning for devices", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn enable_discoverable(&self) -> HandlerResult {
-    tracing::debug!("({}) enabling discoverable mode", &self.handle.id);
+    tracing::debug!("({}) enabling discoverable mode", &self.handle.from);
     Ok(self.bluetooth.set_discoverable(true).await?)
   }
 
   async fn disable_discoverable(&self) -> HandlerResult {
-    tracing::debug!("({}) disabling discoverable mode", &self.handle.id);
+    tracing::debug!("({}) disabling discoverable mode", &self.handle.from);
     Ok(self.bluetooth.set_discoverable(false).await?)
   }
 
   async fn pair(&self, mac: String) -> HandlerResult {
-    tracing::debug!("({}) pairing with device with MAC: {}", &self.handle.id, mac);
+    tracing::debug!("({}) pairing with device with MAC: {}", &self.handle.from, mac);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
-  async fn forget(&self, mac: String) -> HandlerResult {
-    tracing::debug!("({}) forgetting device with MAC: {}", &self.handle.id, mac);
+  async fn forget(&mut self, mac: String) -> HandlerResult {
+    tracing::debug!("({}) forgetting device with MAC: {}", &self.handle.from, mac);
+
+    self.bluetooth.forget(&mac).await?;
+    self.state.remove_device(mac).await?;
+    self.list().await?;
+
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn enable_pan(&self, mac: String) -> HandlerResult {
-    tracing::debug!("({}) enabling PAN on device with MAC: {}", &self.handle.id, mac);
+    tracing::debug!("({}) enabling PAN on device with MAC: {}", &self.handle.from, mac);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn disable_pan(&self, mac: String) -> HandlerResult {
-    tracing::debug!("({}) disabling PAN on device with MAC: {}", &self.handle.id, mac);
+    tracing::debug!("({}) disabling PAN on device with MAC: {}", &self.handle.from, mac);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn set_alias(&self, name: String) -> HandlerResult {
-    tracing::debug!("({}) setting adapter alias to: {}", &self.handle.id, name);
+    tracing::debug!("({}) setting adapter alias to: {}", &self.handle.from, name);
     // Ok(self.handle.respond().await?)
     Ok(())
   }

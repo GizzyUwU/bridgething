@@ -47,9 +47,15 @@ impl From<StorageSend> for StockStorageSend {
   }
 }
 
+impl From<StockStorageSend> for StockSendMsg {
+  fn from(val: StockStorageSend) -> Self {
+    Self::Storage(val)
+  }
+}
+
 impl From<StockStorageSend> for PossibleSendMsg {
   fn from(val: StockStorageSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Storage(val))
+    Self::Stock(StockSendMsg::Storage(val))
   }
 }
 

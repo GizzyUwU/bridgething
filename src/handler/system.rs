@@ -17,7 +17,7 @@ impl<'a> SystemHandler<'a> {
   }
 
   pub async fn handle(&self, msg: SystemRecv) -> HandlerResult {
-    tracing::debug!("({}) handling system message", &self.handle.id);
+    tracing::debug!("({}) handling system message", &self.handle.from);
 
     match msg {
       SystemRecv::VersionRequest => self.version_request().await,
@@ -32,43 +32,43 @@ impl<'a> SystemHandler<'a> {
   }
 
   async fn version_request(&self) -> HandlerResult {
-    tracing::debug!("({}) handling version request", &self.handle.id);
+    tracing::debug!("({}) handling version request", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn reboot(&self) -> HandlerResult {
-    tracing::debug!("({}) handling reboot request", &self.handle.id);
+    tracing::debug!("({}) handling reboot request", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn power_off(&self) -> HandlerResult {
-    tracing::debug!("({}) handling power off request", &self.handle.id);
+    tracing::debug!("({}) handling power off request", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn factory_reset(&self) -> HandlerResult {
-    tracing::debug!("({}) handling factory reset request", &self.handle.id);
+    tracing::debug!("({}) handling factory reset request", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn phone_call_accept(&self, call_id: String) -> HandlerResult {
-    tracing::debug!("({}) accepting phone call with id {}", &self.handle.id, call_id);
+    tracing::debug!("({}) accepting phone call with id {}", &self.handle.from, call_id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn phone_call_end(&self, call_id: String) -> HandlerResult {
-    tracing::debug!("({}) ending phone call with id {}", &self.handle.id, call_id);
+    tracing::debug!("({}) ending phone call with id {}", &self.handle.from, call_id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn legacy_stock_return_to_spotify(&self) -> HandlerResult {
-    tracing::debug!("({}) handling legacy stock return to Spotify", &self.handle.id);
+    tracing::debug!("({}) handling legacy stock return to Spotify", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }

@@ -27,8 +27,14 @@ pub enum StockConfigurationSend {
   },
 }
 
+impl From<StockConfigurationSend> for StockSendMsg {
+  fn from(val: StockConfigurationSend) -> Self {
+    Self::Configuration(val)
+  }
+}
+
 impl From<StockConfigurationSend> for PossibleSendMsg {
   fn from(val: StockConfigurationSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Configuration(val))
+    Self::Stock(StockSendMsg::Configuration(val))
   }
 }

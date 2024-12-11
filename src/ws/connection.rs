@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_websockets::WebSocketStream;
 use uuid::Uuid;
 
-use crate::msg::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendMsg, SendRx};
+use crate::msg::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendRx};
 
 pub struct Connection {
   mode: ClientMode,
@@ -72,7 +72,7 @@ impl Connection {
         }
 
         Some(server_msg) = self.rx.recv() => {
-          tracing::trace!("({}) sending message: {:?}", &self.address, server_msg);
+          tracing::trace!("(outgoing: {}) sending message: {:?}", &self.address, server_msg);
           self.send(server_msg).await;
         }
 
@@ -86,7 +86,7 @@ impl Connection {
   }
 
   async fn handle_text(&mut self, text: String) {
-    tracing::trace!("({}) new message: {}", &self.address, &text);
+    tracing::trace!("(incoming: {}) new message: {}", &self.address, &text);
     let Ok(msg) = serde_json::from_str::<PossibleRecvMsg>(&text) else {
       return tracing::warn!(
         "({}) failed to deserialize incoming message!! message: {text}",
@@ -102,9 +102,11 @@ impl Connection {
         &self.address
       );
       self.mode = ClientMode::Stock;
+
+      self.forward(ForwardMsg::ChangeMode(ClientMode::Stock)).await;
     };
 
-    tracing::trace!("({}) decoded message: {:?}", &self.address, &msg);
+    tracing::trace!("(incoming: {}) decoded message: {:?}", &self.address, &msg);
     self.forward(msg).await;
   }
 
@@ -124,8 +126,7 @@ impl Connection {
     };
   }
 
-  async fn send(&mut self, msg: SendMsg) {
-    let msg = PossibleSendMsg::from_send_msg(msg, &self.mode);
+  async fn send(&mut self, msg: PossibleSendMsg) {
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => return tracing::error!("({}) error converting message to json!!: {:?}", &self.address, err),
@@ -207,6 +208,7 @@ enum ForwardMsg {
   Msg(Uuid, PossibleRecvMsg),
   ConnectionClosed(tokio_websockets::CloseCode, String),
   Error(tokio_websockets::Error),
+  ChangeMode(ClientMode),
 }
 
 impl From<(tokio_websockets::CloseCode, String)> for ForwardMsg {
@@ -244,6 +246,11 @@ impl From<(SocketAddr, ForwardMsg)> for RecvMsg {
         id: Uuid::now_v7(),
         from,
         data: RecvMsgData::Error(err),
+      },
+      ForwardMsg::ChangeMode(mode) => Self {
+        id: Uuid::now_v7(),
+        from,
+        data: RecvMsgData::ChangeMode(mode),
       },
     }
   }

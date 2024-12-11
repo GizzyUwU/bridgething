@@ -2,13 +2,17 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::msg::StockSetPreset;
+use crate::msg::{SendMsgData, StockSetPreset};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", content = "args", rename_all = "camelCase")]
 pub enum InteractionRecv {
+  // base interactions
   GetImage {
+    id: String,
+  },
+  GetThumbnailImage {
     id: String,
   },
   GetNextTracks,
@@ -48,26 +52,13 @@ pub enum InteractionRecv {
     limit: usize,
     offset: Option<usize>,
   },
-  SpotifyGetHome {
-    limit: usize,
-    limit_overrides: HashMap<String, usize>,
-  },
-  SpotifyGetPermissions,
   SpotifyGetPodcast {
     uri: String,
     limit: Option<usize>,
     offset: Option<usize>,
   },
-  SpotifyGetPresets,
   SpotifyGetSaved {
     id: String,
-  },
-  GetThumbnailImage {
-    id: String,
-  },
-  SpotifyGetTips,
-  SpotifyGetTts {
-    file: String,
   },
   SpotifyPlayPodcastTrailer {
     uri: String,
@@ -78,16 +69,11 @@ pub enum InteractionRecv {
   SpotifySetPodcastPlaybackSpeed {
     playback_speed: usize,
   },
-  SpotifySetPreset {
-    presets: Vec<StockSetPreset>,
-  },
   SpotifySetSaved {
     id: Option<String>, // id is same as uri
     uri: Option<String>,
     saved: bool,
   },
-
-  SpotifySummonDj,
   SpotifyPlayUri {
     uri: String,
     feature_identifier: String,
@@ -95,11 +81,36 @@ pub enum InteractionRecv {
     skip_to_uri: Option<String>,
     skip_to_uid: Option<String>,
   },
+
+  // legacy interactions - ie stock app only
+  __LegacySpotifyGetPermissions,
+  __LegacySpotifySummonDj,
+  __LegacySpotifyGetHome {
+    limit: usize,
+    limit_overrides: HashMap<String, usize>,
+  },
+  __LegacySpotifyGetPresets,
+  __LegacySpotifySetPreset {
+    presets: Vec<StockSetPreset>,
+  },
+  __LegacySpotifyGetTips,
+  __LegacySpotifyGetTts {
+    file: String,
+  },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", content = "data", rename_all = "camelCase")]
-pub enum InteractionSend {}
+pub enum InteractionSend {
+  // legacy interactions - ie stock app only
+  __LegacySpotifyPermissions,
+}
+
+impl From<InteractionSend> for SendMsgData {
+  fn from(val: InteractionSend) -> Self {
+    SendMsgData::Interaction(val)
+  }
+}
 
 #[cfg(test)]
 mod test {
@@ -337,7 +348,7 @@ mod test {
       PossibleRecvMsg::Modern(ModernRecvMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         data: ModernRecvMsgType::Interaction {
-          msg: InteractionRecv::SpotifyGetHome {
+          msg: InteractionRecv::__LegacySpotifyGetHome {
             limit: 10,
             limit_overrides
           },
@@ -420,7 +431,7 @@ mod test {
       PossibleRecvMsg::Modern(ModernRecvMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         data: ModernRecvMsgType::Interaction {
-          msg: InteractionRecv::SpotifyGetTts {
+          msg: InteractionRecv::__LegacySpotifyGetTts {
             file: "tts_file".to_string()
           },
           stock_msg_id: None
@@ -513,7 +524,7 @@ mod test {
       PossibleRecvMsg::Modern(ModernRecvMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         data: ModernRecvMsgType::Interaction {
-          msg: InteractionRecv::SpotifySetPreset { presets },
+          msg: InteractionRecv::__LegacySpotifySetPreset { presets },
           stock_msg_id: None
         }
       })

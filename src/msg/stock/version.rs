@@ -17,8 +17,14 @@ pub enum StockVersionSend {
   },
 }
 
+impl From<StockVersionSend> for StockSendMsg {
+  fn from(val: StockVersionSend) -> Self {
+    Self::Version(val)
+  }
+}
+
 impl From<StockVersionSend> for PossibleSendMsg {
   fn from(val: StockVersionSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Version(val))
+    Self::Stock(StockSendMsg::Version(val))
   }
 }

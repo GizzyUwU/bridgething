@@ -1,5 +1,5 @@
 use crate::{
-  msg::{StorageRecv, StorageSend, SystemSend},
+  msg::{stock::StockSetupSend, StorageRecv, StorageSend},
   state::State,
 };
 
@@ -20,7 +20,7 @@ impl<'a> StorageHandler<'a> {
   }
 
   pub async fn handle(&mut self, msg: StorageRecv) -> HandlerResult {
-    tracing::debug!("({}) handling storage message", &self.handle.id);
+    tracing::debug!("({}) handling storage message", &self.handle.from);
 
     match msg {
       StorageRecv::Get { key } => self.get(key).await,
@@ -30,26 +30,34 @@ impl<'a> StorageHandler<'a> {
   }
 
   async fn get(&self, key: String) -> HandlerResult {
-    tracing::debug!("({}) getting value for key: {}", &self.handle.id, &key);
+    tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
     let value = self.state.get_storage_key(&key);
 
     // handle for stock firmware
     if &key == "onboarding_status" {
-      tracing::debug!(
-        "({}) sending dummy setup status to make stock firmware happy",
-        &self.handle.id
+      tracing::trace!(
+        "({}) sending setup status to make stock firmware happy",
+        &self.handle.from
       );
-      self
-        .handle
-        .send_info(SystemSend::__LegacyStockSetupStatus("".to_owned()))
-        .await?;
+
+      let payload = if self.state.connected_device.is_some() {
+        "finished"
+      } else {
+        ""
+      }
+      .to_owned();
+
+      self.handle.send_stock(StockSetupSend::Status { payload }).await?;
+
+      // for debugging
+      return Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?);
     }
 
     Ok(self.handle.respond(StorageSend::Response { key, value }).await?)
   }
 
   async fn put(&mut self, key: String, value: String) -> HandlerResult {
-    tracing::debug!("({}) putting key: {}, value: {}", &self.handle.id, &key, &value);
+    tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
     self.state.set_storage_key(key.clone(), value.clone()).await?;
 
     Ok(
@@ -64,7 +72,7 @@ impl<'a> StorageHandler<'a> {
   }
 
   async fn delete(&mut self, key: String) -> HandlerResult {
-    tracing::debug!("({}) deleting value for key: {}", &self.handle.id, key);
+    tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
     self.state.del_storage_key(&key).await?;
 
     Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?)

@@ -39,7 +39,7 @@ async fn main() {
         }
       },
       msg = bluetooth.listen() => {
-        if let Err(err) = bluetooth.handle_msg(&mut conn_man, &mut state, msg).await {
+        if let Err(err) = bluetooth.handle_event(&mut conn_man, &mut state, msg).await {
           tracing::error!("failed to handle bluetooth message: {:?}", err);
         }
       },

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
-  msg::{stock::StockSetPreset, InteractionRecv},
+  msg::{
+    stock::{StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockSetPreset},
+    InteractionRecv,
+  },
   state::State,
 };
 
@@ -24,7 +27,7 @@ impl<'a> InteractionHandler<'a> {
   }
 
   pub async fn handle(&self, msg: InteractionRecv) -> HandlerResult {
-    tracing::debug!("({}) handling interaction message", &self.handle.id);
+    tracing::debug!("({}) handling interaction message", &self.handle.from);
 
     match msg {
       InteractionRecv::GetImage { id } => self.get_image(id).await,
@@ -50,22 +53,24 @@ impl<'a> InteractionHandler<'a> {
         limit,
         offset,
       } => self.spotify_get_children(parent_id, limit, offset).await,
-      InteractionRecv::SpotifyGetHome { limit, limit_overrides } => self.spotify_get_home(limit, limit_overrides).await,
-      InteractionRecv::SpotifyGetPermissions => self.spotify_get_permissions().await,
+      InteractionRecv::__LegacySpotifyGetHome { limit, limit_overrides } => {
+        self.spotify_get_home(limit, limit_overrides).await
+      }
+      InteractionRecv::__LegacySpotifyGetPermissions => self.spotify_get_permissions().await,
       InteractionRecv::SpotifyGetPodcast { uri, limit, offset } => self.spotify_get_podcast(uri, limit, offset).await,
-      InteractionRecv::SpotifyGetPresets => self.spotify_get_presets().await,
+      InteractionRecv::__LegacySpotifyGetPresets => self.spotify_get_presets().await,
       InteractionRecv::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
       InteractionRecv::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
-      InteractionRecv::SpotifyGetTips => self.spotify_get_tips().await,
-      InteractionRecv::SpotifyGetTts { file } => self.spotify_get_tts(file).await,
+      InteractionRecv::__LegacySpotifyGetTips => self.spotify_get_tips().await,
+      InteractionRecv::__LegacySpotifyGetTts { file } => self.spotify_get_tts(file).await,
       InteractionRecv::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
       InteractionRecv::SpotifyQueueUri { uri } => self.spotify_queue_uri(uri).await,
       InteractionRecv::SpotifySetPodcastPlaybackSpeed { playback_speed } => {
         self.spotify_set_podcast_playback_speed(playback_speed).await
       }
-      InteractionRecv::SpotifySetPreset { presets } => self.spotify_set_preset(presets).await,
+      InteractionRecv::__LegacySpotifySetPreset { presets } => self.spotify_set_preset(presets).await,
       InteractionRecv::SpotifySetSaved { id, uri, saved } => self.spotify_set_saved(id, uri, saved).await,
-      InteractionRecv::SpotifySummonDj => self.spotify_summon_dj().await,
+      InteractionRecv::__LegacySpotifySummonDj => self.spotify_summon_dj().await,
       InteractionRecv::SpotifyPlayUri {
         uri,
         feature_identifier,
@@ -81,25 +86,25 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn get_image(&self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting image with id: {}", &self.handle.id, id);
+    tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {
-    tracing::debug!("({}) getting next tracks", &self.handle.id);
+    tracing::debug!("({}) getting next tracks", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn phone_answer(&self) -> HandlerResult {
-    tracing::debug!("({}) answering phone", &self.handle.id);
+    tracing::debug!("({}) answering phone", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn phone_decline(&self) -> HandlerResult {
-    tracing::debug!("({}) declining phone", &self.handle.id);
+    tracing::debug!("({}) declining phone", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -126,25 +131,25 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn increase_volume(&self) -> HandlerResult {
-    tracing::debug!("({}) increasing volume", &self.handle.id);
+    tracing::debug!("({}) increasing volume", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn decrease_volume(&self) -> HandlerResult {
-    tracing::debug!("({}) decreasing volume", &self.handle.id);
+    tracing::debug!("({}) decreasing volume", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn skip_to_index(&self, index: usize) -> HandlerResult {
-    tracing::debug!("({}) skipping to index: {}", &self.handle.id, index);
+    tracing::debug!("({}) skipping to index: {}", &self.handle.from, index);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn skip_next(&self) -> HandlerResult {
-    tracing::debug!("({}) skipping to next track", &self.handle.id);
+    tracing::debug!("({}) skipping to next track", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -160,31 +165,31 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn seek_to(&self, position: usize) -> HandlerResult {
-    tracing::debug!("({}) seeking to position: {}", &self.handle.id, position);
+    tracing::debug!("({}) seeking to position: {}", &self.handle.from, position);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn pause(&self) -> HandlerResult {
-    tracing::debug!("({}) pausing playback", &self.handle.id);
+    tracing::debug!("({}) pausing playback", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn resume(&self) -> HandlerResult {
-    tracing::debug!("({}) resuming playback", &self.handle.id);
+    tracing::debug!("({}) resuming playback", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn set_shuffle(&self, shuffle: bool) -> HandlerResult {
-    tracing::debug!("({}) setting shuffle to: {}", &self.handle.id, shuffle);
+    tracing::debug!("({}) setting shuffle to: {}", &self.handle.from, shuffle);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn set_repeat(&self, repeat_mode: bool) -> HandlerResult {
-    tracing::debug!("({}) setting repeat mode to: {}", &self.handle.id, repeat_mode);
+    tracing::debug!("({}) setting repeat mode to: {}", &self.handle.from, repeat_mode);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -213,8 +218,25 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn spotify_get_permissions(&self) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify permissions", &self.handle.id);
-    // Ok(self.handle.respond().await?)
+    tracing::debug!("({}) handling Spotify permissions request", &self.handle.from);
+
+    self
+      .handle
+      .send_stock(StockPermissionsSend::DevicePermissions {
+        can_use_superbird: true,
+        can_play_on_demand: None,
+      })
+      .await?;
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.stock_msg_id,
+        StockInterAppSendPayload::Permissions {
+          can_use_superbird: true,
+        },
+      ))
+      .await?;
+
     Ok(())
   }
 
@@ -231,43 +253,47 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn spotify_get_presets(&self) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify presets", &self.handle.id);
+    tracing::debug!("({}) getting Spotify presets", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn spotify_get_saved(&self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify saved item for id: {}", &self.handle.id, id);
+    tracing::debug!("({}) getting Spotify saved item for id: {}", &self.handle.from, id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn get_thumbnail_image(&self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.id, id);
+    tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn spotify_get_tips(&self) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify tips", &self.handle.id);
+    tracing::debug!("({}) getting Spotify tips", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn spotify_get_tts(&self, file: String) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify TTS for file: {}", &self.handle.id, file);
+    tracing::debug!("({}) getting Spotify TTS for file: {}", &self.handle.from, file);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn spotify_play_podcast_trailer(&self, uri: String) -> HandlerResult {
-    tracing::debug!("({}) playing Spotify podcast trailer for uri: {}", &self.handle.id, uri);
+    tracing::debug!(
+      "({}) playing Spotify podcast trailer for uri: {}",
+      &self.handle.from,
+      uri
+    );
     // Ok(self.handle.respond().await?)
     Ok(())
   }
 
   async fn spotify_queue_uri(&self, uri: String) -> HandlerResult {
-    tracing::debug!("({}) queuing Spotify uri: {}", &self.handle.id, uri);
+    tracing::debug!("({}) queuing Spotify uri: {}", &self.handle.from, uri);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -283,7 +309,7 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn spotify_set_preset(&self, presets: Vec<StockSetPreset>) -> HandlerResult {
-    tracing::debug!("({}) setting Spotify presets: {:?}", &self.handle.id, presets);
+    tracing::debug!("({}) setting Spotify presets: {:?}", &self.handle.from, presets);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -301,7 +327,7 @@ impl<'a> InteractionHandler<'a> {
   }
 
   async fn spotify_summon_dj(&self) -> HandlerResult {
-    tracing::debug!("({}) summoning Spotify DJ", &self.handle.id);
+    tracing::debug!("({}) summoning Spotify DJ", &self.handle.from);
     // Ok(self.handle.respond().await?)
     Ok(())
   }
@@ -314,7 +340,7 @@ impl<'a> InteractionHandler<'a> {
     skip_to_uri: Option<String>,
     skip_to_uid: Option<String>,
   ) -> HandlerResult {
-    tracing::debug!("({}) playing Spotify uri: {}, feature identifier: {}, interaction id: {:?}, skip to uri: {:?}, skip to uid: {:?}", &self.handle.id, uri, feature_identifier, interaction_id, skip_to_uri, skip_to_uid);
+    tracing::debug!("({}) playing Spotify uri: {}, feature identifier: {}, interaction id: {:?}, skip to uri: {:?}, skip to uid: {:?}", &self.handle.from, uri, feature_identifier, interaction_id, skip_to_uri, skip_to_uid);
     // Ok(self.handle.respond().await?)
     Ok(())
   }

@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{InteractionRecv, RecvMsgData};
+use crate::msg::{InteractionRecv, InteractionSend, PossibleSendMsg, RecvMsgData};
+
+use super::StockSendMsg;
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -167,6 +169,83 @@ pub enum StockInterAppRecv {
   SetRepeat { repeat_mode: bool },
 }
 
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StockInterAppSend {
+  pub msg_id: Option<usize>,
+  // msg_type: String,
+  #[serde(flatten)]
+  pub data: StockInterAppSendPayload,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
+pub enum StockInterAppSendPayload {
+  #[serde(rename = "call_result")]
+  Ack {},
+  #[serde(rename = "call_result")]
+  Permissions { can_use_superbird: bool },
+  #[serde(rename = "com.spotify.session_state")]
+  SessionState {
+    connection_type: StockConnectionType,
+    is_in_forced_offline_mode: bool,
+    is_logged_in: bool,
+    is_offline: bool,
+  },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StockConnectionType {
+  None,
+  Wlan,
+  #[serde(rename = "4g")]
+  FourG,
+}
+
+impl StockInterAppSend {
+  pub fn new(msg_id: Option<usize>, data: StockInterAppSendPayload) -> Self {
+    Self { msg_id, data }
+  }
+
+  pub fn make_ack(msg_id: Option<usize>) -> Self {
+    Self {
+      msg_id,
+      data: StockInterAppSendPayload::Ack {},
+    }
+  }
+}
+
+impl From<InteractionSend> for StockInterAppSendPayload {
+  fn from(payload: InteractionSend) -> Self {
+    match payload {
+      InteractionSend::__LegacySpotifyPermissions => todo!(),
+    }
+  }
+}
+
+impl From<StockInterAppSend> for StockSendMsg {
+  fn from(val: StockInterAppSend) -> Self {
+    Self::InterApp(val)
+  }
+}
+
+impl From<StockInterAppSend> for PossibleSendMsg {
+  fn from(val: StockInterAppSend) -> Self {
+    Self::Stock(StockSendMsg::InterApp(val))
+  }
+}
+
+impl InteractionSend {
+  pub fn to_stock(self, msg_id: Option<usize>) -> StockInterAppSend {
+    StockInterAppSend {
+      msg_id,
+      data: self.into(),
+    }
+  }
+}
+
 impl From<(usize, StockInterAppRecv)> for RecvMsgData {
   fn from((msg_id, data): (usize, StockInterAppRecv)) -> Self {
     match data {
@@ -248,11 +327,11 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
       },
       StockInterAppRecv::GetHome { limit, limit_overrides } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifyGetHome { limit, limit_overrides },
+        msg: InteractionRecv::__LegacySpotifyGetHome { limit, limit_overrides },
       },
       StockInterAppRecv::GetPermissions {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifyGetPermissions,
+        msg: InteractionRecv::__LegacySpotifyGetPermissions,
       },
       StockInterAppRecv::GetPodcast { uri, limit, offset } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
@@ -260,7 +339,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
       },
       StockInterAppRecv::GetPresets {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifyGetPresets,
+        msg: InteractionRecv::__LegacySpotifyGetPresets,
       },
       StockInterAppRecv::GetSaved { id } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
@@ -272,11 +351,11 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
       },
       StockInterAppRecv::GetTips {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifyGetTips,
+        msg: InteractionRecv::__LegacySpotifyGetTips,
       },
       StockInterAppRecv::GetTts { file } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifyGetTts { file },
+        msg: InteractionRecv::__LegacySpotifyGetTts { file },
       },
       StockInterAppRecv::PlayPodcastTrailer { uri } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
@@ -292,7 +371,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
       },
       StockInterAppRecv::SetPreset { presets } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifySetPreset { presets },
+        msg: InteractionRecv::__LegacySpotifySetPreset { presets },
       },
       StockInterAppRecv::SetSaved { id, uri, saved } => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
@@ -300,7 +379,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
       },
       StockInterAppRecv::SummonDj => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
-        msg: InteractionRecv::SpotifySummonDj,
+        msg: InteractionRecv::__LegacySpotifySummonDj,
       },
       StockInterAppRecv::PlayUri {
         uri,
@@ -318,7 +397,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
           skip_to_uid,
         },
       },
-      _ => RecvMsgData::Hole,
+      _ => RecvMsgData::Hole(Some(msg_id)),
     }
   }
 }

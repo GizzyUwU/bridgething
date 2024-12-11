@@ -3,13 +3,13 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::{
-  msg::{SendMsgData, SendMsgMeta},
+  msg::{stock::StockSendMsg, SendMsgData, SendMsgMeta},
   ws::{ConnMan, WSResult},
 };
 
 #[derive(Debug)]
 pub struct MsgHandle<'a> {
-  conn_man: &'a mut ConnMan,
+  pub conn_man: &'a mut ConnMan,
 
   pub id: Uuid,
   pub from: SocketAddr,
@@ -23,27 +23,31 @@ impl<'a> MsgHandle<'a> {
   }
 
   pub async fn send(&self, id: Uuid, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
-    self.conn_man.send(id, self.from, data, meta).await
+    self.conn_man.send(id, self.from, data, meta, None).await
   }
 
   pub async fn request(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
     self
       .conn_man
-      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Request)
+      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Request, None)
       .await
   }
 
   pub async fn respond(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
     self
       .conn_man
-      .send(self.id, self.from, data, SendMsgMeta::Response)
+      .send(self.id, self.from, data, SendMsgMeta::Response, None)
       .await
   }
 
   pub async fn send_info(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
     self
       .conn_man
-      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Info)
+      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Info, None)
       .await
+  }
+
+  pub async fn send_stock(&self, data: impl Into<StockSendMsg>) -> WSResult<()> {
+    self.conn_man.send_stock(self.from, data).await
   }
 }

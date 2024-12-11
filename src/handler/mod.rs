@@ -18,8 +18,8 @@ mod handle;
 pub use handle::*;
 
 use crate::{
-  bt::Bluetooth,
-  msg::RecvMsgData,
+  bt::{Bluetooth, BluetoothError},
+  msg::{stock::StockInterAppSend, ClientMode, RecvMsgData},
   state::{State, StateError},
   ws::{ConnMan, WSError},
 };
@@ -52,10 +52,32 @@ impl<'a> Handler<'a> {
       RecvMsgData::System(msg) => SystemHandler::new(self).handle(msg).await,
       RecvMsgData::Voice(msg) => VoiceHandler::new(self).handle(msg).await,
       RecvMsgData::Interaction { msg, stock_msg_id } => InteractionHandler::new(self, stock_msg_id).handle(msg).await,
-      RecvMsgData::Hole => {
-        tracing::trace!("({}) received blackhole message, ignoring", &self.handle.id);
+
+      RecvMsgData::Hole(stock_msg_id) => {
+        tracing::trace!("({}) received blackhole message", &self.handle.from);
+
+        if let Some(msg_id) = stock_msg_id {
+          self
+            .handle
+            .send_stock(StockInterAppSend::make_ack(Some(msg_id)))
+            .await?;
+        }
+
         Ok(())
       }
+
+      // need to do some things for legacy compatibility
+      RecvMsgData::ChangeMode(mode) => {
+        if mode == ClientMode::Stock {
+          self
+            .bluetooth
+            .handle_connection(self.handle.conn_man, self.state, false)
+            .await?;
+        };
+
+        Ok(())
+      }
+
       RecvMsgData::ConnectionClosed(code, reason) => {
         tracing::info!(
           "({}) connection closed with code {:?}, reason {}",
@@ -66,7 +88,7 @@ impl<'a> Handler<'a> {
         Ok(())
       }
       RecvMsgData::Error(error) => {
-        tracing::error!("({}) failed to receive message: {:?}", &self.handle.id, error);
+        tracing::error!("({}) failed to receive message: {:?}", &self.handle.from, error);
         Err(HandlerError::WS(WSError::Websocket(error)))
       }
     }
@@ -81,6 +103,8 @@ pub enum HandlerError {
   WS(#[from] WSError),
   #[error("state error: {0}")]
   State(#[from] StateError),
-  #[error("bluetooth error: {0}")]
-  Bluetooth(#[from] bluer::Error),
+  #[error("bluez error: {0}")]
+  Bluez(#[from] bluer::Error),
+  #[error("bluetooth handler error: {0}")]
+  Bluetooth(#[from] BluetoothError),
 }

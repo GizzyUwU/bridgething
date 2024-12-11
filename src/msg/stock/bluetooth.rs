@@ -46,9 +46,15 @@ pub enum StockBluetoothSend {
   DeviceList { payload: Vec<StockDevice> },
 }
 
+impl From<StockBluetoothSend> for StockSendMsg {
+  fn from(val: StockBluetoothSend) -> Self {
+    Self::Bluetooth(val)
+  }
+}
+
 impl From<StockBluetoothSend> for PossibleSendMsg {
   fn from(val: StockBluetoothSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Bluetooth(val))
+    Self::Stock(StockSendMsg::Bluetooth(val))
   }
 }
 

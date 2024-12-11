@@ -1,3 +1,33 @@
 {
-  "cSpell.words": ["bincode", "blackhole", "Bluez", "bridgething", "pairable", "superbird"]
+  "cSpell.words": ["bincode", "blackhole", "Bluez", "bridgething", "pairable", "superbird"],
+  "highlight.regexes": {
+    "(from ct:)(.*)": [
+      {
+        "filterFileRegex": "notes/mitm.txt",
+        "filterLanguageRegex": "plaintext",
+        "overviewRulerColor": "#4dff94",
+        "fontWeight": "bold",
+        "color": "#4dff94"
+      },
+      {
+        "filterFileRegex": "notes/mitm.txt",
+        "filterLanguageRegex": "plaintext",
+        "color": "#4dff94"
+      }
+    ],
+    "(to   ct:?)(.*)": [
+      {
+        "filterFileRegex": "notes/mitm.txt",
+        "filterLanguageRegex": "plaintext",
+        "overviewRulerColor": "#4de0ff",
+        "fontWeight": "bold",
+        "color": "#4de0ff"
+      },
+      {
+        "filterFileRegex": "notes/mitm.txt",
+        "filterLanguageRegex": "plaintext",
+        "color": "#4de0ff"
+      }
+    ]
+  }
 }

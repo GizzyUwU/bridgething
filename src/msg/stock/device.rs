@@ -44,9 +44,15 @@ pub enum StockHardwareSend {
   AmbientLightUpdate { payload: usize },
 }
 
+impl From<StockHardwareSend> for StockSendMsg {
+  fn from(val: StockHardwareSend) -> Self {
+    Self::Hardware(val)
+  }
+}
+
 impl From<StockHardwareSend> for PossibleSendMsg {
   fn from(val: StockHardwareSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Hardware(val))
+    Self::Stock(StockSendMsg::Hardware(val))
   }
 }
 
@@ -79,8 +85,14 @@ pub enum PhoneCallDirection {
   Outgoing,
 }
 
+impl From<StockPhoneCallSend> for StockSendMsg {
+  fn from(val: StockPhoneCallSend) -> Self {
+    Self::PhoneCall(val)
+  }
+}
+
 impl From<StockPhoneCallSend> for PossibleSendMsg {
   fn from(val: StockPhoneCallSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::PhoneCall(val))
+    Self::Stock(StockSendMsg::PhoneCall(val))
   }
 }

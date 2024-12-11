@@ -8,6 +8,9 @@ use crate::msg::Device;
 pub struct State {
   #[serde(skip)]
   path: PathBuf,
+  #[serde(skip)]
+  pub connected_device: Option<bluer::Address>,
+
   devices: HashMap<String, Device>,
   storage: HashMap<String, String>,
 }

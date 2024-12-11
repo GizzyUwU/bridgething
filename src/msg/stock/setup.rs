@@ -9,8 +9,14 @@ pub enum StockSetupSend {
   Status { payload: String },
 }
 
+impl From<StockSetupSend> for StockSendMsg {
+  fn from(val: StockSetupSend) -> Self {
+    Self::Setup(val)
+  }
+}
+
 impl From<StockSetupSend> for PossibleSendMsg {
   fn from(val: StockSetupSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Setup(val))
+    Self::Stock(StockSendMsg::Setup(val))
   }
 }

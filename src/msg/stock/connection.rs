@@ -16,8 +16,14 @@ pub enum StockConnectionSend {
   TransportStatus { payload: bool },
 }
 
+impl From<StockConnectionSend> for StockSendMsg {
+  fn from(val: StockConnectionSend) -> Self {
+    Self::Connection(val)
+  }
+}
+
 impl From<StockConnectionSend> for PossibleSendMsg {
   fn from(val: StockConnectionSend) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Connection(val))
+    Self::Stock(StockSendMsg::Connection(val))
   }
 }

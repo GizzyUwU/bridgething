@@ -9,7 +9,10 @@ use tokio_websockets::ServerBuilder;
 use uuid::Uuid;
 
 use crate::{
-  msg::{RecvMsg, RecvMsgData, RecvRx, RecvTx, SendMsg, SendMsgData, SendMsgMeta, SendTx},
+  msg::{
+    stock::StockSendMsg, ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendMsg, SendMsgData,
+    SendMsgMeta, SendTx,
+  },
   ws::{connection::Connection, WSError},
 };
 
@@ -17,10 +20,11 @@ use super::WSResult;
 
 #[derive(Debug)]
 struct ConnectionData {
+  tx: SendTx,
+  mode: ClientMode,
+
   handle: JoinHandle<()>,
   cancel_token: CancellationToken,
-
-  tx: SendTx,
 }
 
 #[derive(Debug)]
@@ -52,6 +56,11 @@ impl ConnMan {
     let msg = self.rx.recv().await.ok_or(WSError::ChannelClosed)?;
     tracing::trace!("new parsed message from {:?}", msg.from);
 
+    if let RecvMsgData::ChangeMode(mode) = &msg.data {
+      let connection = self.connections.get_mut(&msg.from).ok_or(WSError::NotConnected)?;
+      connection.mode = *mode;
+    };
+
     if let RecvMsgData::ConnectionClosed(_, _) = msg.data {
       self.handle_disconnect(msg.from);
     };
@@ -59,23 +68,79 @@ impl ConnMan {
     Ok(msg)
   }
 
-  pub async fn send(&self, id: Uuid, to: SocketAddr, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
-    let ConnectionData { tx, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
+  pub async fn send(
+    &self,
+    id: Uuid,
+    to: SocketAddr,
+    data: impl Into<SendMsgData>,
+    meta: SendMsgMeta,
+    stock_msg_id: Option<usize>,
+  ) -> WSResult<()> {
+    let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
     let data = data.into();
-
     tracing::trace!("sending message id {id} to {to} with data {:?}", data);
-    Ok(tx.send(SendMsg { id, data, meta }).await?)
+
+    let msg = SendMsg {
+      id,
+      data,
+      meta,
+      stock_msg_id,
+    };
+    let msg = PossibleSendMsg::from_send_msg(msg, mode);
+
+    Ok(tx.send(msg).await?)
   }
 
   pub async fn broadcast(&self, data: impl Into<SendMsgData> + Clone, meta: SendMsgMeta) -> Result<(), Vec<WSError>> {
+    let data = data.into();
+
+    let msg = SendMsg {
+      id: uuid::Uuid::now_v7(),
+      data: data.clone(),
+      meta,
+      stock_msg_id: None,
+    };
+
     let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| {
+      let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
+      c.tx.send(msg).map_err(WSError::MessageSend)
+    }))
+    .await;
+
+    let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
+    if errors.is_empty() {
+      Ok(())
+    } else {
+      Err(errors)
+    }
+  }
+
+  pub async fn send_stock(&self, to: SocketAddr, data: impl Into<StockSendMsg>) -> WSResult<()> {
+    let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
+    if *mode != ClientMode::Stock {
+      tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
+      return Ok(());
+    }
+
+    let msg = data.into();
+    tracing::trace!("sending stock message to {to} with data {:?}", msg);
+
+    Ok(tx.send(PossibleSendMsg::Stock(msg)).await?)
+  }
+
+  pub async fn broadcast_stock(&self, data: impl Into<StockSendMsg> + Clone) -> Result<(), Vec<WSError>> {
+    let msg = data.into();
+
+    let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| async {
+      if c.mode != ClientMode::Stock {
+        tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
+        return Ok(());
+      };
+
       c.tx
-        .send(SendMsg {
-          id: uuid::Uuid::now_v7(),
-          data: data.clone().into(),
-          meta,
-        })
+        .send(PossibleSendMsg::Stock(msg.clone()))
         .map_err(WSError::MessageSend)
+        .await
     }))
     .await;
 
@@ -96,9 +161,11 @@ impl ConnMan {
     let cancel_token = self.cancel_token.child_token();
 
     let data = ConnectionData {
+      tx,
+      mode: ClientMode::Modern,
+
       handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone()),
       cancel_token,
-      tx,
     };
 
     self.connections.insert(address, data);
