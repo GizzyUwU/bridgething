@@ -1,4 +1,7 @@
 use bridgething::{
+  bt::Bluetooth,
+  handler::Handler,
+  state::State,
   systemd::{self, Notify},
   ws,
 };
@@ -9,11 +12,13 @@ mod monitoring;
 async fn main() {
   monitoring::init_logger();
 
-  #[cfg(feature = "systemd")]
-  let notifier = systemd::SystemdNotify::new();
+  let notifier = systemd::init_notifier();
+  let mut state = State::init().await.expect("failed to initialize state!!");
 
-  #[cfg(not(feature = "systemd"))]
-  let notifier = systemd::DummyNotify::new();
+  notifier.status("initializing bluetooth stack...");
+  let mut bluetooth = Bluetooth::init()
+    .await
+    .expect("failed to initialize the bluetooth stack");
 
   let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
   let mut conn_man = ws::ConnMan::new();
@@ -29,7 +34,14 @@ async fn main() {
         };
       },
       Ok(msg) = conn_man.listen() => {
-        // leaving this here...
+        if let Err(err) = Handler::new(&mut conn_man, &mut state, &mut bluetooth, msg.id, msg.from).handle(msg.data).await {
+          tracing::error!("failed to handle websocket message: {:?}", err);
+        }
+      },
+      msg = bluetooth.listen() => {
+        if let Err(err) = bluetooth.handle_msg(&mut conn_man, &mut state, msg).await {
+          tracing::error!("failed to handle bluetooth message: {:?}", err);
+        }
       },
       _ = monitoring::wait_for_signal() => {
         break;

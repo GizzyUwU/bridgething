@@ -70,9 +70,9 @@ impl From<PossibleRecvMsg> for RecvMsgData {
   }
 }
 
-impl From<&PossibleRecvMsg> for uuid::Uuid {
-  fn from(recv: &PossibleRecvMsg) -> Self {
-    match recv {
+impl PossibleRecvMsg {
+  pub fn uuid(&self) -> uuid::Uuid {
+    match self {
       PossibleRecvMsg::Modern(msg) => msg.id,
       _ => uuid::Uuid::now_v7(),
     }

@@ -7,7 +7,7 @@ pub use server::Server;
 
 use crate::msg::SendMsg;
 
-type WSResult<T> = Result<T, WSError>;
+pub type WSResult<T> = Result<T, WSError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WSError {
@@ -21,4 +21,6 @@ pub enum WSError {
   MessageSend(#[from] tokio::sync::mpsc::error::SendError<SendMsg>),
   #[error("channel from connections to server struct has been dropped!!! this is bad.")]
   ChannelClosed,
+  #[error("failed to broadcast to all devices. check the logs for more info.")]
+  BroadcastFailed,
 }

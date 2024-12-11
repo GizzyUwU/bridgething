@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::msg::SendMsgData;
@@ -41,7 +43,7 @@ pub enum BluetoothSend {
     name: String,
     pin: String,
   },
-  PairedDevices(Vec<Device>),
+  PairedDevices(HashMap<String, Device>),
 }
 
 impl From<BluetoothSend> for SendMsgData {
@@ -69,4 +71,5 @@ pub enum DeviceType {
   Windows,
   MacOS,
   Linux,
+  Unknown,
 }

@@ -9,13 +9,13 @@ use crate::msg::{InteractionRecv, RecvMsgData};
 #[serde(tag = "method", content = "args", rename_all = "snake_case")]
 pub enum StockInterAppRecv {
   #[serde(rename = "com.spotify.superbird.crashes.report")]
-  CrashReport,
+  CrashReport(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.earcon")]
   Earcon { earcon: String }, // 'confirmation' | 'listening' | 'error'
   #[serde(rename = "com.spotify.get_available_podcast_playback_speeds")]
-  GetAvailablePodcastPlaybackSpeeds,
+  GetAvailablePodcastPlaybackSpeeds {},
   #[serde(rename = "com.spotify.get_capabilities")]
-  GetCapabilities,
+  GetCapabilities {},
   #[serde(rename = "com.spotify.get_children_of_item")]
   GetChildrenOfItem {
     parent_id: String,
@@ -28,23 +28,23 @@ pub enum StockInterAppRecv {
     limit_overrides: HashMap<String, usize>,
   },
   #[serde(rename = "com.spotify.get_crossfade_state")]
-  GetCrossfadeState,
+  GetCrossfadeState {},
   #[serde(rename = "com.spotify.get_current_context")]
-  GetCurrentContext,
+  GetCurrentContext {},
   #[serde(rename = "com.spotify.get_current_track")]
-  GetCurrentTrack,
+  GetCurrentTrack {},
   #[serde(rename = "com.spotify.get_image")]
   GetImage { id: String },
   #[serde(rename = "com.spotify.get_items_for_uris")]
-  GetItemForURI,
+  GetItemForURI {},
   #[serde(rename = "com.spotify.get_next_tracks")]
-  GetNextTracks,
+  GetNextTracks {},
   #[serde(rename = "com.spotify.superbird.permissions")]
-  GetPermissions,
+  GetPermissions {},
   #[serde(rename = "com.spotify.get_playback_speed")]
-  GetPlaybackSpeed,
+  GetPlaybackSpeed {},
   #[serde(rename = "com.spotify.get_player_state")]
-  GetPlayerState,
+  GetPlayerState {},
   #[serde(rename = "com.spotify.superbird.get_podcast")]
   GetPodcast {
     uri: String,
@@ -52,37 +52,37 @@ pub enum StockInterAppRecv {
     offset: Option<usize>,
   },
   #[serde(rename = "com.spotify.get_podcast_playback_speed")]
-  GetPodcastPlaybackSpeed,
+  GetPodcastPlaybackSpeed {},
   #[serde(rename = "com.spotify.superbird.presets.get_presets")]
-  GetPresets,
+  GetPresets {},
   #[serde(rename = "com.spotify.get_rating")]
-  GetRating,
+  GetRating {},
   #[serde(rename = "com.spotify.get_recommended_content_for_type")]
-  GetRecommendedContentForType,
+  GetRecommendedContentForType {},
   #[serde(rename = "com.spotify.get_repeat")]
-  GetRepeat,
+  GetRepeat {},
   #[serde(rename = "com.spotify.get_root_item")]
-  GetRootItem,
+  GetRootItem {},
   #[serde(rename = "com.spotify.get_saved")]
   GetSaved { id: String }, // id is uri
   #[serde(rename = "com.spotify.get_session_state")]
-  GetSessionState,
+  GetSessionState {},
   #[serde(rename = "com.spotify.get_shuffle")]
-  GetShuffle,
+  GetShuffle {},
   #[serde(rename = "com.spotify.get_thumbnail_image")]
   GetThumbnailImage { id: String },
   #[serde(rename = "com.spotify.superbird.tipsandtricks.get_tips_and_tricks")]
-  GetTips,
+  GetTips {},
   #[serde(rename = "com.spotify.get_track_elapsed")]
-  GetTrackElapsed,
+  GetTrackElapsed {},
   #[serde(rename = "com.spotify.superbird.tts.speak")]
   GetTts { file: String },
   #[serde(rename = "com.spotify.superbird.graphql")]
   Graph,
   #[serde(rename = "com.spotify.log_message")]
-  LogMessage,
+  LogMessage(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.pitstop.log")]
-  PitstopLog,
+  PitstopLog(serde_json::Value),
   #[serde(rename = "com.spotify.play_item")]
   _PlayItem,
   #[serde(rename = "com.spotify.play_uri")]
@@ -124,25 +124,25 @@ pub enum StockInterAppRecv {
   #[serde(rename = "com.spotify.superbird.dj.summon")]
   SummonDj,
   #[serde(rename = "com.spotify.superbird.instrumentation.request")]
-  RequestLog,
+  RequestLog(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.instrumentation.interaction")]
-  SendUbiInteraction,
+  SendUbiInteraction(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.instrumentation.impression")]
-  SendUbiImpression,
+  SendUbiImpression(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.instrumentation.log")]
-  SendUbiBatch,
+  SendUbiBatch(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.phone.answer")]
-  PhoneAnswer,
+  PhoneAnswer {},
   #[serde(rename = "com.spotify.superbird.phone.decline")]
-  PhoneDecline,
+  PhoneDecline {},
   #[serde(rename = "com.spotify.superbird.phone.get_image")]
   PhoneCallImage { phone_number: String },
   #[serde(rename = "com.spotify.superbird.phone.send_message")]
   PhoneCallMessage { phone_number: String, message: String },
   #[serde(rename = "com.spotify.superbird.volume.volume_up")]
-  IncreaseVolume,
+  IncreaseVolume {},
   #[serde(rename = "com.spotify.superbird.volume.volume_down")]
-  DecreaseVolume,
+  DecreaseVolume {},
   #[serde(rename = "com.spotify.superbird.play_uri")]
   PlayUri {
     uri: String,
@@ -152,15 +152,15 @@ pub enum StockInterAppRecv {
     skip_to_uid: Option<String>,
   },
   #[serde(rename = "com.spotify.superbird.skip_next")]
-  SkipNext,
+  SkipNext {},
   #[serde(rename = "com.spotify.superbird.skip_prev")]
   SkipPrev { allow_seeking: bool },
   #[serde(rename = "com.spotify.superbird.seek_to")]
   SeekTo { position: usize },
   #[serde(rename = "com.spotify.superbird.resume")]
-  Resume,
+  Resume {},
   #[serde(rename = "com.spotify.superbird.pause")]
-  Pause,
+  Pause {},
   #[serde(rename = "com.spotify.superbird.set_shuffle")]
   SetShuffle { shuffle: bool },
   #[serde(rename = "com.spotify.superbird.set_repeat")]
@@ -174,15 +174,15 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::GetImage { id },
       },
-      StockInterAppRecv::GetNextTracks => RecvMsgData::Interaction {
+      StockInterAppRecv::GetNextTracks {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::GetNextTracks,
       },
-      StockInterAppRecv::PhoneAnswer => RecvMsgData::Interaction {
+      StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::PhoneAnswer,
       },
-      StockInterAppRecv::PhoneDecline => RecvMsgData::Interaction {
+      StockInterAppRecv::PhoneDecline {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::PhoneDecline,
       },
@@ -194,11 +194,11 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::PhoneCallMessage { phone_number, message },
       },
-      StockInterAppRecv::IncreaseVolume => RecvMsgData::Interaction {
+      StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::IncreaseVolume,
       },
-      StockInterAppRecv::DecreaseVolume => RecvMsgData::Interaction {
+      StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::DecreaseVolume,
       },
@@ -206,7 +206,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SkipToIndex { index },
       },
-      StockInterAppRecv::SkipNext => RecvMsgData::Interaction {
+      StockInterAppRecv::SkipNext {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SkipNext,
       },
@@ -218,11 +218,11 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SeekTo { position },
       },
-      StockInterAppRecv::Pause => RecvMsgData::Interaction {
+      StockInterAppRecv::Pause {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::Pause,
       },
-      StockInterAppRecv::Resume => RecvMsgData::Interaction {
+      StockInterAppRecv::Resume {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::Resume,
       },
@@ -250,7 +250,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SpotifyGetHome { limit, limit_overrides },
       },
-      StockInterAppRecv::GetPermissions => RecvMsgData::Interaction {
+      StockInterAppRecv::GetPermissions {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SpotifyGetPermissions,
       },
@@ -258,7 +258,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SpotifyGetPodcast { uri, limit, offset },
       },
-      StockInterAppRecv::GetPresets => RecvMsgData::Interaction {
+      StockInterAppRecv::GetPresets {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SpotifyGetPresets,
       },
@@ -270,7 +270,7 @@ impl From<(usize, StockInterAppRecv)> for RecvMsgData {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::GetThumbnailImage { id },
       },
-      StockInterAppRecv::GetTips => RecvMsgData::Interaction {
+      StockInterAppRecv::GetTips {} => RecvMsgData::Interaction {
         stock_msg_id: Some(msg_id),
         msg: InteractionRecv::SpotifyGetTips,
       },
@@ -426,7 +426,7 @@ mod test {
 
   #[test]
   fn de_stock_recv_increase_volume() {
-    let json = r#"{"msgId":3,"method":"com.spotify.superbird.volume.volume_up","userAction": false}"#;
+    let json = r#"{"msgId":3,"method":"com.spotify.superbird.volume.volume_up","args":{},"userAction": false}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -434,7 +434,7 @@ mod test {
       de,
       PossibleRecvMsg::StockInterApp {
         msg_id: 3,
-        data: StockInterAppRecv::IncreaseVolume,
+        data: StockInterAppRecv::IncreaseVolume {},
         user_action: false,
       }
     );
@@ -471,5 +471,19 @@ mod test {
         user_action: false,
       }
     );
+  }
+
+  #[test]
+  fn de_stock_recv_permissions() {
+    let json = r#"{"msgId":2,"method":"com.spotify.superbird.permissions","args":{},"userAction":false}"#;
+    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
+    println!("{:?}", de);
+  }
+
+  #[test]
+  fn de_stock_recv_instrumentation() {
+    let json = r#"{"msgId":3,"method":"com.spotify.superbird.instrumentation.log","args":{"interactions":[{"action_name":"ui_navigate_back","action_version":1,"annotator_configuration_version":"","annotator_version":"","app":"music","element_path_ids":["","","",""],"element_path_names":["car-settings-carthingos","phone_connection_row","phone_connection_view","hardware_back_button"],"element_path_pos":["","","",""],"element_path_reasons":["","","",""],"element_path_uris":["","","",""],"generator_version":"10.0.2","interaction_id":"a27d88eb-1b5f-4f57-b477-51b3f031b9f1","interaction_type":"key_stroke","parent_modes":[],"parent_path_ids":[],"parent_path_names":[],"parent_path_pos":[],"parent_path_reasons":[],"parent_path_uris":[],"parent_specification_versions":[],"specification_version":"9.0.0","specification_mode":"default","page_instance_id":null,"playback_id":null,"play_context_uri":null},{"action_name":"ui_navigate_back","action_version":1,"annotator_configuration_version":"","annotator_version":"","app":"music","element_path_ids":["",""],"element_path_names":["car-settings-carthingos","hardware_back_button"],"element_path_pos":["",""],"element_path_reasons":["",""],"element_path_uris":["",""],"generator_version":"10.0.2","interaction_id":"4a212c49-76a7-4f34-afad-9c03052c4e4b","interaction_type":"key_stroke","parent_modes":[],"parent_path_ids":[],"parent_path_names":[],"parent_path_pos":[],"parent_path_reasons":[],"parent_path_uris":[],"parent_specification_versions":[],"specification_version":"9.0.0","specification_mode":"default","page_instance_id":null,"playback_id":null,"play_context_uri":null}],"impressions":[{"annotator_configuration_version":"","annotator_version":"","app":"music","element_path_ids":["","","","",""],"element_path_names":["car-settings-carthingos","phone_connection_row","phone_connection_view","existing_phone_row","select_phone_progress_dialog"],"element_path_pos":["","","","",""],"element_path_reasons":["","","","",""],"element_path_uris":["","","","",""],"generator_version":"10.0.2","impression_id":"b858b7aa-bbb9-4816-89ee-25ca1602eb91","parent_modes":[],"parent_path_ids":[],"parent_path_names":[],"parent_path_pos":[],"parent_path_reasons":[],"parent_path_uris":[],"parent_specification_versions":[],"specification_version":"9.0.0","specification_mode":"default","page_instance_id":null,"playback_id":null,"play_context_uri":null},{"annotator_configuration_version":"","annotator_version":"","app":"music","element_path_ids":["","","","",""],"element_path_names":["car-settings-carthingos","phone_connection_row","phone_connection_view","existing_phone_row","select_phone_success_dialog"],"element_path_pos":["","","","",""],"element_path_reasons":["","","","",""],"element_path_uris":["","","","",""],"generator_version":"10.0.2","impression_id":"7eff4cb6-384c-4f43-8ffd-f9e16366ab22","parent_modes":[],"parent_path_ids":[],"parent_path_names":[],"parent_path_pos":[],"parent_path_reasons":[],"parent_path_uris":[],"parent_specification_versions":[],"specification_version":"9.0.0","specification_mode":"default","page_instance_id":null,"playback_id":null,"play_context_uri":null},{"annotator_configuration_version":"","annotator_version":"","app":"music","element_path_ids":[""],"element_path_names":["car-settings-carthingos"],"element_path_pos":[""],"element_path_reasons":[""],"element_path_uris":[""],"generator_version":"10.0.2","impression_id":"50ccf04d-e308-4cf6-a1e0-fd57d7913d63","parent_modes":[],"parent_path_ids":[],"parent_path_names":[],"parent_path_pos":[],"parent_path_reasons":[],"parent_path_uris":[],"parent_specification_versions":[],"specification_version":"9.0.0","specification_mode":"default","page_instance_id":null,"playback_id":null,"play_context_uri":null}],"interaction_timestamps":[{"timestamp":1733803725274,"interaction_id":"a27d88eb-1b5f-4f57-b477-51b3f031b9f1"},{"timestamp":1733803726813,"interaction_id":"4a212c49-76a7-4f34-afad-9c03052c4e4b"}],"impression_timestamps":[{"timestamp":1733803720258,"impression_id":"b858b7aa-bbb9-4816-89ee-25ca1602eb91"},{"timestamp":1733803720263,"impression_id":"7eff4cb6-384c-4f43-8ffd-f9e16366ab22"},{"timestamp":1733803725285,"impression_id":"50ccf04d-e308-4cf6-a1e0-fd57d7913d63"}]},"userAction":false}"#;
+    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
+    println!("{:?}", de);
   }
 }

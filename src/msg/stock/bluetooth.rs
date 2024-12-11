@@ -21,7 +21,10 @@ impl From<StockBluetoothRecv> for BluetoothRecv {
       StockBluetoothRecv::Scan => BluetoothRecv::Scan,
       StockBluetoothRecv::Pair { mac } => BluetoothRecv::Pair { mac },
       StockBluetoothRecv::Forget { mac } => BluetoothRecv::Forget { mac },
-      StockBluetoothRecv::Discoverable { .. } => BluetoothRecv::EnableDiscoverable,
+      StockBluetoothRecv::Discoverable { active } => match active {
+        true => BluetoothRecv::EnableDiscoverable,
+        false => BluetoothRecv::DisableDiscoverable,
+      },
     }
   }
 }
@@ -58,7 +61,7 @@ impl From<BluetoothSend> for StockBluetoothSend {
       BluetoothSend::ParingResult { success } => StockBluetoothSend::PairingFinished { success },
       BluetoothSend::Pin { pin, .. } => StockBluetoothSend::Pin { pin },
       BluetoothSend::PairedDevices(info) => StockBluetoothSend::DeviceList {
-        payload: info.into_iter().map(|d| d.into()).collect(),
+        payload: info.values().map(|d| d.to_owned().into()).collect(),
       },
     }
   }

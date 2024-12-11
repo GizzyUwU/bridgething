@@ -1,13 +1,10 @@
-use std::net::SocketAddr;
+use std::collections::HashMap;
 
 use bridgething::{
-  msg::{
-    BluetoothRecv, BluetoothSend, Device, DeviceType, RecvMsg, RecvMsgData, SendMsgMeta, StorageRecv, StorageSend,
-    SystemSend,
-  },
+  handler::MsgHandle,
+  msg::{BluetoothRecv, BluetoothSend, Device, DeviceType, RecvMsgData, StorageRecv, StorageSend, SystemSend},
   ws,
 };
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -25,8 +22,7 @@ async fn main() {
         };
       },
       Ok(msg) = conn_man.listen() => {
-        let mut handler = MockMsgHandler::new(&mut conn_man);
-        handler.handle(msg).await;
+        MockMsgHandler::new(MsgHandle::new(&mut conn_man, msg.id, msg.from)).handle(msg.data).await;
       },
       _ = wait_for_signal() => {
         tracing::info!("signal received - exiting...");
@@ -37,144 +33,111 @@ async fn main() {
 }
 
 struct MockMsgHandler<'a> {
-  conn_man: &'a mut ws::ConnMan,
+  handle: MsgHandle<'a>,
 }
 
 impl<'a> MockMsgHandler<'a> {
-  fn new(conn_man: &'a mut ws::ConnMan) -> Self {
-    Self { conn_man }
+  fn new(handle: MsgHandle<'a>) -> Self {
+    Self { handle }
   }
 
-  async fn handle(&mut self, ws_msg: RecvMsg) {
-    if let RecvMsgData::Hole = ws_msg.data {
+  async fn handle(&self, data: RecvMsgData) {
+    if let RecvMsgData::Hole = data {
       return tracing::trace!("received blackhole message, ignoring");
     };
 
-    tracing::trace!("handling message: {:?}", &ws_msg);
+    tracing::trace!("handling message: {:?}", &data);
 
-    match ws_msg.data {
-      RecvMsgData::Storage(msg) => self.handle_storage_msg(ws_msg.id, ws_msg.from, msg).await,
-      RecvMsgData::Bluetooth(msg) => self.handle_bluetooth_msg(ws_msg.id, ws_msg.from, msg).await,
+    match &data {
+      RecvMsgData::Storage(msg) => self.handle_storage_msg(msg).await,
+      RecvMsgData::Bluetooth(msg) => self.handle_bluetooth_msg(msg).await,
       _ => tracing::warn!("unhandled message!!"),
     }
   }
 
-  async fn handle_storage_msg(&mut self, id: Uuid, address: SocketAddr, msg: StorageRecv) {
+  async fn handle_storage_msg(&self, msg: &StorageRecv) {
     match msg {
       StorageRecv::Get { key, .. } => match key.as_str() {
         "local-storage-data" => {
           self
-            .conn_man
-            .send(
-              id,
-              address,
-              StorageSend::Response {
-                key: "local-storage-data".to_owned(),
-                value: Some("{}".to_owned()),
-              },
-              SendMsgMeta::Response,
-            )
+            .handle
+            .respond(StorageSend::Response {
+              key: "local-storage-data".to_owned(),
+              value: Some("{}".to_owned()),
+            })
             .await
             .expect("failed to send message");
         }
         "onboarding_status" => {
           self
-            .conn_man
-            .send(
-              id,
-              address,
-              StorageSend::Response {
-                key: "onboarding_status".to_owned(),
-                value: Some("finished".to_owned()),
-              },
-              SendMsgMeta::Response,
-            )
+            .handle
+            .respond(StorageSend::Response {
+              key: "onboarding_status".to_owned(),
+              value: Some("finished".to_owned()),
+            })
             .await
             .expect("failed to send message");
 
           self
-            .conn_man
-            .send(
-              id,
-              address,
-              SystemSend::__LegacyStockSetupStatus("finished".to_owned()),
-              SendMsgMeta::Info,
-            )
+            .handle
+            .send_info(SystemSend::__LegacyStockSetupStatus("finished".to_owned()))
             .await
             .expect("failed to send message");
         }
         _ => {}
       },
-      StorageRecv::Put { key, value, .. } => {}
+      StorageRecv::Put { key, value, .. } => {
+        tracing::debug!("attempting to set storage key: {:?}; value: {:?}", key, value);
+      }
+      StorageRecv::Delete { key } => {
+        tracing::debug!("attempting to delete storage key: {:?}", key);
+      }
     };
   }
 
-  async fn handle_bluetooth_msg(&mut self, id: Uuid, address: SocketAddr, msg: BluetoothRecv) {
-    let devices = vec![Device {
+  async fn handle_bluetooth_msg(&self, msg: &BluetoothRecv) {
+    let mock_device = Device {
       name: "Mock Device".to_owned(),
       device_type: DeviceType::Ios,
       mac: "mo::ck::ad::re::ss".to_owned(),
       default: true,
-    }];
+    };
+    let devices = HashMap::from_iter(vec![(mock_device.mac.clone(), mock_device.clone())]);
+
     match msg {
       BluetoothRecv::List => {
         self
-          .conn_man
-          .send(
-            id,
-            address,
-            BluetoothSend::PairedDevices(devices),
-            SendMsgMeta::Response,
-          )
+          .handle
+          .respond(BluetoothSend::PairedDevices(devices))
           .await
           .expect("failed to send message");
       }
       BluetoothRecv::Connect { .. } => {
         self
-          .conn_man
-          .send(
-            id,
-            address,
-            BluetoothSend::Status { connected: true },
-            SendMsgMeta::Response,
-          )
+          .handle
+          .respond(BluetoothSend::Status { connected: true })
           .await
           .expect("failed to send message");
         self
-          .conn_man
-          .send(
-            id,
-            address,
-            BluetoothSend::ConnectedDevice {
-              name: devices[0].name.clone(),
-              mac: devices[0].mac.clone(),
-            },
-            SendMsgMeta::Info,
-          )
+          .handle
+          .send_info(BluetoothSend::ConnectedDevice {
+            name: mock_device.name.clone(),
+            mac: mock_device.mac.clone(),
+          })
           .await
           .expect("failed to send message");
         self
-          .conn_man
-          .send(
-            id,
-            address,
-            SystemSend::__LegacyStockRemoteStatus {
-              payload: true,
-              mac: devices[0].mac.clone(),
-              phone_type: devices[0].device_type.clone(),
-            },
-            SendMsgMeta::Info,
-          )
+          .handle
+          .send_info(SystemSend::__LegacyStockRemoteStatus {
+            payload: true,
+            mac: mock_device.mac.clone(),
+            phone_type: mock_device.device_type.clone(),
+          })
           .await
           .expect("failed to send message");
         self
-          .conn_man
-          .send(
-            id,
-            address,
-            SystemSend::__LegacyStockTransportStatus { payload: true },
-            SendMsgMeta::Info,
-          )
+          .handle
+          .send_info(SystemSend::__LegacyStockTransportStatus { payload: true })
           .await
           .expect("failed to send message");
       }

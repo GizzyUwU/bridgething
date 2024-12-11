@@ -15,6 +15,7 @@ use crate::{
 
 use super::WSResult;
 
+#[derive(Debug)]
 struct ConnectionData {
   handle: JoinHandle<()>,
   cancel_token: CancellationToken,
@@ -22,6 +23,7 @@ struct ConnectionData {
   tx: SendTx,
 }
 
+#[derive(Debug)]
 pub struct ConnMan {
   connections: HashMap<SocketAddr, ConnectionData>,
   cancel_token: CancellationToken,
@@ -59,33 +61,30 @@ impl ConnMan {
 
   pub async fn send(&self, id: Uuid, to: SocketAddr, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
     let ConnectionData { tx, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
+    let data = data.into();
 
-    Ok(
-      tx.send(SendMsg {
-        id,
-        data: data.into(),
-        meta,
-      })
-      .await?,
-    )
+    tracing::trace!("sending message id {id} to {to} with data {:?}", data);
+    Ok(tx.send(SendMsg { id, data, meta }).await?)
   }
 
-  pub async fn broadcast(
-    &self,
-    id: Uuid,
-    data: impl Into<SendMsgData> + Clone,
-    meta: SendMsgMeta,
-  ) -> Vec<WSResult<()>> {
-    futures::future::join_all(self.connections.values().map(|c| {
+  pub async fn broadcast(&self, data: impl Into<SendMsgData> + Clone, meta: SendMsgMeta) -> Result<(), Vec<WSError>> {
+    let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| {
       c.tx
         .send(SendMsg {
-          id,
+          id: uuid::Uuid::now_v7(),
           data: data.clone().into(),
           meta,
         })
         .map_err(WSError::MessageSend)
     }))
-    .await
+    .await;
+
+    let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
+    if errors.is_empty() {
+      Ok(())
+    } else {
+      Err(errors)
+    }
   }
 
   /// NOT cancel-safe

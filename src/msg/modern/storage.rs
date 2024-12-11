@@ -8,6 +8,7 @@ use crate::msg::SendMsgData;
 pub enum StorageRecv {
   Get { key: String },
   Put { key: String, value: String },
+  Delete { key: String },
 }
 
 #[serde_with::skip_serializing_none]

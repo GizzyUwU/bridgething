@@ -2,10 +2,22 @@
 use sd_notify::{booted, notify, NotifyState};
 
 pub trait Notify<'a> {
-  fn new() -> Self;
+  fn new() -> Self
+  where
+    Self: Sized;
 
   fn ready(&self, ready: bool, status: Option<&'a str>);
   fn status(&self, status: &'a str);
+}
+
+pub fn init_notifier<'a>() -> impl Notify<'a> + Sized {
+  #[cfg(feature = "systemd")]
+  let notifier = SystemdNotify::new();
+
+  #[cfg(not(feature = "systemd"))]
+  let notifier = DummyNotify::new();
+
+  notifier
 }
 
 #[cfg(feature = "systemd")]

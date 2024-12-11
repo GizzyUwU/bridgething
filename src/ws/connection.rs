@@ -86,7 +86,7 @@ impl Connection {
   }
 
   async fn handle_text(&mut self, text: String) {
-    tracing::trace!("({}) new text message: {}", &self.address, &text);
+    tracing::trace!("({}) new message: {}", &self.address, &text);
     let Ok(msg) = serde_json::from_str::<PossibleRecvMsg>(&text) else {
       return tracing::warn!(
         "({}) failed to deserialize incoming message!! message: {text}",
@@ -223,7 +223,7 @@ impl From<tokio_websockets::Error> for ForwardMsg {
 
 impl From<PossibleRecvMsg> for ForwardMsg {
   fn from(msg: PossibleRecvMsg) -> Self {
-    ForwardMsg::Msg((&msg).into(), msg)
+    ForwardMsg::Msg(msg.uuid(), msg)
   }
 }
 
