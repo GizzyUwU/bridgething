@@ -49,8 +49,8 @@ impl<'a> StorageHandler<'a> {
 
       self.handle.send_stock(StockSetupSend::Status { payload }).await?;
 
-      // for debugging
-      return Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?);
+      // for debugging setup
+      // return Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?);
     }
 
     Ok(self.handle.respond(StorageSend::Response { key, value }).await?)
