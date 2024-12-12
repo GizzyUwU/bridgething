@@ -31,6 +31,10 @@ impl<'a> StorageHandler<'a> {
 
   async fn get(&self, key: String) -> HandlerResult {
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
+    #[cfg(debug_assertions)]
+    let mut value = self.state.get_storage_key(&key);
+
+    #[cfg(not(debug_assertions))]
     let value = self.state.get_storage_key(&key);
 
     // handle for stock firmware
@@ -49,8 +53,10 @@ impl<'a> StorageHandler<'a> {
 
       self.handle.send_stock(StockSetupSend::Status { payload }).await?;
 
-      // for debugging setup
-      // return Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?);
+      #[cfg(debug_assertions)]
+      {
+        value = Some("finished".to_string());
+      }
     }
 
     Ok(self.handle.respond(StorageSend::Response { key, value }).await?)

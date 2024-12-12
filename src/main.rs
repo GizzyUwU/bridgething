@@ -16,7 +16,7 @@ async fn main() {
   let mut state = State::init().await.expect("failed to initialize state!!");
 
   notifier.status("initializing bluetooth stack...");
-  let mut bluetooth = Bluetooth::init()
+  let mut bluetooth = Bluetooth::init(&mut state)
     .await
     .expect("failed to initialize the bluetooth stack");
 

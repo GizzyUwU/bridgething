@@ -30,8 +30,9 @@ pub struct Bluetooth {
   _agent_handle: AgentHandle,
 }
 
+// TODO: better reconnection logic
 impl Bluetooth {
-  pub async fn init() -> bluer::Result<Self> {
+  pub async fn init(state: &mut State) -> bluer::Result<Self> {
     tracing::debug!("initializing bluetooth session");
 
     let session = bluer::Session::new().await?;
@@ -53,7 +54,8 @@ impl Bluetooth {
     #[cfg(debug_assertions)]
     debug::query_adapter(&adapter).await?;
 
-    Ok(Self {
+    // start stream BEFORE device reconnection attempts
+    let this = Self {
       rx,
       stream: Box::new(adapter.events().await?),
 
@@ -61,7 +63,36 @@ impl Bluetooth {
 
       adapter,
       _agent_handle,
-    })
+    };
+
+    // restore connections if possible
+    for state_device in state.get_devices().values() {
+      let Ok(address) = state_device.mac.parse() else {
+        tracing::warn!("failed to parse a saved device's mac address - this is probably not good");
+        continue;
+      };
+      if let Ok(device) = this.adapter.device(address) {
+        tracing::debug!("found handle to device with mac: {:?}", &state_device.mac);
+        let Ok(connected) = device.is_connected().await else {
+          tracing::warn!("failed to get a handle to device!!");
+          continue;
+        };
+
+        if !connected {
+          if let Err(err) = this.connect(&state_device.mac).await {
+            tracing::warn!("error reconnecting to device: {:?}", err);
+          };
+        };
+      } else if state_device.default {
+        tracing::debug!("attempting to reconnect to device with mac: {:?}", &state_device.mac);
+
+        if let Err(err) = this.connect(&state_device.mac).await {
+          tracing::warn!("error reconnecting to device: {:?}", err);
+        }
+      }
+    }
+
+    Ok(this)
   }
 
   pub async fn set_alias(&self, alias: String) -> bluer::Result<()> {
