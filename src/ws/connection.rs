@@ -131,6 +131,7 @@ impl Connection {
       Ok(json) => json,
       Err(err) => return tracing::error!("({}) error converting message to json!!: {:?}", &self.address, err),
     };
+    tracing::trace!("sending json: {:?}", json);
 
     if let Err(err) = self.stream.send(tokio_websockets::Message::text(json)).await {
       tracing::error!("({}) error sending message to websocket!!: {:?}", &self.address, err);

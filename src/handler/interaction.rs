@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
   msg::{
-    stock::{StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockSetPreset},
+    stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockSetPreset},
     InteractionRecv,
   },
   state::State,
@@ -202,7 +202,35 @@ impl<'a> InteractionHandler<'a> {
       limit,
       offset
     );
-    // Ok(self.handle.respond().await?)
+
+    // TODO: remove testing code
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.stock_msg_id,
+        StockInterAppSendPayload::ItemChildren {
+          limit: 10000,
+          offset: 0,
+          total: 1,
+          items: vec![ChildItem {
+            id: "spotify:track:bridgething".to_owned(),
+            uri: "spotify:track:bridgething".to_owned(),
+            image_id: "spotify:image:bridgething".to_owned(),
+            title: "BridgeThing".to_owned(),
+            subtitle: "Thing Labs".to_owned(),
+            playable: true,
+            has_children: false,
+            available_offline: false,
+            metadata: ChildMeta {
+              is_explicit_content: false,
+              is_19_plus_content: false,
+              duration_ms: 5_000_000,
+            },
+          }],
+        },
+      ))
+      .await?;
+
     Ok(())
   }
 

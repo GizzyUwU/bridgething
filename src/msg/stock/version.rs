@@ -9,11 +9,14 @@ pub enum StockVersionSend {
   Status {
     serial: String,
     os_version: String,
+    country: String,
     app_version: String,
     touch_fw_version: String,
     model_name: String,
     fcc_id: String,
     ic_id: String,
+    discord: String,
+    credits: String,
   },
 }
 

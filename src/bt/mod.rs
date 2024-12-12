@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt};
 use crate::{
   msg::{
     stock::{StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
-    BluetoothSend, SendMsgMeta,
+    BluetoothSend, PlayerSend, SendMsgMeta,
   },
   state::{State, StateError},
   ws::{ConnMan, WSError},
@@ -117,6 +117,15 @@ impl Bluetooth {
     let device = self.adapter.device(mac.parse()?)?;
     device.set_trusted(false).await?;
     device.disconnect().await?;
+
+    Ok(())
+  }
+
+  pub async fn reset(&self, state: &mut State) -> bluer::Result<()> {
+    tracing::debug!("forgetting all devices");
+    for mac in state.get_devices().keys() {
+      self.forget(mac).await?;
+    }
 
     Ok(())
   }
@@ -304,6 +313,20 @@ impl Bluetooth {
         },
       })
       .await?;
+
+    // TODO: remove testing code
+    conn_man
+      .broadcast_stock(StockConnectionSend::RemoteApp {
+        app_id: "com.bridgething".to_owned(),
+        is_spotify: false,
+      })
+      .await?;
+
+    // TODO: remove testing code
+    // #[cfg(debug_assertions)]
+    conn_man.broadcast(PlayerSend::dummy(), SendMsgMeta::Info).await?;
+    // #[cfg(debug_assertions)]
+    conn_man.broadcast(PlayerSend::dummy_queue(), SendMsgMeta::Info).await?;
 
     Ok(())
   }

@@ -26,7 +26,18 @@ pub enum SystemRecv {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", content = "data", rename_all = "camelCase")]
 pub enum SystemSend {
-  Version(String),
+  Version {
+    serial: String,
+    os_version: String,
+    app_version: String,
+    touch_fw_version: String,
+    model_name: String,
+    fcc_id: String,
+    ic_id: String,
+    country: String,
+    discord: String,
+    credits: String,
+  },
 
   OtaReboot {
     delay_ms: usize,
@@ -56,14 +67,28 @@ impl From<SystemSend> for SendMsgData {
 impl SystemSend {
   pub fn to_stock(self) -> StockSendMsg {
     match self {
-      SystemSend::Version(version) => StockSendMsg::Version(StockVersionSend::Status {
-        serial: version.clone(),
-        os_version: version.clone(),
-        app_version: version.clone(),
-        touch_fw_version: version.clone(),
-        model_name: version.clone(),
-        fcc_id: version.clone(),
-        ic_id: version,
+      SystemSend::Version {
+        serial,
+        os_version,
+        app_version,
+        touch_fw_version,
+        model_name,
+        fcc_id,
+        ic_id,
+        country,
+        discord,
+        credits,
+      } => StockSendMsg::Version(StockVersionSend::Status {
+        serial,
+        os_version,
+        app_version,
+        touch_fw_version,
+        model_name,
+        fcc_id,
+        ic_id,
+        country,
+        discord,
+        credits,
       }),
 
       SystemSend::OtaReboot { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaReboot {

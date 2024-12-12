@@ -1,3 +1,4 @@
+#![allow(clippy::large_enum_variant)]
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -107,6 +108,7 @@ pub enum SendMsgData {
   Storage(StorageSend),
   System(SystemSend),
   Interaction(InteractionSend),
+  Player(PlayerSend),
   Ack,
 }
 

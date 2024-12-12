@@ -4,12 +4,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::msg::Device;
 
+pub mod meta;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
   #[serde(skip)]
   path: PathBuf,
   #[serde(skip)]
   pub connected_device: Option<bluer::Address>,
+  pub meta: meta::Meta,
 
   devices: HashMap<String, Device>,
   storage: HashMap<String, String>,
@@ -27,14 +30,47 @@ impl State {
     }
 
     let path = config_dir_path.join("bridgething.db");
-    if !path.exists() || !path.is_file() {
-      return Ok(Self {
+    let mut state = if path.exists() && path.is_file() {
+      if let Ok(mut state) = State::read(&path).await {
+        state.path = path;
+        state
+      } else {
+        tracing::warn!("state file is corrupt!! this is probably not good.");
+        Self {
+          path,
+          ..Default::default()
+        }
+      }
+    } else {
+      tracing::debug!("no saved state - initializing default state");
+      Self {
         path,
         ..Default::default()
-      });
+      }
+    };
+
+    #[cfg(debug_assertions)]
+    let meta_path = PathBuf::from("./resources/superbird.json");
+
+    #[cfg(not(debug_assertions))]
+    let meta_path = PathBuf::from("/etc/superbird");
+
+    if meta_path.exists() {
+      let data = tokio::fs::read(&meta_path).await?;
+      if let Ok(meta) = serde_json::from_slice(&data) {
+        state.meta = meta;
+      } else {
+        tracing::warn!(
+          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
+        );
+      }
+    } else {
+      tracing::warn!("could not find superbird metadata! bridgething is only officially supported on nixos-superbird.");
     }
 
-    State::read(path).await
+    tracing::debug!("metadata: {:?}", &state.meta);
+
+    Ok(state)
   }
 
   pub fn get_devices(&self) -> &HashMap<String, Device> {
@@ -79,11 +115,9 @@ impl State {
     Ok(())
   }
 
-  async fn read(path: PathBuf) -> Result<Self, StateError> {
-    let data = tokio::fs::read(&path).await?;
-
-    let mut state: State = bincode::deserialize(&data)?;
-    state.path = path;
+  async fn read(path: &PathBuf) -> Result<Self, StateError> {
+    let data = tokio::fs::read(path).await?;
+    let state: State = bincode::deserialize(&data)?;
 
     Ok(state)
   }
@@ -95,6 +129,10 @@ impl State {
     tokio::fs::write(&self.path, data).await?;
 
     Ok(())
+  }
+
+  pub async fn reset(&self) -> Result<(), StateError> {
+    Ok(tokio::fs::remove_file(&self.path).await?)
   }
 }
 

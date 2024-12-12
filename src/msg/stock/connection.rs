@@ -12,6 +12,8 @@ pub enum StockConnectionSend {
     mac: String,
     phone_type: StockDeviceType,
   },
+  #[serde(rename = "remote_control_app_change")]
+  RemoteApp { app_id: String, is_spotify: bool },
   #[serde(rename = "transport_connection_status")]
   TransportStatus { payload: bool },
 }

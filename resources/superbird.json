@@ -1,0 +1,28 @@
+{
+  "name": "nixos-superbird-bridgething",
+  "version": "v0.1.0",
+  "description": "a dummy superbird.json for bridgething to test with",
+  "nixos-superbird": {
+    "owner": "",
+    "repo": "",
+    "rev": "",
+    "ref": "",
+    "type": "",
+    "lastModified": "",
+    "narHash": ""
+  },
+  "derivation": {
+    "owner": "",
+    "repo": "",
+    "rev": "",
+    "ref": "",
+    "type": "",
+    "lastModified": "",
+    "narHash": ""
+  },
+  "btMac": "00:00:00:00:00:00",
+  "serialNumber": "000000000000",
+  "fccId": "2AP3D",
+  "icId": "24262",
+  "modelName": "YX5H6679"
+}

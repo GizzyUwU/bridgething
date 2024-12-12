@@ -3,12 +3,14 @@ use uuid::Uuid;
 
 pub mod bluetooth;
 pub mod interaction;
+pub mod player;
 pub mod storage;
 pub mod system;
 pub mod voice;
 
 pub use bluetooth::*;
 pub use interaction::*;
+pub use player::*;
 pub use storage::*;
 pub use system::*;
 pub use voice::*;

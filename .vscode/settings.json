@@ -1,7 +1,7 @@
 {
   "cSpell.words": ["bincode", "blackhole", "Bluez", "bridgething", "pairable", "superbird"],
   "highlight.regexes": {
-    "(from ct:)(.*)": [
+    "(\\[Client -> Server\\]?)(.*)": [
       {
         "filterFileRegex": "notes/mitm.txt",
         "filterLanguageRegex": "plaintext",
@@ -15,7 +15,7 @@
         "color": "#4dff94"
       }
     ],
-    "(to   ct:?)(.*)": [
+    "(\\[Server -> Client\\]?)(.*)": [
       {
         "filterFileRegex": "notes/mitm.txt",
         "filterLanguageRegex": "plaintext",

@@ -107,4 +107,6 @@ pub enum HandlerError {
   Bluez(#[from] bluer::Error),
   #[error("bluetooth handler error: {0}")]
   Bluetooth(#[from] BluetoothError),
+  #[error("io error: {0}")]
+  IO(#[from] std::io::Error),
 }

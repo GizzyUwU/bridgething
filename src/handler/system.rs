@@ -1,11 +1,11 @@
-use crate::{msg::SystemRecv, state::State};
+use crate::{bt::Bluetooth, msg::SystemRecv, state::State};
 
 use super::{Handler, HandlerResult, MsgHandle};
 
-#[derive(Debug)]
 pub struct SystemHandler<'a> {
   handle: MsgHandle<'a>,
   state: &'a mut State,
+  bluetooth: &'a mut Bluetooth,
 }
 
 impl<'a> SystemHandler<'a> {
@@ -13,10 +13,11 @@ impl<'a> SystemHandler<'a> {
     Self {
       handle: handler.handle,
       state: handler.state,
+      bluetooth: handler.bluetooth,
     }
   }
 
-  pub async fn handle(&self, msg: SystemRecv) -> HandlerResult {
+  pub async fn handle(&mut self, msg: SystemRecv) -> HandlerResult {
     tracing::debug!("({}) handling system message", &self.handle.from);
 
     match msg {
@@ -33,25 +34,34 @@ impl<'a> SystemHandler<'a> {
 
   async fn version_request(&self) -> HandlerResult {
     tracing::debug!("({}) handling version request", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    Ok(self.handle.respond(self.state.meta.clone()).await?)
   }
 
   async fn reboot(&self) -> HandlerResult {
     tracing::debug!("({}) handling reboot request", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+
+    #[cfg(not(debug_assertions))]
+    tokio::process::Command::new("sudo reboot").spawn()?;
+
     Ok(())
   }
 
   async fn power_off(&self) -> HandlerResult {
     tracing::debug!("({}) handling power off request", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+
+    #[cfg(not(debug_assertions))]
+    tokio::process::Command::new("sudo shutdown now").spawn()?;
+
     Ok(())
   }
 
-  async fn factory_reset(&self) -> HandlerResult {
+  async fn factory_reset(&mut self) -> HandlerResult {
     tracing::debug!("({}) handling factory reset request", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+    self.bluetooth.reset(self.state).await?;
+    self.state.reset().await?;
+
+    self.reboot().await?;
+
     Ok(())
   }
 
