@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::msg::{
-  CurrentlyPlayingApplication, InteractionRecv, InteractionSend, PlaybackOptions, PlaybackRestrictions, PlayerSend,
-  PossibleSendMsg, RecvMsgData, Track,
+  CurrentlyActiveApplication, InteractionRecv, InteractionSend, PlaybackOptions, PlaybackRestrictions, PlayerSend,
+  PossibleSendMsg, RecvMsgData, Track, QueueTrack,
 };
 
 use super::StockSendMsg;
@@ -48,7 +48,7 @@ pub enum StockInterAppRecv {
   GetPermissions {},
   #[serde(rename = "com.spotify.get_playback_speed")]
   GetPlaybackSpeed {},
-  #[serde(rename = "com.spotify.get_player_state")]
+  #[serde(rename = "com.spotify.superbird.player_state")]
   GetPlayerState {},
   #[serde(rename = "com.spotify.superbird.get_podcast")]
   GetPodcast {
@@ -196,7 +196,7 @@ pub enum StockInterAppSendPayload {
     is_logged_in: bool,
     is_offline: bool,
   },
-  #[serde(rename = "com.spotify.player_state")]
+  #[serde(rename = "com.spotify.superbird.player_state")]
   IdlePlayerState {
     context_uri: String,
     is_paused: bool,
@@ -206,9 +206,9 @@ pub enum StockInterAppSendPayload {
     playback_restrictions: PlaybackRestrictions,
     playback_speed: usize, // TODO: this is a float. i don't care right now.
   },
-  #[serde(rename = "com.spotify.player_state")]
+  #[serde(rename = "com.spotify.superbird.player_state")]
   SimplePlayerState {
-    currently_playing_application: CurrentlyPlayingApplication,
+    currently_active_application: CurrentlyActiveApplication,
     context_uri: String,
     context_title: String,
     is_paused: bool,
@@ -219,7 +219,7 @@ pub enum StockInterAppSendPayload {
     playback_speed: usize, // TODO: this is a float. i don't care right now.
     track: Track,
   },
-  #[serde(rename = "com.spotify.player_state")]
+  #[serde(rename = "com.spotify.superbird.player_state")]
   SpotifyPlayerState {
     context_uri: String,
     context_title: String,
@@ -233,9 +233,9 @@ pub enum StockInterAppSendPayload {
   },
   #[serde(rename = "com.spotify.play_queue")]
   PlayerQueue {
-    next: Vec<Track>,
-    current: Track,
-    previous: Vec<Track>,
+    next: Vec<QueueTrack>,
+    current: QueueTrack,
+    previous: Vec<QueueTrack>,
   },
   #[serde(rename = "com.spotify.get_children_of_item")]
   ItemChildren {
@@ -287,22 +287,22 @@ impl From<PlayerSend> for StockInterAppSendPayload {
         playback_speed,
       },
       PlayerSend::SimplePlayerState {
-        currently_playing_application,
+        currently_active_application,
         context_uri,
         context_title,
-        is_paused_bool,
         is_paused,
+        is_paused_bool,
         playback_options,
         playback_position,
         playback_restrictions,
         playback_speed,
         track,
       } => Self::SimplePlayerState {
-        currently_playing_application,
+        currently_active_application,
         context_uri,
         context_title,
-        is_paused_bool,
         is_paused,
+        is_paused_bool,
         playback_options,
         playback_position,
         playback_restrictions,

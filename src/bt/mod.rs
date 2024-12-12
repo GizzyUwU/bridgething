@@ -318,7 +318,7 @@ impl Bluetooth {
     conn_man
       .broadcast_stock(StockConnectionSend::RemoteApp {
         app_id: "com.bridgething".to_owned(),
-        is_spotify: false,
+        is_spotify: true,
       })
       .await?;
 

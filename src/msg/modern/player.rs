@@ -18,7 +18,7 @@ pub enum PlayerSend {
     playback_speed: usize, // TODO: this is a float. i don't care right now.
   },
   SimplePlayerState {
-    currently_playing_application: CurrentlyPlayingApplication,
+    currently_active_application: CurrentlyActiveApplication,
     context_uri: String,
     context_title: String,
     is_paused: bool,
@@ -41,9 +41,9 @@ pub enum PlayerSend {
     track: Track,
   },
   PlayerQueue {
-    next: Vec<Track>,
-    current: Track,
-    previous: Vec<Track>,
+    next: Vec<QueueTrack>,
+    current: QueueTrack,
+    previous: Vec<QueueTrack>,
   },
 }
 
@@ -71,16 +71,60 @@ impl PlayerSend {
   }
 
   // TODO: remove testing code
-  pub fn dummy() -> Self {
+  pub fn dummy_simple() -> Self {
     let artist = Artist {
       name: "Thing Labs".to_owned(),
       uri: "spotify:artist:bridgething".to_owned(),
     };
     PlayerSend::SimplePlayerState {
-      currently_playing_application: CurrentlyPlayingApplication {
+      currently_active_application: CurrentlyActiveApplication {
         id: "com.bridgething".to_owned(),
         name: "BridgeThing".to_owned(),
       },
+      context_uri: "spotify:context:fake".to_owned(),
+      context_title: "BridgeThing".to_owned(),
+      is_paused: false,
+      is_paused_bool: false,
+      playback_options: PlaybackOptions {
+        repeat: 0,
+        shuffle: false,
+      },
+      playback_position: 500,
+      playback_restrictions: PlaybackRestrictions {
+        can_repeat_context: true,
+        can_repeat_track: true,
+        can_seek: true,
+        can_skip_next: true,
+        can_skip_prev: true,
+        can_toggle_shuffle: true,
+      },
+      playback_speed: 0,
+      track: Track {
+        name: "BridgeThing".to_owned(),
+        album: Album {
+          name: "Thing Labs".to_owned(),
+          uri: "spotify:album:bridgething".to_owned(),
+        },
+        artist: artist.clone(),
+        artists: vec![artist],
+        duration_ms: 5000,
+        image_id: "spotify:image:fake:1".to_string(),
+        is_episode: false,
+        is_podcast: false,
+        saved: true,
+        uid: "bridgething".to_string(),
+        uri: "spotify:context:bridgething".to_string(),
+      },
+    }
+  }
+
+  // TODO: remove testing code
+  pub fn dummy() -> Self {
+    let artist = Artist {
+      name: "Thing Labs".to_owned(),
+      uri: "spotify:artist:bridgething".to_owned(),
+    };
+    PlayerSend::SpotifyPlayerState {
       context_uri: "spotify:context:fake".to_owned(),
       context_title: "BridgeThing".to_owned(),
       is_paused: false,
@@ -125,27 +169,19 @@ impl PlayerSend {
       uri: "spotify:artist:bridgething".to_owned(),
     };
 
-    let track = Track {
-      name: "BridgeThing".to_owned(),
-      album: Album {
-        name: "Thing Labs".to_owned(),
-        uri: "spotify:album:bridgething".to_owned(),
-      },
-      artist: artist.clone(),
-      artists: vec![artist],
-      duration_ms: 5000,
-      image_id: "spotify:image:fake:1".to_string(),
-      is_episode: false,
-      is_podcast: false,
-      saved: true,
+    let queue_track = QueueTrack {
       uid: "bridgething".to_string(),
-      uri: "spotify:context:bridgething".to_string(),
+      uri: "spotify:track:bridgething".to_string(),
+      name: "Bridgething Song".to_string(),
+      artists: vec![artist.clone()],
+      image_uri: "spotify:image:bridgething".to_string(),
+      provider: "context".to_string(),
     };
 
     Self::PlayerQueue {
-      next: vec![track.clone()],
-      current: track.clone(),
-      previous: vec![track],
+      next: vec![queue_track.clone()],
+      current: queue_track.clone(),
+      previous: vec![queue_track],
     }
   }
 }
@@ -174,6 +210,17 @@ pub struct Track {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct QueueTrack {
+  uid: String,
+  uri: String,
+  name: String,
+  artists: Vec<Artist>,
+  image_uri: String,
+  provider: String,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Image {
   #[serde(rename = "image_id")]
   Id(String),
@@ -197,7 +244,7 @@ pub struct Artist {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CurrentlyPlayingApplication {
+pub struct CurrentlyActiveApplication {
   id: String,
   name: String,
 }
