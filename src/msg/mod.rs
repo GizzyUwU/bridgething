@@ -92,7 +92,7 @@ pub enum SendMsgMeta {
   Info,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SendMsg {
   pub id: Uuid,
   #[serde(flatten)]
@@ -101,7 +101,7 @@ pub struct SendMsg {
   pub stock_msg_id: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum SendMsgData {
   Bluetooth(BluetoothSend),
@@ -112,7 +112,7 @@ pub enum SendMsgData {
   Ack,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum PossibleSendMsg {
   Modern(SendMsg),

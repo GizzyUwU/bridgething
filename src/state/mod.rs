@@ -122,14 +122,19 @@ impl State {
     Ok(state)
   }
 
+  // #[cfg(not(debug_assertions))]
   async fn save(&self) -> Result<(), StateError> {
-    #[cfg(not(debug_assertions))]
     let data = bincode::serialize(&self)?;
-    #[cfg(not(debug_assertions))]
     tokio::fs::write(&self.path, data).await?;
 
     Ok(())
   }
+
+  // #[cfg(debug_assertions)]
+  // async fn save(&self) -> Result<(), StateError> {
+  //   tracing::trace!("debug mode: not saving application state.");
+  //   Ok(())
+  // }
 
   pub async fn reset(&self) -> Result<(), StateError> {
     Ok(tokio::fs::remove_file(&self.path).await?)

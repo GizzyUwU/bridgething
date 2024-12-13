@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum StockConfigurationSend {
   #[serde(rename = "remote_configuration_update")]
   Update {
@@ -25,6 +25,30 @@ pub enum StockConfigurationSend {
     sunset_kill_switch: bool,
     sunset_info_screen_nag: bool,
   },
+}
+
+impl Default for StockConfigurationSend {
+  fn default() -> Self {
+    Self::Update {
+      developer_menu_enabled: true,
+      batch_ubi_logs: false,
+      log_requests: true,
+      log_signal_strength: true,
+      podcast_trailer_enabled: true,
+      use_superbird_namespace: true,
+      use_volume_superbird_namespace: true,
+      handle_incoming_phone_calls: true,
+      night_mode_strength: 40,
+      night_mode_slope: 10,
+      graphql_endpoint_enabled: false,
+      enable_push_to_talk_shelf: true,
+      non_spotify_playback_ios: true,
+      graphql_for_shelf_enabled: false,
+      sunset_info_screen: false,
+      sunset_kill_switch: false,
+      sunset_info_screen_nag: false,
+    }
+  }
 }
 
 impl From<StockConfigurationSend> for StockSendMsg {

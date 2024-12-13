@@ -13,13 +13,20 @@ pub struct MsgHandle<'a> {
 
   pub id: Uuid,
   pub from: SocketAddr,
+  pub stock_msg_id: Option<usize>,
 }
 
 impl<'a> MsgHandle<'a> {
   pub fn new(conn_man: &'a mut ConnMan, id: Uuid, from: SocketAddr) -> Self {
     tracing::trace!("creating connection handle for message id {id} from {from}");
 
-    Self { conn_man, id, from }
+    Self {
+      conn_man,
+
+      id,
+      from,
+      stock_msg_id: None,
+    }
   }
 
   pub async fn send(&self, id: Uuid, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
@@ -36,7 +43,7 @@ impl<'a> MsgHandle<'a> {
   pub async fn respond(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
     self
       .conn_man
-      .send(self.id, self.from, data, SendMsgMeta::Response, None)
+      .send(self.id, self.from, data, SendMsgMeta::Response, self.stock_msg_id)
       .await
   }
 

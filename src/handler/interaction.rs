@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
   msg::{
     stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockSetPreset},
-    InteractionRecv,
+    InteractionRecv, PlayerSend,
   },
   state::State,
 };
@@ -19,18 +19,28 @@ pub struct InteractionHandler<'a> {
 
 impl<'a> InteractionHandler<'a> {
   pub fn new(handler: Handler<'a>, stock_msg_id: Option<usize>) -> Self {
+    let mut handle = handler.handle;
+    handle.stock_msg_id = stock_msg_id;
+
     Self {
-      handle: handler.handle,
+      handle,
       state: handler.state,
       stock_msg_id,
     }
   }
 
   pub async fn handle(&self, msg: InteractionRecv) -> HandlerResult {
-    tracing::debug!("({}) handling interaction message", &self.handle.from);
+    tracing::debug!(
+      "({}) handling interaction message: id: {:?}; stock_msg_id: {:?}",
+      &self.handle.from,
+      &self.handle.id,
+      &self.handle.stock_msg_id
+    );
 
     match msg {
       InteractionRecv::GetImage { id } => self.get_image(id).await,
+      InteractionRecv::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
+
       InteractionRecv::GetNextTracks => self.get_next_tracks().await,
       InteractionRecv::PhoneAnswer => self.phone_answer().await,
       InteractionRecv::PhoneDecline => self.phone_decline().await,
@@ -60,7 +70,6 @@ impl<'a> InteractionHandler<'a> {
       InteractionRecv::SpotifyGetPodcast { uri, limit, offset } => self.spotify_get_podcast(uri, limit, offset).await,
       InteractionRecv::__LegacySpotifyGetPresets => self.spotify_get_presets().await,
       InteractionRecv::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
-      InteractionRecv::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
       InteractionRecv::__LegacySpotifyGetTips => self.spotify_get_tips().await,
       InteractionRecv::__LegacySpotifyGetTts { file } => self.spotify_get_tts(file).await,
       InteractionRecv::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
@@ -87,8 +96,12 @@ impl<'a> InteractionHandler<'a> {
 
   async fn get_image(&self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    Ok(self.handle.respond(PlayerSend::dummy_img(300)).await?)
+  }
+
+  async fn get_thumbnail_image(&self, id: String) -> HandlerResult {
+    tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
+    Ok(self.handle.respond(PlayerSend::dummy_img(96)).await?)
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {
@@ -288,12 +301,6 @@ impl<'a> InteractionHandler<'a> {
 
   async fn spotify_get_saved(&self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting Spotify saved item for id: {}", &self.handle.from, id);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn get_thumbnail_image(&self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
     // Ok(self.handle.respond().await?)
     Ok(())
   }

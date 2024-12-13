@@ -129,12 +129,14 @@ impl Connection {
   async fn send(&mut self, msg: PossibleSendMsg) {
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
-      Err(err) => return tracing::error!("({}) error converting message to json!!: {:?}", &self.address, err),
+      Err(err) => {
+        return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err)
+      }
     };
-    tracing::trace!("sending json: {:?}", json);
+    tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);
 
     if let Err(err) = self.stream.send(tokio_websockets::Message::text(json)).await {
-      tracing::error!("({}) error sending message to websocket!!: {:?}", &self.address, err);
+      tracing::error!(target: "bridgething::ws::connection::send", "({}) error sending message to websocket!!: {:?}", &self.address, err);
     };
   }
 

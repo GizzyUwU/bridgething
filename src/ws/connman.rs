@@ -78,7 +78,7 @@ impl ConnMan {
   ) -> WSResult<()> {
     let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
     let data = data.into();
-    tracing::trace!("sending message id {id} to {to} with data {:?}", data);
+    tracing::trace!("sending message to {to} with data {:?}", data);
 
     let msg = SendMsg {
       id,

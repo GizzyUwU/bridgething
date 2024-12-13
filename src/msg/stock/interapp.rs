@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::msg::{
   CurrentlyActiveApplication, InteractionRecv, InteractionSend, PlaybackOptions, PlaybackRestrictions, PlayerSend,
-  PossibleSendMsg, RecvMsgData, Track, QueueTrack,
+  PossibleSendMsg, QueueTrack, RecvMsgData, Track,
 };
 
 use super::StockSendMsg;
@@ -173,8 +173,9 @@ pub enum StockInterAppRecv {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct StockInterAppSend {
+  #[serde(rename = "msgId")]
   pub msg_id: Option<usize>,
   // msg_type: String,
   #[serde(flatten)]
@@ -182,7 +183,7 @@ pub struct StockInterAppSend {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(derive_more::Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum StockInterAppSendPayload {
   #[serde(rename = "call_result")]
@@ -204,7 +205,7 @@ pub enum StockInterAppSendPayload {
     playback_options: PlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: usize, // TODO: this is a float. i don't care right now.
+    playback_speed: f64, // TODO: this is a float. i don't care right now.
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
   SimplePlayerState {
@@ -216,7 +217,7 @@ pub enum StockInterAppSendPayload {
     playback_options: PlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: usize, // TODO: this is a float. i don't care right now.
+    playback_speed: f64, // TODO: this is a float. i don't care right now.
     track: Track,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
@@ -228,7 +229,7 @@ pub enum StockInterAppSendPayload {
     playback_options: PlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: usize, // TODO: this is a float. i don't care right now.
+    playback_speed: f64, // TODO: this is a float. i don't care right now.
     track: Track,
   },
   #[serde(rename = "com.spotify.play_queue")]
@@ -244,9 +245,16 @@ pub enum StockInterAppSendPayload {
     total: usize,
     items: Vec<ChildItem>,
   },
+  #[serde(rename = "call_result")]
+  Image {
+    height: usize,
+    width: usize,
+    #[debug(skip)]
+    image_data: String,
+  },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChildItem {
   pub id: String,
   pub uri: String,
@@ -259,7 +267,7 @@ pub struct ChildItem {
   pub metadata: ChildMeta,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChildMeta {
   pub is_explicit_content: bool,
   pub is_19_plus_content: bool,
@@ -338,6 +346,11 @@ impl From<PlayerSend> for StockInterAppSendPayload {
         next,
         current,
         previous,
+      },
+      PlayerSend::Image { height, width, data } => Self::Image {
+        height,
+        width,
+        image_data: data,
       },
     }
   }

@@ -20,7 +20,7 @@ impl From<Meta> for SendMsgData {
       serial: meta.serial_number,
       os_version: "bridgething".to_owned(),
       app_version: meta.version,
-      touch_fw_version: "nixos".to_owned(),
+      fw_version: "NixOS".to_owned(),
       model_name: meta.model_name,
       fcc_id: meta.fcc_id,
       ic_id: meta.ic_id,

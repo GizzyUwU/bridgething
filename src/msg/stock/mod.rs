@@ -53,7 +53,7 @@ impl From<StockRecvMsg> for RecvMsgData {
   }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum StockSendMsg {
   Bluetooth(StockBluetoothSend),
@@ -75,7 +75,7 @@ impl From<SendMsg> for StockSendMsg {
       SendMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
       SendMsgData::Storage(data) => StockSendMsg::Storage(data.into()),
       SendMsgData::System(data) => data.to_stock(),
-      SendMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(None, data.into())),
+      SendMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(msg.stock_msg_id, data.into())),
       SendMsgData::Interaction(data) => StockSendMsg::InterApp(data.to_stock(msg.stock_msg_id)),
       SendMsgData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
     }

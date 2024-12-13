@@ -3,7 +3,7 @@ use futures::{Stream, StreamExt};
 
 use crate::{
   msg::{
-    stock::{StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
+    stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
     BluetoothSend, PlayerSend, SendMsgMeta,
   },
   state::{State, StateError},
@@ -55,7 +55,7 @@ impl Bluetooth {
     debug::query_adapter(&adapter).await?;
 
     // start stream BEFORE device reconnection attempts
-    let this = Self {
+    let mut this = Self {
       rx,
       stream: Box::new(adapter.events().await?),
 
@@ -81,16 +81,30 @@ impl Bluetooth {
         if !connected {
           if let Err(err) = this.connect(&state_device.mac).await {
             tracing::warn!("error reconnecting to device: {:?}", err);
+            continue;
           };
         };
+
+        tracing::info!("reconnected to device with mac: {:?}", &state_device.mac);
+        this.device = Some(device);
       } else if state_device.default {
         tracing::debug!("attempting to reconnect to device with mac: {:?}", &state_device.mac);
 
         if let Err(err) = this.connect(&state_device.mac).await {
           tracing::warn!("error reconnecting to device: {:?}", err);
+          continue;
         }
+
+        if let Ok(device) = this.adapter.device(address) {
+          tracing::info!("reconnected to device with mac: {:?}", &state_device.mac);
+          this.device = Some(device);
+        };
       }
     }
+
+    if let Some(device) = &this.device {
+      state.connected_device = Some(device.address());
+    };
 
     Ok(this)
   }
@@ -293,6 +307,7 @@ impl Bluetooth {
     conn_man
       .broadcast_stock(StockConnectionSend::TransportStatus { payload: true })
       .await?;
+    conn_man.broadcast_stock(StockConfigurationSend::default()).await?;
 
     if new_device {
       conn_man
