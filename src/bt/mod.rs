@@ -30,7 +30,6 @@ pub struct Bluetooth {
   _agent_handle: AgentHandle,
 }
 
-// TODO: better reconnection logic
 impl Bluetooth {
   pub async fn init(state: &mut State) -> Result<Self, BluetoothError> {
     tracing::debug!("initializing bluetooth session");
@@ -49,6 +48,7 @@ impl Bluetooth {
             return Err(BluetoothError::Timeout);
           }
           tracing::warn!("Error getting default adapter: {:?}", e);
+          tokio::time::sleep(std::time::Duration::from_millis(750)).await;
           continue;
         }
       }
@@ -71,7 +71,7 @@ impl Bluetooth {
     debug::query_adapter(&adapter).await?;
 
     // start stream BEFORE device reconnection attempts
-    let mut this = Self {
+    let this = Self {
       rx,
       stream: Box::new(adapter.events().await?),
 
@@ -82,45 +82,11 @@ impl Bluetooth {
     };
 
     // restore connections if possible
-    for state_device in state.get_devices().values() {
-      let Ok(address) = state_device.mac.parse() else {
-        tracing::warn!("failed to parse a saved device's mac address - this is probably not good");
-        continue;
+    if let Some(last) = &state.last_device {
+      if let Ok(mac) = last.parse() {
+        tokio::spawn(connect_device(this.adapter.clone(), mac, None));
       };
-      if let Ok(device) = this.adapter.device(address) {
-        tracing::debug!("found handle to device with mac: {:?}", &state_device.mac);
-        let Ok(connected) = device.is_connected().await else {
-          tracing::warn!("failed to get a handle to device!!");
-          continue;
-        };
-
-        if !connected {
-          if let Err(err) = this.connect(&state_device.mac).await {
-            tracing::warn!("error reconnecting to device: {:?}", err);
-            continue;
-          };
-        };
-
-        tracing::info!("reconnected to device with mac: {:?}", &state_device.mac);
-        this.device = Some(device);
-      } else if state_device.default {
-        tracing::debug!("attempting to reconnect to device with mac: {:?}", &state_device.mac);
-
-        if let Err(err) = this.connect(&state_device.mac).await {
-          tracing::warn!("error reconnecting to device: {:?}", err);
-          continue;
-        }
-
-        if let Ok(device) = this.adapter.device(address) {
-          tracing::info!("reconnected to device with mac: {:?}", &state_device.mac);
-          this.device = Some(device);
-        };
-      }
     }
-
-    if let Some(device) = &this.device {
-      state.connected_device = Some(device.address());
-    };
 
     Ok(this)
   }
@@ -135,10 +101,11 @@ impl Bluetooth {
     self.adapter.set_discoverable(discoverable).await
   }
 
-  pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
+  pub fn connect(&self, mac: &str) -> bluer::Result<()> {
     tracing::debug!("attempting to connect to device with mac address {:?}", &mac);
-    let device = self.adapter.device(mac.parse()?)?;
-    device.connect().await
+    tokio::spawn(connect_device(self.adapter.clone(), mac.parse()?, Some(12)));
+
+    Ok(())
   }
 
   pub async fn forget(&self, mac: &str) -> bluer::Result<()> {
@@ -222,6 +189,7 @@ impl Bluetooth {
           if let Some(device) = &self.device {
             tracing::info!("bluetooth device connected with mac address: {:?}", &mac);
             state.connected_device = Some(mac);
+            state.last_device = Some(mac.to_string());
 
             let state_device = crate::msg::Device {
               name: device.name().await?.unwrap_or(mac.to_string()),
@@ -380,6 +348,38 @@ impl Bluetooth {
     }
 
     Ok(false)
+  }
+}
+
+pub async fn connect_device(adapter: Adapter, mac: Address, max_attempts: Option<usize>) {
+  let mut attempts: usize = 0;
+
+  loop {
+    if let Some(max) = max_attempts {
+      if max > attempts {
+        tracing::warn!("max reconnection attempts for mac {:?} exceeded.", &mac);
+        break;
+      }
+    }
+
+    tracing::debug!("attempting to reconnect to device with mac: {:?}", &mac);
+
+    if let Ok(device) = adapter.device(mac) {
+      tracing::debug!("found handle to device with mac: {:?}", &mac);
+
+      if let Ok(connected) = device.is_connected().await {
+        if connected {
+          tracing::info!("reconnected to device with mac: {:?}", &mac);
+          break;
+        } else if device.connect().await.is_ok() {
+          tracing::info!("reconnected to device with mac: {:?}", &mac);
+          break;
+        }
+      };
+    };
+
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    attempts += 1;
   }
 }
 

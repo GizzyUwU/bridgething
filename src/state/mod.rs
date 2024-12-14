@@ -12,8 +12,10 @@ pub struct State {
   path: PathBuf,
   #[serde(skip)]
   pub connected_device: Option<bluer::Address>,
+  #[serde(skip)]
   pub meta: meta::Meta,
 
+  pub last_device: Option<String>,
   devices: HashMap<String, Device>,
   storage: HashMap<String, String>,
 }
@@ -91,6 +93,18 @@ impl State {
   pub async fn remove_device(&mut self, mac: String) -> Result<(), StateError> {
     if self.devices.remove(&mac).is_some() {
       self.save().await?;
+    }
+
+    if let Some(last) = &self.last_device {
+      if *last == mac {
+        self.last_device = None;
+      }
+    }
+
+    if let Some(current) = &self.connected_device {
+      if current.to_string() == mac {
+        self.connected_device = None;
+      }
     }
 
     Ok(())
