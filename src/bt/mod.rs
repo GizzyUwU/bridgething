@@ -32,11 +32,27 @@ pub struct Bluetooth {
 
 // TODO: better reconnection logic
 impl Bluetooth {
-  pub async fn init(state: &mut State) -> bluer::Result<Self> {
+  pub async fn init(state: &mut State) -> Result<Self, BluetoothError> {
     tracing::debug!("initializing bluetooth session");
 
     let session = bluer::Session::new().await?;
-    let adapter = session.default_adapter().await?;
+
+    let timeout = std::time::Duration::new(10, 0);
+    let start = std::time::Instant::now();
+
+    let adapter = loop {
+      match session.default_adapter().await {
+        Ok(adapter) => break adapter,
+        Err(e) => {
+          if start.elapsed() >= timeout {
+            tracing::error!("Error getting default adapter - timing out: {:?}", e);
+            return Err(BluetoothError::Timeout);
+          }
+          tracing::warn!("Error getting default adapter: {:?}", e);
+          continue;
+        }
+      }
+    };
 
     tracing::debug!("attempting to power on adapter");
     adapter.set_powered(true).await?;
@@ -398,6 +414,8 @@ pub enum BluetoothError {
   WS(#[from] WSError),
   #[error("state error: {0}")]
   State(#[from] StateError),
+  #[error("connection to bluetooth daemon timed out")]
+  Timeout,
 }
 
 impl From<Vec<WSError>> for BluetoothError {
