@@ -41,7 +41,10 @@ impl<'a> SystemHandler<'a> {
     tracing::debug!("({}) handling reboot request", &self.handle.from);
 
     #[cfg(not(debug_assertions))]
-    tokio::process::Command::new("sudo reboot").spawn()?;
+    tokio::process::Command::new("sh")
+      .arg("-c")
+      .arg("sudo reboot")
+      .spawn()?;
 
     Ok(())
   }
@@ -50,7 +53,10 @@ impl<'a> SystemHandler<'a> {
     tracing::debug!("({}) handling power off request", &self.handle.from);
 
     #[cfg(not(debug_assertions))]
-    tokio::process::Command::new("sudo shutdown now").spawn()?;
+    tokio::process::Command::new("sh")
+      .arg("-c")
+      .arg("sudo shutdown now")
+      .spawn()?;
 
     Ok(())
   }
