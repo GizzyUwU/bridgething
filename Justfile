@@ -1,5 +1,5 @@
 run:
   cargo run
 
-mock:
-  cargo run --example mock-backend
+avrcp:
+  cargo run --example avrcp

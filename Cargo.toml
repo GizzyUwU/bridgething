@@ -23,11 +23,11 @@ uuid = { version = "1.11.0", features = ["v7", "serde", "fast-rng"] }
 serde_with = { version = "3.11.0", features = ["json"] }
 dirs = "5.0.1"
 bincode = "1.3.3"
+zbus = "5.1.1"
 
 # systemd feature
 sd-notify = { version = "0.4.3", optional = true }
 derive_more = { version = "1.0.0", features = ["debug"] }
-
 
 # als feature
 
@@ -40,4 +40,4 @@ systemd = ["dep:sd-notify"]
 superbird = ["als", "mic", "systemd"]
 
 [[example]]
-name = "mock-backend"
+name = "avrcp"
