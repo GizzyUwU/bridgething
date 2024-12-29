@@ -99,7 +99,6 @@ impl<'a> BluetoothHandler<'a> {
 
   async fn set_alias(&self, name: String) -> HandlerResult {
     tracing::debug!("({}) setting adapter alias to: {}", &self.handle.from, name);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    Ok(self.bluetooth.set_alias(name).await?)
   }
 }

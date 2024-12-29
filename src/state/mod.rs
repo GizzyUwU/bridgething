@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::msg::Device;
+use crate::{dbus, msg::Device};
 
 pub mod meta;
 
@@ -14,6 +14,8 @@ pub struct State {
   pub connected_device: Option<bluer::Address>,
   #[serde(skip)]
   pub meta: meta::Meta,
+  #[serde(skip)]
+  pub player: Option<dbus::Player>,
 
   pub last_device: Option<String>,
   devices: HashMap<String, Device>,

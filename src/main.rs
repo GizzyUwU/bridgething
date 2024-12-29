@@ -1,12 +1,22 @@
-use bridgething::{
-  bt::Bluetooth,
-  handler::Handler,
-  state::State,
-  systemd::{self, Notify},
-  ws,
-};
+mod bt;
+mod dbus;
+mod ws;
+
+mod msg;
+
+mod als;
+mod mic;
+mod systemd;
+
+mod handler;
+mod state;
 
 mod monitoring;
+
+use bt::Bluetooth;
+use handler::Handler;
+use state::State;
+use systemd::Notify;
 
 #[tokio::main]
 async fn main() {
@@ -42,6 +52,12 @@ async fn main() {
         if let Err(err) = bluetooth.handle_event(&mut conn_man, &mut state, msg).await {
           tracing::error!("failed to handle bluetooth message: {:?}", err);
         }
+      },
+      Some(msg) = dbus::maybe_recv(&mut state.player) => {
+        match msg {
+          Ok(msg) => {},
+          Err(err) => tracing::error!("error receiving msg from dbus: {:?}", err),
+        };
       },
       _ = monitoring::wait_for_signal() => {
         break;
