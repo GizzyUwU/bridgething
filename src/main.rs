@@ -54,10 +54,7 @@ async fn main() {
         }
       },
       Some(msg) = dbus::maybe_recv(&mut state.player) => {
-        match msg {
-          Ok(msg) => {},
-          Err(err) => tracing::error!("error receiving msg from dbus: {:?}", err),
-        };
+        // do something
       },
       _ = monitoring::wait_for_signal() => {
         break;

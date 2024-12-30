@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use tokio::task::JoinHandle;
 use zbus::Connection;
 
 mod media_player1;
@@ -7,16 +8,16 @@ mod player;
 use media_player1::{MediaPlayer1Proxy, MediaPlayer1Track, PlayerStream};
 pub use player::*;
 
+pub type PlayerTx = tokio::sync::mpsc::Sender<PlayerEvent>;
+pub type PlayerRx = tokio::sync::mpsc::Receiver<PlayerEvent>;
+
 #[derive(Debug)]
 pub struct Player {
   conn: Connection,
-  pub player: MediaPlayer1Proxy<'static>,
+  player: MediaPlayer1Proxy<'static>,
 
-  status_changes: PlayerStream<String>,
-  track_changes: PlayerStream<MediaPlayer1Track>,
-  position_changes: PlayerStream<u32>,
-  shuffle_changes: PlayerStream<String>,
-  repeat_changes: PlayerStream<String>,
+  rx: PlayerRx,
+  _change_handle: JoinHandle<()>,
 }
 
 impl Player {
@@ -28,38 +29,43 @@ impl Player {
     let player = MediaPlayer1Proxy::builder(&conn).path(path)?.build().await?;
     tracing::debug!("connection to player via dbus created");
 
-    Ok(Self {
-      status_changes: player.receive_status_changed().await,
-      track_changes: player.receive_track_changed().await,
-      position_changes: player.receive_position_changed().await,
-      shuffle_changes: player.receive_shuffle_changed().await,
-      repeat_changes: player.receive_repeat_changed().await,
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    let mut changes = PlayerChanges {
+      tx,
 
+      status: player.receive_status_changed().await,
+      track: player.receive_track_changed().await,
+      position: player.receive_position_changed().await,
+      shuffle: player.receive_shuffle_changed().await,
+      repeat: player.receive_repeat_changed().await,
+    };
+
+    Ok(Self {
       conn,
       player,
+
+      rx,
+      _change_handle: tokio::spawn(async move { changes.spawn().await }),
     })
   }
 
-  pub async fn recv(&mut self) -> DBusResult<PlayerEvent> {
-    tokio::select! {
-      Some(status) = self.status_changes.next() => Ok(PlayerEvent::Status(status.get().await?.try_into()?)),
-      Some(track) = self.track_changes.next() => Ok(PlayerEvent::Track(track.get().await?.try_into()?)),
-      Some(position) = self.position_changes.next() => Ok(PlayerEvent::Position(position.get().await?)),
-      Some(shuffle) = self.shuffle_changes.next() => Ok(PlayerEvent::Shuffle(shuffle.get().await?.try_into()?)),
-      Some(repeat) = self.repeat_changes.next() => Ok(PlayerEvent::Repeat(repeat.get().await?.try_into()?)),
-    }
+  pub async fn recv(&mut self) -> Option<PlayerEvent> {
+    self.rx.recv().await
   }
 }
 
-pub async fn maybe_recv(player: &mut Option<Player>) -> Option<DBusResult<PlayerEvent>> {
+pub async fn maybe_recv(player: &mut Option<Player>) -> Option<PlayerEvent> {
   let Some(player) = player else {
     return None;
   };
 
   let res = player.recv().await;
   tracing::trace!("received message from dbus player: {:?}", &res);
+  if res.is_none() {
+    tracing::error!("player stream appears to be closed?? this is probably bad.");
+  }
 
-  Some(res)
+  res
 }
 
 #[derive(Debug)]
@@ -69,6 +75,44 @@ pub enum PlayerEvent {
   Position(u32),
   Shuffle(PlayerShuffle),
   Repeat(PlayerRepeat),
+}
+
+#[derive(Debug)]
+pub struct PlayerChanges {
+  tx: PlayerTx,
+
+  status: PlayerStream<String>,
+  track: PlayerStream<MediaPlayer1Track>,
+  position: PlayerStream<u32>,
+  shuffle: PlayerStream<String>,
+  repeat: PlayerStream<String>,
+}
+
+impl PlayerChanges {
+  pub async fn spawn(&mut self) {
+    loop {
+      let event = self.recv().await;
+
+      match event {
+        Ok(event) => {
+          if let Err(err) = self.tx.send(event).await {
+            tracing::error!("failed to forward message from dbus: {:?}", err);
+          };
+        }
+        Err(err) => tracing::error!("error receiving from dbus: {:?}", err),
+      }
+    }
+  }
+
+  async fn recv(&mut self) -> DBusResult<PlayerEvent> {
+    tokio::select! {
+      Some(status) = self.status.next() => Ok(PlayerEvent::Status(status.get().await?.try_into()?)),
+      Some(track) = self.track.next() => Ok(PlayerEvent::Track(track.get().await?.try_into()?)),
+      Some(position) = self.position.next() => Ok(PlayerEvent::Position(position.get().await?)),
+      Some(shuffle) = self.shuffle.next() => Ok(PlayerEvent::Shuffle(shuffle.get().await?.try_into()?)),
+      Some(repeat) = self.repeat.next() => Ok(PlayerEvent::Repeat(repeat.get().await?.try_into()?)),
+    }
+  }
 }
 
 pub type DBusResult<T> = Result<T, DBusError>;

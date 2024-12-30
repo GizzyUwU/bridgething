@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
 
@@ -19,6 +21,8 @@ pub mod ble;
 
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
+
+const AVRCP_UUID: &str = "0000110c-0000-1000-8000-00805f9b34fb";
 
 pub struct Bluetooth {
   tx: BluetoothTx,
@@ -245,6 +249,10 @@ impl Bluetooth {
           conn_man
             .broadcast_stock(StockConnectionSend::TransportStatus { payload: false })
             .await?;
+
+          tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
+          #[cfg(not(debug_assertions))]
+          tokio::spawn(connect_device(self.adapter.clone(), mac, self.tx.clone(), None));
         }
 
         Ok(())
@@ -367,6 +375,7 @@ impl Bluetooth {
 
 pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max_attempts: Option<usize>) {
   let mut attempts: usize = 0;
+  let connected_device: Device;
 
   loop {
     if let Some(max) = max_attempts {
@@ -377,6 +386,15 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     }
 
     tracing::debug!("attempting to connect to device with mac: {:?}", &mac);
+    // if let Ok(device) = adapter.connect_device(mac, bluer::AddressType::BrEdr).await {
+    //   tracing::info!(
+    //     "connected to device {:?} with mac: {:?}",
+    //     device.name().await.unwrap_or(None),
+    //     &mac
+    //   );
+
+    //   break;
+    // }
 
     if let Ok(device) = adapter.device(mac) {
       tracing::debug!("found handle to device with mac: {:?}", &mac);
@@ -384,9 +402,11 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
       if let Ok(connected) = device.is_connected().await {
         if connected {
           tracing::info!("connected to device with mac: {:?}", &mac);
+          connected_device = device;
           break;
         } else if device.connect().await.is_ok() {
           tracing::info!("connected to device with mac: {:?}", &mac);
+          connected_device = device;
           break;
         }
       };
@@ -395,6 +415,13 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     attempts += 1;
   }
+
+  tracing::debug!("connecting to avrcp profile...");
+  let avrcp = bluer::Uuid::from_str(AVRCP_UUID).expect("failed to make avrcp uuid");
+  match connected_device.connect_profile(&avrcp).await {
+    Ok(()) => tracing::info!("avrcp profile connected!"),
+    Err(err) => tracing::error!("failed to connect do avrcp profile: {:?}", err),
+  };
 
   if let Err(err) = tx.send(BluetoothEvent::DeviceAdded { mac }).await {
     tracing::error!("failed to send message to bluetooth tx: {:?}", err);
