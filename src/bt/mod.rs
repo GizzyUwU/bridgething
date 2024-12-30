@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
@@ -416,12 +416,21 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     attempts += 1;
   }
 
-  tracing::debug!("connecting to avrcp profile...");
   let avrcp = bluer::Uuid::from_str(AVRCP_UUID).expect("failed to make avrcp uuid");
-  match connected_device.connect_profile(&avrcp).await {
-    Ok(()) => tracing::info!("avrcp profile connected!"),
-    Err(err) => tracing::error!("failed to connect do avrcp profile: {:?}", err),
-  };
+
+  loop {
+    tracing::debug!("attempting to connect to avrcp profile...");
+    match connected_device.connect_profile(&avrcp).await {
+      Ok(()) => {
+        tracing::info!("avrcp profile connected!");
+        break;
+      }
+      Err(err) => {
+        tracing::debug!("failed to connect do avrcp profile: {:?}", err);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+      }
+    };
+  }
 
   if let Err(err) = tx.send(BluetoothEvent::DeviceAdded { mac }).await {
     tracing::error!("failed to send message to bluetooth tx: {:?}", err);
