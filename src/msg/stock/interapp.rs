@@ -590,8 +590,8 @@ mod test {
   #[test]
   fn ser_stock_recv() {
     let ser = serde_json::to_string(&StockInterAppRecv::PlayUri {
-      uri: "test".to_owned(),
-      feature_identifier: "test".to_owned(),
+      uri: "test".to_string(),
+      feature_identifier: "test".to_string(),
       interaction_id: None,
       skip_to_uri: None,
       skip_to_uid: None,
@@ -616,8 +616,8 @@ mod test {
       PossibleRecvMsg::StockInterApp {
         msg_id: 69,
         data: StockInterAppRecv::PlayUri {
-          uri: "test".to_owned(),
-          feature_identifier: "test".to_owned(),
+          uri: "test".to_string(),
+          feature_identifier: "test".to_string(),
           interaction_id: None,
           skip_to_uri: None,
           skip_to_uid: None,
@@ -638,7 +638,7 @@ mod test {
       PossibleRecvMsg::StockInterApp {
         msg_id: 1,
         data: StockInterAppRecv::GetImage {
-          id: "image_id".to_owned(),
+          id: "image_id".to_string(),
         },
         user_action: false,
       }
@@ -656,8 +656,8 @@ mod test {
       PossibleRecvMsg::StockInterApp {
         msg_id: 2,
         data: StockInterAppRecv::PhoneCallMessage {
-          phone_number: "1234567890".to_owned(),
-          message: "Hello".to_owned(),
+          phone_number: "1234567890".to_string(),
+          message: "Hello".to_string(),
         },
         user_action: false,
       }

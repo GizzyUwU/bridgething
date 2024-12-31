@@ -39,7 +39,7 @@ impl From<StorageSend> for StockStorageSend {
         payload: StockStoragePayload {
           key,
           value,
-          value_type: "string".to_owned(),
+          value_type: "string".to_string(),
           error: None,
         },
       },

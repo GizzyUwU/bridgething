@@ -157,6 +157,7 @@ impl State {
   }
 }
 
+pub type StateResult<T> = Result<T, StateError>;
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
   #[error("failed to bind to port: {0}")]

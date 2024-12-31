@@ -2,13 +2,11 @@ use std::{str::FromStr, time::Duration};
 
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
+use message::{connection_messages, disconnection_messages};
 
 use crate::{
-  dbus::Player,
-  msg::{
-    stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
-    BluetoothSend, PlayerSend, SendMsgMeta,
-  },
+  dbus::{DBusError, Player},
+  msg::{BluetoothSend, SendMsgMeta},
   state::{State, StateError},
   ws::{ConnMan, WSError},
 };
@@ -18,6 +16,7 @@ mod auth;
 mod debug;
 
 pub mod ble;
+mod message;
 
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
@@ -196,13 +195,13 @@ impl Bluetooth {
         tracing::info!("bluetooth device added with mac address: {:?}", &mac);
         let just_connected = self.handle_device(mac).await?;
 
-        match Player::init(&mac.to_string()).await {
-          Ok(player) => state.player = Some(player),
-          Err(err) => tracing::error!("error connecting to player via dbus: {:?}", err),
-        };
+        if let Some(device) = &self.device {
+          match Player::init(device.clone()).await {
+            Ok(player) => state.player = Some(player),
+            Err(err) => tracing::error!("error connecting to player via dbus: {:?}", err),
+          };
 
-        if just_connected {
-          if let Some(device) = &self.device {
+          if just_connected {
             tracing::info!("bluetooth device connected with mac address: {:?}", &mac);
             state.connected_device = Some(mac);
             state.last_device = Some(mac.to_string());
@@ -236,19 +235,7 @@ impl Bluetooth {
           state.connected_device = None;
           state.player = None;
 
-          conn_man
-            .broadcast(BluetoothSend::Status { connected: false }, SendMsgMeta::Info)
-            .await?;
-          conn_man
-            .broadcast(
-              BluetoothSend::PairedDevices(state.get_devices().clone()),
-              SendMsgMeta::Info,
-            )
-            .await?;
-
-          conn_man
-            .broadcast_stock(StockConnectionSend::TransportStatus { payload: false })
-            .await?;
+          disconnection_messages(conn_man, state).await?;
 
           tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
           #[cfg(not(debug_assertions))]
@@ -267,7 +254,7 @@ impl Bluetooth {
   pub async fn handle_connection(
     &self,
     conn_man: &mut ConnMan,
-    state: &mut State,
+    state: &State,
     new_device: bool,
   ) -> Result<(), BluetoothError> {
     let Some(device) = &self.device else {
@@ -278,78 +265,7 @@ impl Bluetooth {
       return Ok(());
     };
 
-    if new_device {
-      conn_man
-        .broadcast(BluetoothSend::ParingResult { success: true }, SendMsgMeta::Info)
-        .await?;
-    }
-
-    conn_man
-      .broadcast(BluetoothSend::Status { connected: true }, SendMsgMeta::Info)
-      .await?;
-    conn_man
-      .broadcast(
-        BluetoothSend::PairedDevices(state.get_devices().clone()),
-        SendMsgMeta::Info,
-      )
-      .await?;
-    conn_man
-      .broadcast(
-        BluetoothSend::ConnectedDevice {
-          name: state_device.name.clone(),
-          mac: state_device.mac.clone(),
-        },
-        SendMsgMeta::Info,
-      )
-      .await?;
-
-    conn_man
-      .broadcast_stock(StockConnectionSend::RemoteStatus {
-        payload: true,
-        mac: state_device.mac.clone(),
-        phone_type: state_device.device_type.clone().into(),
-      })
-      .await?;
-    conn_man
-      .broadcast_stock(StockConnectionSend::TransportStatus { payload: true })
-      .await?;
-    conn_man.broadcast_stock(StockConfigurationSend::default()).await?;
-
-    if new_device {
-      conn_man
-        .broadcast_stock(StockSetupSend::Status {
-          payload: "finished".to_string(),
-        })
-        .await?;
-    }
-
-    conn_man
-      .broadcast_stock(StockInterAppSend {
-        msg_id: None,
-        data: StockInterAppSendPayload::SessionState {
-          connection_type: crate::msg::stock::StockConnectionType::FourG,
-          is_in_forced_offline_mode: false,
-          is_logged_in: true,
-          is_offline: false,
-        },
-      })
-      .await?;
-
-    // TODO: remove testing code
-    conn_man
-      .broadcast_stock(StockConnectionSend::RemoteApp {
-        app_id: "com.bridgething".to_owned(),
-        is_spotify: true,
-      })
-      .await?;
-
-    // TODO: remove testing code
-    // #[cfg(debug_assertions)]
-    conn_man.broadcast(PlayerSend::dummy(), SendMsgMeta::Info).await?;
-    // #[cfg(debug_assertions)]
-    conn_man.broadcast(PlayerSend::dummy_queue(), SendMsgMeta::Info).await?;
-
-    Ok(())
+    connection_messages(conn_man, state, new_device, state_device).await
   }
 
   /// the returned bool is whether this is a new pairing or not
@@ -386,16 +302,6 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     }
 
     tracing::debug!("attempting to connect to device with mac: {:?}", &mac);
-    // if let Ok(device) = adapter.connect_device(mac, bluer::AddressType::BrEdr).await {
-    //   tracing::info!(
-    //     "connected to device {:?} with mac: {:?}",
-    //     device.name().await.unwrap_or(None),
-    //     &mac
-    //   );
-
-    //   break;
-    // }
-
     if let Ok(device) = adapter.device(mac) {
       tracing::debug!("found handle to device with mac: {:?}", &mac);
 
@@ -416,24 +322,28 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     attempts += 1;
   }
 
+  connect_avrcp(&connected_device).await;
+
+  if let Err(err) = tx.send(BluetoothEvent::DeviceAdded { mac }).await {
+    tracing::error!("failed to send message to bluetooth tx: {:?}", err);
+  }
+}
+
+pub async fn connect_avrcp(device: &Device) -> bool {
   let avrcp = bluer::Uuid::from_str(AVRCP_UUID).expect("failed to make avrcp uuid");
 
   loop {
     tracing::debug!("attempting to connect to avrcp profile...");
-    match connected_device.connect_profile(&avrcp).await {
+    match device.connect_profile(&avrcp).await {
       Ok(()) => {
         tracing::info!("avrcp profile connected!");
-        break;
+        return true;
       }
       Err(err) => {
-        tracing::debug!("failed to connect do avrcp profile: {:?}", err);
+        tracing::debug!("failed to connect to avrcp profile: {:?}", err);
         tokio::time::sleep(Duration::from_secs(2)).await;
       }
     };
-  }
-
-  if let Err(err) = tx.send(BluetoothEvent::DeviceAdded { mac }).await {
-    tracing::error!("failed to send message to bluetooth tx: {:?}", err);
   }
 }
 
@@ -460,6 +370,7 @@ impl From<AdapterEvent> for BluetoothEvent {
   }
 }
 
+pub type BluetoothResult<T> = Result<T, BluetoothError>;
 #[derive(Debug, thiserror::Error)]
 pub enum BluetoothError {
   #[error("bluez error: {0}")]
@@ -470,6 +381,8 @@ pub enum BluetoothError {
   State(#[from] StateError),
   #[error("connection to bluetooth daemon timed out")]
   Timeout,
+  #[error(transparent)]
+  DBus(#[from] DBusError),
 }
 
 impl From<Vec<WSError>> for BluetoothError {

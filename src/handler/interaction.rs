@@ -163,8 +163,11 @@ impl<'a> InteractionHandler<'a> {
 
   async fn skip_next(&self) -> HandlerResult {
     tracing::debug!("({}) skipping to next track", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.next().await?)
   }
 
   async fn skip_prev(&self, allow_seeking: bool) -> HandlerResult {
@@ -173,8 +176,11 @@ impl<'a> InteractionHandler<'a> {
       &self.handle.id,
       allow_seeking
     );
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.prev().await?)
   }
 
   async fn seek_to(&self, position: usize) -> HandlerResult {
@@ -185,26 +191,38 @@ impl<'a> InteractionHandler<'a> {
 
   async fn pause(&self) -> HandlerResult {
     tracing::debug!("({}) pausing playback", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.pause().await?)
   }
 
   async fn resume(&self) -> HandlerResult {
     tracing::debug!("({}) resuming playback", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.play().await?)
   }
 
   async fn set_shuffle(&self, shuffle: bool) -> HandlerResult {
     tracing::debug!("({}) setting shuffle to: {}", &self.handle.from, shuffle);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.shuffle(shuffle.into()).await?)
   }
 
-  async fn set_repeat(&self, repeat_mode: bool) -> HandlerResult {
-    tracing::debug!("({}) setting repeat mode to: {}", &self.handle.from, repeat_mode);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+  async fn set_repeat(&self, repeat: bool) -> HandlerResult {
+    tracing::debug!("({}) setting repeat to: {}", &self.handle.from, repeat);
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    Ok(player.repeat(repeat.into()).await?)
   }
 
   async fn spotify_get_children(&self, parent_id: String, limit: usize, offset: Option<usize>) -> HandlerResult {
@@ -226,11 +244,11 @@ impl<'a> InteractionHandler<'a> {
           offset: 0,
           total: 1,
           items: vec![ChildItem {
-            id: "spotify:track:bridgething".to_owned(),
-            uri: "spotify:track:bridgething".to_owned(),
-            image_id: "spotify:image:bridgething".to_owned(),
-            title: "BridgeThing".to_owned(),
-            subtitle: "Thing Labs".to_owned(),
+            id: "spotify:track:bridgething".to_string(),
+            uri: "spotify:track:bridgething".to_string(),
+            image_id: "spotify:image:bridgething".to_string(),
+            title: "BridgeThing".to_string(),
+            subtitle: "Thing Labs".to_string(),
             playable: true,
             has_children: false,
             available_offline: false,

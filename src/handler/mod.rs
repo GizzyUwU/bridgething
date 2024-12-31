@@ -19,6 +19,7 @@ pub use handle::*;
 
 use crate::{
   bt::{Bluetooth, BluetoothError},
+  dbus::DBusError,
   msg::{stock::StockInterAppSend, ClientMode, RecvMsgData},
   state::{State, StateError},
   ws::{ConnMan, WSError},
@@ -109,4 +110,6 @@ pub enum HandlerError {
   Bluetooth(#[from] BluetoothError),
   #[error("io error: {0}")]
   IO(#[from] std::io::Error),
+  #[error("failed to call avrcp: {0}")]
+  DBus(#[from] DBusError),
 }

@@ -53,8 +53,12 @@ async fn main() {
           tracing::error!("failed to handle bluetooth message: {:?}", err);
         }
       },
-      Some(msg) = dbus::maybe_recv(&mut state.player) => {
-        // do something
+      Some(event) = dbus::maybe_recv(&mut state.player) => {
+        if let Some(player) = &mut state.player {
+          if let Err(err) = player.handle_event(&mut conn_man, event).await {
+            tracing::error!("failed to handle bluetooth message: {:?}", err);
+          }
+        }
       },
       _ = monitoring::wait_for_signal() => {
         break;
