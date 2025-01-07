@@ -295,7 +295,7 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
 
   loop {
     if let Some(max) = max_attempts {
-      if max > attempts {
+      if attempts > max {
         tracing::warn!("max connect attempts for mac {:?} exceeded.", &mac);
         return;
       }
