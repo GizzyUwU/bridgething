@@ -1,8 +1,10 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
+use ble::GattServer;
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
 use message::{connection_messages, disconnection_messages};
+use tokio::task::JoinHandle;
 
 use crate::{
   dbus::{DBusError, Player},
@@ -12,16 +14,15 @@ use crate::{
 };
 
 mod auth;
+mod ble;
 #[cfg(debug_assertions)]
 mod debug;
-
-pub mod ble;
 mod message;
 
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
 
-const AVRCP_UUID: &str = "0000110c-0000-1000-8000-00805f9b34fb";
+const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110C00001000800000805F9B34FB);
 
 pub struct Bluetooth {
   tx: BluetoothTx,
@@ -30,8 +31,9 @@ pub struct Bluetooth {
 
   device: Option<Device>,
 
-  adapter: Adapter,
+  pub adapter: Adapter,
   _agent_handle: AgentHandle,
+  _gatt_handle: JoinHandle<BluetoothResult<()>>,
 }
 
 impl Bluetooth {
@@ -70,6 +72,7 @@ impl Bluetooth {
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let _agent_handle = auth::build_agent(&session, tx.clone()).await?;
+    let _gatt_handle = GattServer::init(adapter.clone(), tx.clone()).await?.spawn().await;
 
     #[cfg(debug_assertions)]
     debug::query_adapter(&adapter).await?;
@@ -84,6 +87,7 @@ impl Bluetooth {
 
       adapter,
       _agent_handle,
+      _gatt_handle,
     };
 
     // restore connections if possible
@@ -330,11 +334,9 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
 }
 
 pub async fn connect_avrcp(device: &Device) -> bool {
-  let avrcp = bluer::Uuid::from_str(AVRCP_UUID).expect("failed to make avrcp uuid");
-
   loop {
     tracing::debug!("attempting to connect to avrcp profile...");
-    match device.connect_profile(&avrcp).await {
+    match device.connect_profile(&AVRCP_UUID).await {
       Ok(()) => {
         tracing::info!("avrcp profile connected!");
         return true;

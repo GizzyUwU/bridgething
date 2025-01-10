@@ -31,6 +31,8 @@ sd-notify = { version = "0.4.3", optional = true }
 
 # als feature
 
+# mic feature
+
 
 [features]
 default = []
@@ -38,3 +40,8 @@ als = []
 mic = []
 systemd = ["dep:sd-notify"]
 superbird = ["als", "mic", "systemd"]
+
+
+[[example]]
+name = "art"
+path = "examples/art.rs"
