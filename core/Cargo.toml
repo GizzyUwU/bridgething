@@ -1,0 +1,45 @@
+[package]
+name = "bridgething"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82.0"
+
+[dependencies]
+# workspace features
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
+serde_with = { workspace = true, features = ["json"] }
+derive_more = { workspace = true, features = ["debug"] }
+
+# dependencies
+bluer = { version = "0.17.3", features = ["bluetoothd", "l2cap"] }
+futures = "0.3.31"
+thiserror = "2.0.3"
+tokio = { version = "1.41.1", features = ["full"] }
+tokio-util = "0.7.12"
+tokio-websockets = { version = "0.10.1", features = [
+  "server",
+  "simd",
+  "sha1_smol",
+] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+dirs = "5.0.1"
+bincode = "1.3.3"
+zbus = { version = "5.1.1", default-features = false, features = ["tokio"] }
+
+# systemd feature
+sd-notify = { version = "0.4.3", optional = true }
+
+# als feature
+
+# mic feature
+
+
+[features]
+default = []
+als = []
+mic = []
+systemd = ["dep:sd-notify"]
+superbird = ["als", "mic", "systemd"]

@@ -33,6 +33,7 @@
             ];
 
             src = ./.;
+            cargoBuildFlags = "-p bridgething";
             cargoLock = {
               lockFile = ./Cargo.lock;
               allowBuiltinFetchGit = true;

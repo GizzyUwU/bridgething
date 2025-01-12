@@ -1,0 +1,17 @@
+{
+  "name": "@bridgething/client",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "dev": "tsup ./src --watch",
+    "build": "tsup ./src"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,22 +1,10 @@
-mod bt;
-mod dbus;
-mod ws;
-
-mod msg;
-
-mod als;
-mod mic;
-mod systemd;
-
-mod handler;
-mod state;
-
 mod monitoring;
 
-use bt::Bluetooth;
-use handler::Handler;
-use state::State;
-use systemd::Notify;
+use bridgething::bt::Bluetooth;
+use bridgething::handler::Handler;
+use bridgething::state::State;
+use bridgething::systemd::Notify;
+use bridgething::{dbus, systemd, ws};
 
 #[tokio::main]
 async fn main() {
