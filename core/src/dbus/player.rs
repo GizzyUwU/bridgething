@@ -1,39 +1,41 @@
+use libbridgething::{to_slug, QueueTrack, Track};
+
 use super::{media_player1::MediaPlayer1Track, DBusError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlayerShuffle {
+pub enum DBusPlayerShuffle {
   On,
   Off,
 }
 
-impl Default for PlayerShuffle {
+impl Default for DBusPlayerShuffle {
   fn default() -> Self {
     Self::Off
   }
 }
 
-impl TryFrom<String> for PlayerShuffle {
+impl TryFrom<String> for DBusPlayerShuffle {
   type Error = DBusError;
 
   fn try_from(value: String) -> Result<Self, Self::Error> {
     match value.as_str() {
-      "on" => Ok(PlayerShuffle::On),
-      "off" => Ok(PlayerShuffle::Off),
+      "on" => Ok(DBusPlayerShuffle::On),
+      "off" => Ok(DBusPlayerShuffle::Off),
       _ => Err(DBusError::Deserialization(value)),
     }
   }
 }
 
-impl From<&PlayerShuffle> for &str {
-  fn from(val: &PlayerShuffle) -> Self {
+impl From<&DBusPlayerShuffle> for &str {
+  fn from(val: &DBusPlayerShuffle) -> Self {
     match *val {
-      PlayerShuffle::On => "on",
-      PlayerShuffle::Off => "off",
+      DBusPlayerShuffle::On => "on",
+      DBusPlayerShuffle::Off => "off",
     }
   }
 }
 
-impl From<bool> for PlayerShuffle {
+impl From<bool> for DBusPlayerShuffle {
   fn from(shuffle: bool) -> Self {
     match shuffle {
       true => Self::On,
@@ -43,39 +45,39 @@ impl From<bool> for PlayerShuffle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlayerRepeat {
+pub enum DBusPlayerRepeat {
   On,
   Off,
 }
 
-impl Default for PlayerRepeat {
+impl Default for DBusPlayerRepeat {
   fn default() -> Self {
     Self::Off
   }
 }
 
-impl TryFrom<String> for PlayerRepeat {
+impl TryFrom<String> for DBusPlayerRepeat {
   type Error = DBusError;
 
   fn try_from(value: String) -> Result<Self, Self::Error> {
     match value.as_str() {
-      "on" => Ok(PlayerRepeat::On),
-      "off" => Ok(PlayerRepeat::Off),
+      "on" => Ok(DBusPlayerRepeat::On),
+      "off" => Ok(DBusPlayerRepeat::Off),
       _ => Err(DBusError::Deserialization(value)),
     }
   }
 }
 
-impl From<&PlayerRepeat> for &str {
-  fn from(val: &PlayerRepeat) -> Self {
+impl From<&DBusPlayerRepeat> for &str {
+  fn from(val: &DBusPlayerRepeat) -> Self {
     match *val {
-      PlayerRepeat::On => "on",
-      PlayerRepeat::Off => "off",
+      DBusPlayerRepeat::On => "on",
+      DBusPlayerRepeat::Off => "off",
     }
   }
 }
 
-impl From<bool> for PlayerRepeat {
+impl From<bool> for DBusPlayerRepeat {
   fn from(repeat: bool) -> Self {
     match repeat {
       true => Self::On,
@@ -85,31 +87,31 @@ impl From<bool> for PlayerRepeat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlayerStatus {
+pub enum DBusPlayerStatus {
   Playing,
   Paused,
 }
 
-impl Default for PlayerStatus {
+impl Default for DBusPlayerStatus {
   fn default() -> Self {
     Self::Paused
   }
 }
 
-impl TryFrom<String> for PlayerStatus {
+impl TryFrom<String> for DBusPlayerStatus {
   type Error = DBusError;
 
   fn try_from(value: String) -> Result<Self, Self::Error> {
     match value.as_str() {
-      "playing" => Ok(PlayerStatus::Playing),
-      "paused" => Ok(PlayerStatus::Paused),
+      "playing" => Ok(DBusPlayerStatus::Playing),
+      "paused" => Ok(DBusPlayerStatus::Paused),
       _ => Err(DBusError::Deserialization(value)),
     }
   }
 }
 
 #[derive(Debug, Clone)]
-pub struct PlayerTrack {
+pub struct DBusPlayerTrack {
   pub title: String,
   pub artists: Vec<String>,
   pub album: String,
@@ -118,7 +120,7 @@ pub struct PlayerTrack {
   pub number_of_tracks: usize,
 }
 
-impl Default for PlayerTrack {
+impl Default for DBusPlayerTrack {
   fn default() -> Self {
     Self {
       title: "BridgeThing".to_string(),
@@ -131,7 +133,39 @@ impl Default for PlayerTrack {
   }
 }
 
-impl TryFrom<MediaPlayer1Track> for PlayerTrack {
+impl From<DBusPlayerTrack> for Track {
+  fn from(val: DBusPlayerTrack) -> Self {
+    Track {
+      name: val.title,
+      artist: val.artists.first().cloned().unwrap_or_default().into(),
+      artists: val.artists.into_iter().map(Into::into).collect(),
+      duration_ms: val.duration,
+      image_id: format!("spotify:image:{}", to_slug(&val.album)),
+      is_episode: false,
+      is_podcast: false,
+      saved: false,
+      uid: to_slug(&val.album),
+      uri: format!("spotify:context:{}", to_slug(&val.album)),
+
+      album: val.album.into(),
+    }
+  }
+}
+
+impl From<DBusPlayerTrack> for QueueTrack {
+  fn from(val: DBusPlayerTrack) -> Self {
+    QueueTrack {
+      uid: to_slug(&val.album),
+      uri: format!("spotify:track:{}", to_slug(&val.title)),
+      name: val.title,
+      artists: val.artists.into_iter().map(Into::into).collect(),
+      image_uri: format!("spotify:image:{}", to_slug(&val.album)),
+      provider: "context".to_string(),
+    }
+  }
+}
+
+impl TryFrom<MediaPlayer1Track> for DBusPlayerTrack {
   type Error = DBusError;
 
   fn try_from(value: MediaPlayer1Track) -> Result<Self, Self::Error> {

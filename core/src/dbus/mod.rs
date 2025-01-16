@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
+use libbridgething::{server::ServerPlayerEvent, PlaybackOptions, PlaybackRestrictions, ServerEventType};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use zbus::Connection;
@@ -8,16 +9,13 @@ use zbus::Connection;
 mod media_player1;
 mod player;
 
-use media_player1::{MediaPlayer1Proxy, MediaPlayer1Track, PlayerStream};
+use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
 pub use player::*;
 
-use crate::{
-  msg::{PlayerSend, SendMsgMeta},
-  ws::{ConnMan, WSError},
-};
+use crate::ws::{ConnMan, WSError};
 
-pub type PlayerTx = tokio::sync::mpsc::Sender<PlayerEvent>;
-pub type PlayerRx = tokio::sync::mpsc::Receiver<PlayerEvent>;
+pub type PlayerTx = tokio::sync::mpsc::Sender<DBusPlayerEvent>;
+pub type PlayerRx = tokio::sync::mpsc::Receiver<DBusPlayerEvent>;
 
 #[derive(Debug)]
 pub struct Player {
@@ -44,7 +42,7 @@ impl Player {
 
     let cancel_token = CancellationToken::new();
     let (tx, rx) = tokio::sync::mpsc::channel(64);
-    let mut changes = PlayerChanges {
+    let mut changes = DBusPlayerChanges {
       tx,
 
       status: player.receive_status_changed().await,
@@ -68,7 +66,7 @@ impl Player {
     })
   }
 
-  pub async fn recv(&mut self) -> Option<PlayerEvent> {
+  pub async fn recv(&mut self) -> Option<DBusPlayerEvent> {
     self.rx.recv().await
   }
 
@@ -88,31 +86,31 @@ impl Player {
     Ok(self.player.pause().await?)
   }
 
-  pub async fn shuffle(&self, shuffle: PlayerShuffle) -> DBusResult<()> {
+  pub async fn shuffle(&self, shuffle: DBusPlayerShuffle) -> DBusResult<()> {
     self.player.set_shuffle((&shuffle).into()).await?;
     Ok(())
   }
 
-  pub async fn repeat(&self, repeat: PlayerRepeat) -> DBusResult<()> {
+  pub async fn repeat(&self, repeat: DBusPlayerRepeat) -> DBusResult<()> {
     self.player.set_repeat((&repeat).into()).await?;
     Ok(())
   }
 
-  pub async fn handle_event(&mut self, conn_man: &mut ConnMan, event: PlayerEvent) -> DBusResult<()> {
+  pub async fn handle_event(&mut self, conn_man: &mut ConnMan, event: DBusPlayerEvent) -> DBusResult<()> {
     match event {
-      PlayerEvent::Status(status) => {
+      DBusPlayerEvent::Status(status) => {
         self.state.status = status;
       }
-      PlayerEvent::Track(track) => {
+      DBusPlayerEvent::Track(track) => {
         self.state.track = track;
       }
-      PlayerEvent::Position(position) => {
+      DBusPlayerEvent::Position(position) => {
         self.state.position = position;
       }
-      PlayerEvent::Shuffle(shuffle) => {
+      DBusPlayerEvent::Shuffle(shuffle) => {
         self.state.shuffle = shuffle;
       }
-      PlayerEvent::Repeat(repeat) => {
+      DBusPlayerEvent::Repeat(repeat) => {
         self.state.repeat = repeat;
       }
     }
@@ -124,10 +122,10 @@ impl Player {
 
   pub async fn send_state(&self, conn_man: &mut ConnMan) -> DBusResult<()> {
     conn_man
-      .broadcast(PlayerSend::state_from_player_state(&self.state), SendMsgMeta::Info)
+      .broadcast(self.state.to_send_state(), ServerEventType::Info)
       .await?;
     conn_man
-      .broadcast(PlayerSend::queue_from_player_state(&self.state), SendMsgMeta::Info)
+      .broadcast(self.state.to_send_queue(), ServerEventType::Info)
       .await?;
 
     Ok(())
@@ -144,7 +142,7 @@ impl Drop for Player {
   }
 }
 
-pub async fn maybe_recv(player: &mut Option<Player>) -> Option<PlayerEvent> {
+pub async fn maybe_recv(player: &mut Option<Player>) -> Option<DBusPlayerEvent> {
   let Some(player) = player else {
     return None;
   };
@@ -160,34 +158,68 @@ pub async fn maybe_recv(player: &mut Option<Player>) -> Option<PlayerEvent> {
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerState {
-  pub status: PlayerStatus,
-  pub track: PlayerTrack,
+  pub status: DBusPlayerStatus,
+  pub track: DBusPlayerTrack,
   pub position: usize,
-  pub shuffle: PlayerShuffle,
-  pub repeat: PlayerRepeat,
+  pub shuffle: DBusPlayerShuffle,
+  pub repeat: DBusPlayerRepeat,
+}
+
+impl PlayerState {
+  pub fn to_send_state(&self) -> ServerPlayerEvent {
+    ServerPlayerEvent::SpotifyPlayerState {
+      context_uri: "spotify:context:fake".to_string(),
+      context_title: "BridgeThing".to_string(),
+      is_paused: self.status == DBusPlayerStatus::Paused,
+      is_paused_bool: self.status == DBusPlayerStatus::Paused,
+      playback_options: PlaybackOptions {
+        repeat: if self.repeat == DBusPlayerRepeat::On { 1 } else { 0 },
+        shuffle: self.shuffle == DBusPlayerShuffle::On,
+      },
+      playback_position: self.position,
+      playback_restrictions: PlaybackRestrictions {
+        can_repeat_context: true,
+        can_repeat_track: true,
+        can_seek: true,
+        can_skip_next: true,
+        can_skip_prev: true,
+        can_toggle_shuffle: true,
+      },
+      playback_speed: 1.0,
+      track: self.track.clone().into(),
+    }
+  }
+
+  pub fn to_send_queue(&self) -> ServerPlayerEvent {
+    ServerPlayerEvent::PlayerQueue {
+      current: self.track.clone().into(),
+      previous: vec![],
+      next: vec![],
+    }
+  }
 }
 
 #[derive(Debug)]
-pub enum PlayerEvent {
-  Status(PlayerStatus),
-  Track(PlayerTrack),
+pub enum DBusPlayerEvent {
+  Status(DBusPlayerStatus),
+  Track(DBusPlayerTrack),
   Position(usize),
-  Shuffle(PlayerShuffle),
-  Repeat(PlayerRepeat),
+  Shuffle(DBusPlayerShuffle),
+  Repeat(DBusPlayerRepeat),
 }
 
 #[derive(Debug)]
-pub struct PlayerChanges {
+pub struct DBusPlayerChanges {
   tx: PlayerTx,
 
-  status: PlayerStream<String>,
-  track: PlayerStream<MediaPlayer1Track>,
-  position: PlayerStream<u32>,
-  shuffle: PlayerStream<String>,
-  repeat: PlayerStream<String>,
+  status: DBusPlayerStream<String>,
+  track: DBusPlayerStream<MediaPlayer1Track>,
+  position: DBusPlayerStream<u32>,
+  shuffle: DBusPlayerStream<String>,
+  repeat: DBusPlayerStream<String>,
 }
 
-impl PlayerChanges {
+impl DBusPlayerChanges {
   pub async fn spawn(&mut self, cancel_token: CancellationToken) {
     loop {
       tokio::select! {
@@ -209,13 +241,13 @@ impl PlayerChanges {
     }
   }
 
-  async fn recv(&mut self) -> DBusResult<PlayerEvent> {
+  async fn recv(&mut self) -> DBusResult<DBusPlayerEvent> {
     tokio::select! {
-      Some(status) = self.status.next() => Ok(PlayerEvent::Status(status.get().await?.try_into()?)),
-      Some(track) = self.track.next() => Ok(PlayerEvent::Track(track.get().await?.try_into()?)),
-      Some(position) = self.position.next() => Ok(PlayerEvent::Position(position.get().await?.try_into()?)),
-      Some(shuffle) = self.shuffle.next() => Ok(PlayerEvent::Shuffle(shuffle.get().await?.try_into()?)),
-      Some(repeat) = self.repeat.next() => Ok(PlayerEvent::Repeat(repeat.get().await?.try_into()?)),
+      Some(status) = self.status.next() => Ok(DBusPlayerEvent::Status(status.get().await?.try_into()?)),
+      Some(track) = self.track.next() => Ok(DBusPlayerEvent::Track(track.get().await?.try_into()?)),
+      Some(position) = self.position.next() => Ok(DBusPlayerEvent::Position(position.get().await?.try_into()?)),
+      Some(shuffle) = self.shuffle.next() => Ok(DBusPlayerEvent::Shuffle(shuffle.get().await?.try_into()?)),
+      Some(repeat) = self.repeat.next() => Ok(DBusPlayerEvent::Repeat(repeat.get().await?.try_into()?)),
     }
   }
 }

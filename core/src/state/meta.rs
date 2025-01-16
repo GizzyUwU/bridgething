@@ -1,6 +1,5 @@
+use libbridgething::{server::ServerSystemEvent, ServerEventData};
 use serde::{Deserialize, Serialize};
-
-use crate::msg::{SendMsgData, SystemSend};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -14,9 +13,9 @@ pub struct Meta {
   pub model_name: String,
 }
 
-impl From<Meta> for SendMsgData {
+impl From<Meta> for ServerEventData {
   fn from(meta: Meta) -> Self {
-    SendMsgData::System(SystemSend::Version {
+    ServerEventData::System(ServerSystemEvent::Version {
       serial: meta.serial_number,
       os_version: "bridgething".to_string(),
       app_version: meta.version,

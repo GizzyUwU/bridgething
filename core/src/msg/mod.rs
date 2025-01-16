@@ -1,13 +1,16 @@
 #![allow(clippy::large_enum_variant)]
+use libbridgething::{
+  client::{
+    ClientBluetoothCommand, ClientInteractionCommand, ClientStorageCommand, ClientSystemCommand, ClientVoiceCommand,
+  },
+  ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
+};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 pub(crate) mod stock;
 use stock::*;
-
-mod modern;
-pub use modern::*;
 
 pub type RecvTx = tokio::sync::mpsc::Sender<RecvMsg>;
 pub type RecvRx = tokio::sync::mpsc::Receiver<RecvMsg>;
@@ -30,12 +33,12 @@ pub struct RecvMsg {
 
 #[derive(Debug)]
 pub enum RecvMsgData {
-  Bluetooth(BluetoothRecv),
-  Storage(StorageRecv),
-  System(SystemRecv),
-  Voice(VoiceRecv),
+  Bluetooth(ClientBluetoothCommand),
+  Storage(ClientStorageCommand),
+  System(ClientSystemCommand),
+  Voice(ClientVoiceCommand),
   Interaction {
-    msg: InteractionRecv,
+    msg: ClientInteractionCommand,
     stock_msg_id: Option<usize>,
   },
 
@@ -50,10 +53,22 @@ pub enum RecvMsgData {
   Error(tokio_websockets::Error),
 }
 
+impl From<ClientCommand> for RecvMsgData {
+  fn from(msg: ClientCommand) -> Self {
+    match msg.data {
+      ClientCommandType::Bluetooth(msg) => Self::Bluetooth(msg),
+      ClientCommandType::Storage(msg) => Self::Storage(msg),
+      ClientCommandType::System(msg) => Self::System(msg),
+      ClientCommandType::Voice(msg) => Self::Voice(msg),
+      ClientCommandType::Interaction { msg, stock_msg_id } => Self::Interaction { msg, stock_msg_id },
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum PossibleRecvMsg {
-  Modern(ModernRecvMsg),
+  Modern(ClientCommand),
   Stock(StockRecvMsg),
   #[serde(rename_all = "camelCase")]
   StockInterApp {
@@ -84,52 +99,24 @@ impl PossibleRecvMsg {
 }
 
 // --- sends ---
-#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SendMsgMeta {
-  Request,
-  Response,
-  Info,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct SendMsg {
-  pub id: Uuid,
-  #[serde(flatten)]
-  pub data: SendMsgData,
-  pub meta: SendMsgMeta,
-  pub stock_msg_id: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
-pub enum SendMsgData {
-  Bluetooth(BluetoothSend),
-  Storage(StorageSend),
-  System(SystemSend),
-  Interaction(InteractionSend),
-  Player(PlayerSend),
-  Ack,
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum PossibleSendMsg {
-  Modern(SendMsg),
+  Modern(ServerEvent),
   Stock(StockSendMsg),
+}
+
+impl PossibleSendMsg {
+  pub fn from_send_msg(msg: ServerEvent, mode: &ClientMode) -> Self {
+    match mode {
+      ClientMode::Modern => Self::Modern(msg),
+      ClientMode::Stock => Self::Stock(msg.into()),
+    }
+  }
 }
 
 impl From<StockSendMsg> for PossibleSendMsg {
   fn from(msg: StockSendMsg) -> Self {
     Self::Stock(msg)
-  }
-}
-
-impl PossibleSendMsg {
-  pub fn from_send_msg(msg: SendMsg, mode: &ClientMode) -> Self {
-    match mode {
-      ClientMode::Modern => Self::Modern(msg),
-      ClientMode::Stock => Self::Stock(msg.into()),
-    }
   }
 }

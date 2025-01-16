@@ -13,17 +13,13 @@ use bluer::{
   Adapter,
 };
 use futures::{future, StreamExt};
+use libbridgething::{BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_SERVICE_UUID, MANUFACTURER_ID};
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   task::JoinHandle,
 };
-use uuid::Uuid;
 
 use super::{BluetoothResult, BluetoothTx};
-
-const BRIDGETHING_SERVICE_UUID: Uuid = Uuid::from_u128(0xD8EF030853E54085A5D8F55F3F14AC5A);
-const BRIDGETHING_CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x8AABE8FAF3DC46208B748BD49BB5A468);
-const MANUFACTURER_ID: u16 = 0xf00d;
 
 pub struct GattServer {
   tx: BluetoothTx,

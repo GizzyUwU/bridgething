@@ -1,7 +1,6 @@
-use crate::{
-  msg::{stock::StockSetupSend, StorageRecv, StorageSend},
-  state::State,
-};
+use libbridgething::{client::ClientStorageCommand, server::ServerStorageEvent};
+
+use crate::{msg::stock::StockSetupSend, state::State};
 
 use super::{Handler, HandlerResult, MsgHandle};
 
@@ -19,13 +18,13 @@ impl<'a> StorageHandler<'a> {
     }
   }
 
-  pub async fn handle(&mut self, msg: StorageRecv) -> HandlerResult {
+  pub async fn handle(&mut self, msg: ClientStorageCommand) -> HandlerResult {
     tracing::debug!("({}) handling storage message", &self.handle.from);
 
     match msg {
-      StorageRecv::Get { key } => self.get(key).await,
-      StorageRecv::Put { key, value } => self.put(key, value).await,
-      StorageRecv::Delete { key } => self.delete(key).await,
+      ClientStorageCommand::Get { key } => self.get(key).await,
+      ClientStorageCommand::Put { key, value } => self.put(key, value).await,
+      ClientStorageCommand::Delete { key } => self.delete(key).await,
     }
   }
 
@@ -59,7 +58,7 @@ impl<'a> StorageHandler<'a> {
       }
     }
 
-    Ok(self.handle.respond(StorageSend::Response { key, value }).await?)
+    Ok(self.handle.respond(ServerStorageEvent::Response { key, value }).await?)
   }
 
   async fn put(&mut self, key: String, value: String) -> HandlerResult {
@@ -69,7 +68,7 @@ impl<'a> StorageHandler<'a> {
     Ok(
       self
         .handle
-        .respond(StorageSend::Response {
+        .respond(ServerStorageEvent::Response {
           key,
           value: Some(value),
         })
@@ -81,6 +80,11 @@ impl<'a> StorageHandler<'a> {
     tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
     self.state.del_storage_key(&key).await?;
 
-    Ok(self.handle.respond(StorageSend::Response { key, value: None }).await?)
+    Ok(
+      self
+        .handle
+        .respond(ServerStorageEvent::Response { key, value: None })
+        .await?,
+    )
   }
 }

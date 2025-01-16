@@ -40,6 +40,6 @@ yarn-error.log*
 *.pem
 
 # adapters
-dev/adapter/*.node
-dev/adapter/*.ts
-dev/adapter/*.js
+adapter/*.node
+adapter/*.ts
+adapter/*.*js

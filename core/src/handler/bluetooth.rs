@@ -1,8 +1,6 @@
-use crate::{
-  bt::Bluetooth,
-  msg::{BluetoothRecv, BluetoothSend},
-  state::State,
-};
+use libbridgething::{client::ClientBluetoothCommand, server::ServerBluetoothEvent};
+
+use crate::{bt::Bluetooth, state::State};
 
 use super::{Handler, HandlerResult, MsgHandle};
 
@@ -21,20 +19,20 @@ impl<'a> BluetoothHandler<'a> {
     }
   }
 
-  pub async fn handle(&mut self, msg: BluetoothRecv) -> HandlerResult {
+  pub async fn handle(&mut self, msg: ClientBluetoothCommand) -> HandlerResult {
     tracing::debug!("({}) handling bluetooth message", &self.handle.from);
 
     match msg {
-      BluetoothRecv::List => self.list().await,
-      BluetoothRecv::Connect { mac } => self.connect(mac).await,
-      BluetoothRecv::Scan => self.scan().await,
-      BluetoothRecv::EnableDiscoverable => self.enable_discoverable().await,
-      BluetoothRecv::DisableDiscoverable => self.disable_discoverable().await,
-      BluetoothRecv::Pair { mac } => self.pair(mac).await,
-      BluetoothRecv::Forget { mac } => self.forget(mac).await,
-      BluetoothRecv::EnablePAN { mac } => self.enable_pan(mac).await,
-      BluetoothRecv::DisablePAN { mac } => self.disable_pan(mac).await,
-      BluetoothRecv::SetAlias { name } => self.set_alias(name).await,
+      ClientBluetoothCommand::List => self.list().await,
+      ClientBluetoothCommand::Connect { mac } => self.connect(mac).await,
+      ClientBluetoothCommand::Scan => self.scan().await,
+      ClientBluetoothCommand::EnableDiscoverable => self.enable_discoverable().await,
+      ClientBluetoothCommand::DisableDiscoverable => self.disable_discoverable().await,
+      ClientBluetoothCommand::Pair { mac } => self.pair(mac).await,
+      ClientBluetoothCommand::Forget { mac } => self.forget(mac).await,
+      ClientBluetoothCommand::EnablePAN { mac } => self.enable_pan(mac).await,
+      ClientBluetoothCommand::DisablePAN { mac } => self.disable_pan(mac).await,
+      ClientBluetoothCommand::SetAlias { name } => self.set_alias(name).await,
     }
   }
 
@@ -44,7 +42,12 @@ impl<'a> BluetoothHandler<'a> {
     let devices = self.state.get_devices().to_owned();
     tracing::trace!("({}) devices: {:?}", &self.handle.from, &devices);
 
-    Ok(self.handle.respond(BluetoothSend::PairedDevices(devices)).await?)
+    Ok(
+      self
+        .handle
+        .respond(ServerBluetoothEvent::PairedDevices(devices))
+        .await?,
+    )
   }
 
   async fn connect(&self, mac: String) -> HandlerResult {

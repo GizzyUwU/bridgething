@@ -1,4 +1,6 @@
-use crate::{msg::VoiceRecv, state::State};
+use libbridgething::client::ClientVoiceCommand;
+
+use crate::state::State;
 
 use super::{Handler, HandlerResult, MsgHandle};
 
@@ -16,14 +18,14 @@ impl<'a> VoiceHandler<'a> {
     }
   }
 
-  pub async fn handle(&self, msg: VoiceRecv) -> HandlerResult {
+  pub async fn handle(&self, msg: ClientVoiceCommand) -> HandlerResult {
     tracing::debug!("({}) handling voice message", &self.handle.from);
 
     match msg {
-      VoiceRecv::Cancel => self.cancel().await,
-      VoiceRecv::PushToTalk => self.push_to_talk().await,
-      VoiceRecv::MuteMic { preserve } => self.mute_mic(preserve).await,
-      VoiceRecv::UnmuteMic { preserve } => self.unmute_mic(preserve).await,
+      ClientVoiceCommand::Cancel => self.cancel().await,
+      ClientVoiceCommand::PushToTalk => self.push_to_talk().await,
+      ClientVoiceCommand::MuteMic { preserve } => self.mute_mic(preserve).await,
+      ClientVoiceCommand::UnmuteMic { preserve } => self.unmute_mic(preserve).await,
     }
   }
 

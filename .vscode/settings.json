@@ -1,5 +1,13 @@
 {
-  "cSpell.words": ["bincode", "blackhole", "Bluez", "bridgething", "pairable", "superbird"],
+  "cSpell.words": [
+    "bincode",
+    "blackhole",
+    "Bluez",
+    "bridgething",
+    "libbridgething",
+    "pairable",
+    "superbird"
+  ],
   "highlight.regexes": {
     "(\\[Client -> Server\\]?)(.*)": [
       {

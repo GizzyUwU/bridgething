@@ -1,4 +1,5 @@
 use futures::TryFutureExt;
+use libbridgething::{ServerEvent, ServerEventData, ServerEventType};
 use std::{collections::HashMap, net::SocketAddr};
 use tokio::{
   net::TcpStream,
@@ -9,10 +10,7 @@ use tokio_websockets::ServerBuilder;
 use uuid::Uuid;
 
 use crate::{
-  msg::{
-    stock::StockSendMsg, ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendMsg, SendMsgData,
-    SendMsgMeta, SendTx,
-  },
+  msg::{stock::StockSendMsg, ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
   ws::{connection::Connection, WSError},
 };
 
@@ -72,15 +70,15 @@ impl ConnMan {
     &self,
     id: Uuid,
     to: SocketAddr,
-    data: impl Into<SendMsgData>,
-    meta: SendMsgMeta,
+    data: impl Into<ServerEventData>,
+    meta: ServerEventType,
     stock_msg_id: Option<usize>,
   ) -> WSResult<()> {
     let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
     let data = data.into();
     tracing::trace!("sending message to {to} with data {:?}", data);
 
-    let msg = SendMsg {
+    let msg = ServerEvent {
       id,
       data,
       meta,
@@ -91,10 +89,14 @@ impl ConnMan {
     Ok(tx.send(msg).await?)
   }
 
-  pub async fn broadcast(&self, data: impl Into<SendMsgData> + Clone, meta: SendMsgMeta) -> Result<(), Vec<WSError>> {
+  pub async fn broadcast(
+    &self,
+    data: impl Into<ServerEventData> + Clone,
+    meta: ServerEventType,
+  ) -> Result<(), Vec<WSError>> {
     let data = data.into();
 
-    let msg = SendMsg {
+    let msg = ServerEvent {
       id: uuid::Uuid::now_v7(),
       data: data.clone(),
       meta,

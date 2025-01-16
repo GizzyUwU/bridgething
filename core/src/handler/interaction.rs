@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
+use libbridgething::{client::ClientInteractionCommand, server::ServerPlayerEvent, stock::StockSetPreset};
+
 use crate::{
-  msg::{
-    stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockSetPreset},
-    InteractionRecv, PlayerSend,
-  },
+  msg::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend},
   state::State,
 };
 
@@ -29,7 +28,7 @@ impl<'a> InteractionHandler<'a> {
     }
   }
 
-  pub async fn handle(&self, msg: InteractionRecv) -> HandlerResult {
+  pub async fn handle(&self, msg: ClientInteractionCommand) -> HandlerResult {
     tracing::debug!(
       "({}) handling interaction message: id: {:?}; stock_msg_id: {:?}",
       &self.handle.from,
@@ -38,49 +37,51 @@ impl<'a> InteractionHandler<'a> {
     );
 
     match msg {
-      InteractionRecv::GetImage { id } => self.get_image(id).await,
-      InteractionRecv::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
+      ClientInteractionCommand::GetImage { id } => self.get_image(id).await,
+      ClientInteractionCommand::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
 
-      InteractionRecv::GetNextTracks => self.get_next_tracks().await,
-      InteractionRecv::PhoneAnswer => self.phone_answer().await,
-      InteractionRecv::PhoneDecline => self.phone_decline().await,
-      InteractionRecv::PhoneCallImage { phone_number } => self.phone_call_image(phone_number).await,
-      InteractionRecv::PhoneCallMessage { phone_number, message } => {
+      ClientInteractionCommand::GetNextTracks => self.get_next_tracks().await,
+      ClientInteractionCommand::PhoneAnswer => self.phone_answer().await,
+      ClientInteractionCommand::PhoneDecline => self.phone_decline().await,
+      ClientInteractionCommand::PhoneCallImage { phone_number } => self.phone_call_image(phone_number).await,
+      ClientInteractionCommand::PhoneCallMessage { phone_number, message } => {
         self.phone_call_message(phone_number, message).await
       }
-      InteractionRecv::IncreaseVolume => self.increase_volume().await,
-      InteractionRecv::DecreaseVolume => self.decrease_volume().await,
-      InteractionRecv::SkipToIndex { index } => self.skip_to_index(index).await,
-      InteractionRecv::SkipNext => self.skip_next().await,
-      InteractionRecv::SkipPrev { allow_seeking } => self.skip_prev(allow_seeking).await,
-      InteractionRecv::SeekTo { position } => self.seek_to(position).await,
-      InteractionRecv::Pause => self.pause().await,
-      InteractionRecv::Resume => self.resume().await,
-      InteractionRecv::SetShuffle { shuffle } => self.set_shuffle(shuffle).await,
-      InteractionRecv::SetRepeat { repeat_mode } => self.set_repeat(repeat_mode).await,
-      InteractionRecv::SpotifyGetChildren {
+      ClientInteractionCommand::IncreaseVolume => self.increase_volume().await,
+      ClientInteractionCommand::DecreaseVolume => self.decrease_volume().await,
+      ClientInteractionCommand::SkipToIndex { index } => self.skip_to_index(index).await,
+      ClientInteractionCommand::SkipNext => self.skip_next().await,
+      ClientInteractionCommand::SkipPrev { allow_seeking } => self.skip_prev(allow_seeking).await,
+      ClientInteractionCommand::SeekTo { position } => self.seek_to(position).await,
+      ClientInteractionCommand::Pause => self.pause().await,
+      ClientInteractionCommand::Resume => self.resume().await,
+      ClientInteractionCommand::SetShuffle { shuffle } => self.set_shuffle(shuffle).await,
+      ClientInteractionCommand::SetRepeat { repeat_mode } => self.set_repeat(repeat_mode).await,
+      ClientInteractionCommand::SpotifyGetChildren {
         parent_id,
         limit,
         offset,
       } => self.spotify_get_children(parent_id, limit, offset).await,
-      InteractionRecv::__LegacySpotifyGetHome { limit, limit_overrides } => {
+      ClientInteractionCommand::__LegacySpotifyGetHome { limit, limit_overrides } => {
         self.spotify_get_home(limit, limit_overrides).await
       }
-      InteractionRecv::__LegacySpotifyGetPermissions => self.spotify_get_permissions().await,
-      InteractionRecv::SpotifyGetPodcast { uri, limit, offset } => self.spotify_get_podcast(uri, limit, offset).await,
-      InteractionRecv::__LegacySpotifyGetPresets => self.spotify_get_presets().await,
-      InteractionRecv::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
-      InteractionRecv::__LegacySpotifyGetTips => self.spotify_get_tips().await,
-      InteractionRecv::__LegacySpotifyGetTts { file } => self.spotify_get_tts(file).await,
-      InteractionRecv::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
-      InteractionRecv::SpotifyQueueUri { uri } => self.spotify_queue_uri(uri).await,
-      InteractionRecv::SpotifySetPodcastPlaybackSpeed { playback_speed } => {
+      ClientInteractionCommand::__LegacySpotifyGetPermissions => self.spotify_get_permissions().await,
+      ClientInteractionCommand::SpotifyGetPodcast { uri, limit, offset } => {
+        self.spotify_get_podcast(uri, limit, offset).await
+      }
+      ClientInteractionCommand::__LegacySpotifyGetPresets => self.spotify_get_presets().await,
+      ClientInteractionCommand::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
+      ClientInteractionCommand::__LegacySpotifyGetTips => self.spotify_get_tips().await,
+      ClientInteractionCommand::__LegacySpotifyGetTts { file } => self.spotify_get_tts(file).await,
+      ClientInteractionCommand::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
+      ClientInteractionCommand::SpotifyQueueUri { uri } => self.spotify_queue_uri(uri).await,
+      ClientInteractionCommand::SpotifySetPodcastPlaybackSpeed { playback_speed } => {
         self.spotify_set_podcast_playback_speed(playback_speed).await
       }
-      InteractionRecv::__LegacySpotifySetPreset { presets } => self.spotify_set_preset(presets).await,
-      InteractionRecv::SpotifySetSaved { id, uri, saved } => self.spotify_set_saved(id, uri, saved).await,
-      InteractionRecv::__LegacySpotifySummonDj => self.spotify_summon_dj().await,
-      InteractionRecv::SpotifyPlayUri {
+      ClientInteractionCommand::__LegacySpotifySetPreset { presets } => self.spotify_set_preset(presets).await,
+      ClientInteractionCommand::SpotifySetSaved { id, uri, saved } => self.spotify_set_saved(id, uri, saved).await,
+      ClientInteractionCommand::__LegacySpotifySummonDj => self.spotify_summon_dj().await,
+      ClientInteractionCommand::SpotifyPlayUri {
         uri,
         feature_identifier,
         interaction_id,
@@ -96,12 +97,12 @@ impl<'a> InteractionHandler<'a> {
 
   async fn get_image(&self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
-    Ok(self.handle.respond(PlayerSend::dummy_img(300)).await?)
+    Ok(self.handle.respond(ServerPlayerEvent::dummy_img(300)).await?)
   }
 
   async fn get_thumbnail_image(&self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
-    Ok(self.handle.respond(PlayerSend::dummy_img(96)).await?)
+    Ok(self.handle.respond(ServerPlayerEvent::dummy_img(96)).await?)
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {

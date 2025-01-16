@@ -1,6 +1,7 @@
+use libbridgething::server::ServerSystemEvent;
 use serde::{Deserialize, Serialize};
 
-use super::{RecvMsgData, SendMsg, SendMsgData};
+use super::{RecvMsgData, ServerEvent, ServerEventData};
 
 mod action;
 mod bluetooth;
@@ -69,15 +70,71 @@ pub enum StockSendMsg {
   InterApp(StockInterAppSend),
 }
 
-impl From<SendMsg> for StockSendMsg {
-  fn from(msg: SendMsg) -> Self {
+impl From<ServerEvent> for StockSendMsg {
+  fn from(msg: ServerEvent) -> Self {
     match msg.data {
-      SendMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
-      SendMsgData::Storage(data) => StockSendMsg::Storage(data.into()),
-      SendMsgData::System(data) => data.to_stock(),
-      SendMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(msg.stock_msg_id, data.into())),
-      SendMsgData::Interaction(data) => StockSendMsg::InterApp(data.to_stock(msg.stock_msg_id)),
-      SendMsgData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
+      ServerEventData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
+      ServerEventData::Storage(data) => StockSendMsg::Storage(data.into()),
+      ServerEventData::System(data) => data.into(),
+      ServerEventData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(msg.stock_msg_id, data.into())),
+      ServerEventData::Interaction(data) => {
+        StockSendMsg::InterApp(StockInterAppSend::from_interaction_send(data, msg.stock_msg_id))
+      }
+      ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
+    }
+  }
+}
+
+impl From<ServerSystemEvent> for StockSendMsg {
+  fn from(value: ServerSystemEvent) -> Self {
+    match value {
+      ServerSystemEvent::Version {
+        serial,
+        os_version,
+        app_version,
+        fw_version,
+        model_name,
+        fcc_id,
+        ic_id,
+        country,
+        discord,
+        credits,
+      } => StockSendMsg::Version(StockVersionSend::Status {
+        serial,
+        os_version,
+        app_version,
+        fw_version,
+        model_name,
+        fcc_id,
+        ic_id,
+        country,
+        discord,
+        credits,
+      }),
+
+      ServerSystemEvent::OtaReboot { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaReboot {
+        delay_ms: delay_ms.to_string(),
+      }),
+      ServerSystemEvent::OtaPowerOff { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaPowerOff {
+        delay_ms: delay_ms.to_string(),
+      }),
+      ServerSystemEvent::AmbientLightUpdate { brightness } => {
+        StockSendMsg::Hardware(StockHardwareSend::AmbientLightUpdate { payload: brightness })
+      }
+
+      ServerSystemEvent::PhoneCallInfo {
+        remote_id,
+        display_name,
+        status,
+        call_dir,
+        call_id,
+      } => StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
+        remote_id,
+        display_name,
+        status,
+        call_dir,
+        call_id,
+      }),
     }
   }
 }

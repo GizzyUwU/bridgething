@@ -1,8 +1,19 @@
 run:
   cargo run -p bridgething
 
-gatt:
-  cd dev-btclient && bun run build
+build:
+  just typescript
+  cargo build
+  bun run build
 
-typeshare:
-  typeshare ./core --lang=typescript --output-file=client/typescript/src/bridgething.ts
+adapter:
+  cargo run --example bridgething-adapter-gateway
+
+gatt:
+  bun run build
+  bun run dev:gateway
+
+typescript:
+  rm -rf lib/ts/bindings
+  cargo test -p libbridgething &> /dev/null || exit 0
+  bunx prettier lib/ts/bindings --write

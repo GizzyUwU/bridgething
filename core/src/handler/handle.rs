@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 
+use libbridgething::{ServerEventData, ServerEventType};
 use uuid::Uuid;
 
 use crate::{
-  msg::{stock::StockSendMsg, SendMsgData, SendMsgMeta},
+  msg::stock::StockSendMsg,
   ws::{ConnMan, WSResult},
 };
 
@@ -29,28 +30,28 @@ impl<'a> MsgHandle<'a> {
     }
   }
 
-  pub async fn send(&self, id: Uuid, data: impl Into<SendMsgData>, meta: SendMsgMeta) -> WSResult<()> {
+  pub async fn send(&self, id: Uuid, data: impl Into<ServerEventData>, meta: ServerEventType) -> WSResult<()> {
     self.conn_man.send(id, self.from, data, meta, None).await
   }
 
-  pub async fn request(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
+  pub async fn request(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
     self
       .conn_man
-      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Request, None)
+      .send(Uuid::now_v7(), self.from, data, ServerEventType::Request, None)
       .await
   }
 
-  pub async fn respond(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
+  pub async fn respond(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
     self
       .conn_man
-      .send(self.id, self.from, data, SendMsgMeta::Response, self.stock_msg_id)
+      .send(self.id, self.from, data, ServerEventType::Response, self.stock_msg_id)
       .await
   }
 
-  pub async fn send_info(&self, data: impl Into<SendMsgData>) -> WSResult<()> {
+  pub async fn send_info(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
     self
       .conn_man
-      .send(Uuid::now_v7(), self.from, data, SendMsgMeta::Info, None)
+      .send(Uuid::now_v7(), self.from, data, ServerEventType::Info, None)
       .await
   }
 

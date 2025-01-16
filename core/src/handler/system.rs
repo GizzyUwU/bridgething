@@ -1,4 +1,6 @@
-use crate::{bt::Bluetooth, msg::SystemRecv, state::State};
+use libbridgething::client::ClientSystemCommand;
+
+use crate::{bt::Bluetooth, state::State};
 
 use super::{Handler, HandlerResult, MsgHandle};
 
@@ -17,18 +19,20 @@ impl<'a> SystemHandler<'a> {
     }
   }
 
-  pub async fn handle(&mut self, msg: SystemRecv) -> HandlerResult {
+  pub async fn handle(&mut self, msg: ClientSystemCommand) -> HandlerResult {
     tracing::debug!("({}) handling system message", &self.handle.from);
 
     match msg {
-      SystemRecv::VersionRequest => self.version_request().await,
-      SystemRecv::Reboot => self.reboot().await,
-      SystemRecv::PowerOff => self.power_off().await,
-      SystemRecv::FactoryReset => self.factory_reset().await,
-      SystemRecv::PhoneCallAccept { call_id } => self.phone_call_accept(call_id).await,
-      SystemRecv::PhoneCallEnd { call_id } => self.phone_call_end(call_id).await,
-      SystemRecv::__LegacyStockReturnToSpotify => self.legacy_stock_return_to_spotify().await,
-      SystemRecv::__LegacyStockRemoteConfigurationRequest => self.legacy_stock_remote_configuration_request().await,
+      ClientSystemCommand::VersionRequest => self.version_request().await,
+      ClientSystemCommand::Reboot => self.reboot().await,
+      ClientSystemCommand::PowerOff => self.power_off().await,
+      ClientSystemCommand::FactoryReset => self.factory_reset().await,
+      ClientSystemCommand::PhoneCallAccept { call_id } => self.phone_call_accept(call_id).await,
+      ClientSystemCommand::PhoneCallEnd { call_id } => self.phone_call_end(call_id).await,
+      ClientSystemCommand::__LegacyStockReturnToSpotify => self.legacy_stock_return_to_spotify().await,
+      ClientSystemCommand::__LegacyStockRemoteConfigurationRequest => {
+        self.legacy_stock_remote_configuration_request().await
+      }
     }
   }
 

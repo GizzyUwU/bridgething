@@ -3,12 +3,12 @@ use std::time::Duration;
 use ble::GattServer;
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
+use libbridgething::{server::ServerBluetoothEvent, ServerEventType};
 use message::{connection_messages, disconnection_messages};
 use tokio::task::JoinHandle;
 
 use crate::{
   dbus::{DBusError, Player},
-  msg::{BluetoothSend, SendMsgMeta},
   state::{State, StateError},
   ws::{ConnMan, WSError},
 };
@@ -22,7 +22,7 @@ mod message;
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
 
-const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110C00001000800000805F9B34FB);
+pub const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110C00001000800000805F9B34FB);
 
 pub struct Bluetooth {
   tx: BluetoothTx,
@@ -182,12 +182,12 @@ impl Bluetooth {
 
         conn_man
           .broadcast(
-            BluetoothSend::Pin {
+            ServerBluetoothEvent::Pin {
               mac: mac.to_string(),
               name: mac.to_string(),
               pin: pin.to_owned(),
             },
-            SendMsgMeta::Info,
+            ServerEventType::Info,
           )
           .await?;
 
@@ -210,9 +210,9 @@ impl Bluetooth {
             state.connected_device = Some(mac);
             state.last_device = Some(mac.to_string());
 
-            let state_device = crate::msg::Device {
+            let state_device = libbridgething::Device {
               name: device.name().await?.unwrap_or(mac.to_string()),
-              device_type: crate::msg::DeviceType::Unknown,
+              device_type: libbridgething::DeviceType::Unknown,
               mac: mac.to_string(),
               default: true,
             };

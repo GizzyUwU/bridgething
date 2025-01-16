@@ -1,0 +1,33 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::Device;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "action", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "server.ts")]
+pub enum ServerBluetoothEvent {
+  Status {
+    connected: bool,
+  },
+  ConnectedDevice {
+    name: String,
+    mac: String,
+  },
+  Interface {
+    mac: String,
+    name: String,
+    interface: String,
+  },
+  ParingResult {
+    success: bool,
+  },
+  Pin {
+    mac: String,
+    name: String,
+    pin: String,
+  },
+  PairedDevices(HashMap<String, Device>),
+}

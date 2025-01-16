@@ -1,6 +1,7 @@
+use libbridgething::client::ClientVoiceCommand;
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, VoiceRecv};
+use crate::msg::PossibleSendMsg;
 
 use super::StockSendMsg;
 
@@ -95,30 +96,30 @@ pub struct StockVoiceErrorPayload {
   domain: String,
 }
 
-impl From<VoiceRecv> for StockVoiceRecv {
-  fn from(data: VoiceRecv) -> Self {
+impl From<ClientVoiceCommand> for StockVoiceRecv {
+  fn from(data: ClientVoiceCommand) -> Self {
     match data {
-      VoiceRecv::Cancel => StockVoiceRecv::Cancel,
-      VoiceRecv::PushToTalk => StockVoiceRecv::PushToTalk,
-      VoiceRecv::MuteMic { preserve } => StockVoiceRecv::MuteMic {
+      ClientVoiceCommand::Cancel => StockVoiceRecv::Cancel,
+      ClientVoiceCommand::PushToTalk => StockVoiceRecv::PushToTalk,
+      ClientVoiceCommand::MuteMic { preserve } => StockVoiceRecv::MuteMic {
         attributes: MuteStatusAttributes { preserve },
       },
-      VoiceRecv::UnmuteMic { preserve } => StockVoiceRecv::UnmuteMic {
+      ClientVoiceCommand::UnmuteMic { preserve } => StockVoiceRecv::UnmuteMic {
         attributes: MuteStatusAttributes { preserve },
       },
     }
   }
 }
 
-impl From<StockVoiceRecv> for VoiceRecv {
+impl From<StockVoiceRecv> for ClientVoiceCommand {
   fn from(data: StockVoiceRecv) -> Self {
     match data {
-      StockVoiceRecv::Cancel => VoiceRecv::Cancel,
-      StockVoiceRecv::PushToTalk => VoiceRecv::PushToTalk,
-      StockVoiceRecv::MuteMic { attributes } => VoiceRecv::MuteMic {
+      StockVoiceRecv::Cancel => ClientVoiceCommand::Cancel,
+      StockVoiceRecv::PushToTalk => ClientVoiceCommand::PushToTalk,
+      StockVoiceRecv::MuteMic { attributes } => ClientVoiceCommand::MuteMic {
         preserve: attributes.preserve,
       },
-      StockVoiceRecv::UnmuteMic { attributes } => VoiceRecv::UnmuteMic {
+      StockVoiceRecv::UnmuteMic { attributes } => ClientVoiceCommand::UnmuteMic {
         preserve: attributes.preserve,
       },
     }

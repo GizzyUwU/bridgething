@@ -21,7 +21,7 @@
 use zbus::proxy::PropertyStream;
 
 pub type MediaPlayer1Track = std::collections::HashMap<String, zbus::zvariant::OwnedValue>;
-pub type PlayerStream<T> = PropertyStream<'static, T>;
+pub type DBusPlayerStream<T> = PropertyStream<'static, T>;
 
 #[zbus::proxy(
   interface = "org.bluez.MediaPlayer1",

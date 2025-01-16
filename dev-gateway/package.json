@@ -5,15 +5,14 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "dev": "",
+    "dev:gateway": "bun run src/index.ts",
     "build": ""
   },
   "dependencies": {
-    "@bridgething/dev-adapter": "workspace:*"
+    "@bridgething/gateway": "workspace:*",
+    "@bridgething/adapter": "workspace:*"
   },
-  "devDependencies": {
-
-  },
+  "devDependencies": {},
   "peerDependencies": {
     "typescript": "^5.7.3"
   }

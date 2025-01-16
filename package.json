@@ -1,11 +1,13 @@
 {
   "name": "turbo",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "dev:gateway": "cd dev/gateway && bun run dev:gateway"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
@@ -22,8 +24,10 @@
   },
   "packageManager": "bun@1.1.43",
   "workspaces": [
-    "client/*",
+    "lib",
     "gateway",
-    "dev/*"
+    "adapter",
+    "dev-gateway",
+    "client/typescript"
   ]
 }

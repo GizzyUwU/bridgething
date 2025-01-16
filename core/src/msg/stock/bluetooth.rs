@@ -1,6 +1,7 @@
+use libbridgething::{client::ClientBluetoothCommand, server::ServerBluetoothEvent, Device, DeviceType};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{BluetoothRecv, BluetoothSend, Device, DeviceType, PossibleSendMsg, StockSendMsg};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -13,17 +14,17 @@ pub enum StockBluetoothRecv {
   Discoverable { active: bool },
 }
 
-impl From<StockBluetoothRecv> for BluetoothRecv {
+impl From<StockBluetoothRecv> for ClientBluetoothCommand {
   fn from(data: StockBluetoothRecv) -> Self {
     match data {
-      StockBluetoothRecv::List => BluetoothRecv::List,
-      StockBluetoothRecv::Select { mac } => BluetoothRecv::Connect { mac },
-      StockBluetoothRecv::Scan => BluetoothRecv::Scan,
-      StockBluetoothRecv::Pair { mac } => BluetoothRecv::Pair { mac },
-      StockBluetoothRecv::Forget { mac } => BluetoothRecv::Forget { mac },
+      StockBluetoothRecv::List => ClientBluetoothCommand::List,
+      StockBluetoothRecv::Select { mac } => ClientBluetoothCommand::Connect { mac },
+      StockBluetoothRecv::Scan => ClientBluetoothCommand::Scan,
+      StockBluetoothRecv::Pair { mac } => ClientBluetoothCommand::Pair { mac },
+      StockBluetoothRecv::Forget { mac } => ClientBluetoothCommand::Forget { mac },
       StockBluetoothRecv::Discoverable { active } => match active {
-        true => BluetoothRecv::EnableDiscoverable,
-        false => BluetoothRecv::DisableDiscoverable,
+        true => ClientBluetoothCommand::EnableDiscoverable,
+        false => ClientBluetoothCommand::DisableDiscoverable,
       },
     }
   }
@@ -58,15 +59,15 @@ impl From<StockBluetoothSend> for PossibleSendMsg {
   }
 }
 
-impl From<BluetoothSend> for StockBluetoothSend {
-  fn from(data: BluetoothSend) -> Self {
+impl From<ServerBluetoothEvent> for StockBluetoothSend {
+  fn from(data: ServerBluetoothEvent) -> Self {
     match data {
-      BluetoothSend::Status { connected } => StockBluetoothSend::ConnectionStatus { connected },
-      BluetoothSend::ConnectedDevice { name, mac } => StockBluetoothSend::CurrentDevice { address: mac, name },
-      BluetoothSend::Interface { mac, name, .. } => StockBluetoothSend::LocalDevice { mac, name },
-      BluetoothSend::ParingResult { success } => StockBluetoothSend::PairingFinished { success },
-      BluetoothSend::Pin { pin, .. } => StockBluetoothSend::Pin { pin },
-      BluetoothSend::PairedDevices(info) => StockBluetoothSend::DeviceList {
+      ServerBluetoothEvent::Status { connected } => StockBluetoothSend::ConnectionStatus { connected },
+      ServerBluetoothEvent::ConnectedDevice { name, mac } => StockBluetoothSend::CurrentDevice { address: mac, name },
+      ServerBluetoothEvent::Interface { mac, name, .. } => StockBluetoothSend::LocalDevice { mac, name },
+      ServerBluetoothEvent::ParingResult { success } => StockBluetoothSend::PairingFinished { success },
+      ServerBluetoothEvent::Pin { pin, .. } => StockBluetoothSend::Pin { pin },
+      ServerBluetoothEvent::PairedDevices(info) => StockBluetoothSend::DeviceList {
         payload: info.values().map(|d| d.to_owned().into()).collect(),
       },
     }

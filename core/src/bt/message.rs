@@ -1,7 +1,8 @@
+use libbridgething::{server::ServerBluetoothEvent, Device, ServerEventType};
+
 use crate::{
-  msg::{
-    stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
-    BluetoothSend, Device, SendMsgMeta,
+  msg::stock::{
+    StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend,
   },
   state::State,
   ws::ConnMan,
@@ -17,26 +18,29 @@ pub async fn connection_messages(
 ) -> BluetoothResult<()> {
   if new_device {
     conn_man
-      .broadcast(BluetoothSend::ParingResult { success: true }, SendMsgMeta::Info)
+      .broadcast(
+        ServerBluetoothEvent::ParingResult { success: true },
+        ServerEventType::Info,
+      )
       .await?;
   }
 
   conn_man
-    .broadcast(BluetoothSend::Status { connected: true }, SendMsgMeta::Info)
+    .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Info)
     .await?;
   conn_man
     .broadcast(
-      BluetoothSend::PairedDevices(state.get_devices().clone()),
-      SendMsgMeta::Info,
+      ServerBluetoothEvent::PairedDevices(state.get_devices().clone()),
+      ServerEventType::Info,
     )
     .await?;
   conn_man
     .broadcast(
-      BluetoothSend::ConnectedDevice {
+      ServerBluetoothEvent::ConnectedDevice {
         name: device.name.clone(),
         mac: device.mac.clone(),
       },
-      SendMsgMeta::Info,
+      ServerEventType::Info,
     )
     .await?;
 
@@ -95,12 +99,12 @@ pub async fn connection_messages(
 
 pub async fn disconnection_messages(conn_man: &mut ConnMan, state: &State) -> BluetoothResult<()> {
   conn_man
-    .broadcast(BluetoothSend::Status { connected: false }, SendMsgMeta::Info)
+    .broadcast(ServerBluetoothEvent::Status { connected: false }, ServerEventType::Info)
     .await?;
   conn_man
     .broadcast(
-      BluetoothSend::PairedDevices(state.get_devices().clone()),
-      SendMsgMeta::Info,
+      ServerBluetoothEvent::PairedDevices(state.get_devices().clone()),
+      ServerEventType::Info,
     )
     .await?;
 

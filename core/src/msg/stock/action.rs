@@ -1,6 +1,5 @@
+use libbridgething::client::ClientSystemCommand;
 use serde::{Deserialize, Serialize};
-
-use crate::msg::SystemRecv;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -9,11 +8,11 @@ pub enum StockActionRecv {
   RcsRequest,
 }
 
-impl From<StockActionRecv> for SystemRecv {
+impl From<StockActionRecv> for ClientSystemCommand {
   fn from(data: StockActionRecv) -> Self {
     match data {
-      StockActionRecv::VersionRequest => SystemRecv::VersionRequest,
-      StockActionRecv::RcsRequest => SystemRecv::__LegacyStockRemoteConfigurationRequest,
+      StockActionRecv::VersionRequest => ClientSystemCommand::VersionRequest,
+      StockActionRecv::RcsRequest => ClientSystemCommand::__LegacyStockRemoteConfigurationRequest,
     }
   }
 }

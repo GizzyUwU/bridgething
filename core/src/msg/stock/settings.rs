@@ -1,6 +1,7 @@
+use libbridgething::{client::ClientStorageCommand, server::ServerStorageEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg, StorageRecv, StorageSend};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -16,11 +17,11 @@ pub enum StockStorageRecv {
   },
 }
 
-impl From<StockStorageRecv> for StorageRecv {
+impl From<StockStorageRecv> for ClientStorageCommand {
   fn from(data: StockStorageRecv) -> Self {
     match data {
-      StockStorageRecv::Get { key, .. } => StorageRecv::Get { key },
-      StockStorageRecv::Put { key, value, .. } => StorageRecv::Put { key, value },
+      StockStorageRecv::Get { key, .. } => ClientStorageCommand::Get { key },
+      StockStorageRecv::Put { key, value, .. } => ClientStorageCommand::Put { key, value },
     }
   }
 }
@@ -32,10 +33,10 @@ pub enum StockStorageSend {
   Response { payload: StockStoragePayload },
 }
 
-impl From<StorageSend> for StockStorageSend {
-  fn from(data: StorageSend) -> Self {
+impl From<ServerStorageEvent> for StockStorageSend {
+  fn from(data: ServerStorageEvent) -> Self {
     match data {
-      StorageSend::Response { key, value } => StockStorageSend::Response {
+      ServerStorageEvent::Response { key, value } => StockStorageSend::Response {
         payload: StockStoragePayload {
           key,
           value,

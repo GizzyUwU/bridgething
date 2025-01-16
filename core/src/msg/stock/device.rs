@@ -1,6 +1,7 @@
+use libbridgething::{client::ClientSystemCommand, PhoneCallDirection, PhoneCallStatus};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg, SystemRecv};
+use crate::msg::{PossibleSendMsg, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -19,17 +20,17 @@ pub struct PhoneCallAttributes {
   call_id: String,
 }
 
-impl From<StockDeviceRecv> for SystemRecv {
+impl From<StockDeviceRecv> for ClientSystemCommand {
   fn from(data: StockDeviceRecv) -> Self {
     match data {
-      StockDeviceRecv::Reboot => SystemRecv::Reboot,
-      StockDeviceRecv::PowerOff => SystemRecv::PowerOff,
-      StockDeviceRecv::FactoryReset => SystemRecv::FactoryReset,
-      StockDeviceRecv::ReturnToSpotify => SystemRecv::__LegacyStockReturnToSpotify,
-      StockDeviceRecv::PhoneCallAnswer { attributes } => SystemRecv::PhoneCallAccept {
+      StockDeviceRecv::Reboot => ClientSystemCommand::Reboot,
+      StockDeviceRecv::PowerOff => ClientSystemCommand::PowerOff,
+      StockDeviceRecv::FactoryReset => ClientSystemCommand::FactoryReset,
+      StockDeviceRecv::ReturnToSpotify => ClientSystemCommand::__LegacyStockReturnToSpotify,
+      StockDeviceRecv::PhoneCallAnswer { attributes } => ClientSystemCommand::PhoneCallAccept {
         call_id: attributes.call_id,
       },
-      StockDeviceRecv::PhoneCallEnd { attributes } => SystemRecv::PhoneCallEnd {
+      StockDeviceRecv::PhoneCallEnd { attributes } => ClientSystemCommand::PhoneCallEnd {
         call_id: attributes.call_id,
       },
     }
@@ -66,23 +67,6 @@ pub enum StockPhoneCallSend {
     call_dir: PhoneCallDirection,
     call_id: String,
   },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PhoneCallStatus {
-  Disconnected,
-  Sending,
-  Ringing,
-  Connecting,
-  Active,
-  Held,
-  Disconnecting,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PhoneCallDirection {
-  Incoming,
-  Outgoing,
 }
 
 impl From<StockPhoneCallSend> for StockSendMsg {

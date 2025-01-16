@@ -1,8 +1,9 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use libbridgething::Device;
 use serde::{Deserialize, Serialize};
 
-use crate::{dbus, msg::Device};
+use crate::dbus;
 
 pub mod meta;
 
