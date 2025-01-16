@@ -1,5 +1,5 @@
 {
-  "name": "@bridgething/sdk",
+  "name": "@bridgething/lib",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
