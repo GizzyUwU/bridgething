@@ -7,7 +7,7 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "dev:gateway": "cd dev/gateway && bun run dev:gateway"
+    "dev:gateway": "cd gateway && bun run dev:gateway"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
@@ -27,7 +27,6 @@
     "lib",
     "gateway",
     "adapter",
-    "dev-gateway",
     "client/typescript"
   ]
 }

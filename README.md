@@ -34,7 +34,6 @@ this code needs some serious refactoring lol - dw i am well aware
 │   ├── rust # rust sdk
 │   └── typescript # typescript sdk
 ├── core # primary bridgething daemon
-├── dev-gateway # development gateway for testing gatt code
 ├── gateway # sdk for creating gateway platforms
 ├── lib # shared communication types for rust and typescript
 │   ├── src # rust types
