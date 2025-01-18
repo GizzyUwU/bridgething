@@ -61,11 +61,14 @@ impl GattServer {
     let app = Application {
       services: vec![Service {
         uuid: BRIDGETHING_SERVICE_UUID,
+        #[cfg(debug_assertions)]
+        primary: false,
+        #[cfg(not(debug_assertions))]
         primary: true,
         characteristics: vec![Characteristic {
           uuid: BRIDGETHING_CHARACTERISTIC_UUID,
           write: Some(CharacteristicWrite {
-            write: true,
+            write: false,
             write_without_response: true,
             method: CharacteristicWriteMethod::Io,
             ..Default::default()

@@ -1,13 +1,9 @@
-import { scanAndConnect } from '@bridgething/adapter';
-import { type BLEAdapter } from '@bridgething/gateway';
+import { PlugAdapter } from '@bridgething/adapter';
+import { sleep } from 'bun';
 
-class DevGateway implements BLEAdapter {
-  constructor() {}
+const adapter = new PlugAdapter();
+adapter.on(e => console.log('>> js got new data!!', e));
 
-  async scan() {
-    await scanAndConnect();
-  }
-}
+await adapter.init('hci1');
 
-const gateway = new DevGateway();
-await gateway.scan();
+await sleep(1_000_000);

@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "tsup ./src --watch",
     "build": "tsup ./src",
-    "dev:gateway": "bun examples/dev.ts"
+    "example:dev": "RUST_LOG=bridgething_adapter=trace bun examples/dev.ts"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0-beta2"
   },
   "devDependencies": {
+    "@bridgething/adapter": "workspace:*",
     "tsup": "^8.3.5"
   },
   "peerDependencies": {

@@ -42,12 +42,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.95"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
-
-[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,16 +214,17 @@ dependencies = [
 name = "bridgething-adapter"
 version = "0.0.0"
 dependencies = [
- "anyhow",
- "bluer",
  "btleplug",
  "futures",
  "libbridgething",
  "napi",
  "napi-build",
  "napi-derive",
+ "thiserror 2.0.11",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1030,7 +1025,6 @@ version = "3.0.0-alpha.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "023afffe908293dd644255348d78502d748e28dab7a329aa72edce1c5ac8be81"
 dependencies = [
- "anyhow",
  "bitflags",
  "ctor",
  "napi-build",

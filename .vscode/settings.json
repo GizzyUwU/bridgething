@@ -4,9 +4,11 @@
     "blackhole",
     "Bluez",
     "bridgething",
+    "Btleplug",
     "libbridgething",
     "pairable",
-    "superbird"
+    "superbird",
+    "Threadsafe"
   ],
   "highlight.regexes": {
     "(\\[Client -> Server\\]?)(.*)": [

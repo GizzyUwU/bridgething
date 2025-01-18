@@ -2,17 +2,25 @@
   "name": "@bridgething/adapter",
   "version": "0.0.0",
   "type": "module",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "napi": {
-    "name": "bridgething-adapter",
-    "triples": {
-      "defaults": false,
-      "additional": [
-        "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-gnu"
-      ]
-    },
+    "binaryName": "bridgething-adapter",
+    "targets": [
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-linux-android",
+      "arm-linux-androideabi",
+      "armv7-linux-androideabi",
+      "x86_64-linux-android",
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-apple-ios",
+      "aarch64-apple-ios-macabi",
+      "aarch64-apple-ios-sim",
+      "aarch64-pc-windows-msvc",
+      "x86_64-pc-windows-msvc"
+    ],
     "npmClient": "bun"
   },
   "license": "MIT",
@@ -24,9 +32,8 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --js binding.cjs --features napi && bun run make-module",
-    "build:debug": "napi build --platform --js binding.cjs --features napi && bun run make-module",
-    "make-module": "echo \"export * from './binding.cjs';\" > index.js && ./export.sh",
+    "build": "napi build --platform --release --esm -o ./dist",
+    "build:debug": "napi build --platform --esm -o ./dist",
     "version": "napi version"
   }
 }

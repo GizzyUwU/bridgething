@@ -4,32 +4,26 @@ name = "bridgething-adapter"
 version = "0.0.0"
 
 [lib]
-crate-type = ["lib", "cdylib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-bluer = { workspace = true, features = ["bluetoothd"] }
-futures = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-tokio-util = { workspace = true }
 libbridgething = { path = "../lib" }
-anyhow = "1.0.95"
 
-# napi
+futures = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
 napi = { version = "3.0.0-alpha.27", default-features = false, features = [
-  "napi4",
   "async",
-  "anyhow",
+  "tokio_sync",
 ] }
 napi-derive = "3.0.0-alpha.25"
 btleplug = { version = "0.11.7", features = ["serde"] }
 
+
 [build-dependencies]
 napi-build = "2.1.4"
-
-[features]
-default = []
-napi = []
-
-[[example]]
-name = "bridgething-adapter-gateway"
-path = "examples/gateway.rs"
+napi-derive = "3.0.0-alpha.25"

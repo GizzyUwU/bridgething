@@ -6,12 +6,9 @@ build:
   cargo build
   bun run build
 
-adapter:
-  cargo run --example bridgething-adapter-gateway
-
-gatt:
-  bun run build
-  bun run dev:gateway
+gateway:
+  bun run build -- --filter=@bridgething/gateway
+  bun run gateway:example:dev
 
 typescript:
   rm -rf lib/ts/bindings
