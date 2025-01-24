@@ -1,11 +1,9 @@
 use std::time::Duration;
 
-use ble::GattServer;
 use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use futures::{Stream, StreamExt};
 use libbridgething::{server::ServerBluetoothEvent, ServerEventType};
 use message::{connection_messages, disconnection_messages};
-use tokio::task::JoinHandle;
 
 use crate::{
   dbus::{DBusError, Player},
@@ -14,7 +12,6 @@ use crate::{
 };
 
 mod auth;
-mod ble;
 #[cfg(debug_assertions)]
 mod debug;
 mod message;
@@ -33,7 +30,6 @@ pub struct Bluetooth {
 
   pub adapter: Adapter,
   _agent_handle: AgentHandle,
-  _gatt_handle: JoinHandle<BluetoothResult<()>>,
 }
 
 impl Bluetooth {
@@ -72,7 +68,6 @@ impl Bluetooth {
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let _agent_handle = auth::build_agent(&session, tx.clone()).await?;
-    let _gatt_handle = GattServer::init(adapter.clone(), tx.clone()).await?.spawn().await;
 
     #[cfg(debug_assertions)]
     debug::query_adapter(&adapter).await?;
@@ -87,7 +82,6 @@ impl Bluetooth {
 
       adapter,
       _agent_handle,
-      _gatt_handle,
     };
 
     // restore connections if possible

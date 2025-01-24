@@ -19,11 +19,44 @@ use tokio::{
   task::JoinHandle,
 };
 
-use super::{BluetoothResult, BluetoothTx};
+use super::bt::BluetoothResult;
+
+pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayEvent>;
+pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayEvent>;
+pub type GatewayNotifyTx = tokio::sync::mpsc::Sender<GatewayEvent>;
+pub type GatewayNotifyRx = tokio::sync::mpsc::Receiver<GatewayEvent>;
+
+#[derive(Debug)]
+pub enum GatewayEvent {}
+
+pub struct GatewayCon {
+  tx: GatewayNotifyTx,
+  rx: GatewayRecvRx,
+  _gatt_handle: JoinHandle<BluetoothResult<()>>,
+}
+
+impl GatewayCon {
+  pub async fn init(adapter: &Adapter) -> BluetoothResult<Self> {
+    let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
+    let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
+
+    let gatt_server = GattServer::init(adapter, recv_tx, notify_rx).await?;
+
+    Ok(Self {
+      tx,
+      rx,
+      _gatt_handle: gatt_server.spawn().await,
+    })
+  }
+
+  pub async fn listen(&mut self) -> Option<GatewayEvent> {
+    self.rx.recv().await
+  }
+}
 
 pub struct GattServer {
-  tx: BluetoothTx,
-  adapter: Adapter,
+  tx: GatewayRecvTx,
+  rx: GatewayNotifyRx,
 
   app: ApplicationHandle,
   advertisement: AdvertisementHandle,
@@ -37,7 +70,7 @@ pub struct GattServer {
 }
 
 impl GattServer {
-  pub async fn init(adapter: Adapter, tx: BluetoothTx) -> BluetoothResult<Self> {
+  pub async fn init(adapter: &Adapter, tx: GatewayRecvTx, rx: GatewayNotifyRx) -> BluetoothResult<Self> {
     tracing::debug!(
       "advertising on bluetooth adapter {} with address {}",
       adapter.name(),
@@ -61,10 +94,10 @@ impl GattServer {
     let app = Application {
       services: vec![Service {
         uuid: BRIDGETHING_SERVICE_UUID,
-        #[cfg(debug_assertions)]
+        // #[cfg(debug_assertions)]
         primary: false,
-        #[cfg(not(debug_assertions))]
-        primary: true,
+        // #[cfg(not(debug_assertions))]
+        // primary: true,
         characteristics: vec![Characteristic {
           uuid: BRIDGETHING_CHARACTERISTIC_UUID,
           write: Some(CharacteristicWrite {
@@ -93,7 +126,7 @@ impl GattServer {
 
     Ok(Self {
       tx,
-      adapter,
+      rx,
 
       app: app_handle,
       advertisement: adv_handle,

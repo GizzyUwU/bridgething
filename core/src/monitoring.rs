@@ -35,7 +35,7 @@ pub fn init_logger() {
     .with(fmt::layer().with_span_events(FmtSpan::CLOSE).with_filter(filter))
     .init();
 
-  tracing::info!("initialized logger");
+  tracing::debug!("initialized logger");
 }
 
 pub async fn wait_for_signal() {

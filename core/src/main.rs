@@ -1,5 +1,7 @@
 mod bt;
 mod dbus;
+
+mod ble;
 mod ws;
 
 mod als;
@@ -13,6 +15,7 @@ mod msg;
 
 mod monitoring;
 
+use ble::GatewayCon;
 use bt::Bluetooth;
 use handler::Handler;
 use state::State;
@@ -29,6 +32,10 @@ async fn main() {
   let mut bluetooth = Bluetooth::init(&mut state)
     .await
     .expect("failed to initialize the bluetooth stack");
+
+  let mut gateway_con = GatewayCon::init(&bluetooth.adapter)
+    .await
+    .expect("failed to create gatt server for gateway connections!");
 
   let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
   let mut conn_man = ws::ConnMan::new();
@@ -52,6 +59,9 @@ async fn main() {
         if let Err(err) = bluetooth.handle_event(&mut conn_man, &mut state, msg).await {
           tracing::error!("failed to handle bluetooth message: {:?}", err);
         }
+      },
+      Some(event) = gateway_con.listen() => {
+        tracing::trace!("new gateway event: {:?}", event);
       },
       Some(event) = dbus::maybe_recv(&mut state.player) => {
         if let Some(player) = &mut state.player {
