@@ -1,4 +1,4 @@
-use libbridgething::{client::ClientStorageCommand, server::ServerStorageEvent};
+use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::msg::{PossibleSendMsg, StockSendMsg};
@@ -17,11 +17,11 @@ pub enum StockStorageRecv {
   },
 }
 
-impl From<StockStorageRecv> for ClientStorageCommand {
+impl From<StockStorageRecv> for ClientKVStoreCommand {
   fn from(data: StockStorageRecv) -> Self {
     match data {
-      StockStorageRecv::Get { key, .. } => ClientStorageCommand::Get { key },
-      StockStorageRecv::Put { key, value, .. } => ClientStorageCommand::Put { key, value },
+      StockStorageRecv::Get { key, .. } => ClientKVStoreCommand::Get { key },
+      StockStorageRecv::Put { key, value, .. } => ClientKVStoreCommand::Put { key, value },
     }
   }
 }

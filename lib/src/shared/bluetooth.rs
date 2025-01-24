@@ -24,3 +24,9 @@ pub enum DeviceType {
   Linux,
   Unknown,
 }
+
+impl Default for DeviceType {
+  fn default() -> Self {
+    Self::Unknown
+  }
+}

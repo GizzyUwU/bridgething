@@ -5,7 +5,7 @@ use crate::{bt::Bluetooth, state::State};
 use super::{Handler, HandlerResult, MsgHandle};
 
 pub struct SystemHandler<'a> {
-  handle: MsgHandle<'a>,
+  handle: MsgHandle,
   state: &'a mut State,
   bluetooth: &'a mut Bluetooth,
 }

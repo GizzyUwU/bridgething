@@ -1,6 +1,6 @@
-use futures::TryFutureExt;
+use dashmap::DashMap;
 use libbridgething::{ServerEvent, ServerEventData, ServerEventType};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
   net::TcpStream,
   task::{JoinHandle, JoinSet},
@@ -17,7 +17,7 @@ use crate::{
 use super::WSResult;
 
 #[derive(Debug)]
-struct ConnectionData {
+struct ClientData {
   tx: SendTx,
   mode: ClientMode,
 
@@ -25,28 +25,24 @@ struct ConnectionData {
   cancel_token: CancellationToken,
 }
 
-#[derive(Debug)]
-pub struct ConnMan {
-  connections: HashMap<SocketAddr, ConnectionData>,
-  cancel_token: CancellationToken,
+pub fn create_client_manager() -> (ClientMan, ClientListener) {
+  let (tx, rx) = tokio::sync::mpsc::channel(64);
 
-  tx: RecvTx,
-  rx: RecvRx,
+  let client_man = Arc::new(ClientManager::new(tx));
+  let listener = ClientListener::new(rx, client_man.clone());
+
+  (client_man, listener)
 }
 
-impl ConnMan {
-  pub fn new() -> Self {
-    tracing::info!("creating connection manager");
+#[derive(Debug)]
+pub struct ClientListener {
+  rx: RecvRx,
+  client_man: ClientMan,
+}
 
-    let (tx, rx) = tokio::sync::mpsc::channel(64);
-
-    Self {
-      connections: HashMap::new(),
-      cancel_token: CancellationToken::new(),
-
-      tx,
-      rx,
-    }
+impl ClientListener {
+  fn new(rx: RecvRx, client_man: ClientMan) -> Self {
+    Self { rx, client_man }
   }
 
   /// cancel-safe
@@ -55,15 +51,43 @@ impl ConnMan {
     tracing::trace!("new parsed message from {:?}", msg.from);
 
     if let RecvMsgData::ChangeMode(mode) = &msg.data {
-      let connection = self.connections.get_mut(&msg.from).ok_or(WSError::NotConnected)?;
-      connection.mode = *mode;
+      self.client_man.change_mode(&msg.from, mode);
     };
 
     if let RecvMsgData::ConnectionClosed(_, _) = msg.data {
-      self.handle_disconnect(msg.from);
+      self.client_man.handle_disconnect(msg.from);
     };
 
     Ok(msg)
+  }
+}
+
+pub type ClientMan = Arc<ClientManager>;
+
+#[derive(Debug)]
+pub struct ClientManager {
+  connections: DashMap<SocketAddr, ClientData>,
+  cancel_token: CancellationToken,
+
+  tx: RecvTx,
+}
+
+impl ClientManager {
+  fn new(tx: RecvTx) -> Self {
+    tracing::info!("creating connection manager");
+
+    Self {
+      connections: DashMap::new(),
+      cancel_token: CancellationToken::new(),
+
+      tx,
+    }
+  }
+
+  pub fn change_mode(&self, from: &SocketAddr, mode: &ClientMode) {
+    if let Some(mut client) = self.connections.get_mut(from) {
+      client.mode = *mode;
+    }
   }
 
   pub async fn send(
@@ -74,7 +98,7 @@ impl ConnMan {
     meta: ServerEventType,
     stock_msg_id: Option<usize>,
   ) -> WSResult<()> {
-    let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
+    let client = self.connections.get(&to).ok_or(WSError::NotConnected)?;
     let data = data.into();
     tracing::trace!("sending message to {to} with data {:?}", data);
 
@@ -84,9 +108,9 @@ impl ConnMan {
       meta,
       stock_msg_id,
     };
-    let msg = PossibleSendMsg::from_send_msg(msg, mode);
+    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode);
 
-    Ok(tx.send(msg).await?)
+    Ok(client.tx.send(msg).await?)
   }
 
   pub async fn broadcast(
@@ -103,11 +127,20 @@ impl ConnMan {
       stock_msg_id: None,
     };
 
-    let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| {
-      let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
-      c.tx.send(msg).map_err(WSError::MessageSend)
-    }))
-    .await;
+    //  let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.iter().map(|c| {
+    //   let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
+    //   c.tx.send(msg).map_err(WSError::MessageSend)
+    // }))
+    // .await;
+
+    let results: Vec<Result<(), WSError>> = self
+      .connections
+      .iter()
+      .map(|c| {
+        let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
+        c.tx.try_send(msg).map_err(WSError::MessageTrySend)
+      })
+      .collect();
 
     let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
     if errors.is_empty() {
@@ -118,8 +151,8 @@ impl ConnMan {
   }
 
   pub async fn send_stock(&self, to: SocketAddr, data: impl Into<StockSendMsg>) -> WSResult<()> {
-    let ConnectionData { tx, mode, .. } = self.connections.get(&to).ok_or(WSError::NotConnected)?;
-    if *mode != ClientMode::Stock {
+    let client = self.connections.get(&to).ok_or(WSError::NotConnected)?;
+    if client.mode != ClientMode::Stock {
       tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
       return Ok(());
     }
@@ -127,24 +160,39 @@ impl ConnMan {
     let msg = data.into();
     tracing::trace!("sending stock message to {to} with data {:?}", msg);
 
-    Ok(tx.send(PossibleSendMsg::Stock(msg)).await?)
+    Ok(client.tx.send(PossibleSendMsg::Stock(msg)).await?)
   }
 
   pub async fn broadcast_stock(&self, data: impl Into<StockSendMsg> + Clone) -> Result<(), Vec<WSError>> {
     let msg = data.into();
 
-    let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| async {
-      if c.mode != ClientMode::Stock {
-        tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
-        return Ok(());
-      };
+    //  let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| async {
+    //   if c.mode != ClientMode::Stock {
+    //     tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
+    //     return Ok(());
+    //   };
 
-      c.tx
-        .send(PossibleSendMsg::Stock(msg.clone()))
-        .map_err(WSError::MessageSend)
-        .await
-    }))
-    .await;
+    //   c.tx
+    //     .send(PossibleSendMsg::Stock(msg.clone()))
+    //     .map_err(WSError::MessageSend)
+    //     .await
+    // }))
+    // .await;
+
+    let results: Vec<Result<(), WSError>> = self
+      .connections
+      .iter()
+      .map(|c| {
+        if c.mode != ClientMode::Stock {
+          tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
+          return Ok(());
+        };
+
+        c.tx
+          .try_send(PossibleSendMsg::Stock(msg.clone()))
+          .map_err(WSError::MessageTrySend)
+      })
+      .collect();
 
     let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
     if errors.is_empty() {
@@ -155,14 +203,14 @@ impl ConnMan {
   }
 
   /// NOT cancel-safe
-  pub async fn handle_connection(&mut self, address: SocketAddr, stream: TcpStream) -> WSResult<()> {
+  pub async fn handle_connection(&self, address: SocketAddr, stream: TcpStream) -> WSResult<()> {
     let stream = ServerBuilder::new().accept(stream).await?;
     tracing::debug!("accepted stream from {address}");
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let cancel_token = self.cancel_token.child_token();
 
-    let data = ConnectionData {
+    let data = ClientData {
       tx,
       mode: ClientMode::Modern,
 
@@ -175,24 +223,18 @@ impl ConnMan {
     Ok(())
   }
 
-  pub fn handle_disconnect(&mut self, address: SocketAddr) {
-    if let Some(data) = self.connections.remove(&address) {
+  pub fn handle_disconnect(&self, address: SocketAddr) {
+    if let Some((_addr, data)) = self.connections.remove(&address) {
       data.cancel_token.cancel();
       tracing::debug!("removed connection handle for {address}");
     }
   }
 
-  pub async fn handle_shutdown(&mut self) {
+  pub async fn handle_shutdown(self) {
     self.cancel_token.cancel();
 
-    JoinSet::from_iter(self.connections.drain().map(|c| c.1.handle))
+    JoinSet::from_iter(self.connections.into_iter().map(|(_, c)| c.handle))
       .join_all()
       .await;
-  }
-}
-
-impl Default for ConnMan {
-  fn default() -> Self {
-    Self::new()
   }
 }

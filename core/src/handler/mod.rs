@@ -2,13 +2,13 @@ use std::net::SocketAddr;
 
 mod bluetooth;
 mod interaction;
-mod storage;
+mod store;
 mod system;
 mod voice;
 
 use bluetooth::*;
 use interaction::*;
-use storage::*;
+use store::*;
 use system::*;
 use uuid::Uuid;
 use voice::*;
@@ -22,25 +22,25 @@ use crate::{
   dbus::DBusError,
   msg::{stock::StockInterAppSend, ClientMode, RecvMsgData},
   state::{State, StateError},
-  ws::{ConnMan, WSError},
+  ws::{ClientMan, WSError},
 };
 
 pub struct Handler<'a> {
-  handle: MsgHandle<'a>,
+  handle: MsgHandle,
   state: &'a mut State,
   bluetooth: &'a mut Bluetooth,
 }
 
 impl<'a> Handler<'a> {
   pub fn new(
-    conn_man: &'a mut ConnMan,
+    client_man: ClientMan,
     state: &'a mut State,
     bluetooth: &'a mut Bluetooth,
     msg_id: Uuid,
     msg_from: SocketAddr,
   ) -> Self {
     Self {
-      handle: MsgHandle::new(conn_man, msg_id, msg_from),
+      handle: MsgHandle::new(client_man, msg_id, msg_from),
       state,
       bluetooth,
     }
@@ -49,7 +49,7 @@ impl<'a> Handler<'a> {
   pub async fn handle(self, data: RecvMsgData) -> HandlerResult {
     match data {
       RecvMsgData::Bluetooth(msg) => BluetoothHandler::new(self).handle(msg).await,
-      RecvMsgData::Storage(msg) => StorageHandler::new(self).handle(msg).await,
+      RecvMsgData::Store(msg) => StorageHandler::new(self).handle(msg).await,
       RecvMsgData::System(msg) => SystemHandler::new(self).handle(msg).await,
       RecvMsgData::Voice(msg) => VoiceHandler::new(self).handle(msg).await,
       RecvMsgData::Interaction { msg, stock_msg_id } => InteractionHandler::new(self, stock_msg_id).handle(msg).await,
@@ -72,7 +72,7 @@ impl<'a> Handler<'a> {
         if mode == ClientMode::Stock {
           self
             .bluetooth
-            .handle_connection(self.handle.conn_man, self.state, false)
+            .handle_connection(&self.handle.client_man, self.state, false)
             .await?;
         };
 

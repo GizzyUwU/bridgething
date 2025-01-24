@@ -6,7 +6,7 @@ use super::{Handler, HandlerResult, MsgHandle};
 
 #[derive(Debug)]
 pub struct VoiceHandler<'a> {
-  handle: MsgHandle<'a>,
+  handle: MsgHandle,
   state: &'a mut State,
 }
 

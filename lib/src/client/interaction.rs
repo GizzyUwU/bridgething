@@ -5,6 +5,8 @@ use ts_rs::TS;
 
 use crate::stock::StockSetPreset;
 
+// TODO: refactor this into more command types so not spotify-specific
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "action", content = "args", rename_all = "camelCase")]

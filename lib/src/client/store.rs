@@ -5,7 +5,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "action", content = "args", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
-pub enum ClientStorageCommand {
+pub enum ClientKVStoreCommand {
   Get { key: String },
   Put { key: String, value: String },
   Delete { key: String },

@@ -1,7 +1,7 @@
 #![allow(clippy::large_enum_variant)]
 use libbridgething::{
   client::{
-    ClientBluetoothCommand, ClientInteractionCommand, ClientStorageCommand, ClientSystemCommand, ClientVoiceCommand,
+    ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientSystemCommand, ClientVoiceCommand,
   },
   ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
 };
@@ -34,7 +34,7 @@ pub struct RecvMsg {
 #[derive(Debug)]
 pub enum RecvMsgData {
   Bluetooth(ClientBluetoothCommand),
-  Storage(ClientStorageCommand),
+  Store(ClientKVStoreCommand),
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
   Interaction {
@@ -57,7 +57,7 @@ impl From<ClientCommand> for RecvMsgData {
   fn from(msg: ClientCommand) -> Self {
     match msg.data {
       ClientCommandType::Bluetooth(msg) => Self::Bluetooth(msg),
-      ClientCommandType::Storage(msg) => Self::Storage(msg),
+      ClientCommandType::Store(msg) => Self::Store(msg),
       ClientCommandType::System(msg) => Self::System(msg),
       ClientCommandType::Voice(msg) => Self::Voice(msg),
       ClientCommandType::Interaction { msg, stock_msg_id } => Self::Interaction { msg, stock_msg_id },

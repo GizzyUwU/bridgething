@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dbus;
 
+pub mod art;
 pub mod meta;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -86,14 +87,14 @@ impl State {
     self.devices.get(mac)
   }
 
-  pub async fn add_device(&mut self, device: Device) -> Result<(), StateError> {
+  pub async fn add_device(&mut self, device: Device) -> StateResult<()> {
     self.devices.insert(device.mac.clone(), device);
     self.save().await?;
 
     Ok(())
   }
 
-  pub async fn remove_device(&mut self, mac: String) -> Result<(), StateError> {
+  pub async fn remove_device(&mut self, mac: String) -> StateResult<()> {
     if self.devices.remove(&mac).is_some() {
       self.save().await?;
     }
@@ -118,21 +119,21 @@ impl State {
     value.cloned()
   }
 
-  pub async fn set_storage_key(&mut self, key: String, value: String) -> Result<(), StateError> {
+  pub async fn set_storage_key(&mut self, key: String, value: String) -> StateResult<()> {
     self.storage.insert(key, value);
     self.save().await?;
 
     Ok(())
   }
 
-  pub async fn del_storage_key(&mut self, key: &str) -> Result<(), StateError> {
+  pub async fn del_storage_key(&mut self, key: &str) -> StateResult<()> {
     self.storage.remove(key);
     self.save().await?;
 
     Ok(())
   }
 
-  async fn read(path: &PathBuf) -> Result<Self, StateError> {
+  async fn read(path: &PathBuf) -> StateResult<Self> {
     let data = tokio::fs::read(path).await?;
     let state: State = bincode::deserialize(&data)?;
 
@@ -140,7 +141,7 @@ impl State {
   }
 
   // #[cfg(not(debug_assertions))]
-  async fn save(&self) -> Result<(), StateError> {
+  async fn save(&self) -> StateResult<()> {
     let data = bincode::serialize(&self)?;
     tokio::fs::write(&self.path, data).await?;
 
@@ -148,12 +149,12 @@ impl State {
   }
 
   // #[cfg(debug_assertions)]
-  // async fn save(&self) -> Result<(), StateError> {
+  // async fn save(&self) -> StateResult<()> {
   //   tracing::trace!("debug mode: not saving application state.");
   //   Ok(())
   // }
 
-  pub async fn reset(&self) -> Result<(), StateError> {
+  pub async fn reset(&self) -> StateResult<()> {
     Ok(tokio::fs::remove_file(&self.path).await?)
   }
 }

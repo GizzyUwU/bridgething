@@ -5,13 +5,13 @@ use crate::{
     StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend,
   },
   state::State,
-  ws::ConnMan,
+  ws::ClientMan,
 };
 
 use super::BluetoothResult;
 
 pub async fn connection_messages(
-  conn_man: &mut ConnMan,
+  conn_man: &ClientMan,
   state: &State,
   new_device: bool,
   device: &Device,
@@ -85,7 +85,7 @@ pub async fn connection_messages(
     .await?;
 
   if let Some(player) = &state.player {
-    player.send_state(conn_man).await?;
+    player.send_state().await?;
   }
 
   // TODO: remove testing code
@@ -97,7 +97,7 @@ pub async fn connection_messages(
   Ok(())
 }
 
-pub async fn disconnection_messages(conn_man: &mut ConnMan, state: &State) -> BluetoothResult<()> {
+pub async fn disconnection_messages(conn_man: &ClientMan, state: &State) -> BluetoothResult<()> {
   conn_man
     .broadcast(ServerBluetoothEvent::Status { connected: false }, ServerEventType::Info)
     .await?;

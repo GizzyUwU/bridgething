@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use libbridgething::{server::ServerPlayerEvent, PlaybackOptions, PlaybackRestrictions, ServerEventType};
+use libbridgething::{server::ServerPlayerEvent, DeviceType, PlaybackOptions, PlaybackRestrictions, ServerEventType};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use zbus::Connection;
@@ -12,15 +12,22 @@ mod player;
 use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
 pub use player::*;
 
-use crate::ws::{ConnMan, WSError};
+use crate::{
+  bt::art::CoverArt,
+  handler::MsgHandle,
+  state::art::CoverArtCache,
+  ws::{ClientMan, WSError},
+};
 
 pub type PlayerTx = tokio::sync::mpsc::Sender<DBusPlayerEvent>;
 pub type PlayerRx = tokio::sync::mpsc::Receiver<DBusPlayerEvent>;
 
 #[derive(Debug)]
 pub struct Player {
+  client_man: ClientMan,
   player: MediaPlayer1Proxy<'static>,
   pub state: PlayerState,
+  art: Option<CoverArt>,
 
   rx: PlayerRx,
   cancel_token: CancellationToken,
@@ -29,7 +36,7 @@ pub struct Player {
 }
 
 impl Player {
-  pub async fn init(device: bluer::Device) -> DBusResult<Self> {
+  pub async fn init(client_man: ClientMan, cover_art_cache: CoverArtCache, device: bluer::Device) -> DBusResult<Self> {
     let path = format!(
       "/org/bluez/hci0/dev_{}/player0",
       device.address().to_string().replace(":", "_")
@@ -42,22 +49,36 @@ impl Player {
 
     let cancel_token = CancellationToken::new();
     let (tx, rx) = tokio::sync::mpsc::channel(64);
-    let mut changes = DBusPlayerChanges {
-      tx,
-
-      status: player.receive_status_changed().await,
-      track: player.receive_track_changed().await,
-      position: player.receive_position_changed().await,
-      shuffle: player.receive_shuffle_changed().await,
-      repeat: player.receive_repeat_changed().await,
-    };
+    let changes = DBusPlayerChanges::init(tx, &player).await;
 
     let avrcp_cancel = cancel_token.child_token();
     let change_cancel = cancel_token.child_token();
 
+    let mut state = PlayerState::default();
+
+    let mut art = None;
+
+    if let Ok(obex_port) = player.obex_port().await {
+      if obex_port == 0x1007 {
+        tracing::debug!("obex port 0x1007 detected from device - assuming ios");
+        state.device_type = DeviceType::Ios;
+        art = Some(CoverArt::init(
+          client_man.clone(),
+          cover_art_cache,
+          cancel_token.child_token(),
+          device.address(),
+        ));
+      } else if obex_port == 0x1001 {
+        tracing::debug!("obex port 0x1001 detected from device - assuming android");
+        state.device_type = DeviceType::Android;
+      }
+    }
+
     Ok(Self {
+      client_man,
       player,
-      state: PlayerState::default(),
+      state,
+      art,
 
       rx,
       _change_handle: tokio::spawn(async move { changes.spawn(change_cancel).await }),
@@ -96,12 +117,17 @@ impl Player {
     Ok(())
   }
 
-  pub async fn handle_event(&mut self, conn_man: &mut ConnMan, event: DBusPlayerEvent) -> DBusResult<()> {
+  pub async fn handle_event(&mut self, event: DBusPlayerEvent) -> DBusResult<()> {
     match event {
       DBusPlayerEvent::Status(status) => {
         self.state.status = status;
       }
       DBusPlayerEvent::Track(track) => {
+        // if self.state.track.title != track.title {
+        //   if let Some(art) = &self.art {
+        //     art.fetch(&track.spotify_image_id(), None).await;
+        //   }
+        // }
         self.state.track = track;
       }
       DBusPlayerEvent::Position(position) => {
@@ -115,20 +141,28 @@ impl Player {
       }
     }
 
-    self.send_state(conn_man).await?;
+    self.send_state().await?;
 
     Ok(())
   }
 
-  pub async fn send_state(&self, conn_man: &mut ConnMan) -> DBusResult<()> {
-    conn_man
+  pub async fn send_state(&self) -> DBusResult<()> {
+    self
+      .client_man
       .broadcast(self.state.to_send_state(), ServerEventType::Info)
       .await?;
-    conn_man
+    self
+      .client_man
       .broadcast(self.state.to_send_queue(), ServerEventType::Info)
       .await?;
 
     Ok(())
+  }
+
+  pub async fn request_cover_art(&self, msg_handle: MsgHandle) {
+    if let Some(art) = &self.art {
+      art.fetch(&self.state.track.spotify_image_id(), Some(msg_handle)).await;
+    }
   }
 }
 
@@ -148,7 +182,7 @@ pub async fn maybe_recv(player: &mut Option<Player>) -> Option<DBusPlayerEvent> 
   };
 
   let res = player.recv().await;
-  tracing::trace!("received message from dbus player: {:?}", &res);
+  tracing::trace!("new player message: {:?}", &res);
   if res.is_none() {
     tracing::error!("player stream appears to be closed?? this is probably bad.");
   }
@@ -158,6 +192,7 @@ pub async fn maybe_recv(player: &mut Option<Player>) -> Option<DBusPlayerEvent> 
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerState {
+  pub device_type: DeviceType,
   pub status: DBusPlayerStatus,
   pub track: DBusPlayerTrack,
   pub position: usize,
@@ -173,8 +208,8 @@ impl PlayerState {
       is_paused: self.status == DBusPlayerStatus::Paused,
       is_paused_bool: self.status == DBusPlayerStatus::Paused,
       playback_options: PlaybackOptions {
-        repeat: if self.repeat == DBusPlayerRepeat::On { 1 } else { 0 },
-        shuffle: self.shuffle == DBusPlayerShuffle::On,
+        repeat: self.repeat.into(),
+        shuffle: self.shuffle.into(),
       },
       playback_position: self.position,
       playback_restrictions: PlaybackRestrictions {
@@ -220,7 +255,19 @@ pub struct DBusPlayerChanges {
 }
 
 impl DBusPlayerChanges {
-  pub async fn spawn(&mut self, cancel_token: CancellationToken) {
+  pub async fn init(tx: PlayerTx, player: &MediaPlayer1Proxy<'static>) -> Self {
+    Self {
+      tx,
+
+      status: player.receive_status_changed().await,
+      track: player.receive_track_changed().await,
+      position: player.receive_position_changed().await,
+      shuffle: player.receive_shuffle_changed().await,
+      repeat: player.receive_repeat_changed().await,
+    }
+  }
+
+  pub async fn spawn(mut self, cancel_token: CancellationToken) {
     loop {
       tokio::select! {
         event = self.recv() => {

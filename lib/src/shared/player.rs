@@ -58,7 +58,7 @@ pub struct Album {
 impl From<String> for Album {
   fn from(name: String) -> Self {
     Self {
-      uri: format!("spotify:album:{}", to_slug(&name)),
+      uri: format!("bridgething:album:{}", to_slug(&name)),
       name,
     }
   }
@@ -75,7 +75,7 @@ pub struct Artist {
 impl From<String> for Artist {
   fn from(name: String) -> Self {
     Self {
-      uri: format!("spotify:artist:{}", to_slug(&name)),
+      uri: format!("bridgething:artist:{}", to_slug(&name)),
       name,
     }
   }

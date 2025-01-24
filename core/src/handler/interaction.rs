@@ -11,7 +11,7 @@ use super::{Handler, HandlerResult, MsgHandle};
 
 #[derive(Debug)]
 pub struct InteractionHandler<'a> {
-  handle: MsgHandle<'a>,
+  handle: MsgHandle,
   state: &'a mut State,
   stock_msg_id: Option<usize>,
 }
@@ -28,7 +28,7 @@ impl<'a> InteractionHandler<'a> {
     }
   }
 
-  pub async fn handle(&self, msg: ClientInteractionCommand) -> HandlerResult {
+  pub async fn handle(self, msg: ClientInteractionCommand) -> HandlerResult {
     tracing::debug!(
       "({}) handling interaction message: id: {:?}; stock_msg_id: {:?}",
       &self.handle.from,
@@ -95,14 +95,24 @@ impl<'a> InteractionHandler<'a> {
     }
   }
 
-  async fn get_image(&self, id: String) -> HandlerResult {
+  async fn get_image(self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
-    Ok(self.handle.respond(ServerPlayerEvent::dummy_img(300)).await?)
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    player.request_cover_art(self.handle).await;
+    Ok(())
   }
 
-  async fn get_thumbnail_image(&self, id: String) -> HandlerResult {
+  async fn get_thumbnail_image(self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
-    Ok(self.handle.respond(ServerPlayerEvent::dummy_img(96)).await?)
+    let Some(player) = &self.state.player else {
+      return Ok(());
+    };
+
+    player.request_cover_art(self.handle).await;
+    Ok(())
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {

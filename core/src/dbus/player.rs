@@ -44,10 +44,26 @@ impl From<bool> for DBusPlayerShuffle {
   }
 }
 
+impl From<DBusPlayerShuffle> for bool {
+  fn from(val: DBusPlayerShuffle) -> Self {
+    val == DBusPlayerShuffle::On
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DBusPlayerRepeat {
   On,
   Off,
+}
+
+impl From<DBusPlayerRepeat> for usize {
+  fn from(val: DBusPlayerRepeat) -> Self {
+    if val == DBusPlayerRepeat::On {
+      1
+    } else {
+      0
+    }
+  }
 }
 
 impl Default for DBusPlayerRepeat {
@@ -118,6 +134,42 @@ pub struct DBusPlayerTrack {
   pub duration: usize,
   pub track_number: usize,
   pub number_of_tracks: usize,
+}
+
+impl DBusPlayerTrack {
+  pub fn track_uid(&self) -> String {
+    format!(
+      "bridgething:track:{}:{}:{}",
+      self
+        .artists
+        .first()
+        .unwrap_or(&String::from("unknown_artist"))
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .replace(' ', "_"),
+      self
+        .album
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .replace(' ', "_"),
+      self
+        .title
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .replace(' ', "_")
+    )
+  }
+
+  pub fn image_uid(&self) -> String {
+    format!("{}:image", self.track_uid())
+  }
+
+  pub fn spotify_image_id(&self) -> String {
+    format!("spotify:image:{}", to_slug(&self.album))
+  }
 }
 
 impl Default for DBusPlayerTrack {

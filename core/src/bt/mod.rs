@@ -7,10 +7,14 @@ use message::{connection_messages, disconnection_messages};
 
 use crate::{
   dbus::{DBusError, Player},
-  state::{State, StateError},
-  ws::{ConnMan, WSError},
+  state::{
+    art::{CoverArtCache, ImageCache},
+    State, StateError,
+  },
+  ws::{ClientMan, WSError},
 };
 
+pub mod art;
 mod auth;
 #[cfg(debug_assertions)]
 mod debug;
@@ -22,6 +26,9 @@ pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
 pub const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110C00001000800000805F9B34FB);
 
 pub struct Bluetooth {
+  client_man: ClientMan,
+  cover_art_cache: CoverArtCache,
+
   tx: BluetoothTx,
   rx: BluetoothRx,
   stream: Box<dyn Stream<Item = AdapterEvent> + Unpin>,
@@ -33,7 +40,7 @@ pub struct Bluetooth {
 }
 
 impl Bluetooth {
-  pub async fn init(state: &mut State) -> Result<Self, BluetoothError> {
+  pub async fn init(client_man: ClientMan, state: &mut State) -> Result<Self, BluetoothError> {
     tracing::debug!("initializing bluetooth session");
 
     let session = bluer::Session::new().await?;
@@ -74,6 +81,9 @@ impl Bluetooth {
 
     // start stream BEFORE device reconnection attempts
     let this = Self {
+      client_man,
+      cover_art_cache: CoverArtCache::new(ImageCache::new()),
+
       tx,
       rx,
       stream: Box::new(adapter.events().await?),
@@ -147,12 +157,7 @@ impl Bluetooth {
     }
   }
 
-  pub async fn handle_event(
-    &mut self,
-    conn_man: &mut ConnMan,
-    state: &mut State,
-    event: BluetoothEvent,
-  ) -> Result<(), BluetoothError> {
+  pub async fn handle_event(&mut self, state: &mut State, event: BluetoothEvent) -> Result<(), BluetoothError> {
     match event {
       // auth/pairing
       BluetoothEvent::AuthRequest { mac } => {
@@ -174,7 +179,8 @@ impl Bluetooth {
           &pin
         );
 
-        conn_man
+        self
+          .client_man
           .broadcast(
             ServerBluetoothEvent::Pin {
               mac: mac.to_string(),
@@ -194,7 +200,7 @@ impl Bluetooth {
         let just_connected = self.handle_device(mac).await?;
 
         if let Some(device) = &self.device {
-          match Player::init(device.clone()).await {
+          match Player::init(self.client_man.clone(), self.cover_art_cache.clone(), device.clone()).await {
             Ok(player) => state.player = Some(player),
             Err(err) => tracing::error!("error connecting to player via dbus: {:?}", err),
           };
@@ -219,7 +225,7 @@ impl Bluetooth {
               self.set_discoverable(false).await?;
             };
 
-            self.handle_connection(conn_man, state, new_device).await?;
+            self.handle_connection(&self.client_man, state, new_device).await?;
           };
         };
 
@@ -233,7 +239,7 @@ impl Bluetooth {
           state.connected_device = None;
           state.player = None;
 
-          disconnection_messages(conn_man, state).await?;
+          disconnection_messages(&self.client_man, state).await?;
 
           tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
           #[cfg(not(debug_assertions))]
@@ -251,7 +257,7 @@ impl Bluetooth {
 
   pub async fn handle_connection(
     &self,
-    conn_man: &mut ConnMan,
+    conn_man: &ClientMan,
     state: &State,
     new_device: bool,
   ) -> Result<(), BluetoothError> {

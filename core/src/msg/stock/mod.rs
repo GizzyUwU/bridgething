@@ -47,7 +47,7 @@ impl From<StockRecvMsg> for RecvMsgData {
       StockRecvMsg::Voice(data) => RecvMsgData::Voice(data.into()),
       StockRecvMsg::Key => RecvMsgData::Hole(None),
       StockRecvMsg::Action(data) => RecvMsgData::System(data.into()),
-      StockRecvMsg::Storage(data) => RecvMsgData::Storage(data.into()),
+      StockRecvMsg::Storage(data) => RecvMsgData::Store(data.into()),
       StockRecvMsg::Device(data) => RecvMsgData::System(data.into()),
       StockRecvMsg::Log => RecvMsgData::Hole(None),
     }

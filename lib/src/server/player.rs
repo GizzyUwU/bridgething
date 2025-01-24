@@ -6,6 +6,8 @@ use crate::{
   CARTHING_HACKS_LOGO,
 };
 
+// TODO: refactor this into more command types so not spotify-specific
+
 #[serde_with::skip_serializing_none]
 #[derive(derive_more::Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "action", content = "data", rename_all = "camelCase")]

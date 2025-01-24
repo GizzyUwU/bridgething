@@ -4,13 +4,13 @@ use uuid::Uuid;
 
 mod bluetooth;
 mod interaction;
-mod storage;
+mod store;
 mod system;
 mod voice;
 
 pub use bluetooth::*;
 pub use interaction::*;
-pub use storage::*;
+pub use store::*;
 pub use system::*;
 pub use voice::*;
 
@@ -28,7 +28,7 @@ pub struct ClientCommand {
 #[ts(export, export_to = "client.ts")]
 pub enum ClientCommandType {
   Bluetooth(ClientBluetoothCommand),
-  Storage(ClientStorageCommand),
+  Store(ClientKVStoreCommand),
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
   Interaction {

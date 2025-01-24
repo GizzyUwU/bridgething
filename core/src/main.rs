@@ -28,8 +28,11 @@ async fn main() {
   let notifier = systemd::init_notifier();
   let mut state = State::init().await.expect("failed to initialize state!!");
 
+  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
+  let (client_man, mut client_listener) = ws::create_client_manager();
+
   notifier.status("initializing bluetooth stack...");
-  let mut bluetooth = Bluetooth::init(&mut state)
+  let mut bluetooth = Bluetooth::init(client_man.clone(), &mut state)
     .await
     .expect("failed to initialize the bluetooth stack");
 
@@ -37,26 +40,24 @@ async fn main() {
     .await
     .expect("failed to create gatt server for gateway connections!");
 
-  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
-  let mut conn_man = ws::ConnMan::new();
-
   notifier.ready(true, Some("ready to accept connections..."));
 
+  // TODO: handle all events on spawned threads
   loop {
     tokio::select! {
       Ok((stream, address)) = server.listen() => {
-        if let Err(err) = conn_man.handle_connection(address, stream).await {
+        if let Err(err) = client_man.handle_connection(address, stream).await {
           tracing::error!("failed to accept tcp stream: {:?}", err);
           continue;
         };
       },
-      Ok(msg) = conn_man.listen() => {
-        if let Err(err) = Handler::new(&mut conn_man, &mut state, &mut bluetooth, msg.id, msg.from).handle(msg.data).await {
+      Ok(msg) = client_listener.listen() => {
+        if let Err(err) = Handler::new(client_man.clone(), &mut state, &mut bluetooth, msg.id, msg.from).handle(msg.data).await {
           tracing::error!("failed to handle websocket message: {:?}", err);
         }
       },
       msg = bluetooth.listen() => {
-        if let Err(err) = bluetooth.handle_event(&mut conn_man, &mut state, msg).await {
+        if let Err(err) = bluetooth.handle_event(&mut state, msg).await {
           tracing::error!("failed to handle bluetooth message: {:?}", err);
         }
       },
@@ -65,7 +66,7 @@ async fn main() {
       },
       Some(event) = dbus::maybe_recv(&mut state.player) => {
         if let Some(player) = &mut state.player {
-          if let Err(err) = player.handle_event(&mut conn_man, event).await {
+          if let Err(err) = player.handle_event(event).await {
             tracing::error!("failed to handle bluetooth message: {:?}", err);
           }
         }
