@@ -56,25 +56,25 @@ impl Player {
 
     let mut state = PlayerState::default();
 
-    // let mut art = None;
+    let mut art = None;
 
-    // if let Ok(obex_port) = player.obex_port().await {
-    // if obex_port == 0x1007 {
-    tracing::debug!("obex port 0x1007 detected from device - assuming ios");
-    state.device_type = DeviceType::Ios;
-    let art = Some(CoverArt::init(
-      client_man.clone(),
-      cover_art_cache,
-      cancel_token.child_token(),
-      device.address(),
-    ));
-    //   } else if obex_port == 0x1001 {
-    //     tracing::debug!("obex port 0x1001 detected from device - assuming android");
-    //     state.device_type = DeviceType::Android;
-    //   }
-    // } else {
-    //   tracing::warn!("could not get obex port for device!");
-    // }
+    if let Ok(obex_port) = player.obex_port().await {
+      if obex_port == 0x1007 {
+        tracing::debug!("obex port 0x1007 detected from device - assuming ios");
+        state.device_type = DeviceType::Ios;
+        art = Some(CoverArt::init(
+          client_man.clone(),
+          cover_art_cache,
+          cancel_token.child_token(),
+          device.address(),
+        ));
+      } else if obex_port == 0x1001 {
+        tracing::debug!("obex port 0x1001 detected from device - assuming android");
+        state.device_type = DeviceType::Android;
+      }
+    } else {
+      tracing::warn!("could not get obex port for device!");
+    }
 
     Ok(Self {
       client_man,
