@@ -12,29 +12,14 @@ pub const THUMBNAIL_SIZE: usize = 96;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Track {
+  pub id: String,
   pub name: String,
   pub album: Album,
   pub artist: Artist,
   pub artists: Vec<Artist>,
   pub duration_ms: usize,
   pub image_id: String,
-  pub is_episode: bool,
-  pub is_podcast: bool,
   pub saved: bool,
-  pub uid: String,
-  pub uri: String,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "shared.ts")]
-pub struct QueueTrack {
-  pub uid: String,
-  pub uri: String,
-  pub name: String,
-  pub artists: Vec<Artist>,
-  pub image_uri: String,
-  pub provider: String,
 }
 
 #[serde_with::skip_serializing_none]
@@ -48,34 +33,34 @@ pub enum Image {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Album {
+  pub id: String,
   pub name: String,
-  pub uri: String,
 }
 
 impl From<String> for Album {
   fn from(name: String) -> Self {
     Self {
-      uri: format!("bridgething:album:{}", to_slug(&name)),
+      id: format!("bridgething:album:{}", to_slug(&name)),
       name,
     }
   }
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Artist {
+  pub id: String,
   pub name: String,
-  pub uri: String,
 }
 
 impl From<String> for Artist {
   fn from(name: String) -> Self {
     Self {
-      uri: format!("bridgething:artist:{}", to_slug(&name)),
+      id: format!("bridgething:artist:{}", to_slug(&name)),
       name,
     }
   }

@@ -6,7 +6,7 @@ use bluer::{
   l2cap::{self, Socket, SocketAddr, Stream},
   Address, AddressType,
 };
-use libbridgething::{server::ServerPlayerEvent, ServerEventType};
+use libbridgething::{server::ServerPlayerEvent, ServerEventType, CARTHING_HACKS_LOGO};
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   sync::mpsc,
@@ -25,7 +25,6 @@ pub struct CoverArt {
   cache: CoverArtCache,
 
   tx: ArtTx,
-  cancel_token: CancellationToken,
   _handle: Arc<JoinHandle<()>>,
 }
 
@@ -38,7 +37,7 @@ impl CoverArt {
       cache: cache.clone(),
 
       rx,
-      cancel_token: cancel_token.child_token(),
+      cancel_token,
 
       address,
 
@@ -50,15 +49,26 @@ impl CoverArt {
       cache,
 
       tx,
-      cancel_token,
       _handle: Arc::new(inner.spawn()),
     }
   }
 
   /// this function will either send the image if it's in the cache or ask for it and send it later
   pub async fn fetch(&self, key: &String, handle: Option<MsgHandle>) {
+    // handle the dummy image for stock firmware
+    if key == "bridgething:image:bridgething:image" {
+      send_image(
+        &self.client_man,
+        &handle,
+        key.to_owned(),
+        CARTHING_HACKS_LOGO.as_bytes(),
+      )
+      .await;
+      return;
+    }
+
     if let Some(image) = self.cache.get(key) {
-      send_image(&self.client_man, &handle, &image).await;
+      send_image(&self.client_man, &handle, key.to_owned(), &image).await;
     } else if let Err(err) = self.tx.send((key.to_owned(), handle)).await {
       tracing::error!("failed to send message to image fetch thread: {:?}", err);
     }
@@ -145,7 +155,7 @@ impl CoverArtInner {
 
   async fn get_image(&mut self, image_id: &String, handle: &Option<MsgHandle>) -> bluer::Result<bool> {
     if let Some(image) = self.cache.get(image_id) {
-      send_image(&self.client_man, handle, &image).await;
+      send_image(&self.client_man, handle, image_id.to_owned(), &image).await;
       return Ok(true);
     }
 
@@ -195,7 +205,7 @@ impl CoverArtInner {
     }
     self.last_image_hash = hash;
 
-    send_image(&self.client_man, handle, &image).await;
+    send_image(&self.client_man, handle, image_id.to_owned(), &image).await;
 
     self.cache.insert(image_id.to_owned(), image);
     tracing::debug!("successfully got obex image!");
@@ -203,11 +213,12 @@ impl CoverArtInner {
   }
 }
 
-async fn send_image(client_man: &ClientMan, handle: &Option<MsgHandle>, image: &Vec<u8>) {
+async fn send_image(client_man: &ClientMan, handle: &Option<MsgHandle>, image_id: String, image: &[u8]) {
   let data = STANDARD.encode(image);
   if let Some(handle) = handle {
     if let Err(err) = handle
       .respond(ServerPlayerEvent::Image {
+        id: image_id,
         height: 200,
         width: 200,
         data,
@@ -219,6 +230,7 @@ async fn send_image(client_man: &ClientMan, handle: &Option<MsgHandle>, image: &
   } else if let Err(err) = client_man
     .broadcast(
       ServerPlayerEvent::Image {
+        id: image_id,
         height: 200,
         width: 200,
         data,

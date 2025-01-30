@@ -21,6 +21,7 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+flate2 = { workspace = true }
 
 # systemd feature
 sd-notify = { version = "0.4.5", optional = true }
@@ -52,6 +53,8 @@ als = []
 mic = []
 systemd = ["dep:sd-notify"]
 superbird = ["als", "mic", "systemd"]
+# dev features
+no-persist = []
 
 [[example]]
 name = "cover_art"

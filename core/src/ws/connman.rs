@@ -21,7 +21,7 @@ struct ClientData {
   tx: SendTx,
   mode: ClientMode,
 
-  handle: JoinHandle<()>,
+  _handle: JoinHandle<()>,
   cancel_token: CancellationToken,
 }
 
@@ -214,7 +214,7 @@ impl ClientManager {
       tx,
       mode: ClientMode::Modern,
 
-      handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone()),
+      _handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone()),
       cancel_token,
     };
 
@@ -230,10 +230,10 @@ impl ClientManager {
     }
   }
 
-  pub async fn handle_shutdown(self) {
+  pub async fn _handle_shutdown(self) {
     self.cancel_token.cancel();
 
-    JoinSet::from_iter(self.connections.into_iter().map(|(_, c)| c.handle))
+    JoinSet::from_iter(self.connections.into_iter().map(|(_, c)| c._handle))
       .join_all()
       .await;
   }

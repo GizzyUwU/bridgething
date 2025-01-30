@@ -127,7 +127,7 @@ impl Player {
       DBusPlayerEvent::Track(track) => {
         // if self.state.track.title != track.title {
         //   if let Some(art) = &self.art {
-        //     art.fetch(&track.spotify_image_id(), None).await;
+        //     art.fetch(&track.image_id(), None).await;
         //   }
         // }
         self.state.track = track;
@@ -163,7 +163,7 @@ impl Player {
 
   pub async fn request_cover_art(&self, msg_handle: MsgHandle) {
     if let Some(art) = &self.art {
-      art.fetch(&self.state.track.spotify_image_id(), Some(msg_handle)).await;
+      art.fetch(&self.state.track.image_id(), Some(msg_handle)).await;
     }
   }
 }
@@ -204,11 +204,10 @@ pub struct PlayerState {
 
 impl PlayerState {
   pub fn to_send_state(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::SpotifyPlayerState {
-      context_uri: "spotify:context:fake".to_string(),
+    ServerPlayerEvent::PlayerState {
+      context_id: "spotify:context:fake".to_string(),
       context_title: "BridgeThing".to_string(),
       is_paused: self.status == DBusPlayerStatus::Paused,
-      is_paused_bool: self.status == DBusPlayerStatus::Paused,
       playback_options: PlaybackOptions {
         repeat: self.repeat.into(),
         shuffle: self.shuffle.into(),
@@ -228,7 +227,7 @@ impl PlayerState {
   }
 
   pub fn to_send_queue(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::PlayerQueue {
+    ServerPlayerEvent::Queue {
       current: self.track.clone().into(),
       previous: vec![],
       next: vec![],

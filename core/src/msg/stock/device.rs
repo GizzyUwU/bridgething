@@ -1,7 +1,7 @@
 use libbridgething::{client::ClientSystemCommand, PhoneCallDirection, PhoneCallStatus};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg};
+use crate::msg::{PossibleSendMsg, RecvMsgData, StockSendMsg};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -20,19 +20,21 @@ pub struct PhoneCallAttributes {
   call_id: String,
 }
 
-impl From<StockDeviceRecv> for ClientSystemCommand {
+impl From<StockDeviceRecv> for RecvMsgData {
   fn from(data: StockDeviceRecv) -> Self {
     match data {
-      StockDeviceRecv::Reboot => ClientSystemCommand::Reboot,
-      StockDeviceRecv::PowerOff => ClientSystemCommand::PowerOff,
-      StockDeviceRecv::FactoryReset => ClientSystemCommand::FactoryReset,
-      StockDeviceRecv::ReturnToSpotify => ClientSystemCommand::__LegacyStockReturnToSpotify,
-      StockDeviceRecv::PhoneCallAnswer { attributes } => ClientSystemCommand::PhoneCallAccept {
+      StockDeviceRecv::Reboot => RecvMsgData::System(ClientSystemCommand::Reboot),
+      StockDeviceRecv::PowerOff => RecvMsgData::System(ClientSystemCommand::PowerOff),
+      StockDeviceRecv::FactoryReset => RecvMsgData::System(ClientSystemCommand::FactoryReset),
+      StockDeviceRecv::PhoneCallAnswer { attributes } => RecvMsgData::System(ClientSystemCommand::PhoneCallAccept {
         call_id: attributes.call_id,
-      },
-      StockDeviceRecv::PhoneCallEnd { attributes } => ClientSystemCommand::PhoneCallEnd {
+      }),
+      StockDeviceRecv::PhoneCallEnd { attributes } => RecvMsgData::System(ClientSystemCommand::PhoneCallEnd {
         call_id: attributes.call_id,
-      },
+      }),
+      StockDeviceRecv::ReturnToSpotify => {
+        RecvMsgData::Unsupported(crate::msg::PossibleRecvMsg::Stock(super::StockRecvMsg::Device(data)))
+      }
     }
   }
 }

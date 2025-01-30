@@ -10,7 +10,8 @@
     "example:dev": "RUST_LOG=bridgething_adapter=trace bun examples/dev.ts"
   },
   "dependencies": {
-    "@msgpack/msgpack": "^3.0.0-beta2"
+    "@msgpack/msgpack": "^3.0.0-beta3",
+    "@bridgething/lib": "workspace:*"
   },
   "devDependencies": {
     "@bridgething/adapter": "workspace:*",

@@ -1,7 +1,8 @@
 #![allow(clippy::large_enum_variant)]
 use libbridgething::{
   client::{
-    ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientSystemCommand, ClientVoiceCommand,
+    ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientLegacyStockCommand,
+    ClientSystemCommand, ClientVoiceCommand,
   },
   ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
 };
@@ -29,6 +30,8 @@ pub struct RecvMsg {
   pub id: Uuid,
   pub from: SocketAddr,
   pub data: RecvMsgData,
+
+  pub stock_msg_id: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -37,13 +40,14 @@ pub enum RecvMsgData {
   Store(ClientKVStoreCommand),
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
-  Interaction {
-    msg: ClientInteractionCommand,
-    stock_msg_id: Option<usize>,
-  },
+  Interaction(ClientInteractionCommand),
 
   // stock compatibility
-  Hole(Option<usize>),
+  LegacyStock(ClientLegacyStockCommand),
+
+  // ignored and unsupported
+  Hole,
+  Unsupported(PossibleRecvMsg),
 
   // metadata
   ChangeMode(ClientMode),
@@ -60,7 +64,10 @@ impl From<ClientCommand> for RecvMsgData {
       ClientCommandType::Store(msg) => Self::Store(msg),
       ClientCommandType::System(msg) => Self::System(msg),
       ClientCommandType::Voice(msg) => Self::Voice(msg),
-      ClientCommandType::Interaction { msg, stock_msg_id } => Self::Interaction { msg, stock_msg_id },
+      ClientCommandType::Interaction(msg) => Self::Interaction(msg),
+
+      // legacy
+      ClientCommandType::LegacyStock(msg) => Self::LegacyStock(msg),
     }
   }
 }
@@ -84,7 +91,7 @@ impl From<PossibleRecvMsg> for RecvMsgData {
     match recv {
       PossibleRecvMsg::Modern(msg) => msg.into(),
       PossibleRecvMsg::Stock(msg) => msg.into(),
-      PossibleRecvMsg::StockInterApp { msg_id, data, .. } => (msg_id, data).into(),
+      PossibleRecvMsg::StockInterApp { .. } => RecvMsgData::from_stock_inter_app_possible_recv(recv),
     }
   }
 }

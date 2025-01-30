@@ -18,7 +18,7 @@ pub struct MsgHandle {
 }
 
 impl MsgHandle {
-  pub fn new(client_man: ClientMan, id: Uuid, from: SocketAddr) -> Self {
+  pub fn new(client_man: ClientMan, id: Uuid, from: SocketAddr, stock_msg_id: Option<usize>) -> Self {
     tracing::trace!("creating connection handle for message id {id} from {from}");
 
     Self {
@@ -26,7 +26,7 @@ impl MsgHandle {
 
       id,
       from,
-      stock_msg_id: None,
+      stock_msg_id,
     }
   }
 

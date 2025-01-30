@@ -8,7 +8,7 @@ mod adapter;
 mod manager;
 mod monitoring;
 
-type Event = BtEvent;
+type Event = AdapterEvent;
 type Callback = ThreadsafeFunction<Event, Unknown, Event, false>;
 type MsgTx = tokio::sync::mpsc::Sender<JsMessage>;
 type MsgRx = tokio::sync::mpsc::Receiver<JsMessage>;
@@ -17,16 +17,20 @@ pub enum JsMessage {
   ScanOn,
   ScanOff,
 
+  Data(BDAddr, Vec<u8>),
+
   Disconnect(BDAddr),
 
   Callback(Callback),
 }
 
 #[napi]
-#[derive(Debug, Clone)]
-pub enum BtEvent {
+#[derive(Clone)]
+pub enum AdapterEvent {
   Connected { name: String, mac_address: String },
   Disconnected { mac_address: String },
+
+  Data { mac_address: String, data: Uint8Array },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -50,6 +54,8 @@ pub enum Error {
   Communication(#[from] tokio::sync::mpsc::error::SendError<JsMessage>),
   #[error("error communicating with the device thread")]
   InternalCommunication(#[from] tokio::sync::mpsc::error::SendError<manager::NotifyData>),
+  #[error("irrecoverable io error")]
+  Io(#[from] std::io::Error),
 }
 
 impl From<Error> for napi::Error {

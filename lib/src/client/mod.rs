@@ -4,19 +4,28 @@ use uuid::Uuid;
 
 mod bluetooth;
 mod interaction;
+mod stock;
 mod store;
 mod system;
 mod voice;
 
 pub use bluetooth::*;
 pub use interaction::*;
+pub use stock::*;
 pub use store::*;
 pub use system::*;
 pub use voice::*;
 
+/// client -> bridgething
+/// messages from the client (usually webpage) on the car thing to the bridgething
+/// daemon.
+///
+/// these messages will pass through a websocket.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "client.ts")]
 pub struct ClientCommand {
+  #[serde(with = "uuid::serde::simple")]
+  #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
   pub data: ClientCommandType,
@@ -31,9 +40,9 @@ pub enum ClientCommandType {
   Store(ClientKVStoreCommand),
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
-  Interaction {
-    #[serde(flatten)]
-    msg: ClientInteractionCommand,
-    stock_msg_id: Option<usize>,
-  },
+  Interaction(ClientInteractionCommand),
+
+  // legacy and stock app stuffs
+  #[ts(skip)]
+  LegacyStock(ClientLegacyStockCommand),
 }

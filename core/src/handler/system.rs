@@ -29,10 +29,6 @@ impl<'a> SystemHandler<'a> {
       ClientSystemCommand::FactoryReset => self.factory_reset().await,
       ClientSystemCommand::PhoneCallAccept { call_id } => self.phone_call_accept(call_id).await,
       ClientSystemCommand::PhoneCallEnd { call_id } => self.phone_call_end(call_id).await,
-      ClientSystemCommand::__LegacyStockReturnToSpotify => self.legacy_stock_return_to_spotify().await,
-      ClientSystemCommand::__LegacyStockRemoteConfigurationRequest => {
-        self.legacy_stock_remote_configuration_request().await
-      }
     }
   }
 
@@ -45,10 +41,16 @@ impl<'a> SystemHandler<'a> {
     tracing::debug!("({}) handling reboot request", &self.handle.from);
 
     #[cfg(not(debug_assertions))]
-    tokio::process::Command::new("sh")
+    let status = tokio::process::Command::new("sh")
       .arg("-c")
       .arg("sudo reboot")
-      .spawn()?;
+      .status()
+      .await?;
+
+    #[cfg(not(debug_assertions))]
+    if !status.success() {
+      tracing::error!("Failed to reboot: {:?}", status);
+    }
 
     Ok(())
   }
@@ -57,10 +59,16 @@ impl<'a> SystemHandler<'a> {
     tracing::debug!("({}) handling power off request", &self.handle.from);
 
     #[cfg(not(debug_assertions))]
-    tokio::process::Command::new("sh")
+    let status = tokio::process::Command::new("sh")
       .arg("-c")
       .arg("sudo shutdown now")
-      .spawn()?;
+      .status()
+      .await?;
+
+    #[cfg(not(debug_assertions))]
+    if !status.success() {
+      tracing::error!("Failed to reboot: {:?}", status);
+    }
 
     Ok(())
   }
@@ -89,21 +97,6 @@ impl<'a> SystemHandler<'a> {
 
   async fn phone_call_end(&self, call_id: String) -> HandlerResult {
     tracing::debug!("({}) ending phone call with id {}", &self.handle.from, call_id);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn legacy_stock_return_to_spotify(&self) -> HandlerResult {
-    tracing::debug!("({}) handling legacy stock return to Spotify", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn legacy_stock_remote_configuration_request(&self) -> HandlerResult {
-    tracing::debug!(
-      "({}) handling legacy stock remote configuration request",
-      &self.handle.id
-    );
     // Ok(self.handle.respond().await?)
     Ok(())
   }

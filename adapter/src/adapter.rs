@@ -13,7 +13,6 @@ struct AdapterInner {
 }
 
 #[napi]
-#[derive(Default)]
 pub struct PlugAdapter {
   callback_purgatory: Option<Vec<Callback>>,
   inner: Option<AdapterInner>,
@@ -57,7 +56,7 @@ impl PlugAdapter {
     Ok(())
   }
 
-  #[napi(ts_args_type = "callback: (event: string) => void")]
+  #[napi(ts_args_type = "callback: (event: AdapterEvent) => void")]
   pub fn on(&mut self, callback: Function<Event>) -> napi::Result<()> {
     tracing::debug!("registering new event listener callback");
     let callback = callback.build_threadsafe_function().build()?;
@@ -78,12 +77,12 @@ impl PlugAdapter {
 
   #[napi]
   pub fn scan_on(&self) -> napi::Result<()> {
-    Ok(self.send(JsMessage::ScanOn)?)
+    Ok(self.forward(JsMessage::ScanOn)?)
   }
 
   #[napi]
   pub fn scan_off(&self) -> napi::Result<()> {
-    Ok(self.send(JsMessage::ScanOff)?)
+    Ok(self.forward(JsMessage::ScanOff)?)
   }
 
   #[napi]
@@ -92,12 +91,30 @@ impl PlugAdapter {
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    Ok(self.send(JsMessage::Disconnect(mac_address))?)
+    Ok(self.forward(JsMessage::Disconnect(mac_address))?)
   }
 
-  fn send(&self, message: JsMessage) -> Result<()> {
+  #[napi]
+  pub fn send(&self, mac_address: String, message: Uint8Array) -> napi::Result<()> {
+    let mac_address = mac_address
+      .parse()
+      .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
+
+    Ok(self.forward(JsMessage::Data(mac_address, message.to_vec()))?)
+  }
+
+  fn forward(&self, message: JsMessage) -> Result<()> {
     let inner = self.inner.as_ref().ok_or(Error::NotInitialized)?;
     Ok(inner.tx.blocking_send(message)?)
+  }
+}
+
+impl Default for PlugAdapter {
+  fn default() -> Self {
+    Self {
+      callback_purgatory: Some(Vec::new()),
+      inner: None,
+    }
   }
 }
 

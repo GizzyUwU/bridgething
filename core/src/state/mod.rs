@@ -36,7 +36,7 @@ impl State {
     }
 
     let path = config_dir_path.join("bridgething.db");
-    let mut state = if path.exists() && path.is_file() {
+    let mut state = if path.exists() && path.is_file() && !cfg!(feature = "no-persist") {
       if let Ok(mut state) = State::read(&path).await {
         state.path = path;
         state
@@ -57,7 +57,6 @@ impl State {
 
     #[cfg(debug_assertions)]
     let meta_path = PathBuf::from("./resources/superbird.json");
-
     #[cfg(not(debug_assertions))]
     let meta_path = PathBuf::from("/etc/superbird");
 
@@ -136,11 +135,12 @@ impl State {
   async fn read(path: &PathBuf) -> StateResult<Self> {
     let data = tokio::fs::read(path).await?;
     let state: State = bincode::deserialize(&data)?;
+    tracing::trace!("persisted state: {:?}", &state);
 
     Ok(state)
   }
 
-  // #[cfg(not(debug_assertions))]
+  #[cfg(not(feature = "no-persist"))]
   async fn save(&self) -> StateResult<()> {
     let data = bincode::serialize(&self)?;
     tokio::fs::write(&self.path, data).await?;
@@ -148,14 +148,18 @@ impl State {
     Ok(())
   }
 
-  // #[cfg(debug_assertions)]
-  // async fn save(&self) -> StateResult<()> {
-  //   tracing::trace!("debug mode: not saving application state.");
-  //   Ok(())
-  // }
+  #[cfg(feature = "no-persist")]
+  async fn save(&self) -> StateResult<()> {
+    tracing::trace!("debug mode: not saving application state.");
+    Ok(())
+  }
 
   pub async fn reset(&self) -> StateResult<()> {
-    Ok(tokio::fs::remove_file(&self.path).await?)
+    if self.path.exists() {
+      tokio::fs::remove_file(&self.path).await?
+    }
+
+    Ok(())
   }
 }
 

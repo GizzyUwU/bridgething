@@ -45,11 +45,11 @@ impl From<StockRecvMsg> for RecvMsgData {
     match msg {
       StockRecvMsg::Bluetooth(data) => RecvMsgData::Bluetooth(data.into()),
       StockRecvMsg::Voice(data) => RecvMsgData::Voice(data.into()),
-      StockRecvMsg::Key => RecvMsgData::Hole(None),
-      StockRecvMsg::Action(data) => RecvMsgData::System(data.into()),
+      StockRecvMsg::Key => RecvMsgData::Hole,
+      StockRecvMsg::Action(data) => data.into(),
       StockRecvMsg::Storage(data) => RecvMsgData::Store(data.into()),
-      StockRecvMsg::Device(data) => RecvMsgData::System(data.into()),
-      StockRecvMsg::Log => RecvMsgData::Hole(None),
+      StockRecvMsg::Device(data) => data.into(),
+      StockRecvMsg::Log => RecvMsgData::Hole,
     }
   }
 }

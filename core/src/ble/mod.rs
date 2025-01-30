@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, pin::Pin};
+use std::{collections::BTreeMap, io::Write, pin::Pin};
 
 use bluer::{
   adv::{Advertisement, AdvertisementHandle},
@@ -12,12 +12,18 @@ use bluer::{
   },
   Adapter,
 };
+use flate2::Compression;
 use futures::{future, StreamExt};
-use libbridgething::{BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_SERVICE_UUID, MANUFACTURER_ID};
+use libbridgething::{
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgType, BridgeToGatewayResponse},
+  BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_MANUFACTURER_ID, BRIDGETHING_SERVICE_UUID,
+};
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   task::JoinHandle,
 };
+
+use crate::bt::BluetoothError;
 
 use super::bt::BluetoothResult;
 
@@ -78,7 +84,7 @@ impl GattServer {
     );
 
     let mut manufacturer_data = BTreeMap::new();
-    manufacturer_data.insert(MANUFACTURER_ID, vec![0x21, 0x22, 0x23, 0x24]);
+    manufacturer_data.insert(BRIDGETHING_MANUFACTURER_ID, vec![0x21, 0x22, 0x23, 0x24]);
     let le_advertisement = Advertisement {
       service_uuids: vec![BRIDGETHING_SERVICE_UUID].into_iter().collect(),
       manufacturer_data,
@@ -94,10 +100,7 @@ impl GattServer {
     let app = Application {
       services: vec![Service {
         uuid: BRIDGETHING_SERVICE_UUID,
-        // #[cfg(debug_assertions)]
         primary: false,
-        // #[cfg(not(debug_assertions))]
-        // primary: true,
         characteristics: vec![Characteristic {
           uuid: BRIDGETHING_CHARACTERISTIC_UUID,
           write: Some(CharacteristicWrite {
@@ -147,51 +150,102 @@ impl GattServer {
   async fn recv(&mut self) -> BluetoothResult<()> {
     loop {
       tokio::select! {
-        evt = self.characteristic.next() => {
-          match evt {
-            Some(CharacteristicControlEvent::Write(req)) => {
-              tracing::debug!("accepting write request event with MTU {}", req.mtu());
-              self.read_buf = vec![0; req.mtu()];
-              self.reader = Some(req.accept()?);
-            },
-            Some(CharacteristicControlEvent::Notify(notifier)) => {
-              tracing::debug!("accepting notify request event with MTU {}", notifier.mtu());
-              self.writer = Some(notifier);
-            },
-            None => break,
-          }
-        },
+        Some(msg) = self.rx.recv() => {},
+
+        evt = self.characteristic.next() => self.handle_characteristic(evt).await?,
         read_res = async {
           match &mut self.reader {
             Some(reader) if self.writer.is_some() => reader.read(&mut self.read_buf).await,
             _ => future::pending().await,
           }
-        } => {
-          match read_res {
-            Ok(0) => {
-              tracing::debug!("read stream ended");
-              self.reader = None;
-            }
-            Ok(n) => {
-              let value = self.read_buf[..n].to_vec();
-              tracing::trace!("echoing {} bytes: {:x?} ... {:x?}", value.len(), &value[0..4.min(value.len())], &value[value.len().saturating_sub(4) ..]);
+        } => self.handle_read(read_res).await?,
+      }
+    }
+  }
 
-              let Some(writer) = self.writer.as_mut() else {
-                tracing::error!("could not get reference to writer?? this should never fail.");
-                continue;
-              };
+  async fn write(&mut self, msg: BridgeToGatewayMsg) -> BluetoothResult<()> {
+    let Some(writer) = self.writer.as_mut() else {
+      tracing::error!("could not get reference to writer. is bluetooth disconnected?");
+      return Ok(());
+    };
+    tracing::trace!("writing message: {:?}", msg);
 
-              if let Err(err) = writer.write_all(&value).await {
-                tracing::error!("write failed: {}", &err);
-                self.writer = None;
-              }
-            }
-            Err(err) => {
-              tracing::error!("read stream error: {}", &err);
-              self.reader = None;
-            }
-          }
+    let packed = rmp_serde::to_vec(&msg)?;
+    tracing::trace!("packed msg: {:?}", &packed);
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&packed)?;
+    let message = encoder.finish()?;
+    tracing::trace!("final msg: {:?}", &message);
+
+    if let Err(err) = writer.write_all(&message).await {
+      tracing::error!("write failed: {}", &err);
+      self.writer = None;
+      return Err(err)?;
+    }
+
+    Ok(())
+  }
+
+  async fn handle_read(&mut self, read_res: Result<usize, std::io::Error>) -> BluetoothResult<()> {
+    match read_res {
+      Ok(0) => {
+        tracing::debug!("read stream ended");
+        self.reader = None;
+      }
+      Ok(n) => {
+        let value = self.read_buf[..n].to_vec();
+        tracing::trace!(
+          "echoing {} bytes: {:x?} ... {:x?}",
+          value.len(),
+          &value[0..4.min(value.len())],
+          &value[value.len().saturating_sub(4)..]
+        );
+
+        let Some(writer) = self.writer.as_mut() else {
+          tracing::error!("could not get reference to writer?? this should never fail.");
+          return Ok(());
+        };
+
+        if let Err(err) = writer.write_all(&value).await {
+          tracing::error!("write failed: {}", &err);
+          self.writer = None;
         }
+      }
+      Err(err) => {
+        tracing::error!("read stream error: {}", &err);
+        self.reader = None;
+      }
+    }
+
+    Ok(())
+  }
+
+  async fn handle_characteristic(&mut self, evt: Option<CharacteristicControlEvent>) -> BluetoothResult<()> {
+    match evt {
+      Some(CharacteristicControlEvent::Write(req)) => {
+        tracing::debug!("accepting write request event with MTU {}", req.mtu());
+        self.read_buf = vec![0; req.mtu()];
+        self.reader = Some(req.accept()?);
+      }
+      Some(CharacteristicControlEvent::Notify(notifier)) => {
+        tracing::debug!("accepting notify request event with MTU {}", notifier.mtu());
+        self.writer = Some(notifier);
+
+        self
+          .write(BridgeToGatewayMsg {
+            id: uuid::Uuid::now_v7(),
+            data: BridgeToGatewayMsgType::Version {
+              bridgething: "v0.1.0-alpha1".to_string(),
+              app: "unknown".to_string(),
+            },
+          })
+          .await
+          .expect("could not send version!!");
+      }
+      None => {
+        tracing::error!("bluetooth characteristic pipe broken!!");
+        return Err(BluetoothError::CharacteristicControl);
       }
     }
 

@@ -1,4 +1,4 @@
-use libbridgething::{to_slug, QueueTrack, Track};
+use libbridgething::Track;
 
 use super::{media_player1::MediaPlayer1Track, DBusError};
 
@@ -137,7 +137,7 @@ pub struct DBusPlayerTrack {
 }
 
 impl DBusPlayerTrack {
-  pub fn track_uid(&self) -> String {
+  pub fn track_id(&self) -> String {
     format!(
       "bridgething:track:{}:{}:{}",
       self
@@ -163,12 +163,8 @@ impl DBusPlayerTrack {
     )
   }
 
-  pub fn image_uid(&self) -> String {
-    format!("{}:image", self.track_uid())
-  }
-
-  pub fn spotify_image_id(&self) -> String {
-    format!("spotify:image:{}", to_slug(&self.album))
+  pub fn image_id(&self) -> String {
+    format!("{}:image", self.track_id())
   }
 }
 
@@ -188,31 +184,14 @@ impl Default for DBusPlayerTrack {
 impl From<DBusPlayerTrack> for Track {
   fn from(val: DBusPlayerTrack) -> Self {
     Track {
+      id: val.track_id(),
+      image_id: val.image_id(),
       name: val.title,
       artist: val.artists.first().cloned().unwrap_or_default().into(),
       artists: val.artists.into_iter().map(Into::into).collect(),
       duration_ms: val.duration,
-      image_id: format!("spotify:image:{}", to_slug(&val.album)),
-      is_episode: false,
-      is_podcast: false,
       saved: false,
-      uid: to_slug(&val.album),
-      uri: format!("spotify:context:{}", to_slug(&val.album)),
-
       album: val.album.into(),
-    }
-  }
-}
-
-impl From<DBusPlayerTrack> for QueueTrack {
-  fn from(val: DBusPlayerTrack) -> Self {
-    QueueTrack {
-      uid: to_slug(&val.album),
-      uri: format!("spotify:track:{}", to_slug(&val.title)),
-      name: val.title,
-      artists: val.artists.into_iter().map(Into::into).collect(),
-      image_uri: format!("spotify:image:{}", to_slug(&val.album)),
-      provider: "context".to_string(),
     }
   }
 }

@@ -52,7 +52,7 @@ async fn main() {
         };
       },
       Ok(msg) = client_listener.listen() => {
-        if let Err(err) = Handler::new(client_man.clone(), &mut state, &mut bluetooth, msg.id, msg.from).handle(msg.data).await {
+        if let Err(err) = Handler::new(client_man.clone(), &mut state, &mut bluetooth, msg.id, msg.from, msg.stock_msg_id).handle(msg.data).await {
           tracing::error!("failed to handle websocket message: {:?}", err);
         }
       },

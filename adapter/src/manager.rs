@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use btleplug::{
   api::{
     bleuuid::BleUuid, BDAddr, Central, CentralEvent, Characteristic, Manager as _, Peripheral as _,
-    PeripheralProperties, ScanFilter,
+    PeripheralProperties, ScanFilter, ValueNotification,
   },
   platform::{Manager, Peripheral, PeripheralId},
 };
@@ -14,7 +14,7 @@ use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunctionCallMode};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{BtEvent, Callback, Error, Event, JsMessage, MsgRx, Result};
+use crate::{AdapterEvent, Callback, Error, Event, JsMessage, MsgRx, Result};
 
 type NotifyTx = tokio::sync::mpsc::Sender<NotifyData>;
 type NotifyRx = tokio::sync::mpsc::Receiver<NotifyData>;
@@ -100,8 +100,9 @@ impl BtMan {
             tracing::error!("error handling ble event: {:?}", err);
           }
         },
-        Some(data) = self.notify_rx.recv() => {
-          tracing::debug!("received new from: {:?}", data.address);
+        Some(msg) = self.notify_rx.recv() => {
+          tracing::debug!("received new from: {:?}", msg.address);
+          self.emit(AdapterEvent::Data { mac_address: msg.address.to_string(), data: msg.data.into() });
         },
         Some(msg) = self.msg_rx.recv() => {
           if let Err(err) = self.handle_message(msg).await {
@@ -144,7 +145,7 @@ impl BtMan {
     let properties = handle.properties().await?;
     if let Some(properties) = properties {
       if !properties.services.contains(&BRIDGETHING_SERVICE_UUID) {
-        // tracing::trace!("device with mac {:?} did not have visible services", handle.address());
+        // tracing::trace!("device with mac {:?} did not have bridgething service", handle.address());
         return Ok(());
       };
     };
@@ -163,7 +164,7 @@ impl BtMan {
     let device = Device::new(handle, self.notify_tx.clone(), self.cancel_token.child_token()).await?;
 
     tracing::debug!("device with mac {:?} connected", device.address);
-    self.emit(BtEvent::Connected {
+    self.emit(AdapterEvent::Connected {
       name: device.name.clone(),
       mac_address: device.address.to_string(),
     });
@@ -176,7 +177,7 @@ impl BtMan {
     let handle = self.adapter.peripheral(&id).await?;
     tracing::debug!("device with mac {:?} disconnected", handle.address());
 
-    self.emit(BtEvent::Disconnected {
+    self.emit(AdapterEvent::Disconnected {
       mac_address: handle.address().to_string(),
     });
 
@@ -197,6 +198,7 @@ impl BtMan {
     match msg {
       JsMessage::ScanOn => tracing::debug!("received scan on message"),
       JsMessage::ScanOff => tracing::debug!("received scan off message"),
+      JsMessage::Data(address, data) => tracing::debug!("sending data {:?} to {:?}", address, data),
       JsMessage::Disconnect(address) => self.disconnect(address).await?,
       JsMessage::Callback(callback) => {
         tracing::debug!("new callback registered");
@@ -252,8 +254,12 @@ impl Device {
       .find(|c| c.uuid == BRIDGETHING_CHARACTERISTIC_UUID)
       .ok_or(crate::Error::NoCharacteristic)?;
 
-    handle.subscribe(&char).await?;
     let notify_stream = handle.notifications().await?;
+    handle.subscribe(&char).await?;
+
+    // handle
+    //   .write(&char, &[0xf, 0x0, 0x0, 0xd], WriteType::WithoutResponse)
+    //   .await?;
 
     Ok(Self {
       name: device_name(&properties),
@@ -267,10 +273,19 @@ impl Device {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NotifyData {
   address: BDAddr,
   data: Vec<u8>,
+}
+
+impl From<NotifyData> for AdapterEvent {
+  fn from(notification: NotifyData) -> Self {
+    Self::Data {
+      mac_address: notification.address.to_string(),
+      data: notification.data.into(),
+    }
+  }
 }
 
 type NotifyStream = std::pin::Pin<Box<dyn futures::Stream<Item = btleplug::api::ValueNotification> + Send>>;
@@ -285,13 +300,29 @@ impl DeviceNotify {
   async fn event_loop(&mut self) -> Result<()> {
     loop {
       tokio::select! {
-        Some(data) = self.stream.next() => {
-          tracing::trace!("received from {:?} data: {:?}", self.address, data);
-          self.tx.send(NotifyData { address: self.address, data: data.value }).await?;
-        },
+        Some(data) = self.stream.next() => self.handle_data(data).await?,
         _ = self.cancel_token.cancelled() => break,
       }
     }
+
+    Ok(())
+  }
+
+  async fn handle_data(&mut self, data: ValueNotification) -> Result<()> {
+    tracing::trace!("received from {:?} data: {:?}", self.address, data);
+
+    let mut decoder = flate2::write::GzDecoder::new(Vec::new());
+    decoder.write_all(&data.value)?;
+    let decoded = decoder.finish()?;
+    tracing::trace!("final msg: {:?}", decoded);
+
+    self
+      .tx
+      .send(NotifyData {
+        address: self.address,
+        data: decoded,
+      })
+      .await?;
 
     Ok(())
   }

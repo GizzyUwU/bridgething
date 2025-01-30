@@ -1,20 +1,21 @@
 use std::net::SocketAddr;
+use uuid::Uuid;
 
 mod bluetooth;
 mod interaction;
+mod stock;
 mod store;
 mod system;
 mod voice;
 
 use bluetooth::*;
 use interaction::*;
+use stock::*;
 use store::*;
 use system::*;
-use uuid::Uuid;
 use voice::*;
 
 mod handle;
-
 pub use handle::*;
 
 use crate::{
@@ -38,9 +39,10 @@ impl<'a> Handler<'a> {
     bluetooth: &'a mut Bluetooth,
     msg_id: Uuid,
     msg_from: SocketAddr,
+    stock_msg_id: Option<usize>,
   ) -> Self {
     Self {
-      handle: MsgHandle::new(client_man, msg_id, msg_from),
+      handle: MsgHandle::new(client_man, msg_id, msg_from, stock_msg_id),
       state,
       bluetooth,
     }
@@ -52,12 +54,28 @@ impl<'a> Handler<'a> {
       RecvMsgData::Store(msg) => StorageHandler::new(self).handle(msg).await,
       RecvMsgData::System(msg) => SystemHandler::new(self).handle(msg).await,
       RecvMsgData::Voice(msg) => VoiceHandler::new(self).handle(msg).await,
-      RecvMsgData::Interaction { msg, stock_msg_id } => InteractionHandler::new(self, stock_msg_id).handle(msg).await,
+      RecvMsgData::Interaction(msg) => InteractionHandler::new(self).handle(msg).await,
 
-      RecvMsgData::Hole(stock_msg_id) => {
+      // stock compatibility
+      RecvMsgData::LegacyStock(msg) => LegacyStockHandler::new(self).handle(msg).await,
+
+      // ignored and unsupported
+      RecvMsgData::Hole => {
         tracing::trace!("({}) received blackhole message", &self.handle.from);
 
-        if let Some(msg_id) = stock_msg_id {
+        if let Some(msg_id) = self.handle.stock_msg_id {
+          self
+            .handle
+            .send_stock(StockInterAppSend::make_ack(Some(msg_id)))
+            .await?;
+        }
+
+        Ok(())
+      }
+      RecvMsgData::Unsupported(msg) => {
+        tracing::trace!("({}) received unsupported message: {:?}", &self.handle.from, msg);
+
+        if let Some(msg_id) = self.handle.stock_msg_id {
           self
             .handle
             .send_stock(StockInterAppSend::make_ack(Some(msg_id)))
@@ -67,7 +85,7 @@ impl<'a> Handler<'a> {
         Ok(())
       }
 
-      // need to do some things for legacy compatibility
+      // switch to legacy compatibility mode
       RecvMsgData::ChangeMode(mode) => {
         if mode == ClientMode::Stock {
           self

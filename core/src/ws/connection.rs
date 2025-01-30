@@ -235,25 +235,37 @@ impl From<PossibleRecvMsg> for ForwardMsg {
 impl From<(SocketAddr, ForwardMsg)> for RecvMsg {
   fn from((from, fwd): (SocketAddr, ForwardMsg)) -> Self {
     match fwd {
-      ForwardMsg::Msg(id, data) => Self {
-        id,
-        from,
-        data: data.into(),
-      },
+      ForwardMsg::Msg(id, data) => {
+        let stock_msg_id = if let PossibleRecvMsg::StockInterApp { msg_id, .. } = data {
+          Some(msg_id)
+        } else {
+          None
+        };
+
+        Self {
+          id,
+          from,
+          data: data.into(),
+          stock_msg_id,
+        }
+      }
       ForwardMsg::ConnectionClosed(close_code, msg) => Self {
         id: Uuid::now_v7(),
         from,
         data: RecvMsgData::ConnectionClosed(close_code, msg),
+        stock_msg_id: None,
       },
       ForwardMsg::Error(err) => Self {
         id: Uuid::now_v7(),
         from,
         data: RecvMsgData::Error(err),
+        stock_msg_id: None,
       },
       ForwardMsg::ChangeMode(mode) => Self {
         id: Uuid::now_v7(),
         from,
         data: RecvMsgData::ChangeMode(mode),
+        stock_msg_id: None,
       },
     }
   }

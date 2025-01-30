@@ -385,6 +385,14 @@ pub enum BluetoothError {
   Timeout,
   #[error(transparent)]
   DBus(#[from] DBusError),
+  #[error(transparent)]
+  MessagePackEnc(#[from] rmp_serde::encode::Error),
+  #[error(transparent)]
+  MessagePackDec(#[from] rmp_serde::decode::Error),
+  #[error(transparent)]
+  Io(#[from] std::io::Error),
+  #[error("bluetooth gatt characteristic pipe broken!!")]
+  CharacteristicControl,
 }
 
 impl From<Vec<WSError>> for BluetoothError {

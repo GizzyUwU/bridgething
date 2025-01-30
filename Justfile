@@ -12,5 +12,8 @@ gateway:
 
 typescript:
   rm -rf lib/ts/bindings
-  cargo test -p libbridgething &> /dev/null || exit 0
+  cargo test -p libbridgething &> /dev/null
   bunx prettier lib/ts/bindings --write
+
+tokei:
+  tokei -t Nix,Rust,TypeScript

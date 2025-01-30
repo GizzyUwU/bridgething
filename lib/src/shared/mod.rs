@@ -7,5 +7,10 @@ pub use player::*;
 pub use system::*;
 
 pub fn to_slug(value: &str) -> String {
-  value.chars().filter(|c| c.is_alphanumeric()).collect::<String>()
+  value
+    .trim()
+    .replace(' ', "_")
+    .chars()
+    .filter(|c| c.is_alphanumeric())
+    .collect::<String>()
 }

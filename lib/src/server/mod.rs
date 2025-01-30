@@ -23,9 +23,15 @@ pub enum ServerEventType {
   Info,
 }
 
+/// bridgething -> client
+/// messages from bridgething to the client (usually webpage) on the car thing.
+///
+/// these messages will pass through a websocket.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "server.ts")]
 pub struct ServerEvent {
+  #[serde(with = "uuid::serde::simple")]
+  #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
   pub data: ServerEventData,

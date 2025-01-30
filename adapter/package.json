@@ -32,8 +32,9 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --esm -o ./dist",
+    "build:release": "napi build --platform --release --esm -o ./dist",
     "build:debug": "napi build --platform --esm -o ./dist",
+    "build": "bun run build:debug",
     "version": "napi version"
   }
 }

@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  client::ClientInteractionCommand,
+  client::{ClientInteractionCommand, ClientLegacyStockCommand},
   server::{ServerInteractionEvent, ServerPlayerEvent},
   stock::StockSetPreset,
-  CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, QueueTrack, Track,
+  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, Track,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, RecvMsgData};
+use crate::msg::{PossibleRecvMsg, PossibleSendMsg, RecvMsgData};
 
 use super::StockSendMsg;
 
@@ -221,7 +221,7 @@ pub enum StockInterAppSendPayload {
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
     playback_speed: f64, // TODO: this is a float. i don't care right now.
-    track: Track,
+    track: StockTrack,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
   SpotifyPlayerState {
@@ -233,13 +233,13 @@ pub enum StockInterAppSendPayload {
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
     playback_speed: f64, // TODO: this is a float. i don't care right now.
-    track: Track,
+    track: StockTrack,
   },
   #[serde(rename = "com.spotify.play_queue")]
   PlayerQueue {
-    next: Vec<QueueTrack>,
-    current: QueueTrack,
-    previous: Vec<QueueTrack>,
+    next: Vec<StockQueueTrack>,
+    current: StockQueueTrack,
+    previous: Vec<StockQueueTrack>,
   },
   #[serde(rename = "com.spotify.get_children_of_item")]
   ItemChildren {
@@ -280,51 +280,29 @@ pub struct ChildMeta {
 impl From<ServerPlayerEvent> for StockInterAppSendPayload {
   fn from(data: ServerPlayerEvent) -> Self {
     match data {
-      ServerPlayerEvent::IdlePlayerState {
-        context_uri,
-        is_paused,
-        is_paused_bool,
-        playback_options,
-        playback_position,
-        playback_restrictions,
-        playback_speed,
-      } => Self::IdlePlayerState {
-        context_uri,
-        is_paused,
-        is_paused_bool,
-        playback_options,
-        playback_position,
-        playback_restrictions,
-        playback_speed,
+      ServerPlayerEvent::PlayerIdle => Self::IdlePlayerState {
+        context_uri: "".to_string(),
+        is_paused: false,
+        is_paused_bool: false,
+        playback_position: 0,
+        playback_options: PlaybackOptions {
+          repeat: 0,
+          shuffle: false,
+        },
+        playback_restrictions: PlaybackRestrictions {
+          can_repeat_context: true,
+          can_repeat_track: true,
+          can_seek: false,
+          can_skip_next: false,
+          can_skip_prev: false,
+          can_toggle_shuffle: true,
+        },
+        playback_speed: 0.0,
       },
-      ServerPlayerEvent::SimplePlayerState {
-        currently_active_application,
-        context_uri,
+      ServerPlayerEvent::PlayerState {
+        context_id: context_uri,
         context_title,
         is_paused,
-        is_paused_bool,
-        playback_options,
-        playback_position,
-        playback_restrictions,
-        playback_speed,
-        track,
-      } => Self::SimplePlayerState {
-        currently_active_application,
-        context_uri,
-        context_title,
-        is_paused,
-        is_paused_bool,
-        playback_options,
-        playback_position,
-        playback_restrictions,
-        playback_speed,
-        track,
-      },
-      ServerPlayerEvent::SpotifyPlayerState {
-        context_uri,
-        context_title,
-        is_paused,
-        is_paused_bool,
         playback_options,
         playback_position,
         playback_restrictions,
@@ -334,27 +312,119 @@ impl From<ServerPlayerEvent> for StockInterAppSendPayload {
         context_uri,
         context_title,
         is_paused,
-        is_paused_bool,
+        is_paused_bool: is_paused,
         playback_options,
         playback_position,
         playback_restrictions,
         playback_speed,
-        track,
+        track: track.into(),
       },
-      ServerPlayerEvent::PlayerQueue {
+      ServerPlayerEvent::Queue {
         next,
         current,
         previous,
       } => Self::PlayerQueue {
-        next,
-        current,
-        previous,
+        next: next.into_iter().map(|a| a.into()).collect(),
+        current: current.into(),
+        previous: previous.into_iter().map(|a| a.into()).collect(),
       },
-      ServerPlayerEvent::Image { height, width, data } => Self::Image {
+      ServerPlayerEvent::Image {
+        height, width, data, ..
+      } => Self::Image {
         height,
         width,
         image_data: data,
       },
+    }
+  }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockArtist {
+  pub name: String,
+  pub uri: String,
+}
+
+impl From<Artist> for StockArtist {
+  fn from(artist: Artist) -> Self {
+    Self {
+      name: artist.name,
+      uri: artist.id,
+    }
+  }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockAlbum {
+  pub name: String,
+  pub uri: String,
+}
+
+impl From<Album> for StockAlbum {
+  fn from(album: Album) -> Self {
+    Self {
+      name: album.name,
+      uri: album.id,
+    }
+  }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockTrack {
+  pub name: String,
+  pub album: StockAlbum,
+  pub artist: StockArtist,
+  pub artists: Vec<StockArtist>,
+  pub duration_ms: usize,
+  pub image_id: String,
+  pub is_episode: bool,
+  pub is_podcast: bool,
+  pub saved: bool,
+  pub uid: String,
+  pub uri: String,
+}
+
+impl From<Track> for StockTrack {
+  fn from(track: Track) -> Self {
+    Self {
+      name: track.name,
+      album: track.album.into(),
+      artist: track.artists.first().cloned().unwrap_or_default().into(),
+      artists: track.artists.into_iter().map(|a| a.into()).collect(),
+      duration_ms: track.duration_ms,
+      image_id: track.image_id,
+      is_episode: false,
+      is_podcast: false,
+      saved: track.saved,
+      uid: track.id.clone(),
+      uri: track.id,
+    }
+  }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockQueueTrack {
+  pub uid: String,
+  pub uri: String,
+  pub name: String,
+  pub artists: Vec<StockArtist>,
+  pub image_uri: String,
+  pub provider: String,
+}
+
+impl From<Track> for StockQueueTrack {
+  fn from(track: Track) -> Self {
+    Self {
+      uid: track.id.clone(),
+      uri: track.id,
+      name: track.name,
+      artists: track.artists.into_iter().map(|a| a.into()).collect(),
+      image_uri: track.image_id,
+      provider: "context".to_string(),
     }
   }
 }
@@ -383,9 +453,7 @@ impl StockInterAppSend {
 
 impl From<ServerInteractionEvent> for StockInterAppSendPayload {
   fn from(payload: ServerInteractionEvent) -> Self {
-    match payload {
-      ServerInteractionEvent::__LegacySpotifyPermissions => todo!(),
-    }
+    todo!()
   }
 }
 
@@ -410,167 +478,80 @@ impl StockInterAppSend {
   }
 }
 
-impl From<(usize, StockInterAppRecv)> for RecvMsgData {
-  fn from((msg_id, data): (usize, StockInterAppRecv)) -> Self {
+impl RecvMsgData {
+  /// this method WILL panic. don't be a dumbass.
+  pub fn from_stock_inter_app_possible_recv(recv: PossibleRecvMsg) -> Self {
+    let PossibleRecvMsg::StockInterApp { ref data, .. } = recv else {
+      panic!("YOU CAN ONY CALL THIS WITH STOCK INTER APP RECV DATA");
+    };
+
+    // fully unsupported
     match data {
-      StockInterAppRecv::GetImage { id } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::GetImage { id },
-      },
-      StockInterAppRecv::GetNextTracks {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::GetNextTracks,
-      },
-      StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::PhoneAnswer,
-      },
-      StockInterAppRecv::PhoneDecline {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::PhoneDecline,
-      },
-      StockInterAppRecv::PhoneCallImage { phone_number } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::PhoneCallImage { phone_number },
-      },
-      StockInterAppRecv::PhoneCallMessage { phone_number, message } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::PhoneCallMessage { phone_number, message },
-      },
-      StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::IncreaseVolume,
-      },
-      StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::DecreaseVolume,
-      },
-      StockInterAppRecv::SkipToIndex { index } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SkipToIndex { index },
-      },
-      StockInterAppRecv::SkipNext {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SkipNext,
-      },
-      StockInterAppRecv::SkipPrev { allow_seeking } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SkipPrev { allow_seeking },
-      },
-      StockInterAppRecv::SeekTo { position } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SeekTo { position },
-      },
-      StockInterAppRecv::Pause {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::Pause,
-      },
-      StockInterAppRecv::Resume {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::Resume,
-      },
-      StockInterAppRecv::SetShuffle { shuffle } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SetShuffle { shuffle },
-      },
-      StockInterAppRecv::SetRepeat { repeat_mode } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SetRepeat { repeat_mode },
-      },
-      StockInterAppRecv::GetChildrenOfItem {
-        parent_id,
-        limit,
-        offset,
-      } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyGetChildren {
-          parent_id,
-          limit,
-          offset,
-        },
-      },
-      StockInterAppRecv::GetHome { limit, limit_overrides } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifyGetHome { limit, limit_overrides },
-      },
-      StockInterAppRecv::GetPermissions {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifyGetPermissions,
-      },
-      StockInterAppRecv::GetPodcast { uri, limit, offset } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyGetPodcast { uri, limit, offset },
-      },
-      StockInterAppRecv::GetPresets {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifyGetPresets,
-      },
-      StockInterAppRecv::GetSaved { id } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyGetSaved { id },
-      },
-      StockInterAppRecv::GetThumbnailImage { id } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::GetThumbnailImage { id },
-      },
-      StockInterAppRecv::GetTips {} => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifyGetTips,
-      },
-      StockInterAppRecv::GetTts { file } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifyGetTts { file },
-      },
-      StockInterAppRecv::PlayPodcastTrailer { uri } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyPlayPodcastTrailer { uri },
-      },
-      StockInterAppRecv::QueueUri { uri } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyQueueUri { uri },
-      },
-      StockInterAppRecv::SetPodcastPlaybackSpeed { playback_speed } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifySetPodcastPlaybackSpeed { playback_speed },
-      },
-      StockInterAppRecv::SetPreset { presets } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifySetPreset { presets },
-      },
-      StockInterAppRecv::SetSaved { id, uri, saved } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifySetSaved { id, uri, saved },
-      },
-      StockInterAppRecv::SummonDj => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::__LegacySpotifySummonDj,
-      },
-      StockInterAppRecv::PlayUri {
-        uri,
-        feature_identifier,
-        interaction_id,
-        skip_to_uri,
-        skip_to_uid,
-      } => RecvMsgData::Interaction {
-        stock_msg_id: Some(msg_id),
-        msg: ClientInteractionCommand::SpotifyPlayUri {
-          uri,
-          feature_identifier,
-          interaction_id,
-          skip_to_uri,
-          skip_to_uid,
-        },
-      },
-      _ => RecvMsgData::Hole(Some(msg_id)),
+      StockInterAppRecv::GetChildrenOfItem { .. }
+      | StockInterAppRecv::GetHome { .. }
+      | StockInterAppRecv::GetPodcast { .. }
+      | StockInterAppRecv::GetPresets { .. }
+      | StockInterAppRecv::GetSaved { .. }
+      | StockInterAppRecv::GetTips { .. }
+      | StockInterAppRecv::GetTts { .. }
+      | StockInterAppRecv::PlayPodcastTrailer { .. }
+      | StockInterAppRecv::QueueUri { .. }
+      | StockInterAppRecv::SetPodcastPlaybackSpeed { .. }
+      | StockInterAppRecv::SetPreset { .. }
+      | StockInterAppRecv::SetSaved { .. }
+      | StockInterAppRecv::SummonDj
+      | StockInterAppRecv::PlayUri { .. } => return RecvMsgData::Unsupported(recv),
+      _ => {}
+    }
+
+    let PossibleRecvMsg::StockInterApp { data, .. } = recv else {
+      panic!("YOU CAN ONY CALL THIS WITH STOCK INTER APP RECV DATA");
+    };
+
+    match data {
+      StockInterAppRecv::GetImage { id } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetImage { id }),
+      StockInterAppRecv::GetThumbnailImage { id } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetThumbnailImage { id })
+      }
+      StockInterAppRecv::GetNextTracks {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetNextTracks),
+      StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Interaction(ClientInteractionCommand::PhoneAnswer),
+      StockInterAppRecv::PhoneDecline {} => RecvMsgData::Interaction(ClientInteractionCommand::PhoneDecline),
+      StockInterAppRecv::PhoneCallImage { phone_number } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::PhoneCallImage { phone_number })
+      }
+      StockInterAppRecv::PhoneCallMessage { phone_number, message } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::PhoneCallMessage { phone_number, message })
+      }
+      StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Interaction(ClientInteractionCommand::IncreaseVolume),
+      StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Interaction(ClientInteractionCommand::DecreaseVolume),
+      StockInterAppRecv::SkipToIndex { index } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::SkipToIndex { index })
+      }
+      StockInterAppRecv::SkipNext {} => RecvMsgData::Interaction(ClientInteractionCommand::SkipNext),
+      StockInterAppRecv::SkipPrev { allow_seeking } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::SkipPrev { allow_seeking })
+      }
+      StockInterAppRecv::SeekTo { position } => RecvMsgData::Interaction(ClientInteractionCommand::SeekTo { position }),
+      StockInterAppRecv::Pause {} => RecvMsgData::Interaction(ClientInteractionCommand::Pause),
+      StockInterAppRecv::Resume {} => RecvMsgData::Interaction(ClientInteractionCommand::Resume),
+      StockInterAppRecv::SetShuffle { shuffle } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::SetShuffle { shuffle })
+      }
+      StockInterAppRecv::SetRepeat { repeat_mode } => {
+        RecvMsgData::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode })
+      }
+      StockInterAppRecv::GetPermissions { .. } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions)
+      }
+
+      _ => RecvMsgData::Hole,
     }
   }
 }
 
 #[cfg(test)]
 mod test {
-  use std::collections::HashMap;
-
-  use libbridgething::stock::StockSetPreset;
+  use libbridgething::client::ClientLegacyStockCommand;
   use uuid::Uuid;
 
   use super::StockInterAppRecv;
@@ -720,57 +701,16 @@ mod test {
   fn ser_recv_get_image() {
     let ser = serde_json::to_string(&PossibleRecvMsg::Modern(ClientCommand {
       id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-      data: ClientCommandType::Interaction {
-        msg: ClientInteractionCommand::GetImage {
-          id: "image_id".to_string(),
-        },
-        stock_msg_id: None,
-      },
+      data: ClientCommandType::LegacyStock(ClientLegacyStockCommand::GetImage {
+        id: "image_id".to_string(),
+      }),
     }))
     .expect("failed to serialize json");
     println!("{:?}", &ser);
 
     assert_eq!(
       ser,
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"getImage","args":{"id":"image_id"}}"#
-    );
-  }
-
-  #[test]
-  fn de_recv_get_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"getImage","args":{"id":"image_id"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::GetImage {
-            id: "image_id".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_get_next_tracks() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"getNextTracks"}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::GetNextTracks,
-          stock_msg_id: None
-        }
-      })
+      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"legacyStock","action":"getImage","args":{"id":"image_id"}}"#
     );
   }
 
@@ -784,12 +724,9 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::PhoneCallImage {
-            phone_number: "1234567890".to_string()
-          },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::PhoneCallImage {
+          phone_number: "1234567890".to_string()
+        })
       })
     );
   }
@@ -804,13 +741,10 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::PhoneCallMessage {
-            phone_number: "1234567890".to_string(),
-            message: "Hello".to_string()
-          },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::PhoneCallMessage {
+          phone_number: "1234567890".to_string(),
+          message: "Hello".to_string()
+        })
       })
     );
   }
@@ -826,10 +760,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SkipToIndex { index: 5 },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SkipToIndex { index: 5 })
       })
     );
   }
@@ -844,10 +775,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SkipPrev { allow_seeking: true },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SkipPrev { allow_seeking: true })
       })
     );
   }
@@ -863,10 +791,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SeekTo { position: 120 },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SeekTo { position: 120 })
       })
     );
   }
@@ -881,10 +806,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SetShuffle { shuffle: true },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SetShuffle { shuffle: true })
       })
     );
   }
@@ -899,276 +821,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SetRepeat { repeat_mode: true },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_get_children() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyGetChildren","args":{"parent_id":"parent_id","limit":10,"offset":5}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyGetChildren {
-            parent_id: "parent_id".to_string(),
-            limit: 10,
-            offset: Some(5)
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_get_home() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyGetHome","args":{"limit":10,"limit_overrides":{"key1":5,"key2":10}}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    let mut limit_overrides = HashMap::new();
-    limit_overrides.insert("key1".to_string(), 5);
-    limit_overrides.insert("key2".to_string(), 10);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::__LegacySpotifyGetHome {
-            limit: 10,
-            limit_overrides
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_get_podcast() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyGetPodcast","args":{"uri":"podcast_uri","limit":10,"offset":5}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyGetPodcast {
-            uri: "podcast_uri".to_string(),
-            limit: Some(10),
-            offset: Some(5)
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_get_saved() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyGetSaved","args":{"id":"saved_id"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyGetSaved {
-            id: "saved_id".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_get_thumbnail_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"getThumbnailImage","args":{"id":"thumbnail_id"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::GetThumbnailImage {
-            id: "thumbnail_id".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_get_tts() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyGetTts","args":{"file":"tts_file"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::__LegacySpotifyGetTts {
-            file: "tts_file".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_play_podcast_trailer() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyPlayPodcastTrailer","args":{"uri":"trailer_uri"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyPlayPodcastTrailer {
-            uri: "trailer_uri".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_queue_uri() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyQueueUri","args":{"uri":"queue_uri"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyQueueUri {
-            uri: "queue_uri".to_string()
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_set_podcast_playback_speed() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifySetPodcastPlaybackSpeed","args":{"playback_speed":2}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifySetPodcastPlaybackSpeed { playback_speed: 2 },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_set_preset() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifySetPreset","args":{"presets":[{"version":1,"context_uri":"context1","slot_index":0,"source":"source1"},{"version":2,"context_uri":"context2","slot_index":1,"source":"source2"}]}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    let presets = vec![
-      StockSetPreset {
-        version: 1,
-        context_uri: "context1".to_string(),
-        slot_index: 0,
-        source: "source1".to_string(),
-      },
-      StockSetPreset {
-        version: 2,
-        context_uri: "context2".to_string(),
-        slot_index: 1,
-        source: "source2".to_string(),
-      },
-    ];
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::__LegacySpotifySetPreset { presets },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_set_saved() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifySetSaved","args":{"id":"saved_id","uri":"saved_uri","saved":true}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifySetSaved {
-            id: Some("saved_id".to_string()),
-            uri: Some("saved_uri".to_string()),
-            saved: true
-          },
-          stock_msg_id: None
-        }
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_spotify_play_uri() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"spotifyPlayUri","args":{"uri":"play_uri","feature_identifier":"feature_id","interaction_id":"interaction_id","skip_to_uri":"skip_uri","skip_to_uid":"skip_uid"}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientCommand {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        data: ClientCommandType::Interaction {
-          msg: ClientInteractionCommand::SpotifyPlayUri {
-            uri: "play_uri".to_string(),
-            feature_identifier: "feature_id".to_string(),
-            interaction_id: Some("interaction_id".to_string()),
-            skip_to_uri: Some("skip_uri".to_string()),
-            skip_to_uid: Some("skip_uid".to_string())
-          },
-          stock_msg_id: None
-        }
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode: true })
       })
     );
   }
