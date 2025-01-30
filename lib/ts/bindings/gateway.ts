@@ -11,6 +11,7 @@ export type BridgeToGatewayEvent = never;
  * these messages will pass over bluetooth.
  */
 export type BridgeToGatewayMsg = { id: string } & (
+  | { type: 'version'; bridgething: string; app: string }
   | ({ type: 'command' } & BridgeToGatewayCommand)
   | ({ type: 'event' } & BridgeToGatewayEvent)
   | ({ type: 'request' } & BridgeToGatewayRequest)
@@ -18,6 +19,7 @@ export type BridgeToGatewayMsg = { id: string } & (
 );
 
 export type BridgeToGatewayMsgType =
+  | { type: 'version'; bridgething: string; app: string }
   | ({ type: 'command' } & BridgeToGatewayCommand)
   | ({ type: 'event' } & BridgeToGatewayEvent)
   | ({ type: 'request' } & BridgeToGatewayRequest)
@@ -43,6 +45,7 @@ export type GatewayToBridgeEvent = never;
  * these messages will pass over bluetooth.
  */
 export type GatewayToBridgeMsg = { id: string } & (
+  | { type: 'version'; gateway: string; app: string }
   | ({ type: 'command' } & GatewayToBridgeCommand)
   | ({ type: 'event' } & GatewayToBridgeEvent)
   | ({ type: 'request' } & GatewayToBridgeRequest)
@@ -50,6 +53,7 @@ export type GatewayToBridgeMsg = { id: string } & (
 );
 
 export type GatewayToBridgeMsgType =
+  | { type: 'version'; gateway: string; app: string }
   | ({ type: 'command' } & GatewayToBridgeCommand)
   | ({ type: 'event' } & GatewayToBridgeEvent)
   | ({ type: 'request' } & GatewayToBridgeRequest)

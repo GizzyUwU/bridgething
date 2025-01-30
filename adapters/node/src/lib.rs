@@ -27,10 +27,10 @@ pub enum JsMessage {
 #[napi]
 #[derive(Clone)]
 pub enum AdapterEvent {
-  Connected { name: String, mac_address: String },
-  Disconnected { mac_address: String },
+  Connected { name: String, device_id: String },
+  Disconnected { device_id: String },
 
-  Data { mac_address: String, data: Uint8Array },
+  Data { device_id: String, data: Uint8Array },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -53,9 +53,13 @@ pub enum Error {
   #[error("error communicating with the bluetooth thread")]
   Communication(#[from] tokio::sync::mpsc::error::SendError<JsMessage>),
   #[error("error communicating with the device thread")]
-  InternalCommunication(#[from] tokio::sync::mpsc::error::SendError<manager::NotifyData>),
+  InternalRecvCommunication(#[from] tokio::sync::mpsc::error::SendError<manager::NotifyData>),
+  #[error("error communicating with the device thread")]
+  InternalSendCommunication(#[from] tokio::sync::mpsc::error::SendError<Vec<u8>>),
   #[error("irrecoverable io error")]
   Io(#[from] std::io::Error),
+  #[error("device is not connected!")]
+  DeviceDisconnected,
 }
 
 impl From<Error> for napi::Error {

@@ -13,16 +13,16 @@ struct AdapterInner {
 }
 
 #[napi]
-pub struct PlugAdapter {
+pub struct NodeAdapter {
   callback_purgatory: Option<Vec<Callback>>,
   inner: Option<AdapterInner>,
 }
 
 #[napi]
-impl PlugAdapter {
+impl NodeAdapter {
   #[napi(constructor)]
-  pub fn new() -> Self {
-    monitoring::init_logger();
+  pub fn new(log_level_directive: Option<String>) -> Self {
+    monitoring::init_logger(log_level_directive);
     Self::default()
   }
 
@@ -76,40 +76,40 @@ impl PlugAdapter {
   }
 
   #[napi]
-  pub fn scan_on(&self) -> napi::Result<()> {
-    Ok(self.forward(JsMessage::ScanOn)?)
+  pub async fn scan_on(&self) -> napi::Result<()> {
+    Ok(self.forward(JsMessage::ScanOn).await?)
   }
 
   #[napi]
-  pub fn scan_off(&self) -> napi::Result<()> {
-    Ok(self.forward(JsMessage::ScanOff)?)
+  pub async fn scan_off(&self) -> napi::Result<()> {
+    Ok(self.forward(JsMessage::ScanOff).await?)
   }
 
   #[napi]
-  pub fn disconnect(&self, mac_address: String) -> napi::Result<()> {
-    let mac_address = mac_address
+  pub async fn disconnect(&self, device_id: String) -> napi::Result<()> {
+    let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    Ok(self.forward(JsMessage::Disconnect(mac_address))?)
+    Ok(self.forward(JsMessage::Disconnect(device_id)).await?)
   }
 
   #[napi]
-  pub fn send(&self, mac_address: String, message: Uint8Array) -> napi::Result<()> {
-    let mac_address = mac_address
+  pub async fn send(&self, device_id: String, message: Uint8Array) -> napi::Result<()> {
+    let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    Ok(self.forward(JsMessage::Data(mac_address, message.to_vec()))?)
+    Ok(self.forward(JsMessage::Data(device_id, message.to_vec())).await?)
   }
 
-  fn forward(&self, message: JsMessage) -> Result<()> {
+  async fn forward(&self, message: JsMessage) -> Result<()> {
     let inner = self.inner.as_ref().ok_or(Error::NotInitialized)?;
-    Ok(inner.tx.blocking_send(message)?)
+    Ok(inner.tx.send(message).await?)
   }
 }
 
-impl Default for PlugAdapter {
+impl Default for NodeAdapter {
   fn default() -> Self {
     Self {
       callback_purgatory: Some(Vec::new()),
@@ -118,7 +118,7 @@ impl Default for PlugAdapter {
   }
 }
 
-impl Drop for PlugAdapter {
+impl Drop for NodeAdapter {
   fn drop(&mut self) {
     if let Some(inner) = &self.inner {
       inner.cancel_token.cancel();

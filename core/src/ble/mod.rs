@@ -15,7 +15,7 @@ use bluer::{
 use flate2::Compression;
 use futures::{future, StreamExt};
 use libbridgething::{
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgType, BridgeToGatewayResponse},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgType, GatewayToBridgeMsg},
   BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_MANUFACTURER_ID, BRIDGETHING_SERVICE_UUID,
 };
 use tokio::{
@@ -27,13 +27,10 @@ use crate::bt::BluetoothError;
 
 use super::bt::BluetoothResult;
 
-pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayEvent>;
-pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayEvent>;
-pub type GatewayNotifyTx = tokio::sync::mpsc::Sender<GatewayEvent>;
-pub type GatewayNotifyRx = tokio::sync::mpsc::Receiver<GatewayEvent>;
-
-#[derive(Debug)]
-pub enum GatewayEvent {}
+pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayToBridgeMsg>;
+pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayToBridgeMsg>;
+pub type GatewayNotifyTx = tokio::sync::mpsc::Sender<BridgeToGatewayMsg>;
+pub type GatewayNotifyRx = tokio::sync::mpsc::Receiver<BridgeToGatewayMsg>;
 
 pub struct GatewayCon {
   tx: GatewayNotifyTx,
@@ -55,7 +52,7 @@ impl GatewayCon {
     })
   }
 
-  pub async fn listen(&mut self) -> Option<GatewayEvent> {
+  pub async fn listen(&mut self) -> Option<GatewayToBridgeMsg> {
     self.rx.recv().await
   }
 }
@@ -150,7 +147,7 @@ impl GattServer {
   async fn recv(&mut self) -> BluetoothResult<()> {
     loop {
       tokio::select! {
-        Some(msg) = self.rx.recv() => {},
+        Some(msg) = self.rx.recv() => self.write(msg).await?,
 
         evt = self.characteristic.next() => self.handle_characteristic(evt).await?,
         read_res = async {
@@ -194,22 +191,24 @@ impl GattServer {
         self.reader = None;
       }
       Ok(n) => {
-        let value = self.read_buf[..n].to_vec();
-        tracing::trace!(
-          "echoing {} bytes: {:x?} ... {:x?}",
-          value.len(),
-          &value[0..4.min(value.len())],
-          &value[value.len().saturating_sub(4)..]
-        );
+        let data = self.read_buf[..n].to_vec();
+        tracing::trace!("read {} bytes: {:x?}", data.len(), &data);
 
-        let Some(writer) = self.writer.as_mut() else {
-          tracing::error!("could not get reference to writer?? this should never fail.");
-          return Ok(());
+        let mut decoder = flate2::write::GzDecoder::new(Vec::new());
+        decoder.write_all(&data)?;
+        let data = decoder.finish()?;
+        tracing::trace!("uncompressed msg: {:?}", &data);
+
+        let message = match rmp_serde::from_slice(&data) {
+          Ok(message) => message,
+          Err(err) => {
+            tracing::error!("failed to decode packed message: {:?}", err);
+            return Ok(());
+          }
         };
 
-        if let Err(err) = writer.write_all(&value).await {
-          tracing::error!("write failed: {}", &err);
-          self.writer = None;
+        if let Err(err) = self.tx.send(message).await {
+          tracing::error!("error forwarding bluetooth message: {:?}", err);
         }
       }
       Err(err) => {

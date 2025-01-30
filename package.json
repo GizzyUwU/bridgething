@@ -22,11 +22,11 @@
   "engines": {
     "node": ">=18"
   },
-  "packageManager": "bun@1.1.43",
+  "packageManager": "bun@1.2.1",
   "workspaces": [
     "lib",
     "gateway",
-    "adapter",
+    "adapters/*",
     "client/typescript"
   ]
 }

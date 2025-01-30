@@ -1,4 +1,4 @@
-pub fn init_logger() {
+pub fn init_logger(level_directive: Option<String>) {
   use tracing::metadata::LevelFilter;
   use tracing_subscriber::fmt::format::FmtSpan;
   use tracing_subscriber::{
@@ -6,7 +6,9 @@ pub fn init_logger() {
   };
 
   let default_directive = Directive::from(LevelFilter::INFO);
-  let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
+  let filter_directives = if let Some(directive) = level_directive {
+    directive
+  } else if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
     "bridgething_adapter=info".to_string()

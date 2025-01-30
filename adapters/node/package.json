@@ -1,5 +1,5 @@
 {
-  "name": "@bridgething/adapter",
+  "name": "@bridgething/adapter-node",
   "version": "0.0.0",
   "type": "module",
   "main": "dist/index.js",
