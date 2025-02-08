@@ -126,6 +126,15 @@ impl TryFrom<String> for DBusPlayerStatus {
   }
 }
 
+impl From<DBusPlayerStatus> for bool {
+  fn from(val: DBusPlayerStatus) -> Self {
+    match val {
+      DBusPlayerStatus::Playing => true,
+      DBusPlayerStatus::Paused => false,
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct DBusPlayerTrack {
   pub title: String,

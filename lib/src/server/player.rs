@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Album, Artist, PlaybackOptions, PlaybackRestrictions, Track, CARTHING_HACKS_LOGO};
+use crate::{Album, Artist, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, Track, CARTHING_HACKS_LOGO};
 
 // TODO: refactor this into more command types so not spotify-specific
 
@@ -59,6 +59,9 @@ impl ServerPlayerEvent {
         can_skip_next: true,
         can_skip_prev: true,
         can_toggle_shuffle: true,
+        can_change_volume: true,
+        can_like: true,
+        can_set_output: true,
       },
       playback_speed: 0.0,
       track: Track {
@@ -97,6 +100,16 @@ impl ServerPlayerEvent {
       height: size,
       width: size,
       data: CARTHING_HACKS_LOGO.to_owned(),
+    }
+  }
+}
+
+impl From<PlaybackQueue> for ServerPlayerEvent {
+  fn from(queue: PlaybackQueue) -> Self {
+    Self::Queue {
+      next: queue.next,
+      current: queue.current,
+      previous: queue.previous,
     }
   }
 }

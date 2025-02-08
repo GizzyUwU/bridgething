@@ -1,21 +1,15 @@
 use libbridgething::client::ClientInteractionCommand;
 
-use crate::state::State;
-
-use super::{Handler, HandlerResult, MsgHandle};
+use super::{HandlerResult, MsgHandle};
 
 #[derive(Debug)]
-pub struct InteractionHandler<'a> {
+pub struct InteractionHandler {
   handle: MsgHandle,
-  state: &'a mut State,
 }
 
-impl<'a> InteractionHandler<'a> {
-  pub fn new(handler: Handler<'a>) -> Self {
-    Self {
-      handle: handler.handle,
-      state: handler.state,
-    }
+impl InteractionHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
   }
 
   pub async fn handle(self, msg: ClientInteractionCommand) -> HandlerResult {
@@ -99,11 +93,7 @@ impl<'a> InteractionHandler<'a> {
 
   async fn skip_next(&self) -> HandlerResult {
     tracing::debug!("({}) skipping to next track", &self.handle.from);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.next().await?)
+    Ok(self.handle.state.player.next().await?)
   }
 
   async fn skip_prev(&self, allow_seeking: bool) -> HandlerResult {
@@ -112,11 +102,7 @@ impl<'a> InteractionHandler<'a> {
       &self.handle.id,
       allow_seeking
     );
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.prev().await?)
+    Ok(self.handle.state.player.prev().await?)
   }
 
   async fn seek_to(&self, position: usize) -> HandlerResult {
@@ -127,37 +113,21 @@ impl<'a> InteractionHandler<'a> {
 
   async fn pause(&self) -> HandlerResult {
     tracing::debug!("({}) pausing playback", &self.handle.from);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.pause().await?)
+    Ok(self.handle.state.player.pause().await?)
   }
 
   async fn resume(&self) -> HandlerResult {
     tracing::debug!("({}) resuming playback", &self.handle.from);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.play().await?)
+    Ok(self.handle.state.player.play().await?)
   }
 
   async fn set_shuffle(&self, shuffle: bool) -> HandlerResult {
     tracing::debug!("({}) setting shuffle to: {}", &self.handle.from, shuffle);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.shuffle(shuffle.into()).await?)
+    Ok(self.handle.state.player.shuffle(shuffle).await?)
   }
 
   async fn set_repeat(&self, repeat: bool) -> HandlerResult {
     tracing::debug!("({}) setting repeat to: {}", &self.handle.from, repeat);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
-
-    Ok(player.repeat(repeat.into()).await?)
+    Ok(self.handle.state.player.repeat(repeat).await?)
   }
 }

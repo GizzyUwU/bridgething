@@ -1,21 +1,15 @@
 use libbridgething::client::ClientVoiceCommand;
 
-use crate::state::State;
-
-use super::{Handler, HandlerResult, MsgHandle};
+use super::{HandlerResult, MsgHandle};
 
 #[derive(Debug)]
-pub struct VoiceHandler<'a> {
+pub struct VoiceHandler {
   handle: MsgHandle,
-  state: &'a mut State,
 }
 
-impl<'a> VoiceHandler<'a> {
-  pub fn new(handler: Handler<'a>) -> Self {
-    Self {
-      handle: handler.handle,
-      state: handler.state,
-    }
+impl VoiceHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
   }
 
   pub async fn handle(&self, msg: ClientVoiceCommand) -> HandlerResult {

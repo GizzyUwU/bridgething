@@ -1,31 +1,50 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use libbridgething::Device;
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
-use crate::dbus;
+use crate::ws::ClientMan;
 
-pub mod art;
 pub mod meta;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct State {
-  #[serde(skip)]
-  path: PathBuf,
-  #[serde(skip)]
-  pub connected_device: Option<bluer::Address>,
-  #[serde(skip)]
-  pub meta: meta::Meta,
-  #[serde(skip)]
-  pub player: Option<dbus::Player>,
+pub type State = Arc<AppState>;
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PersistentAppState {
   pub last_device: Option<String>,
-  devices: HashMap<String, Device>,
-  storage: HashMap<String, String>,
+  pub devices: HashMap<String, Device>,
+  pub storage: HashMap<String, String>,
 }
 
-impl State {
-  pub async fn init() -> Result<Self, StateError> {
+impl PersistentAppState {
+  pub async fn restore_or_default(path: &PathBuf) -> Self {
+    if path.exists() && path.is_file() && !cfg!(feature = "no-persist") {
+      if let Ok(persist_state) = AppState::read_persist(path).await {
+        persist_state
+      } else {
+        tracing::warn!("state file is corrupt!! this is probably not good.");
+        PersistentAppState::default()
+      }
+    } else {
+      tracing::debug!("no saved state - initializing default state");
+      PersistentAppState::default()
+    }
+  }
+}
+
+#[derive(Debug)]
+pub struct AppState {
+  pub client_man: ClientMan,
+  pub meta: meta::Meta,
+  pub player: crate::player::Player,
+
+  persist_path: PathBuf,
+  persist: RwLock<PersistentAppState>,
+}
+
+impl AppState {
+  pub async fn init(client_man: ClientMan, player: crate::player::Player) -> Result<State, StateError> {
     tracing::info!("initializing state");
     let config_dir_path = dirs::config_dir()
       .unwrap_or("/home/superbird/.config".into())
@@ -35,128 +54,121 @@ impl State {
       tokio::fs::create_dir_all(&config_dir_path).await?;
     }
 
-    let path = config_dir_path.join("bridgething.db");
-    let mut state = if path.exists() && path.is_file() && !cfg!(feature = "no-persist") {
-      if let Ok(mut state) = State::read(&path).await {
-        state.path = path;
-        state
-      } else {
-        tracing::warn!("state file is corrupt!! this is probably not good.");
-        Self {
-          path,
-          ..Default::default()
-        }
-      }
-    } else {
-      tracing::debug!("no saved state - initializing default state");
-      Self {
-        path,
-        ..Default::default()
-      }
-    };
+    let persist_path = config_dir_path.join("bridgething.db");
+    let persist = PersistentAppState::restore_or_default(&persist_path).await;
 
-    #[cfg(debug_assertions)]
-    let meta_path = PathBuf::from("./resources/superbird.json");
-    #[cfg(not(debug_assertions))]
-    let meta_path = PathBuf::from("/etc/superbird");
+    let meta = meta::Meta::read_or_default().await;
+    tracing::debug!("metadata: {:?}", &meta);
 
-    if meta_path.exists() {
-      let data = tokio::fs::read(&meta_path).await?;
-      if let Ok(meta) = serde_json::from_slice(&data) {
-        state.meta = meta;
-      } else {
-        tracing::warn!(
-          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
-        );
-      }
-    } else {
-      tracing::warn!("could not find superbird metadata! bridgething is only officially supported on nixos-superbird.");
-    }
+    Ok(Arc::new(Self {
+      client_man,
+      meta,
+      player,
 
-    tracing::debug!("metadata: {:?}", &state.meta);
-
-    Ok(state)
+      persist_path,
+      persist: RwLock::new(persist),
+    }))
   }
 
-  pub fn get_devices(&self) -> &HashMap<String, Device> {
-    &self.devices
+  pub async fn get_devices(&self) -> HashMap<String, Device> {
+    // cloning here so that the lock is not held open
+    self.persist.read().await.devices.clone()
   }
 
-  pub fn get_device(&self, mac: &str) -> Option<&Device> {
-    self.devices.get(mac)
+  pub async fn get_device(&self, mac: &str) -> Option<Device> {
+    // cloning here so that the lock is not held open
+    self.persist.read().await.devices.get(mac).cloned()
   }
 
-  pub async fn add_device(&mut self, device: Device) -> StateResult<()> {
-    self.devices.insert(device.mac.clone(), device);
-    self.save().await?;
+  pub async fn add_device(&self, device: Device) -> StateResult<()> {
+    self.persist.write().await.devices.insert(device.mac.clone(), device);
+    self.save_persist().await?;
 
     Ok(())
   }
 
-  pub async fn remove_device(&mut self, mac: String) -> StateResult<()> {
-    if self.devices.remove(&mac).is_some() {
-      self.save().await?;
+  pub async fn remove_device(&self, mac: String) -> StateResult<()> {
+    let mut app = self.persist.write().await;
+    if app.devices.remove(&mac).is_some() {
+      self.save_persist().await?;
     }
 
-    if let Some(last) = &self.last_device {
-      if *last == mac {
-        self.last_device = None;
-      }
+    let mut persist = self.persist.write().await;
+    if persist.last_device == Some(mac) {
+      persist.last_device = None;
     }
 
-    if let Some(current) = &self.connected_device {
-      if current.to_string() == mac {
-        self.connected_device = None;
-      }
-    }
+    // if let Some(current) = &self.connected_device {
+    //   if current.to_string() == mac {
+    //     self.connected_device = None;
+    //   }
+    // }
 
     Ok(())
   }
 
-  pub fn get_storage_key(&self, key: &str) -> Option<String> {
-    let value = self.storage.get(key);
-    value.cloned()
-  }
-
-  pub async fn set_storage_key(&mut self, key: String, value: String) -> StateResult<()> {
-    self.storage.insert(key, value);
-    self.save().await?;
+  pub async fn handle_disconnect(&self) -> StateResult<()> {
+    // TODO: handle player delete
 
     Ok(())
   }
 
-  pub async fn del_storage_key(&mut self, key: &str) -> StateResult<()> {
-    self.storage.remove(key);
-    self.save().await?;
+  pub async fn last_device(&self) -> Option<String> {
+    // cloning here so that the lock is not held open
+    self.persist.read().await.last_device.clone()
+  }
+
+  pub async fn set_last_device(&self, mac: String) -> StateResult<()> {
+    self.persist.write().await.last_device = Some(mac);
+    self.save_persist().await?;
 
     Ok(())
   }
 
-  async fn read(path: &PathBuf) -> StateResult<Self> {
+  pub async fn get_storage_key(&self, key: &str) -> Option<String> {
+    // cloning here so that the lock is not held open
+    self.persist.read().await.storage.get(key).cloned()
+  }
+
+  pub async fn set_storage_key(&self, key: String, value: String) -> StateResult<()> {
+    self.persist.write().await.storage.insert(key, value);
+    self.save_persist().await?;
+
+    Ok(())
+  }
+
+  pub async fn del_storage_key(&self, key: &str) -> StateResult<()> {
+    self.persist.write().await.storage.remove(key);
+    self.save_persist().await?;
+
+    Ok(())
+  }
+
+  async fn read_persist(path: &PathBuf) -> StateResult<PersistentAppState> {
     let data = tokio::fs::read(path).await?;
-    let state: State = bincode::deserialize(&data)?;
+    let state: PersistentAppState = bincode::deserialize(&data)?;
     tracing::trace!("persisted state: {:?}", &state);
 
     Ok(state)
   }
 
   #[cfg(not(feature = "no-persist"))]
-  async fn save(&self) -> StateResult<()> {
-    let data = bincode::serialize(&self)?;
-    tokio::fs::write(&self.path, data).await?;
+  async fn save_persist(&self) -> StateResult<()> {
+    let data = bincode::serialize(&*self.persist.read().await)?;
+    tokio::fs::write(&self.persist_path, data).await?;
 
     Ok(())
   }
 
   #[cfg(feature = "no-persist")]
-  async fn save(&self) -> StateResult<()> {
+  async fn save_persist(&self) -> StateResult<()> {
     tracing::trace!("debug mode: not saving application state.");
     Ok(())
   }
 
   pub async fn reset(&self) -> StateResult<()> {
-    if self.path.exists() {
-      tokio::fs::remove_file(&self.path).await?
+    if self.persist_path.exists() {
+      tokio::fs::remove_file(&self.persist_path).await?
     }
 
     Ok(())

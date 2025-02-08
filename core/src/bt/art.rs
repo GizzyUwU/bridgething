@@ -14,7 +14,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{handler::MsgHandle, state::art::CoverArtCache, ws::ClientMan};
+use crate::{handler::client::MsgHandle, player::art::CoverArtCache, ws::ClientMan};
+
+// TODO: potentially make cover art synchronous? or more tied to player rather than bt?
 
 type ArtTx = mpsc::Sender<(String, Option<MsgHandle>)>;
 type ArtRx = mpsc::Receiver<(String, Option<MsgHandle>)>;

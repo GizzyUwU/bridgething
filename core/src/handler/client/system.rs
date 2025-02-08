@@ -1,22 +1,14 @@
 use libbridgething::client::ClientSystemCommand;
 
-use crate::{bt::Bluetooth, state::State};
+use super::{HandlerResult, MsgHandle};
 
-use super::{Handler, HandlerResult, MsgHandle};
-
-pub struct SystemHandler<'a> {
+pub struct SystemHandler {
   handle: MsgHandle,
-  state: &'a mut State,
-  bluetooth: &'a mut Bluetooth,
 }
 
-impl<'a> SystemHandler<'a> {
-  pub fn new(handler: Handler<'a>) -> Self {
-    Self {
-      handle: handler.handle,
-      state: handler.state,
-      bluetooth: handler.bluetooth,
-    }
+impl SystemHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
   }
 
   pub async fn handle(&mut self, msg: ClientSystemCommand) -> HandlerResult {
@@ -34,7 +26,7 @@ impl<'a> SystemHandler<'a> {
 
   async fn version_request(&self) -> HandlerResult {
     tracing::debug!("({}) handling version request", &self.handle.from);
-    Ok(self.handle.respond(self.state.meta.clone()).await?)
+    Ok(self.handle.respond(self.handle.state.meta.clone()).await?)
   }
 
   async fn reboot(&self) -> HandlerResult {
@@ -76,11 +68,11 @@ impl<'a> SystemHandler<'a> {
   async fn factory_reset(&mut self) -> HandlerResult {
     tracing::debug!("({}) handling factory reset request", &self.handle.from);
 
-    if let Err(err) = self.bluetooth.reset(self.state).await {
+    if let Err(err) = self.handle.bluetooth.reset().await {
       tracing::error!("error resetting bluetooth devices: {:?}", err);
     }
 
-    if let Err(err) = self.state.reset().await {
+    if let Err(err) = self.handle.state.reset().await {
       tracing::error!("error resetting state: {:?}", err);
     }
 

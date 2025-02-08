@@ -285,18 +285,8 @@ impl From<ServerPlayerEvent> for StockInterAppSendPayload {
         is_paused: false,
         is_paused_bool: false,
         playback_position: 0,
-        playback_options: PlaybackOptions {
-          repeat: 0,
-          shuffle: false,
-        },
-        playback_restrictions: PlaybackRestrictions {
-          can_repeat_context: true,
-          can_repeat_track: true,
-          can_seek: false,
-          can_skip_next: false,
-          can_skip_prev: false,
-          can_toggle_shuffle: true,
-        },
+        playback_options: PlaybackOptions::default(),
+        playback_restrictions: PlaybackRestrictions::default(),
         playback_speed: 0.0,
       },
       ServerPlayerEvent::PlayerState {

@@ -46,7 +46,7 @@ impl ClientListener {
   }
 
   /// cancel-safe
-  pub async fn listen(&mut self) -> WSResult<RecvMsg> {
+  pub async fn recv(&mut self) -> WSResult<RecvMsg> {
     let msg = self.rx.recv().await.ok_or(WSError::ChannelClosed)?;
     tracing::trace!("new parsed message from {:?}", msg.from);
 

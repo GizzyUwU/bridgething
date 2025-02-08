@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use libbridgething::{server::ServerSystemEvent, ServerEventData};
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,36 @@ pub struct Meta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
+}
+
+impl Meta {
+  pub async fn read_or_default() -> Self {
+    #[cfg(debug_assertions)]
+    let meta_path = PathBuf::from("./resources/superbird.json");
+    #[cfg(not(debug_assertions))]
+    let meta_path = PathBuf::from("/etc/superbird");
+
+    if meta_path.exists() {
+      let Ok(data) = tokio::fs::read(&meta_path).await else {
+        tracing::warn!(
+          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
+        );
+        return Self::default();
+      };
+
+      if let Ok(meta) = serde_json::from_slice(&data) {
+        meta
+      } else {
+        tracing::warn!(
+          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
+        );
+        Self::default()
+      }
+    } else {
+      tracing::warn!("could not find superbird metadata! bridgething is only officially supported on nixos-superbird.");
+      Self::default()
+    }
+  }
 }
 
 impl From<Meta> for ServerEventData {

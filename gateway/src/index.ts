@@ -57,7 +57,7 @@ class BridgethingGateway {
     private readonly adapter: Adapter,
     private readonly options: GatewayOptions = { logLevel: LogLevel.Log },
   ) {
-    this.logger = new Logger(options.logLevel || LogLevel.Log);
+    this.logger = new Logger('Gateway', options.logLevel || LogLevel.Log);
     adapter.on(allEvent => void this.handleEvent(allEvent));
   }
 

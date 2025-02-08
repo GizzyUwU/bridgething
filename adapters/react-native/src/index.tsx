@@ -24,7 +24,7 @@ class ReactNativeAdapter implements Adapter {
   private readonly devices: Record<DeviceId, Device> = {};
 
   constructor(logLevel: LogLevel = LogLevel.Log) {
-    this.logger = new Logger(logLevel);
+    this.logger = new Logger('Adapter', logLevel);
     this.manager = new BleManager({});
     void this.manager.setLogLevel(logLevelToBleLogLevel(logLevel));
     this.logger.debug('initializing ble manager');

@@ -22,6 +22,21 @@ pub struct Track {
   pub saved: bool,
 }
 
+impl Default for Track {
+  fn default() -> Self {
+    Self {
+      id: "dummy-bridgething-default".to_string(),
+      name: "BridgeThing".to_string(),
+      album: Album::default(),
+      artist: Artist::default(),
+      artists: vec![Artist::default()],
+      duration_ms: 5000,
+      image_id: "bridgething:image:bridgething:image".to_string(),
+      saved: true,
+    }
+  }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
@@ -33,11 +48,20 @@ pub enum Image {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Album {
   pub id: String,
   pub name: String,
+}
+
+impl Default for Album {
+  fn default() -> Self {
+    Self {
+      name: "Thing Labs".to_string(),
+      id: "bridgething:album:bridgething".to_string(),
+    }
+  }
 }
 
 impl From<String> for Album {
@@ -50,11 +74,20 @@ impl From<String> for Album {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Artist {
   pub id: String,
   pub name: String,
+}
+
+impl Default for Artist {
+  fn default() -> Self {
+    Self {
+      name: "Thing Labs".to_string(),
+      id: "bridgething:artist:bridgething".to_string(),
+    }
+  }
 }
 
 impl From<String> for Artist {
@@ -75,7 +108,7 @@ pub struct CurrentlyActiveApplication {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct PlaybackOptions {
   pub repeat: usize,
@@ -92,4 +125,52 @@ pub struct PlaybackRestrictions {
   pub can_skip_next: bool,
   pub can_skip_prev: bool,
   pub can_toggle_shuffle: bool,
+  pub can_like: bool,
+  pub can_change_volume: bool,
+  pub can_set_output: bool,
+}
+
+impl PlaybackRestrictions {
+  pub fn all_true() -> Self {
+    Self {
+      can_repeat_context: true,
+      can_repeat_track: true,
+      can_seek: true,
+      can_skip_next: true,
+      can_skip_prev: true,
+      can_toggle_shuffle: true,
+      can_like: true,
+      can_change_volume: true,
+      can_set_output: true,
+    }
+  }
+
+  pub fn all_false() -> Self {
+    Self {
+      can_repeat_context: false,
+      can_repeat_track: false,
+      can_seek: false,
+      can_skip_next: false,
+      can_skip_prev: false,
+      can_toggle_shuffle: false,
+      can_like: false,
+      can_change_volume: false,
+      can_set_output: false,
+    }
+  }
+}
+
+impl Default for PlaybackRestrictions {
+  fn default() -> Self {
+    Self::all_true()
+  }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlaybackQueue {
+  pub next: Vec<Track>,
+  pub current: Track,
+  pub previous: Vec<Track>,
 }

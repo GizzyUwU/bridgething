@@ -1,42 +1,42 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use libbridgething::{server::ServerPlayerEvent, DeviceType, PlaybackOptions, PlaybackRestrictions, ServerEventType};
-use tokio::task::JoinHandle;
+use libbridgething::DeviceType;
+use tokio::{sync::RwLock, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use zbus::Connection;
 
 mod media_player1;
-mod player;
+mod state;
 
 use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
-pub use player::*;
+pub use state::*;
 
 use crate::{
   bt::art::CoverArt,
-  handler::MsgHandle,
-  state::art::CoverArtCache,
   ws::{ClientMan, WSError},
 };
 
-pub type PlayerTx = tokio::sync::mpsc::Sender<DBusPlayerEvent>;
-pub type PlayerRx = tokio::sync::mpsc::Receiver<DBusPlayerEvent>;
+use super::{art::CoverArtCache, state::PlayerState};
 
 #[derive(Debug)]
-pub struct Player {
-  client_man: ClientMan,
+pub struct DBusPlayer {
+  state: Arc<RwLock<PlayerState>>,
   player: MediaPlayer1Proxy<'static>,
-  pub state: PlayerState,
-  art: Option<CoverArt>,
+  pub art: Option<CoverArt>,
 
-  rx: PlayerRx,
   cancel_token: CancellationToken,
   _change_handle: JoinHandle<()>,
   _avrcp_handle: JoinHandle<DBusResult<()>>,
 }
 
-impl Player {
-  pub async fn init(client_man: ClientMan, cover_art_cache: CoverArtCache, device: bluer::Device) -> DBusResult<Self> {
+impl DBusPlayer {
+  pub async fn init(
+    client_man: ClientMan,
+    state: Arc<RwLock<PlayerState>>,
+    art_cache: CoverArtCache,
+    device: bluer::Device,
+  ) -> DBusResult<Self> {
     let path = format!(
       "/org/bluez/hci0/dev_{}/player0",
       device.address().to_string().replace(":", "_")
@@ -48,49 +48,43 @@ impl Player {
     tracing::debug!("connection to player via dbus created");
 
     let cancel_token = CancellationToken::new();
-    let (tx, rx) = tokio::sync::mpsc::channel(64);
-    let changes = DBusPlayerChanges::init(tx, &player).await;
+    let changes = DBusPlayerChanges::init(state.clone(), &player).await;
 
     let avrcp_cancel = cancel_token.child_token();
     let change_cancel = cancel_token.child_token();
 
-    let mut state = PlayerState::default();
-
     let mut art = None;
-
     if let Ok(obex_port) = player.obex_port().await {
       if obex_port == 0x1007 {
         tracing::debug!("obex port 0x1007 detected from device - assuming ios");
-        state.device_type = DeviceType::Ios;
+        if let Some(device) = &mut state.write().await.device {
+          device.device_type = DeviceType::Ios;
+        };
         art = Some(CoverArt::init(
           client_man.clone(),
-          cover_art_cache,
+          art_cache,
           cancel_token.child_token(),
           device.address(),
         ));
       } else if obex_port == 0x1001 {
         tracing::debug!("obex port 0x1001 detected from device - assuming android");
-        state.device_type = DeviceType::Android;
+        if let Some(device) = &mut state.write().await.device {
+          device.device_type = DeviceType::Android;
+        };
       }
     } else {
       tracing::warn!("could not get obex port for device!");
     }
 
     Ok(Self {
-      client_man,
-      player,
       state,
+      player,
       art,
 
-      rx,
       _change_handle: tokio::spawn(async move { changes.spawn(change_cancel).await }),
       _avrcp_handle: tokio::spawn(async move { ensure_avrcp(conn, path, device, avrcp_cancel).await }),
       cancel_token,
     })
-  }
-
-  pub async fn recv(&mut self) -> Option<DBusPlayerEvent> {
-    self.rx.recv().await
   }
 
   pub async fn next(&self) -> DBusResult<()> {
@@ -119,119 +113,53 @@ impl Player {
     Ok(())
   }
 
-  pub async fn handle_event(&mut self, event: DBusPlayerEvent) -> DBusResult<()> {
-    match event {
-      DBusPlayerEvent::Status(status) => {
-        self.state.status = status;
-      }
-      DBusPlayerEvent::Track(track) => {
-        // if self.state.track.title != track.title {
-        //   if let Some(art) = &self.art {
-        //     art.fetch(&track.image_id(), None).await;
-        //   }
-        // }
-        self.state.track = track;
-      }
-      DBusPlayerEvent::Position(position) => {
-        self.state.position = position;
-      }
-      DBusPlayerEvent::Shuffle(shuffle) => {
-        self.state.shuffle = shuffle;
-      }
-      DBusPlayerEvent::Repeat(repeat) => {
-        self.state.repeat = repeat;
-      }
+  // TODO: anything but this
+  pub async fn get_current_state(&self) -> DBusResult<()> {
+    let mut state = self.state.write().await;
+
+    if let Err(err) = state
+      .handle_dbus_event(DBusPlayerEvent::Status(self.player.status().await?.try_into()?))
+      .await
+    {
+      tracing::error!("failed to handle message from dbus: {:?}", err);
     }
 
-    self.send_state().await?;
-
-    Ok(())
-  }
-
-  pub async fn send_state(&self) -> DBusResult<()> {
-    self
-      .client_man
-      .broadcast(self.state.to_send_state(), ServerEventType::Info)
-      .await?;
-    self
-      .client_man
-      .broadcast(self.state.to_send_queue(), ServerEventType::Info)
-      .await?;
-
-    Ok(())
-  }
-
-  pub async fn request_cover_art(&self, msg_handle: MsgHandle) {
-    if let Some(art) = &self.art {
-      art.fetch(&self.state.track.image_id(), Some(msg_handle)).await;
+    if let Err(err) = state
+      .handle_dbus_event(DBusPlayerEvent::Track(self.player.track().await?.try_into()?))
+      .await
+    {
+      tracing::error!("failed to handle message from dbus: {:?}", err);
     }
+
+    if let Err(err) = state
+      .handle_dbus_event(DBusPlayerEvent::Position(self.player.position().await?.try_into()?))
+      .await
+    {
+      tracing::error!("failed to handle message from dbus: {:?}", err);
+    }
+
+    if let Err(err) = state
+      .handle_dbus_event(DBusPlayerEvent::Shuffle(self.player.shuffle().await?.try_into()?))
+      .await
+    {
+      tracing::error!("failed to handle message from dbus: {:?}", err);
+    }
+
+    if let Err(err) = state
+      .handle_dbus_event(DBusPlayerEvent::Repeat(self.player.repeat().await?.try_into()?))
+      .await
+    {
+      tracing::error!("failed to handle message from dbus: {:?}", err);
+    }
+
+    Ok(())
   }
 }
 
-impl Drop for Player {
+impl Drop for DBusPlayer {
   fn drop(&mut self) {
     tracing::trace!("dropping player, cancelling threads...");
     self.cancel_token.cancel();
-
-    self._change_handle.abort();
-    self._avrcp_handle.abort();
-  }
-}
-
-pub async fn maybe_recv(player: &mut Option<Player>) -> Option<DBusPlayerEvent> {
-  let Some(player) = player else {
-    return None;
-  };
-
-  let res = player.recv().await;
-  tracing::trace!("new player message: {:?}", &res);
-  if res.is_none() {
-    tracing::error!("player stream appears to be closed?? this is probably bad.");
-  }
-
-  res
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct PlayerState {
-  pub device_type: DeviceType,
-  pub status: DBusPlayerStatus,
-  pub track: DBusPlayerTrack,
-  pub position: usize,
-  pub shuffle: DBusPlayerShuffle,
-  pub repeat: DBusPlayerRepeat,
-}
-
-impl PlayerState {
-  pub fn to_send_state(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::PlayerState {
-      context_id: "spotify:context:fake".to_string(),
-      context_title: "BridgeThing".to_string(),
-      is_paused: self.status == DBusPlayerStatus::Paused,
-      playback_options: PlaybackOptions {
-        repeat: self.repeat.into(),
-        shuffle: self.shuffle.into(),
-      },
-      playback_position: self.position,
-      playback_restrictions: PlaybackRestrictions {
-        can_repeat_context: true,
-        can_repeat_track: true,
-        can_seek: true,
-        can_skip_next: true,
-        can_skip_prev: true,
-        can_toggle_shuffle: true,
-      },
-      playback_speed: 1.0,
-      track: self.track.clone().into(),
-    }
-  }
-
-  pub fn to_send_queue(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::Queue {
-      current: self.track.clone().into(),
-      previous: vec![],
-      next: vec![],
-    }
   }
 }
 
@@ -246,7 +174,7 @@ pub enum DBusPlayerEvent {
 
 #[derive(Debug)]
 pub struct DBusPlayerChanges {
-  tx: PlayerTx,
+  state: Arc<RwLock<PlayerState>>,
 
   status: DBusPlayerStream<String>,
   track: DBusPlayerStream<MediaPlayer1Track>,
@@ -256,9 +184,9 @@ pub struct DBusPlayerChanges {
 }
 
 impl DBusPlayerChanges {
-  pub async fn init(tx: PlayerTx, player: &MediaPlayer1Proxy<'static>) -> Self {
+  pub async fn init(state: Arc<RwLock<PlayerState>>, player: &MediaPlayer1Proxy<'static>) -> Self {
     Self {
-      tx,
+      state,
 
       status: player.receive_status_changed().await,
       track: player.receive_track_changed().await,
@@ -274,8 +202,8 @@ impl DBusPlayerChanges {
         event = self.recv() => {
           match event {
             Ok(event) => {
-              if let Err(err) = self.tx.send(event).await {
-                tracing::error!("failed to forward message from dbus: {:?}", err);
+              if let Err(err) = self.state.write().await.handle_dbus_event(event).await {
+                tracing::error!("failed to handle message from dbus: {:?}", err);
               };
             }
             Err(err) => tracing::error!("error receiving from dbus: {:?}", err),
@@ -318,7 +246,7 @@ async fn ensure_avrcp(
     // tracing::trace!("ensuring avrcp is connected");
     if let Err(err) = player.status().await {
       tracing::debug!("error received from avrcp, attempting reconnect: {:?}", err);
-      if super::bt::connect_avrcp(&device).await {
+      if crate::bt::connect_avrcp(&device).await {
         tracing::debug!("connected to avrcp, quitting this loop");
         break;
       }

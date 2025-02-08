@@ -1,118 +1,7 @@
-use std::net::SocketAddr;
-use uuid::Uuid;
+pub mod client;
+pub use client::ClientHandler;
 
-mod bluetooth;
-mod interaction;
-mod stock;
-mod store;
-mod system;
-mod voice;
-
-use bluetooth::*;
-use interaction::*;
-use stock::*;
-use store::*;
-use system::*;
-use voice::*;
-
-mod handle;
-pub use handle::*;
-
-use crate::{
-  bt::{Bluetooth, BluetoothError},
-  dbus::DBusError,
-  msg::{stock::StockInterAppSend, ClientMode, RecvMsgData},
-  state::{State, StateError},
-  ws::{ClientMan, WSError},
-};
-
-pub struct Handler<'a> {
-  handle: MsgHandle,
-  state: &'a mut State,
-  bluetooth: &'a mut Bluetooth,
-}
-
-impl<'a> Handler<'a> {
-  pub fn new(
-    client_man: ClientMan,
-    state: &'a mut State,
-    bluetooth: &'a mut Bluetooth,
-    msg_id: Uuid,
-    msg_from: SocketAddr,
-    stock_msg_id: Option<usize>,
-  ) -> Self {
-    Self {
-      handle: MsgHandle::new(client_man, msg_id, msg_from, stock_msg_id),
-      state,
-      bluetooth,
-    }
-  }
-
-  pub async fn handle(self, data: RecvMsgData) -> HandlerResult {
-    match data {
-      RecvMsgData::Bluetooth(msg) => BluetoothHandler::new(self).handle(msg).await,
-      RecvMsgData::Store(msg) => StorageHandler::new(self).handle(msg).await,
-      RecvMsgData::System(msg) => SystemHandler::new(self).handle(msg).await,
-      RecvMsgData::Voice(msg) => VoiceHandler::new(self).handle(msg).await,
-      RecvMsgData::Interaction(msg) => InteractionHandler::new(self).handle(msg).await,
-
-      // stock compatibility
-      RecvMsgData::LegacyStock(msg) => LegacyStockHandler::new(self).handle(msg).await,
-
-      // ignored and unsupported
-      RecvMsgData::Hole => {
-        tracing::trace!("({}) received blackhole message", &self.handle.from);
-
-        if let Some(msg_id) = self.handle.stock_msg_id {
-          self
-            .handle
-            .send_stock(StockInterAppSend::make_ack(Some(msg_id)))
-            .await?;
-        }
-
-        Ok(())
-      }
-      RecvMsgData::Unsupported(msg) => {
-        tracing::trace!("({}) received unsupported message: {:?}", &self.handle.from, msg);
-
-        if let Some(msg_id) = self.handle.stock_msg_id {
-          self
-            .handle
-            .send_stock(StockInterAppSend::make_ack(Some(msg_id)))
-            .await?;
-        }
-
-        Ok(())
-      }
-
-      // switch to legacy compatibility mode
-      RecvMsgData::ChangeMode(mode) => {
-        if mode == ClientMode::Stock {
-          self
-            .bluetooth
-            .handle_connection(&self.handle.client_man, self.state, false)
-            .await?;
-        };
-
-        Ok(())
-      }
-
-      RecvMsgData::ConnectionClosed(code, reason) => {
-        tracing::info!(
-          "({}) connection closed with code {:?}, reason {}",
-          &self.handle.id,
-          code,
-          reason
-        );
-        Ok(())
-      }
-      RecvMsgData::Error(error) => {
-        tracing::error!("({}) failed to receive message: {:?}", &self.handle.from, error);
-        Err(HandlerError::WS(WSError::Websocket(error)))
-      }
-    }
-  }
-}
+use crate::{bt::BluetoothError, player::PlayerError, state::StateError, ws::WSError};
 
 type HandlerResult = Result<(), HandlerError>;
 
@@ -128,6 +17,6 @@ pub enum HandlerError {
   Bluetooth(#[from] BluetoothError),
   #[error("io error: {0}")]
   IO(#[from] std::io::Error),
-  #[error("failed to call avrcp: {0}")]
-  DBus(#[from] DBusError),
+  #[error(transparent)]
+  Player(#[from] PlayerError),
 }

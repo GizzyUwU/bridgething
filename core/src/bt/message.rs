@@ -5,19 +5,14 @@ use crate::{
     StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend,
   },
   state::State,
-  ws::ClientMan,
 };
 
 use super::BluetoothResult;
 
-pub async fn connection_messages(
-  conn_man: &ClientMan,
-  state: &State,
-  new_device: bool,
-  device: &Device,
-) -> BluetoothResult<()> {
+pub async fn connection_messages(state: &State, new_device: bool, device: &Device) -> BluetoothResult<()> {
   if new_device {
-    conn_man
+    state
+      .client_man
       .broadcast(
         ServerBluetoothEvent::ParingResult { success: true },
         ServerEventType::Info,
@@ -25,16 +20,19 @@ pub async fn connection_messages(
       .await?;
   }
 
-  conn_man
+  state
+    .client_man
     .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Info)
     .await?;
-  conn_man
+  state
+    .client_man
     .broadcast(
-      ServerBluetoothEvent::PairedDevices(state.get_devices().clone()),
+      ServerBluetoothEvent::PairedDevices(state.get_devices().await),
       ServerEventType::Info,
     )
     .await?;
-  conn_man
+  state
+    .client_man
     .broadcast(
       ServerBluetoothEvent::ConnectedDevice {
         name: device.name.clone(),
@@ -44,27 +42,34 @@ pub async fn connection_messages(
     )
     .await?;
 
-  conn_man
+  state
+    .client_man
     .broadcast_stock(StockConnectionSend::RemoteStatus {
       payload: true,
       mac: device.mac.clone(),
       phone_type: device.device_type.clone().into(),
     })
     .await?;
-  conn_man
+  state
+    .client_man
     .broadcast_stock(StockConnectionSend::TransportStatus { payload: true })
     .await?;
-  conn_man.broadcast_stock(StockConfigurationSend::default()).await?;
+  state
+    .client_man
+    .broadcast_stock(StockConfigurationSend::default())
+    .await?;
 
   if new_device {
-    conn_man
+    state
+      .client_man
       .broadcast_stock(StockSetupSend::Status {
         payload: "finished".to_string(),
       })
       .await?;
   }
 
-  conn_man
+  state
+    .client_man
     .broadcast_stock(StockInterAppSend {
       msg_id: None,
       data: StockInterAppSendPayload::SessionState {
@@ -77,38 +82,40 @@ pub async fn connection_messages(
     .await?;
 
   // TODO: remove testing code
-  conn_man
+  state
+    .client_man
     .broadcast_stock(StockConnectionSend::RemoteApp {
       app_id: "com.bridgething".to_string(),
       is_spotify: true,
     })
     .await?;
 
-  if let Some(player) = &state.player {
-    player.send_state().await?;
-  }
+  state.player.send_state().await?;
 
   // TODO: remove testing code
   // #[cfg(debug_assertions)]
-  // conn_man.broadcast(PlayerSend::dummy(), SendMsgMeta::Info).await?;
+  // state.client_man.broadcast(PlayerSend::dummy(), SendMsgMeta::Info).await?;
   // #[cfg(debug_assertions)]
-  // conn_man.broadcast(PlayerSend::dummy_queue(), SendMsgMeta::Info).await?;
+  // state.client_man.broadcast(PlayerSend::dummy_queue(), SendMsgMeta::Info).await?;
 
   Ok(())
 }
 
-pub async fn disconnection_messages(conn_man: &ClientMan, state: &State) -> BluetoothResult<()> {
-  conn_man
+pub async fn disconnection_messages(state: &State) -> BluetoothResult<()> {
+  state
+    .client_man
     .broadcast(ServerBluetoothEvent::Status { connected: false }, ServerEventType::Info)
     .await?;
-  conn_man
+  state
+    .client_man
     .broadcast(
-      ServerBluetoothEvent::PairedDevices(state.get_devices().clone()),
+      ServerBluetoothEvent::PairedDevices(state.get_devices().await),
       ServerEventType::Info,
     )
     .await?;
 
-  conn_man
+  state
+    .client_man
     .broadcast_stock(StockConnectionSend::TransportStatus { payload: false })
     .await?;
 

@@ -2,25 +2,18 @@ use std::collections::HashMap;
 
 use libbridgething::{client::ClientLegacyStockCommand, stock::StockSetPreset};
 
-use crate::{
-  msg::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend},
-  state::State,
-};
+use crate::msg::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
 
-use super::{Handler, HandlerResult, MsgHandle};
+use super::{HandlerResult, MsgHandle};
 
 #[derive(Debug)]
-pub struct LegacyStockHandler<'a> {
+pub struct LegacyStockHandler {
   handle: MsgHandle,
-  state: &'a mut State,
 }
 
-impl<'a> LegacyStockHandler<'a> {
-  pub fn new(handler: Handler<'a>) -> Self {
-    Self {
-      handle: handler.handle,
-      state: handler.state,
-    }
+impl LegacyStockHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
   }
 
   pub async fn handle(self, msg: ClientLegacyStockCommand) -> HandlerResult {
@@ -77,21 +70,17 @@ impl<'a> LegacyStockHandler<'a> {
 
   async fn get_image(self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
 
-    player.request_cover_art(self.handle).await;
+    // TODO: don't clone the message handle, do this "synchronously"?
+    self.handle.state.player.request_cover_art(self.handle.clone()).await;
     Ok(())
   }
 
   async fn get_thumbnail_image(self, id: String) -> HandlerResult {
     tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
-    let Some(player) = &self.state.player else {
-      return Ok(());
-    };
 
-    player.request_cover_art(self.handle).await;
+    // TODO: don't clone the message handle, do this "synchronously"?
+    self.handle.state.player.request_cover_art(self.handle.clone()).await;
     Ok(())
   }
 

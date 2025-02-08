@@ -1,21 +1,17 @@
 use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
 
-use crate::{msg::stock::StockSetupSend, state::State};
+use crate::msg::stock::StockSetupSend;
 
-use super::{Handler, HandlerResult, MsgHandle};
+use super::{HandlerResult, MsgHandle};
 
 #[derive(Debug)]
-pub struct StorageHandler<'a> {
+pub struct StorageHandler {
   handle: MsgHandle,
-  state: &'a mut State,
 }
 
-impl<'a> StorageHandler<'a> {
-  pub fn new(handler: Handler<'a>) -> Self {
-    Self {
-      handle: handler.handle,
-      state: handler.state,
-    }
+impl StorageHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
   }
 
   pub async fn handle(&mut self, msg: ClientKVStoreCommand) -> HandlerResult {
@@ -31,7 +27,7 @@ impl<'a> StorageHandler<'a> {
   async fn get(&self, key: String) -> HandlerResult {
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
     #[cfg(debug_assertions)]
-    let mut value = self.state.get_storage_key(&key);
+    let mut value = self.handle.state.get_storage_key(&key).await;
 
     #[cfg(not(debug_assertions))]
     let value = self.state.get_storage_key(&key);
@@ -43,7 +39,7 @@ impl<'a> StorageHandler<'a> {
         &self.handle.from
       );
 
-      let payload = if self.state.connected_device.is_some() {
+      let payload = if self.handle.state.last_device().await.is_some() {
         "finished"
       } else {
         ""
@@ -63,7 +59,7 @@ impl<'a> StorageHandler<'a> {
 
   async fn put(&mut self, key: String, value: String) -> HandlerResult {
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
-    self.state.set_storage_key(key.clone(), value.clone()).await?;
+    self.handle.state.set_storage_key(key.clone(), value.clone()).await?;
 
     Ok(
       self
@@ -78,7 +74,7 @@ impl<'a> StorageHandler<'a> {
 
   async fn delete(&mut self, key: String) -> HandlerResult {
     tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
-    self.state.del_storage_key(&key).await?;
+    self.handle.state.del_storage_key(&key).await?;
 
     Ok(
       self

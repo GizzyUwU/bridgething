@@ -16,4 +16,4 @@ typescript:
   bunx prettier lib/ts/bindings --write
 
 tokei:
-  tokei -t Nix,Rust,TypeScript
+  tokei -t Nix,Rust,TypeScript,TSX
