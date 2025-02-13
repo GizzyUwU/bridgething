@@ -13,6 +13,13 @@ type Callback = ThreadsafeFunction<Event, Unknown, Event, false>;
 type MsgTx = tokio::sync::mpsc::Sender<JsMessage>;
 type MsgRx = tokio::sync::mpsc::Receiver<JsMessage>;
 
+pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[napi]
+pub fn adapter_version() -> String {
+  format!("v{}", ADAPTER_VERSION)
+}
+
 pub enum JsMessage {
   ScanOn,
   ScanOff,

@@ -41,7 +41,7 @@ async fn main() {
     .await
     .expect("failed to initialize the bluetooth stack");
 
-  let mut gateway_con = GatewayCon::init(&bluetooth.adapter)
+  let mut gateway_con = GatewayCon::init(&bluetooth.adapter, state.clone())
     .await
     .expect("failed to create gatt server for gateway connections!");
 
@@ -49,7 +49,6 @@ async fn main() {
 
   notifier.ready(true, Some("ready to accept connections..."));
 
-  // TODO: handle all events on spawned threads
   loop {
     tokio::select! {
       Ok((stream, address)) = server.listen() => {

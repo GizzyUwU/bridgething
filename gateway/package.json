@@ -1,13 +1,16 @@
 {
   "name": "@bridgething/gateway",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "scripts": {
     "dev": "tsup ./src --watch",
+    "prebuild": "bun run gv",
     "build": "tsup ./src",
-    "example:dev": "bun examples/dev.ts"
+    "example:dev": "bun examples/dev.ts",
+    "gv": "genversion --esm --semi src/version.ts"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0-beta3",
@@ -15,7 +18,8 @@
   },
   "devDependencies": {
     "@bridgething/adapter-node": "workspace:*",
-    "tsup": "^8.3.6"
+    "tsup": "^8.3.6",
+    "genversion": "3.2.0"
   },
   "peerDependencies": {
     "typescript": "^5.7.3"

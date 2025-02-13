@@ -36,7 +36,7 @@ impl PersistentAppState {
 #[derive(Debug)]
 pub struct AppState {
   pub client_man: ClientMan,
-  pub meta: meta::Meta,
+  pub meta: meta::SuperbirdMeta,
   pub player: crate::player::Player,
 
   persist_path: PathBuf,
@@ -57,7 +57,7 @@ impl AppState {
     let persist_path = config_dir_path.join("bridgething.db");
     let persist = PersistentAppState::restore_or_default(&persist_path).await;
 
-    let meta = meta::Meta::read_or_default().await;
+    let meta = meta::SuperbirdMeta::read_or_default().await;
     tracing::debug!("metadata: {:?}", &meta);
 
     Ok(Arc::new(Self {

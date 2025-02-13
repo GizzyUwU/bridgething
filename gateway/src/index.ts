@@ -7,7 +7,6 @@ type Adapter = {
   on(callback: AdapterCallback): void;
 
   init(): Promise<void>;
-  init(adapterName?: string | null): Promise<void>;
 
   scanOn(): Promise<void>;
   scanOff(): Promise<void>;
@@ -65,7 +64,7 @@ class BridgethingGateway {
    * blocks until the bluetooth adapter is ready.
    * @throws THIS WILL THROW IF BLUETOOTH PERMISSION IS DENIED
    */
-  init = (adapterName?: string | null) => this.adapter.init(adapterName);
+  init = () => this.adapter.init();
 
   on<K extends Lowercase<AdapterEvent['type']>>(type: K, callback: KeyedEventCallback<K>): void;
   on(callback: SimpleEventCallback): void;
@@ -84,7 +83,7 @@ class BridgethingGateway {
   disconnect = (id: string) => this.adapter.disconnect(id);
 
   /** @throws THIS WILL THROW IF THE DEVICE IS NOT KNOWN/CONNECTED OR IF SEND FAILS */
-  send = (deviceId: string, message: GatewayToBridgeMsg) => this.adapter.send(deviceId, encode(message));
+  send = (deviceId: string, message: GatewayToBridgeMsg) => this.adapter.send(deviceId, encode(stripUuid(message)));
 
   private handleEvent(allEvent: AllAdapterEvent) {
     this.logger.trace('new event: ', allEvent);
@@ -102,8 +101,14 @@ class BridgethingGateway {
   }
 }
 
+const stripUuid = (message: GatewayToBridgeMsg) => ({ ...message, id: message.id.replaceAll('-', '') });
+
+import { version } from './version';
+const GATEWAY_VERSION = `v${version}`;
+
 export {
   BridgethingGateway,
+  GATEWAY_VERSION,
   type Adapter,
   type AdapterCallback,
   type AdapterEvent,

@@ -2,7 +2,7 @@ import { BridgethingGateway, type SimpleEventCallback } from '../src';
 
 import { NodeAdapter } from '@bridgething/adapter-node';
 import { LogLevel, type BridgeToGatewayMsg } from '@bridgething/lib';
-import { sleep } from 'bun';
+import { randomUUIDv7, sleep } from 'bun';
 
 const msgHandler: SimpleEventCallback = e => {
   console.log('>> js callback got new data!!', e);
@@ -20,19 +20,47 @@ const msgHandler: SimpleEventCallback = e => {
 const handleData = async (deviceId: string, data: BridgeToGatewayMsg) => {
   switch (data.type) {
     case 'version':
-      await gateway.send(deviceId, { id: data.id, type: 'version', gateway: 'v0.1.0-alpha1', app: 'development' });
+      // await gateway.send(deviceId, {
+      //   id: randomUUIDv7(),
+      //   meta: 'event',
+      //   type: 'version',
+      //   data: { gateway: 'v0.1.0-alpha1', app: 'development' },
+      // });
+
+      // test send large file
+      await gateway.send(deviceId, {
+        id: randomUUIDv7(),
+        meta: 'event',
+        type: 'addFiles',
+        data: {
+          files: [
+            {
+              path: 'test',
+              data: (() => {
+                const randomData = new Uint8Array(200 * 1024);
+                crypto.getRandomValues(randomData);
+                return randomData;
+              })(),
+            },
+          ],
+        },
+      });
+
       break;
-    case 'request':
+    case 'files':
+      console.log(`files:`, data);
       break;
-    case 'response':
+    case 'data':
+      console.log(`data:`, data);
       break;
   }
 };
 
-const gateway = new BridgethingGateway(new NodeAdapter('bridgething_adapter=trace'), { logLevel: LogLevel.Trace });
+const adapter = new NodeAdapter({ adapterName: 'hci1', logLevelDirective: 'bridgething_adapter=trace' });
+const gateway = new BridgethingGateway(adapter, { logLevel: LogLevel.Trace });
 gateway.on(msgHandler);
 
-await gateway.init('hci1');
+await gateway.init();
 await gateway.scanOn();
 
 await sleep(1_000_000);

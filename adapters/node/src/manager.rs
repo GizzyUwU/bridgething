@@ -134,8 +134,15 @@ impl BtMan {
         tracing::debug!("ServiceDataAdvertisement: {:?}, {:?}", id, service_data);
       }
       CentralEvent::ServicesAdvertisement { id, services } => {
-        let services: Vec<String> = services.into_iter().map(|s| s.to_short_string()).collect();
-        tracing::debug!("ServicesAdvertisement: {:?}, {:?}", id, services);
+        tracing::debug!(
+          "ServicesAdvertisement: {:?}, {:?}",
+          id,
+          services.iter().map(|s| s.to_short_string()).collect::<Vec<_>>()
+        );
+
+        if services.into_iter().any(|s| s == BRIDGETHING_SERVICE_UUID) {
+          self.handle_device_discovered(id).await?;
+        };
       }
       _ => {}
     }
@@ -150,7 +157,10 @@ impl BtMan {
     let properties = handle.properties().await?;
     if let Some(properties) = properties {
       if !properties.services.contains(&BRIDGETHING_SERVICE_UUID) {
-        // tracing::trace!("device with mac {:?} did not have bridgething service", handle.address());
+        tracing::trace!(
+          "device with mac {:?} did not have bridgething service",
+          handle.address()
+        );
         return Ok(());
       };
     };
@@ -311,18 +321,30 @@ impl DeviceWrite {
     Ok(())
   }
 
+  #[tracing::instrument(level = "trace", skip_all)]
   async fn handle_write(&mut self, data: Vec<u8>) -> Result<()> {
-    tracing::trace!("writing to {:?} data: {:?}", self.address, data);
-
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(&data)?;
     let encoded = encoder.finish()?;
-    tracing::trace!("final msg: {:?}", encoded);
 
-    self
-      .handle
-      .write(&self.char, &encoded, WriteType::WithoutResponse)
-      .await?;
+    if encoded.len() > 512 {
+      tracing::debug!(
+        "splitting encoded data of length {} into chunks for {:?}",
+        encoded.len(),
+        self.address
+      );
+
+      for chunk in encoded.chunks(512) {
+        // tracing::trace!("writing chunk of length {} to {:?}", chunk.len(), self.address);
+        self.handle.write(&self.char, chunk, WriteType::WithoutResponse).await?;
+      }
+    } else {
+      tracing::debug!("writing data of length {} to {:?}", encoded.len(), self.address);
+      self
+        .handle
+        .write(&self.char, &encoded, WriteType::WithoutResponse)
+        .await?;
+    }
 
     Ok(())
   }
@@ -383,12 +405,19 @@ impl DeviceNotify {
     Ok(())
   }
 
+  #[tracing::instrument(level = "trace", skip_all)]
   async fn handle_data(&mut self, data: ValueNotification) -> Result<()> {
+    tracing::debug!("received from {:?} data of length {:?}", self.address, data.value.len());
     tracing::trace!("received from {:?} data: {:?}", self.address, data);
 
     let mut decoder = flate2::write::GzDecoder::new(Vec::new());
     decoder.write_all(&data.value)?;
     let decoded = decoder.finish()?;
+    tracing::debug!(
+      "received from {:?} final message of length {:?}",
+      self.address,
+      decoded.len()
+    );
     tracing::trace!("final msg: {:?}", decoded);
 
     self

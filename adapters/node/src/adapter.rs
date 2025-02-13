@@ -12,8 +12,25 @@ struct AdapterInner {
   cancel_token: CancellationToken,
 }
 
+#[napi(object)]
+#[derive(Debug)]
+pub struct AdapterOptions {
+  pub log_level_directive: Option<String>,
+  pub adapter_name: Option<String>,
+}
+
+impl Default for AdapterOptions {
+  fn default() -> Self {
+    Self {
+      log_level_directive: Some("bridgething_adapter=info".to_string()),
+      adapter_name: None,
+    }
+  }
+}
+
 #[napi]
 pub struct NodeAdapter {
+  options: AdapterOptions,
   callback_purgatory: Option<Vec<Callback>>,
   inner: Option<AdapterInner>,
 }
@@ -21,14 +38,20 @@ pub struct NodeAdapter {
 #[napi]
 impl NodeAdapter {
   #[napi(constructor)]
-  pub fn new(log_level_directive: Option<String>) -> Self {
-    monitoring::init_logger(log_level_directive);
-    Self::default()
+  pub fn new(options: Option<AdapterOptions>) -> Self {
+    let options = options.unwrap_or_default();
+    monitoring::init_logger(options.log_level_directive.clone());
+
+    Self {
+      options,
+      callback_purgatory: Some(vec![]),
+      inner: None,
+    }
   }
 
   #[napi]
   #[allow(clippy::missing_safety_doc)]
-  pub async unsafe fn init(&mut self, adapter_name: Option<String>) -> Result<()> {
+  pub async unsafe fn init(&mut self) -> Result<()> {
     if self.inner.is_some() {
       return Err(Error::AlreadyInitialized);
     };
@@ -37,7 +60,7 @@ impl NodeAdapter {
     let cancel_token = CancellationToken::new();
 
     let bt_man = BtMan::new(
-      adapter_name,
+      self.options.adapter_name.clone(),
       rx,
       self.callback_purgatory.take().unwrap_or_default(),
       cancel_token.child_token(),
@@ -109,14 +132,15 @@ impl NodeAdapter {
   }
 }
 
-impl Default for NodeAdapter {
-  fn default() -> Self {
-    Self {
-      callback_purgatory: Some(Vec::new()),
-      inner: None,
-    }
-  }
-}
+// impl Default for NodeAdapter {
+//   fn default() -> Self {
+//     Self {
+//       options: Default::default(),
+//       callback_purgatory: Some(Vec::new()),
+//       inner: None,
+//     }
+//   }
+// }
 
 impl Drop for NodeAdapter {
   fn drop(&mut self) {

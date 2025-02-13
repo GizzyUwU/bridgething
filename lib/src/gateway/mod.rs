@@ -2,11 +2,21 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-mod from;
-mod to;
+use crate::BridgeThingMeta;
 
-pub use from::*;
-pub use to::*;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "meta", rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub enum GatewayMsgMeta {
+  Command,
+  Event,
+  Request,
+  Response {
+    #[serde(with = "uuid::serde::simple")]
+    #[ts(type = "string")]
+    request_id: Uuid,
+  },
+}
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
@@ -19,19 +29,47 @@ pub struct GatewayToBridgeMsg {
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
-  pub data: GatewayToBridgeMsgType,
+  pub meta: GatewayMsgMeta,
+  #[serde(flatten)]
+  pub data: GatewayToBridgeMsgData,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-pub enum GatewayToBridgeMsgType {
-  Version { gateway: String, app: String },
-  Command(GatewayToBridgeCommand),
-  Event(GatewayToBridgeEvent),
-  Request(GatewayToBridgeRequest),
-  Response(GatewayToBridgeResponse),
+pub enum GatewayToBridgeMsgData {
+  Version { version: String, app: String }, // event, response?
+
+  // files
+  ListFiles,                           // request
+  DeleteFiles { files: Vec<String> },  // command
+  AddFiles { files: Vec<BridgeFile> }, // command
+
+  // chrome
+  Navigate { url: String }, // command
+
+  // arbitrary data
+  Data(ArbitraryData), // request, response, event, command?
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct BridgeFile {
+  pub path: String,
+  #[ts(type = "Uint8Array")]
+  pub data: Vec<u8>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(untagged, rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub enum ArbitraryData {
+  String(String),
+  Bytes(#[ts(type = "Uint8Array")] Vec<u8>),
 }
 
 /// bridgething -> gateway
@@ -45,17 +83,22 @@ pub struct BridgeToGatewayMsg {
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
-  pub data: BridgeToGatewayMsgType,
+  pub meta: GatewayMsgMeta,
+  #[serde(flatten)]
+  pub data: BridgeToGatewayMsgData,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-pub enum BridgeToGatewayMsgType {
-  Version { bridgething: String, app: String },
-  Command(BridgeToGatewayCommand),
-  Event(BridgeToGatewayEvent),
-  Request(BridgeToGatewayRequest),
-  Response(BridgeToGatewayResponse),
+#[allow(clippy::large_enum_variant)] // TODO: maybe remove this allow later
+pub enum BridgeToGatewayMsgData {
+  Version(BridgeThingMeta), // event, response?
+
+  // files
+  Files { files: Vec<String> }, // response
+
+  // arbitrary data
+  Data(ArbitraryData), // request, response, event, command?
 }

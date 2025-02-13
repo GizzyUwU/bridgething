@@ -30,6 +30,9 @@ sd-notify = { version = "0.4.5", optional = true }
 
 # mic feature
 
+# chrome feature
+fantoccini = { version = "0.21.4", optional = true }
+
 # dependencies
 tokio-websockets = { version = "0.10.1", features = [
   "server",
@@ -38,10 +41,10 @@ tokio-websockets = { version = "0.10.1", features = [
 ] }
 dirs = "5.0.1"
 bincode = "1.3.3"
-zbus = { version = "5.3.1", default-features = false, features = ["tokio"] }
+zbus = { version = "5.5.0", default-features = false, features = ["tokio"] }
 rmp = "0.8.14"
 rmp-serde = "1.3.0"
-quick_cache = "0.6.9"
+quick_cache = "0.6.10"
 dashmap = { version = "6.1.0", features = ["serde"] }
 base64 = "0.22.1"
 ahash = "0.8.11"
@@ -51,6 +54,7 @@ ahash = "0.8.11"
 default = []
 als = []
 mic = []
+chrome = ["dep:fantoccini"]
 systemd = ["dep:sd-notify"]
 superbird = ["als", "mic", "systemd"]
 # dev features

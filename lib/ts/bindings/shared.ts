@@ -4,11 +4,37 @@ export type Album = { id: string; name: string };
 
 export type Artist = { id: string; name: string };
 
+export type BridgeThingMeta = {
+  bridgethingVersion: string;
+  libbridgethingVersion: string;
+  appName: string;
+  appVersion: string;
+  osName: string;
+  osVersion: string;
+  osDescription: string;
+  btMac: string;
+  serialNumber: string;
+  fccId: string;
+  icId: string;
+  modelName: string;
+  discord: string;
+  credits: string;
+};
+
 export type CurrentlyActiveApplication = { id: string; name: string };
 
 export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
 
 export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
+
+export type GatewayMeta = {
+  adapterVersion: string;
+  libVersion: string;
+  libbridgethingVersion: string;
+  appName: string;
+  appVersion: string;
+  osName: string;
+};
 
 export type Image = { image_id: string } | { image_bytes: string };
 
@@ -25,6 +51,8 @@ export type PhoneCallStatus =
 
 export type PlaybackOptions = { repeat: number; shuffle: boolean };
 
+export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
+
 export type PlaybackRestrictions = {
   can_repeat_context: boolean;
   can_repeat_track: boolean;
@@ -32,6 +60,9 @@ export type PlaybackRestrictions = {
   can_skip_next: boolean;
   can_skip_prev: boolean;
   can_toggle_shuffle: boolean;
+  can_like: boolean;
+  can_change_volume: boolean;
+  can_set_output: boolean;
 };
 
 export type Track = {

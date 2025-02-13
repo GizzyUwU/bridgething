@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, io::Write, pin::Pin};
 
 use bluer::{
-  adv::{Advertisement, AdvertisementHandle},
+  adv::{Advertisement, AdvertisementHandle, SecondaryChannel},
   gatt::{
     local::{
       characteristic_control, service_control, Application, ApplicationHandle, Characteristic, CharacteristicControl,
@@ -15,7 +15,7 @@ use bluer::{
 use flate2::Compression;
 use futures::{future, StreamExt};
 use libbridgething::{
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgType, GatewayToBridgeMsg},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
   BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_MANUFACTURER_ID, BRIDGETHING_SERVICE_UUID,
 };
 use tokio::{
@@ -23,7 +23,7 @@ use tokio::{
   task::JoinHandle,
 };
 
-use crate::bt::BluetoothError;
+use crate::{bt::BluetoothError, state::State};
 
 use super::bt::BluetoothResult;
 
@@ -35,15 +35,15 @@ pub type GatewayNotifyRx = tokio::sync::mpsc::Receiver<BridgeToGatewayMsg>;
 pub struct GatewayCon {
   tx: GatewayNotifyTx,
   rx: GatewayRecvRx,
-  _gatt_handle: JoinHandle<BluetoothResult<()>>,
+  _gatt_handle: JoinHandle<()>,
 }
 
 impl GatewayCon {
-  pub async fn init(adapter: &Adapter) -> BluetoothResult<Self> {
+  pub async fn init(adapter: &Adapter, state: State) -> BluetoothResult<Self> {
     let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
     let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
 
-    let gatt_server = GattServer::init(adapter, recv_tx, notify_rx).await?;
+    let gatt_server = GattServer::init(adapter, state, recv_tx, notify_rx).await?;
 
     Ok(Self {
       tx,
@@ -57,7 +57,10 @@ impl GatewayCon {
   }
 }
 
+// TODO: handle errors ffs
 pub struct GattServer {
+  state: State,
+
   tx: GatewayRecvTx,
   rx: GatewayNotifyRx,
 
@@ -73,7 +76,7 @@ pub struct GattServer {
 }
 
 impl GattServer {
-  pub async fn init(adapter: &Adapter, tx: GatewayRecvTx, rx: GatewayNotifyRx) -> BluetoothResult<Self> {
+  pub async fn init(adapter: &Adapter, state: State, tx: GatewayRecvTx, rx: GatewayNotifyRx) -> BluetoothResult<Self> {
     tracing::debug!(
       "advertising on bluetooth adapter {} with address {}",
       adapter.name(),
@@ -87,6 +90,8 @@ impl GattServer {
       manufacturer_data,
       discoverable: Some(true),
       local_name: Some("bridgething".to_string()),
+      solicit_uuids: vec![BRIDGETHING_SERVICE_UUID].into_iter().collect(),
+      secondary_channel: Some(SecondaryChannel::TwoM),
       ..Default::default()
     };
     let adv_handle = adapter.advertise(le_advertisement).await?;
@@ -97,12 +102,13 @@ impl GattServer {
     let app = Application {
       services: vec![Service {
         uuid: BRIDGETHING_SERVICE_UUID,
-        primary: false,
+        primary: true,
         characteristics: vec![Characteristic {
           uuid: BRIDGETHING_CHARACTERISTIC_UUID,
           write: Some(CharacteristicWrite {
-            write: false,
+            write: true,
             write_without_response: true,
+            reliable_write: true,
             method: CharacteristicWriteMethod::Io,
             ..Default::default()
           }),
@@ -125,6 +131,8 @@ impl GattServer {
     tracing::trace!("characteristic handle is 0x{:x}", char_control.handle()?);
 
     Ok(Self {
+      state,
+
       tx,
       rx,
 
@@ -140,8 +148,12 @@ impl GattServer {
     })
   }
 
-  pub async fn spawn(mut self) -> JoinHandle<BluetoothResult<()>> {
-    tokio::spawn(async move { self.recv().await })
+  pub async fn spawn(mut self) -> JoinHandle<()> {
+    tokio::spawn(async move {
+      if let Err(err) = self.recv().await {
+        tracing::error!("gatt server died: {:?}", err);
+      }
+    })
   }
 
   async fn recv(&mut self) -> BluetoothResult<()> {
@@ -152,8 +164,8 @@ impl GattServer {
         evt = self.characteristic.next() => self.handle_characteristic(evt).await?,
         read_res = async {
           match &mut self.reader {
-            Some(reader) if self.writer.is_some() => reader.read(&mut self.read_buf).await,
-            _ => future::pending().await,
+            Some(reader) => reader.read(&mut self.read_buf).await,
+            None => future::pending().await,
           }
         } => self.handle_read(read_res).await?,
       }
@@ -194,22 +206,22 @@ impl GattServer {
         let data = self.read_buf[..n].to_vec();
         tracing::trace!("read {} bytes: {:x?}", data.len(), &data);
 
-        let mut decoder = flate2::write::GzDecoder::new(Vec::new());
-        decoder.write_all(&data)?;
-        let data = decoder.finish()?;
-        tracing::trace!("uncompressed msg: {:?}", &data);
+        // let mut decoder = flate2::write::GzDecoder::new(Vec::new());
+        // decoder.write_all(&data)?;
+        // let data = decoder.finish()?;
+        // tracing::trace!("uncompressed msg: {:x?}", &data);
 
-        let message = match rmp_serde::from_slice(&data) {
-          Ok(message) => message,
-          Err(err) => {
-            tracing::error!("failed to decode packed message: {:?}", err);
-            return Ok(());
-          }
-        };
+        // let message = match rmp_serde::from_slice(&data) {
+        //   Ok(message) => message,
+        //   Err(err) => {
+        //     tracing::error!("failed to decode packed message: {:?}", err);
+        //     return Ok(());
+        //   }
+        // };
 
-        if let Err(err) = self.tx.send(message).await {
-          tracing::error!("error forwarding bluetooth message: {:?}", err);
-        }
+        // if let Err(err) = self.tx.send(message).await {
+        //   tracing::error!("error forwarding bluetooth message: {:?}", err);
+        // }
       }
       Err(err) => {
         tracing::error!("read stream error: {}", &err);
@@ -234,10 +246,8 @@ impl GattServer {
         self
           .write(BridgeToGatewayMsg {
             id: uuid::Uuid::now_v7(),
-            data: BridgeToGatewayMsgType::Version {
-              bridgething: "v0.1.0-alpha1".to_string(),
-              app: "unknown".to_string(),
-            },
+            meta: GatewayMsgMeta::Event,
+            data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
           })
           .await
           .expect("could not send version!!");
