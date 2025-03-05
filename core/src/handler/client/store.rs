@@ -30,7 +30,7 @@ impl StorageHandler {
     let mut value = self.handle.state.get_storage_key(&key).await;
 
     #[cfg(not(debug_assertions))]
-    let value = self.state.get_storage_key(&key);
+    let value = self.handle.state.get_storage_key(&key).await;
 
     // handle for stock firmware
     if &key == "onboarding_status" {
