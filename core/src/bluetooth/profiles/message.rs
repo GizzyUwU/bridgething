@@ -1,13 +1,12 @@
-use libbridgething::{server::ServerBluetoothEvent, Device, ServerEventType};
+use libbridgething::{Device, ServerEventType, server::ServerBluetoothEvent};
 
 use crate::{
+  bluetooth::BluetoothResult,
   msg::stock::{
     StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend,
   },
   state::State,
 };
-
-use super::BluetoothResult;
 
 pub async fn connection_messages(state: &State, new_device: bool, device: &Device) -> BluetoothResult<()> {
   if new_device {

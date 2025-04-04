@@ -168,8 +168,9 @@ impl BtMan {
     tracing::debug!("discovered device running bridgething with mac: {:?}", handle.address());
     if !handle.is_connected().await? {
       tracing::debug!("attempting to connect to {:?}", handle.address());
-      handle.connect().await?;
+      let _ = handle.connect().await;
     }
+    self.handle_connect(id).await?;
 
     Ok(())
   }

@@ -1,68 +1,38 @@
 use std::{collections::BTreeMap, io::Write, pin::Pin};
 
 use bluer::{
+  Adapter,
   adv::{Advertisement, AdvertisementHandle, SecondaryChannel},
   gatt::{
-    local::{
-      characteristic_control, service_control, Application, ApplicationHandle, Characteristic, CharacteristicControl,
-      CharacteristicControlEvent, CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicWrite,
-      CharacteristicWriteMethod, Service, ServiceControl,
-    },
     CharacteristicReader, CharacteristicWriter,
+    local::{
+      Application, ApplicationHandle, Characteristic, CharacteristicControl, CharacteristicControlEvent,
+      CharacteristicNotify, CharacteristicNotifyMethod, CharacteristicWrite, CharacteristicWriteMethod, Service,
+      ServiceControl, characteristic_control, service_control,
+    },
   },
-  Adapter,
 };
 use flate2::Compression;
-use futures::{future, StreamExt};
+use futures::{StreamExt, future};
 use libbridgething::{
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
   BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_MANUFACTURER_ID, BRIDGETHING_SERVICE_UUID,
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta},
 };
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   task::JoinHandle,
 };
 
-use crate::{bt::BluetoothError, state::State};
+use crate::{bluetooth::BluetoothError, state::State};
 
-use super::bt::BluetoothResult;
-
-pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayToBridgeMsg>;
-pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayToBridgeMsg>;
-pub type GatewayNotifyTx = tokio::sync::mpsc::Sender<BridgeToGatewayMsg>;
-pub type GatewayNotifyRx = tokio::sync::mpsc::Receiver<BridgeToGatewayMsg>;
-
-pub struct GatewayCon {
-  tx: GatewayNotifyTx,
-  rx: GatewayRecvRx,
-  _gatt_handle: JoinHandle<()>,
-}
-
-impl GatewayCon {
-  pub async fn init(adapter: &Adapter, state: State) -> BluetoothResult<Self> {
-    let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
-    let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
-
-    let gatt_server = GattServer::init(adapter, state, recv_tx, notify_rx).await?;
-
-    Ok(Self {
-      tx,
-      rx,
-      _gatt_handle: gatt_server.spawn().await,
-    })
-  }
-
-  pub async fn listen(&mut self) -> Option<GatewayToBridgeMsg> {
-    self.rx.recv().await
-  }
-}
+use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 
 // TODO: handle errors ffs
 pub struct GattServer {
   state: State,
 
   tx: GatewayRecvTx,
-  rx: GatewayNotifyRx,
+  rx: GatewaySendRx,
 
   app: ApplicationHandle,
   advertisement: AdvertisementHandle,
@@ -72,11 +42,16 @@ pub struct GattServer {
   reader: Option<CharacteristicReader>,
   writer: Option<CharacteristicWriter>,
 
+  // testing
+  start: tokio::time::Instant,
+  packets: usize,
+  total_bytes: usize,
+
   read_buf: Vec<u8>,
 }
 
 impl GattServer {
-  pub async fn init(adapter: &Adapter, state: State, tx: GatewayRecvTx, rx: GatewayNotifyRx) -> BluetoothResult<Self> {
+  pub async fn init(adapter: &Adapter, state: State, tx: GatewayRecvTx, rx: GatewaySendRx) -> BluetoothResult<Self> {
     tracing::debug!(
       "advertising on bluetooth adapter {} with address {}",
       adapter.name(),
@@ -144,11 +119,16 @@ impl GattServer {
       reader: None,
       writer: None,
 
+      // testing
+      start: tokio::time::Instant::now(),
+      packets: 0,
+      total_bytes: 0,
+
       read_buf: Vec::new(),
     })
   }
 
-  pub async fn spawn(mut self) -> JoinHandle<()> {
+  pub fn spawn(mut self) -> JoinHandle<()> {
     tokio::spawn(async move {
       if let Err(err) = self.recv().await {
         tracing::error!("gatt server died: {:?}", err);
@@ -205,6 +185,11 @@ impl GattServer {
       Ok(n) => {
         let data = self.read_buf[..n].to_vec();
         tracing::trace!("read {} bytes: {:x?}", data.len(), &data);
+        self.total_bytes += data.len();
+        self.packets += 1;
+        tracing::trace!("elapsed: {:?}", self.start.elapsed());
+        tracing::trace!("packets: {}", self.packets);
+        tracing::trace!("total bytes: {}", self.total_bytes);
 
         // let mut decoder = flate2::write::GzDecoder::new(Vec::new());
         // decoder.write_all(&data)?;
@@ -238,6 +223,10 @@ impl GattServer {
         tracing::debug!("accepting write request event with MTU {}", req.mtu());
         self.read_buf = vec![0; req.mtu()];
         self.reader = Some(req.accept()?);
+
+        self.start = tokio::time::Instant::now();
+        self.packets = 0;
+        self.total_bytes = 0;
       }
       Some(CharacteristicControlEvent::Notify(notifier)) => {
         tracing::debug!("accepting notify request event with MTU {}", notifier.mtu());

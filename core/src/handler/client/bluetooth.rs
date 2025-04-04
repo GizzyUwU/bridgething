@@ -44,7 +44,7 @@ impl BluetoothHandler {
 
   async fn connect(&self, mac: String) -> HandlerResult {
     tracing::debug!("({}) connecting to device with MAC: {}", &self.handle.from, mac);
-    Ok(self.handle.bluetooth.connect(&mac)?)
+    Ok(self.handle.bluetooth.profile_man.connect(&mac)?)
   }
 
   async fn scan(&self) -> HandlerResult {
@@ -55,12 +55,12 @@ impl BluetoothHandler {
 
   async fn enable_discoverable(&self) -> HandlerResult {
     tracing::debug!("({}) enabling discoverable mode", &self.handle.from);
-    Ok(self.handle.bluetooth.set_discoverable(true).await?)
+    Ok(self.handle.bluetooth.profile_man.set_discoverable(true).await?)
   }
 
   async fn disable_discoverable(&self) -> HandlerResult {
     tracing::debug!("({}) disabling discoverable mode", &self.handle.from);
-    Ok(self.handle.bluetooth.set_discoverable(false).await?)
+    Ok(self.handle.bluetooth.profile_man.set_discoverable(false).await?)
   }
 
   async fn pair(&self, mac: String) -> HandlerResult {
@@ -72,7 +72,7 @@ impl BluetoothHandler {
   async fn forget(&mut self, mac: String) -> HandlerResult {
     tracing::debug!("({}) forgetting device with MAC: {}", &self.handle.from, mac);
 
-    self.handle.bluetooth.forget(&mac).await?;
+    self.handle.bluetooth.profile_man.forget(&mac).await?;
     self.handle.state.remove_device(mac).await?;
     self.list().await?;
 
@@ -94,6 +94,6 @@ impl BluetoothHandler {
 
   async fn set_alias(&self, name: String) -> HandlerResult {
     tracing::debug!("({}) setting adapter alias to: {}", &self.handle.from, name);
-    Ok(self.handle.bluetooth.set_alias(name).await?)
+    Ok(self.handle.bluetooth.profile_man.set_alias(name).await?)
   }
 }

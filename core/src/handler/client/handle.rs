@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use libbridgething::{ServerEventData, ServerEventType};
 use uuid::Uuid;
 
-use crate::{bt::Bluetooth, msg::stock::StockSendMsg, state::State, ws::WSResult};
+use crate::{bluetooth::BluetoothMan, msg::stock::StockSendMsg, state::State, ws::WSResult};
 
 use super::ClientHandler;
 
@@ -11,7 +11,7 @@ use super::ClientHandler;
 #[derive(Debug, Clone)]
 pub struct MsgHandle {
   pub state: State,
-  pub bluetooth: Bluetooth,
+  pub bluetooth: BluetoothMan,
 
   pub id: Uuid,
   pub from: SocketAddr,
@@ -32,10 +32,12 @@ impl MsgHandle {
     }
   }
 
+  #[allow(unused)]
   pub async fn send(&self, id: Uuid, data: impl Into<ServerEventData>, meta: ServerEventType) -> WSResult<()> {
     self.state.client_man.send(id, self.from, data, meta, None).await
   }
 
+  #[allow(unused)]
   pub async fn request(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
     self
       .state
@@ -52,6 +54,7 @@ impl MsgHandle {
       .await
   }
 
+  #[allow(unused)]
   pub async fn send_info(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
     self
       .state

@@ -16,9 +16,9 @@ mod handle;
 pub use handle::*;
 
 use crate::{
-  bt::Bluetooth,
+  bluetooth::BluetoothMan,
   handler::HandlerError,
-  msg::{stock::StockInterAppSend, ClientMode, RecvMsg, RecvMsgData},
+  msg::{ClientMode, RecvMsg, RecvMsgData, stock::StockInterAppSend},
   state::State,
   ws::WSError,
 };
@@ -27,11 +27,11 @@ use super::HandlerResult;
 
 pub struct ClientHandler {
   state: State,
-  bluetooth: Bluetooth,
+  bluetooth: BluetoothMan,
 }
 
 impl ClientHandler {
-  pub fn new(state: State, bluetooth: Bluetooth) -> Self {
+  pub fn new(state: State, bluetooth: BluetoothMan) -> Self {
     Self { state, bluetooth }
   }
 
@@ -79,7 +79,7 @@ impl ClientHandler {
       // switch to legacy compatibility mode
       RecvMsgData::ChangeMode(mode) => {
         if mode == ClientMode::Stock {
-          self.bluetooth.handle_connection(false).await?;
+          self.bluetooth.profile_man.handle_connection(false).await?;
         };
       }
 

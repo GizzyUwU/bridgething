@@ -1,6 +1,4 @@
-mod bt;
-
-mod ble;
+mod bluetooth;
 mod ws;
 
 mod als;
@@ -15,9 +13,8 @@ mod msg;
 
 mod monitoring;
 
-use ble::GatewayCon;
-use bt::BluetoothMan;
-use handler::ClientHandler;
+use bluetooth::BluetoothManager;
+use handler::{ClientHandler, GatewayHandler};
 use player::Player;
 use state::AppState;
 use systemd::Notify;
@@ -37,15 +34,13 @@ async fn main() {
     .expect("failed to initialize state!!");
 
   notifier.status("initializing bluetooth stack...");
-  let (bluetooth, mut bt_listener) = BluetoothMan::init(state.clone())
+  let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
+  let bluetooth = BluetoothManager::init(state.clone(), bluetooth_tx)
     .await
-    .expect("failed to initialize the bluetooth stack");
-
-  let mut gateway_con = GatewayCon::init(&bluetooth.adapter, state.clone())
-    .await
-    .expect("failed to create gatt server for gateway connections!");
+    .expect("failed to initialize bluetooth stack");
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone());
+  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone());
 
   notifier.ready(true, Some("ready to accept connections..."));
 
@@ -62,13 +57,14 @@ async fn main() {
           tracing::error!("failed to handle websocket message: {:?}", err);
         }
       },
-      msg = bt_listener.recv() => {
-        if let Err(err) = bluetooth.handle_event(msg).await {
-          tracing::error!("failed to handle bluetooth message: {:?}", err);
+      Some(msg) = bluetooth_rx.recv() => {
+        match msg {
+          bluetooth::BluetoothEvent::Gateway { from, msg } => {
+            if let Err(err) = gateway_handler.handle(from, msg).await {
+              tracing::error!("failed to handle bluetooth message: {:?}", err);
+            }
+          }
         }
-      },
-      Some(event) = gateway_con.listen() => {
-        tracing::trace!("new gateway event: {:?}", event);
       },
 
       _ = monitoring::wait_for_signal() => {

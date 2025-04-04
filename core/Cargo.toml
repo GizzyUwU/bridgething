@@ -1,8 +1,8 @@
 [package]
 name = "bridgething"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.82.0"
+edition = "2024"
+rust-version = "1.85.0"
 default-run = "bridgething"
 
 [dependencies]
@@ -14,7 +14,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 serde_with = { workspace = true, features = ["json"] }
 derive_more = { workspace = true, features = ["debug"] }
-bluer = { workspace = true, features = ["bluetoothd", "l2cap"] }
+bluer = { workspace = true, features = ["bluetoothd", "l2cap", "rfcomm"] }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }

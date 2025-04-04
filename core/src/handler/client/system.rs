@@ -68,7 +68,7 @@ impl SystemHandler {
   async fn factory_reset(&mut self) -> HandlerResult {
     tracing::debug!("({}) handling factory reset request", &self.handle.from);
 
-    if let Err(err) = self.handle.bluetooth.reset().await {
+    if let Err(err) = self.handle.bluetooth.profile_man.reset().await {
       tracing::error!("error resetting bluetooth devices: {:?}", err);
     }
 

@@ -1,129 +1,44 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use bluer::{agent::AgentHandle, Adapter, AdapterEvent, AdapterProperty, Address, Device};
-use futures::{Stream, StreamExt};
-use libbridgething::{server::ServerBluetoothEvent, ServerEventType};
+use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
+use libbridgething::{ServerEventType, server::ServerBluetoothEvent};
 use message::{connection_messages, disconnection_messages};
 use tokio::sync::RwLock;
 
-use crate::{
-  player::PlayerError,
-  state::{State, StateError},
-  ws::WSError,
-};
+use crate::state::State;
 
-pub mod art;
-mod auth;
-#[cfg(debug_assertions)]
-mod debug;
+use super::{BluetoothResult, BluetoothTx};
+
+pub mod avrcp;
 mod message;
 
-pub type Bluetooth = Arc<BluetoothMan>;
-
-pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
-pub type BluetoothRx = tokio::sync::mpsc::Receiver<BluetoothEvent>;
-
-pub const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110c00001000800000805f9b34fb);
+pub type ProfileMan = Arc<ProfileManager>;
 
 #[derive(Debug, Default)]
-struct BluetoothState {
+struct ProfileConnectionState {
   pub device: Option<Device>,
 }
 
-pub struct BluetoothListener {
-  rx: BluetoothRx,
-  stream: Box<dyn Stream<Item = AdapterEvent> + Unpin>,
-  _agent_handle: AgentHandle,
-}
-
-impl BluetoothListener {
-  /// cancel-safe
-  pub async fn recv(&mut self) -> BluetoothEvent {
-    tokio::select! {
-      Some(msg) = self.rx.recv() => {
-        msg
-      },
-      Some(msg) = self.stream.next() => {
-        msg.into()
-      },
-    }
-  }
-}
-
 #[derive(Debug)]
-pub struct BluetoothMan {
+pub struct ProfileManager {
+  adapter: Adapter,
   state: State,
-
-  pub adapter: Adapter,
-  bt_state: RwLock<BluetoothState>,
-
   tx: BluetoothTx,
+
+  profile_state: RwLock<ProfileConnectionState>,
 }
 
-impl BluetoothMan {
-  pub async fn init(state: State) -> Result<(Bluetooth, BluetoothListener), BluetoothError> {
-    tracing::debug!("initializing bluetooth session");
+impl ProfileManager {
+  pub async fn init(adapter: Adapter, state: State, tx: BluetoothTx) -> ProfileManager {
+    tracing::debug!("initializing bluetooth profile connection manager");
 
-    let session = bluer::Session::new().await?;
-
-    let timeout = std::time::Duration::new(10, 0);
-    let start = std::time::Instant::now();
-
-    let adapter = loop {
-      match session.default_adapter().await {
-        Ok(adapter) => break adapter,
-        Err(e) => {
-          if start.elapsed() >= timeout {
-            tracing::error!("Error getting default adapter - timing out: {:?}", e);
-            return Err(BluetoothError::Timeout);
-          }
-          tracing::warn!("Error getting default adapter: {:?}", e);
-          tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-          continue;
-        }
-      }
-    };
-
-    tracing::debug!("attempting to power on adapter");
-    adapter.set_powered(true).await?;
-
-    tracing::info!("initialized bluetooth adapter {}", adapter.name());
-
-    tracing::debug!("configuring adapter");
-    adapter.set_discoverable_timeout(0).await?;
-    adapter.set_pairable_timeout(0).await?;
-    adapter.set_pairable(true).await?;
-
-    let (tx, rx) = tokio::sync::mpsc::channel(16);
-    let _agent_handle = auth::build_agent(&session, tx.clone()).await?;
-
-    #[cfg(debug_assertions)]
-    debug::query_adapter(&adapter).await?;
-
-    // start stream BEFORE device reconnection attempts
-    let listener = BluetoothListener {
-      rx,
-      stream: Box::new(adapter.events().await?),
-      _agent_handle,
-    };
-
-    // restore connections if possible
-    if let Some(last) = state.last_device().await {
-      if let Ok(mac) = last.parse() {
-        tokio::spawn(connect_device(adapter.clone(), mac, tx.clone(), None));
-      };
-    }
-
-    let this = Self {
-      state,
-
-      tx,
-      bt_state: RwLock::new(BluetoothState::default()),
-
+    Self {
       adapter,
-    };
+      state,
+      tx,
 
-    Ok((Arc::new(this), listener))
+      profile_state: RwLock::new(ProfileConnectionState::default()),
+    }
   }
 
   pub async fn set_alias(&self, alias: String) -> bluer::Result<()> {
@@ -136,14 +51,9 @@ impl BluetoothMan {
     self.adapter.set_discoverable(discoverable).await
   }
 
-  pub fn connect(&self, mac: &str) -> bluer::Result<()> {
+  pub fn connect(self: &ProfileMan, mac: &str) -> bluer::Result<()> {
     tracing::debug!("attempting to connect to device with mac address {:?}", &mac);
-    tokio::spawn(connect_device(
-      self.adapter.clone(),
-      mac.parse()?,
-      self.tx.clone(),
-      Some(12),
-    ));
+    tokio::spawn(connect_profiles(self.clone(), mac.parse()?, Some(12)));
 
     Ok(())
   }
@@ -167,14 +77,14 @@ impl BluetoothMan {
     Ok(())
   }
 
-  pub async fn handle_event(&self, event: BluetoothEvent) -> Result<(), BluetoothError> {
+  pub async fn handle_event(&self, event: BluetoothConnectionEvent) -> BluetoothResult<()> {
     match event {
       // auth/pairing
-      BluetoothEvent::AuthRequest { mac } => {
+      BluetoothConnectionEvent::AuthRequest { mac } => {
         tracing::info!("bluetooth auth request from mac address: {:?}", &mac);
         Ok(())
       }
-      BluetoothEvent::ServiceAuthRequest { mac, service } => {
+      BluetoothConnectionEvent::ServiceAuthRequest { mac, service } => {
         tracing::info!(
           "bluetooth service auth request from mac address {:?} to service: {:?}",
           &mac,
@@ -182,7 +92,7 @@ impl BluetoothMan {
         );
         Ok(())
       }
-      BluetoothEvent::PinCode { mac, pin } => {
+      BluetoothConnectionEvent::PinCode { mac, pin } => {
         tracing::info!(
           "bluetooth device with mac address {:?} pairing pincode: {:?}",
           &mac,
@@ -206,11 +116,11 @@ impl BluetoothMan {
       }
 
       // adapter
-      BluetoothEvent::DeviceAdded { mac } => {
+      BluetoothConnectionEvent::DeviceAdded { mac } => {
         tracing::info!("bluetooth device added with mac address: {:?}", &mac);
         let just_connected = self.handle_device(mac).await?;
 
-        if let Some(device) = &self.bt_state.read().await.device {
+        if let Some(device) = &self.profile_state.read().await.device {
           self.state.player.init_dbus_player(device.clone()).await?;
 
           if just_connected {
@@ -238,11 +148,11 @@ impl BluetoothMan {
 
         Ok(())
       }
-      BluetoothEvent::DeviceRemoved { mac } => {
+      BluetoothConnectionEvent::DeviceRemoved { mac } => {
         tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
 
         if self
-          .bt_state
+          .profile_state
           .write()
           .await
           .device
@@ -256,20 +166,20 @@ impl BluetoothMan {
 
           tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
           #[cfg(not(debug_assertions))]
-          tokio::spawn(connect_device(self.adapter.clone(), mac, self.tx.clone(), None));
+          tokio::spawn(connect_profiles(self.adapter.clone(), mac, self.tx.clone(), None));
         }
 
         Ok(())
       }
-      BluetoothEvent::AdapterPropertyChanged(property) => {
+      BluetoothConnectionEvent::AdapterPropertyChanged(property) => {
         tracing::trace!("adapter property changed: {:?}", &property);
         Ok(())
       }
     }
   }
 
-  pub async fn handle_connection(&self, new_device: bool) -> Result<(), BluetoothError> {
-    let Some(device) = &self.bt_state.read().await.device else {
+  pub async fn handle_connection(&self, new_device: bool) -> BluetoothResult<()> {
+    let Some(device) = &self.profile_state.read().await.device else {
       return Ok(());
     };
 
@@ -286,9 +196,9 @@ impl BluetoothMan {
     let device = self.adapter.device(mac)?;
 
     #[cfg(debug_assertions)]
-    debug::query_device(&device).await?;
+    super::debug::query_device(&device).await?;
 
-    let state_device = &mut self.bt_state.write().await.device;
+    let state_device = &mut self.profile_state.write().await.device;
     if state_device.is_none() && device.is_paired().await? {
       if !device.is_trusted().await? {
         device.set_trusted(true).await?;
@@ -302,7 +212,7 @@ impl BluetoothMan {
   }
 }
 
-pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max_attempts: Option<usize>) {
+pub async fn connect_profiles(profile_man: ProfileMan, mac: Address, max_attempts: Option<usize>) {
   let mut attempts: usize = 0;
   let connected_device: Device;
 
@@ -315,7 +225,7 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     }
 
     tracing::debug!("attempting to connect to device with mac: {:?}", &mac);
-    if let Ok(device) = adapter.device(mac) {
+    if let Ok(device) = profile_man.adapter.device(mac) {
       tracing::debug!("found handle to device with mac: {:?}", &mac);
 
       if let Ok(connected) = device.is_connected().await {
@@ -335,31 +245,18 @@ pub async fn connect_device(adapter: Adapter, mac: Address, tx: BluetoothTx, max
     attempts += 1;
   }
 
-  connect_avrcp(&connected_device).await;
+  avrcp::connect_avrcp(&connected_device).await;
 
-  if let Err(err) = tx.send(BluetoothEvent::DeviceAdded { mac }).await {
-    tracing::error!("failed to send message to bluetooth tx: {:?}", err);
-  }
-}
-
-pub async fn connect_avrcp(device: &Device) -> bool {
-  loop {
-    tracing::debug!("attempting to connect to avrcp profile...");
-    match device.connect_profile(&AVRCP_UUID).await {
-      Ok(()) => {
-        tracing::info!("avrcp profile connected!");
-        return true;
-      }
-      Err(err) => {
-        tracing::debug!("failed to connect to avrcp profile: {:?}", err);
-        tokio::time::sleep(Duration::from_secs(2)).await;
-      }
-    };
+  if let Err(err) = profile_man
+    .handle_event(BluetoothConnectionEvent::DeviceAdded { mac })
+    .await
+  {
+    tracing::error!("failed to handle device added event: {:?}", err);
   }
 }
 
 #[derive(Debug)]
-pub enum BluetoothEvent {
+pub enum BluetoothConnectionEvent {
   // auth/pairing
   AuthRequest { mac: Address },
   ServiceAuthRequest { mac: Address, service: uuid::Uuid },
@@ -371,45 +268,12 @@ pub enum BluetoothEvent {
   AdapterPropertyChanged(AdapterProperty),
 }
 
-impl From<AdapterEvent> for BluetoothEvent {
+impl From<AdapterEvent> for BluetoothConnectionEvent {
   fn from(event: AdapterEvent) -> Self {
     match event {
       AdapterEvent::DeviceAdded(address) => Self::DeviceAdded { mac: address },
       AdapterEvent::DeviceRemoved(address) => Self::DeviceRemoved { mac: address },
       AdapterEvent::PropertyChanged(property) => Self::AdapterPropertyChanged(property),
     }
-  }
-}
-
-pub type BluetoothResult<T> = Result<T, BluetoothError>;
-#[derive(Debug, thiserror::Error)]
-pub enum BluetoothError {
-  #[error("bluez error: {0}")]
-  Bluez(#[from] bluer::Error),
-  #[error("websocket error: {0}")]
-  WS(#[from] WSError),
-  #[error("state error: {0}")]
-  State(#[from] StateError),
-  #[error("connection to bluetooth daemon timed out")]
-  Timeout,
-  #[error(transparent)]
-  Player(#[from] PlayerError),
-  #[error(transparent)]
-  MessagePackEnc(#[from] rmp_serde::encode::Error),
-  #[error(transparent)]
-  MessagePackDec(#[from] rmp_serde::decode::Error),
-  #[error(transparent)]
-  Io(#[from] std::io::Error),
-  #[error("bluetooth gatt characteristic pipe broken!!")]
-  CharacteristicControl,
-}
-
-impl From<Vec<WSError>> for BluetoothError {
-  fn from(errors: Vec<WSError>) -> Self {
-    for error in errors {
-      tracing::error!("failed to broadcast message: {:?}", error);
-    }
-
-    Self::WS(WSError::BroadcastFailed)
   }
 }

@@ -13,7 +13,7 @@ use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
 pub use state::*;
 
 use crate::{
-  bt::art::CoverArt,
+  bluetooth::avrcp::art::CoverArt,
   ws::{ClientMan, WSError},
 };
 
@@ -246,7 +246,7 @@ async fn ensure_avrcp(
     // tracing::trace!("ensuring avrcp is connected");
     if let Err(err) = player.status().await {
       tracing::debug!("error received from avrcp, attempting reconnect: {:?}", err);
-      if crate::bt::connect_avrcp(&device).await {
+      if crate::bluetooth::avrcp::connect_avrcp(&device).await {
         tracing::debug!("connected to avrcp, quitting this loop");
         break;
       }

@@ -1,12 +1,12 @@
 use std::{hash::Hasher, sync::Arc, time::Duration};
 
 use ahash::AHasher;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bluer::{
-  l2cap::{self, Socket, SocketAddr, Stream},
   Address, AddressType,
+  l2cap::{self, Socket, SocketAddr, Stream},
 };
-use libbridgething::{server::ServerPlayerEvent, ServerEventType, CARTHING_HACKS_LOGO};
+use libbridgething::{CARTHING_HACKS_LOGO, ServerEventType, server::ServerPlayerEvent};
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
   sync::mpsc,
@@ -149,7 +149,7 @@ impl CoverArtInner {
     tokio::time::sleep(Duration::from_millis(500)).await; // If this is removed, connection fails most of the time
 
     #[cfg(debug_assertions)]
-    super::debug::query_socket(&stream).await?;
+    crate::bluetooth::debug::query_socket(&stream).await?;
 
     tracing::debug!("connected to obex channel for {:?}", self.address);
     Ok(stream)

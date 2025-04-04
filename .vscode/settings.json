@@ -7,6 +7,7 @@
     "Btleplug",
     "libbridgething",
     "pairable",
+    "Rfcomm",
     "superbird",
     "Threadsafe"
   ],
