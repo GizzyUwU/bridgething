@@ -77,7 +77,7 @@ impl ProfileManager {
     Ok(())
   }
 
-  pub async fn handle_event(&self, event: BluetoothConnectionEvent) -> BluetoothResult<()> {
+  pub async fn handle_event(self: &ProfileMan, event: BluetoothConnectionEvent) -> BluetoothResult<()> {
     match event {
       // auth/pairing
       BluetoothConnectionEvent::AuthRequest { mac } => {
@@ -164,9 +164,10 @@ impl ProfileManager {
 
           disconnection_messages(&self.state).await?;
 
-          tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
-          #[cfg(not(debug_assertions))]
-          tokio::spawn(connect_profiles(self.adapter.clone(), mac, self.tx.clone(), None));
+          // TODO: figure out a solution for this
+          // tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
+          // #[cfg(not(debug_assertions))]
+          // tokio::spawn(connect_profiles(self.clone(), mac, None));
         }
 
         Ok(())
