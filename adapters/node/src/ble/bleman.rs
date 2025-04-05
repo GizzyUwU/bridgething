@@ -15,7 +15,7 @@ use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunctionCallMode};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{AdapterEvent, Callback, Error, Event, JsMessage, MsgRx, Result};
+use crate::{AdapterEvent, Callback, ConnectionType, Error, Event, JsMessage, MsgRx, Result};
 
 type NotifyTx = tokio::sync::mpsc::Sender<NotifyData>;
 type NotifyRx = tokio::sync::mpsc::Receiver<NotifyData>;
@@ -23,7 +23,7 @@ type NotifyRx = tokio::sync::mpsc::Receiver<NotifyData>;
 type WriteTx = tokio::sync::mpsc::Sender<Vec<u8>>;
 type WriteRx = tokio::sync::mpsc::Receiver<Vec<u8>>;
 
-pub struct BtMan {
+pub struct BleMan {
   _manager: Manager,
   adapter: btleplug::platform::Adapter,
 
@@ -38,7 +38,7 @@ pub struct BtMan {
   cancel_token: CancellationToken,
 }
 
-impl BtMan {
+impl BleMan {
   pub async fn new(
     adapter_name: Option<String>,
     msg_rx: MsgRx,
@@ -182,6 +182,7 @@ impl BtMan {
 
     tracing::info!("device with mac {:?} connected", device.address);
     self.emit(AdapterEvent::Connected {
+      mode: ConnectionType::Ble,
       name: device.name.clone(),
       device_id: device.address.to_string(),
     });
@@ -196,6 +197,7 @@ impl BtMan {
     tracing::info!("device with mac {:?} disconnected", handle.address());
 
     self.emit(AdapterEvent::Disconnected {
+      mode: ConnectionType::Ble,
       device_id: handle.address().to_string(),
     });
 

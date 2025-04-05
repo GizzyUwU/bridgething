@@ -12,6 +12,7 @@ pub type State = Arc<AppState>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistentAppState {
+  // TODO: only say that device is "connected" if it is connected to avrcp profile
   pub last_device: Option<String>,
   pub devices: HashMap<String, Device>,
   pub storage: HashMap<String, String>,

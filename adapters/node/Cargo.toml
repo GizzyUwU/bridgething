@@ -16,15 +16,52 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 flate2 = { workspace = true }
+async-trait = { workspace = true }
 
-napi = { version = "3.0.0-alpha.27", default-features = false, features = [
-  "async",
-  "tokio_sync",
-] }
-napi-derive = "3.0.0-alpha.25"
-btleplug = { version = "0.11.7", features = ["serde"] }
+# feature-specific cross-platform dependencies (ble)
+btleplug = { version = "0.11.7", features = ["serde"], optional = true }
+serde.workspace = true
 
+# feature-specific platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = { workspace = true, features = [
+  "bluetoothd",
+  "rfcomm",
+], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.60.0", features = [
+  "Devices_Bluetooth",
+  "Devices_Radios",
+  "Foundation_Collections",
+  "Foundation",
+  "Storage_Streams",
+], optional = true }
+# base64 = { version = "0.22.1" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# objc2 = { version = "0.5.2" }
+# objc2-foundation = { version = "0.2.2", features = ["all"] }
+# block2 = { version = "0.5.1" }
+# core-foundation = { version = "0.10.0" }
+# dispatch2 = { version = "0.1.0" }lea
+# base64 = { version = "0.22.1" }
+
+[features]
+default = ["rfcomm"]
+rfcomm = ["windows", "bluer"]
+ble = ["btleplug"]
+
+
+[dependencies.napi]
+version = "3.0.0-alpha.33"
+default-features = false
+# see https://nodejs.org/api/n-api.html#node-api-version-matrix
+features = ["napi4", "async"]
+
+[dependencies.napi-derive]
+version = "3.0.0-alpha.29"
+features = ["type-def"]
 
 [build-dependencies]
-napi-build = "2.1.4"
-napi-derive = "3.0.0-alpha.25"
+napi-build = "2"

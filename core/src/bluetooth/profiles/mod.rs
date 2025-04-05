@@ -14,6 +14,7 @@ mod message;
 
 pub type ProfileMan = Arc<ProfileManager>;
 
+// TODO: only say that device is "connected" if it is connected to avrcp profile
 #[derive(Debug, Default)]
 struct ProfileConnectionState {
   pub device: Option<Device>,
@@ -77,104 +78,109 @@ impl ProfileManager {
     Ok(())
   }
 
-  pub async fn handle_event(self: &ProfileMan, event: BluetoothConnectionEvent) -> BluetoothResult<()> {
-    match event {
-      // auth/pairing
-      BluetoothConnectionEvent::AuthRequest { mac } => {
-        tracing::info!("bluetooth auth request from mac address: {:?}", &mac);
-        Ok(())
-      }
-      BluetoothConnectionEvent::ServiceAuthRequest { mac, service } => {
-        tracing::info!(
-          "bluetooth service auth request from mac address {:?} to service: {:?}",
-          &mac,
-          &service
-        );
-        Ok(())
-      }
-      BluetoothConnectionEvent::PinCode { mac, pin } => {
-        tracing::info!(
-          "bluetooth device with mac address {:?} pairing pincode: {:?}",
-          &mac,
-          &pin
-        );
+  #[expect(clippy::manual_async_fn)]
+  pub fn handle_event(
+    self: &ProfileMan,
+    event: BluetoothConnectionEvent,
+  ) -> impl Future<Output = BluetoothResult<()>> + Send {
+    async {
+      match event {
+        // auth/pairing
+        BluetoothConnectionEvent::AuthRequest { mac } => {
+          tracing::info!("bluetooth auth request from mac address: {:?}", &mac);
+          Ok(())
+        }
+        BluetoothConnectionEvent::ServiceAuthRequest { mac, service } => {
+          tracing::info!(
+            "bluetooth service auth request from mac address {:?} to service: {:?}",
+            &mac,
+            &service
+          );
+          Ok(())
+        }
+        BluetoothConnectionEvent::PinCode { mac, pin } => {
+          tracing::info!(
+            "bluetooth device with mac address {:?} pairing pincode: {:?}",
+            &mac,
+            &pin
+          );
 
-        self
-          .state
-          .client_man
-          .broadcast(
-            ServerBluetoothEvent::Pin {
-              mac: mac.to_string(),
-              name: mac.to_string(),
-              pin: pin.to_owned(),
-            },
-            ServerEventType::Info,
-          )
-          .await?;
+          self
+            .state
+            .client_man
+            .broadcast(
+              ServerBluetoothEvent::Pin {
+                mac: mac.to_string(),
+                name: mac.to_string(),
+                pin: pin.to_owned(),
+              },
+              ServerEventType::Info,
+            )
+            .await?;
 
-        Ok(())
-      }
-
-      // adapter
-      BluetoothConnectionEvent::DeviceAdded { mac } => {
-        tracing::info!("bluetooth device added with mac address: {:?}", &mac);
-        let just_connected = self.handle_device(mac).await?;
-
-        if let Some(device) = &self.profile_state.read().await.device {
-          self.state.player.init_dbus_player(device.clone()).await?;
-
-          if just_connected {
-            tracing::info!("bluetooth device connected with mac address: {:?}", &mac);
-            self.state.set_last_device(mac.to_string()).await?;
-
-            let state_device = libbridgething::Device {
-              name: device.name().await?.unwrap_or(mac.to_string()),
-              device_type: libbridgething::DeviceType::Unknown,
-              mac: mac.to_string(),
-              default: true,
-            };
-
-            let mut new_device = false;
-            if self.state.get_device(&mac.to_string()).await.is_none() {
-              new_device = true;
-              self.state.add_device(state_device.clone()).await?;
-
-              self.set_discoverable(false).await?;
-            };
-
-            self.handle_connection(new_device).await?;
-          };
-        };
-
-        Ok(())
-      }
-      BluetoothConnectionEvent::DeviceRemoved { mac } => {
-        tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
-
-        if self
-          .profile_state
-          .write()
-          .await
-          .device
-          .take_if(|d| d.address() == mac)
-          .is_some()
-        {
-          tracing::info!("current device with mac address {:?} has disconnected!", &mac);
-          self.state.handle_disconnect().await?;
-
-          disconnection_messages(&self.state).await?;
-
-          // TODO: figure out a solution for this
-          // tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
-          // #[cfg(not(debug_assertions))]
-          // tokio::spawn(connect_profiles(self.clone(), mac, None));
+          Ok(())
         }
 
-        Ok(())
-      }
-      BluetoothConnectionEvent::AdapterPropertyChanged(property) => {
-        tracing::trace!("adapter property changed: {:?}", &property);
-        Ok(())
+        // adapter
+        BluetoothConnectionEvent::DeviceAdded { mac } => {
+          tracing::info!("bluetooth device added with mac address: {:?}", &mac);
+          let just_connected = self.handle_device(mac).await?;
+
+          if let Some(device) = &self.profile_state.read().await.device {
+            self.state.player.init_dbus_player(device.clone()).await?;
+
+            if just_connected {
+              tracing::info!("bluetooth device connected with mac address: {:?}", &mac);
+              self.state.set_last_device(mac.to_string()).await?;
+
+              let state_device = libbridgething::Device {
+                name: device.name().await?.unwrap_or(mac.to_string()),
+                device_type: libbridgething::DeviceType::Unknown,
+                mac: mac.to_string(),
+                default: true,
+              };
+
+              let mut new_device = false;
+              if self.state.get_device(&mac.to_string()).await.is_none() {
+                new_device = true;
+                self.state.add_device(state_device.clone()).await?;
+
+                self.set_discoverable(false).await?;
+              };
+
+              self.handle_connection(new_device).await?;
+            };
+          };
+
+          Ok(())
+        }
+        BluetoothConnectionEvent::DeviceRemoved { mac } => {
+          tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
+
+          if self
+            .profile_state
+            .write()
+            .await
+            .device
+            .take_if(|d| d.address() == mac)
+            .is_some()
+          {
+            tracing::info!("current device with mac address {:?} has disconnected!", &mac);
+            self.state.handle_disconnect().await?;
+
+            disconnection_messages(&self.state).await?;
+
+            tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
+            #[cfg(not(debug_assertions))]
+            tokio::spawn(connect_profiles(self.clone(), mac, None));
+          }
+
+          Ok(())
+        }
+        BluetoothConnectionEvent::AdapterPropertyChanged(property) => {
+          tracing::trace!("adapter property changed: {:?}", &property);
+          Ok(())
+        }
       }
     }
   }

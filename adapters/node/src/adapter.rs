@@ -2,7 +2,7 @@ use napi::bindgen_prelude::*;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{manager::BtMan, monitoring, Callback, Error, Event, JsMessage, MsgTx, Result};
+use crate::{monitoring, protocol::ProtocolMan, Callback, Error, Event, JsMessage, MsgTx, Result};
 
 #[derive(Debug)]
 struct AdapterInner {
@@ -12,9 +12,18 @@ struct AdapterInner {
   cancel_token: CancellationToken,
 }
 
+#[napi(string_enum)]
+#[derive(Debug, Clone, Copy)]
+pub enum AdapterMode {
+  Dual,
+  Ble,
+  Rfcomm,
+}
+
 #[napi(object)]
 #[derive(Debug)]
 pub struct AdapterOptions {
+  pub mode: Option<AdapterMode>,
   pub log_level_directive: Option<String>,
   pub adapter_name: Option<String>,
 }
@@ -22,6 +31,7 @@ pub struct AdapterOptions {
 impl Default for AdapterOptions {
   fn default() -> Self {
     Self {
+      mode: Some(AdapterMode::Rfcomm),
       log_level_directive: Some("bridgething_adapter=info".to_string()),
       adapter_name: None,
     }
@@ -32,7 +42,8 @@ impl Default for AdapterOptions {
 pub struct NodeAdapter {
   options: AdapterOptions,
   callback_purgatory: Option<Vec<Callback>>,
-  inner: Option<AdapterInner>,
+
+  manager: Option<ProtocolMan>,
 }
 
 #[napi]
@@ -45,35 +56,25 @@ impl NodeAdapter {
     Self {
       options,
       callback_purgatory: Some(vec![]),
-      inner: None,
+      manager: None,
     }
   }
 
   #[napi]
   #[allow(clippy::missing_safety_doc)]
   pub async unsafe fn init(&mut self) -> Result<()> {
-    if self.inner.is_some() {
+    if self.manager.is_some() {
       return Err(Error::AlreadyInitialized);
     };
 
-    let (tx, rx) = tokio::sync::mpsc::channel(16);
-    let cancel_token = CancellationToken::new();
-
-    let bt_man = BtMan::new(
+    let manager = ProtocolMan::init(
       self.options.adapter_name.clone(),
-      rx,
+      self.options.mode.unwrap_or(AdapterMode::Rfcomm),
       self.callback_purgatory.take().unwrap_or_default(),
-      cancel_token.child_token(),
     )
     .await?;
 
-    self.inner = Some(AdapterInner {
-      tx,
-
-      _handle: bt_man.spawn(),
-      cancel_token,
-    });
-
+    self.manager = Some(manager);
     tracing::info!("initialized bridgething adapter - scanning for car thing");
 
     Ok(())
@@ -84,10 +85,9 @@ impl NodeAdapter {
     tracing::debug!("registering new event listener callback");
     let callback = callback.build_threadsafe_function().build()?;
 
-    if let Some(inner) = self.inner.as_ref() {
-      inner
-        .tx
-        .blocking_send(callback.into())
+    if let Some(manager) = &self.manager {
+      manager
+        .try_send(callback.into())
         .map_err(|e| napi::Error::from_reason(e.to_string()))
     } else if let Some(purgatory) = self.callback_purgatory.as_mut() {
       purgatory.push(callback);
@@ -127,25 +127,15 @@ impl NodeAdapter {
   }
 
   async fn forward(&self, message: JsMessage) -> Result<()> {
-    let inner = self.inner.as_ref().ok_or(Error::NotInitialized)?;
-    Ok(inner.tx.send(message).await?)
+    let manager = self.manager.as_ref().ok_or(Error::NotInitialized)?;
+    Ok(manager.send(message).await?)
   }
 }
 
-// impl Default for NodeAdapter {
-//   fn default() -> Self {
-//     Self {
-//       options: Default::default(),
-//       callback_purgatory: Some(Vec::new()),
-//       inner: None,
-//     }
-//   }
-// }
-
 impl Drop for NodeAdapter {
   fn drop(&mut self) {
-    if let Some(inner) = &self.inner {
-      inner.cancel_token.cancel();
+    if let Some(manager) = &self.manager {
+      manager.cancel_token.cancel();
     }
   }
 }
