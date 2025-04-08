@@ -124,6 +124,7 @@ impl ProfileManager {
         // adapter
         BluetoothConnectionEvent::DeviceAdded { mac } => {
           tracing::info!("bluetooth device added with mac address: {:?}", &mac);
+          return Ok(());
           let just_connected = self.handle_device(mac).await?;
 
           if let Some(device) = &self.profile_state.read().await.device {

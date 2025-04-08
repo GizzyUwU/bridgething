@@ -56,7 +56,7 @@ const handleData = async (deviceId: string, data: BridgeToGatewayMsg) => {
   }
 };
 
-const adapter = new NodeAdapter({ adapterName: 'hci0', logLevelDirective: 'bridgething_adapter=trace' });
+const adapter = new NodeAdapter({ adapterName: 'hci1', logLevelDirective: 'bridgething_adapter=trace' });
 const gateway = new BridgethingGateway(adapter, { logLevel: LogLevel.Trace });
 gateway.on(msgHandler);
 

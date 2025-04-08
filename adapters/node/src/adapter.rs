@@ -1,16 +1,6 @@
 use napi::bindgen_prelude::*;
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
-use crate::{monitoring, protocol::ProtocolMan, Callback, Error, Event, JsMessage, MsgTx, Result};
-
-#[derive(Debug)]
-struct AdapterInner {
-  tx: MsgTx,
-
-  _handle: JoinHandle<Result<()>>,
-  cancel_token: CancellationToken,
-}
+use crate::{monitoring, protocol::ProtocolMan, Callback, Error, Event, JsMessage, Result};
 
 #[napi(string_enum)]
 #[derive(Debug, Clone, Copy)]
@@ -100,16 +90,21 @@ impl NodeAdapter {
 
   #[napi]
   pub async fn scan_on(&self) -> napi::Result<()> {
-    Ok(self.forward(JsMessage::ScanOn).await?)
+    tracing::trace!("scan_on called");
+    println!("{:?}", self.forward(JsMessage::ScanOn).await);
+    println!("wtaf");
+    Ok(())
   }
 
   #[napi]
   pub async fn scan_off(&self) -> napi::Result<()> {
+    tracing::trace!("scan_off called");
     Ok(self.forward(JsMessage::ScanOff).await?)
   }
 
   #[napi]
   pub async fn disconnect(&self, device_id: String) -> napi::Result<()> {
+    tracing::trace!("disconnect called with device_id: {device_id}");
     let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
@@ -119,6 +114,7 @@ impl NodeAdapter {
 
   #[napi]
   pub async fn send(&self, device_id: String, message: Uint8Array) -> napi::Result<()> {
+    tracing::trace!("send called with device_id: {device_id}");
     let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
@@ -128,7 +124,7 @@ impl NodeAdapter {
 
   async fn forward(&self, message: JsMessage) -> Result<()> {
     let manager = self.manager.as_ref().ok_or(Error::NotInitialized)?;
-    Ok(manager.send(message).await?)
+    manager.send(message).await
   }
 }
 

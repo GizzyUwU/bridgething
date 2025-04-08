@@ -59,6 +59,7 @@ pub struct ProtocolMan {
 
 impl ProtocolMan {
   pub async fn init(adapter_name: Option<String>, mode: AdapterMode, callbacks: Vec<Callback>) -> Result<Self> {
+    tracing::debug!("initializing protocol manager");
     let cancel_token = CancellationToken::new();
 
     let mode = match mode {
@@ -89,6 +90,7 @@ impl ProtocolMan {
   }
 
   pub async fn send(&self, data: JsMessage) -> Result<()> {
+    tracing::trace!("sending message: {data:?}");
     match &self.mode {
       Mode::Dual { ble, rfcomm } => {
         ble.tx.send(data.clone()).await?;
@@ -106,6 +108,7 @@ impl ProtocolMan {
   }
 
   pub fn try_send(&self, data: JsMessage) -> Result<()> {
+    tracing::trace!("try_sending message: {data:?}");
     match &self.mode {
       Mode::Dual { ble, rfcomm } => {
         ble.tx.try_send(data.clone())?;

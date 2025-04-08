@@ -60,8 +60,11 @@ pub enum JsMessage {
 impl std::fmt::Debug for JsMessage {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      JsMessage::Callback(_) => write!(f, "Callback"),
-      data => write!(f, "{:?}", data),
+      Self::ScanOn => write!(f, "JsMessage::ScanOn"),
+      Self::ScanOff => write!(f, "JsMessage::ScanOff"),
+      Self::Data(addr, data) => f.debug_tuple("JsMessage::Data").field(addr).field(data).finish(),
+      Self::Disconnect(addr) => f.debug_tuple("JsMessage::Disconnect").field(addr).finish(),
+      Self::Callback(_) => write!(f, "JsMessage::Callback(...)"),
     }
   }
 }

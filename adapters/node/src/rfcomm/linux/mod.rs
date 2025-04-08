@@ -1,4 +1,9 @@
-use bluer::{Adapter, Session};
+use bluer::{
+  rfcomm::{Socket, SocketAddr},
+  Adapter, AdapterEvent, DiscoveryFilter, DiscoveryTransport, Session,
+};
+use futures::{Stream, StreamExt};
+use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -10,6 +15,8 @@ use crate::{protocol::Protocol, Callback, JsMessage, MsgRx, Result};
 pub struct Rfcomm {
   session: Session,
   adapter: Adapter,
+
+  discovery: Option<Box<dyn Stream<Item = AdapterEvent> + Send + Unpin>>,
 
   rx: MsgRx,
   callbacks: Vec<Callback>,
@@ -31,6 +38,17 @@ impl Rfcomm {
             tracing::error!("failed to handle js message: {:?}", e);
           }
         }
+        Some(event) = async {
+          if let Some(discovery) = &mut self.discovery {
+            discovery.next().await
+          } else {
+            None
+          }
+        } => {
+          if let Err(e) = self.handle_adapter_event(event).await {
+            tracing::error!("failed to handle adapter event: {:?}", e);
+          }
+        }
         _ = self.cancel_token.cancelled() => {
           tracing::debug!("rfcomm event loop cancelled");
           break;
@@ -42,13 +60,79 @@ impl Rfcomm {
   }
 
   async fn handle_js_msg(&mut self, msg: JsMessage) -> Result<()> {
-    tracing::debug!("received JS message: {msg:?}");
+    tracing::trace!("received JS message: {msg:?}");
+
+    Ok(())
+  }
+
+  async fn handle_adapter_event(&mut self, event: AdapterEvent) -> Result<()> {
+    tracing::trace!("received adapter event: {event:?}");
+
+    let address = match event {
+      AdapterEvent::DeviceAdded(address) => {
+        tracing::debug!("device added: {address}");
+        address
+      }
+      AdapterEvent::DeviceRemoved(address) => {
+        tracing::debug!("device removed: {address}");
+        return Ok(());
+      }
+      AdapterEvent::PropertyChanged(adapter_property) => {
+        tracing::debug!("adapter property changed: {adapter_property:?}");
+        return Ok(());
+      }
+    };
+
+    let device = self.adapter.device(address)?;
+    if device.address().to_string() != "50:C2:E8:D7:1C:D2" {
+      tracing::debug!("skipping device: {address}");
+      return Ok(());
+    }
+
+    let services_resolved = device.is_services_resolved().await?;
+    let paired = device.is_paired().await?;
+    let connected = device.is_connected().await?;
+    let trusted = device.is_trusted().await?;
+    tracing::debug!(
+      "services_resolved: {services_resolved}, paired: {paired}, connected: {connected}, trusted: {trusted}"
+    );
+
+    #[cfg(debug_assertions)]
+    debug::query_device(&device).await?;
+
+    if !paired {
+      tracing::debug!("pairing with device: {address}");
+      device.pair().await?;
+    }
+
+    // attempt to connect rfcomm
+    let socket_addr = SocketAddr::new(device.address(), BRIDGETHING_RFCOMM_CHANNEL);
+    let socket = Socket::new()?;
+    let stream = socket.connect(socket_addr).await?;
 
     Ok(())
   }
 
   async fn initialize(&mut self) -> Result<()> {
     tracing::debug!("initializing rfcomm protocol");
+    self.start_discovery().await?;
+
+    Ok(())
+  }
+
+  async fn start_discovery(&mut self) -> Result<()> {
+    tracing::debug!("discovering devices");
+
+    let filter = DiscoveryFilter {
+      uuids: [BRIDGETHING_PROFILE_UUID].into(),
+      transport: DiscoveryTransport::BrEdr,
+      duplicate_data: false,
+      ..Default::default()
+    };
+    self.adapter.set_discovery_filter(filter).await?;
+
+    let devices = self.adapter.discover_devices_with_changes().await?;
+    self.discovery = Some(Box::new(devices));
 
     Ok(())
   }
@@ -72,6 +156,7 @@ impl Protocol for Rfcomm {
 
     tracing::debug!("attempting to power on adapter");
     adapter.set_powered(true).await?;
+    adapter.set_pairable(true).await?;
 
     #[cfg(debug_assertions)]
     debug::query_adapter(&adapter).await?;
@@ -81,6 +166,8 @@ impl Protocol for Rfcomm {
     Ok(Self {
       session,
       adapter,
+
+      discovery: None,
 
       rx,
       callbacks,

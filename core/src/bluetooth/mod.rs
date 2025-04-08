@@ -62,7 +62,7 @@ impl BluetoothManager {
 
     // TODO: what am i supposed to do here?
     adapter.set_discoverable_timeout(0).await?;
-    adapter.set_discoverable(false).await?;
+    adapter.set_discoverable(true).await?;
 
     #[cfg(debug_assertions)]
     debug::query_adapter(&adapter).await?;

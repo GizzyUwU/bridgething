@@ -61,15 +61,3 @@ pub async fn query_device(device: &bluer::Device) -> bluer::Result<()> {
   }
   Ok(())
 }
-
-#[cfg(debug_assertions)]
-pub async fn query_socket(stream: &bluer::l2cap::Stream) -> bluer::Result<()> {
-  println!("Local address: {:?}", stream.as_ref().local_addr()?);
-  println!("Remote address: {:?}", stream.peer_addr()?);
-  println!("Send MTU: {:?}", stream.as_ref().send_mtu()?);
-  println!("Recv MTU: {}", stream.as_ref().recv_mtu()?);
-  println!("Security: {:?}", stream.as_ref().security()?);
-  println!("Flow control: {:?}", stream.as_ref().flow_control()?);
-  println!("L2CAP Options: {:?}", stream.as_ref().l2cap_opts()?);
-  Ok(())
-}

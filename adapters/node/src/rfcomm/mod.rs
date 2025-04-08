@@ -22,5 +22,5 @@ pub async fn get_rfcomm(
   #[cfg(target_os = "windows")]
   let rfcomm = windows::Rfcomm::init(adapter_name, rx, callbacks, cancel_token).await;
 
-  Ok(rfcomm?)
+  rfcomm
 }

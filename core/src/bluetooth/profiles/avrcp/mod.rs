@@ -7,6 +7,8 @@ pub mod art;
 pub const AVRCP_UUID: bluer::Uuid = bluer::Uuid::from_u128(0x110c00001000800000805f9b34fb);
 
 pub async fn connect_avrcp(device: &Device) -> bool {
+  return false;
+
   loop {
     tracing::debug!("attempting to connect to avrcp profile...");
     match device.connect_profile(&AVRCP_UUID).await {
