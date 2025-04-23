@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunction};
+use libbridgething::gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg};
+use napi::{
+  bindgen_prelude::*,
+  threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
+};
 
 #[macro_use]
 extern crate napi_derive;
@@ -23,17 +27,22 @@ type Callback = ThreadsafeFunction<Event, Unknown, Event, false>;
 type MsgTx = tokio::sync::mpsc::Sender<JsMessage>;
 type MsgRx = tokio::sync::mpsc::Receiver<JsMessage>;
 
-#[derive(Debug, Clone)]
-pub struct NotifyData {
-  address: BDAddr,
-  data: Vec<u8>,
-}
+#[derive(Default, Clone)]
+struct Callbacks(Vec<Arc<Callback>>);
 
-impl From<NotifyData> for AdapterEvent {
-  fn from(notification: NotifyData) -> Self {
-    Self::Data {
-      device_id: notification.address.to_string(),
-      data: notification.data.into(),
+impl Callbacks {
+  pub fn add(&mut self, callback: Arc<Callback>) {
+    self.0.push(callback);
+  }
+
+  pub fn send(&self, event: Event) {
+    for callback in &self.0 {
+      match callback.call(event.clone(), ThreadsafeFunctionCallMode::Blocking) {
+        napi::Status::Ok => {}
+        error => {
+          tracing::error!("failed to call callback: {:?}", error);
+        }
+      }
     }
   }
 }
@@ -50,7 +59,7 @@ pub enum JsMessage {
   ScanOn,
   ScanOff,
 
-  Data(BDAddr, Vec<u8>),
+  Data(BDAddr, GatewayToBridgeMsg),
 
   Disconnect(BDAddr),
 
@@ -77,6 +86,7 @@ pub enum ConnectionType {
 }
 
 #[napi]
+#[derive(Clone)]
 pub enum AdapterEvent {
   Connected {
     name: String,
@@ -88,20 +98,18 @@ pub enum AdapterEvent {
     mode: ConnectionType,
   },
 
-  Data {
+  Message {
     device_id: String,
-    data: Uint8Array,
+    #[napi(ts_type = "BridgeToGatewayMsg")]
+    data: serde_json::Value,
   },
 }
 
-impl Clone for AdapterEvent {
-  fn clone(&self) -> Self {
-    match self {
-      AdapterEvent::Data { device_id, data } => AdapterEvent::Data {
-        device_id: device_id.clone(),
-        data: Uint8Array::with_data_copied(data),
-      },
-      this => this.clone(),
+impl From<(BDAddr, BridgeToGatewayMsg)> for AdapterEvent {
+  fn from((address, msg): (BDAddr, BridgeToGatewayMsg)) -> Self {
+    Self::Message {
+      device_id: address.to_string(),
+      data: serde_json::to_value(msg).unwrap_or_default(),
     }
   }
 }
@@ -128,14 +136,14 @@ pub enum Error {
   Communication(#[from] tokio::sync::mpsc::error::SendError<JsMessage>),
   #[error("error communicating with the bluetooth thread")]
   TryCommunication(#[from] tokio::sync::mpsc::error::TrySendError<JsMessage>),
-  #[error("error communicating with the device thread")]
-  InternalRecvCommunication(#[from] tokio::sync::mpsc::error::SendError<protocol::NotifyData>),
-  #[error("error communicating with the device thread")]
-  InternalSendCommunication(#[from] tokio::sync::mpsc::error::SendError<Vec<u8>>),
   #[error("irrecoverable io error")]
   Io(#[from] std::io::Error),
   #[error("device is not connected!")]
   DeviceDisconnected,
+  #[error("failed to parse address: {0}")]
+  AddressParse(#[from] bdaddr::ParseBDAddrError),
+  #[error(transparent)]
+  Endec(#[from] libbridgething::protocol::EndecError),
   #[cfg(target_os = "linux")]
   #[error("bluez error: {0}")]
   Bluez(#[from] bluer::Error),

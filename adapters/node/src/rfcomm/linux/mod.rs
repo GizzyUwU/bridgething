@@ -1,25 +1,75 @@
-use bluer::{
-  rfcomm::{Socket, SocketAddr},
-  Adapter, AdapterEvent, DiscoveryFilter, DiscoveryTransport, Session,
-};
-use futures::{Stream, StreamExt};
-use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
+use std::collections::HashMap;
 
+use bluer::{
+  agent::AgentHandle,
+  rfcomm::{SocketAddr, Stream},
+  Adapter, AdapterEvent, Session,
+};
+use futures::{
+  stream::{SplitSink, SplitStream},
+  SinkExt, StreamExt,
+};
+use libbridgething::{
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
+  protocol::GatewayEndec,
+  BRIDGETHING_DEVICE_CLASS, BRIDGETHING_RFCOMM_CHANNEL,
+};
+use tokio::task::JoinHandle;
+use tokio_util::{codec::Framed, sync::CancellationToken};
+
+mod auth;
 #[cfg(debug_assertions)]
 mod debug;
 
-use crate::{protocol::Protocol, Callback, JsMessage, MsgRx, Result};
+use crate::{bdaddr::BDAddr, protocol::Protocol, Callbacks, JsMessage, MsgRx, Result};
+
+type ConnectionTx = tokio::sync::mpsc::Sender<(BDAddr, BridgeToGatewayMsg)>;
+type ConnectionRx = tokio::sync::mpsc::Receiver<(BDAddr, BridgeToGatewayMsg)>;
+
+#[derive(Debug)]
+struct Connection {
+  writer: SplitSink<Framed<Stream, GatewayEndec>, GatewayToBridgeMsg>,
+  _reader_handle: JoinHandle<()>,
+}
+
+impl Connection {
+  fn new(address: BDAddr, stream: Stream, tx: ConnectionTx) -> Self {
+    let framed = Framed::new(stream, GatewayEndec);
+    let (writer, reader) = framed.split();
+    let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
+    Self { writer, _reader_handle }
+  }
+}
+
+async fn reader_task(address: BDAddr, mut reader: SplitStream<Framed<Stream, GatewayEndec>>, tx: ConnectionTx) {
+  while let Some(frame) = reader.next().await {
+    match frame {
+      Ok(msg) => {
+        if let Err(e) = tx.send((address, msg)).await {
+          tracing::error!("failed to forward bridge message: {:?}", e);
+        }
+      }
+      Err(e) => {
+        tracing::error!("error decoding rfcomm frame: {:?}", e);
+        break;
+      }
+    }
+  }
+}
 
 pub struct Rfcomm {
   session: Session,
   adapter: Adapter,
+  _agent: AgentHandle,
 
-  discovery: Option<Box<dyn Stream<Item = AdapterEvent> + Send + Unpin>>,
+  discovery: Option<Box<dyn futures::Stream<Item = AdapterEvent> + Send + Unpin>>,
+  connections: HashMap<bluer::Address, Connection>,
+
+  conn_tx: ConnectionTx,
+  conn_rx: ConnectionRx,
 
   rx: MsgRx,
-  callbacks: Vec<Callback>,
+  callbacks: Callbacks,
   cancel_token: CancellationToken,
 }
 
@@ -37,6 +87,10 @@ impl Rfcomm {
           if let Err(e) = self.handle_js_msg(msg).await {
             tracing::error!("failed to handle js message: {:?}", e);
           }
+        }
+        Some(msg) = self.conn_rx.recv() => {
+          tracing::trace!("received rfcomm message: {msg:?}");
+          self.callbacks.send(msg.into());
         }
         Some(event) = async {
           if let Some(discovery) = &mut self.discovery {
@@ -62,6 +116,17 @@ impl Rfcomm {
   async fn handle_js_msg(&mut self, msg: JsMessage) -> Result<()> {
     tracing::trace!("received JS message: {msg:?}");
 
+    match msg {
+      JsMessage::ScanOn => self.start_discovery().await?,
+      JsMessage::ScanOff => self.stop_discovery().await?,
+      JsMessage::Data(addr, msg) => self.send(addr, msg).await?,
+      JsMessage::Disconnect(addr) => self.disconnect(addr).await?,
+      JsMessage::Callback(callback) => {
+        tracing::debug!("adding new callback");
+        self.callbacks.add(callback);
+      }
+    }
+
     Ok(())
   }
 
@@ -84,21 +149,33 @@ impl Rfcomm {
     };
 
     let device = self.adapter.device(address)?;
-    if device.address().to_string() != "50:C2:E8:D7:1C:D2" {
-      tracing::debug!("skipping device: {address}");
-      return Ok(());
-    }
-
-    let services_resolved = device.is_services_resolved().await?;
-    let paired = device.is_paired().await?;
-    let connected = device.is_connected().await?;
-    let trusted = device.is_trusted().await?;
-    tracing::debug!(
-      "services_resolved: {services_resolved}, paired: {paired}, connected: {connected}, trusted: {trusted}"
-    );
 
     #[cfg(debug_assertions)]
     debug::query_device(&device).await?;
+
+    let paired = device.is_paired().await?;
+    let connected = device.is_connected().await?;
+    let trusted = device.is_trusted().await?;
+    tracing::debug!("({address}) paired: {paired}, connected: {connected}, trusted: {trusted}");
+
+    // work around bluez not letting me sdp easily
+    if let Some(class) = device.class().await? {
+      tracing::debug!("device class: {class}");
+      if class != BRIDGETHING_DEVICE_CLASS {
+        tracing::debug!("device class does not match: {address}");
+        return Ok(());
+      }
+    } else {
+      tracing::warn!("device class not available");
+    }
+
+    #[cfg(debug_assertions)]
+    debug::query_device(&device).await?;
+
+    if !trusted {
+      tracing::debug!("trusting device: {address}");
+      device.set_trusted(true).await?;
+    }
 
     if !paired {
       tracing::debug!("pairing with device: {address}");
@@ -107,8 +184,32 @@ impl Rfcomm {
 
     // attempt to connect rfcomm
     let socket_addr = SocketAddr::new(device.address(), BRIDGETHING_RFCOMM_CHANNEL);
-    let socket = Socket::new()?;
-    let stream = socket.connect(socket_addr).await?;
+    let stream = Stream::connect(socket_addr).await?;
+    tracing::debug!("rfcomm stream connected to device: {address}");
+
+    let connection = Connection::new(device.address().into(), stream, self.conn_tx.clone());
+    self.connections.insert(address, connection);
+    tracing::debug!("rfcomm connection established with device: {address}");
+
+    self.stop_discovery().await?;
+
+    self.callbacks.send(crate::AdapterEvent::Connected {
+      name: device.name().await.unwrap_or_default().unwrap_or_default(),
+      device_id: device.address().to_string(),
+      mode: crate::ConnectionType::Rfcomm,
+    });
+
+    Ok(())
+  }
+
+  async fn send(&mut self, addr: BDAddr, msg: GatewayToBridgeMsg) -> Result<()> {
+    tracing::trace!("sending rfcomm message to {addr}: {msg:?}");
+
+    if let Some(connection) = self.connections.get_mut(&addr.into()) {
+      connection.writer.send(msg).await?;
+    } else {
+      tracing::warn!("no connection found for address: {addr}");
+    }
 
     Ok(())
   }
@@ -122,17 +223,39 @@ impl Rfcomm {
 
   async fn start_discovery(&mut self) -> Result<()> {
     tracing::debug!("discovering devices");
+    if self.discovery.is_some() {
+      tracing::debug!("discovery already started");
+      return Ok(());
+    }
 
-    let filter = DiscoveryFilter {
-      uuids: [BRIDGETHING_PROFILE_UUID].into(),
-      transport: DiscoveryTransport::BrEdr,
-      duplicate_data: false,
-      ..Default::default()
-    };
-    self.adapter.set_discovery_filter(filter).await?;
+    // let filter = DiscoveryFilter {
+    //   uuids: [BRIDGETHING_PROFILE_UUID].into(),
+    //   transport: DiscoveryTransport::BrEdr,
+    //   duplicate_data: false,
+    //   ..Default::default()
+    // };
+    // self.adapter.set_discovery_filter(filter).await?;
 
     let devices = self.adapter.discover_devices_with_changes().await?;
     self.discovery = Some(Box::new(devices));
+
+    Ok(())
+  }
+
+  async fn stop_discovery(&mut self) -> Result<()> {
+    tracing::debug!("stopping discovery");
+    if self.discovery.is_some() {
+      self.discovery = None;
+    }
+
+    Ok(())
+  }
+
+  async fn disconnect(&mut self, addr: BDAddr) -> Result<()> {
+    tracing::debug!("disconnecting from device: {addr}");
+    if let Some(mut connection) = self.connections.remove(&addr.into()) {
+      connection.writer.close().await?;
+    }
 
     Ok(())
   }
@@ -143,11 +266,12 @@ impl Protocol for Rfcomm {
   async fn init(
     adapter_name: Option<String>,
     rx: MsgRx,
-    callbacks: Vec<Callback>,
+    callbacks: Callbacks,
     cancel_token: CancellationToken,
   ) -> Result<Self> {
     tracing::debug!("initializing bluetooth adapter");
     let session = Session::new().await?;
+    let _agent = auth::build_agent(&session).await?;
     let adapter = if let Some(adapter_name) = adapter_name {
       session.adapter(&adapter_name)
     } else {
@@ -163,11 +287,18 @@ impl Protocol for Rfcomm {
 
     tracing::debug!("initialized bluetooth adapter {}", adapter.name());
 
+    let (conn_tx, conn_rx) = tokio::sync::mpsc::channel(16);
+
     Ok(Self {
       session,
       adapter,
+      _agent,
 
       discovery: None,
+      connections: HashMap::new(),
+
+      conn_tx,
+      conn_rx,
 
       rx,
       callbacks,
@@ -177,5 +308,21 @@ impl Protocol for Rfcomm {
 
   fn spawn(mut self) -> JoinHandle<()> {
     tokio::spawn(async move { self.event_loop().await })
+  }
+}
+
+impl From<bluer::Address> for BDAddr {
+  fn from(address: bluer::Address) -> Self {
+    let mut addr = [0; 6];
+    addr.copy_from_slice(address.as_slice());
+    Self::from(addr)
+  }
+}
+
+impl From<BDAddr> for bluer::Address {
+  fn from(address: BDAddr) -> Self {
+    let mut addr = [0; 6];
+    addr.copy_from_slice(address.as_ref());
+    Self::new(addr)
   }
 }

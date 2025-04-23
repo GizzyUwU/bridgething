@@ -1,6 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
-use crate::{protocol::Protocol, Callback, MsgRx, Result};
+use crate::{protocol::Protocol, Callback, Callbacks, MsgRx, Result};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -12,7 +12,7 @@ mod windows;
 pub async fn get_rfcomm(
   adapter_name: Option<String>,
   rx: MsgRx,
-  callbacks: Vec<Callback>,
+  callbacks: Callbacks,
   cancel_token: CancellationToken,
 ) -> Result<impl Protocol> {
   #[cfg(target_os = "linux")]

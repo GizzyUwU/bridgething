@@ -11,7 +11,7 @@ pub fn init_logger(level_directive: Option<String>) {
   } else if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething_adapter=info".to_string()
+    "bridgething_adapter=info,libbridgething=info".to_string()
   };
 
   let filter = EnvFilter::builder()

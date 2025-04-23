@@ -249,6 +249,7 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "serde",
+ "serde_json",
  "thiserror 2.0.12",
  "tokio",
  "tokio-util",
@@ -1309,9 +1310,14 @@ name = "libbridgething"
 version = "0.1.0"
 dependencies = [
  "derive_more",
+ "flate2",
+ "rmp-serde",
  "serde",
  "serde_json",
  "serde_with",
+ "thiserror 2.0.12",
+ "tokio-util",
+ "tracing",
  "ts-rs",
  "uuid",
 ]
@@ -1445,6 +1451,8 @@ dependencies = [
  "ctor",
  "napi-build",
  "napi-sys",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

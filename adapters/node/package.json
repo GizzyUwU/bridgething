@@ -24,6 +24,9 @@
     "npmClient": "bun"
   },
   "license": "MIT",
+  "dependencies": {
+    "@bridgething/lib": "workspace:*"
+  },
   "devDependencies": {
     "@napi-rs/cli": "^3.0.0-alpha.65"
   },
@@ -32,8 +35,8 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build:release": "napi build --platform --release --esm -o ./dist",
-    "build:debug": "napi build --platform --esm -o ./dist",
+    "build:release": "napi build --platform --release --esm -o ./dist && ./postbuild.sh",
+    "build:debug": "napi build --platform --esm -o ./dist && ./postbuild.sh",
     "build": "bun run build:debug",
     "version": "napi version"
   }

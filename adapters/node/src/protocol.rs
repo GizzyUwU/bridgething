@@ -1,29 +1,14 @@
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{adapter::AdapterMode, bdaddr::BDAddr, AdapterEvent, Callback, JsMessage, MsgRx, MsgTx, Result};
-
-#[derive(Debug, Clone)]
-pub struct NotifyData {
-  address: BDAddr,
-  data: Vec<u8>,
-}
-
-impl From<NotifyData> for AdapterEvent {
-  fn from(notification: NotifyData) -> Self {
-    Self::Data {
-      device_id: notification.address.to_string(),
-      data: notification.data.into(),
-    }
-  }
-}
+use crate::{adapter::AdapterMode, Callbacks, JsMessage, MsgRx, MsgTx, Result};
 
 #[async_trait::async_trait]
 pub trait Protocol: Send {
   async fn init(
     adapter_name: Option<String>,
     rx: MsgRx,
-    callbacks: Vec<Callback>,
+    callbacks: Callbacks,
     cancel_token: CancellationToken,
   ) -> Result<Self>
   where
@@ -58,7 +43,7 @@ pub struct ProtocolMan {
 }
 
 impl ProtocolMan {
-  pub async fn init(adapter_name: Option<String>, mode: AdapterMode, callbacks: Vec<Callback>) -> Result<Self> {
+  pub async fn init(adapter_name: Option<String>, mode: AdapterMode, callbacks: Callbacks) -> Result<Self> {
     tracing::debug!("initializing protocol manager");
     let cancel_token = CancellationToken::new();
 

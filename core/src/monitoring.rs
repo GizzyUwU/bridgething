@@ -2,7 +2,7 @@ pub fn init_logger() {
   use tracing::metadata::LevelFilter;
   use tracing_subscriber::fmt::format::FmtSpan;
   use tracing_subscriber::{
-    filter::Directive, fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+    EnvFilter, Layer, filter::Directive, fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
   };
 
   // directives for debug builds
@@ -13,7 +13,7 @@ pub fn init_logger() {
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething=trace,bridgething::ws::connection::send=debug".to_string()
+    "bridgething=trace,bridgething::ws::connection::send=debug,libbridgething=trace".to_string()
   };
 
   // directives for release builds
@@ -24,7 +24,7 @@ pub fn init_logger() {
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething=info".to_string()
+    "bridgething=info,libbridgething=info".to_string()
   };
 
   let filter = EnvFilter::builder()
@@ -41,7 +41,7 @@ pub fn init_logger() {
 pub async fn wait_for_signal() {
   use tokio::signal::{
     ctrl_c,
-    unix::{signal, SignalKind},
+    unix::{SignalKind, signal},
   };
 
   let mut signal_terminate = signal(SignalKind::terminate()).expect("could not create signal handler");

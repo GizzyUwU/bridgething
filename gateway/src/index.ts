@@ -1,6 +1,5 @@
 import type { BridgeToGatewayMsg, GatewayToBridgeMsg } from '@bridgething/lib';
 import { Logger, LogLevel } from '@bridgething/lib';
-import { decode, encode } from '@msgpack/msgpack';
 
 type AdapterCallback = (event: AllAdapterEvent) => void;
 type Adapter = {
@@ -13,13 +12,13 @@ type Adapter = {
 
   disconnect(deviceId: string): Promise<void>;
 
-  send(deviceId: string, message: Uint8Array): Promise<void>;
+  send(deviceId: string, message: GatewayToBridgeMsg): Promise<void>;
 };
 
 type AdapterEvent =
   | { type: 'connected'; name: string; deviceId: string }
   | { type: 'disconnected'; deviceId: string }
-  | { type: 'data'; deviceId: string; data: Uint8Array };
+  | { type: 'message'; deviceId: string; data: BridgeToGatewayMsg };
 type AllAdapterEvent = AdapterEvent extends infer T
   ? T extends { type: infer U extends string }
     ? Omit<T, 'type'> & { type: U | Capitalize<U> }
@@ -27,7 +26,6 @@ type AllAdapterEvent = AdapterEvent extends infer T
   : never;
 
 type ParsedDataEvent = { type: 'data'; deviceId: string; data: BridgeToGatewayMsg };
-type ParsedAdapterEvent<T extends AdapterEvent = AdapterEvent> = T['type'] extends 'data' ? ParsedDataEvent : T;
 
 type EventByType<T extends AdapterEvent['type']> = Extract<AdapterEvent, { type: T }>;
 type KeyedAdapterEvent<K extends AdapterEvent['type']> = Omit<EventByType<K>, 'type'>;
@@ -49,7 +47,7 @@ class BridgethingGateway {
   private readonly callbacks: EventCallbacks = {
     connected: [],
     disconnected: [],
-    data: [],
+    message: [],
     all: [],
   };
   constructor(
@@ -83,16 +81,11 @@ class BridgethingGateway {
   disconnect = (id: string) => this.adapter.disconnect(id);
 
   /** @throws THIS WILL THROW IF THE DEVICE IS NOT KNOWN/CONNECTED OR IF SEND FAILS */
-  send = (deviceId: string, message: GatewayToBridgeMsg) => this.adapter.send(deviceId, encode(stripUuid(message)));
+  send = (deviceId: string, message: GatewayToBridgeMsg) => this.adapter.send(deviceId, message);
 
   private handleEvent(allEventData: AllAdapterEvent) {
-    const allEvent = lowercaseEvent(allEventData);
-    this.logger.trace('new event: ', allEvent);
-
-    let data;
-    if (allEvent.type === 'data') data = decode(allEvent.data);
-    const event = { ...allEvent, data } as ParsedAdapterEvent;
-    this.logger.trace('decoded event: ', event);
+    const event = lowercaseEvent(allEventData);
+    this.logger.trace('new event: ', event);
 
     this.callbacks.all.map(callback => callback(event as never));
 
@@ -102,7 +95,6 @@ class BridgethingGateway {
   }
 }
 
-const stripUuid = (message: GatewayToBridgeMsg) => ({ ...message, id: message.id.replaceAll('-', '') });
 const lowercaseEvent = <T extends AllAdapterEvent>({ type, ...event }: T) =>
   ({ ...event, type: type.toLowerCase() }) as AdapterEvent;
 

@@ -12,7 +12,7 @@ pub enum GatewayMsgMeta {
   Event,
   Request,
   Response {
-    #[serde(with = "uuid::serde::simple")]
+    // #[serde(with = "uuid::serde::simple")]
     #[ts(type = "string")]
     request_id: Uuid,
   },
@@ -25,7 +25,7 @@ pub enum GatewayMsgMeta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
-  #[serde(with = "uuid::serde::simple")]
+  // #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
@@ -79,7 +79,7 @@ pub enum ArbitraryData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
-  #[serde(with = "uuid::serde::simple")]
+  // #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]

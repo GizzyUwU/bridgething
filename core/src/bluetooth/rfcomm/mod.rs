@@ -2,48 +2,53 @@ use std::collections::HashMap;
 
 use bluer::{
   Address, Session,
-  rfcomm::{
-    self, ConnectRequest, Profile, ProfileHandle, Stream,
-    stream::{OwnedReadHalf, OwnedWriteHalf},
-  },
+  rfcomm::{self, ConnectRequest, Profile, ProfileHandle, Stream},
 };
-use futures::StreamExt;
+use futures::stream::{SplitSink, SplitStream};
+use futures::{SinkExt, StreamExt};
+use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg};
+use libbridgething::protocol::BridgeEndec;
 use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
-use tokio::{io::AsyncReadExt, task::JoinHandle};
+use tokio::task::JoinHandle;
+use tokio_util::codec::Framed;
 
 use crate::state::State;
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 
-type ConnectionTx = tokio::sync::mpsc::Sender<()>;
-type ConnectionRx = tokio::sync::mpsc::Receiver<()>;
+type ConnectionTx = tokio::sync::mpsc::Sender<GatewayToBridgeMsg>;
+type ConnectionRx = tokio::sync::mpsc::Receiver<GatewayToBridgeMsg>;
 
 #[derive(Debug)]
 struct Connection {
-  writer: OwnedWriteHalf,
+  writer: SplitSink<Framed<Stream, BridgeEndec>, BridgeToGatewayMsg>,
   _reader_handle: JoinHandle<()>,
 }
 
 impl Connection {
   fn new(stream: Stream, tx: ConnectionTx) -> Self {
-    let (reader, writer) = stream.into_split();
+    let framed = Framed::new(stream, BridgeEndec);
+    let (writer, reader) = framed.split();
     let _reader_handle = tokio::spawn(reader_task(reader, tx));
-
     Self { writer, _reader_handle }
+  }
+
+  async fn send(&mut self, msg: BridgeToGatewayMsg) -> BluetoothResult<()> {
+    tracing::trace!("sending rfcomm frame: {:?}", msg);
+    Ok(self.writer.send(msg).await?)
   }
 }
 
-async fn reader_task(mut reader: OwnedReadHalf, tx: ConnectionTx) {
-  let mut buf = vec![0; 1024];
-  loop {
-    match reader.read(&mut buf).await {
-      Ok(0) => break, // Connection closed
-      Ok(n) => {
-        // Handle the data read from the stream
-        tracing::debug!("Read {} bytes: {:?}", n, &buf[..n]);
+async fn reader_task(mut reader: SplitStream<Framed<Stream, BridgeEndec>>, tx: ConnectionTx) {
+  while let Some(frame) = reader.next().await {
+    match frame {
+      Ok(msg) => {
+        if let Err(e) = tx.send(msg).await {
+          tracing::error!("failed to forward gateway message: {:?}", e);
+        }
       }
       Err(e) => {
-        tracing::error!("Error reading from stream: {:?}", e);
+        tracing::error!("error decoding rfcomm frame: {:?}", e);
         break;
       }
     }
@@ -117,11 +122,17 @@ impl RfcommGateway {
         },
         Some(msg) = self.send_rx.recv() => {
           tracing::trace!("rfcomm gateway received message: {:?}", msg);
-          // Handle the message here
+          // send bridge message to all connected peers
+          for conn in self.connections.values_mut() {
+            if let Err(e) = conn.writer.send(msg.clone()).await {
+              tracing::error!("failed to send rfcomm frame: {:?}", e);
+            }
+          }
         },
         Some(msg) = self.conn_rx.recv() => {
           tracing::trace!("connected device rfcomm message: {:?}", msg);
-          // Handle the message here
+          // forward to application
+          let _ = self.recv_tx.send(msg).await;
         },
         else => {
           tracing::error!("rfcomm profile handle stream ended - this should not happen");
@@ -138,7 +149,15 @@ impl RfcommGateway {
     let stream = request.accept()?;
     tracing::debug!("rfcomm accepted connection from: {address}");
 
-    let connection = Connection::new(stream, self.conn_tx.clone());
+    let mut connection = Connection::new(stream, self.conn_tx.clone());
+    connection
+      .send(BridgeToGatewayMsg {
+        id: uuid::Uuid::now_v7(),
+        meta: GatewayMsgMeta::Event,
+        data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
+      })
+      .await?;
+
     self.connections.insert(address, connection);
 
     Ok(())

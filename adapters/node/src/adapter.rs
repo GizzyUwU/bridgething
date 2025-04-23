@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
-use crate::{monitoring, protocol::ProtocolMan, Callback, Error, Event, JsMessage, Result};
+use crate::{monitoring, protocol::ProtocolMan, Callbacks, Error, Event, JsMessage, Result};
 
 #[napi(string_enum)]
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +33,7 @@ impl Default for AdapterOptions {
 #[napi]
 pub struct NodeAdapter {
   options: AdapterOptions,
-  callback_purgatory: Option<Vec<Callback>>,
+  callback_purgatory: Option<Callbacks>,
 
   manager: Option<ProtocolMan>,
 }
@@ -45,7 +47,7 @@ impl NodeAdapter {
 
     Self {
       options,
-      callback_purgatory: Some(vec![]),
+      callback_purgatory: Some(Callbacks::default()),
       manager: None,
     }
   }
@@ -80,7 +82,7 @@ impl NodeAdapter {
         .try_send(callback.into())
         .map_err(|e| napi::Error::from_reason(e.to_string()))
     } else if let Some(purgatory) = self.callback_purgatory.as_mut() {
-      purgatory.push(callback);
+      purgatory.add(Arc::new(callback));
       Ok(())
     } else {
       tracing::error!("something went wrong - there was nowhere to send the callback!!");
@@ -91,9 +93,7 @@ impl NodeAdapter {
   #[napi]
   pub async fn scan_on(&self) -> napi::Result<()> {
     tracing::trace!("scan_on called");
-    println!("{:?}", self.forward(JsMessage::ScanOn).await);
-    println!("wtaf");
-    Ok(())
+    Ok(self.forward(JsMessage::ScanOn).await?)
   }
 
   #[napi]
@@ -113,13 +113,21 @@ impl NodeAdapter {
   }
 
   #[napi]
-  pub async fn send(&self, device_id: String, message: Uint8Array) -> napi::Result<()> {
+  pub async fn send(
+    &self,
+    device_id: String,
+    #[napi(ts_arg_type = "GatewayToBridgeMsg")] message: serde_json::Value,
+  ) -> napi::Result<()> {
     tracing::trace!("send called with device_id: {device_id}");
     let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    Ok(self.forward(JsMessage::Data(device_id, message.to_vec())).await?)
+    tracing::trace!("attempting to parse message: {message:?}");
+    let message = serde_json::from_value(message);
+    tracing::trace!("parsed message: {message:?}");
+    let message = message.map_err(|_| napi::Error::from_reason("failed to parse message".to_string()))?;
+    Ok(self.forward(JsMessage::Data(device_id, message)).await?)
   }
 
   async fn forward(&self, message: JsMessage) -> Result<()> {

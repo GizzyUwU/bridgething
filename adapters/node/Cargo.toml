@@ -17,10 +17,11 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 flate2 = { workspace = true }
 async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # feature-specific cross-platform dependencies (ble)
 btleplug = { version = "0.11.7", features = ["serde"], optional = true }
-serde.workspace = true
 
 # feature-specific platform-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -57,7 +58,7 @@ ble = ["btleplug"]
 version = "3.0.0-alpha.33"
 default-features = false
 # see https://nodejs.org/api/n-api.html#node-api-version-matrix
-features = ["napi4", "async"]
+features = ["napi4", "async", "serde-json"]
 
 [dependencies.napi-derive]
 version = "3.0.0-alpha.29"

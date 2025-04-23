@@ -12,39 +12,39 @@ const msgHandler: SimpleEventCallback = e => {
       break;
     case 'disconnected':
       break;
-    case 'data':
-      return void handleData(e.deviceId, e.data);
+    case 'message':
+      return void handleMessage(e.deviceId, e.data);
   }
 };
 
-const handleData = async (deviceId: string, data: BridgeToGatewayMsg) => {
+const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
   switch (data.type) {
     case 'version':
-      // await gateway.send(deviceId, {
-      //   id: randomUUIDv7(),
-      //   meta: 'event',
-      //   type: 'version',
-      //   data: { gateway: 'v0.1.0-alpha1', app: 'development' },
-      // });
-
-      // test send large file
       await gateway.send(deviceId, {
         id: randomUUIDv7(),
         meta: 'event',
-        type: 'addFiles',
-        data: {
-          files: [
-            {
-              path: 'test',
-              data: (() => {
-                const randomData = new Uint8Array(200 * 1024);
-                crypto.getRandomValues(randomData);
-                return randomData;
-              })(),
-            },
-          ],
-        },
+        type: 'version',
+        data: { version: 'v0.1.0-alpha1', app: 'development' },
       });
+
+      // test send large file
+      // await gateway.send(deviceId, {
+      //   id: randomUUIDv7(),
+      //   meta: 'event',
+      //   type: 'addFiles',
+      //   data: {
+      //     files: [
+      //       {
+      //         path: 'test',
+      //         data: (() => {
+      //           const randomData = new Uint8Array(200 * 1024);
+      //           crypto.getRandomValues(randomData);
+      //           return randomData;
+      //         })(),
+      //       },
+      //     ],
+      //   },
+      // });
 
       break;
     case 'files':
@@ -56,7 +56,10 @@ const handleData = async (deviceId: string, data: BridgeToGatewayMsg) => {
   }
 };
 
-const adapter = new NodeAdapter({ adapterName: 'hci1', logLevelDirective: 'bridgething_adapter=trace' });
+const adapter = new NodeAdapter({
+  adapterName: 'hci2',
+  logLevelDirective: 'bridgething_adapter=trace,libbridgething=trace',
+});
 const gateway = new BridgethingGateway(adapter, { logLevel: LogLevel.Trace });
 gateway.on(msgHandler);
 

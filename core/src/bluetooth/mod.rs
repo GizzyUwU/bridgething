@@ -235,6 +235,8 @@ pub enum BluetoothError {
   #[error(transparent)]
   MessagePackDec(#[from] rmp_serde::decode::Error),
   #[error(transparent)]
+  Endec(#[from] libbridgething::protocol::EndecError),
+  #[error(transparent)]
   Io(#[from] std::io::Error),
   #[error("bluetooth gatt characteristic pipe broken!!")]
   CharacteristicControl,

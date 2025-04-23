@@ -41,3 +41,7 @@ this code needs some serious refactoring lol - dw i am well aware
 ├── notes # dumps/notes/etc
 └── resources # random resources
 ```
+
+## Notes
+
+For development, the bridgething host device needs to have the bluetooth class `0x7c0000`. This can be set by running `sudo hciconfig hci0 class 0x7c0000` (where `hci0` is the bluetooth adapter).
