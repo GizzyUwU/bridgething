@@ -34,7 +34,7 @@ struct Connection {
 
 impl Connection {
   fn new(address: BDAddr, stream: Stream, tx: ConnectionTx) -> Self {
-    let framed = Framed::new(stream, GatewayEndec);
+    let framed = Framed::new(stream, GatewayEndec::default());
     let (writer, reader) = framed.split();
     let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
     Self { writer, _reader_handle }

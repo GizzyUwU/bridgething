@@ -1,3 +1,4 @@
+use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -39,26 +40,38 @@ pub struct GatewayToBridgeMsg {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
-  Version { version: String, app: String }, // event, response?
+  Version {
+    version: String,
+    app: String,
+  }, // event, response?
 
   // files
-  ListFiles,                           // request
-  DeleteFiles { files: Vec<String> },  // command
-  AddFiles { files: Vec<BridgeFile> }, // command
+  ListFiles, // request
+  DeleteFiles {
+    files: Vec<String>,
+  }, // command
+  AddFiles {
+    #[debug(skip)]
+    files: Vec<BridgeFile>,
+  }, // command
 
   // chrome
-  Navigate { url: String }, // command
+  Navigate {
+    url: String,
+  }, // command
 
   // arbitrary data
   Data(ArbitraryData), // request, response, event, command?
 }
 
+#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeFile {
   pub path: String,
+  #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
   pub data: Vec<u8>,
 }

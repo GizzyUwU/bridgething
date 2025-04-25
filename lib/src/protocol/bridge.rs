@@ -1,49 +1,73 @@
 use std::io::{Cursor, Read, Write};
 
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{read::GzDecoder, write::GzEncoder};
 use tokio_util::{
   bytes::{Buf, BufMut, BytesMut},
   codec::{Decoder, Encoder},
 };
 
-use crate::gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg};
+use crate::protocol::Compression;
+use crate::{
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
+  protocol::mbps,
+};
 
-use super::{EndecError, COMPRESSION_GZIP, HEADER_LEN, MAGIC, VERSION};
+use super::{EndecError, EndecState, COMPRESSION_GZIP, HEADER_LEN, MAGIC, VERSION};
 
-#[derive(Debug)]
-pub struct BridgeEndec;
+#[derive(Debug, Default)]
+pub struct BridgeEndec {
+  state: Option<EndecState>,
+}
 
 impl Decoder for BridgeEndec {
   type Item = GatewayToBridgeMsg;
   type Error = EndecError;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "checking buffer with {} bytes", src.len());
-    if src.len() < HEADER_LEN {
-      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
+    if src.is_empty() {
       return Ok(None);
     }
 
-    let magic = u16::from_be_bytes([src[0], src[1]]);
-    if magic != MAGIC {
-      tracing::error!(target: "libbridgething::protocol::bridge::decoder", "invalid magic: {:#x}", magic);
-      return Err(EndecError::InvalidMagic);
+    let state = self.state.get_or_insert_default();
+
+    if state.packet == 0 {
+      if src.len() < HEADER_LEN {
+        tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
+        state.packet += 1;
+        return Ok(None);
+      }
+
+      let magic = u16::from_be_bytes([src[0], src[1]]);
+      if magic != MAGIC {
+        tracing::error!(target: "libbridgething::protocol::bridge::decoder", "invalid magic: {:#x}", magic);
+        // drop junk
+        src.clear();
+        return Err(EndecError::InvalidMagic);
+      }
+
+      state.version = src[2];
+      if state.version != VERSION {
+        tracing::error!(target: "libbridgething::protocol::bridge::decoder", "unsupported version: {}", state.version);
+        // drop junk
+        src.clear();
+        return Err(EndecError::UnsupportedVersion(state.version));
+      }
+
+      state.compression = src[3].into();
+      state.length = u64::from_be_bytes(src[4..12].try_into().unwrap());
+      state.total_length = HEADER_LEN + state.length as usize;
+      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message length {}, compression {:?}", state.length, state.compression);
     }
-    let version = src[2];
-    if version != VERSION {
-      tracing::error!(target: "libbridgething::protocol::bridge::decoder", "unsupported version: {}", version);
-      return Err(EndecError::UnsupportedVersion(version));
-    }
-    let comp = src[3];
-    let len = u64::from_be_bytes(src[4..12].try_into().unwrap()) as usize;
-    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message length {}, compression {}", len, comp);
-    if src.len() < HEADER_LEN + len {
-      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for full message (need {}, have {})", HEADER_LEN + len, src.len());
+
+    if src.len() < state.total_length {
+      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message not complete ({}/{} bytes)", src.len(),state.total_length);
+      state.packet += 1;
       return Ok(None);
     }
+
     src.advance(HEADER_LEN);
-    let data = src.split_to(len).to_vec();
-    let payload = if comp == COMPRESSION_GZIP {
+    let data = src.split_to(state.length as usize).to_vec();
+    let payload = if state.compression == Compression::Gzip {
       tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "decompressing gzip data");
       let mut decoder = GzDecoder::new(Cursor::new(data));
       let mut buf = Vec::new();
@@ -54,10 +78,20 @@ impl Decoder for BridgeEndec {
       tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "using uncompressed data");
       data
     };
-    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "deserializing message {:?}", payload);
-    let msg: Self::Item = rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?;
-    // let msg: Self::Item = serde_json::from_slice(&payload).map_err(EndecError::Json)?;
+
+    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "deserializing message with {} bytes", payload.len());
+    // tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "deserializing message {:?}", payload);
+    // let msg: Self::Item = rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?;
+    let msg: Self::Item = serde_json::from_slice(&payload).map_err(EndecError::Json)?;
     tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "successfully decoded message");
+
+    if state.packet != 0 {
+      let elapsed_time = state.message_start.elapsed();
+      tracing::debug!(target: "libbridgething::protocol::bridge::decoder", "network bytes: {}, total bytes: {}, elapsed {:?}", state.length, payload.len(), elapsed_time);
+      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "transfer rate: {:.2}mbps, effective rate: {:.2}mbps", mbps(elapsed_time, state.total_length as f64), mbps(elapsed_time, (HEADER_LEN + payload.len()) as f64));
+    }
+
+    self.state = None;
     Ok(Some(msg))
   }
 }
@@ -68,13 +102,13 @@ impl Encoder<BridgeToGatewayMsg> for BridgeEndec {
   fn encode(&mut self, item: BridgeToGatewayMsg, dst: &mut BytesMut) -> Result<(), Self::Error> {
     tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serializing message");
     // https://github.com/3Hren/msgpack-rust/issues/250
-    let packed = rmp_serde::to_vec_named(&item).map_err(EndecError::RmpSerialization)?;
-    // let packed = serde_json::to_vec(&item).map_err(EndecError::Json)?;
+    // let packed = rmp_serde::to_vec_named(&item).map_err(EndecError::RmpSerialization)?;
+    let packed = serde_json::to_vec(&item).map_err(EndecError::Json)?;
     tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serialized to {} bytes", packed.len());
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serialized {packed:?}");
+    // tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serialized {packed:?}");
 
     tracing::trace!(target: "libbridgething::protocol::bridge::encode", "compressing with gzip");
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(&packed)?;
     let compressed = encoder.finish()?;
     let len = compressed.len() as u64;

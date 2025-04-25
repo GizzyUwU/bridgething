@@ -28,23 +28,23 @@ const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
       });
 
       // test send large file
-      // await gateway.send(deviceId, {
-      //   id: randomUUIDv7(),
-      //   meta: 'event',
-      //   type: 'addFiles',
-      //   data: {
-      //     files: [
-      //       {
-      //         path: 'test',
-      //         data: (() => {
-      //           const randomData = new Uint8Array(200 * 1024);
-      //           crypto.getRandomValues(randomData);
-      //           return randomData;
-      //         })(),
-      //       },
-      //     ],
-      //   },
-      // });
+      await gateway.send(deviceId, {
+        id: randomUUIDv7(),
+        meta: 'event',
+        type: 'addFiles',
+        data: {
+          files: [
+            {
+              path: 'test',
+              data: (() => {
+                const randomData = new Uint8Array(1024 * 1024);
+                crypto.getRandomValues(randomData);
+                return randomData;
+              })(),
+            },
+          ],
+        },
+      });
 
       break;
     case 'files':

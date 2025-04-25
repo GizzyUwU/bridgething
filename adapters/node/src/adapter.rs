@@ -113,26 +113,31 @@ impl NodeAdapter {
   }
 
   #[napi]
-  pub async fn send(
+  pub fn send(
     &self,
     device_id: String,
-    #[napi(ts_arg_type = "GatewayToBridgeMsg")] message: serde_json::Value,
+    #[napi(ts_arg_type = "GatewayToBridgeMsg")] message: Object,
   ) -> napi::Result<()> {
     tracing::trace!("send called with device_id: {device_id}");
     let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    tracing::trace!("attempting to parse message: {message:?}");
-    let message = serde_json::from_value(message);
+    let message = serde::Deserialize::deserialize(&mut napi::De::new(&message))
+      .map_err(|_| napi::Error::from_reason("failed to deserialize message".to_string()))?;
     tracing::trace!("parsed message: {message:?}");
-    let message = message.map_err(|_| napi::Error::from_reason("failed to parse message".to_string()))?;
-    Ok(self.forward(JsMessage::Data(device_id, message)).await?)
+
+    Ok(self.try_forward(JsMessage::Data(device_id, message))?)
   }
 
   async fn forward(&self, message: JsMessage) -> Result<()> {
     let manager = self.manager.as_ref().ok_or(Error::NotInitialized)?;
     manager.send(message).await
+  }
+
+  fn try_forward(&self, message: JsMessage) -> Result<()> {
+    let manager = self.manager.as_ref().ok_or(Error::NotInitialized)?;
+    manager.try_send(message)
   }
 }
 

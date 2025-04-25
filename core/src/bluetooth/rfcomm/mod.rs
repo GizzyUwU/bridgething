@@ -27,7 +27,7 @@ struct Connection {
 
 impl Connection {
   fn new(stream: Stream, tx: ConnectionTx) -> Self {
-    let framed = Framed::new(stream, BridgeEndec);
+    let framed = Framed::new(stream, BridgeEndec::default());
     let (writer, reader) = framed.split();
     let _reader_handle = tokio::spawn(reader_task(reader, tx));
     Self { writer, _reader_handle }

@@ -18,5 +18,10 @@ typescript:
   cargo test -p libbridgething &> /dev/null
   bunx prettier lib/ts/bindings --write
 
+class:
+  sudo hciconfig hci0 class 0x7c0000 || true
+  sudo hciconfig hci1 class 0x7c0000 || true
+  sudo hciconfig hci2 class 0x7c0000 || true
+
 tokei:
   tokei -t Nix,Rust,TypeScript,TSX

@@ -12,7 +12,7 @@ type Adapter = {
 
   disconnect(deviceId: string): Promise<void>;
 
-  send(deviceId: string, message: GatewayToBridgeMsg): Promise<void>;
+  send(deviceId: string, message: GatewayToBridgeMsg): Promise<void> | void;
 };
 
 type AdapterEvent =
