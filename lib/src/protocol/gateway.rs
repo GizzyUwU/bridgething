@@ -81,8 +81,8 @@ impl Decoder for GatewayEndec {
 
     tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "deserializing message with {} bytes", payload.len());
     // tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "deserializing message {:?}", payload);
-    // let msg: Self::Item = rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?;
-    let msg: Self::Item = serde_json::from_slice(&payload).map_err(EndecError::Json)?;
+    let msg: Self::Item = rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?;
+    // let msg: Self::Item = serde_json::from_slice(&payload).map_err(EndecError::Json)?;
     tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "successfully decoded message");
 
     if state.packet != 0 {
@@ -102,8 +102,8 @@ impl Encoder<GatewayToBridgeMsg> for GatewayEndec {
   fn encode(&mut self, item: GatewayToBridgeMsg, dst: &mut BytesMut) -> Result<(), Self::Error> {
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serializing message");
     // https://github.com/3Hren/msgpack-rust/issues/250
-    // let packed = rmp_serde::to_vec_named(&item).map_err(EndecError::RmpSerialization)?;
-    let packed = serde_json::to_vec(&item).map_err(EndecError::Json)?;
+    let packed = rmp_serde::to_vec_named(&item).map_err(EndecError::RmpSerialization)?;
+    // let packed = serde_json::to_vec(&item).map_err(EndecError::Json)?;
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serialized to {} bytes", packed.len());
     // tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serialized {packed:?}");
 
