@@ -5,6 +5,9 @@ mod als;
 mod mic;
 mod systemd;
 
+mod chrome;
+mod serve;
+
 mod handler;
 mod player;
 mod state;
@@ -22,6 +25,10 @@ use systemd::Notify;
 #[tokio::main]
 async fn main() {
   monitoring::init_logger();
+
+  let chrome = chrome::ChromeManager::init()
+    .await
+    .expect("failed to initialize chrome");
 
   let notifier = systemd::init_notifier();
 
@@ -41,6 +48,8 @@ async fn main() {
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone());
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone());
+
+  let serve = serve::FileServe::init();
 
   notifier.ready(true, Some("ready to accept connections..."));
 
@@ -72,6 +81,10 @@ async fn main() {
       }
     }
   }
+
+  tracing::info!("shutting down...");
+  chrome.shutdown().await;
+  serve.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");
 }

@@ -33,7 +33,10 @@ sd-notify = { version = "0.4.5", optional = true }
 # mic feature
 
 # chrome feature
-fantoccini = { version = "0.21.4", optional = true }
+headless_chrome = { version = "1.0.17", optional = true }
+
+# serve feature
+warp = { version = "0.3", optional = true }
 
 # dependencies
 tokio-websockets = { version = "0.10.1", features = [
@@ -48,15 +51,17 @@ quick_cache = "0.6.10"
 dashmap = { version = "6.1.0", features = ["serde"] }
 base64 = "0.22.1"
 ahash = "0.8.11"
+reqwest = { version = "0.12.15", features = ["json"] }
 
 
 [features]
-default = []
+default = ["chrome", "serve"]
 als = []
 mic = []
-chrome = ["dep:fantoccini"]
+chrome = ["dep:headless_chrome"]
 systemd = ["dep:sd-notify"]
-superbird = ["als", "mic", "systemd"]
+serve = ["dep:warp"]
+superbird = ["als", "mic", "systemd", "chrome", "serve"]
 # dev features
 no-persist = []
 
