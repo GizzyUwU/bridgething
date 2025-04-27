@@ -23,7 +23,9 @@ const msgHandler: SimpleEventCallback = e => {
 const appInit = async (deviceId: string) => {
   console.log('>> sending html file to device');
   const html = await Bun.file(import.meta.dir + '/assets/index.html').bytes();
-  const js = await Bun.file(import.meta.dir + '/assets/index.js').bytes();
+  const indexJs = await Bun.file(import.meta.dir + '/assets/index.js').bytes();
+  const uiJs = await Bun.file(import.meta.dir + '/assets/ui.js').bytes();
+  const websocketJs = await Bun.file(import.meta.dir + '/assets/websocket.js').bytes();
 
   const id = randomUUIDv7();
   WAIT_FOR.set(id, 'navigate');
@@ -37,7 +39,9 @@ const appInit = async (deviceId: string) => {
       data: {
         files: [
           { path: 'index.html', data: html },
-          { path: 'index.js', data: js },
+          { path: 'index.js', data: indexJs },
+          { path: 'ui.js', data: uiJs },
+          { path: 'websocket.js', data: websocketJs },
         ],
       },
     },

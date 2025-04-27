@@ -7,7 +7,12 @@ use crate::{Album, Artist, PlaybackOptions, PlaybackQueue, PlaybackRestrictions,
 
 #[serde_with::skip_serializing_none]
 #[derive(derive_more::Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[serde(tag = "action", content = "data", rename_all = "camelCase")]
+#[serde(
+  tag = "action",
+  content = "data",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerPlayerEvent {
   PlayerIdle,

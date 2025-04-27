@@ -24,7 +24,6 @@ pub use voice::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "client.ts")]
 pub struct ClientCommand {
-  #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
@@ -41,6 +40,7 @@ pub enum ClientCommandType {
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
   Interaction(ClientInteractionCommand),
+  // Forward(),
 
   // legacy and stock app stuffs
   #[ts(skip)]

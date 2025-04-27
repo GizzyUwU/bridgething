@@ -3,7 +3,12 @@ use ts_rs::TS;
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "action", content = "args", rename_all = "camelCase")]
+#[serde(
+  tag = "action",
+  content = "args",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
 #[ts(export, export_to = "client.ts")]
 pub enum ClientKVStoreCommand {
   Get { key: String },

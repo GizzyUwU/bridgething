@@ -50,7 +50,13 @@ impl MsgHandle {
     self
       .state
       .client_man
-      .send(self.id, self.from, data, ServerEventType::Response, self.stock_msg_id)
+      .send(
+        Uuid::now_v7(),
+        self.from,
+        data,
+        ServerEventType::Response { request_id: self.id },
+        self.stock_msg_id,
+      )
       .await
   }
 

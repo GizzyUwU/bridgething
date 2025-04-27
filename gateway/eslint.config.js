@@ -26,6 +26,6 @@ export default [
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    ignores: ['src/env.d.ts', 'README.md'],
+    ignores: ['src/env.d.ts', 'README.md', 'examples/assets/**/*'],
   },
 ];

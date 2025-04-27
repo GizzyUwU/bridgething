@@ -15,11 +15,11 @@ pub use storage::*;
 pub use system::*;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventType {
   Request,
-  Response,
+  Response { request_id: Uuid },
   Info,
 }
 
@@ -27,14 +27,15 @@ pub enum ServerEventType {
 /// messages from bridgething to the client (usually webpage) on the car thing.
 ///
 /// these messages will pass through a websocket.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "server.ts")]
+#[ts(export, export_to = "server.ts", rename_all = "camelCase")]
 pub struct ServerEvent {
-  #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
   pub data: ServerEventData,
+  #[serde(flatten)]
   pub meta: ServerEventType,
   pub stock_msg_id: Option<usize>,
 }
@@ -48,6 +49,7 @@ pub enum ServerEventData {
   System(ServerSystemEvent),
   Interaction(ServerInteractionEvent),
   Player(ServerPlayerEvent),
+  // Forward(),
   Ack,
 }
 

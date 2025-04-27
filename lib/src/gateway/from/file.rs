@@ -6,7 +6,12 @@ use crate::gateway::BridgeFile;
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(
+  tag = "type",
+  content = "data",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeFileMsg {
   List, // request

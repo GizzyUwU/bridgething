@@ -12,16 +12,14 @@ pub use to::*;
 use crate::BridgeThingMeta;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "meta", rename_all = "camelCase")]
+#[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayMsgMeta {
   Command,
   Event,
   Request,
   Response {
-    // #[serde(with = "uuid::serde::simple")]
     #[ts(type = "string")]
-    #[serde(rename = "requestId")]
     request_id: Uuid,
   },
 }
@@ -33,7 +31,6 @@ pub enum GatewayMsgMeta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
-  // #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]
@@ -44,7 +41,12 @@ pub struct GatewayToBridgeMsg {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(
+  tag = "type",
+  content = "data",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
   Version { version: String, app: String }, // event, response?
@@ -84,7 +86,6 @@ pub enum ArbitraryData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
-  // #[serde(with = "uuid::serde::simple")]
   #[ts(type = "string")]
   pub id: Uuid,
   #[serde(flatten)]

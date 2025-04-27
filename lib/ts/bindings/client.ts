@@ -37,18 +37,18 @@ export type ClientCommandType =
 export type ClientInteractionCommand =
   | { action: 'phoneAnswer' }
   | { action: 'phoneDecline' }
-  | { action: 'phoneCallImage'; args: { phone_number: string } }
-  | { action: 'phoneCallMessage'; args: { phone_number: string; message: string } }
+  | { action: 'phoneCallImage'; args: { phoneNumber: string } }
+  | { action: 'phoneCallMessage'; args: { phoneNumber: string; message: string } }
   | { action: 'increaseVolume' }
   | { action: 'decreaseVolume' }
   | { action: 'skipToIndex'; args: { index: number } }
   | { action: 'skipNext' }
-  | { action: 'skipPrev'; args: { allow_seeking: boolean } }
+  | { action: 'skipPrev'; args: { allowSeeking: boolean } }
   | { action: 'seekTo'; args: { position: number } }
   | { action: 'pause' }
   | { action: 'resume' }
   | { action: 'setShuffle'; args: { shuffle: boolean } }
-  | { action: 'setRepeat'; args: { repeat_mode: boolean } };
+  | { action: 'setRepeat'; args: { repeatMode: boolean } };
 
 export type ClientKVStoreCommand =
   | { action: 'get'; args: { key: string } }
@@ -60,8 +60,8 @@ export type ClientSystemCommand =
   | { action: 'reboot' }
   | { action: 'powerOff' }
   | { action: 'factoryReset' }
-  | { action: 'phoneCallAccept'; args: { call_id: string } }
-  | { action: 'phoneCallEnd'; args: { call_id: string } };
+  | { action: 'phoneCallAccept'; args: { callId: string } }
+  | { action: 'phoneCallEnd'; args: { callId: string } };
 
 export type ClientVoiceCommand =
   | { action: 'cancel' }

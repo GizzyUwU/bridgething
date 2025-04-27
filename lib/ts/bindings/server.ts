@@ -22,14 +22,15 @@ export type ServerBluetoothEvent =
  *
  * these messages will pass through a websocket.
  */
-export type ServerEvent = { id: string; meta: ServerEventType; stock_msg_id: number | null } & (
+export type ServerEvent = { id: string; stockMsgId: number | null } & (
   | { type: 'bluetooth'; data: ServerBluetoothEvent }
   | { type: 'storage'; data: ServerStorageEvent }
   | { type: 'system'; data: ServerSystemEvent }
   | { type: 'interaction'; data: ServerInteractionEvent }
   | { type: 'player'; data: ServerPlayerEvent }
   | { type: 'ack' }
-);
+) &
+  ({ meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'info' });
 
 export type ServerEventData =
   | { type: 'bluetooth'; data: ServerBluetoothEvent }
@@ -39,7 +40,7 @@ export type ServerEventData =
   | { type: 'player'; data: ServerPlayerEvent }
   | { type: 'ack' };
 
-export type ServerEventType = 'request' | 'response' | 'info';
+export type ServerEventType = { meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'info' };
 
 export type ServerInteractionEvent = never;
 
@@ -48,13 +49,13 @@ export type ServerPlayerEvent =
   | {
       action: 'playerState';
       data: {
-        context_id: string;
-        context_title: string;
-        is_paused: boolean;
-        playback_options: PlaybackOptions;
-        playback_position: number;
-        playback_restrictions: PlaybackRestrictions;
-        playback_speed: number;
+        contextId: string;
+        contextTitle: string;
+        isPaused: boolean;
+        playbackOptions: PlaybackOptions;
+        playbackPosition: number;
+        playbackRestrictions: PlaybackRestrictions;
+        playbackSpeed: number;
         track: Track;
       };
     }
@@ -68,27 +69,27 @@ export type ServerSystemEvent =
       action: 'version';
       data: {
         serial: string;
-        os_version: string;
-        app_version: string;
-        fw_version: string;
-        model_name: string;
-        fcc_id: string;
-        ic_id: string;
+        osVersion: string;
+        appVersion: string;
+        fwVersion: string;
+        modelName: string;
+        fccId: string;
+        icId: string;
         country: string;
         discord: string;
         credits: string;
       };
     }
-  | { action: 'otaReboot'; data: { delay_ms: number } }
-  | { action: 'otaPowerOff'; data: { delay_ms: number } }
+  | { action: 'otaReboot'; data: { delayMs: number } }
+  | { action: 'otaPowerOff'; data: { delayMs: number } }
   | { action: 'ambientLightUpdate'; data: { brightness: number } }
   | {
       action: 'phoneCallInfo';
       data: {
-        remote_id: string;
-        display_name: string;
+        remoteId: string;
+        displayName: string;
         status: PhoneCallStatus;
-        call_dir: PhoneCallDirection;
-        call_id: string;
+        callDir: PhoneCallDirection;
+        callId: string;
       };
     };

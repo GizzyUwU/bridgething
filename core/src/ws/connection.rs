@@ -87,11 +87,14 @@ impl Connection {
 
   async fn handle_text(&mut self, text: String) {
     tracing::trace!("(incoming: {}) new message: {}", &self.address, &text);
-    let Ok(msg) = serde_json::from_str::<PossibleRecvMsg>(&text) else {
-      return tracing::warn!(
-        "({}) failed to deserialize incoming message!! message: {text}",
-        &self.address
-      );
+    let msg = match serde_json::from_str::<PossibleRecvMsg>(&text) {
+      Ok(msg) => msg,
+      error => {
+        return tracing::warn!(
+          "({}) failed to deserialize incoming message!! message: {text}; error: {error:?}",
+          &self.address
+        );
+      }
     };
 
     if self.mode != ClientMode::Stock
@@ -130,7 +133,7 @@ impl Connection {
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => {
-        return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err)
+        return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err);
       }
     };
     tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use libbridgething::{
+  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, Track,
   client::{ClientInteractionCommand, ClientLegacyStockCommand},
   server::{ServerInteractionEvent, ServerPlayerEvent},
   stock::StockSetPreset,
-  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, Track,
 };
 use serde::{Deserialize, Serialize};
 
@@ -706,7 +706,7 @@ mod test {
 
   #[test]
   fn de_recv_phone_call_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallImage","args":{"phone_number":"1234567890"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallImage","args":{"phoneNumber":"1234567890"}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -723,7 +723,7 @@ mod test {
 
   #[test]
   fn de_recv_phone_call_message() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallMessage","args":{"phone_number":"1234567890","message":"Hello"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallMessage","args":{"phoneNumber":"1234567890","message":"Hello"}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -757,7 +757,7 @@ mod test {
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"skipPrev","args":{"allow_seeking":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"skipPrev","args":{"allowSeeking":true}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -803,7 +803,7 @@ mod test {
 
   #[test]
   fn de_recv_set_repeat() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"setRepeat","args":{"repeat_mode":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"setRepeat","args":{"repeatMode":true}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 

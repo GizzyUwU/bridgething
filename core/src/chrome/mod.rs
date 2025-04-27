@@ -100,6 +100,26 @@ impl ChromeWorker {
       return;
     };
 
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      browser.register_missing_tabs();
+    }));
+    let Some(browser) = (if let Err(e) = result {
+      tracing::error!("failed to register missing tabs: {:?}, restarting connection", e);
+      self.browser = None;
+
+      let browser = self.get_connection().await;
+      if let Some(b) = browser {
+        b.register_missing_tabs();
+      };
+
+      browser.as_ref()
+    } else {
+      Some(browser)
+    }) else {
+      tracing::error!("failed to get browser connection");
+      return;
+    };
+
     browser.register_missing_tabs();
     let Some(tab) = (if let Ok(tabs) = browser.get_tabs().lock() {
       tabs.first().cloned()

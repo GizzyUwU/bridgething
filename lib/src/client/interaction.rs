@@ -4,7 +4,12 @@ use ts_rs::TS;
 // TODO: refactor this into more command types so not spotify-specific
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "action", content = "args", rename_all = "camelCase")]
+#[serde(
+  tag = "action",
+  content = "args",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
 #[ts(export, export_to = "client.ts")]
 pub enum ClientInteractionCommand {
   PhoneAnswer,
