@@ -14,6 +14,8 @@ pub use player::*;
 pub use storage::*;
 pub use system::*;
 
+use crate::ForwardMessage;
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "server.ts")]
@@ -49,7 +51,7 @@ pub enum ServerEventData {
   System(ServerSystemEvent),
   Interaction(ServerInteractionEvent),
   Player(ServerPlayerEvent),
-  // Forward(),
+  Forward(ForwardMessage),
   Ack,
 }
 

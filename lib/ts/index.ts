@@ -10,8 +10,11 @@ export const BRIDGETHING_SERVICE_UUID = 'dead0000-53e5-4085-a5d8-f55f3f14ac5a';
 export const BRIDGETHING_CHARACTERISTIC_UUID = 'dead0000-f3dc-4620-8b74-8bd49bb5a468';
 export const BRIDGETHING_MANUFACTURER_ID = 0xdead;
 
+export const BRIDGETHING_WS_PORT = 8891;
+export const BRIDGETHING_FILE_PORT = 8892;
+
+export * from './logger';
+
 import { version } from './version';
 export const LIB_VERSION = `v${version}`;
 export const LIBBRIDGETHING_VERSION = 'v0.1.0';
-
-export * from './logger';

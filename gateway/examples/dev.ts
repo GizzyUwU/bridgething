@@ -87,8 +87,8 @@ const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
     case 'file':
       console.log(`file:`, data);
       break;
-    case 'data':
-      console.log(`data:`, data);
+    case 'forward':
+      console.log(`forwarded data:`, data);
       break;
     case 'ack':
     case 'done': {

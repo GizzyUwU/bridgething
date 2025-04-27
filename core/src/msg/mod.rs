@@ -1,10 +1,10 @@
 #![allow(clippy::large_enum_variant)]
 use libbridgething::{
+  ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
   client::{
     ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientLegacyStockCommand,
     ClientSystemCommand, ClientVoiceCommand,
   },
-  ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -65,6 +65,7 @@ impl From<ClientCommand> for RecvMsgData {
       ClientCommandType::System(msg) => Self::System(msg),
       ClientCommandType::Voice(msg) => Self::Voice(msg),
       ClientCommandType::Interaction(msg) => Self::Interaction(msg),
+      ClientCommandType::Forward(_) => Self::Unsupported(PossibleRecvMsg::Modern(msg)),
 
       // legacy
       ClientCommandType::LegacyStock(msg) => Self::LegacyStock(msg),

@@ -9,7 +9,7 @@ mod to;
 pub use from::*;
 pub use to::*;
 
-use crate::BridgeThingMeta;
+use crate::{BridgeThingMeta, ForwardMessage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -55,7 +55,7 @@ pub enum GatewayToBridgeMsgData {
   Chrome(GatewayToBridgeChromeMsg),
 
   // arbitrary data
-  Data(ArbitraryData), // request, response, event, command?
+  Forward(ForwardMessage), // request, response, event, command?
 }
 
 #[serde_with::serde_as]
@@ -68,15 +68,6 @@ pub struct BridgeFile {
   #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
   pub data: Vec<u8>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(untagged, rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum ArbitraryData {
-  String(String),
-  Bytes(#[ts(type = "Uint8Array")] Vec<u8>),
 }
 
 /// bridgething -> gateway
@@ -107,5 +98,5 @@ pub enum BridgeToGatewayMsgData {
   File(BridgeToGatewayFileMsg),
 
   // arbitrary data
-  Data(ArbitraryData), // request, response, event, command?
+  Forward(ForwardMessage), // request, response, event, command?
 }

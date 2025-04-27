@@ -1,8 +1,10 @@
 mod bluetooth;
+mod forward;
 mod player;
 mod system;
 
 pub use bluetooth::*;
+pub use forward::*;
 pub use player::*;
 pub use system::*;
 

@@ -16,6 +16,8 @@ pub use store::*;
 pub use system::*;
 pub use voice::*;
 
+use crate::ForwardMessage;
+
 /// client -> bridgething
 /// messages from the client (usually webpage) on the car thing to the bridgething
 /// daemon.
@@ -40,7 +42,7 @@ pub enum ClientCommandType {
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
   Interaction(ClientInteractionCommand),
-  // Forward(),
+  Forward(ForwardMessage),
 
   // legacy and stock app stuffs
   #[ts(skip)]

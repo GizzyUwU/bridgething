@@ -80,6 +80,10 @@ impl From<ServerEvent> for StockSendMsg {
       ServerEventData::Interaction(data) => {
         StockSendMsg::InterApp(StockInterAppSend::from_interaction_send(data, msg.stock_msg_id))
       }
+      ServerEventData::Forward(_) => {
+        tracing::warn!("forward message is not supported in stock app!!");
+        StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id))
+      }
       ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
     }
   }

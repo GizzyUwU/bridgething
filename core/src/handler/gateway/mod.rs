@@ -7,7 +7,10 @@ mod file;
 use chrome::*;
 use file::*;
 
-use libbridgething::gateway::{ArbitraryData, GatewayToBridgeMsg, GatewayToBridgeMsgData};
+use libbridgething::{
+  ForwardMessage,
+  gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
+};
 
 use crate::{
   bluetooth::{BluetoothMan, GatewayMessage},
@@ -51,8 +54,8 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
         tokio::spawn(async move { ChromeHandler::new(handle).handle(chrome_msg).await });
       }
-      GatewayToBridgeMsgData::Data(arbitrary_data) => {
-        tokio::spawn(async move { TopLevelHandler::new(handle).handle_data(arbitrary_data).await });
+      GatewayToBridgeMsgData::Forward(forward) => {
+        tokio::spawn(async move { TopLevelHandler::new(handle).handle_data(forward).await });
       }
     }
 
@@ -78,7 +81,7 @@ impl TopLevelHandler {
     Ok(())
   }
 
-  pub async fn handle_data(&mut self, data: ArbitraryData) -> HandlerResult {
+  pub async fn handle_data(&mut self, data: ForwardMessage) -> HandlerResult {
     tracing::debug!("({:?}) handling data message", &self.handle.address);
     tracing::debug!("({:?}) data: {:?}", &self.handle.address, data);
 
