@@ -24,4 +24,4 @@ class:
   sudo hciconfig hci2 class 0x7c0000 || true
 
 tokei:
-  tokei -t Nix,Rust,TypeScript,TSX
+  tokei -t Nix,Rust,TypeScript,TSX,JavaScript
