@@ -1,11 +1,7 @@
+use libbridgething::BRIDGETHING_FILE_SERVE_PORT;
 use tokio_util::sync::CancellationToken;
-use warp::Filter;
-use warp::http::{Response, StatusCode};
-use warp::path::Tail;
 
 use crate::state::State;
-
-const FILE_SERVE_PORT: u16 = 8891;
 
 #[derive(Debug)]
 pub struct FileServe {
@@ -20,7 +16,7 @@ impl FileServe {
     Self {
       cancel_token: cancel_token.clone(),
       handle: tokio::spawn(async {
-        tracing::info!("starting file server on port {}", FILE_SERVE_PORT);
+        tracing::info!("starting file server on port {}", BRIDGETHING_FILE_SERVE_PORT);
         file_server(state, cancel_token).await;
       }),
     }
@@ -37,7 +33,7 @@ impl FileServe {
 async fn file_server(state: State, cancel_token: CancellationToken) {
   loop {
     tokio::select! {
-    _ = warp::serve(warp::fs::dir(state.fs.root.clone())).run(([0, 0, 0, 0], FILE_SERVE_PORT)) => {
+    _ = warp::serve(warp::fs::dir(state.fs.root.clone())).bind(([0, 0, 0, 0], BRIDGETHING_FILE_SERVE_PORT)) => {
         tracing::error!("file server stopped");
       }
       _ = cancel_token.cancelled() => {

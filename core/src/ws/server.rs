@@ -1,28 +1,43 @@
+use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 
 use super::WSResult;
-
-const LISTEN_ADDRESS: &str = "127.0.0.1:8890";
+use crate::msg::ClientMode;
 
 pub struct Server {
-  listener: TcpListener,
+  stock_listener: TcpListener,
+  modern_listener: TcpListener,
 }
 
 impl Server {
   pub async fn bind() -> WSResult<Self> {
-    tracing::info!("binding to address {}", LISTEN_ADDRESS);
-
+    tracing::info!(
+      "binding to ports {} (stock) and {} (modern)",
+      BRIDGETHING_STOCK_WS_PORT,
+      BRIDGETHING_WS_MODERN_PORT
+    );
+    let stock_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
+    let modern_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
     Ok(Self {
-      listener: TcpListener::bind(LISTEN_ADDRESS).await?,
+      stock_listener,
+      modern_listener,
     })
   }
 
   /// cancel-safe
-  pub async fn listen(&self) -> WSResult<(TcpStream, SocketAddr)> {
-    let tcp_connection = self.listener.accept().await?;
-    tracing::info!("new connection from {}", tcp_connection.1);
-
-    Ok(tcp_connection)
+  pub async fn listen(&self) -> WSResult<(TcpStream, SocketAddr, ClientMode)> {
+    tokio::select! {
+      res = self.stock_listener.accept() => {
+        let (stream, addr) = res?;
+        tracing::info!("new stock connection from {}", addr);
+        Ok((stream, addr, ClientMode::Stock))
+      }
+      res = self.modern_listener.accept() => {
+        let (stream, addr) = res?;
+        tracing::info!("new modern connection from {}", addr);
+        Ok((stream, addr, ClientMode::Modern))
+      }
+    }
   }
 }

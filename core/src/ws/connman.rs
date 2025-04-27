@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use libbridgething::{ServerEvent, ServerEventData, ServerEventType};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
-  net::TcpStream,
+  io::{AsyncRead, AsyncWrite},
   task::{JoinHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
@@ -10,8 +10,8 @@ use tokio_websockets::ServerBuilder;
 use uuid::Uuid;
 
 use crate::{
-  msg::{stock::StockSendMsg, ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
-  ws::{connection::Connection, WSError},
+  msg::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx, stock::StockSendMsg},
+  ws::{WSError, connection::Connection},
 };
 
 use super::WSResult;
@@ -25,10 +25,10 @@ struct ClientData {
   cancel_token: CancellationToken,
 }
 
-pub fn create_client_manager() -> (ClientMan, ClientListener) {
+pub fn create_client_manager(meta: crate::state::meta::SuperbirdMeta) -> (ClientMan, ClientListener) {
   let (tx, rx) = tokio::sync::mpsc::channel(64);
 
-  let client_man = Arc::new(ClientManager::new(tx));
+  let client_man = Arc::new(ClientManager::new(meta, tx));
   let listener = ClientListener::new(rx, client_man.clone());
 
   (client_man, listener)
@@ -66,6 +66,7 @@ pub type ClientMan = Arc<ClientManager>;
 
 #[derive(Debug)]
 pub struct ClientManager {
+  meta: crate::state::meta::SuperbirdMeta,
   connections: DashMap<SocketAddr, ClientData>,
   cancel_token: CancellationToken,
 
@@ -73,10 +74,11 @@ pub struct ClientManager {
 }
 
 impl ClientManager {
-  fn new(tx: RecvTx) -> Self {
+  fn new(meta: crate::state::meta::SuperbirdMeta, tx: RecvTx) -> Self {
     tracing::info!("creating connection manager");
 
     Self {
+      meta,
       connections: DashMap::new(),
       cancel_token: CancellationToken::new(),
 
@@ -127,12 +129,6 @@ impl ClientManager {
       stock_msg_id: None,
     };
 
-    //  let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.iter().map(|c| {
-    //   let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
-    //   c.tx.send(msg).map_err(WSError::MessageSend)
-    // }))
-    // .await;
-
     let results: Vec<Result<(), WSError>> = self
       .connections
       .iter()
@@ -143,11 +139,7 @@ impl ClientManager {
       .collect();
 
     let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
-    if errors.is_empty() {
-      Ok(())
-    } else {
-      Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
   }
 
   pub async fn send_stock(&self, to: SocketAddr, data: impl Into<StockSendMsg>) -> WSResult<()> {
@@ -166,19 +158,6 @@ impl ClientManager {
   pub async fn broadcast_stock(&self, data: impl Into<StockSendMsg> + Clone) -> Result<(), Vec<WSError>> {
     let msg = data.into();
 
-    //  let results: Vec<Result<(), WSError>> = futures::future::join_all(self.connections.values().map(|c| async {
-    //   if c.mode != ClientMode::Stock {
-    //     tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
-    //     return Ok(());
-    //   };
-
-    //   c.tx
-    //     .send(PossibleSendMsg::Stock(msg.clone()))
-    //     .map_err(WSError::MessageSend)
-    //     .await
-    // }))
-    // .await;
-
     let results: Vec<Result<(), WSError>> = self
       .connections
       .iter()
@@ -195,15 +174,16 @@ impl ClientManager {
       .collect();
 
     let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
-    if errors.is_empty() {
-      Ok(())
-    } else {
-      Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
   }
 
   /// NOT cancel-safe
-  pub async fn handle_connection(&self, address: SocketAddr, stream: TcpStream) -> WSResult<()> {
+  pub async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+    &self,
+    address: SocketAddr,
+    stream: S,
+    mode: ClientMode,
+  ) -> WSResult<()> {
     let stream = ServerBuilder::new().accept(stream).await?;
     tracing::debug!("accepted stream from {address}");
 
@@ -212,11 +192,26 @@ impl ClientManager {
 
     let data = ClientData {
       tx,
-      mode: ClientMode::Modern,
+      mode,
 
-      _handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone()),
+      _handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone(), mode),
       cancel_token,
     };
+
+    if data.mode == ClientMode::Stock {
+      tracing::debug!("new stock connection from {address}");
+    } else {
+      tracing::debug!("new modern connection from {address}, sending version info");
+      let msg = ServerEvent {
+        id: uuid::Uuid::now_v7(),
+        data: self.meta.clone().into(),
+        meta: ServerEventType::Info,
+        stock_msg_id: None,
+      };
+      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
+      data.tx.send(msg).await?;
+      tracing::debug!("sent version info to {address}");
+    }
 
     self.connections.insert(address, data);
 

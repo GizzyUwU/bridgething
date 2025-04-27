@@ -28,20 +28,21 @@ async fn main() {
 
   let notifier = systemd::init_notifier();
 
-  let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
+  notifier.status("initializing bridgething...");
+  let meta = state::meta::SuperbirdMeta::read_or_default().await;
+  tracing::debug!("metadata: {:?}", &meta);
 
-  notifier.status("initializing websocket server...");
-  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
-  let (client_man, mut client_listener) = ws::create_client_manager();
-
-  notifier.status("initializing dbus player manager...");
+  let (client_man, mut client_listener) = ws::create_client_manager(meta.clone());
   let player = Player::new(client_man.clone());
-  let state = AppState::init(client_man.clone(), player, chrome)
+
+  let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
+  let state = AppState::init(client_man.clone(), meta, player, chrome)
     .await
     .expect("failed to initialize state!!");
 
-  notifier.status("initializing file server...");
+  notifier.status("initializing server binds...");
   let serve = serve::FileServe::init(state.clone());
+  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
 
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
@@ -56,8 +57,8 @@ async fn main() {
 
   loop {
     tokio::select! {
-      Ok((stream, address)) = server.listen() => {
-        if let Err(err) = client_man.handle_connection(address, stream).await {
+      Ok((stream, address, mode)) = server.listen() => {
+        if let Err(err) = client_man.handle_connection(address, stream, mode).await {
           tracing::error!("failed to accept tcp stream: {:?}", err);
           continue;
         };

@@ -50,6 +50,7 @@ pub struct AppState {
 impl AppState {
   pub async fn init(
     client_man: ClientMan,
+    meta: meta::SuperbirdMeta,
     player: crate::player::Player,
     chrome: chrome::Chrome,
   ) -> Result<State, StateError> {
@@ -67,9 +68,6 @@ impl AppState {
 
     let fs = files::FileSystem::init().await?;
     tracing::debug!("file system initialized");
-
-    let meta = meta::SuperbirdMeta::read_or_default().await;
-    tracing::debug!("metadata: {:?}", &meta);
 
     Ok(Arc::new(Self {
       client_man,

@@ -1,34 +1,41 @@
 use futures::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use tokio::{net::TcpStream, task::JoinHandle};
+use tokio::{
+  io::{AsyncRead, AsyncWrite},
+  task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tokio_websockets::WebSocketStream;
 use uuid::Uuid;
 
 use crate::msg::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendRx};
 
-pub struct Connection {
+pub struct Connection<S: AsyncRead + AsyncWrite + Unpin> {
   mode: ClientMode,
   address: SocketAddr,
-  stream: WebSocketStream<TcpStream>,
+  stream: WebSocketStream<S>,
   cancel_token: CancellationToken,
 
   tx: RecvTx,
   rx: SendRx,
 }
 
-impl Connection {
+impl<S> Connection<S>
+where
+  S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
   pub fn spawn(
     address: SocketAddr,
-    stream: WebSocketStream<TcpStream>,
+    stream: WebSocketStream<S>,
     tx: RecvTx,
     rx: SendRx,
     cancel_token: CancellationToken,
+    mode: ClientMode,
   ) -> JoinHandle<()> {
-    tracing::debug!("spawning listener for {address} in default modern mode");
+    tracing::debug!("spawning listener for {address} in {:?} mode", &mode);
     tokio::spawn(async move {
       Self {
-        mode: ClientMode::Modern,
+        mode,
         address,
         stream,
         cancel_token,
