@@ -12,38 +12,46 @@ use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
 use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
 
-use crate::state::State;
+use crate::{
+  bluetooth::{GatewayMessage, GatewayType},
+  state::State,
+};
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 
-type ConnectionTx = tokio::sync::mpsc::Sender<GatewayToBridgeMsg>;
-type ConnectionRx = tokio::sync::mpsc::Receiver<GatewayToBridgeMsg>;
+type ConnectionTx = tokio::sync::mpsc::Sender<(Address, GatewayToBridgeMsg)>;
+type ConnectionRx = tokio::sync::mpsc::Receiver<(Address, GatewayToBridgeMsg)>;
 
 #[derive(Debug)]
 struct Connection {
+  address: Address,
   writer: SplitSink<Framed<Stream, BridgeEndec>, BridgeToGatewayMsg>,
   _reader_handle: JoinHandle<()>,
 }
 
 impl Connection {
-  fn new(stream: Stream, tx: ConnectionTx) -> Self {
+  fn new(address: Address, stream: Stream, tx: ConnectionTx) -> Self {
     let framed = Framed::new(stream, BridgeEndec::default());
     let (writer, reader) = framed.split();
-    let _reader_handle = tokio::spawn(reader_task(reader, tx));
-    Self { writer, _reader_handle }
+    let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
+    Self {
+      address,
+      writer,
+      _reader_handle,
+    }
   }
 
   async fn send(&mut self, msg: BridgeToGatewayMsg) -> BluetoothResult<()> {
-    tracing::trace!("sending rfcomm frame: {:?}", msg);
+    tracing::trace!("({}) sending rfcomm message: {:?}", self.address, msg);
     Ok(self.writer.send(msg).await?)
   }
 }
 
-async fn reader_task(mut reader: SplitStream<Framed<Stream, BridgeEndec>>, tx: ConnectionTx) {
+async fn reader_task(address: Address, mut reader: SplitStream<Framed<Stream, BridgeEndec>>, tx: ConnectionTx) {
   while let Some(frame) = reader.next().await {
     match frame {
       Ok(msg) => {
-        if let Err(e) = tx.send(msg).await {
+        if let Err(e) = tx.send((address, msg)).await {
           tracing::error!("failed to forward gateway message: {:?}", e);
         }
       }
@@ -120,19 +128,29 @@ impl RfcommGateway {
             tracing::error!("failed to handle connect request: {:?}", err);
           }
         },
-        Some(msg) = self.send_rx.recv() => {
-          tracing::trace!("rfcomm gateway received message: {:?}", msg);
-          // send bridge message to all connected peers
-          for conn in self.connections.values_mut() {
-            if let Err(e) = conn.writer.send(msg.clone()).await {
-              tracing::error!("failed to send rfcomm frame: {:?}", e);
+        Some(data) = self.send_rx.recv() => {
+          tracing::trace!("rfcomm gateway received message: {:?}", data);
+          if let Some(address) = data.address {
+            if let Some(conn) = self.connections.get_mut(&address) {
+              if let Err(e) = conn.send(data.msg).await {
+                tracing::error!("failed to send rfcomm frame: {:?}", e);
+              }
+            } else {
+              tracing::warn!("rfcomm connection not found for address: {:?}", address);
+            }
+          } else {
+            // send bridge message to all connected peers
+            for conn in self.connections.values_mut() {
+              if let Err(e) = conn.writer.send(data.msg.clone()).await {
+                tracing::error!("failed to send rfcomm frame: {:?}", e);
+              }
             }
           }
         },
-        Some(msg) = self.conn_rx.recv() => {
-          tracing::trace!("connected device rfcomm message: {:?}", msg);
+        Some((address, msg)) = self.conn_rx.recv() => {
+          tracing::trace!("rfcomm message from {}: {:?}", address, msg);
           // forward to application
-          let _ = self.recv_tx.send(msg).await;
+          let _ = self.recv_tx.send(GatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await;
         },
         else => {
           tracing::error!("rfcomm profile handle stream ended - this should not happen");
@@ -149,7 +167,7 @@ impl RfcommGateway {
     let stream = request.accept()?;
     tracing::debug!("rfcomm accepted connection from: {address}");
 
-    let mut connection = Connection::new(stream, self.conn_tx.clone());
+    let mut connection = Connection::new(address, stream, self.conn_tx.clone());
     connection
       .send(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),

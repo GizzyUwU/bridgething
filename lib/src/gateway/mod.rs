@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+mod from;
+mod to;
+
+pub use from::*;
+pub use to::*;
+
 use crate::BridgeThingMeta;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -15,6 +21,7 @@ pub enum GatewayMsgMeta {
   Response {
     // #[serde(with = "uuid::serde::simple")]
     #[ts(type = "string")]
+    #[serde(rename = "requestId")]
     request_id: Uuid,
   },
 }
@@ -40,25 +47,10 @@ pub struct GatewayToBridgeMsg {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
-  Version {
-    version: String,
-    app: String,
-  }, // event, response?
+  Version { version: String, app: String }, // event, response?
 
-  // files
-  ListFiles, // request
-  DeleteFiles {
-    files: Vec<String>,
-  }, // command
-  AddFiles {
-    #[debug(skip)]
-    files: Vec<BridgeFile>,
-  }, // command
-
-  // chrome
-  Navigate {
-    url: String,
-  }, // command
+  File(GatewayToBridgeFileMsg),
+  Chrome(GatewayToBridgeChromeMsg),
 
   // arbitrary data
   Data(ArbitraryData), // request, response, event, command?
@@ -107,10 +99,11 @@ pub struct BridgeToGatewayMsg {
 #[ts(export, export_to = "gateway.ts")]
 #[allow(clippy::large_enum_variant)] // TODO: maybe remove this allow later
 pub enum BridgeToGatewayMsgData {
+  Ack,                      // response, happens when a command has been received and won't have a completion
+  Done,                     // response, happens when a command has been completed
   Version(BridgeThingMeta), // event, response?
 
-  // files
-  Files { files: Vec<String> }, // response
+  File(BridgeToGatewayFileMsg),
 
   // arbitrary data
   Data(ArbitraryData), // request, response, event, command?

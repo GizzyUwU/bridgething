@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::gateway::BridgeToGatewayMsgData;
+
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -26,6 +28,12 @@ pub struct BridgeThingMeta {
 impl BridgeThingMeta {
   pub fn libbridgething_version() -> String {
     format!("v{}", LIBBRIDGETHING_VERSION)
+  }
+}
+
+impl From<BridgeThingMeta> for BridgeToGatewayMsgData {
+  fn from(val: BridgeThingMeta) -> Self {
+    BridgeToGatewayMsgData::Version(val)
   }
 }
 

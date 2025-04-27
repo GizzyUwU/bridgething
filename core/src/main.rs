@@ -26,19 +26,22 @@ use systemd::Notify;
 async fn main() {
   monitoring::init_logger();
 
-  let chrome = chrome::ChromeManager::init()
-    .await
-    .expect("failed to initialize chrome");
-
   let notifier = systemd::init_notifier();
 
+  let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
+
+  notifier.status("initializing websocket server...");
   let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
   let (client_man, mut client_listener) = ws::create_client_manager();
 
+  notifier.status("initializing dbus player manager...");
   let player = Player::new(client_man.clone());
-  let state = AppState::init(client_man.clone(), player)
+  let state = AppState::init(client_man.clone(), player, chrome)
     .await
     .expect("failed to initialize state!!");
+
+  notifier.status("initializing file server...");
+  let serve = serve::FileServe::init(state.clone());
 
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
@@ -48,8 +51,6 @@ async fn main() {
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone());
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone());
-
-  let serve = serve::FileServe::init();
 
   notifier.ready(true, Some("ready to accept connections..."));
 
@@ -68,8 +69,8 @@ async fn main() {
       },
       Some(msg) = bluetooth_rx.recv() => {
         match msg {
-          bluetooth::BluetoothEvent::Gateway { from, msg } => {
-            if let Err(err) = gateway_handler.handle(from, msg).await {
+          bluetooth::BluetoothEvent::Gateway(data) => {
+            if let Err(err) = gateway_handler.handle(data).await {
               tracing::error!("failed to handle bluetooth message: {:?}", err);
             }
           }
@@ -83,7 +84,7 @@ async fn main() {
   }
 
   tracing::info!("shutting down...");
-  chrome.shutdown().await;
+  state.chrome.shutdown().await;
   serve.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");

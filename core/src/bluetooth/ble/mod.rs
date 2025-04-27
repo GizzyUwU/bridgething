@@ -139,7 +139,7 @@ impl GattServer {
   async fn recv(&mut self) -> BluetoothResult<()> {
     loop {
       tokio::select! {
-        Some(msg) = self.rx.recv() => self.write(msg).await?,
+        Some(data) = self.rx.recv() => self.write(data.msg).await?,
 
         evt = self.characteristic.next() => self.handle_characteristic(evt).await?,
         read_res = async {

@@ -5,6 +5,8 @@ export type ArbitraryData = string | Uint8Array;
 
 export type BridgeFile = { path: string; data: Uint8Array };
 
+export type BridgeToGatewayFileMsg = { type: 'files'; data: { files: Array<string> } };
+
 /**
  * bridgething -> gateway
  * messages from bridgething to the gateway (mobile or desktop app).
@@ -15,24 +17,35 @@ export type BridgeToGatewayMsg = { id: string } & (
   | { meta: 'command' }
   | { meta: 'event' }
   | { meta: 'request' }
-  | { meta: 'response'; request_id: string }
+  | { meta: 'response'; requestId: string }
 ) &
   (
+    | { type: 'ack' }
+    | { type: 'done' }
     | { type: 'version'; data: BridgeThingMeta }
-    | { type: 'files'; data: { files: Array<string> } }
+    | { type: 'file'; data: BridgeToGatewayFileMsg }
     | { type: 'data'; data: ArbitraryData }
   );
 
 export type BridgeToGatewayMsgData =
+  | { type: 'ack' }
+  | { type: 'done' }
   | { type: 'version'; data: BridgeThingMeta }
-  | { type: 'files'; data: { files: Array<string> } }
+  | { type: 'file'; data: BridgeToGatewayFileMsg }
   | { type: 'data'; data: ArbitraryData };
 
 export type GatewayMsgMeta =
   | { meta: 'command' }
   | { meta: 'event' }
   | { meta: 'request' }
-  | { meta: 'response'; request_id: string };
+  | { meta: 'response'; requestId: string };
+
+export type GatewayToBridgeChromeMsg = { type: 'navigate'; data: { url: string } };
+
+export type GatewayToBridgeFileMsg =
+  | { type: 'list' }
+  | { type: 'delete'; data: { files: Array<string> } }
+  | { type: 'add'; data: { files: Array<BridgeFile> } };
 
 /**
  * gateway -> bridgething
@@ -44,21 +57,17 @@ export type GatewayToBridgeMsg = { id: string } & (
   | { meta: 'command' }
   | { meta: 'event' }
   | { meta: 'request' }
-  | { meta: 'response'; request_id: string }
+  | { meta: 'response'; requestId: string }
 ) &
   (
     | { type: 'version'; data: { version: string; app: string } }
-    | { type: 'listFiles' }
-    | { type: 'deleteFiles'; data: { files: Array<string> } }
-    | { type: 'addFiles'; data: { files: Array<BridgeFile> } }
-    | { type: 'navigate'; data: { url: string } }
+    | { type: 'file'; data: GatewayToBridgeFileMsg }
+    | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
     | { type: 'data'; data: ArbitraryData }
   );
 
 export type GatewayToBridgeMsgData =
   | { type: 'version'; data: { version: string; app: string } }
-  | { type: 'listFiles' }
-  | { type: 'deleteFiles'; data: { files: Array<string> } }
-  | { type: 'addFiles'; data: { files: Array<BridgeFile> } }
-  | { type: 'navigate'; data: { url: string } }
+  | { type: 'file'; data: GatewayToBridgeFileMsg }
+  | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
   | { type: 'data'; data: ArbitraryData };

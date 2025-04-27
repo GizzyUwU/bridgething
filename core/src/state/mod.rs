@@ -4,8 +4,9 @@ use libbridgething::Device;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::ws::ClientMan;
+use crate::{chrome, ws::ClientMan};
 
+mod files;
 pub mod meta;
 
 pub type State = Arc<AppState>;
@@ -39,13 +40,19 @@ pub struct AppState {
   pub client_man: ClientMan,
   pub meta: meta::SuperbirdMeta,
   pub player: crate::player::Player,
+  pub chrome: chrome::Chrome,
+  pub fs: files::FileSystem,
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
 }
 
 impl AppState {
-  pub async fn init(client_man: ClientMan, player: crate::player::Player) -> Result<State, StateError> {
+  pub async fn init(
+    client_man: ClientMan,
+    player: crate::player::Player,
+    chrome: chrome::Chrome,
+  ) -> Result<State, StateError> {
     tracing::info!("initializing state");
     let config_dir_path = dirs::config_dir()
       .unwrap_or("/home/superbird/.config".into())
@@ -58,6 +65,9 @@ impl AppState {
     let persist_path = config_dir_path.join("bridgething.db");
     let persist = PersistentAppState::restore_or_default(&persist_path).await;
 
+    let fs = files::FileSystem::init().await?;
+    tracing::debug!("file system initialized");
+
     let meta = meta::SuperbirdMeta::read_or_default().await;
     tracing::debug!("metadata: {:?}", &meta);
 
@@ -65,6 +75,8 @@ impl AppState {
       client_man,
       meta,
       player,
+      chrome,
+      fs,
 
       persist_path,
       persist: RwLock::new(persist),
@@ -183,4 +195,8 @@ pub enum StateError {
   Io(#[from] tokio::io::Error),
   #[error("bincode deserialization error: {0}")]
   Deserialize(#[from] bincode::Error),
+  #[error("invalid path: {0}")]
+  InvalidPath(String),
+  #[error("file does not exist: {0}")]
+  FileNotFound(String),
 }

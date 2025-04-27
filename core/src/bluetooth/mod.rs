@@ -21,7 +21,7 @@ use crate::{
   ws::WSError,
 };
 use ble::GattServer;
-use bluer::{Adapter, Session};
+use bluer::{Adapter, Address, Session};
 use libbridgething::gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg};
 use profiles::ProfileMan;
 use tokio::task::JoinHandle;
@@ -31,7 +31,7 @@ pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 
 #[derive(Debug)]
 pub enum BluetoothEvent {
-  Gateway { from: GatewayType, msg: GatewayToBridgeMsg },
+  Gateway(GatewayMessage<GatewayToBridgeMsg>),
 }
 
 #[derive(Debug)]
@@ -104,10 +104,43 @@ pub enum GatewayType {
   Rfcomm,
 }
 
-pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayToBridgeMsg>;
-pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayToBridgeMsg>;
-pub type GatewaySendTx = tokio::sync::mpsc::Sender<BridgeToGatewayMsg>;
-pub type GatewaySendRx = tokio::sync::mpsc::Receiver<BridgeToGatewayMsg>;
+#[derive(Debug, Clone)]
+pub struct GatewayMessage<T: Clone> {
+  pub address: Option<Address>,
+  pub protocol: GatewayType,
+  pub msg: T,
+}
+
+impl<T: Clone> GatewayMessage<T> {
+  pub fn new(address: Option<Address>, protocol: GatewayType, msg: T) -> Self {
+    Self { address, protocol, msg }
+  }
+
+  pub fn all(protocol: GatewayType, msg: T) -> Self {
+    Self::new(None, protocol, msg)
+  }
+
+  pub fn ble(address: Address, msg: T) -> Self {
+    Self::new(Some(address), GatewayType::Ble, msg)
+  }
+
+  pub fn ble_all(msg: T) -> Self {
+    Self::new(None, GatewayType::Ble, msg)
+  }
+
+  pub fn rfcomm(address: Address, msg: T) -> Self {
+    Self::new(Some(address), GatewayType::Rfcomm, msg)
+  }
+
+  pub fn rfcomm_all(msg: T) -> Self {
+    Self::new(None, GatewayType::Rfcomm, msg)
+  }
+}
+
+pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayMessage<GatewayToBridgeMsg>>;
+pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayMessage<GatewayToBridgeMsg>>;
+pub type GatewaySendTx = tokio::sync::mpsc::Sender<GatewayMessage<BridgeToGatewayMsg>>;
+pub type GatewaySendRx = tokio::sync::mpsc::Receiver<GatewayMessage<BridgeToGatewayMsg>>;
 
 #[derive(Debug)]
 pub struct GatewayMan {
@@ -137,10 +170,10 @@ impl GatewayMan {
     })
   }
 
-  pub async fn send(&self, to: GatewayType, msg: BridgeToGatewayMsg) {
-    match to {
-      GatewayType::Ble => self.ble.send(msg).await,
-      GatewayType::Rfcomm => self.rfcomm.send(msg).await,
+  pub async fn send(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
+    match &data.protocol {
+      GatewayType::Ble => self.ble.send(data).await,
+      GatewayType::Rfcomm => self.rfcomm.send(data).await,
     }
   }
 }
@@ -184,8 +217,8 @@ impl GatewayCon {
     })
   }
 
-  pub async fn send(&self, msg: BridgeToGatewayMsg) {
-    if let Err(err) = self.tx.send(msg).await {
+  pub async fn send(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
+    if let Err(err) = self.tx.send(data).await {
       tracing::error!("failed to send message to gateway: {:?}", err);
     }
   }
@@ -203,13 +236,7 @@ impl GatewayCon {
           }
         };
 
-        if let Err(err) = tx
-          .send(BluetoothEvent::Gateway {
-            from: gateway_type,
-            msg,
-          })
-          .await
-        {
+        if let Err(err) = tx.send(BluetoothEvent::Gateway(msg)).await {
           tracing::error!("failed to send message to bluetooth manager: {:?}", err);
         }
       }

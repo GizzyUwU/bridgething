@@ -1,9 +1,5 @@
-mod command;
-mod event;
-mod request;
-mod response;
+mod chrome;
+mod file;
 
-pub use command::*;
-pub use event::*;
-pub use request::*;
-pub use response::*;
+pub use chrome::*;
+pub use file::*;

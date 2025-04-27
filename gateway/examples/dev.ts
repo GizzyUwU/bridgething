@@ -4,6 +4,9 @@ import { NodeAdapter } from '@bridgething/adapter-node';
 import { LogLevel, type BridgeToGatewayMsg } from '@bridgething/lib';
 import { randomUUIDv7, sleep } from 'bun';
 
+type NextTask = 'navigate';
+const WAIT_FOR = new Map<string, NextTask>();
+
 const msgHandler: SimpleEventCallback = e => {
   console.log('>> js callback got new data!!', e);
 
@@ -17,6 +20,30 @@ const msgHandler: SimpleEventCallback = e => {
   }
 };
 
+const appInit = async (deviceId: string) => {
+  console.log('>> sending html file to device');
+  const html = await Bun.file(import.meta.dir + '/assets/index.html').bytes();
+  const js = await Bun.file(import.meta.dir + '/assets/index.js').bytes();
+
+  const id = randomUUIDv7();
+  WAIT_FOR.set(id, 'navigate');
+
+  await gateway.send(deviceId, {
+    id,
+    meta: 'event',
+    type: 'file',
+    data: {
+      type: 'add',
+      data: {
+        files: [
+          { path: 'index.html', data: html },
+          { path: 'index.js', data: js },
+        ],
+      },
+    },
+  });
+};
+
 const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
   switch (data.type) {
     case 'version':
@@ -27,32 +54,63 @@ const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
         data: { version: 'v0.1.0-alpha1', app: 'development' },
       });
 
+      await appInit(deviceId);
+
       // test send large file
-      await gateway.send(deviceId, {
-        id: randomUUIDv7(),
-        meta: 'event',
-        type: 'addFiles',
-        data: {
-          files: [
-            {
-              path: 'test',
-              data: (() => {
-                const randomData = new Uint8Array(1024 * 1024);
-                crypto.getRandomValues(randomData);
-                return randomData;
-              })(),
-            },
-          ],
-        },
-      });
+      // console.log('>> sending large test file to device');
+      // await gateway.send(deviceId, {
+      //   id: randomUUIDv7(),
+      //   meta: 'event',
+      //   type: 'file',
+      //   data: {
+      //     type: 'add',
+      //     data: {
+      //       files: [
+      //         {
+      //           path: 'test.bin',
+      //           data: (() => {
+      //             const randomData = new Uint8Array(1024 * 1024);
+      //             crypto.getRandomValues(randomData);
+      //             return randomData;
+      //           })(),
+      //         },
+      //       ],
+      //     },
+      //   },
+      // });
 
       break;
-    case 'files':
-      console.log(`files:`, data);
+    case 'file':
+      console.log(`file:`, data);
       break;
     case 'data':
       console.log(`data:`, data);
       break;
+    case 'ack':
+    case 'done': {
+      console.log(`ack/done:`, data);
+      if (!('requestId' in data)) return;
+
+      if (WAIT_FOR.has(data.requestId)) {
+        const task = WAIT_FOR.get(data.requestId);
+        WAIT_FOR.delete(data.requestId);
+        console.log('>> waited for task completed', data.requestId);
+
+        if (task === 'navigate') {
+          console.log('>> navigating to index.html');
+          await gateway.send(deviceId, {
+            id: randomUUIDv7(),
+            meta: 'event',
+            type: 'chrome',
+            data: {
+              type: 'navigate',
+              data: { url: 'http://localhost:8891/index.html' },
+            },
+          });
+        }
+      }
+      break;
+    }
   }
 };
 

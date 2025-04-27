@@ -45,3 +45,5 @@ this code needs some serious refactoring lol - dw i am well aware
 ## Notes
 
 For development, the bridgething host device needs to have the bluetooth class `0x7c0000`. This can be set by running `sudo hciconfig hci0 class 0x7c0000` (where `hci0` is the bluetooth adapter).
+
+BridgeThing expects a `chromium` instance with `--remote-debugging-port=9222` to be running. You don't need it running, but BridgeThing will be a little confused without it.

@@ -6,13 +6,13 @@ This document describes the binary protocol used for communication over Bluetoot
 
 Each message sent over the RFCOMM channel uses the following structure:
 
-| Field            | Size (bytes) | Description                             |
-| ---------------- | ------------ | --------------------------------------- |
-| Magic Number     | 2            | Fixed value: `0xdead` (big-endian)      |
-| Version          | 1            | Protocol version (currently 1)          |
-| Compression Type | 1            | Compression algorithm (see below)       |
-| Length           | 8            | Length of the following JSON data (u64) |
-| JSON Data        | variable     | Message payload, possibly compressed    |
+| Field            | Size (bytes) | Description                                |
+| ---------------- | ------------ | ------------------------------------------ |
+| Magic Number     | 2            | Fixed value: `0xdead` (big-endian)         |
+| Version          | 1            | Protocol version (currently 1)             |
+| Compression Type | 1            | Compression algorithm (see below)          |
+| Length           | 8            | Length of the following msgpack data (u64) |
+| MsgPack Data     | variable     | Message payload, possibly compressed       |
 
 ### Field Details
 
@@ -21,29 +21,28 @@ Each message sent over the RFCOMM channel uses the following structure:
 - **Compression Type**: Indicates the compression algorithm used for the payload. The following values are supported:
   - `0x00`: no compression
   - `0x01`: gzip
-- **Length**: 8-byte unsigned integer (big-endian) specifying the length in bytes of the following JSON data (after compression, if any).
-- **JSON Data**: The actual message payload, encoded as JSON. If compression is used, this field contains the compressed data.
+- **Length**: 8-byte unsigned integer (big-endian) specifying the length in bytes of the following MsgPack data (after compression, if any).
+- **MsgPack Data**: The actual message payload, encoded using [MessagePack](https://msgpack.org/). If compression is used, this field contains the compressed data.
 
 ## Example
 
 A valid packet might look like:
 
 ```none
-[0xDE, 0xAD, 0x01, 0x00, <8-byte length>, <json bytes>]
+[0xDE, 0xAD, 0x01, 0x00, <8-byte length>, <msgpack bytes>]
 ```
 
 or, with gzip compression:
 
 ```none
-[0xDE, 0xAD, 0x01, 0x01, <8-byte length>, <gzip-compressed json bytes>]
+[0xDE, 0xAD, 0x01, 0x01, <8-byte length>, <gzip-compressed msgpack bytes>]
 ```
 
 ## Notes
 
 - Only no compression (`0x00`) and gzip compression (`0x01`) are currently supported. Other values are reserved for future use.
 - All multi-byte fields are encoded in big-endian order.
-- The JSON data should be a valid JSON-encoded object or array, as defined by your application.
-- Gzipped JSON is the preferred format as it provides better compatibility than MessagePack.
+- The MsgPack data should be a valid MessagePack-encoded object or array, as defined by your application.
 
 ## Version Matrix
 
