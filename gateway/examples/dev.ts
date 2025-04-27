@@ -1,7 +1,7 @@
 import { BridgethingGateway, type SimpleEventCallback } from '../src';
 
 import { NodeAdapter } from '@bridgething/adapter-node';
-import { LogLevel, type BridgeToGatewayMsg } from '@bridgething/lib';
+import { BRIDGETHING_FILE_PORT, LogLevel, type BridgeToGatewayMsg } from '@bridgething/lib';
 import { randomUUIDv7, sleep } from 'bun';
 
 type NextTask = 'navigate';
@@ -108,7 +108,7 @@ const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
             type: 'chrome',
             data: {
               type: 'navigate',
-              data: { url: 'http://localhost:8891/index.html' },
+              data: { url: `http://localhost:${BRIDGETHING_FILE_PORT}/index.html` },
             },
           });
         }
