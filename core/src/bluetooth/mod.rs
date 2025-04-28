@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use crate::{
   player::PlayerError,
+  server::WSError,
   state::{State, StateError},
-  ws::WSError,
 };
 use ble::GattServer;
 use bluer::{Adapter, Address, Session};

@@ -11,7 +11,7 @@ export const BRIDGETHING_CHARACTERISTIC_UUID = 'dead0000-f3dc-4620-8b74-8bd49bb5
 export const BRIDGETHING_MANUFACTURER_ID = 0xdead;
 
 export const BRIDGETHING_WS_PORT = 8891;
-export const BRIDGETHING_FILE_PORT = 8892;
+export const BRIDGETHING_FILE_PORT = 8891;
 
 export * from './logger';
 

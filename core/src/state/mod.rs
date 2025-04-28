@@ -4,7 +4,7 @@ use libbridgething::Device;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::{chrome, ws::ClientMan};
+use crate::{chrome, server::ClientMan};
 
 mod files;
 pub mod meta;

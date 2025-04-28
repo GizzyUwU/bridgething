@@ -19,8 +19,8 @@ use crate::{
   bluetooth::BluetoothMan,
   handler::HandlerError,
   msg::{ClientMode, RecvMsg, RecvMsgData, stock::StockInterAppSend},
+  server::WSError,
   state::State,
-  ws::WSError,
 };
 
 use super::HandlerResult;

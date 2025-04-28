@@ -1,12 +1,11 @@
 mod bluetooth;
-mod ws;
+mod server;
 
 mod als;
 mod mic;
 mod systemd;
 
 mod chrome;
-mod serve;
 
 mod handler;
 mod player;
@@ -32,7 +31,7 @@ async fn main() {
   let meta = state::meta::SuperbirdMeta::read_or_default().await;
   tracing::debug!("metadata: {:?}", &meta);
 
-  let (client_man, mut client_listener) = ws::create_client_manager(meta.clone());
+  let (client_man, mut client_listener) = server::create_client_manager(meta.clone());
   let player = Player::new(client_man.clone());
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
@@ -41,8 +40,9 @@ async fn main() {
     .expect("failed to initialize state!!");
 
   notifier.status("initializing server binds...");
-  let serve = serve::FileServe::init(state.clone());
-  let server = ws::Server::bind().await.expect("failed to bind to 127.0.0.1:8890");
+  let mut server = server::Server::bind(state.clone())
+    .await
+    .expect("failed to bind to 127.0.0.1:8890");
 
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
@@ -86,7 +86,7 @@ async fn main() {
 
   tracing::info!("shutting down...");
   state.chrome.shutdown().await;
-  serve.shutdown().await;
+  server.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");
 }

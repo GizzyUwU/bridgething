@@ -53,8 +53,8 @@ pub enum RecvMsgData {
   ChangeMode(ClientMode),
 
   // errors
-  ConnectionClosed(tokio_websockets::CloseCode, String),
-  Error(tokio_websockets::Error),
+  ConnectionClosed(u16, String),
+  Error(axum::Error),
 }
 
 impl From<ClientCommand> for RecvMsgData {

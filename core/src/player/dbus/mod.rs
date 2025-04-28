@@ -14,7 +14,7 @@ pub use state::*;
 
 use crate::{
   bluetooth::avrcp::art::CoverArt,
-  ws::{ClientMan, WSError},
+  server::{ClientMan, WSError},
 };
 
 use super::{art::CoverArtCache, state::PlayerState};

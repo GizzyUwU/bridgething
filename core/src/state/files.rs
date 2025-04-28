@@ -1,6 +1,7 @@
+use mime_guess::Mime;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use tokio::fs;
+use tokio::fs::{self, File};
 
 use super::{StateError, StateResult};
 
@@ -23,10 +24,11 @@ impl FileSystem {
     Ok(Self { root })
   }
 
-  pub async fn save_file(&self, path: String, data: Vec<u8>) -> StateResult<()> {
+  pub async fn save_file<P: AsRef<str>>(&self, path: P, data: Vec<u8>) -> StateResult<()> {
+    let path = path.as_ref();
     tracing::debug!("saving file: {}", path);
 
-    let full_path = self.root.join(&path);
+    let full_path = self.root.join(path);
     if let Some(parent) = full_path.parent() {
       fs::create_dir_all(parent).await?;
     }
@@ -35,27 +37,53 @@ impl FileSystem {
     Ok(())
   }
 
-  pub async fn delete_file(&self, path: String) -> StateResult<()> {
+  pub async fn delete_file<P: AsRef<str>>(&self, path: P) -> StateResult<()> {
+    let path = path.as_ref();
     tracing::debug!("deleting file: {}", path);
-    let full_path = self.root.join(&path);
+    let full_path = self.root.join(path);
     match fs::remove_file(&full_path).await {
       Ok(_) => Ok(()),
-      Err(e) if e.kind() == ErrorKind::NotFound => Err(StateError::FileNotFound(path)),
+      Err(e) if e.kind() == ErrorKind::NotFound => Err(StateError::FileNotFound(path.to_string())),
       Err(e) => Err(StateError::Io(e)),
     }
   }
 
-  pub async fn read_file(&self, path: String) -> StateResult<Vec<u8>> {
+  pub async fn read_file<P: AsRef<str>>(&self, path: P) -> StateResult<(Vec<u8>, Mime)> {
+    let path = path.as_ref();
     tracing::debug!("reading file: {}", path);
-    let full_path = self.root.join(&path);
+    let full_path = self.root.join(path);
     let data = fs::read(&full_path).await.map_err(|e| {
       if e.kind() == ErrorKind::NotFound {
-        StateError::FileNotFound(path.clone())
+        StateError::FileNotFound(path.to_string())
       } else {
         StateError::Io(e)
       }
     })?;
-    Ok(data)
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    Ok((data, mime))
+  }
+
+  pub async fn get_file<P: AsRef<str>>(&self, path: P) -> StateResult<(File, Mime)> {
+    let path = path.as_ref();
+    tracing::debug!("getting file: {}", path);
+    let full_path = self.root.join(path);
+    let file = File::open(&full_path).await.map_err(|e| {
+      if e.kind() == ErrorKind::NotFound {
+        StateError::FileNotFound(path.to_string())
+      } else {
+        StateError::Io(e)
+      }
+    })?;
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    Ok((file, mime))
+  }
+
+  pub async fn file_exists<P: AsRef<str>>(&self, path: P) -> StateResult<bool> {
+    let path = path.as_ref();
+    tracing::debug!("checking if file exists: {}", path);
+    let full_path = self.root.join(path);
+    let exists = full_path.exists();
+    Ok(exists)
   }
 
   /// TODO: this is comically inefficient :)

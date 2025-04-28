@@ -1,17 +1,14 @@
+use axum::extract::ws::WebSocket;
 use dashmap::DashMap;
 use libbridgething::{ServerEvent, ServerEventData, ServerEventType};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{
-  io::{AsyncRead, AsyncWrite},
-  task::{JoinHandle, JoinSet},
-};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
-use tokio_websockets::ServerBuilder;
 use uuid::Uuid;
 
 use crate::{
   msg::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx, stock::StockSendMsg},
-  ws::{WSError, connection::Connection},
+  server::{WSError, connection::Connection},
 };
 
 use super::WSResult;
@@ -178,14 +175,8 @@ impl ClientManager {
   }
 
   /// NOT cancel-safe
-  pub async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
-    &self,
-    address: SocketAddr,
-    stream: S,
-    mode: ClientMode,
-  ) -> WSResult<()> {
-    let stream = ServerBuilder::new().accept(stream).await?;
-    tracing::debug!("accepted stream from {address}");
+  pub async fn handle_connection(&self, address: SocketAddr, ws: WebSocket, mode: ClientMode) -> WSResult<()> {
+    tracing::debug!("handling accepted websocket connection from {address}");
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let cancel_token = self.cancel_token.child_token();
@@ -194,7 +185,7 @@ impl ClientManager {
       tx,
       mode,
 
-      _handle: Connection::spawn(address, stream, self.tx.clone(), rx, cancel_token.clone(), mode),
+      _handle: Connection::spawn(address, ws, self.tx.clone(), rx, cancel_token.clone(), mode),
       cancel_token,
     };
 

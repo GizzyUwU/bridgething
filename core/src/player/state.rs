@@ -1,10 +1,10 @@
 use libbridgething::{
-  server::ServerPlayerEvent, Device, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, ServerEventType, Track,
+  Device, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, ServerEventType, Track, server::ServerPlayerEvent,
 };
 
-use crate::ws::ClientMan;
+use crate::server::ClientMan;
 
-use super::{dbus::DBusPlayerEvent, PlayerResult};
+use super::{PlayerResult, dbus::DBusPlayerEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepeatState {

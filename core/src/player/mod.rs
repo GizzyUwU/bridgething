@@ -11,7 +11,7 @@ use dbus::DBusPlayer;
 
 use crate::{
   handler::client::MsgHandle,
-  ws::{ClientMan, WSError},
+  server::{ClientMan, WSError},
 };
 
 use tokio::sync::RwLock;

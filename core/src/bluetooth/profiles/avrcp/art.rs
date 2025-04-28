@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{handler::client::MsgHandle, player::art::CoverArtCache, ws::ClientMan};
+use crate::{handler::client::MsgHandle, player::art::CoverArtCache, server::ClientMan};
 
 // TODO: potentially make cover art synchronous? or more tied to player rather than bt?
 

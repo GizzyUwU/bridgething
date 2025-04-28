@@ -179,7 +179,7 @@ export class WebSocketClient {
    * Connect to the WebSocket server
    * @param {string} url
    */
-  connect(url = 'ws://localhost:8890') {
+  connect(url = 'ws://localhost:8891') {
     this.setStatus('connecting', 'orange');
 
     this.ws = new WebSocket(url);

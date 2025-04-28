@@ -1,47 +1,55 @@
-use futures::{SinkExt, StreamExt};
-use std::net::SocketAddr;
-use tokio::{
-  io::{AsyncRead, AsyncWrite},
-  task::JoinHandle,
+use axum::{
+  body::Bytes,
+  extract::ws::{self, Utf8Bytes, WebSocket},
 };
+use futures::{
+  SinkExt, StreamExt,
+  stream::{SplitSink, SplitStream},
+};
+use std::net::SocketAddr;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tokio_websockets::WebSocketStream;
 use uuid::Uuid;
 
 use crate::msg::{ClientMode, PossibleRecvMsg, PossibleSendMsg, RecvMsg, RecvMsgData, RecvTx, SendRx};
 
-pub struct Connection<S: AsyncRead + AsyncWrite + Unpin> {
+pub struct Connection {
   mode: ClientMode,
   address: SocketAddr,
-  stream: WebSocketStream<S>,
-  cancel_token: CancellationToken,
+
+  writer: SplitSink<WebSocket, ws::Message>,
+  reader: SplitStream<WebSocket>,
 
   tx: RecvTx,
   rx: SendRx,
+
+  cancel_token: CancellationToken,
 }
 
-impl<S> Connection<S>
-where
-  S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
+impl Connection {
   pub fn spawn(
     address: SocketAddr,
-    stream: WebSocketStream<S>,
+    ws: WebSocket,
     tx: RecvTx,
     rx: SendRx,
     cancel_token: CancellationToken,
     mode: ClientMode,
   ) -> JoinHandle<()> {
     tracing::debug!("spawning listener for {address} in {:?} mode", &mode);
+    let (writer, reader) = ws.split();
+
     tokio::spawn(async move {
       Self {
         mode,
         address,
-        stream,
-        cancel_token,
+
+        writer,
+        reader,
 
         tx,
         rx,
+
+        cancel_token,
       }
       .listen()
       .await
@@ -51,14 +59,14 @@ where
   pub async fn listen(&mut self) {
     loop {
       tokio::select! {
-        ws_msg = self.stream.next() => {
+        ws_msg = self.reader.next() => {
           let Some(ws_msg) = ws_msg else {
             tracing::warn!("({}) connection closed unexpectedly!", &self.address);
             break;
           };
 
           let ws_msg = match ws_msg {
-            Ok(msg) => WsMsgType::from(msg),
+            Ok(msg) => msg,
             Err(err) => {
               tracing::warn!("({}) error decoding websocket message: {:?}!", &self.address, &err);
               self.forward(err).await;
@@ -67,12 +75,12 @@ where
           };
 
           match ws_msg {
-            WsMsgType::Text(text) => self.handle_text(text).await,
-            WsMsgType::Binary(payload) => self.handle_binary(payload).await,
-            WsMsgType::Ping(payload) => self.handle_ping(payload).await,
-            WsMsgType::Pong(payload) => self.handle_pong(payload).await,
-            WsMsgType::Close(code, reason) => {
-              self.handle_closed(code, reason).await;
+            ws::Message::Text(text) => self.handle_text(text).await,
+            ws::Message::Binary(payload) => self.handle_binary(payload).await,
+            ws::Message::Ping(payload) => self.handle_ping(payload).await,
+            ws::Message::Pong(payload) => self.handle_pong(payload).await,
+            ws::Message::Close(frame) => {
+              self.handle_closed(frame).await;
               break;
             }
           };
@@ -92,9 +100,9 @@ where
     }
   }
 
-  async fn handle_text(&mut self, text: String) {
-    tracing::trace!("(incoming: {}) new message: {}", &self.address, &text);
-    let msg = match serde_json::from_str::<PossibleRecvMsg>(&text) {
+  async fn handle_text(&mut self, text: Utf8Bytes) {
+    tracing::trace!("(incoming: {}) new message: {}", &self.address, text.as_str());
+    let msg = match serde_json::from_str::<PossibleRecvMsg>(text.as_str()) {
       Ok(msg) => msg,
       error => {
         return tracing::warn!(
@@ -120,11 +128,11 @@ where
     self.forward(msg).await;
   }
 
-  async fn handle_binary(&self, payload: tokio_websockets::Payload) {
+  async fn handle_binary(&self, payload: Bytes) {
     tracing::trace!("({}) binary data received? payload: {:?}", &self.address, payload);
   }
 
-  async fn handle_pong(&self, payload: tokio_websockets::Payload) {
+  async fn handle_pong(&self, payload: Bytes) {
     tracing::trace!("({}) pong received? payload: {:?}", &self.address, payload);
   }
 
@@ -145,93 +153,58 @@ where
     };
     tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);
 
-    if let Err(err) = self.stream.send(tokio_websockets::Message::text(json)).await {
+    if let Err(err) = self.writer.send(ws::Message::Text(json.into())).await {
       tracing::error!(target: "bridgething::ws::connection::send", "({}) error sending message to websocket!!: {:?}", &self.address, err);
     };
   }
 
   async fn close(&mut self) {
     if let Err(err) = self
-      .stream
-      .send(tokio_websockets::Message::close(
-        Some(tokio_websockets::CloseCode::NORMAL_CLOSURE),
-        "bye",
-      ))
+      .writer
+      .send(ws::Message::Close(Some(ws::CloseFrame {
+        code: ws::close_code::NORMAL,
+        reason: "bye".into(),
+      })))
       .await
     {
       tracing::error!("({}) error sending message to websocket!!: {:?}", &self.address, err);
     };
   }
 
-  async fn handle_closed(&self, code: tokio_websockets::CloseCode, reason: String) {
-    tracing::info!(
-      "connection from {} closed with code {:?} and reason {}",
-      &self.address,
-      code,
-      &reason
-    );
-    self.forward((code, reason.to_owned())).await;
+  async fn handle_closed(&self, frame: Option<ws::CloseFrame>) {
+    tracing::info!("connection from {} closed with frame {:?}", &self.address, frame);
+    if let Some(frame) = frame {
+      self.forward((frame.code, frame.reason.as_str().to_string())).await;
+    } else {
+      self
+        .forward((ws::close_code::ABNORMAL, "no close frame".to_string()))
+        .await;
+    }
   }
 
-  async fn handle_ping(&mut self, payload: tokio_websockets::Payload) {
-    if let Err(err) = self
-      .stream
-      .send(tokio_websockets::Message::pong(payload.to_owned()))
-      .await
-    {
+  async fn handle_ping(&mut self, payload: Bytes) {
+    if let Err(err) = self.writer.send(ws::Message::Pong(payload)).await {
       tracing::error!("({}) error sending message to websocket: {:?}", &self.address, err);
     };
-  }
-}
-
-enum WsMsgType {
-  Text(String),
-  Binary(tokio_websockets::Payload),
-  Pong(tokio_websockets::Payload),
-  Ping(tokio_websockets::Payload),
-  Close(tokio_websockets::CloseCode, String),
-}
-
-impl From<tokio_websockets::Message> for WsMsgType {
-  fn from(msg: tokio_websockets::Message) -> Self {
-    if msg.is_text() {
-      Self::Text(
-        msg
-          .as_text()
-          .expect("this message said it was text. this should never fail.")
-          .to_owned(),
-      )
-    } else if msg.is_pong() {
-      Self::Pong(msg.into_payload())
-    } else if msg.is_ping() {
-      Self::Ping(msg.into_payload())
-    } else if msg.is_close() {
-      let (code, reason) = msg
-        .as_close()
-        .expect("this message said it was a close message. this should never fail.");
-      Self::Close(code, reason.to_owned())
-    } else {
-      Self::Binary(msg.into_payload())
-    }
   }
 }
 
 #[derive(Debug)]
 enum ForwardMsg {
   Msg(Uuid, PossibleRecvMsg),
-  ConnectionClosed(tokio_websockets::CloseCode, String),
-  Error(tokio_websockets::Error),
+  ConnectionClosed(ws::CloseCode, String),
+  Error(axum::Error),
   ChangeMode(ClientMode),
 }
 
-impl From<(tokio_websockets::CloseCode, String)> for ForwardMsg {
-  fn from((close_code, msg): (tokio_websockets::CloseCode, String)) -> Self {
+impl From<(ws::CloseCode, String)> for ForwardMsg {
+  fn from((close_code, msg): (ws::CloseCode, String)) -> Self {
     Self::ConnectionClosed(close_code, msg)
   }
 }
 
-impl From<tokio_websockets::Error> for ForwardMsg {
-  fn from(err: tokio_websockets::Error) -> Self {
+impl From<axum::Error> for ForwardMsg {
+  fn from(err: axum::Error) -> Self {
     Self::Error(err)
   }
 }
