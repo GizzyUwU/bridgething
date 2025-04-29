@@ -50,7 +50,7 @@ impl MsgHandle {
     self
       .bluetooth
       .gateway_man
-      .send(GatewayMessage::new(
+      .send_all(GatewayMessage::new(
         self.address,
         self.protocol,
         BridgeToGatewayMsg {

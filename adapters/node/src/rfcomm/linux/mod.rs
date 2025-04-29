@@ -10,9 +10,7 @@ use futures::{
   SinkExt, StreamExt,
 };
 use libbridgething::{
-  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::GatewayEndec,
-  BRIDGETHING_DEVICE_CLASS, BRIDGETHING_RFCOMM_CHANNEL,
+  gateway::GatewayToBridgeMsg, protocol::GatewayEndec, BRIDGETHING_DEVICE_CLASS, BRIDGETHING_RFCOMM_CHANNEL,
 };
 use tokio::task::JoinHandle;
 use tokio_util::{codec::Framed, sync::CancellationToken};
@@ -21,10 +19,12 @@ mod auth;
 #[cfg(debug_assertions)]
 mod debug;
 
-use crate::{bdaddr::BDAddr, protocol::Protocol, Callbacks, JsMessage, MsgRx, Result};
+use crate::{
+  bdaddr::BDAddr, protocol::Protocol, Callbacks, ConnectionMessage, ConnectionType, JsMessage, MsgRx, Result,
+};
 
-type ConnectionTx = tokio::sync::mpsc::Sender<(BDAddr, BridgeToGatewayMsg)>;
-type ConnectionRx = tokio::sync::mpsc::Receiver<(BDAddr, BridgeToGatewayMsg)>;
+type ConnectionTx = tokio::sync::mpsc::Sender<(BDAddr, ConnectionMessage)>;
+type ConnectionRx = tokio::sync::mpsc::Receiver<(BDAddr, ConnectionMessage)>;
 
 #[derive(Debug)]
 struct Connection {
@@ -45,20 +45,27 @@ async fn reader_task(address: BDAddr, mut reader: SplitStream<Framed<Stream, Gat
   while let Some(frame) = reader.next().await {
     match frame {
       Ok(msg) => {
-        if let Err(e) = tx.send((address, msg)).await {
+        if let Err(e) = tx.send((address, msg.into())).await {
           tracing::error!("failed to forward bridge message: {:?}", e);
         }
       }
       Err(e) => {
-        tracing::error!("error decoding rfcomm frame: {:?}", e);
+        tracing::debug!("error decoding rfcomm frame: {:?}", e);
         break;
       }
     }
   }
+
+  tracing::info!("({address}) bluetooth connection closed");
+  if let Err(e) = tx
+    .send((address, ConnectionMessage::Close(ConnectionType::Rfcomm)))
+    .await
+  {
+    tracing::error!("({address}) failed to send close message: {:?}", e);
+  }
 }
 
 pub struct Rfcomm {
-  session: Session,
   adapter: Adapter,
   _agent: AgentHandle,
 
@@ -290,7 +297,6 @@ impl Protocol for Rfcomm {
     let (conn_tx, conn_rx) = tokio::sync::mpsc::channel(16);
 
     Ok(Self {
-      session,
       adapter,
       _agent,
 

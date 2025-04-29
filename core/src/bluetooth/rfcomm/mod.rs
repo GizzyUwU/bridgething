@@ -4,23 +4,39 @@ use bluer::{
   Address, Session,
   rfcomm::{self, ConnectRequest, Profile, ProfileHandle, Stream},
 };
-use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
-use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg};
-use libbridgething::protocol::BridgeEndec;
-use libbridgething::{BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL};
+use futures::{
+  SinkExt, StreamExt,
+  stream::{SplitSink, SplitStream},
+};
+use libbridgething::{
+  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL,
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
+  protocol::BridgeEndec,
+};
 use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
 
 use crate::{
   bluetooth::{GatewayMessage, GatewayType},
-  state::State,
+  state::{GatewayStatus, State},
 };
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 
-type ConnectionTx = tokio::sync::mpsc::Sender<(Address, GatewayToBridgeMsg)>;
-type ConnectionRx = tokio::sync::mpsc::Receiver<(Address, GatewayToBridgeMsg)>;
+#[derive(Debug)]
+enum ConnectionMessage {
+  Msg(GatewayToBridgeMsg),
+  Close,
+}
+
+impl From<GatewayToBridgeMsg> for ConnectionMessage {
+  fn from(msg: GatewayToBridgeMsg) -> Self {
+    Self::Msg(msg)
+  }
+}
+
+type ConnectionTx = tokio::sync::mpsc::Sender<(Address, ConnectionMessage)>;
+type ConnectionRx = tokio::sync::mpsc::Receiver<(Address, ConnectionMessage)>;
 
 #[derive(Debug)]
 struct Connection {
@@ -51,15 +67,20 @@ async fn reader_task(address: Address, mut reader: SplitStream<Framed<Stream, Br
   while let Some(frame) = reader.next().await {
     match frame {
       Ok(msg) => {
-        if let Err(e) = tx.send((address, msg)).await {
-          tracing::error!("failed to forward gateway message: {:?}", e);
+        if let Err(e) = tx.send((address, msg.into())).await {
+          tracing::error!("({address}) failed to forward gateway message: {:?}", e);
         }
       }
       Err(e) => {
-        tracing::error!("error decoding rfcomm frame: {:?}", e);
+        tracing::debug!("({address}) error decoding rfcomm frame: {:?}", e);
         break;
       }
     }
+  }
+
+  tracing::info!("({address}) bluetooth connection closed");
+  if let Err(e) = tx.send((address, ConnectionMessage::Close)).await {
+    tracing::error!("({address}) failed to send close message: {:?}", e);
   }
 }
 
@@ -111,14 +132,10 @@ impl RfcommGateway {
   }
 
   pub fn spawn(mut self) -> JoinHandle<()> {
-    tokio::spawn(async move {
-      if let Err(err) = self.recv().await {
-        tracing::error!("rfcomm server died: {:?}", err);
-      }
-    })
+    tokio::spawn(async move { self.recv().await })
   }
 
-  async fn recv(&mut self) -> BluetoothResult<()> {
+  async fn recv(&mut self) {
     tracing::info!("rfcomm gateway listening for connections");
 
     loop {
@@ -149,12 +166,28 @@ impl RfcommGateway {
         },
         Some((address, msg)) = self.conn_rx.recv() => {
           tracing::trace!("rfcomm message from {}: {:?}", address, msg);
-          // forward to application
-          let _ = self.recv_tx.send(GatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await;
+          match msg {
+            ConnectionMessage::Close => {
+              tracing::debug!("rfcomm connection closed: {:?}", address);
+              self.connections.remove(&address);
+
+              if self.state.gateway_status().await.address == address {
+                tracing::debug!("\"current\" rfcomm connection closed - setting gateway status to disconnected");
+                if let Err(e) = self.state.set_gateway_status(GatewayStatus::default()).await {
+                  tracing::error!("failed to set gateway status: {:?}", e);
+                }
+              }
+            },
+            ConnectionMessage::Msg(msg) => {
+              if let Err(e) = self.recv_tx.send(GatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await {
+                tracing::error!("failed to send rfcomm message to gateway: {:?}", e);
+              }
+            }
+          }
         },
         else => {
           tracing::error!("rfcomm profile handle stream ended - this should not happen");
-          return Ok(());
+          return;
         }
       }
     }

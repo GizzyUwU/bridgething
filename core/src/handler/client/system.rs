@@ -1,4 +1,4 @@
-use libbridgething::client::ClientSystemCommand;
+use libbridgething::{client::ClientSystemCommand, server::ServerSystemEvent};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -16,6 +16,7 @@ impl SystemHandler {
 
     match msg {
       ClientSystemCommand::VersionRequest => self.version_request().await,
+      ClientSystemCommand::GatewayStatusRequest => self.gateway_status_request().await,
       ClientSystemCommand::Reboot => self.reboot().await,
       ClientSystemCommand::PowerOff => self.power_off().await,
       ClientSystemCommand::FactoryReset => self.factory_reset().await,
@@ -27,6 +28,11 @@ impl SystemHandler {
   async fn version_request(&self) -> HandlerResult {
     tracing::debug!("({}) handling version request", &self.handle.from);
     Ok(self.handle.respond(self.handle.state.meta.clone()).await?)
+  }
+
+  async fn gateway_status_request(&self) -> HandlerResult {
+    tracing::debug!("({}) handling gateway status request", &self.handle.from);
+    Ok(self.handle.respond(self.handle.state.gateway_status().await).await?)
   }
 
   async fn reboot(&self) -> HandlerResult {

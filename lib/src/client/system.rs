@@ -12,6 +12,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "client.ts")]
 pub enum ClientSystemCommand {
   VersionRequest,
+  GatewayStatusRequest,
 
   Reboot,
   PowerOff,

@@ -27,7 +27,7 @@ export type Device = { name: string; type: DeviceType; mac: string; default: boo
 
 export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
 
-export type ForwardMessage = { type: 'text'; data: string } | { type: 'binary'; data: Uint8Array };
+export type ForwardMessage = { contentType: 'text'; content: string } | { contentType: 'binary'; content: Uint8Array };
 
 export type GatewayMeta = {
   adapterVersion: string;

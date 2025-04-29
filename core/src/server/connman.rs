@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::{
   msg::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx, stock::StockSendMsg},
   server::{WSError, connection::Connection},
+  state::State,
 };
 
 use super::WSResult;
@@ -22,10 +23,10 @@ struct ClientData {
   cancel_token: CancellationToken,
 }
 
-pub fn create_client_manager(meta: crate::state::meta::SuperbirdMeta) -> (ClientMan, ClientListener) {
+pub fn create_client_manager() -> (ClientMan, ClientListener) {
   let (tx, rx) = tokio::sync::mpsc::channel(64);
 
-  let client_man = Arc::new(ClientManager::new(meta, tx));
+  let client_man = Arc::new(ClientManager::new(tx));
   let listener = ClientListener::new(rx, client_man.clone());
 
   (client_man, listener)
@@ -63,7 +64,6 @@ pub type ClientMan = Arc<ClientManager>;
 
 #[derive(Debug)]
 pub struct ClientManager {
-  meta: crate::state::meta::SuperbirdMeta,
   connections: DashMap<SocketAddr, ClientData>,
   cancel_token: CancellationToken,
 
@@ -71,11 +71,10 @@ pub struct ClientManager {
 }
 
 impl ClientManager {
-  fn new(meta: crate::state::meta::SuperbirdMeta, tx: RecvTx) -> Self {
+  fn new(tx: RecvTx) -> Self {
     tracing::info!("creating connection manager");
 
     Self {
-      meta,
       connections: DashMap::new(),
       cancel_token: CancellationToken::new(),
 
@@ -175,7 +174,13 @@ impl ClientManager {
   }
 
   /// NOT cancel-safe
-  pub async fn handle_connection(&self, address: SocketAddr, ws: WebSocket, mode: ClientMode) -> WSResult<()> {
+  pub async fn handle_connection(
+    &self,
+    address: SocketAddr,
+    ws: WebSocket,
+    mode: ClientMode,
+    state: &State,
+  ) -> WSResult<()> {
     tracing::debug!("handling accepted websocket connection from {address}");
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -192,16 +197,27 @@ impl ClientManager {
     if data.mode == ClientMode::Stock {
       tracing::debug!("new stock connection from {address}");
     } else {
-      tracing::debug!("new modern connection from {address}, sending version info");
+      tracing::debug!("new modern connection from {address}, sending version and gateway status");
       let msg = ServerEvent {
         id: uuid::Uuid::now_v7(),
-        data: self.meta.clone().into(),
+        data: state.meta.clone().into(),
         meta: ServerEventType::Info,
         stock_msg_id: None,
       };
       let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
       data.tx.send(msg).await?;
       tracing::debug!("sent version info to {address}");
+
+      let status = state.gateway_status().await;
+      let msg = ServerEvent {
+        id: uuid::Uuid::now_v7(),
+        data: status.into(),
+        meta: ServerEventType::Info,
+        stock_msg_id: None,
+      };
+      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
+      data.tx.send(msg).await?;
+      tracing::debug!("sent gateway status to {address}");
     }
 
     self.connections.insert(address, data);

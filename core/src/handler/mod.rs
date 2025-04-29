@@ -23,3 +23,13 @@ pub enum HandlerError {
   #[error(transparent)]
   Player(#[from] PlayerError),
 }
+
+impl From<Vec<WSError>> for HandlerError {
+  fn from(errors: Vec<WSError>) -> Self {
+    for error in errors {
+      tracing::error!("failed to broadcast message: {:?}", error);
+    }
+
+    Self::WS(WSError::BroadcastFailed)
+  }
+}

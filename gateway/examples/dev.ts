@@ -48,8 +48,8 @@ const appInit = async (deviceId: string) => {
   });
 };
 
-const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
-  switch (data.type) {
+const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
+  switch (msg.type) {
     case 'version':
       await gateway.send(deviceId, {
         id: randomUUIDv7(),
@@ -85,20 +85,32 @@ const handleMessage = async (deviceId: string, data: BridgeToGatewayMsg) => {
 
       break;
     case 'file':
-      console.log(`file:`, data);
+      console.log(`file:`, msg);
       break;
     case 'forward':
-      console.log(`forwarded data:`, data);
+      console.log(`forwarded data:`, msg);
+      if (msg.data.contentType === 'text') console.log('>> got forwarded text data:', msg.data.content);
+      else if (msg.data.contentType === 'binary') console.log('>> got forwarded binary data:', msg.data.contentType);
+      await gateway.send(deviceId, {
+        id: randomUUIDv7(),
+        meta: 'forward',
+        type: 'forward',
+        data: {
+          contentType: 'text',
+          content: 'hello from the gateway!',
+        },
+      });
+
       break;
     case 'ack':
     case 'done': {
-      console.log(`ack/done:`, data);
-      if (!('requestId' in data)) return;
+      console.log(`ack/done:`, msg);
+      if (!('requestId' in msg)) return;
 
-      if (WAIT_FOR.has(data.requestId)) {
-        const task = WAIT_FOR.get(data.requestId);
-        WAIT_FOR.delete(data.requestId);
-        console.log('>> waited for task completed', data.requestId);
+      if (WAIT_FOR.has(msg.requestId)) {
+        const task = WAIT_FOR.get(msg.requestId);
+        WAIT_FOR.delete(msg.requestId);
+        console.log('>> waited for task completed', msg.requestId);
 
         if (task === 'navigate') {
           console.log('>> navigating to index.html');

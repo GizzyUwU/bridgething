@@ -60,6 +60,7 @@ export type ClientKVStoreCommand =
 
 export type ClientSystemCommand =
   | { action: 'versionRequest' }
+  | { action: 'gatewayStatusRequest' }
   | { action: 'reboot' }
   | { action: 'powerOff' }
   | { action: 'factoryReset' }

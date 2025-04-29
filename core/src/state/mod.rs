@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use libbridgething::Device;
+use bluer::Address;
+use libbridgething::{Device, ServerEventData, ServerEventType, server::ServerSystemEvent};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -35,6 +36,19 @@ impl PersistentAppState {
   }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct GatewayStatus {
+  pub address: Address,
+  pub connected: bool,
+  pub version: String,
+  pub app: String,
+}
+
+#[derive(Debug, Default)]
+struct SessionAppState {
+  pub gateway: GatewayStatus,
+}
+
 #[derive(Debug)]
 pub struct AppState {
   pub client_man: ClientMan,
@@ -45,6 +59,7 @@ pub struct AppState {
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
+  session: RwLock<SessionAppState>,
 }
 
 impl AppState {
@@ -78,7 +93,26 @@ impl AppState {
 
       persist_path,
       persist: RwLock::new(persist),
+      session: RwLock::new(SessionAppState::default()),
     }))
+  }
+
+  pub async fn gateway_status(&self) -> GatewayStatus {
+    // cloning here so that the lock is not held open
+    self.session.read().await.gateway.clone()
+  }
+
+  /// SIDE EFFECTS: broadcasts the new status to all clients
+  pub async fn set_gateway_status(&self, status: GatewayStatus) -> StateResult<()> {
+    self.session.write().await.gateway = status.clone();
+    self.save_persist().await?;
+    if let Err(errors) = self.client_man.broadcast(status, ServerEventType::Info).await {
+      for error in errors {
+        tracing::error!("failed to send gateway status: {:?}", error);
+      }
+    }
+
+    Ok(())
   }
 
   pub async fn get_devices(&self) -> HashMap<String, Device> {
@@ -183,6 +217,16 @@ impl AppState {
     }
 
     Ok(())
+  }
+}
+
+impl From<GatewayStatus> for ServerEventData {
+  fn from(state: GatewayStatus) -> Self {
+    ServerEventData::System(ServerSystemEvent::GatewayStatus {
+      connected: state.connected,
+      version: state.version,
+      app: state.app,
+    })
   }
 }
 

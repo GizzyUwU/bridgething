@@ -1,6 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
-use crate::{protocol::Protocol, Callback, Callbacks, MsgRx, Result};
+use crate::{protocol::Protocol, Callbacks, MsgRx, Result};
 
 #[cfg(target_os = "linux")]
 mod linux;

@@ -2,11 +2,20 @@ import { WebSocketClient } from './websocket.js';
 
 /**
  * @typedef {import('@bridgething/lib/ts/bindings/server').ServerEvent} ServerEvent
+ * @typedef {import('@bridgething/lib/ts/bindings/client').ClientCommand} ClientCommand
  */
 
 const COMMAND_TYPES = ['bluetooth', 'store', 'system', 'voice', 'interaction'];
+/**
+ * @typedef {Object} TestCommand
+ * @property {string} label - The label for the button
+ * @property {Object} command - The command object to send
+ * @property {ClientCommand['type']} command.type - The type of command
+ * @property {ClientCommand['action']} command.action - The action to perform
+ */
 const TEST_COMMANDS = [
   { label: 'System: Version Request', command: { type: 'system', action: 'versionRequest' } },
+  { label: 'System: Gateway Status', command: { type: 'system', action: 'gatewayStatusRequest' } },
   { label: 'Bluetooth: List Devices', command: { type: 'bluetooth', action: 'list' } },
 ];
 

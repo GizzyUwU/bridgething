@@ -32,7 +32,7 @@ export type ServerEvent = { id: string; stockMsgId: number | null } & (
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'ack' }
 ) &
-  ({ meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'info' });
+  ({ meta: 'gateway' } | { meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'info' });
 
 export type ServerEventData =
   | { type: 'bluetooth'; data: ServerBluetoothEvent }
@@ -43,7 +43,11 @@ export type ServerEventData =
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'ack' };
 
-export type ServerEventType = { meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'info' };
+export type ServerEventType =
+  | { meta: 'gateway' }
+  | { meta: 'request' }
+  | { meta: 'response'; requestId: string }
+  | { meta: 'info' };
 
 export type ServerInteractionEvent = never;
 
@@ -83,6 +87,7 @@ export type ServerSystemEvent =
         credits: string;
       };
     }
+  | { action: 'gatewayStatus'; data: { connected: boolean; version: string; app: string } }
   | { action: 'otaReboot'; data: { delayMs: number } }
   | { action: 'otaPowerOff'; data: { delayMs: number } }
   | { action: 'ambientLightUpdate'; data: { brightness: number } }

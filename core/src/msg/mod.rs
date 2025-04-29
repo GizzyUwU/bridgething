@@ -1,6 +1,6 @@
 #![allow(clippy::large_enum_variant)]
 use libbridgething::{
-  ClientCommand, ClientCommandType, ServerEvent, ServerEventData,
+  ClientCommand, ClientCommandType, ForwardMessage, ServerEvent, ServerEventData,
   client::{
     ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientLegacyStockCommand,
     ClientSystemCommand, ClientVoiceCommand,
@@ -41,6 +41,7 @@ pub enum RecvMsgData {
   System(ClientSystemCommand),
   Voice(ClientVoiceCommand),
   Interaction(ClientInteractionCommand),
+  Forward(ForwardMessage),
 
   // stock compatibility
   LegacyStock(ClientLegacyStockCommand),
@@ -65,7 +66,7 @@ impl From<ClientCommand> for RecvMsgData {
       ClientCommandType::System(msg) => Self::System(msg),
       ClientCommandType::Voice(msg) => Self::Voice(msg),
       ClientCommandType::Interaction(msg) => Self::Interaction(msg),
-      ClientCommandType::Forward(_) => Self::Unsupported(PossibleRecvMsg::Modern(msg)),
+      ClientCommandType::Forward(data) => Self::Forward(data),
 
       // legacy
       ClientCommandType::LegacyStock(msg) => Self::LegacyStock(msg),

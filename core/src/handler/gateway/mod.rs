@@ -8,13 +8,14 @@ use chrome::*;
 use file::*;
 
 use libbridgething::{
-  ForwardMessage,
+  ForwardMessage, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  server::ServerSystemEvent,
 };
 
 use crate::{
   bluetooth::{BluetoothMan, GatewayMessage},
-  state::State,
+  state::{GatewayStatus, State},
 };
 
 use super::HandlerResult;
@@ -55,7 +56,7 @@ impl GatewayHandler {
         tokio::spawn(async move { ChromeHandler::new(handle).handle(chrome_msg).await });
       }
       GatewayToBridgeMsgData::Forward(forward) => {
-        tokio::spawn(async move { TopLevelHandler::new(handle).handle_data(forward).await });
+        tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(forward).await });
       }
     }
 
@@ -74,16 +75,27 @@ impl TopLevelHandler {
   }
 
   pub async fn handle_version(&mut self, version: String, app: String) -> HandlerResult {
-    tracing::debug!("({:?}) handling version message", &self.handle.address);
-    tracing::debug!("({:?}) version: {:?}", &self.handle.address, version);
-    tracing::debug!("({:?}) app: {:?}", &self.handle.address, app);
+    tracing::debug!("({:?}) version: {:?};  app: {:?}", &self.handle.address, version, app);
+    let status = GatewayStatus {
+      address: self.handle.address.unwrap_or_default(),
+      connected: true,
+      version,
+      app,
+    };
+    self.handle.state.set_gateway_status(status.clone()).await?;
 
     Ok(())
   }
 
-  pub async fn handle_data(&mut self, data: ForwardMessage) -> HandlerResult {
-    tracing::debug!("({:?}) handling data message", &self.handle.address);
-    tracing::debug!("({:?}) data: {:?}", &self.handle.address, data);
+  pub async fn handle_forward(&mut self, data: ForwardMessage) -> HandlerResult {
+    tracing::debug!("({:?}) handling forward message", &self.handle.address);
+
+    self
+      .handle
+      .state
+      .client_man
+      .broadcast(data, ServerEventType::Gateway)
+      .await?;
 
     Ok(())
   }

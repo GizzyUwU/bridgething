@@ -15,6 +15,7 @@ use crate::{BridgeThingMeta, ForwardMessage};
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayMsgMeta {
+  Forward,
   Command,
   Event,
   Request,
@@ -99,4 +100,16 @@ pub enum BridgeToGatewayMsgData {
 
   // arbitrary data
   Forward(ForwardMessage), // request, response, event, command?
+}
+
+impl From<ForwardMessage> for BridgeToGatewayMsgData {
+  fn from(msg: ForwardMessage) -> Self {
+    Self::Forward(msg)
+  }
+}
+
+impl From<ForwardMessage> for GatewayToBridgeMsgData {
+  fn from(msg: ForwardMessage) -> Self {
+    Self::Forward(msg)
+  }
 }

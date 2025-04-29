@@ -20,6 +20,7 @@ use crate::ForwardMessage;
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventType {
+  Gateway,
   Request,
   Response { request_id: Uuid },
   Info,
@@ -82,5 +83,11 @@ impl From<ServerInteractionEvent> for ServerEventData {
 impl From<ServerPlayerEvent> for ServerEventData {
   fn from(val: ServerPlayerEvent) -> Self {
     ServerEventData::Player(val)
+  }
+}
+
+impl From<ForwardMessage> for ServerEventData {
+  fn from(val: ForwardMessage) -> Self {
+    ServerEventData::Forward(val)
   }
 }

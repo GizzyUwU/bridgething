@@ -22,7 +22,10 @@ use crate::{
 };
 use ble::GattServer;
 use bluer::{Adapter, Address, Session};
-use libbridgething::gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg};
+use libbridgething::{
+  ForwardMessage,
+  gateway::{BridgeToGatewayMsg, GatewayMsgMeta, GatewayToBridgeMsg},
+};
 use profiles::ProfileMan;
 use tokio::task::JoinHandle;
 
@@ -170,10 +173,25 @@ impl GatewayMan {
     })
   }
 
-  pub async fn send(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
+  pub async fn send_all(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
     match &data.protocol {
       GatewayType::Ble => self.ble.send(data).await,
       GatewayType::Rfcomm => self.rfcomm.send(data).await,
+    }
+  }
+
+  pub async fn forward_all(&self, data: ForwardMessage) {
+    let msg = BridgeToGatewayMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: GatewayMsgMeta::Forward,
+      data: data.into(),
+    };
+
+    // if let Err(err) = self.ble.tx.send(GatewayMessage::ble_all(msg.clone())).await {
+    //   tracing::error!("failed to send message to bluetooth gateway: {:?}", err);
+    // }
+    if let Err(err) = self.rfcomm.tx.send(GatewayMessage::rfcomm_all(msg)).await {
+      tracing::error!("failed to send message to bluetooth gateway: {:?}", err);
     }
   }
 }

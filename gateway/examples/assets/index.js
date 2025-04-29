@@ -12,6 +12,7 @@ const client = new WebSocketClient('status', 'messages');
 // Connect when the page loads
 document.addEventListener('DOMContentLoaded', () => {
   registerMessageHandlers();
+  client.on;
   client.connect();
   setupUI(client);
 });
@@ -26,6 +27,18 @@ function registerMessageHandlers() {
     handler: message => {
       console.log('received version response:', message);
       // add responses here
+    },
+  });
+
+  client.addListener({
+    onConnect: () => {
+      setTimeout(() => {
+        client.send({
+          type: 'forward',
+          contentType: 'text',
+          content: 'hello from the web client!',
+        });
+      }, 2000);
     },
   });
 }

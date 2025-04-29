@@ -7,6 +7,7 @@ mod voice;
 
 use bluetooth::*;
 use interaction::*;
+use libbridgething::ForwardMessage;
 use stock::*;
 use store::*;
 use system::*;
@@ -54,6 +55,9 @@ impl ClientHandler {
       RecvMsgData::Interaction(msg) => {
         tokio::spawn(async move { InteractionHandler::new(handle).handle(msg).await });
       }
+      RecvMsgData::Forward(msg) => {
+        tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(msg).await });
+      }
 
       // stock compatibility
       RecvMsgData::LegacyStock(msg) => {
@@ -96,6 +100,24 @@ impl ClientHandler {
         return Err(HandlerError::WS(WSError::Websocket(error)));
       }
     }
+
+    Ok(())
+  }
+}
+
+#[derive(Debug)]
+struct TopLevelHandler {
+  handle: MsgHandle,
+}
+
+impl TopLevelHandler {
+  pub fn new(handle: MsgHandle) -> Self {
+    Self { handle }
+  }
+
+  pub async fn handle_forward(&mut self, data: ForwardMessage) -> HandlerResult {
+    tracing::debug!("({:?}) handling forward message", &self.handle.from);
+    self.handle.bluetooth.gateway_man.forward_all(data).await;
 
     Ok(())
   }

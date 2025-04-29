@@ -68,6 +68,7 @@ pub enum StockSendMsg {
   Version(StockVersionSend),
   Voice(StockVoiceSend),
   InterApp(StockInterAppSend),
+  Unsupported,
 }
 
 impl From<ServerEvent> for StockSendMsg {
@@ -115,6 +116,8 @@ impl From<ServerSystemEvent> for StockSendMsg {
         discord,
         credits,
       }),
+
+      ServerSystemEvent::GatewayStatus { .. } => StockSendMsg::Unsupported,
 
       ServerSystemEvent::OtaReboot { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaReboot {
         delay_ms: delay_ms.to_string(),

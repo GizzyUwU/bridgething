@@ -25,6 +25,11 @@ pub enum ServerSystemEvent {
     discord: String,
     credits: String,
   },
+  GatewayStatus {
+    connected: bool,
+    version: String,
+    app: String,
+  },
 
   OtaReboot {
     delay_ms: usize,

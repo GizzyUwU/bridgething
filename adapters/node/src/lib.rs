@@ -105,11 +105,30 @@ pub enum AdapterEvent {
   },
 }
 
-impl From<(BDAddr, BridgeToGatewayMsg)> for AdapterEvent {
-  fn from((address, msg): (BDAddr, BridgeToGatewayMsg)) -> Self {
-    Self::Message {
-      device_id: address.to_string(),
-      data: serde_json::to_value(msg).unwrap_or_default(),
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+enum ConnectionMessage {
+  Msg(BridgeToGatewayMsg),
+  Close(ConnectionType),
+}
+
+impl From<BridgeToGatewayMsg> for ConnectionMessage {
+  fn from(msg: BridgeToGatewayMsg) -> Self {
+    Self::Msg(msg)
+  }
+}
+
+impl From<(BDAddr, ConnectionMessage)> for AdapterEvent {
+  fn from((address, msg): (BDAddr, ConnectionMessage)) -> Self {
+    match msg {
+      ConnectionMessage::Msg(msg) => Self::Message {
+        device_id: address.to_string(),
+        data: serde_json::to_value(msg).unwrap_or_default(),
+      },
+      ConnectionMessage::Close(mode) => Self::Disconnected {
+        device_id: address.to_string(),
+        mode,
+      },
     }
   }
 }

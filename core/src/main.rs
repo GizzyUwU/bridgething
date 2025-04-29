@@ -31,7 +31,7 @@ async fn main() {
   let meta = state::meta::SuperbirdMeta::read_or_default().await;
   tracing::debug!("metadata: {:?}", &meta);
 
-  let (client_man, mut client_listener) = server::create_client_manager(meta.clone());
+  let (client_man, mut client_listener) = server::create_client_manager();
   let player = Player::new(client_man.clone());
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
@@ -58,7 +58,7 @@ async fn main() {
   loop {
     tokio::select! {
       Ok((stream, address, mode)) = server.listen() => {
-        if let Err(err) = client_man.handle_connection(address, stream, mode).await {
+        if let Err(err) = client_man.handle_connection(address, stream, mode, &state).await {
           tracing::error!("failed to accept tcp stream: {:?}", err);
           continue;
         };
