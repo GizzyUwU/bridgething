@@ -1,13 +1,19 @@
+use libbridgething::gateway::BridgeFile;
 use mime_guess::Mime;
-use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::{collections::HashMap, io::ErrorKind};
 use tokio::fs::{self, File};
+use tokio::sync::Mutex;
 
 use super::{StateError, StateResult};
+
+pub type FileRequestTx = tokio::sync::oneshot::Sender<(Vec<u8>, Mime)>;
 
 #[derive(Clone, Debug)]
 pub struct FileSystem {
   pub root: PathBuf,
+  requests: Arc<Mutex<HashMap<String, Vec<FileRequestTx>>>>,
 }
 
 impl FileSystem {
@@ -21,7 +27,10 @@ impl FileSystem {
       tokio::fs::create_dir_all(&root).await?;
     }
 
-    Ok(Self { root })
+    Ok(Self {
+      root,
+      requests: Arc::new(Mutex::new(HashMap::new())),
+    })
   }
 
   pub async fn save_file<P: AsRef<str>>(&self, path: P, data: Vec<u8>) -> StateResult<()> {
@@ -84,6 +93,34 @@ impl FileSystem {
     let full_path = self.root.join(path);
     let exists = full_path.exists();
     Ok(exists)
+  }
+
+  // TODO: cache files sent in this way
+  pub async fn handle_request_file(&self, path: String, tx: FileRequestTx) {
+    tracing::debug!("requesting file from gateway: {}", path);
+    let mut requests = self.requests.lock().await;
+    if let Some(tx_list) = requests.get_mut(&path) {
+      tx_list.push(tx);
+    } else {
+      requests.insert(path.clone(), vec![tx]);
+    };
+  }
+
+  // TODO: cache files sent in this way
+  pub async fn handle_file_response(&self, file: BridgeFile) {
+    tracing::debug!("handling file response from gateway for {}", file.path);
+    let mime = mime_guess::from_path(&file.path).first_or_octet_stream();
+    let mut requests = self.requests.lock().await;
+
+    if let Some(tx_list) = requests.remove(&file.path) {
+      for tx in tx_list {
+        if let Err(e) = tx.send((file.data.clone(), mime.clone())) {
+          tracing::error!("failed to send file response: {:?}", e);
+        }
+      }
+    } else {
+      tracing::warn!("no requests for file {}", file.path);
+    }
   }
 
   /// TODO: this is comically inefficient :)

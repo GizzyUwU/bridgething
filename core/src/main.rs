@@ -39,16 +39,16 @@ async fn main() {
     .await
     .expect("failed to initialize state!!");
 
-  notifier.status("initializing server binds...");
-  let mut server = server::Server::bind(state.clone())
-    .await
-    .expect("failed to bind to 127.0.0.1:8890");
-
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
   let bluetooth = BluetoothManager::init(state.clone(), bluetooth_tx)
     .await
     .expect("failed to initialize bluetooth stack");
+
+  notifier.status("initializing server binds...");
+  let mut server = server::Server::bind(state.clone(), bluetooth.clone())
+    .await
+    .expect("failed to bind to 127.0.0.1:8890");
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone());
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone());

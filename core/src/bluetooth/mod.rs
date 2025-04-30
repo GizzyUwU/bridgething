@@ -18,13 +18,13 @@ use std::sync::Arc;
 use crate::{
   player::PlayerError,
   server::WSError,
-  state::{State, StateError},
+  state::{FileRequestTx, State, StateError},
 };
 use ble::GattServer;
 use bluer::{Adapter, Address, Session};
 use libbridgething::{
   ForwardMessage,
-  gateway::{BridgeToGatewayMsg, GatewayMsgMeta, GatewayToBridgeMsg},
+  gateway::{BridgeToGatewayFileMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
 };
 use profiles::ProfileMan;
 use tokio::task::JoinHandle;
@@ -98,6 +98,19 @@ impl BluetoothManager {
       profile_man,
       gateway_man,
     }))
+  }
+
+  pub async fn request_file(&self, path: String, tx: FileRequestTx) {
+    self.state.fs.handle_request_file(path.clone(), tx).await;
+
+    self
+      .gateway_man
+      .send_all(GatewayMessage::rfcomm_all(BridgeToGatewayMsg {
+        id: uuid::Uuid::now_v7(),
+        meta: GatewayMsgMeta::Request,
+        data: BridgeToGatewayFileMsg::FileRequest { file: path }.into(),
+      }))
+      .await;
   }
 }
 

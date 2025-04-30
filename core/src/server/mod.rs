@@ -12,11 +12,12 @@ pub use connman::{ClientMan, create_client_manager};
 
 use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use reqwest::StatusCode;
-use std::{net::SocketAddr, sync::Arc};
-use tokio::net::TcpListener;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::{net::TcpListener, time::timeout};
 use tokio_util::{io::ReaderStream, sync::CancellationToken};
 
 use crate::{
+  bluetooth::BluetoothMan,
   msg::{ClientMode, PossibleSendMsg},
   state::State as BridgeThingState,
 };
@@ -33,7 +34,7 @@ pub struct Server {
 }
 
 impl Server {
-  pub async fn bind(state: BridgeThingState) -> WSResult<Self> {
+  pub async fn bind(state: BridgeThingState, bluetooth: BluetoothMan) -> WSResult<Self> {
     tracing::debug!(
       "binding to ports {} (stock) and {} (modern + file serve)",
       BRIDGETHING_STOCK_WS_PORT,
@@ -49,7 +50,7 @@ impl Server {
     let modern_app = Router::new()
       .route("/{*path}", axum::routing::any(modern_handler))
       .fallback(axum::routing::any(modern_handler))
-      .with_state(Arc::new((state, tx)));
+      .with_state(Arc::new((state, bluetooth, tx)));
 
     let stock_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
     let modern_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
@@ -126,7 +127,7 @@ async fn stock_ws_handler(
 async fn modern_handler(
   path: Option<Path<String>>,
   ConnectInfo(addr): ConnectInfo<SocketAddr>,
-  AxumState(state): AxumState<Arc<(BridgeThingState, ServerTx)>>,
+  AxumState(state): AxumState<Arc<(BridgeThingState, BluetoothMan, ServerTx)>>,
   req: Request<Body>,
 ) -> Response {
   if req.headers().contains_key("upgrade") {
@@ -152,11 +153,11 @@ async fn modern_handler(
 async fn modern_ws_handler(
   ws: WebSocketUpgrade,
   addr: SocketAddr,
-  state: Arc<(BridgeThingState, ServerTx)>,
+  state: Arc<(BridgeThingState, BluetoothMan, ServerTx)>,
 ) -> impl IntoResponse {
   tracing::info!("new modern port websocket connection from {}", addr);
 
-  let tx = state.1.clone();
+  let tx = state.2.clone();
   ws.on_upgrade(move |socket| async move {
     if let Err(err) = tx.send((socket, addr, ClientMode::Modern)).await {
       tracing::error!("failed to send new connection to server: {:?}", err);
@@ -164,7 +165,7 @@ async fn modern_ws_handler(
   })
 }
 
-async fn modern_file_handler(state: Arc<(BridgeThingState, ServerTx)>, path: String) -> Response {
+async fn modern_file_handler(state: Arc<(BridgeThingState, BluetoothMan, ServerTx)>, path: String) -> Response {
   tracing::debug!("serving file request for {:?}", path);
 
   if let Ok((file, mime)) = state.0.fs.get_file(&path).await {
@@ -177,8 +178,23 @@ async fn modern_file_handler(state: Arc<(BridgeThingState, ServerTx)>, path: Str
   }
 
   // TODO: request a non-existent file from the gateway
+  let (tx, rx) = tokio::sync::oneshot::channel();
+  state.1.request_file(path.clone(), tx).await;
 
-  (StatusCode::NOT_FOUND, "Not Found").into_response()
+  match timeout(Duration::from_secs(10), rx).await {
+    Ok(Ok(file)) => {
+      tracing::debug!("serving file {:?} with content_type {:?}", path, &file.1);
+      let body = Body::from(file.0);
+
+      let headers = AppendHeaders([(http::header::CONTENT_TYPE, file.1.to_string())]);
+      return (StatusCode::OK, headers, body).into_response();
+    }
+    Ok(Err(err)) => {
+      tracing::error!("failed to get file from gateway: {:?}", err);
+      return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+    }
+    Err(_) => (StatusCode::NOT_FOUND, "Not Found").into_response(),
+  }
 }
 
 pub type WSResult<T> = Result<T, WSError>;

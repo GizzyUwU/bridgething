@@ -3,7 +3,9 @@ import type { BridgeThingMeta, ForwardMessage, GatewayMeta } from './shared';
 
 export type BridgeFile = { path: string; data: Uint8Array };
 
-export type BridgeToGatewayFileMsg = { event: 'files'; data: { files: Array<string> } };
+export type BridgeToGatewayFileMsg =
+  | { event: 'files'; data: { files: Array<string> } }
+  | { event: 'fileRequest'; data: { file: string } };
 
 /**
  * bridgething -> gateway
@@ -43,7 +45,8 @@ export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: { url: string 
 export type GatewayToBridgeFileMsg =
   | { event: 'list' }
   | { event: 'delete'; data: { files: Array<string> } }
-  | { event: 'add'; data: { files: Array<BridgeFile> } };
+  | { event: 'add'; data: { files: Array<BridgeFile> } }
+  | { event: 'fileResponse'; data: { file: BridgeFile } };
 
 /**
  * gateway -> bridgething

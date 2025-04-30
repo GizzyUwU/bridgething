@@ -22,4 +22,9 @@ pub enum GatewayToBridgeFileMsg {
     #[debug(skip)]
     files: Vec<BridgeFile>,
   }, // command
+  /// fileResponse is a response to the fileRequest, which occurs when a file is requested over http that is not known
+  /// to the bridge. a fileResponse within a timely matter will be served to the client over http instead of 404'ing
+  FileResponse {
+    file: BridgeFile,
+  }, // response
 }

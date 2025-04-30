@@ -14,7 +14,13 @@ use crate::gateway::BridgeToGatewayMsgData;
 )]
 #[ts(export, export_to = "gateway.ts")]
 pub enum BridgeToGatewayFileMsg {
-  Files { files: Vec<String> }, // response
+  Files {
+    files: Vec<String>,
+  }, // response
+  /// fileRequest occurs when a file is requested over http that is not known to the bridge
+  FileRequest {
+    file: String,
+  }, // request
 }
 
 impl From<BridgeToGatewayFileMsg> for BridgeToGatewayMsgData {

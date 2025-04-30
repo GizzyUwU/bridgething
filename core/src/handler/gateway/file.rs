@@ -19,6 +19,7 @@ impl FileHandler {
       GatewayToBridgeFileMsg::List => self.list().await,
       GatewayToBridgeFileMsg::Add { files } => self.add(files).await,
       GatewayToBridgeFileMsg::Delete { files } => self.delete(files).await,
+      GatewayToBridgeFileMsg::FileResponse { file } => self.handle_file_response(file).await,
     }
   }
 
@@ -58,6 +59,12 @@ impl FileHandler {
     }
 
     self.handle.respond(BridgeToGatewayMsgData::Done).await;
+    Ok(())
+  }
+
+  async fn handle_file_response(&self, file: BridgeFile) -> HandlerResult {
+    tracing::debug!("({:?}) handling file response", &self.handle.address);
+    self.handle.state.fs.handle_file_response(file).await;
     Ok(())
   }
 }

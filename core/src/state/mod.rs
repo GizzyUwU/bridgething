@@ -9,6 +9,8 @@ use crate::{chrome, server::ClientMan};
 mod files;
 pub mod meta;
 
+pub use files::FileRequestTx;
+
 pub type State = Arc<AppState>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
