@@ -177,7 +177,12 @@ async fn modern_file_handler(state: Arc<(BridgeThingState, BluetoothMan, ServerT
     return (StatusCode::OK, headers, body).into_response();
   }
 
-  // TODO: request a non-existent file from the gateway
+  if !state.0.gateway_status().await.connected {
+    tracing::trace!("gateway not connected, cannot request unknown file file {:?}", path);
+    return (StatusCode::NOT_FOUND, "Not Found").into_response();
+  }
+
+  // request an unknown file from the gateway
   let (tx, rx) = tokio::sync::oneshot::channel();
   state.1.request_file(path.clone(), tx).await;
 
@@ -187,13 +192,12 @@ async fn modern_file_handler(state: Arc<(BridgeThingState, BluetoothMan, ServerT
       let body = Body::from(file.0);
 
       let headers = AppendHeaders([(http::header::CONTENT_TYPE, file.1.to_string())]);
-      return (StatusCode::OK, headers, body).into_response();
+      (StatusCode::OK, headers, body).into_response()
     }
-    Ok(Err(err)) => {
-      tracing::error!("failed to get file from gateway: {:?}", err);
-      return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+    _ => {
+      tracing::trace!("failed to get file {:?} from gateway", path);
+      (StatusCode::NOT_FOUND, "Not Found").into_response()
     }
-    Err(_) => (StatusCode::NOT_FOUND, "Not Found").into_response(),
   }
 }
 
