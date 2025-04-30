@@ -1,14 +1,21 @@
 import { BridgethingGateway, type SimpleEventCallback } from '../src';
 
 import { NodeAdapter } from '@bridgething/adapter-node';
-import { BRIDGETHING_FILE_PORT, LogLevel, type BridgeToGatewayMsg } from '@bridgething/lib';
+import {
+  BRIDGETHING_FILE_PORT,
+  LIB_VERSION,
+  LIBBRIDGETHING_VERSION,
+  LogLevel,
+  type BridgeToGatewayMsg,
+  type GatewayMeta,
+} from '@bridgething/lib';
 import { randomUUIDv7, sleep } from 'bun';
 
 type NextTask = 'navigate';
 const WAIT_FOR = new Map<string, NextTask>();
 
 const msgHandler: SimpleEventCallback = e => {
-  console.log('>> js callback got new data!!', e);
+  // console.log('>> js callback got new data!!', e);
 
   switch (e.type) {
     case 'connected':
@@ -34,16 +41,14 @@ const appInit = async (deviceId: string) => {
     id,
     meta: 'event',
     type: 'file',
+    event: 'add',
     data: {
-      type: 'add',
-      data: {
-        files: [
-          { path: 'index.html', data: html },
-          { path: 'index.js', data: indexJs },
-          { path: 'ui.js', data: uiJs },
-          { path: 'websocket.js', data: websocketJs },
-        ],
-      },
+      files: [
+        { path: 'index.html', data: html },
+        { path: 'index.js', data: indexJs },
+        { path: 'ui.js', data: uiJs },
+        { path: 'websocket.js', data: websocketJs },
+      ],
     },
   });
 };
@@ -55,7 +60,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
         id: randomUUIDv7(),
         meta: 'event',
         type: 'version',
-        data: { version: 'v0.1.0-alpha1', app: 'development' },
+        data: makeGatewayMeta(),
       });
 
       await appInit(deviceId);
@@ -89,17 +94,38 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
       break;
     case 'forward':
       console.log(`forwarded data:`, msg);
-      if (msg.data.contentType === 'text') console.log('>> got forwarded text data:', msg.data.content);
-      else if (msg.data.contentType === 'binary') console.log('>> got forwarded binary data:', msg.data.contentType);
-      await gateway.send(deviceId, {
-        id: randomUUIDv7(),
-        meta: 'forward',
-        type: 'forward',
-        data: {
-          contentType: 'text',
-          content: 'hello from the gateway!',
-        },
-      });
+      switch (msg.encoding) {
+        case 'text':
+          console.log('>> got forwarded text data:', msg.data);
+          await gateway.send(deviceId, {
+            id: randomUUIDv7(),
+            meta: 'event',
+            type: 'forward',
+            encoding: 'text',
+            data: 'hello from the gateway!',
+          });
+          break;
+        case 'json':
+          console.log('>> got forwarded json data:', msg.data);
+          await gateway.send(deviceId, {
+            id: randomUUIDv7(),
+            meta: 'event',
+            type: 'forward',
+            encoding: 'json',
+            data: { message: 'hello from the gateway!' },
+          });
+          break;
+        case 'binary':
+          console.log('>> got forwarded binary data:', msg.data);
+          await gateway.send(deviceId, {
+            id: randomUUIDv7(),
+            meta: 'event',
+            type: 'forward',
+            encoding: 'binary',
+            data: bufferToBase64(new Uint8Array([69, 69, 69, 69])),
+          });
+          break;
+      }
 
       break;
     case 'ack':
@@ -118,10 +144,8 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
             id: randomUUIDv7(),
             meta: 'event',
             type: 'chrome',
-            data: {
-              type: 'navigate',
-              data: { url: `http://localhost:${BRIDGETHING_FILE_PORT}/index.html` },
-            },
+            event: 'navigate',
+            data: { url: `http://localhost:${BRIDGETHING_FILE_PORT}/index.html` },
           });
         }
       }
@@ -129,6 +153,16 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
     }
   }
 };
+
+const bufferToBase64 = (buffer: Uint8Array) => Buffer.from(buffer).toString('base64');
+const makeGatewayMeta = (): GatewayMeta => ({
+  adapterVersion: 'v0.1.0-alpha1',
+  appVersion: 'v0.1.0-alpha1',
+  appName: 'development',
+  libbridgethingVersion: LIBBRIDGETHING_VERSION,
+  libVersion: LIB_VERSION,
+  osName: 'development',
+});
 
 const adapter = new NodeAdapter({
   adapterName: 'hci2',

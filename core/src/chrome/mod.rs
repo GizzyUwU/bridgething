@@ -104,13 +104,19 @@ impl ChromeWorker {
       browser.register_missing_tabs();
     }));
     let Some(browser) = (if let Err(e) = result {
-      tracing::error!("failed to register missing tabs: {:?}, restarting connection", e);
+      tracing::debug!("failed to register missing tabs: {:?}, restarting connection", e);
       self.browser = None;
 
       let browser = self.get_connection().await;
       if let Some(b) = browser {
-        b.register_missing_tabs();
-      };
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          b.register_missing_tabs();
+        })) {
+          tracing::error!("failed to register missing tabs: {:?} - browser likely closed", e);
+          self.browser = None;
+          return;
+        }
+      }
 
       browser.as_ref()
     } else {

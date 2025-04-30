@@ -131,10 +131,7 @@ async fn modern_handler(
 ) -> Response {
   if req.headers().contains_key("upgrade") {
     match WebSocketUpgrade::from_request(req, &()).await {
-      Ok(ws) => {
-        tracing::info!("new modern port websocket connection from {}", addr);
-        modern_ws_handler(ws, addr, state).await.into_response()
-      }
+      Ok(ws) => modern_ws_handler(ws, addr, state).await.into_response(),
       Err(err) => {
         tracing::error!("failed to upgrade request to websocket: {:?}", err);
         (StatusCode::BAD_REQUEST, err.body_text()).into_response()

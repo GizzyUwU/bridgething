@@ -35,12 +35,36 @@ function registerMessageHandlers() {
       setTimeout(() => {
         client.send({
           type: 'forward',
-          contentType: 'text',
-          content: 'hello from the web client!',
+          encoding: 'text',
+          data: 'hello from the web client!',
+        });
+      }, 1000);
+
+      setTimeout(() => {
+        client.send({
+          type: 'forward',
+          encoding: 'json',
+          data: { message: 'hello from the web client!' },
+        });
+      }, 1500);
+
+      setTimeout(async () => {
+        client.send({
+          type: 'forward',
+          encoding: 'binary',
+          data: await bufferToBase64(new Uint8Array([69, 69, 69, 69])),
         });
       }, 2000);
     },
   });
 }
+
+const bufferToBase64 = buffer =>
+  new Promise(r => {
+    const reader = new FileReader();
+    reader.onload = () => r(typeof reader.result === 'string' ? reader.result : '');
+    reader.readAsDataURL(new Blob([buffer]));
+    return reader.result;
+  }).then(s => s.slice(s.indexOf(',') + 1));
 
 window.bridgethingClient = client;

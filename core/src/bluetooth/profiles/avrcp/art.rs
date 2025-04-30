@@ -237,7 +237,7 @@ async fn send_image(client_man: &ClientMan, handle: &Option<MsgHandle>, image_id
         width: 200,
         data,
       },
-      ServerEventType::Info,
+      ServerEventType::Event,
     )
     .await
   {

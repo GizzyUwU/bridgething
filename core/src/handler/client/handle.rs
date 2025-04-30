@@ -65,7 +65,7 @@ impl MsgHandle {
     self
       .state
       .client_man
-      .send(Uuid::now_v7(), self.from, data, ServerEventType::Info, None)
+      .send(Uuid::now_v7(), self.from, data, ServerEventType::Event, None)
       .await
   }
 

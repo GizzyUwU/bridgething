@@ -98,11 +98,11 @@ impl PlayerState {
   pub async fn send_state(&self) -> PlayerResult<()> {
     self
       .client_man
-      .broadcast(self.to_send_state(), ServerEventType::Info)
+      .broadcast(self.to_send_state(), ServerEventType::Event)
       .await?;
     self
       .client_man
-      .broadcast(self.to_send_queue(), ServerEventType::Info)
+      .broadcast(self.to_send_queue(), ServerEventType::Event)
       .await?;
 
     Ok(())

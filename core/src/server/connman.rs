@@ -201,7 +201,7 @@ impl ClientManager {
       let msg = ServerEvent {
         id: uuid::Uuid::now_v7(),
         data: state.meta.clone().into(),
-        meta: ServerEventType::Info,
+        meta: ServerEventType::Event,
         stock_msg_id: None,
       };
       let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
@@ -212,7 +212,7 @@ impl ClientManager {
       let msg = ServerEvent {
         id: uuid::Uuid::now_v7(),
         data: status.into(),
-        meta: ServerEventType::Info,
+        meta: ServerEventType::Event,
         stock_msg_id: None,
       };
       let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);

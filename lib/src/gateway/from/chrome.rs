@@ -5,7 +5,7 @@ use ts_rs::TS;
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(
-  tag = "type",
+  tag = "event",
   content = "data",
   rename_all = "camelCase",
   rename_all_fields = "camelCase"

@@ -14,20 +14,20 @@ pub async fn connection_messages(state: &State, new_device: bool, device: &Devic
       .client_man
       .broadcast(
         ServerBluetoothEvent::ParingResult { success: true },
-        ServerEventType::Info,
+        ServerEventType::Event,
       )
       .await?;
   }
 
   state
     .client_man
-    .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Info)
+    .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Event)
     .await?;
   state
     .client_man
     .broadcast(
       ServerBluetoothEvent::PairedDevices(state.get_devices().await),
-      ServerEventType::Info,
+      ServerEventType::Event,
     )
     .await?;
   state
@@ -37,7 +37,7 @@ pub async fn connection_messages(state: &State, new_device: bool, device: &Devic
         name: device.name.clone(),
         mac: device.mac.clone(),
       },
-      ServerEventType::Info,
+      ServerEventType::Event,
     )
     .await?;
 
@@ -103,13 +103,16 @@ pub async fn connection_messages(state: &State, new_device: bool, device: &Devic
 pub async fn disconnection_messages(state: &State) -> BluetoothResult<()> {
   state
     .client_man
-    .broadcast(ServerBluetoothEvent::Status { connected: false }, ServerEventType::Info)
+    .broadcast(
+      ServerBluetoothEvent::Status { connected: false },
+      ServerEventType::Event,
+    )
     .await?;
   state
     .client_man
     .broadcast(
       ServerBluetoothEvent::PairedDevices(state.get_devices().await),
-      ServerEventType::Info,
+      ServerEventType::Event,
     )
     .await?;
 

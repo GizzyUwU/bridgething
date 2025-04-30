@@ -81,7 +81,10 @@ class BridgethingGateway {
   disconnect = (id: string) => this.adapter.disconnect(id);
 
   /** @throws THIS WILL THROW IF THE DEVICE IS NOT KNOWN/CONNECTED OR IF SEND FAILS */
-  send = (deviceId: string, message: GatewayToBridgeMsg) => this.adapter.send(deviceId, message);
+  send = (deviceId: string, message: GatewayToBridgeMsg) => {
+    this.logger.trace('sending message: ', message);
+    return this.adapter.send(deviceId, message);
+  };
 
   private handleEvent(allEventData: AllAdapterEvent) {
     const event = lowercaseEvent(allEventData);

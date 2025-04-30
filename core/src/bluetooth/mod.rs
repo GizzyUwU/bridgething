@@ -183,7 +183,7 @@ impl GatewayMan {
   pub async fn forward_all(&self, data: ForwardMessage) {
     let msg = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
-      meta: GatewayMsgMeta::Forward,
+      meta: GatewayMsgMeta::Event,
       data: data.into(),
     };
 

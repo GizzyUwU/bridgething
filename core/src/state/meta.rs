@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use libbridgething::{server::ServerSystemEvent, BridgeThingMeta, ServerEventData};
+use libbridgething::{BridgeThingMeta, ServerEventData, server::ServerSystemEvent};
 use serde::{Deserialize, Serialize};
 
 const BRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -50,18 +50,7 @@ impl SuperbirdMeta {
 
 impl From<SuperbirdMeta> for ServerEventData {
   fn from(meta: SuperbirdMeta) -> Self {
-    ServerEventData::System(ServerSystemEvent::Version {
-      serial: meta.serial_number,
-      os_version: "bridgething".to_string(),
-      app_version: meta.version,
-      fw_version: "NixOS".to_string(),
-      model_name: meta.model_name,
-      fcc_id: meta.fcc_id,
-      ic_id: meta.ic_id,
-      country: "Thing Labs".to_string(),
-      discord: "https://tl.mt/d".to_string(),
-      credits: "Joey Eamigh".to_string(),
-    })
+    ServerEventData::System(ServerSystemEvent::Version(meta.into()))
   }
 }
 

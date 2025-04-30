@@ -114,7 +114,7 @@ impl ProfileManager {
                 name: mac.to_string(),
                 pin: pin.to_owned(),
               },
-              ServerEventType::Info,
+              ServerEventType::Event,
             )
             .await?;
 

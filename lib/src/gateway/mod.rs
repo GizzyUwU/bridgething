@@ -9,13 +9,12 @@ mod to;
 pub use from::*;
 pub use to::*;
 
-use crate::{BridgeThingMeta, ForwardMessage};
+use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayMsgMeta {
-  Forward,
   Command,
   Event,
   Request,
@@ -42,15 +41,10 @@ pub struct GatewayToBridgeMsg {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(
-  tag = "type",
-  content = "data",
-  rename_all = "camelCase",
-  rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
-  Version { version: String, app: String }, // event, response?
+  Version { data: GatewayMeta }, // event, response?
 
   File(GatewayToBridgeFileMsg),
   Chrome(GatewayToBridgeChromeMsg),
@@ -88,18 +82,19 @@ pub struct BridgeToGatewayMsg {
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 #[allow(clippy::large_enum_variant)] // TODO: maybe remove this allow later
 pub enum BridgeToGatewayMsgData {
-  Ack,                      // response, happens when a command has been received and won't have a completion
-  Done,                     // response, happens when a command has been completed
-  Version(BridgeThingMeta), // event, response?
-
+  Version { data: BridgeThingMeta }, // event, response?
   File(BridgeToGatewayFileMsg),
 
   // arbitrary data
   Forward(ForwardMessage), // request, response, event, command?
+
+  // acknowledgements
+  Ack,  // response, happens when a command has been received and won't have a completion
+  Done, // response, happens when a command has been completed
 }
 
 impl From<ForwardMessage> for BridgeToGatewayMsgData {

@@ -32,8 +32,8 @@ impl BridgeThingMeta {
 }
 
 impl From<BridgeThingMeta> for BridgeToGatewayMsgData {
-  fn from(val: BridgeThingMeta) -> Self {
-    BridgeToGatewayMsgData::Version(val)
+  fn from(data: BridgeThingMeta) -> Self {
+    BridgeToGatewayMsgData::Version { data }
   }
 }
 

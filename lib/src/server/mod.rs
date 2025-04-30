@@ -20,10 +20,9 @@ use crate::ForwardMessage;
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventType {
-  Gateway,
   Request,
   Response { request_id: Uuid },
-  Info,
+  Event,
 }
 
 /// bridgething -> client
@@ -44,7 +43,7 @@ pub struct ServerEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventData {
   Bluetooth(ServerBluetoothEvent),

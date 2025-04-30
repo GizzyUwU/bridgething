@@ -8,14 +8,14 @@ use chrome::*;
 use file::*;
 
 use libbridgething::{
-  ForwardMessage, ServerEventType,
+  ForwardMessage, GatewayMeta, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
-  server::ServerSystemEvent,
+  server::{GatewayStatus, ServerSystemEvent},
 };
 
 use crate::{
   bluetooth::{BluetoothMan, GatewayMessage},
-  state::{GatewayStatus, State},
+  state::State,
 };
 
 use super::HandlerResult;
@@ -46,8 +46,8 @@ impl GatewayHandler {
     let handle = MsgHandle::new(self, id, meta, address, protocol);
 
     match data {
-      GatewayToBridgeMsgData::Version { version, app } => {
-        tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(version, app).await });
+      GatewayToBridgeMsgData::Version { data } => {
+        tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
       GatewayToBridgeMsgData::File(file_msg) => {
         tokio::spawn(async move { FileHandler::new(handle).handle(file_msg).await });
@@ -74,13 +74,19 @@ impl TopLevelHandler {
     Self { handle }
   }
 
-  pub async fn handle_version(&mut self, version: String, app: String) -> HandlerResult {
-    tracing::debug!("({:?}) version: {:?};  app: {:?}", &self.handle.address, version, app);
+  pub async fn handle_version(&mut self, version: GatewayMeta) -> HandlerResult {
+    tracing::debug!("({:?}) version: {:?};", &self.handle.address, &version);
+
     let status = GatewayStatus {
-      address: self.handle.address.unwrap_or_default(),
+      address: self.handle.address.unwrap_or_default().to_string(),
       connected: true,
-      version,
-      app,
+
+      lib_version: version.lib_version,
+      libbridgething_version: version.libbridgething_version,
+      adapter_version: version.adapter_version,
+      app_name: version.app_name,
+      app_version: version.app_version,
+      os_name: version.os_name,
     };
     self.handle.state.set_gateway_status(status.clone()).await?;
 
@@ -94,7 +100,7 @@ impl TopLevelHandler {
       .handle
       .state
       .client_man
-      .broadcast(data, ServerEventType::Gateway)
+      .broadcast(data, ServerEventType::Event)
       .await?;
 
     Ok(())

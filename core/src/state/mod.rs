@@ -1,7 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use bluer::Address;
-use libbridgething::{Device, ServerEventData, ServerEventType, server::ServerSystemEvent};
+use libbridgething::{Device, ServerEventType, server::GatewayStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -34,14 +33,6 @@ impl PersistentAppState {
       PersistentAppState::default()
     }
   }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GatewayStatus {
-  pub address: Address,
-  pub connected: bool,
-  pub version: String,
-  pub app: String,
 }
 
 #[derive(Debug, Default)]
@@ -106,7 +97,7 @@ impl AppState {
   pub async fn set_gateway_status(&self, status: GatewayStatus) -> StateResult<()> {
     self.session.write().await.gateway = status.clone();
     self.save_persist().await?;
-    if let Err(errors) = self.client_man.broadcast(status, ServerEventType::Info).await {
+    if let Err(errors) = self.client_man.broadcast(status, ServerEventType::Event).await {
       for error in errors {
         tracing::error!("failed to send gateway status: {:?}", error);
       }
@@ -217,16 +208,6 @@ impl AppState {
     }
 
     Ok(())
-  }
-}
-
-impl From<GatewayStatus> for ServerEventData {
-  fn from(state: GatewayStatus) -> Self {
-    ServerEventData::System(ServerSystemEvent::GatewayStatus {
-      connected: state.connected,
-      version: state.version,
-      app: state.app,
-    })
   }
 }
 

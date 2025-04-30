@@ -110,7 +110,7 @@ export class WebSocketClient {
    */
   async handleMessage(e) {
     this.logMessage('from', e.data);
-    this.listeners.forEach(listener => listener.onMessage(e.data));
+    this.listeners.forEach(listener => listener?.onMessage?.(e.data));
 
     try {
       /** @type {ServerEvent} */
@@ -187,12 +187,12 @@ export class WebSocketClient {
     this.ws.addEventListener('open', () => {
       this.setStatus('connected', 'green');
       this.send({ type: 'system', action: 'versionRequest' });
-      this.listeners.forEach(listener => listener.onConnect());
+      this.listeners.forEach(listener => listener?.onConnect?.());
     });
 
     this.ws.addEventListener('close', () => {
       this.setStatus('disconnected', 'red');
-      this.listeners.forEach(listener => listener.onDisconnect());
+      this.listeners.forEach(listener => listener?.onDisconnect?.());
     });
 
     this.ws.addEventListener('message', e => this.handleMessage(e));

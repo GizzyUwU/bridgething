@@ -96,9 +96,10 @@ impl Rfcomm {
           }
         }
         Some(msg) = self.conn_rx.recv() => {
-          tracing::trace!("received rfcomm message: {msg:?}");
-          self.callbacks.send(msg.into());
-        }
+          if let Err(e) = self.handle_message(msg.0, msg.1).await {
+            tracing::error!("failed to handle disconnect: {:?}", e);
+          }
+        },
         Some(event) = async {
           if let Some(discovery) = &mut self.discovery {
             discovery.next().await
@@ -224,6 +225,37 @@ impl Rfcomm {
   async fn initialize(&mut self) -> Result<()> {
     tracing::debug!("initializing rfcomm protocol");
     self.start_discovery().await?;
+
+    Ok(())
+  }
+
+  async fn handle_message(&mut self, addr: BDAddr, msg: ConnectionMessage) -> Result<()> {
+    tracing::trace!("received message from {addr}: {msg:?}");
+
+    if matches!(msg, ConnectionMessage::Close(_)) {
+      if let Err(e) = self.handle_disconnect(addr).await {
+        tracing::error!("failed to handle disconnect: {:?}", e);
+      }
+    }
+
+    self.callbacks.send((addr, msg).into());
+    Ok(())
+  }
+
+  async fn handle_disconnect(&mut self, addr: BDAddr) -> Result<()> {
+    tracing::debug!("rfcomm connection closed for {addr}");
+
+    let Some(mut connection) = self.connections.remove(&addr.into()) else {
+      tracing::trace!("no connection found for addr: {addr}?");
+      return Ok(());
+    };
+    tracing::debug!("removed connection for addr: {addr}");
+    let _ = connection.writer.close().await;
+
+    if self.connections.is_empty() {
+      tracing::debug!("no more connections, starting discovery");
+      self.start_discovery().await?;
+    }
 
     Ok(())
   }

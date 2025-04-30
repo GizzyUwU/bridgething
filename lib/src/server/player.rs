@@ -8,7 +8,7 @@ use crate::{Album, Artist, PlaybackOptions, PlaybackQueue, PlaybackRestrictions,
 #[serde_with::skip_serializing_none]
 #[derive(derive_more::Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(
-  tag = "action",
+  tag = "event",
   content = "data",
   rename_all = "camelCase",
   rename_all_fields = "camelCase"

@@ -1,4 +1,4 @@
-use libbridgething::server::ServerSystemEvent;
+use libbridgething::{BridgeThingMeta, server::ServerSystemEvent};
 use serde::{Deserialize, Serialize};
 
 use super::{RecvMsgData, ServerEvent, ServerEventData};
@@ -93,26 +93,25 @@ impl From<ServerEvent> for StockSendMsg {
 impl From<ServerSystemEvent> for StockSendMsg {
   fn from(value: ServerSystemEvent) -> Self {
     match value {
-      ServerSystemEvent::Version {
-        serial,
+      ServerSystemEvent::Version(BridgeThingMeta {
+        serial_number,
         os_version,
         app_version,
-        fw_version,
         model_name,
         fcc_id,
         ic_id,
-        country,
         discord,
         credits,
-      } => StockSendMsg::Version(StockVersionSend::Status {
-        serial,
+        ..
+      }) => StockSendMsg::Version(StockVersionSend::Status {
+        serial: serial_number,
         os_version,
         app_version,
-        fw_version,
+        fw_version: "BridgeThing".to_string(),
         model_name,
         fcc_id,
         ic_id,
-        country,
+        country: "ThingLabs".to_string(),
         discord,
         credits,
       }),

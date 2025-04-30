@@ -12,13 +12,14 @@ use libbridgething::{
   BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
   protocol::BridgeEndec,
+  server::GatewayStatus,
 };
 use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
 
 use crate::{
   bluetooth::{GatewayMessage, GatewayType},
-  state::{GatewayStatus, State},
+  state::State,
 };
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
@@ -171,7 +172,7 @@ impl RfcommGateway {
               tracing::debug!("rfcomm connection closed: {:?}", address);
               self.connections.remove(&address);
 
-              if self.state.gateway_status().await.address == address {
+              if self.state.gateway_status().await.address == address.to_string() {
                 tracing::debug!("\"current\" rfcomm connection closed - setting gateway status to disconnected");
                 if let Err(e) = self.state.set_gateway_status(GatewayStatus::default()).await {
                   tracing::error!("failed to set gateway status: {:?}", e);
@@ -205,7 +206,9 @@ impl RfcommGateway {
       .send(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),
         meta: GatewayMsgMeta::Event,
-        data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
+        data: BridgeToGatewayMsgData::Version {
+          data: self.state.meta.clone().into(),
+        },
       })
       .await?;
 
