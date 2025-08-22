@@ -1,8 +1,8 @@
 # bridgething
 
-coming soon :)
+This project was created to allow for Bluetooth support for the Spotify Car Thing after discontinuation date. It currently works, but only on Linux. If you connect an iPhone to bridgething on a Car Thing running the stock UI, it will allow basic playback control. The gateways are the only things not implemented.
 
-this code needs some serious refactoring lol - dw i am well aware
+I no longer have the time to work on bridgething. I would love it if someone used this project to complete the restoration of the Spotify Car Thing.
 
 ## Data Flow Diagram
 
@@ -23,23 +23,6 @@ this code needs some serious refactoring lol - dw i am well aware
 │                  ◄───────────┼                  │
 └──────────────────┘           └──────────────────┘
       "daemon"                      "gateway"
-```
-
-## Project Structure
-
-```bash
-.
-├── adapter # cross-platform bluetooth gatt adapter for use in gateways
-├── client # sdks for creating client applications
-│   ├── rust # rust sdk
-│   └── typescript # typescript sdk
-├── core # primary bridgething daemon
-├── gateway # sdk for creating gateway platforms
-├── lib # shared communication types for rust and typescript
-│   ├── src # rust types
-│   └── ts # generated typescript types
-├── notes # dumps/notes/etc
-└── resources # random resources
 ```
 
 ## Notes
