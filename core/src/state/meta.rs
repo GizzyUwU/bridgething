@@ -16,6 +16,16 @@ pub struct SuperbirdMeta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
+  #[serde(default)]
+  pub image_build_id: String,
+  #[serde(default)]
+  pub image_build_date: String,
+  #[serde(default)]
+  pub image_distro: String,
+  #[serde(default)]
+  pub image_distro_version: String,
+  #[serde(default)]
+  pub image_machine: String,
 }
 
 impl SuperbirdMeta {
@@ -69,6 +79,11 @@ impl From<SuperbirdMeta> for BridgeThingMeta {
       fcc_id: meta.fcc_id,
       ic_id: meta.ic_id,
       model_name: meta.model_name,
+      image_build_id: meta.image_build_id,
+      image_build_date: meta.image_build_date,
+      image_distro: meta.image_distro,
+      image_distro_version: meta.image_distro_version,
+      image_machine: meta.image_machine,
       discord: "https://tl.mt/d".to_string(),
       credits: "Joey Eamigh".to_string(),
     }

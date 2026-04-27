@@ -17,6 +17,11 @@ export type BridgeThingMeta = {
   fccId: string;
   icId: string;
   modelName: string;
+  imageBuildId: string;
+  imageBuildDate: string;
+  imageDistro: string;
+  imageDistroVersion: string;
+  imageMachine: string;
   discord: string;
   credits: string;
 };

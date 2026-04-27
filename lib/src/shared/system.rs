@@ -21,6 +21,11 @@ pub struct BridgeThingMeta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
+  pub image_build_id: String,
+  pub image_build_date: String,
+  pub image_distro: String,
+  pub image_distro_version: String,
+  pub image_machine: String,
   pub discord: String,
   pub credits: String,
 }
