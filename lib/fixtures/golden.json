@@ -1,0 +1,439 @@
+{
+  "version": 2,
+  "magic": "0xdead",
+  "header": {
+    "size_bytes": 16,
+    "fields": [
+      {
+        "name": "magic",
+        "offset": 0,
+        "size": 2,
+        "description": "u16 BE, always 0xdead"
+      },
+      {
+        "name": "version",
+        "offset": 2,
+        "size": 1,
+        "description": "u8 wire-format version"
+      },
+      {
+        "name": "compression",
+        "offset": 3,
+        "size": 1,
+        "description": "u8: 0x00 none, 0x01 gzip"
+      },
+      {
+        "name": "encoding",
+        "offset": 4,
+        "size": 1,
+        "description": "u8: 0x00 msgpack-named, 0x01 json"
+      },
+      {
+        "name": "reserved",
+        "offset": 5,
+        "size": 3,
+        "description": "must be zero on encode, ignored on decode"
+      },
+      {
+        "name": "length",
+        "offset": 8,
+        "size": 8,
+        "description": "u64 BE byte length of payload (post-compression)"
+      }
+    ]
+  },
+  "fixtures": [
+    {
+      "name": "bridge_to_gateway/version-event",
+      "description": "daemon announcing its version + hardware metadata as an event",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "appName": "bridgething",
+            "appVersion": "0.1.0",
+            "bridgethingVersion": "0.1.0",
+            "btMac": "aa:bb:cc:dd:ee:ff",
+            "credits": "the car thing scene",
+            "discord": "https://discord.example",
+            "fccId": "fcc-test",
+            "icId": "ic-test",
+            "imageBuildDate": "2026-04-27T00:00:00Z",
+            "imageBuildId": "golden-build-id",
+            "imageDistro": "bridgething",
+            "imageDistroVersion": "v1",
+            "imageMachine": "superbird",
+            "libbridgethingVersion": "v0.1.0",
+            "modelName": "Car Thing",
+            "osDescription": "bridgething wrynose",
+            "osName": "linux",
+            "osVersion": "6.19",
+            "serialNumber": "GOLDEN-0001"
+          },
+          "type": "version"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a776657273696f6ea464617461de0013b26272696467657468696e6756657273696f6ea5302e312e30b56c69626272696467657468696e6756657273696f6ea676302e312e30a76170704e616d65ab6272696467657468696e67aa61707056657273696f6ea5302e312e30a66f734e616d65a56c696e7578a96f7356657273696f6ea4362e3139ad6f734465736372697074696f6eb36272696467657468696e67207772796e6f7365a562744d6163b161613a62623a63633a64643a65653a6666ac73657269616c4e756d626572ab474f4c44454e2d30303031a56663634964a86663632d74657374a469634964a769632d74657374a96d6f64656c4e616d65a9436172205468696e67ac696d6167654275696c644964af676f6c64656e2d6275696c642d6964ae696d6167654275696c6444617465b4323032362d30342d32375430303a30303a30305aab696d61676544697374726fab6272696467657468696e67b2696d61676544697374726f56657273696f6ea27631ac696d6167654d616368696e65a9737570657262697264a7646973636f7264b768747470733a2f2f646973636f72642e6578616d706c65a763726564697473b374686520636172207468696e67207363656e65",
+      "framed_hex": "dead02000000000000000000000001fe83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a776657273696f6ea464617461de0013b26272696467657468696e6756657273696f6ea5302e312e30b56c69626272696467657468696e6756657273696f6ea676302e312e30a76170704e616d65ab6272696467657468696e67aa61707056657273696f6ea5302e312e30a66f734e616d65a56c696e7578a96f7356657273696f6ea4362e3139ad6f734465736372697074696f6eb36272696467657468696e67207772796e6f7365a562744d6163b161613a62623a63633a64643a65653a6666ac73657269616c4e756d626572ab474f4c44454e2d30303031a56663634964a86663632d74657374a469634964a769632d74657374a96d6f64656c4e616d65a9436172205468696e67ac696d6167654275696c644964af676f6c64656e2d6275696c642d6964ae696d6167654275696c6444617465b4323032362d30342d32375430303a30303a30305aab696d61676544697374726fab6272696467657468696e67b2696d61676544697374726f56657273696f6ea27631ac696d6167654d616368696e65a9737570657262697264a7646973636f7264b768747470733a2f2f646973636f72642e6578616d706c65a763726564697473b374686520636172207468696e67207363656e65"
+    },
+    {
+      "name": "bridge_to_gateway/ack-response",
+      "description": "ack to a request — meta carries requestId, data is the unit Ack variant",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "type": "ack"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746181a474797065a361636b",
+      "framed_hex": "dead020000000000000000000000005b83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746181a474797065a361636b"
+    },
+    {
+      "name": "bridge_to_gateway/done-response",
+      "description": "completion response to a long-running command",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "type": "done"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746181a474797065a4646f6e65",
+      "framed_hex": "dead020000000000000000000000005c83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746181a474797065a4646f6e65"
+    },
+    {
+      "name": "bridge_to_gateway/file-files-response",
+      "description": "response to a fileList request — daemon returns the served file list",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "files": [
+                "index.html",
+                "app.js",
+                "style.css"
+              ]
+            },
+            "event": "files"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74a566696c6573a46461746181a566696c657393aa696e6465782e68746d6ca66170702e6a73a97374796c652e637373",
+      "framed_hex": "dead020000000000000000000000009783a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74a566696c6573a46461746181a566696c657393aa696e6465782e68746d6ca66170702e6a73a97374796c652e637373"
+    },
+    {
+      "name": "bridge_to_gateway/file-request-request",
+      "description": "daemon requests a file from the gateway (browser fetched something we don't have)",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "file": "/missing/asset.png"
+            },
+            "event": "fileRequest"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "request"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746182a56576656e74ab66696c6552657175657374a46461746181a466696c65b22f6d697373696e672f61737365742e706e67",
+      "framed_hex": "dead020000000000000000000000006f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746182a56576656e74ab66696c6552657175657374a46461746181a466696c65b22f6d697373696e672f61737365742e706e67"
+    },
+    {
+      "name": "bridge_to_gateway/forward-text-event",
+      "description": "arbitrary text payload over the Forward escape hatch",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": "hello, gateway",
+            "encoding": "text"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a474657874a464617461ae68656c6c6f2c2067617465776179",
+      "framed_hex": "dead020000000000000000000000006283a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a474657874a464617461ae68656c6c6f2c2067617465776179"
+    },
+    {
+      "name": "bridge_to_gateway/forward-json-event",
+      "description": "arbitrary JSON payload over the Forward escape hatch",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "kind": "playback-changed",
+              "payload": {
+                "playing": true,
+                "positionMs": 12345
+              }
+            },
+            "encoding": "json"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a46a736f6ea46461746182a46b696e64b0706c61796261636b2d6368616e676564a77061796c6f616482a7706c6179696e67c3aa706f736974696f6e4d73cd3039",
+      "framed_hex": "dead020000000000000000000000008a83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a46a736f6ea46461746182a46b696e64b0706c61796261636b2d6368616e676564a77061796c6f616482a7706c6179696e67c3aa706f736974696f6e4d73cd3039"
+    },
+    {
+      "name": "bridge_to_gateway/forward-binary-event",
+      "description": "raw bytes over the Forward escape hatch — verifies msgpack bin tag, not base64 string",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": [
+              137,
+              80,
+              78,
+              71,
+              13,
+              10,
+              26,
+              10
+            ],
+            "encoding": "binary"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead020000000000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/version-event",
+      "description": "phone announcing its gateway version",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "adapterVersion": "1.0.0",
+            "appName": "bridgething-mobile",
+            "appVersion": "1.0.0",
+            "libVersion": "1.0.0",
+            "libbridgethingVersion": "v0.1.0",
+            "osName": "iOS"
+          },
+          "type": "version"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a776657273696f6ea46461746186ae6164617074657256657273696f6ea5312e302e30aa6c696256657273696f6ea5312e302e30b56c69626272696467657468696e6756657273696f6ea676302e312e30a76170704e616d65b26272696467657468696e672d6d6f62696c65aa61707056657273696f6ea5312e302e30a66f734e616d65a3694f53",
+      "framed_hex": "dead02000000000000000000000000ba83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a776657273696f6ea46461746186ae6164617074657256657273696f6ea5312e302e30aa6c696256657273696f6ea5312e302e30b56c69626272696467657468696e6756657273696f6ea676302e312e30a76170704e616d65b26272696467657468696e672d6d6f62696c65aa61707056657273696f6ea5312e302e30a66f734e616d65a3694f53"
+    },
+    {
+      "name": "gateway_to_bridge/file-list-request",
+      "description": "gateway asks for the served file list — unit variant of the file enum",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "event": "list"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "request"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746181a56576656e74a46c697374",
+      "framed_hex": "dead020000000000000000000000004a83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746181a56576656e74a46c697374"
+    },
+    {
+      "name": "gateway_to_bridge/file-delete-command",
+      "description": "gateway tells daemon to drop some served files",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "files": [
+                "stale.html"
+              ]
+            },
+            "event": "delete"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "command"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a466696c65a46461746182a56576656e74a664656c657465a46461746181a566696c657391aa7374616c652e68746d6c",
+      "framed_hex": "dead020000000000000000000000006483a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a466696c65a46461746182a56576656e74a664656c657465a46461746181a566696c657391aa7374616c652e68746d6c"
+    },
+    {
+      "name": "gateway_to_bridge/file-add-command",
+      "description": "gateway uploads a file — exercises BridgeFile (path + raw bytes)",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "files": [
+                {
+                  "data": [
+                    137,
+                    80,
+                    78,
+                    71,
+                    13,
+                    10,
+                    26,
+                    10
+                  ],
+                  "path": "/asset.png"
+                }
+              ]
+            },
+            "event": "add"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "command"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a466696c65a46461746182a56576656e74a3616464a46461746181a566696c65739182a470617468aa2f61737365742e706e67a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead020000000000000000000000007683a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a466696c65a46461746182a56576656e74a3616464a46461746181a566696c65739182a470617468aa2f61737365742e706e67a464617461c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/file-response-response",
+      "description": "gateway answering a fileRequest from the daemon — returns BridgeFile",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "file": {
+                "data": [
+                  137,
+                  80,
+                  78,
+                  71,
+                  13,
+                  10,
+                  26,
+                  10
+                ],
+                "path": "/missing/asset.png"
+              }
+            },
+            "event": "fileResponse"
+          },
+          "type": "file"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74ac66696c65526573706f6e7365a46461746181a466696c6582a470617468b22f6d697373696e672f61737365742e706e67a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead02000000000000000000000000a883a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74ac66696c65526573706f6e7365a46461746181a466696c6582a470617468b22f6d697373696e672f61737365742e706e67a464617461c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/chrome-navigate-command",
+      "description": "gateway driving the Car Thing chromium kiosk to a new URL",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "url": "https://example.com"
+            },
+            "event": "navigate"
+          },
+          "type": "chrome"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "command"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a66368726f6d65a46461746182a56576656e74a86e61766967617465a46461746181a375726cb368747470733a2f2f6578616d706c652e636f6d",
+      "framed_hex": "dead020000000000000000000000006e83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a66368726f6d65a46461746182a56576656e74a86e61766967617465a46461746181a375726cb368747470733a2f2f6578616d706c652e636f6d"
+    },
+    {
+      "name": "gateway_to_bridge/forward-binary-event",
+      "description": "gateway sending raw bytes through the Forward escape hatch",
+      "direction": "gateway_to_bridge",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": [
+              137,
+              80,
+              78,
+              71,
+              13,
+              10,
+              26,
+              10
+            ],
+            "encoding": "binary"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead020000000000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
+    }
+  ]
+}

@@ -17,8 +17,8 @@ use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta};
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct ResponseMeta {
-  #[ts(type = "string")]
-  #[typeshare(serialized_as = "String")]
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
   pub request_id: Uuid,
 }
 
@@ -41,8 +41,8 @@ pub enum GatewayMsgMeta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
-  #[ts(type = "string")]
-  #[typeshare(serialized_as = "String")]
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: GatewayMsgMeta,
   pub data: GatewayToBridgeMsgData,
@@ -84,8 +84,8 @@ pub struct BridgeFile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
-  #[ts(type = "string")]
-  #[typeshare(serialized_as = "String")]
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: GatewayMsgMeta,
   pub data: BridgeToGatewayMsgData,

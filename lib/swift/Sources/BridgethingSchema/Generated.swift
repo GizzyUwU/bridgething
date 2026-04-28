@@ -26,9 +26,9 @@ public struct Artist: Codable {
 
 public struct BridgeFile: Codable {
 	public let path: String
-	public let data: [UInt8]
+	public let data: Data
 
-	public init(path: String, data: [UInt8]) {
+	public init(path: String, data: Data) {
 		self.path = path
 		self.data = data
 	}
@@ -208,11 +208,11 @@ public enum BridgeToGatewayMsgData: Codable {
 /// 
 /// these messages will pass over bluetooth.
 public struct BridgeToGatewayMsg: Codable {
-	public let id: String
+	public let id: Data
 	public let meta: GatewayMsgMeta
 	public let data: BridgeToGatewayMsgData
 
-	public init(id: String, meta: GatewayMsgMeta, data: BridgeToGatewayMsgData) {
+	public init(id: Data, meta: GatewayMsgMeta, data: BridgeToGatewayMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -355,11 +355,11 @@ public enum GatewayToBridgeMsgData: Codable {
 /// 
 /// these messages will pass over bluetooth.
 public struct GatewayToBridgeMsg: Codable {
-	public let id: String
+	public let id: Data
 	public let meta: GatewayMsgMeta
 	public let data: GatewayToBridgeMsgData
 
-	public init(id: String, meta: GatewayMsgMeta, data: GatewayToBridgeMsgData) {
+	public init(id: Data, meta: GatewayMsgMeta, data: GatewayToBridgeMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -377,9 +377,9 @@ public struct PlaybackOptions: Codable {
 }
 
 public struct ResponseMeta: Codable {
-	public let requestId: String
+	public let requestId: Data
 
-	public init(requestId: String) {
+	public init(requestId: Data) {
 		self.requestId = requestId
 	}
 }
@@ -455,7 +455,7 @@ public enum BridgeToGatewayFileMsg: Codable {
 public enum ForwardMessage: Codable {
 	case text(String)
 	case json(Value)
-	case binary([UInt8])
+	case binary(Data)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case text,
@@ -482,7 +482,7 @@ public enum ForwardMessage: Codable {
 					return
 				}
 			case .binary:
-				if let content = try? container.decode([UInt8].self, forKey: .data) {
+				if let content = try? container.decode(Data.self, forKey: .data) {
 					self = .binary(content)
 					return
 				}
@@ -608,7 +608,7 @@ public enum GatewayToBridgeFileMsg: Codable {
 
 public enum Image: Codable {
 	case id(String)
-	case bytes([UInt8])
+	case bytes(Data)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case id,
@@ -629,7 +629,7 @@ public enum Image: Codable {
 					return
 				}
 			case .bytes:
-				if let content = try? container.decode([UInt8].self, forKey: .data) {
+				if let content = try? container.decode(Data.self, forKey: .data) {
 					self = .bytes(content)
 					return
 				}

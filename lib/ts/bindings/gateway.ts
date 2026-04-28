@@ -13,7 +13,7 @@ export type BridgeToGatewayFileMsg =
  *
  * these messages will pass over bluetooth.
  */
-export type BridgeToGatewayMsg = { id: string; meta: GatewayMsgMeta; data: BridgeToGatewayMsgData };
+export type BridgeToGatewayMsg = { id: Uint8Array; meta: GatewayMsgMeta; data: BridgeToGatewayMsgData };
 
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
@@ -54,7 +54,7 @@ export type GatewayToBridgeFileMsg =
  *
  * these messages will pass over bluetooth.
  */
-export type GatewayToBridgeMsg = { id: string; meta: GatewayMsgMeta; data: GatewayToBridgeMsgData };
+export type GatewayToBridgeMsg = { id: Uint8Array; meta: GatewayMsgMeta; data: GatewayToBridgeMsgData };
 
 export type GatewayToBridgeMsgData =
   | { type: 'version'; data: GatewayMeta }
@@ -62,4 +62,4 @@ export type GatewayToBridgeMsgData =
   | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
   | { type: 'forward'; data: ForwardMessage };
 
-export type ResponseMeta = { requestId: string };
+export type ResponseMeta = { requestId: Uint8Array };
