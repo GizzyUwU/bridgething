@@ -1,6 +1,7 @@
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typeshare::typeshare;
 use uuid::Uuid;
 
 mod from;
@@ -11,40 +12,49 @@ pub use to::*;
 
 use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta};
 
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct ResponseMeta {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "String")]
+  pub request_id: Uuid,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayMsgMeta {
   Command,
   Event,
   Request,
-  Response {
-    #[ts(type = "string")]
-    request_id: Uuid,
-  },
+  Response(ResponseMeta),
 }
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
 ///
 /// these messages will pass over bluetooth.
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
   #[ts(type = "string")]
+  #[typeshare(serialized_as = "String")]
   pub id: Uuid,
-  #[serde(flatten)]
   pub meta: GatewayMsgMeta,
-  #[serde(flatten)]
   pub data: GatewayToBridgeMsgData,
 }
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
-  Version { data: GatewayMeta }, // event, response?
+  Version(GatewayMeta), // event, response?
 
   File(GatewayToBridgeFileMsg),
   Chrome(GatewayToBridgeChromeMsg),
@@ -53,6 +63,7 @@ pub enum GatewayToBridgeMsgData {
   Forward(ForwardMessage), // request, response, event, command?
 }
 
+#[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -69,24 +80,25 @@ pub struct BridgeFile {
 /// messages from bridgething to the gateway (mobile or desktop app).
 ///
 /// these messages will pass over bluetooth.
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
   #[ts(type = "string")]
+  #[typeshare(serialized_as = "String")]
   pub id: Uuid,
-  #[serde(flatten)]
   pub meta: GatewayMsgMeta,
-  #[serde(flatten)]
   pub data: BridgeToGatewayMsgData,
 }
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 #[allow(clippy::large_enum_variant)] // TODO: maybe remove this allow later
 pub enum BridgeToGatewayMsgData {
-  Version { data: BridgeThingMeta }, // event, response?
+  Version(BridgeThingMeta), // event, response?
   File(BridgeToGatewayFileMsg),
 
   // arbitrary data

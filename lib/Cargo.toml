@@ -12,6 +12,7 @@ derive_more = { workspace = true, features = ["debug"] }
 
 # type generation
 ts-rs = { version = "10.1.0", features = ["uuid-impl", "no-serde-warnings"] }
+typeshare = "1.0.5"
 
 # codec/endec
 tokio-util = { workspace = true, features = ["codec"], optional = true }

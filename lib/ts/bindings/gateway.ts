@@ -4,8 +4,8 @@ import type { BridgeThingMeta, ForwardMessage, GatewayMeta } from './shared';
 export type BridgeFile = { path: string; data: Uint8Array };
 
 export type BridgeToGatewayFileMsg =
-  | { event: 'files'; data: { files: Array<string> } }
-  | { event: 'fileRequest'; data: { file: string } };
+  | { event: 'files'; data: FileList }
+  | { event: 'fileRequest'; data: FileRequestData };
 
 /**
  * bridgething -> gateway
@@ -13,40 +13,40 @@ export type BridgeToGatewayFileMsg =
  *
  * these messages will pass over bluetooth.
  */
-export type BridgeToGatewayMsg = { id: string } & (
-  | { meta: 'command' }
-  | { meta: 'event' }
-  | { meta: 'request' }
-  | { meta: 'response'; requestId: string }
-) &
-  (
-    | { type: 'version'; data: BridgeThingMeta }
-    | ({ type: 'file' } & BridgeToGatewayFileMsg)
-    | ({ type: 'forward' } & ForwardMessage)
-    | { type: 'ack' }
-    | { type: 'done' }
-  );
+export type BridgeToGatewayMsg = { id: string; meta: GatewayMsgMeta; data: BridgeToGatewayMsgData };
 
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
-  | ({ type: 'file' } & BridgeToGatewayFileMsg)
-  | ({ type: 'forward' } & ForwardMessage)
+  | { type: 'file'; data: BridgeToGatewayFileMsg }
+  | { type: 'forward'; data: ForwardMessage }
   | { type: 'ack' }
   | { type: 'done' };
 
-export type GatewayMsgMeta =
-  | { meta: 'command' }
-  | { meta: 'event' }
-  | { meta: 'request' }
-  | { meta: 'response'; requestId: string };
+export type ChromeNavigate = { url: string };
 
-export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: { url: string } };
+export type FileAdd = { files: Array<BridgeFile> };
+
+export type FileDelete = { files: Array<string> };
+
+export type FileList = { files: Array<string> };
+
+export type FileRequestData = { file: string };
+
+export type FileResponseData = { file: BridgeFile };
+
+export type GatewayMsgMeta =
+  | { kind: 'command' }
+  | { kind: 'event' }
+  | { kind: 'request' }
+  | { kind: 'response'; data: ResponseMeta };
+
+export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: ChromeNavigate };
 
 export type GatewayToBridgeFileMsg =
   | { event: 'list' }
-  | { event: 'delete'; data: { files: Array<string> } }
-  | { event: 'add'; data: { files: Array<BridgeFile> } }
-  | { event: 'fileResponse'; data: { file: BridgeFile } };
+  | { event: 'delete'; data: FileDelete }
+  | { event: 'add'; data: FileAdd }
+  | { event: 'fileResponse'; data: FileResponseData };
 
 /**
  * gateway -> bridgething
@@ -54,21 +54,12 @@ export type GatewayToBridgeFileMsg =
  *
  * these messages will pass over bluetooth.
  */
-export type GatewayToBridgeMsg = { id: string } & (
-  | { meta: 'command' }
-  | { meta: 'event' }
-  | { meta: 'request' }
-  | { meta: 'response'; requestId: string }
-) &
-  (
-    | { type: 'version'; data: GatewayMeta }
-    | ({ type: 'file' } & GatewayToBridgeFileMsg)
-    | ({ type: 'chrome' } & GatewayToBridgeChromeMsg)
-    | ({ type: 'forward' } & ForwardMessage)
-  );
+export type GatewayToBridgeMsg = { id: string; meta: GatewayMsgMeta; data: GatewayToBridgeMsgData };
 
 export type GatewayToBridgeMsgData =
   | { type: 'version'; data: GatewayMeta }
-  | ({ type: 'file' } & GatewayToBridgeFileMsg)
-  | ({ type: 'chrome' } & GatewayToBridgeChromeMsg)
-  | ({ type: 'forward' } & ForwardMessage);
+  | { type: 'file'; data: GatewayToBridgeFileMsg }
+  | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
+  | { type: 'forward'; data: ForwardMessage };
+
+export type ResponseMeta = { requestId: string };

@@ -1,4 +1,7 @@
-use libbridgething::gateway::{BridgeFile, BridgeToGatewayFileMsg, BridgeToGatewayMsgData, GatewayToBridgeFileMsg};
+use libbridgething::gateway::{
+  BridgeFile, BridgeToGatewayFileMsg, BridgeToGatewayMsgData, FileAdd, FileDelete, FileList, FileRequestData, FileResponseData,
+  GatewayToBridgeFileMsg,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -17,15 +20,15 @@ impl FileHandler {
 
     match msg {
       GatewayToBridgeFileMsg::List => self.list().await,
-      GatewayToBridgeFileMsg::Add { files } => self.add(files).await,
-      GatewayToBridgeFileMsg::Delete { files } => self.delete(files).await,
-      GatewayToBridgeFileMsg::FileResponse { file } => self.handle_file_response(file).await,
+      GatewayToBridgeFileMsg::Add(FileAdd { files }) => self.add(files).await,
+      GatewayToBridgeFileMsg::Delete(FileDelete { files }) => self.delete(files).await,
+      GatewayToBridgeFileMsg::FileResponse(FileResponseData { file }) => self.handle_file_response(file).await,
     }
   }
 
   async fn list(&self) -> HandlerResult {
     let files = self.handle.state.fs.list_files().await?;
-    self.handle.respond(BridgeToGatewayFileMsg::Files { files }).await;
+    self.handle.respond(BridgeToGatewayFileMsg::Files(FileList { files })).await;
 
     Ok(())
   }

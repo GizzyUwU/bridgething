@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typeshare::typeshare;
 
+#[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -14,9 +16,11 @@ use ts_rs::TS;
 pub enum ForwardMessage {
   Text(String),
   Json(#[ts(type = "unknown")] serde_json::Value),
-
-  /// base64 encoded (json and binary don't play well together) - the tag is just for convenience
-  Binary(String),
+  Binary(
+    #[serde_as(as = "serde_with::Bytes")]
+    #[ts(type = "Uint8Array")]
+    Vec<u8>,
+  ),
 }
 
 // #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

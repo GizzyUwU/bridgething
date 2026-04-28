@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typeshare::typeshare;
 
 use crate::to_slug;
 
@@ -8,6 +9,7 @@ pub const CARTHING_HACKS_LOGO: &str = "/9j/4AAQSkZJRgABAQAAAQABAAD//gATQ3JlYXRlZ
 pub const IMAGE_SIZE: usize = 300;
 pub const THUMBNAIL_SIZE: usize = 96;
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
@@ -17,7 +19,7 @@ pub struct Track {
   pub album: Album,
   pub artist: Artist,
   pub artists: Vec<Artist>,
-  pub duration_ms: usize,
+  pub duration_ms: u32,
   pub image_id: String,
   pub saved: bool,
 }
@@ -37,16 +39,22 @@ impl Default for Track {
   }
 }
 
+#[typeshare]
+#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum Image {
-  #[serde(rename = "image_id")]
   Id(String),
-  #[serde(rename = "image_bytes")]
-  Bytes(String),
+  Bytes(
+    #[serde_as(as = "serde_with::Bytes")]
+    #[ts(type = "Uint8Array")]
+    Vec<u8>,
+  ),
 }
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
@@ -73,6 +81,7 @@ impl From<String> for Album {
   }
 }
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
@@ -107,11 +116,12 @@ pub struct CurrentlyActiveApplication {
   pub name: String,
 }
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct PlaybackOptions {
-  pub repeat: usize,
+  pub repeat: u32,
   pub shuffle: bool,
 }
 

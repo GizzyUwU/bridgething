@@ -35,7 +35,7 @@ export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'un
 export type ForwardMessage =
   | { encoding: 'text'; data: string }
   | { encoding: 'json'; data: unknown }
-  | { encoding: 'binary'; data: string };
+  | { encoding: 'binary'; data: Uint8Array };
 
 export type GatewayMeta = {
   adapterVersion: string;
@@ -46,7 +46,7 @@ export type GatewayMeta = {
   osName: string;
 };
 
-export type Image = { image_id: string } | { image_bytes: string };
+export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8Array };
 
 export type PhoneCallDirection = 'Incoming' | 'Outgoing';
 

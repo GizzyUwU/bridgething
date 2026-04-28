@@ -22,6 +22,7 @@ use crate::{
 };
 use ble::GattServer;
 use bluer::{Adapter, Address, Session};
+use libbridgething::gateway::FileRequestData;
 use libbridgething::{
   ForwardMessage,
   gateway::{BridgeToGatewayFileMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
@@ -108,7 +109,7 @@ impl BluetoothManager {
       .send_all(GatewayMessage::rfcomm_all(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),
         meta: GatewayMsgMeta::Request,
-        data: BridgeToGatewayFileMsg::FileRequest { file: path }.into(),
+        data: BridgeToGatewayFileMsg::FileRequest(FileRequestData { file: path }).into(),
       }))
       .await;
   }

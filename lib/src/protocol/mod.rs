@@ -6,16 +6,21 @@ mod gateway;
 pub use bridge::*;
 pub use gateway::*;
 
-const HEADER_LEN: usize = 12;
+const HEADER_LEN: usize = 16;
 const MAGIC: u16 = 0xdead;
-const VERSION: u8 = 1;
-const COMPRESSION_GZIP: u8 = 0x01;
+const VERSION: u8 = 2;
+
 const COMPRESSION_NONE: u8 = 0x00;
+const COMPRESSION_GZIP: u8 = 0x01;
+
+const ENCODING_MSGPACK: u8 = 0x00;
+const ENCODING_JSON: u8 = 0x01;
 
 #[derive(Debug, Clone)]
 struct EndecState {
   version: u8,
   compression: Compression,
+  encoding: Encoding,
   length: u64,
 
   total_length: usize,
@@ -28,6 +33,7 @@ impl Default for EndecState {
     Self {
       version: VERSION,
       compression: Compression::Gzip,
+      encoding: Encoding::Msgpack,
       length: 0,
 
       total_length: 0,
@@ -49,6 +55,22 @@ impl From<u8> for Compression {
       COMPRESSION_GZIP => Compression::Gzip,
       COMPRESSION_NONE => Compression::None,
       _ => Compression::None,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+  Msgpack,
+  Json,
+}
+
+impl From<u8> for Encoding {
+  fn from(value: u8) -> Self {
+    match value {
+      ENCODING_MSGPACK => Encoding::Msgpack,
+      ENCODING_JSON => Encoding::Json,
+      _ => Encoding::Msgpack,
     }
   }
 }

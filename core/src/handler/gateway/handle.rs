@@ -1,5 +1,5 @@
 use bluer::Address;
-use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta};
+use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, ResponseMeta};
 use uuid::Uuid;
 
 use crate::{
@@ -68,7 +68,11 @@ impl MsgHandle {
 
   pub async fn respond(&self, data: impl Into<BridgeToGatewayMsgData>) {
     self
-      .send(Uuid::now_v7(), data, GatewayMsgMeta::Response { request_id: self.id })
+      .send(
+        Uuid::now_v7(),
+        data,
+        GatewayMsgMeta::Response(ResponseMeta { request_id: self.id }),
+      )
       .await
   }
 

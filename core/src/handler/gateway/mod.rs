@@ -46,7 +46,7 @@ impl GatewayHandler {
     let handle = MsgHandle::new(self, id, meta, address, protocol);
 
     match data {
-      GatewayToBridgeMsgData::Version { data } => {
+      GatewayToBridgeMsgData::Version(data) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
       GatewayToBridgeMsgData::File(file_msg) => {

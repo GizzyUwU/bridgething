@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typeshare::typeshare;
 
 use crate::gateway::BridgeToGatewayMsgData;
 
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -38,10 +40,11 @@ impl BridgeThingMeta {
 
 impl From<BridgeThingMeta> for BridgeToGatewayMsgData {
   fn from(data: BridgeThingMeta) -> Self {
-    BridgeToGatewayMsgData::Version { data }
+    BridgeToGatewayMsgData::Version(data)
   }
 }
 
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -54,6 +57,7 @@ pub struct GatewayMeta {
   pub os_name: String,
 }
 
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub enum PhoneCallStatus {
@@ -66,6 +70,7 @@ pub enum PhoneCallStatus {
   Disconnecting,
 }
 
+#[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub enum PhoneCallDirection {

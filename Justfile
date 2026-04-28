@@ -18,6 +18,14 @@ typescript:
   cargo test -p libbridgething &> /dev/null
   bunx prettier lib/ts/bindings --write
 
+swift:
+  typeshare --lang=swift --output-file=lib/swift/Sources/BridgethingSchema/Generated.swift lib/src/
+
+kotlin:
+  typeshare --lang=kotlin --java-package=dev.bridgething.schema --output-file=lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt lib/src/
+
+codegen: typescript swift kotlin
+
 class:
   sudo hciconfig hci0 class 0x7c0000 || true
   sudo hciconfig hci1 class 0x7c0000 || true

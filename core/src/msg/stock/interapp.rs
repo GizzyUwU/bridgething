@@ -384,7 +384,7 @@ impl From<Track> for StockTrack {
       album: track.album.into(),
       artist: track.artists.first().cloned().unwrap_or_default().into(),
       artists: track.artists.into_iter().map(|a| a.into()).collect(),
-      duration_ms: track.duration_ms,
+      duration_ms: track.duration_ms as usize,
       image_id: track.image_id,
       is_episode: false,
       is_podcast: false,

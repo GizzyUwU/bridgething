@@ -1,26 +1,37 @@
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use typeshare::typeshare;
 
 use crate::gateway::BridgeToGatewayMsgData;
 
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(
-  tag = "event",
-  content = "data",
-  rename_all = "camelCase",
-  rename_all_fields = "camelCase"
-)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct FileList {
+  pub files: Vec<String>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct FileRequestData {
+  pub file: String,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum BridgeToGatewayFileMsg {
-  Files {
-    files: Vec<String>,
-  }, // response
+  Files(FileList), // response
   /// fileRequest occurs when a file is requested over http that is not known to the bridge
-  FileRequest {
-    file: String,
-  }, // request
+  FileRequest(FileRequestData), // request
 }
 
 impl From<BridgeToGatewayFileMsg> for BridgeToGatewayMsgData {

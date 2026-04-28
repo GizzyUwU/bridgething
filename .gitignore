@@ -1,5 +1,11 @@
 /target
 
+# swift
+/.build
+
+# gradle
+/.gradle
+
 # nix
 result
 

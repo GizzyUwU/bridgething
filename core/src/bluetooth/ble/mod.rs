@@ -236,9 +236,7 @@ impl GattServer {
           .write(BridgeToGatewayMsg {
             id: uuid::Uuid::now_v7(),
             meta: GatewayMsgMeta::Event,
-            data: BridgeToGatewayMsgData::Version {
-              data: self.state.meta.clone().into(),
-            },
+            data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
           })
           .await
           .expect("could not send version!!");

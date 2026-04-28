@@ -1,17 +1,12 @@
 use libbridgething::Track;
 
-use super::{media_player1::MediaPlayer1Track, DBusError};
+use super::{DBusError, media_player1::MediaPlayer1Track};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DBusPlayerShuffle {
   On,
+  #[default]
   Off,
-}
-
-impl Default for DBusPlayerShuffle {
-  fn default() -> Self {
-    Self::Off
-  }
 }
 
 impl TryFrom<String> for DBusPlayerShuffle {
@@ -50,25 +45,16 @@ impl From<DBusPlayerShuffle> for bool {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DBusPlayerRepeat {
   On,
+  #[default]
   Off,
 }
 
-impl From<DBusPlayerRepeat> for usize {
+impl From<DBusPlayerRepeat> for u32 {
   fn from(val: DBusPlayerRepeat) -> Self {
-    if val == DBusPlayerRepeat::On {
-      1
-    } else {
-      0
-    }
-  }
-}
-
-impl Default for DBusPlayerRepeat {
-  fn default() -> Self {
-    Self::Off
+    if val == DBusPlayerRepeat::On { 1 } else { 0 }
   }
 }
 
@@ -102,16 +88,11 @@ impl From<bool> for DBusPlayerRepeat {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DBusPlayerStatus {
   Playing,
+  #[default]
   Paused,
-}
-
-impl Default for DBusPlayerStatus {
-  fn default() -> Self {
-    Self::Paused
-  }
 }
 
 impl TryFrom<String> for DBusPlayerStatus {
@@ -198,7 +179,7 @@ impl From<DBusPlayerTrack> for Track {
       name: val.title,
       artist: val.artists.first().cloned().unwrap_or_default().into(),
       artists: val.artists.into_iter().map(Into::into).collect(),
-      duration_ms: val.duration,
+      duration_ms: val.duration as u32,
       saved: false,
       album: val.album.into(),
     }
