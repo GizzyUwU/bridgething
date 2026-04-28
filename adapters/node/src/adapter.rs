@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use napi::bindgen_prelude::*;
+use napi::{bindgen_prelude::*, threadsafe_function::UnknownReturnValue};
 
 use crate::{monitoring, protocol::ProtocolMan, Callbacks, Error, Event, JsMessage, Result};
 
@@ -54,7 +54,7 @@ impl NodeAdapter {
 
   #[napi]
   #[allow(clippy::missing_safety_doc)]
-  pub async unsafe fn init(&mut self) -> Result<()> {
+  pub async unsafe fn start(&mut self) -> Result<()> {
     if self.manager.is_some() {
       return Err(Error::AlreadyInitialized);
     };
@@ -67,13 +67,25 @@ impl NodeAdapter {
     .await?;
 
     self.manager = Some(manager);
-    tracing::info!("initialized bridgething adapter - scanning for car thing");
+    tracing::info!("started bridgething adapter — observing for car thing");
+
+    Ok(())
+  }
+
+  #[napi]
+  #[allow(clippy::missing_safety_doc)]
+  pub async unsafe fn stop(&mut self) -> Result<()> {
+    if let Some(manager) = self.manager.take() {
+      manager.cancel_token.cancel();
+    } else {
+      return Err(Error::NotInitialized);
+    }
 
     Ok(())
   }
 
   #[napi(ts_args_type = "callback: (event: AdapterEvent) => void")]
-  pub fn on(&mut self, callback: Function<Event>) -> napi::Result<()> {
+  pub fn on(&mut self, callback: Function<Event, UnknownReturnValue>) -> napi::Result<()> {
     tracing::debug!("registering new event listener callback");
     let callback = callback.build_threadsafe_function().build()?;
 
@@ -91,18 +103,6 @@ impl NodeAdapter {
   }
 
   #[napi]
-  pub async fn scan_on(&self) -> napi::Result<()> {
-    tracing::trace!("scan_on called");
-    Ok(self.forward(JsMessage::ScanOn).await?)
-  }
-
-  #[napi]
-  pub async fn scan_off(&self) -> napi::Result<()> {
-    tracing::trace!("scan_off called");
-    Ok(self.forward(JsMessage::ScanOff).await?)
-  }
-
-  #[napi]
   pub async fn disconnect(&self, device_id: String) -> napi::Result<()> {
     tracing::trace!("disconnect called with device_id: {device_id}");
     let device_id = device_id
@@ -113,21 +113,14 @@ impl NodeAdapter {
   }
 
   #[napi]
-  pub fn send(
-    &self,
-    device_id: String,
-    #[napi(ts_arg_type = "GatewayToBridgeMsg")] message: Object,
-  ) -> napi::Result<()> {
-    tracing::trace!("send called with device_id: {device_id}");
+  pub fn send(&self, device_id: String, frame: Buffer) -> napi::Result<()> {
+    tracing::trace!("send called with device_id: {device_id} ({} bytes)", frame.len());
     let device_id = device_id
       .parse()
       .map_err(|_| napi::Error::from_reason("failed to parse mac address".to_string()))?;
 
-    let message = serde::Deserialize::deserialize(&mut napi::De::new(&message))
-      .map_err(|_| napi::Error::from_reason("failed to deserialize message".to_string()))?;
-    tracing::trace!("parsed message: {message:?}");
-
-    Ok(self.try_forward(JsMessage::Data(device_id, message))?)
+    let bytes: Vec<u8> = frame.into();
+    Ok(self.try_forward(JsMessage::Send(device_id, bytes))?)
   }
 
   async fn forward(&self, message: JsMessage) -> Result<()> {

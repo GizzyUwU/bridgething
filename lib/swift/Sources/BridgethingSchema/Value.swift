@@ -5,7 +5,7 @@ import Foundation
 /// arbitrary-data escape hatch in the bridgething wire protocol.
 ///
 /// Implemented as a JSON-shaped enum that round-trips through Codable.
-public enum Value: Codable, Equatable {
+public enum Value: Codable, Equatable, Sendable {
   case null
   case bool(Bool)
   case int(Int64)

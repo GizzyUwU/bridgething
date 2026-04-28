@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use libbridgething::gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg};
-use napi::{
-  bindgen_prelude::*,
-  threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
-};
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, UnknownReturnValue};
 
 #[macro_use]
 extern crate napi_derive;
@@ -22,7 +18,7 @@ mod rfcomm;
 use bdaddr::BDAddr;
 
 type Event = AdapterEvent;
-type Callback = ThreadsafeFunction<Event, Unknown, Event, false>;
+type Callback = ThreadsafeFunction<Event, UnknownReturnValue, Event, napi::Status, false>;
 
 type MsgTx = tokio::sync::mpsc::Sender<JsMessage>;
 type MsgRx = tokio::sync::mpsc::Receiver<JsMessage>;
@@ -54,83 +50,49 @@ pub fn adapter_version() -> String {
   format!("v{}", ADAPTER_VERSION)
 }
 
+/// Messages flowing JS → adapter event loop. The wire-level codec lives one
+/// layer up in `@bridgething/gateway`; this layer trades raw bytes only.
 #[derive(Clone)]
 pub enum JsMessage {
-  ScanOn,
-  ScanOff,
-
-  Data(BDAddr, GatewayToBridgeMsg),
-
+  Send(BDAddr, Vec<u8>),
   Disconnect(BDAddr),
-
   Callback(Arc<Callback>),
 }
 
 impl std::fmt::Debug for JsMessage {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::ScanOn => write!(f, "JsMessage::ScanOn"),
-      Self::ScanOff => write!(f, "JsMessage::ScanOff"),
-      Self::Data(addr, data) => f.debug_tuple("JsMessage::Data").field(addr).field(data).finish(),
+      Self::Send(addr, data) => f
+        .debug_tuple("JsMessage::Send")
+        .field(addr)
+        .field(&format!("<{} bytes>", data.len()))
+        .finish(),
       Self::Disconnect(addr) => f.debug_tuple("JsMessage::Disconnect").field(addr).finish(),
       Self::Callback(_) => write!(f, "JsMessage::Callback(...)"),
     }
   }
 }
 
-#[napi(string_enum)]
-#[derive(Debug, Clone, Copy)]
-pub enum ConnectionType {
-  Ble,
-  Rfcomm,
+/// Identity for a connected peer.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct AdapterDevice {
+  pub id: String,
+  pub name: String,
 }
 
+/// Byte-level adapter events. Frame reassembly + msgpack/gzip codec are the
+/// gateway layer's responsibility; we ship raw transport chunks unmodified.
+///
+/// `data` is `Vec<u8>` (not `Buffer`) so the variant stays `Clone` for fan-out
+/// across multiple JS listeners. napi-rs marshals it as a `Uint8Array` on the
+/// JS side, which the TS adapter shim consumes directly.
 #[napi]
 #[derive(Clone)]
 pub enum AdapterEvent {
-  Connected {
-    name: String,
-    device_id: String,
-    mode: ConnectionType,
-  },
-  Disconnected {
-    device_id: String,
-    mode: ConnectionType,
-  },
-
-  Message {
-    device_id: String,
-    #[napi(ts_type = "BridgeToGatewayMsg")]
-    data: serde_json::Value,
-  },
-}
-
-#[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
-enum ConnectionMessage {
-  Msg(BridgeToGatewayMsg),
-  Close(ConnectionType),
-}
-
-impl From<BridgeToGatewayMsg> for ConnectionMessage {
-  fn from(msg: BridgeToGatewayMsg) -> Self {
-    Self::Msg(msg)
-  }
-}
-
-impl From<(BDAddr, ConnectionMessage)> for AdapterEvent {
-  fn from((address, msg): (BDAddr, ConnectionMessage)) -> Self {
-    match msg {
-      ConnectionMessage::Msg(msg) => Self::Message {
-        device_id: address.to_string(),
-        data: serde_json::to_value(msg).unwrap_or_default(),
-      },
-      ConnectionMessage::Close(mode) => Self::Disconnected {
-        device_id: address.to_string(),
-        mode,
-      },
-    }
-  }
+  Connected { device: AdapterDevice },
+  Disconnected { device_id: String },
+  Bytes { device_id: String, data: Vec<u8> },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -141,9 +103,9 @@ pub enum Error {
   #[cfg(feature = "ble")]
   #[error(transparent)]
   Btleplug(#[from] btleplug::Error),
-  #[error("adapter not initialized")]
+  #[error("adapter not started")]
   NotInitialized,
-  #[error("adapter already initialized")]
+  #[error("adapter already started")]
   AlreadyInitialized,
   #[error("no bluetooth adapters found")]
   NoBluetoothAdapters,
@@ -161,8 +123,6 @@ pub enum Error {
   DeviceDisconnected,
   #[error("failed to parse address: {0}")]
   AddressParse(#[from] bdaddr::ParseBDAddrError),
-  #[error(transparent)]
-  Endec(#[from] libbridgething::protocol::EndecError),
   #[cfg(target_os = "linux")]
   #[error("bluez error: {0}")]
   Bluez(#[from] bluer::Error),

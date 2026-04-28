@@ -200,7 +200,7 @@ impl BDAddr {
   ///
   /// For the more common presentation with colons use the `to_string()`
   /// method.
-  pub fn to_string_no_delim(&self) -> String {
+  pub fn string_no_delim(&self) -> String {
     let mut s = String::with_capacity(12);
     self.write_no_delim(&mut s).expect("A String-Writer never fails");
     s
@@ -208,6 +208,14 @@ impl BDAddr {
 }
 
 /// Different de-/serialization formats for [`BDAddr`].
+///
+/// Vendored from btleplug for use as `#[serde(with = "...")]` helpers when
+/// MAC fields cross the wire as part of typed messages. The byte-level
+/// refactor of this adapter ships raw bytes only, so none of the helpers
+/// are currently called — kept under `#[allow(dead_code)]` so re-typing a
+/// future variant of `JsMessage` or `AdapterEvent` doesn't need to vendor
+/// them again.
+#[allow(dead_code)]
 pub mod serde {
   use std::fmt::{self, Write as _};
 

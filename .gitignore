@@ -1,10 +1,12 @@
 /target
+adapters/node/native
 
 # swift
 /.build
 
 # gradle
 /.gradle
+/local.properties
 
 # nix
 result

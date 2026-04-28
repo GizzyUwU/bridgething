@@ -1,7 +1,7 @@
 {
   "name": "@bridgething/adapter-react-native",
   "version": "0.1.0",
-  "description": "bridgething bluetooth adapter for react native",
+  "description": "bridgething transport adapter for react native",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",
@@ -24,6 +24,8 @@
     "android",
     "ios",
     "cpp",
+    "nitrogen",
+    "nitro.json",
     "*.podspec",
     "react-native.config.js",
     "!ios/build",
@@ -38,16 +40,16 @@
     "!**/.*"
   ],
   "scripts": {
-    "example": "#yarn workspace @bridgething/adapter-react-native-example",
-    "typecheck": "#tsc",
-    "lint": "#eslint \"**/*.{js,ts,tsx}\"",
-    "clean": "#rm -rf android/build example/android/build example/android/app/build example/ios/build lib",
-    "build": "#bob build"
+    "nitro:codegen": "nitrogen",
+    "build": "bob build",
+    "clean": "rm -rf lib nitrogen/generated"
   },
   "keywords": [
     "react-native",
     "ios",
-    "android"
+    "android",
+    "bridgething",
+    "nitro"
   ],
   "repository": {
     "type": "git",
@@ -62,47 +64,23 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
-  "dependencies": {
-    "@bridgething/lib": "workspace:*",
-    "pako": "^2.1.0",
-    "react-native-ble-plx": "^3.4.0"
-  },
   "devDependencies": {
-    "@bridgething/gateway": "workspace:*",
-    "@eslint/js": "*",
-    "@react-native-community/cli": "15.1.3",
-    "@react-native/eslint-config": "^0.77.0",
-    "@types/pako": "^2.0.3",
-    "@types/react": "^19.0.8",
-    "eslint": "*",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-prettier": "^5.2.3",
-    "globals": "^15.14.0",
-    "prettier": "*",
-    "react": "19.0.0",
-    "react-native": "0.77.0",
-    "react-native-builder-bob": "^0.36.0",
-    "typescript": "*"
-  },
-  "resolutions": {
-    "@types/react": "^19.0.8"
+    "@react-native-community/cli": "20.1.3",
+    "@react-native/eslint-config": "0.83.6",
+    "@types/react": "^19.2.14",
+    "nitrogen": "^0.35.5",
+    "react": "19.2.5",
+    "react-native": "0.83.6",
+    "react-native-builder-bob": "^0.41.0",
+    "react-native-nitro-modules": "^0.35.5"
   },
   "peerDependencies": {
+    "@bridgething/gateway": "workspace:*",
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
   },
-  "packageManager": "bun@1.2.1",
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "@react-native",
-      "prettier"
-    ]
-  },
-  "eslintIgnore": [
-    "node_modules/",
-    "lib/"
-  ],
+  "packageManager": "bun@1.3.8",
   "react-native-builder-bob": {
     "source": "src",
     "output": "lib",
@@ -122,8 +100,7 @@
       [
         "typescript",
         {
-          "project": "tsconfig.build.json",
-          "esm": true
+          "project": "tsconfig.build.json"
         }
       ]
     ]

@@ -27,7 +27,7 @@ export type ServerBluetoothEvent =
   | { event: 'interface'; data: { mac: string; name: string; interface: string } }
   | { event: 'paringResult'; data: { success: boolean } }
   | { event: 'pin'; data: { mac: string; name: string; pin: string } }
-  | { event: 'pairedDevices'; data: { [key in string]?: Device } };
+  | { event: 'pairedDevices'; data: { [key in string]: Device } };
 
 /**
  * bridgething -> client

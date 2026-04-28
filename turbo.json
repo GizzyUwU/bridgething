@@ -1,11 +1,12 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
+  "globalPassThroughEnv": ["RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "CARGO_HOME"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "native/**", "lib/**"]
     },
     "lint": {
       "dependsOn": ["^lint"]

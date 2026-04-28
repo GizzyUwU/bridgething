@@ -24,6 +24,13 @@ swift:
   # distinguish Data (encodes to msgpack bin) from [UInt8] (encodes to array of int).
   # Our wire is bin; rewrite the type so consumers get Data.
   sed -i 's/\[UInt8\]/Data/g' lib/swift/Sources/BridgethingSchema/Generated.swift
+  # Generated structs/enums travel through actor-isolated stream events on the
+  # gateway side, which Swift 6 strict concurrency requires to be Sendable.
+  # Every typeshare-emitted type is a value type whose stored fields are
+  # already Sendable (primitives, Data, other generated types), so blanket-
+  # adding the conformance is safe.
+  sed -i 's/: Codable {/: Codable, Sendable {/g' lib/swift/Sources/BridgethingSchema/Generated.swift
+  sed -i 's/: String, Codable {/: String, Codable, Sendable {/g' lib/swift/Sources/BridgethingSchema/Generated.swift
 
 kotlin:
   typeshare --lang=kotlin --java-package=dev.bridgething.schema --output-file=lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt lib/src/

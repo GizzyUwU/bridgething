@@ -4,7 +4,7 @@
 
 import Foundation
 
-public struct Album: Codable {
+public struct Album: Codable, Sendable {
 	public let id: String
 	public let name: String
 
@@ -14,7 +14,7 @@ public struct Album: Codable {
 	}
 }
 
-public struct Artist: Codable {
+public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
 
@@ -24,7 +24,7 @@ public struct Artist: Codable {
 	}
 }
 
-public struct BridgeFile: Codable {
+public struct BridgeFile: Codable, Sendable {
 	public let path: String
 	public let data: Data
 
@@ -34,7 +34,7 @@ public struct BridgeFile: Codable {
 	}
 }
 
-public struct BridgeThingMeta: Codable {
+public struct BridgeThingMeta: Codable, Sendable {
 	public let bridgethingVersion: String
 	public let libbridgethingVersion: String
 	public let appName: String
@@ -78,7 +78,7 @@ public struct BridgeThingMeta: Codable {
 	}
 }
 
-public enum GatewayMsgMeta: Codable {
+public enum GatewayMsgMeta: Codable, Sendable {
 	case command
 	case event
 	case request
@@ -134,7 +134,7 @@ public enum GatewayMsgMeta: Codable {
 	}
 }
 
-public enum BridgeToGatewayMsgData: Codable {
+public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case version(BridgeThingMeta)
 	case file(BridgeToGatewayFileMsg)
 	case forward(ForwardMessage)
@@ -207,7 +207,7 @@ public enum BridgeToGatewayMsgData: Codable {
 /// messages from bridgething to the gateway (mobile or desktop app).
 /// 
 /// these messages will pass over bluetooth.
-public struct BridgeToGatewayMsg: Codable {
+public struct BridgeToGatewayMsg: Codable, Sendable {
 	public let id: Data
 	public let meta: GatewayMsgMeta
 	public let data: BridgeToGatewayMsgData
@@ -219,7 +219,7 @@ public struct BridgeToGatewayMsg: Codable {
 	}
 }
 
-public struct ChromeNavigate: Codable {
+public struct ChromeNavigate: Codable, Sendable {
 	public let url: String
 
 	public init(url: String) {
@@ -227,7 +227,7 @@ public struct ChromeNavigate: Codable {
 	}
 }
 
-public struct FileAdd: Codable {
+public struct FileAdd: Codable, Sendable {
 	public let files: [BridgeFile]
 
 	public init(files: [BridgeFile]) {
@@ -235,7 +235,7 @@ public struct FileAdd: Codable {
 	}
 }
 
-public struct FileDelete: Codable {
+public struct FileDelete: Codable, Sendable {
 	public let files: [String]
 
 	public init(files: [String]) {
@@ -243,7 +243,7 @@ public struct FileDelete: Codable {
 	}
 }
 
-public struct FileList: Codable {
+public struct FileList: Codable, Sendable {
 	public let files: [String]
 
 	public init(files: [String]) {
@@ -251,7 +251,7 @@ public struct FileList: Codable {
 	}
 }
 
-public struct FileRequestData: Codable {
+public struct FileRequestData: Codable, Sendable {
 	public let file: String
 
 	public init(file: String) {
@@ -259,7 +259,7 @@ public struct FileRequestData: Codable {
 	}
 }
 
-public struct FileResponseData: Codable {
+public struct FileResponseData: Codable, Sendable {
 	public let file: BridgeFile
 
 	public init(file: BridgeFile) {
@@ -267,7 +267,7 @@ public struct FileResponseData: Codable {
 	}
 }
 
-public struct GatewayMeta: Codable {
+public struct GatewayMeta: Codable, Sendable {
 	public let adapterVersion: String
 	public let libVersion: String
 	public let libbridgethingVersion: String
@@ -285,7 +285,7 @@ public struct GatewayMeta: Codable {
 	}
 }
 
-public enum GatewayToBridgeMsgData: Codable {
+public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case version(GatewayMeta)
 	case file(GatewayToBridgeFileMsg)
 	case chrome(GatewayToBridgeChromeMsg)
@@ -354,7 +354,7 @@ public enum GatewayToBridgeMsgData: Codable {
 /// messages from the gateway (mobile or desktop app) to bridgething.
 /// 
 /// these messages will pass over bluetooth.
-public struct GatewayToBridgeMsg: Codable {
+public struct GatewayToBridgeMsg: Codable, Sendable {
 	public let id: Data
 	public let meta: GatewayMsgMeta
 	public let data: GatewayToBridgeMsgData
@@ -366,7 +366,7 @@ public struct GatewayToBridgeMsg: Codable {
 	}
 }
 
-public struct PlaybackOptions: Codable {
+public struct PlaybackOptions: Codable, Sendable {
 	public let `repeat`: UInt32
 	public let shuffle: Bool
 
@@ -376,7 +376,7 @@ public struct PlaybackOptions: Codable {
 	}
 }
 
-public struct ResponseMeta: Codable {
+public struct ResponseMeta: Codable, Sendable {
 	public let requestId: Data
 
 	public init(requestId: Data) {
@@ -384,7 +384,7 @@ public struct ResponseMeta: Codable {
 	}
 }
 
-public struct Track: Codable {
+public struct Track: Codable, Sendable {
 	public let id: String
 	public let name: String
 	public let album: Album
@@ -406,7 +406,7 @@ public struct Track: Codable {
 	}
 }
 
-public enum BridgeToGatewayFileMsg: Codable {
+public enum BridgeToGatewayFileMsg: Codable, Sendable {
 	case files(FileList)
 	/// fileRequest occurs when a file is requested over http that is not known to the bridge
 	case fileRequest(FileRequestData)
@@ -452,7 +452,7 @@ public enum BridgeToGatewayFileMsg: Codable {
 	}
 }
 
-public enum ForwardMessage: Codable {
+public enum ForwardMessage: Codable, Sendable {
 	case text(String)
 	case json(Value)
 	case binary(Data)
@@ -507,7 +507,7 @@ public enum ForwardMessage: Codable {
 	}
 }
 
-public enum GatewayToBridgeChromeMsg: Codable {
+public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 	case navigate(ChromeNavigate)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -542,7 +542,7 @@ public enum GatewayToBridgeChromeMsg: Codable {
 	}
 }
 
-public enum GatewayToBridgeFileMsg: Codable {
+public enum GatewayToBridgeFileMsg: Codable, Sendable {
 	case list
 	case delete(FileDelete)
 	case add(FileAdd)
@@ -606,7 +606,7 @@ public enum GatewayToBridgeFileMsg: Codable {
 	}
 }
 
-public enum Image: Codable {
+public enum Image: Codable, Sendable {
 	case id(String)
 	case bytes(Data)
 
@@ -651,12 +651,12 @@ public enum Image: Codable {
 	}
 }
 
-public enum PhoneCallDirection: String, Codable {
+public enum PhoneCallDirection: String, Codable, Sendable {
 	case incoming = "Incoming"
 	case outgoing = "Outgoing"
 }
 
-public enum PhoneCallStatus: String, Codable {
+public enum PhoneCallStatus: String, Codable, Sendable {
 	case disconnected = "Disconnected"
 	case sending = "Sending"
 	case ringing = "Ringing"

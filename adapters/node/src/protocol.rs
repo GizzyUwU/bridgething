@@ -20,24 +20,10 @@ pub trait Protocol: Send {
 struct ProtocolHandle {
   tx: MsgTx,
   _handle: JoinHandle<()>,
-  cancel_token: CancellationToken,
-}
-
-enum Mode {
-  Dual {
-    ble: ProtocolHandle,
-    rfcomm: ProtocolHandle,
-  },
-  Ble {
-    handle: ProtocolHandle,
-  },
-  Rfcomm {
-    handle: ProtocolHandle,
-  },
 }
 
 pub struct ProtocolMan {
-  mode: Mode,
+  rfcomm: ProtocolHandle,
 
   pub cancel_token: CancellationToken,
 }
@@ -47,66 +33,37 @@ impl ProtocolMan {
     tracing::debug!("initializing protocol manager");
     let cancel_token = CancellationToken::new();
 
-    let mode = match mode {
-      AdapterMode::Dual => {
-        todo!();
-      }
-      AdapterMode::Ble => {
-        todo!();
-      }
-      AdapterMode::Rfcomm => {
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
-        let cancel_token = cancel_token.child_token();
-        let protocol_cancel_token = cancel_token.clone();
-
-        let handle = ProtocolHandle {
-          tx,
-          _handle: crate::rfcomm::get_rfcomm(adapter_name, rx, callbacks, protocol_cancel_token)
-            .await?
-            .spawn(),
-          cancel_token,
-        };
-
-        Mode::Rfcomm { handle }
+    let rfcomm = match mode {
+      AdapterMode::Rfcomm => Self::spawn_rfcomm(&cancel_token, adapter_name, callbacks).await?,
+      AdapterMode::Dual | AdapterMode::Ble => {
+        return Err(crate::Error::NotInitialized);
       }
     };
 
-    Ok(Self { mode, cancel_token })
+    Ok(Self { rfcomm, cancel_token })
+  }
+
+  async fn spawn_rfcomm(
+    parent: &CancellationToken,
+    adapter_name: Option<String>,
+    callbacks: Callbacks,
+  ) -> Result<ProtocolHandle> {
+    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    let _handle = crate::rfcomm::get_rfcomm(adapter_name, rx, callbacks, parent.child_token())
+      .await?
+      .spawn();
+    Ok(ProtocolHandle { tx, _handle })
   }
 
   pub async fn send(&self, data: JsMessage) -> Result<()> {
     tracing::trace!("sending message: {data:?}");
-    match &self.mode {
-      Mode::Dual { ble, rfcomm } => {
-        ble.tx.send(data.clone()).await?;
-        rfcomm.tx.send(data).await?;
-      }
-      Mode::Ble { handle } => {
-        handle.tx.send(data).await?;
-      }
-      Mode::Rfcomm { handle } => {
-        handle.tx.send(data).await?;
-      }
-    }
-
+    self.rfcomm.tx.send(data).await?;
     Ok(())
   }
 
   pub fn try_send(&self, data: JsMessage) -> Result<()> {
     tracing::trace!("try_sending message: {data:?}");
-    match &self.mode {
-      Mode::Dual { ble, rfcomm } => {
-        ble.tx.try_send(data.clone())?;
-        rfcomm.tx.try_send(data)?;
-      }
-      Mode::Ble { handle } => {
-        handle.tx.try_send(data)?;
-      }
-      Mode::Rfcomm { handle } => {
-        handle.tx.try_send(data)?;
-      }
-    }
-
+    self.rfcomm.tx.try_send(data)?;
     Ok(())
   }
 }

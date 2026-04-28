@@ -27,12 +27,12 @@ let package = Package(
         .product(name: "DMMessagePack", package: "msgpack-swift"),
         .product(name: "Gzip", package: "GzipSwift"),
       ],
-      path: "lib/swift/Sources/BridgethingGateway"
+      path: "gateway/swift/Sources/BridgethingGateway"
     ),
     .testTarget(
       name: "BridgethingGatewayTests",
       dependencies: ["BridgethingGateway"],
-      path: "lib/swift/Tests/BridgethingGatewayTests"
+      path: "gateway/swift/Tests/BridgethingGatewayTests"
     ),
   ]
 )

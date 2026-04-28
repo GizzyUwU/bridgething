@@ -1,176 +1,155 @@
-import { type Adapter, type AdapterCallback } from '@bridgething/gateway';
-import { BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_SERVICE_UUID, Logger, LogLevel } from '@bridgething/lib';
-import { gzip, inflate } from 'pako';
-import { PermissionsAndroid, Platform } from 'react-native';
-import {
-  LogLevel as BLELogLevel,
-  BleManager,
-  State as BLEState,
-  type BleError,
-  type Subscription as BLESubscription,
-  type Characteristic,
-  type Device,
-  type DeviceId,
-} from 'react-native-ble-plx';
+import { type Adapter, type AdapterEvent, type AdapterListener } from '@bridgething/gateway';
 
-class ReactNativeAdapter implements Adapter {
-  private readonly logger: Logger;
-  private readonly manager: BleManager;
+import type { BridgethingTransport, BridgethingTransportDevice } from './specs/BridgethingTransport.nitro';
 
-  private readonly callbacks: AdapterCallback[] = [];
-  private readonly subscriptions: Record<string, BLESubscription> = {};
+export class ReactNativeAdapterError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: 'not-started' | 'unknown-device' | 'send-failed' | 'transport',
+  ) {
+    super(message);
+    this.name = 'ReactNativeAdapterError';
+  }
+}
 
-  private ready: boolean = false;
-  private readonly devices: Record<DeviceId, Device> = {};
+export type ReactNativeAdapterOptions = {
+  /**
+   * Override the underlying Nitro HybridObject. Tests use a fake; production
+   * leaves this unset and lets the wrapper resolve the autolinked native
+   * implementation by name.
+   */
+  transport?: BridgethingTransport;
+};
 
-  constructor(logLevel: LogLevel = LogLevel.Log) {
-    this.logger = new Logger('Adapter', logLevel);
-    this.manager = new BleManager({});
-    void this.manager.setLogLevel(logLevelToBleLogLevel(logLevel));
-    this.logger.debug('initializing ble manager');
+/**
+ * Byte-level RN adapter built on top of the Nitro HybridObject. Implements
+ * the `Adapter` contract that `BridgethingGateway` expects: bytes in, bytes
+ * out, plus connect / disconnect / connected events.
+ *
+ * On iOS the underlying transport observes `EAAccessoryDidConnect` and
+ * auto-opens sessions for the bridgething protocol string — `connect()` is
+ * a manual fallback for accessories that were already attached when the
+ * adapter started. On Android, `connect(deviceId)` opens the RFCOMM channel
+ * to a bonded `BluetoothDevice`.
+ */
+export class ReactNativeAdapter implements Adapter {
+  private readonly transport: BridgethingTransport;
+  private readonly listeners: Set<AdapterListener> = new Set();
+  private started = false;
 
-    this.subscriptions.state = this.manager.onStateChange(state => this.handleStateUpdate(state));
+  constructor(options: ReactNativeAdapterOptions = {}) {
+    this.transport = options.transport ?? createNativeTransport();
+    this.wireListeners();
+  }
+
+  on(listener: AdapterListener): void {
+    this.listeners.add(listener);
+  }
+
+  off(listener: AdapterListener): void {
+    this.listeners.delete(listener);
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    await this.transport.start();
+  }
+
+  async stop(): Promise<void> {
+    if (!this.started) return;
+    this.started = false;
+    await this.transport.stop();
+  }
+
+  async disconnect(deviceId: string): Promise<void> {
+    await this.transport.disconnect(deviceId);
+  }
+
+  async send(deviceId: string, frame: Uint8Array): Promise<void> {
+    if (!this.started) {
+      throw new ReactNativeAdapterError('adapter not started', 'not-started');
+    }
+    try {
+      await this.transport.send(deviceId, toArrayBuffer(frame));
+    } catch (err) {
+      throw new ReactNativeAdapterError(errorMessage(err), 'send-failed');
+    }
   }
 
   /**
-   * blocks until the bluetooth adapter is ready, then starts scan.
-   * @throws THIS WILL THROW IF BLUETOOTH PERMISSION IS DENIED
+   * Manually open a session against a known peer.
+   *
+   * iOS: useful when the accessory was already attached before `start()` —
+   * `EAAccessoryDidConnect` doesn't fire retroactively. Returns immediately
+   * if iOS already has a session for `deviceId`.
+   *
+   * Android: required for every bonded `BluetoothDevice` — RFCOMM doesn't
+   * auto-open. The device must already be paired via system Settings.
    */
-  async init() {
-    const hasPermission = await this.requestBluetoothPermission();
-    if (!hasPermission) throw new Error('failed to get bluetooth permissions!');
-
-    await this.manager.enable();
-
-    const state = await this.manager.state();
-    this.ready = state === BLEState.PoweredOn;
-    // TODO: is there a better way to do this?
-    while (!this.ready) await new Promise(resolve => setTimeout(resolve, 100));
-
-    await this.scanOn();
+  async connect(deviceId: string): Promise<BridgethingTransportDevice> {
+    if (!this.started) {
+      throw new ReactNativeAdapterError('adapter not started', 'not-started');
+    }
+    return this.transport.connect(deviceId);
   }
 
-  on = (callback: AdapterCallback) => this.callbacks.push(callback);
-
-  scanOn = () =>
-    this.manager.startDeviceScan(
-      [BRIDGETHING_SERVICE_UUID],
-      { legacyScan: false },
-      (error, device) => void this.handleDeviceFound(error, device),
-    );
-
-  scanOff = () => this.manager.stopDeviceScan();
-
-  /** @throws THIS WILL THROW IF THE DEVICE IS NOT KNOWN/CONNECTED */
-  async disconnect(deviceId: DeviceId) {
-    const device = this.devices[deviceId];
-    if (!device) throw new Error('device not known!');
-
-    await device.cancelConnection();
+  /** Snapshot of currently-connectable peers known to the OS. */
+  getKnownDevices(): BridgethingTransportDevice[] {
+    return this.transport.getKnownDevices();
   }
 
-  /** @throws THIS WILL THROW IF THE DEVICE IS NOT KNOWN/CONNECTED OR IF SEND FAILS */
-  async send(deviceId: DeviceId, message: Uint8Array) {
-    const device = this.devices[deviceId];
-    if (!device) throw new Error('device not known!');
-
-    const data = gzip(message);
-
-    await device.writeCharacteristicWithoutResponseForService(
-      BRIDGETHING_SERVICE_UUID,
-      BRIDGETHING_CHARACTERISTIC_UUID,
-      bytesToBase64(data),
-    );
+  private wireListeners(): void {
+    this.transport.setOnConnected(device => {
+      this.dispatch({ type: 'connected', device: { id: device.id, name: device.name } });
+    });
+    this.transport.setOnDisconnected(deviceId => {
+      this.dispatch({ type: 'disconnected', deviceId });
+    });
+    this.transport.setOnBytes((deviceId, frame) => {
+      this.dispatch({ type: 'bytes', deviceId, data: new Uint8Array(frame) });
+    });
+    this.transport.setOnError((deviceId, description) => {
+      // Errors from the native transport bubble up to consumers via the
+      // gateway's existing decode-error path is for *codec* failures;
+      // transport-level errors aren't part of the Adapter event surface, so
+      // surface them through console for now and rely on the disconnect
+      // event that follows.
+      console.warn(`[bridgething] transport error on ${deviceId}: ${description}`);
+    });
   }
 
-  private handleRecv(error: BleError | null, char: Characteristic | null) {
-    if (error) this.logger.error('characteristic read error: ', error);
-    if (!char) return;
-
-    this.logger.trace('new characteristic update: ', char);
-
-    const data = char.value;
-    if (!data) return this.logger.warn('received characteristic update with no data!');
-
-    const decompressed = inflate(base64ToBytes(data));
-    this.callbacks.map(c => c({ type: 'data', deviceId: char.deviceID, data: decompressed }));
-  }
-
-  private async handleDeviceFound(error: BleError | null, device: Device | null) {
-    if (error) this.logger.error('scan error: ', error);
-    if (!device) return;
-
-    this.logger.debug('found device running bridgething: ', device);
-    const connected = await device.isConnected();
-    if (!connected) await device.connect();
-
-    this.subscriptions[`${device.id}:char`] = device.monitorCharacteristicForService(
-      BRIDGETHING_SERVICE_UUID,
-      BRIDGETHING_CHARACTERISTIC_UUID,
-      (error, char) => void this.handleRecv(error, char),
-    );
-  }
-
-  private handleStateUpdate(state: BLEState) {
-    this.logger.debug('new bluetooth state update: ', state);
-    if (state === BLEState.PoweredOn) this.ready = true;
-  }
-
-  private requestBluetoothPermission = async () => {
-    if (Platform.OS === 'ios') return true;
-
-    if (Platform.OS === 'android' && PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION) {
-      const apiLevel = parseInt(Platform.Version.toString(), 10);
-
-      if (apiLevel < 31) {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
-      }
-      if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN && PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT) {
-        const result = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ]);
-
-        return (
-          result['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED &&
-          result['android.permission.BLUETOOTH_SCAN'] === PermissionsAndroid.RESULTS.GRANTED &&
-          result['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
-        );
+  private dispatch(event: AdapterEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error('[bridgething] adapter listener threw', err);
       }
     }
-
-    return false;
-  };
-}
-
-function bytesToBase64(data: Uint8Array): string {
-  return btoa(String.fromCharCode.apply(null, Array.from(data)));
-}
-
-function base64ToBytes(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function logLevelToBleLogLevel(logLevel: LogLevel) {
-  switch (logLevel) {
-    case LogLevel.Trace:
-      return BLELogLevel.Verbose;
-    case LogLevel.Debug:
-      return BLELogLevel.Debug;
-    case LogLevel.Log:
-      return BLELogLevel.Info;
-    case LogLevel.Warn:
-      return BLELogLevel.Warning;
-    case LogLevel.Error:
-      return BLELogLevel.Error;
-    default:
-      return BLELogLevel.None;
   }
 }
 
-export { ReactNativeAdapter };
+function createNativeTransport(): BridgethingTransport {
+  // Lazy-require so test environments that pass `options.transport` never
+  // pull in the RN runtime (Bun can't parse react-native's Flow source).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { NitroModules } = require('react-native-nitro-modules') as typeof import('react-native-nitro-modules');
+  return NitroModules.createHybridObject<BridgethingTransport>('BridgethingTransport');
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer;
+  }
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+export type { BridgethingTransport, BridgethingTransportDevice } from './specs/BridgethingTransport.nitro';

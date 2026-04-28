@@ -21,7 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # feature-specific cross-platform dependencies (ble)
-btleplug = { version = "0.11.7", features = ["serde"], optional = true }
+btleplug = { version = "0.12.0", features = ["serde"], optional = true }
 
 # feature-specific platform-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -31,7 +31,7 @@ bluer = { workspace = true, features = [
 ], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.60.0", features = [
+windows = { version = "0.62.2", features = [
   "Devices_Bluetooth",
   "Devices_Radios",
   "Foundation_Collections",
@@ -55,13 +55,13 @@ ble = ["btleplug"]
 
 
 [dependencies.napi]
-version = "3.0.0-alpha.33"
+version = "3.8.5"
 default-features = false
 # see https://nodejs.org/api/n-api.html#node-api-version-matrix
 features = ["napi4", "async", "serde-json"]
 
 [dependencies.napi-derive]
-version = "3.0.0-alpha.29"
+version = "3.5.4"
 features = ["type-def"]
 
 [build-dependencies]
