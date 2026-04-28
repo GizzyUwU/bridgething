@@ -4,7 +4,7 @@ import { ReactNativeAdapter } from '../src';
 import type { BridgethingTransport, BridgethingTransportDevice } from '../src/specs/BridgethingTransport.nitro';
 
 class FakeTransport implements BridgethingTransport {
-  // HybridObject vestiges — not exercised in tests but required by the type.
+  // HybridObject vestiges - not exercised in tests but required by the type.
   readonly name: string = 'FakeBridgethingTransport';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly equals: any = () => false;

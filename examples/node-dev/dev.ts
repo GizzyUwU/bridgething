@@ -72,7 +72,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
     case 'ack':
     case 'done':
       // Bare ack/done events with `meta.kind: 'event'` (rather than a
-      // response) are unusual — the daemon almost always wraps them in a
+      // response) are unusual - the daemon almost always wraps them in a
       // response so the gateway's request() can resolve. Log and ignore.
       console.log('unexpected ack/done as event:', msg);
       break;

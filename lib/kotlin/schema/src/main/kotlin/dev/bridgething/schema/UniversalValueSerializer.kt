@@ -22,7 +22,7 @@ import kotlinx.serialization.json.longOrNull
 /**
  * Serializer for `kotlinx.serialization.json.JsonElement` that works across
  * formats. The schema's `Value = JsonElement` typealias rides the
- * `ForwardMessage.Json` variant — Rust's `serde_json::Value` is format-agnostic
+ * `ForwardMessage.Json` variant - Rust's `serde_json::Value` is format-agnostic
  * (becomes nested JSON in JSON output and nested msgpack maps/arrays/primitives
  * in msgpack output), but kotlinx's built-in `JsonElementSerializer` only works
  * with `JsonEncoder` / `JsonDecoder`.
@@ -39,50 +39,53 @@ import kotlinx.serialization.json.longOrNull
  * post-process adds `@Contextual` on the `Forward.Json.data` field.
  */
 public object UniversalValueSerializer : KSerializer<JsonElement> {
-  @OptIn(InternalSerializationApi::class)
-  override val descriptor: SerialDescriptor =
-    buildSerialDescriptor("dev.bridgething.schema.Value", SerialKind.CONTEXTUAL)
+    @OptIn(InternalSerializationApi::class)
+    override val descriptor: SerialDescriptor =
+        buildSerialDescriptor("dev.bridgething.schema.Value", SerialKind.CONTEXTUAL)
 
-  override fun serialize(encoder: Encoder, value: JsonElement) {
-    if (encoder is JsonEncoder) {
-      encoder.encodeJsonElement(value)
-      return
+    override fun serialize(encoder: Encoder, value: JsonElement) {
+        if (encoder is JsonEncoder) {
+            encoder.encodeJsonElement(value)
+            return
+        }
+        MsgPackNullableDynamicSerializer.Default.serialize(encoder, jsonElementToDynamic(value))
     }
-    MsgPackNullableDynamicSerializer.Default.serialize(encoder, jsonElementToDynamic(value))
-  }
 
-  override fun deserialize(decoder: Decoder): JsonElement {
-    if (decoder is JsonDecoder) return decoder.decodeJsonElement()
-    val dynamic = MsgPackNullableDynamicSerializer.Default.deserialize(decoder)
-    return dynamicToJsonElement(dynamic)
-  }
-
-  private fun jsonElementToDynamic(elem: JsonElement): Any? = when (elem) {
-    is JsonNull -> null
-    is JsonPrimitive -> when {
-      elem.isString -> elem.content
-      else -> elem.booleanOrNull
-        ?: elem.longOrNull
-        ?: elem.doubleOrNull
-        ?: error("UniversalValueSerializer: unsupported JsonPrimitive '${elem.content}'")
+    override fun deserialize(decoder: Decoder): JsonElement {
+        if (decoder is JsonDecoder) return decoder.decodeJsonElement()
+        val dynamic = MsgPackNullableDynamicSerializer.Default.deserialize(decoder)
+        return dynamicToJsonElement(dynamic)
     }
-    is JsonObject -> elem.mapValues { jsonElementToDynamic(it.value) }
-    is JsonArray -> elem.map { jsonElementToDynamic(it) }
-  }
 
-  private fun dynamicToJsonElement(value: Any?): JsonElement = when (value) {
-    null -> JsonNull
-    is Boolean -> JsonPrimitive(value)
-    is Number -> JsonPrimitive(value)
-    is String -> JsonPrimitive(value)
-    is Map<*, *> -> JsonObject(
-      value.entries.associate { (k, v) ->
-        (k?.toString() ?: error("UniversalValueSerializer: null map key in msgpack payload")) to dynamicToJsonElement(v)
-      }
-    )
-    is List<*> -> JsonArray(value.map { dynamicToJsonElement(it) })
-    is Array<*> -> JsonArray(value.map { dynamicToJsonElement(it) })
-    is ByteArray -> JsonArray(value.map { JsonPrimitive(it.toInt() and 0xff) })
-    else -> error("UniversalValueSerializer: unsupported dynamic value type ${value::class.qualifiedName}")
-  }
+    private fun jsonElementToDynamic(elem: JsonElement): Any? = when (elem) {
+        is JsonNull -> null
+        is JsonPrimitive -> when {
+            elem.isString -> elem.content
+            else -> elem.booleanOrNull
+                ?: elem.longOrNull
+                ?: elem.doubleOrNull
+                ?: error("UniversalValueSerializer: unsupported JsonPrimitive '${elem.content}'")
+        }
+
+        is JsonObject -> elem.mapValues { jsonElementToDynamic(it.value) }
+        is JsonArray -> elem.map { jsonElementToDynamic(it) }
+    }
+
+    private fun dynamicToJsonElement(value: Any?): JsonElement = when (value) {
+        null -> JsonNull
+        is Boolean -> JsonPrimitive(value)
+        is Number -> JsonPrimitive(value)
+        is String -> JsonPrimitive(value)
+        is Map<*, *> -> JsonObject(
+            value.entries.associate { (k, v) ->
+                (k?.toString()
+                    ?: error("UniversalValueSerializer: null map key in msgpack payload")) to dynamicToJsonElement(v)
+            }
+        )
+
+        is List<*> -> JsonArray(value.map { dynamicToJsonElement(it) })
+        is Array<*> -> JsonArray(value.map { dynamicToJsonElement(it) })
+        is ByteArray -> JsonArray(value.map { JsonPrimitive(it.toInt() and 0xff) })
+        else -> error("UniversalValueSerializer: unsupported dynamic value type ${value::class.qualifiedName}")
+    }
 }

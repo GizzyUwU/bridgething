@@ -205,7 +205,7 @@ export class BridgethingGateway {
       try {
         frame = acc.nextFrame();
       } catch (err) {
-        // Lost framing — wipe the accumulator so subsequent bytes have a chance
+        // Lost framing - wipe the accumulator so subsequent bytes have a chance
         // to resync if a new (well-framed) message lands at the next chunk.
         this.buffers.set(deviceId, new FrameAccumulator());
         this.emit({ type: 'decodeError', deviceId, description: errorMessage(err) });

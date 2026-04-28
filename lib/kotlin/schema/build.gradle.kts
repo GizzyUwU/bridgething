@@ -8,7 +8,7 @@ dependencies {
   api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
   // kotlin-reflect drives AdjacentTaggedSerializer's sealed-subclass discovery
   // so adding a new variant in Rust + regenerating Kotlin is the only change
-  // needed — no per-class serializer edit.
+  // needed - no per-class serializer edit.
   implementation(kotlin("reflect"))
   // UniversalValueSerializer delegates to MsgPackNullableDynamicSerializer for
   // the binary path so JsonElement payloads round-trip over msgpack.
@@ -17,7 +17,7 @@ dependencies {
 
 kotlin {
   // Bumped to 26 because msgpack 0.6.1 is compiled at class file 65 (JVM 21+).
-  // Output bytecode stays at 17 for consumer compat — Android R8 desugars.
+  // Output bytecode stays at 17 for consumer compat - Android R8 desugars.
   jvmToolchain(26)
   compilerOptions {
     jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

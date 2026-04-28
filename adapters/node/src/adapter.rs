@@ -67,7 +67,7 @@ impl NodeAdapter {
     .await?;
 
     self.manager = Some(manager);
-    tracing::info!("started bridgething adapter — observing for car thing");
+    tracing::info!("started bridgething adapter - observing for car thing");
 
     Ok(())
   }

@@ -2,7 +2,7 @@ import type { HybridObject } from 'react-native-nitro-modules';
 
 /**
  * Wire-side identity for a connected bridgething peer. `id` is opaque to the
- * gateway and only meaningful to the underlying transport — `EAAccessory.serialNumber`
+ * gateway and only meaningful to the underlying transport - `EAAccessory.serialNumber`
  * (or `connectionID` fallback) on iOS, `BluetoothDevice.address` on Android.
  */
 export type BridgethingTransportDevice = {
@@ -57,7 +57,7 @@ export interface BridgethingTransport extends HybridObject<{ ios: 'swift'; andro
    * Snapshot of currently-connectable peers known to the OS:
    * - iOS: registered EAAccessories matching our protocol string
    * - Android: bonded BluetoothDevices (filtering by service is the consumer's
-   *   responsibility — the Bluetooth API exposes UUIDs only after connect on
+   *   responsibility - the Bluetooth API exposes UUIDs only after connect on
    *   most stacks)
    */
   getKnownDevices(): BridgethingTransportDevice[];

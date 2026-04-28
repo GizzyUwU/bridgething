@@ -58,7 +58,7 @@ struct GoldenFixture {
   /// Which direction (and therefore which Rust type) this message decodes to.
   direction: Direction,
   /// Canonical structural form of the decoded message. Cross-language tests
-  /// should compare structurally, not by string match — field order from
+  /// should compare structurally, not by string match - field order from
   /// msgpack named maps is implementation-defined.
   decoded_json: serde_json::Value,
   /// Hex string of `rmp_serde::to_vec_named(&msg)`. The framed payload, pre-
@@ -188,7 +188,7 @@ fn gateway_meta() -> GatewayMeta {
 }
 
 fn fingerprint_bytes() -> Vec<u8> {
-  // PNG magic + a couple bytes — small but distinctive payload for the binary
+  // PNG magic + a couple bytes - small but distinctive payload for the binary
   // path.
   vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 }
@@ -208,7 +208,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(bridge_fixture(
     "bridge_to_gateway/ack-response",
-    "ack to a request — meta carries requestId, data is the unit Ack variant",
+    "ack to a request - meta carries requestId, data is the unit Ack variant",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
@@ -228,7 +228,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(bridge_fixture(
     "bridge_to_gateway/file-files-response",
-    "response to a fileList request — daemon returns the served file list",
+    "response to a fileList request - daemon returns the served file list",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
@@ -275,7 +275,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(bridge_fixture(
     "bridge_to_gateway/forward-binary-event",
-    "raw bytes over the Forward escape hatch — verifies msgpack bin tag, not base64 string",
+    "raw bytes over the Forward escape hatch - verifies msgpack bin tag, not base64 string",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Event,
@@ -295,7 +295,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(gateway_fixture(
     "gateway_to_bridge/file-list-request",
-    "gateway asks for the served file list — unit variant of the file enum",
+    "gateway asks for the served file list - unit variant of the file enum",
     GatewayToBridgeMsg {
       id: id(),
       meta: GatewayMsgMeta::Request,
@@ -317,7 +317,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(gateway_fixture(
     "gateway_to_bridge/file-add-command",
-    "gateway uploads a file — exercises BridgeFile (path + raw bytes)",
+    "gateway uploads a file - exercises BridgeFile (path + raw bytes)",
     GatewayToBridgeMsg {
       id: id(),
       meta: GatewayMsgMeta::Command,
@@ -332,7 +332,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(gateway_fixture(
     "gateway_to_bridge/file-response-response",
-    "gateway answering a fileRequest from the daemon — returns BridgeFile",
+    "gateway answering a fileRequest from the daemon - returns BridgeFile",
     GatewayToBridgeMsg {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
@@ -416,7 +416,11 @@ fn golden_vectors_match_fixture_file() {
   if std::env::var("UPDATE_GOLDEN").is_ok() {
     let json = serde_json::to_string_pretty(&current).expect("serialize golden file");
     std::fs::write(fixture_path(), format!("{json}\n")).expect("write fixture file");
-    eprintln!("wrote {} fixtures to {}", current.fixtures.len(), fixture_path().display());
+    eprintln!(
+      "wrote {} fixtures to {}",
+      current.fixtures.len(),
+      fixture_path().display()
+    );
     return;
   }
 
@@ -430,7 +434,7 @@ fn golden_vectors_match_fixture_file() {
 
   assert_eq!(
     parsed, current,
-    "golden fixtures drifted from Rust source — run `just goldens` to regenerate"
+    "golden fixtures drifted from Rust source - run `just goldens` to regenerate"
   );
 }
 
@@ -439,17 +443,17 @@ fn golden_fixtures_round_trip_through_rust_codec() {
   for (fix, packed) in build_fixtures() {
     match fix.direction {
       Direction::BridgeToGateway => {
-        let decoded: BridgeToGatewayMsg = rmp_serde::from_slice(&packed)
-          .unwrap_or_else(|err| panic!("decode {}: {err}", fix.name));
-        let re_encoded = rmp_serde::to_vec_named(&decoded)
-          .unwrap_or_else(|err| panic!("re-encode {}: {err}", fix.name));
+        let decoded: BridgeToGatewayMsg =
+          rmp_serde::from_slice(&packed).unwrap_or_else(|err| panic!("decode {}: {err}", fix.name));
+        let re_encoded =
+          rmp_serde::to_vec_named(&decoded).unwrap_or_else(|err| panic!("re-encode {}: {err}", fix.name));
         assert_eq!(packed, re_encoded, "{} did not round-trip", fix.name);
       }
       Direction::GatewayToBridge => {
-        let decoded: GatewayToBridgeMsg = rmp_serde::from_slice(&packed)
-          .unwrap_or_else(|err| panic!("decode {}: {err}", fix.name));
-        let re_encoded = rmp_serde::to_vec_named(&decoded)
-          .unwrap_or_else(|err| panic!("re-encode {}: {err}", fix.name));
+        let decoded: GatewayToBridgeMsg =
+          rmp_serde::from_slice(&packed).unwrap_or_else(|err| panic!("decode {}: {err}", fix.name));
+        let re_encoded =
+          rmp_serde::to_vec_named(&decoded).unwrap_or_else(|err| panic!("re-encode {}: {err}", fix.name));
         assert_eq!(packed, re_encoded, "{} did not round-trip", fix.name);
       }
     }

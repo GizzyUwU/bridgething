@@ -27,7 +27,7 @@ export type ReactNativeAdapterOptions = {
  * out, plus connect / disconnect / connected events.
  *
  * On iOS the underlying transport observes `EAAccessoryDidConnect` and
- * auto-opens sessions for the bridgething protocol string — `connect()` is
+ * auto-opens sessions for the bridgething protocol string - `connect()` is
  * a manual fallback for accessories that were already attached when the
  * adapter started. On Android, `connect(deviceId)` opens the RFCOMM channel
  * to a bonded `BluetoothDevice`.
@@ -80,11 +80,11 @@ export class ReactNativeAdapter implements Adapter {
   /**
    * Manually open a session against a known peer.
    *
-   * iOS: useful when the accessory was already attached before `start()` —
+   * iOS: useful when the accessory was already attached before `start()` -
    * `EAAccessoryDidConnect` doesn't fire retroactively. Returns immediately
    * if iOS already has a session for `deviceId`.
    *
-   * Android: required for every bonded `BluetoothDevice` — RFCOMM doesn't
+   * Android: required for every bonded `BluetoothDevice` - RFCOMM doesn't
    * auto-open. The device must already be paired via system Settings.
    */
   async connect(deviceId: string): Promise<BridgethingTransportDevice> {

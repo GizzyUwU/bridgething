@@ -8,31 +8,46 @@ import kotlinx.serialization.KSerializer
  * `@Serializable(with = ...)` to each affected sealed class so kotlinx-serialization
  * picks these up regardless of format (msgpack, json, ...).
  *
- * Adding a new variant in Rust requires no edit here — `AdjacentTaggedSerializer`
+ * Adding a new variant in Rust requires no edit here - `AdjacentTaggedSerializer`
  * uses `kotlin-reflect` to discover sealed subclasses and their `@SerialName` tags
  * at runtime.
  */
 
 public object GatewayMsgMetaSerializer :
-  KSerializer<GatewayMsgMeta> by AdjacentTaggedSerializer(GatewayMsgMeta::class, discriminator = "kind")
+    KSerializer<GatewayMsgMeta> by AdjacentTaggedSerializer(GatewayMsgMeta::class, discriminator = "kind")
 
 public object BridgeToGatewayMsgDataSerializer :
-  KSerializer<BridgeToGatewayMsgData> by AdjacentTaggedSerializer(BridgeToGatewayMsgData::class, discriminator = "type")
+    KSerializer<BridgeToGatewayMsgData> by AdjacentTaggedSerializer(
+        BridgeToGatewayMsgData::class,
+        discriminator = "type"
+    )
 
 public object GatewayToBridgeMsgDataSerializer :
-  KSerializer<GatewayToBridgeMsgData> by AdjacentTaggedSerializer(GatewayToBridgeMsgData::class, discriminator = "type")
+    KSerializer<GatewayToBridgeMsgData> by AdjacentTaggedSerializer(
+        GatewayToBridgeMsgData::class,
+        discriminator = "type"
+    )
 
 public object ImageSerializer :
-  KSerializer<Image> by AdjacentTaggedSerializer(Image::class, discriminator = "type")
+    KSerializer<Image> by AdjacentTaggedSerializer(Image::class, discriminator = "type")
 
 public object BridgeToGatewayFileMsgSerializer :
-  KSerializer<BridgeToGatewayFileMsg> by AdjacentTaggedSerializer(BridgeToGatewayFileMsg::class, discriminator = "event")
+    KSerializer<BridgeToGatewayFileMsg> by AdjacentTaggedSerializer(
+        BridgeToGatewayFileMsg::class,
+        discriminator = "event"
+    )
 
 public object GatewayToBridgeFileMsgSerializer :
-  KSerializer<GatewayToBridgeFileMsg> by AdjacentTaggedSerializer(GatewayToBridgeFileMsg::class, discriminator = "event")
+    KSerializer<GatewayToBridgeFileMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeFileMsg::class,
+        discriminator = "event"
+    )
 
 public object GatewayToBridgeChromeMsgSerializer :
-  KSerializer<GatewayToBridgeChromeMsg> by AdjacentTaggedSerializer(GatewayToBridgeChromeMsg::class, discriminator = "event")
+    KSerializer<GatewayToBridgeChromeMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeChromeMsg::class,
+        discriminator = "event"
+    )
 
 public object ForwardMessageSerializer :
-  KSerializer<ForwardMessage> by AdjacentTaggedSerializer(ForwardMessage::class, discriminator = "encoding")
+    KSerializer<ForwardMessage> by AdjacentTaggedSerializer(ForwardMessage::class, discriminator = "encoding")

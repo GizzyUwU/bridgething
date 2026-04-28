@@ -82,7 +82,7 @@
     },
     {
       "name": "bridge_to_gateway/ack-response",
-      "description": "ack to a request — meta carries requestId, data is the unit Ack variant",
+      "description": "ack to a request - meta carries requestId, data is the unit Ack variant",
       "direction": "bridge_to_gateway",
       "decoded_json": {
         "data": {
@@ -120,7 +120,7 @@
     },
     {
       "name": "bridge_to_gateway/file-files-response",
-      "description": "response to a fileList request — daemon returns the served file list",
+      "description": "response to a fileList request - daemon returns the served file list",
       "direction": "bridge_to_gateway",
       "decoded_json": {
         "data": {
@@ -217,7 +217,7 @@
     },
     {
       "name": "bridge_to_gateway/forward-binary-event",
-      "description": "raw bytes over the Forward escape hatch — verifies msgpack bin tag, not base64 string",
+      "description": "raw bytes over the Forward escape hatch - verifies msgpack bin tag, not base64 string",
       "direction": "bridge_to_gateway",
       "decoded_json": {
         "data": {
@@ -270,7 +270,7 @@
     },
     {
       "name": "gateway_to_bridge/file-list-request",
-      "description": "gateway asks for the served file list — unit variant of the file enum",
+      "description": "gateway asks for the served file list - unit variant of the file enum",
       "direction": "gateway_to_bridge",
       "decoded_json": {
         "data": {
@@ -313,7 +313,7 @@
     },
     {
       "name": "gateway_to_bridge/file-add-command",
-      "description": "gateway uploads a file — exercises BridgeFile (path + raw bytes)",
+      "description": "gateway uploads a file - exercises BridgeFile (path + raw bytes)",
       "direction": "gateway_to_bridge",
       "decoded_json": {
         "data": {
@@ -349,7 +349,7 @@
     },
     {
       "name": "gateway_to_bridge/file-response-response",
-      "description": "gateway answering a fileRequest from the daemon — returns BridgeFile",
+      "description": "gateway answering a fileRequest from the daemon - returns BridgeFile",
       "direction": "gateway_to_bridge",
       "decoded_json": {
         "data": {

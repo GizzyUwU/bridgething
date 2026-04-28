@@ -212,7 +212,7 @@ impl BDAddr {
 /// Vendored from btleplug for use as `#[serde(with = "...")]` helpers when
 /// MAC fields cross the wire as part of typed messages. The byte-level
 /// refactor of this adapter ships raw bytes only, so none of the helpers
-/// are currently called — kept under `#[allow(dead_code)]` so re-typing a
+/// are currently called - kept under `#[allow(dead_code)]` so re-typing a
 /// future variant of `JsMessage` or `AdapterEvent` doesn't need to vendor
 /// them again.
 #[allow(dead_code)]

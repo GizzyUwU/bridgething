@@ -70,7 +70,7 @@ export default function App() {
       try {
         setKnownDevices(adapter.getKnownDevices());
       } catch {
-        // adapter not started yet — ignore
+        // adapter not started yet - ignore
       }
     }, 2000);
     return () => clearInterval(interval);
@@ -205,7 +205,7 @@ export default function App() {
       <Section title={`known devices (${knownDevices.length})`}>
         {knownDevices.length === 0 ? (
           <Text style={styles.empty}>
-            {running ? 'no peers — pair a Car Thing in system Bluetooth settings' : 'press start to scan'}
+            {running ? 'no peers - pair a Car Thing in system Bluetooth settings' : 'press start to scan'}
           </Text>
         ) : (
           knownDevices.map(d => (
@@ -271,7 +271,7 @@ function MetaLine({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.metaLine}>
       <Text style={styles.metaLabel}>{label}</Text>
-      <Text style={styles.metaValue}>{value || '—'}</Text>
+      <Text style={styles.metaValue}>{value || '-'}</Text>
     </View>
   );
 }

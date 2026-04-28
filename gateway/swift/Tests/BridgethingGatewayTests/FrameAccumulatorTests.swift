@@ -1,6 +1,6 @@
-import XCTest
-import BridgethingSchema
 @testable import BridgethingGateway
+import BridgethingSchema
+import XCTest
 
 final class FrameAccumulatorTests: XCTestCase {
   private let codec = Codec(compression: .none, encoding: .msgpack)
@@ -54,7 +54,7 @@ final class FrameAccumulatorTests: XCTestCase {
     let f1 = try makeAckFrame()
     let f2 = try makeAckFrame()
     var acc = FrameAccumulator()
-    // First full frame plus the first 5 bytes of the next — accumulator should
+    // First full frame plus the first 5 bytes of the next - accumulator should
     // pop the first and hold the rest.
     acc.append(f1 + f2.prefix(5))
     XCTAssertEqual(try acc.nextFrame(), f1)
@@ -70,7 +70,7 @@ final class FrameAccumulatorTests: XCTestCase {
     bytes[1] = 0xAD
     acc.append(bytes)
     XCTAssertThrowsError(try acc.nextFrame()) { err in
-      guard case FrameAccumulator.Error.invalidMagic(let m) = err else {
+      guard case let FrameAccumulator.Error.invalidMagic(m) = err else {
         XCTFail("expected invalidMagic, got \(err)"); return
       }
       XCTAssertEqual(m, 0xBAAD)
@@ -95,7 +95,7 @@ final class FrameAccumulatorTests: XCTestCase {
     var bytes = Data(repeating: 0, count: FrameHeader.length)
     bytes[0] = 0xDE; bytes[1] = 0xAD
     bytes[2] = FrameHeader.version
-    // length = 1 MiB — over the cap.
+    // length = 1 MiB - over the cap.
     let big: UInt64 = 1 << 20
     for i in 0 ..< 8 {
       bytes[8 + i] = UInt8((big >> ((7 - i) * 8)) & 0xFF)

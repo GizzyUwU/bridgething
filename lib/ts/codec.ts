@@ -51,7 +51,7 @@ export function writeFrameHeader(header: FrameHeader): Uint8Array {
   view.setUint8(3, header.compression);
   view.setUint8(4, header.encoding);
   // bytes 5..8 reserved zero
-  // u64 BE length — JS can't address > 2^53 but BigInt path keeps the wire honest.
+  // u64 BE length - JS can't address > 2^53 but BigInt path keeps the wire honest.
   view.setBigUint64(8, BigInt(header.payloadLength), false);
   return buf;
 }
