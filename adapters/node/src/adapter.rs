@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use napi::{bindgen_prelude::*, threadsafe_function::UnknownReturnValue};
 
-use crate::{monitoring, protocol::ProtocolMan, Callbacks, Error, Event, JsMessage, Result};
+use crate::{Callbacks, Error, Event, JsMessage, Result, monitoring, protocol::ProtocolMan};
 
 #[napi(string_enum)]
 #[derive(Debug, Clone, Copy)]

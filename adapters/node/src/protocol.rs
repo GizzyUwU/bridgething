@@ -1,7 +1,7 @@
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::{adapter::AdapterMode, Callbacks, JsMessage, MsgRx, MsgTx, Result};
+use crate::{Callbacks, JsMessage, MsgRx, MsgTx, Result, adapter::AdapterMode};
 
 #[async_trait::async_trait]
 pub trait Protocol: Send {

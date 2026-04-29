@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use bluer::{
-  rfcomm::{SocketAddr, Stream},
   Adapter, AdapterEvent, Session,
+  rfcomm::{SocketAddr, Stream},
 };
 use futures::StreamExt;
 use libbridgething::{BRIDGETHING_DEVICE_CLASS, BRIDGETHING_RFCOMM_CHANNEL};
@@ -16,7 +16,7 @@ mod auth;
 #[cfg(debug_assertions)]
 mod debug;
 
-use crate::{bdaddr::BDAddr, protocol::Protocol, AdapterDevice, Callbacks, JsMessage, MsgRx, Result};
+use crate::{AdapterDevice, Callbacks, JsMessage, MsgRx, Result, bdaddr::BDAddr, protocol::Protocol};
 
 /// Internal connection-side event surfaced to the adapter event loop. The
 /// loop fans these out as JS-visible `AdapterEvent::Bytes` /

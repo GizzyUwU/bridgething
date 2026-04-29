@@ -12,7 +12,7 @@ use crate::{
   protocol::mbps,
 };
 
-use super::{EndecError, EndecState, COMPRESSION_GZIP, ENCODING_MSGPACK, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_GZIP, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
 
 #[derive(Debug, Default)]
 pub struct BridgeEndec {

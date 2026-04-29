@@ -1,4 +1,4 @@
-use crate::{protocol::Protocol, Result};
+use crate::{Result, protocol::Protocol};
 
 #[cfg(target_os = "linux")]
 mod linux;

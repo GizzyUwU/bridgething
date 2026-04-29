@@ -9,10 +9,10 @@ use tracing;
 
 use crate::{
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{mbps, Compression, Encoding},
+  protocol::{Compression, Encoding, mbps},
 };
 
-use super::{EndecError, EndecState, COMPRESSION_GZIP, ENCODING_MSGPACK, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_GZIP, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
 
 #[derive(Debug, Default)]
 pub struct GatewayEndec {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Album, Artist, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, Track, CARTHING_HACKS_LOGO};
+use crate::{Album, Artist, CARTHING_HACKS_LOGO, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, Track};
 
 // TODO: refactor this into more command types so not spotify-specific
 

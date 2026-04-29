@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::gateway::BridgeToGatewayMsgData;
 use crate::WebappInfo;
+use crate::gateway::BridgeToGatewayMsgData;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
