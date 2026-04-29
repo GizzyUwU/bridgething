@@ -358,6 +358,16 @@ name = "bridgething-client"
 version = "0.1.0"
 
 [[package]]
+name = "bridgething-codegen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "syn",
+ "walkdir",
+]
+
+[[package]]
 name = "btleplug"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

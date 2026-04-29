@@ -1,7 +1,8 @@
 use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg};
+use super::StockSendMsg;
+use crate::handler::client::PossibleSendMsg;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]

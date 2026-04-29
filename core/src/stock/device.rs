@@ -1,7 +1,8 @@
 use libbridgething::{PhoneCallDirection, PhoneCallStatus, client::ClientSystemCommand};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, RecvMsgData, StockSendMsg};
+use super::StockSendMsg;
+use crate::handler::client::{PossibleSendMsg, RecvMsgData};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -33,7 +34,7 @@ impl From<StockDeviceRecv> for RecvMsgData {
         call_id: attributes.call_id,
       }),
       StockDeviceRecv::ReturnToSpotify => {
-        RecvMsgData::Unsupported(crate::msg::PossibleRecvMsg::Stock(super::StockRecvMsg::Device(data)))
+        RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(super::StockRecvMsg::Device(data)))
       }
     }
   }

@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub(crate) mod stock;
-use stock::*;
+use crate::stock::{StockInterAppRecv, StockRecvMsg, StockSendMsg};
 
 pub type RecvTx = tokio::sync::mpsc::Sender<RecvMsg>;
 pub type RecvRx = tokio::sync::mpsc::Receiver<RecvMsg>;

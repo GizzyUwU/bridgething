@@ -1,5 +1,5 @@
 mod bluetooth;
-mod server;
+mod http;
 
 mod als;
 mod mic;
@@ -12,15 +12,35 @@ mod paths;
 mod player;
 mod state;
 
-mod msg;
+mod stock;
 
 mod monitoring;
 
 use bluetooth::BluetoothManager;
+use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler};
 use player::Player;
 use state::AppState;
 use systemd::Notify;
+
+/// Marks the volatile-runtime path that signals "bridgething has run
+/// at least once during the current boot." Returns whether the marker
+/// was already present (i.e. this is a restart, not the first start
+/// since boot). Always leaves the marker in place for the next start.
+fn check_and_mark_restart() -> bool {
+  let path = paths::restart_marker_path();
+  let was_restart = path.exists();
+  if let Some(parent) = path.parent() {
+    if let Err(e) = std::fs::create_dir_all(parent) {
+      tracing::warn!("failed to create runtime dir {}: {}", parent.display(), e);
+      return false;
+    }
+  }
+  if let Err(e) = std::fs::write(&path, b"") {
+    tracing::warn!("failed to write restart marker {}: {}", path.display(), e);
+  }
+  was_restart
+}
 
 #[tokio::main]
 async fn main() {
@@ -32,10 +52,25 @@ async fn main() {
   let meta = state::meta::SuperbirdMeta::read_or_default().await;
   tracing::debug!("metadata: {:?}", &meta);
 
-  let (client_man, mut client_listener) = server::create_client_manager();
+  // Detect whether this start is the daemon's first since boot or a
+  // restart. We use this to decide whether to reload chromium: on a
+  // fresh boot chromium-kiosk navigates to the kiosk URL itself and
+  // shouldn't be touched, but on any subsequent start (push-deploy,
+  // crash recovery, OTA) the page chromium has loaded points at a
+  // dead daemon and needs to be refreshed.
+  let is_restart = check_and_mark_restart();
+
+  let (client_man, mut client_listener) = http::create_client_manager();
   let player = Player::new(client_man.clone());
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
+
+  if is_restart {
+    if let Err(e) = chrome.send(ChromeCommand::Reload).await {
+      tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
+    }
+  }
+
   let state = AppState::init(client_man.clone(), meta, player, chrome)
     .await
     .expect("failed to initialize state!!");
@@ -47,7 +82,7 @@ async fn main() {
     .expect("failed to initialize bluetooth stack");
 
   notifier.status("initializing server binds...");
-  let mut server = server::Server::bind(state.clone(), bluetooth.clone())
+  let mut server = http::Server::bind(state.clone(), bluetooth.clone())
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 

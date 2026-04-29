@@ -16,12 +16,15 @@ use voice::*;
 mod handle;
 pub use handle::*;
 
+mod msg;
+pub use msg::*;
+
 use crate::{
   bluetooth::BluetoothMan,
   handler::HandlerError,
-  msg::{ClientMode, RecvMsg, RecvMsgData, stock::StockInterAppSend},
-  server::WSError,
+  http::WSError,
   state::State,
+  stock::StockInterAppSend,
 };
 
 use super::HandlerResult;

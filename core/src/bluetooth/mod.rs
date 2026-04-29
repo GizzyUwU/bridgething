@@ -16,8 +16,8 @@ use rfcomm::RfcommGateway;
 use std::sync::Arc;
 
 use crate::{
+  http::WSError,
   player::PlayerError,
-  server::WSError,
   state::{FileRequestTx, State, StateError},
 };
 use ble::GattServer;

@@ -20,7 +20,7 @@ use tower_http::services::ServeDir;
 
 use crate::{
   bluetooth::BluetoothMan,
-  msg::{ClientMode, PossibleSendMsg},
+  handler::client::{ClientMode, PossibleSendMsg},
   state::State as BridgeThingState,
 };
 

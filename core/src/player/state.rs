@@ -2,7 +2,7 @@ use libbridgething::{
   Device, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, ServerEventType, Track, server::ServerPlayerEvent,
 };
 
-use crate::server::ClientMan;
+use crate::http::ClientMan;
 
 use super::{PlayerResult, dbus::DBusPlayerEvent};
 

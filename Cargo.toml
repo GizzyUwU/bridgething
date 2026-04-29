@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "adapters/node", "lib", "client/rust"]
+members = ["core", "adapters/node", "lib", "client/rust", "tools/codegen"]
 
 [workspace.dependencies]
 serde = { version = "1.0.228" }

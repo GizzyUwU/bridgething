@@ -1,7 +1,7 @@
 use libbridgething::client::ClientVoiceCommand;
 use serde::{Deserialize, Serialize};
 
-use crate::msg::PossibleSendMsg;
+use crate::handler::client::PossibleSendMsg;
 
 use super::StockSendMsg;
 

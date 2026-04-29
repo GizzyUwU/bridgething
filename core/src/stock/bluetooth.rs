@@ -1,7 +1,8 @@
 use libbridgething::{Device, DeviceType, client::ClientBluetoothCommand, server::ServerBluetoothEvent};
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg};
+use super::StockSendMsg;
+use crate::handler::client::PossibleSendMsg;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -126,7 +127,7 @@ impl From<DeviceType> for StockDeviceType {
 #[cfg(test)]
 mod test {
   use super::StockBluetoothRecv;
-  use crate::msg::StockRecvMsg;
+  use crate::stock::StockRecvMsg;
 
   #[test]
   fn ser_stock_recv() {

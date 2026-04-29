@@ -14,6 +14,7 @@ type ChromeRx = tokio::sync::mpsc::Receiver<ChromeCommand>;
 #[derive(Debug, Clone)]
 pub enum ChromeCommand {
   Navigate(String),
+  Reload,
 }
 
 #[derive(Debug)]
@@ -82,6 +83,7 @@ impl ChromeWorker {
         Some(message) = self.rx.recv() => {
           match message {
             ChromeCommand::Navigate(url) => self.handle_navigate(url).await,
+            ChromeCommand::Reload => self.handle_reload().await,
           }
         }
         _ = self.cancel_token.cancelled() => {
@@ -89,6 +91,37 @@ impl ChromeWorker {
           break;
         }
       }
+    }
+  }
+
+  async fn handle_reload(&mut self) {
+    tracing::debug!("reloading current chrome tab");
+
+    let Some(browser) = self.get_connection().await else {
+      tracing::warn!("chrome not connected");
+      return;
+    };
+
+    if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      browser.register_missing_tabs();
+    })) {
+      tracing::error!("failed to register missing tabs: {:?} - browser likely closed", e);
+      self.browser = None;
+      return;
+    }
+
+    let Some(tab) = (if let Ok(tabs) = browser.get_tabs().lock() {
+      tabs.first().cloned()
+    } else {
+      tracing::error!("tab mutex poisoned!!");
+      return;
+    }) else {
+      tracing::error!("no tabs found!");
+      return;
+    };
+
+    if let Err(e) = tab.reload(true, None) {
+      tracing::error!("failed to reload tab: {}", e);
     }
   }
 

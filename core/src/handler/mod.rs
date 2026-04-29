@@ -4,7 +4,7 @@ pub mod gateway;
 pub use client::ClientHandler;
 pub use gateway::GatewayHandler;
 
-use crate::{bluetooth::BluetoothError, player::PlayerError, server::WSError, state::StateError};
+use crate::{bluetooth::BluetoothError, http::WSError, player::PlayerError, state::StateError};
 
 type HandlerResult = Result<(), HandlerError>;
 

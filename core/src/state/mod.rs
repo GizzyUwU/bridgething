@@ -4,7 +4,7 @@ use libbridgething::{Device, ServerEventType, server::GatewayStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::{chrome, paths, server::ClientMan};
+use crate::{chrome, http::ClientMan, paths};
 
 mod gateway_files;
 pub mod meta;

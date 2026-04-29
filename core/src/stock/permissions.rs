@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleSendMsg, StockSendMsg};
+use super::StockSendMsg;
+use crate::handler::client::PossibleSendMsg;
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

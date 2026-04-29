@@ -82,6 +82,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("ack")
 	object Ack: BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("nack")
+	object Nack: BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("done")
 	object Done: BridgeToGatewayMsgData()
 }

@@ -1,7 +1,7 @@
-use libbridgething::{BridgeThingMeta, server::ServerSystemEvent};
+use libbridgething::{BridgeThingMeta, ServerEvent, ServerEventData, server::ServerSystemEvent};
 use serde::{Deserialize, Serialize};
 
-use super::{RecvMsgData, ServerEvent, ServerEventData};
+use crate::handler::client::RecvMsgData;
 
 mod action;
 mod bluetooth;

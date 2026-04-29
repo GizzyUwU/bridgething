@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Atomically replace the dev-overlay bridgething daemon binary on the device.
+#
+# Stops bridgething.service, uploads via scp to a temp file, atomically
+# renames into place at /opt/bridgething/daemon/bridgething, then restarts
+# the daemon. Weston and chromium-kiosk are left running across the swap;
+# the daemon itself reloads the active chromium tab on every restart-since-
+# boot so the kiosk recovers without a visible chromium relaunch.
+#
+# Stopping bridgething before the transfer (rather than just letting
+# systemd restart it on binary swap) keeps the swap atomic from the
+# daemon's point of view: it never sees its own ELF replaced under a
+# running mmap.
+#
+# /opt/bridgething is a bind-mount from the settings partition on dev images
+# (bridgething-dev-persist), so the dropped binary survives bootslot swaps
+# and OTA upgrades. The /usr/bin/bridgething wrapper installed by the
+# bridgething-daemon recipe prefers this dev binary over the in-rootfs one.
+#
+# Usage:
+#   bridgething-push-daemon <local-path>
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+    cat <<EOF >&2
+usage: bridgething-push-daemon <local-path>
+
+Pushes <local-path> to /opt/bridgething/daemon/bridgething on the device.
+Stops bridgething, atomically swaps the binary, then restarts it. Chromium
+keeps running and reloads its active tab on the daemon's startup.
+EOF
+    exit 2
+fi
+
+LOCAL="$1"
+
+if [ ! -x "$LOCAL" ]; then
+    echo "bridgething-push-daemon: not an executable file: $LOCAL" >&2
+    exit 1
+fi
+
+HOST="${SUPERBIRD_HOST:-10.42.1.2}"
+DEST_DIR="/opt/bridgething/daemon"
+DEST="${DEST_DIR}/bridgething"
+TMP="${DEST}.tmp.$$"
+
+SSH_OPTS=(-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+
+ssh_dev() { ssh "${SSH_OPTS[@]}" "root@${HOST}" "$@"; }
+
+echo "[push-daemon] stopping bridgething"
+ssh_dev "systemctl stop bridgething.service"
+
+echo "[push-daemon] uploading $(basename "$LOCAL") ($(du -h "$LOCAL" | cut -f1)) to ${HOST}:${TMP}"
+scp -C "${SSH_OPTS[@]}" -q "$LOCAL" "root@${HOST}:${TMP}"
+
+echo "[push-daemon] swapping into ${DEST}"
+ssh_dev "chmod 0755 ${TMP} && mv -f ${TMP} ${DEST}"
+
+echo "[push-daemon] restarting bridgething"
+ssh_dev "systemctl start bridgething.service"
+
+echo "[push-daemon] done."

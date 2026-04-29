@@ -1,3 +1,36 @@
+# bridgething Justfile
+#
+# Two flavors of recipes:
+#   1. Local dev — `cargo run`, `just codegen`, gateway/adapter builds.
+#   2. Device iteration — cross-build the daemon and push to a Car Thing
+#      over USB-CDC-ECM. Helper scripts live in scripts/. Host defaults
+#      to 10.42.1.2 (the gadget end of the USB-CDC link); override with
+#      SUPERBIRD_HOST.
+
+# --- Path config ---
+
+# cross-rs target tuple. Car Thing userspace runs aarch64 glibc.
+cross_target := 'aarch64-unknown-linux-gnu'
+
+# Separate target dir for cross builds. Mixing host build-script ELFs
+# (built against host glibc) with cross-built ones (built against the
+# Ubuntu 20.04 glibc inside cross's container) silently breaks: a build
+# script compiled for host glibc cannot execute inside the container
+# and the build dies with a GLIBC version mismatch. Isolating the
+# target dir is the cheapest fix and beats `cargo clean` before every
+# cross invocation.
+cross_target_dir := justfile_directory() / 'target-cross'
+
+# Default device host. The Car Thing exposes itself as a USB-CDC-ECM
+# gadget at 10.42.1.2 when plugged in.
+device_host := env_var_or_default('SUPERBIRD_HOST', '10.42.1.2')
+
+# ssh args used by every recipe that talks to the device. Overrides
+# host-key checking because the device's keys regenerate on each flash.
+ssh_args := '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR'
+
+# --- Local dev ---
+
 run:
   cargo run -p bridgething
 
@@ -13,56 +46,73 @@ gateway:
 adapter:
   bun run build -- --filter=@bridgething/adapter-node
 
+# --- Codegen ---
+
 typescript:
-  rm -rf lib/ts/bindings
-  cargo test -p libbridgething &> /dev/null
-  bunx prettier lib/ts/bindings --write
+  cargo run -q -p bridgething-codegen -- ts
 
 swift:
-  typeshare --lang=swift --output-file=lib/swift/Sources/BridgethingSchema/Generated.swift lib/src/
-  # typeshare emits [UInt8] for Vec<u8>, but Swift's Codable + every msgpack lib
-  # distinguish Data (encodes to msgpack bin) from [UInt8] (encodes to array of int).
-  # Our wire is bin; rewrite the type so consumers get Data.
-  sed -i 's/\[UInt8\]/Data/g' lib/swift/Sources/BridgethingSchema/Generated.swift
-  # Generated structs/enums travel through actor-isolated stream events on the
-  # gateway side, which Swift 6 strict concurrency requires to be Sendable.
-  # Every typeshare-emitted type is a value type whose stored fields are
-  # already Sendable (primitives, Data, other generated types), so blanket-
-  # adding the conformance is safe.
-  sed -i 's/: Codable {/: Codable, Sendable {/g' lib/swift/Sources/BridgethingSchema/Generated.swift
-  sed -i 's/: String, Codable {/: String, Codable, Sendable {/g' lib/swift/Sources/BridgethingSchema/Generated.swift
+  cargo run -q -p bridgething-codegen -- swift
 
 kotlin:
-  typeshare --lang=kotlin --java-package=dev.bridgething.schema --output-file=lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt lib/src/
-  # typeshare emits List<UByte> for Vec<u8>; rewrite to ByteArray so kotlinx-
-  # serialization-msgpack encodes binary fields as msgpack bin (not an array).
-  sed -i 's/List<UByte>/ByteArray/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  # Override the auto-generated kotlinx serializer for adjacently-tagged sealed
-  # classes. kotlinx-serialization's default polymorphism for binary formats
-  # sibling-inlines the discriminator + content into the parent map, but our
-  # wire shape is a nested {<disc>: "tag", "data": payload} object. The
-  # AdjacentTaggedSerializer proxies in Serializers.kt produce that shape.
-  perl -i -0pe 's/\@Serializable\nsealed class GatewayMsgMeta\b/\@Serializable(with = GatewayMsgMetaSerializer::class)\nsealed class GatewayMsgMeta/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class BridgeToGatewayMsgData\b/\@Serializable(with = BridgeToGatewayMsgDataSerializer::class)\nsealed class BridgeToGatewayMsgData/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeMsgData\b/\@Serializable(with = GatewayToBridgeMsgDataSerializer::class)\nsealed class GatewayToBridgeMsgData/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class Image\b/\@Serializable(with = ImageSerializer::class)\nsealed class Image/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class BridgeToGatewayFileMsg\b/\@Serializable(with = BridgeToGatewayFileMsgSerializer::class)\nsealed class BridgeToGatewayFileMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeFileMsg\b/\@Serializable(with = GatewayToBridgeFileMsgSerializer::class)\nsealed class GatewayToBridgeFileMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeChromeMsg\b/\@Serializable(with = GatewayToBridgeChromeMsgSerializer::class)\nsealed class GatewayToBridgeChromeMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class ForwardMessage\b/\@Serializable(with = ForwardMessageSerializer::class)\nsealed class ForwardMessage/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class BridgeToGatewayWebappMsg\b/\@Serializable(with = BridgeToGatewayWebappMsgSerializer::class)\nsealed class BridgeToGatewayWebappMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeWebappMsg\b/\@Serializable(with = GatewayToBridgeWebappMsgSerializer::class)\nsealed class GatewayToBridgeWebappMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
-  # Forward.Json carries an opaque payload typed as `Value = JsonElement`.
-  # kotlinx's default JsonElement serializer only works with JsonDecoder;
-  # UniversalValueSerializer dispatches on encoder/decoder type so the variant
-  # round-trips over msgpack too.
-  perl -i -pe 's/data class Json\(val data: Value\)/data class Json(\@Serializable(with = UniversalValueSerializer::class) val data: Value)/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
+  cargo run -q -p bridgething-codegen -- kotlin
 
-codegen: typescript swift kotlin
+codegen:
+  cargo run -q -p bridgething-codegen -- all
 
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
 
+# --- Device iteration ---
+
+# Cross-build the daemon for the Car Thing. The `superbird` feature
+# flag selects the on-device build (sd-notify, ALS, mic, chromium CDP
+# wired up; dev-host features dropped).
+cross-build:
+  CARGO_TARGET_DIR={{cross_target_dir}} cross build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird
+
+# Cross-build then push the daemon to /opt/bridgething/daemon/ on the
+# device. The push script stops bridgething + bridgething-weston first
+# (chromium-kiosk cascades) so the 17 MB transfer over USB-CDC doesn't
+# OOM the running stack, then restarts both. /opt/bridgething is a
+# bind-mount from the settings partition so the dropped binary
+# survives bootslot swaps and OTA upgrades.
+push: cross-build
+  scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
+
+# Push a webapp bundle into /var/bridgething/webapps/<name>/. Default
+# name is the basename of <local>. Daemon picks it up next time
+# Webapps::SwitchTo names it (or on next boot if active webapp's
+# manifest already points there).
+push-webapp local name="":
+  scripts/bridgething-push-webapp {{local}} {{name}}
+
+# SSH into the device. Pass commands through as positional args.
+ssh *args:
+  ssh {{ssh_args}} root@{{device_host}} {{args}}
+
+# Tail bridgething.service journal. Ctrl-C to stop.
+logs:
+  ssh {{ssh_args}} root@{{device_host}} journalctl -fu bridgething.service
+
+# Tunnel chromium's CDP socket from the device's 127.0.0.1:9222 to
+# the host. Required because chromium >= M111 silently ignores
+# --remote-debugging-address=non-localhost; this tunnel is what makes
+# chrome://inspect see the kiosk.
+cdp port="9222":
+  scripts/bridgething-cdp {{port}}
+
+# Build, push, and tail logs in one shot. The dev iteration loop:
+# edit, run this, watch the daemon come up under journalctl, Ctrl-C
+# when you want to edit again. Recipe dependencies handle the build
+# + push; the tail blocks until you exit.
+iter: push logs
+
+# --- Misc ---
+
+# Set the host bluetooth class to the Car Thing class (0x7c0000) so
+# stock-webapp and gateway pairing flows behave the same as on real
+# hardware. Run once after each adapter restart.
 class:
   sudo hciconfig hci0 class 0x7c0000 || true
   sudo hciconfig hci1 class 0x7c0000 || true

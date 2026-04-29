@@ -8,9 +8,8 @@ use libbridgething::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::msg::{PossibleRecvMsg, PossibleSendMsg, RecvMsgData};
-
 use super::StockSendMsg;
+use crate::handler::client::{PossibleRecvMsg, PossibleSendMsg, RecvMsgData};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -544,8 +543,10 @@ mod test {
   use libbridgething::client::ClientLegacyStockCommand;
   use uuid::Uuid;
 
+  use libbridgething::{ClientCommand, ClientCommandType, client::ClientInteractionCommand};
+
   use super::StockInterAppRecv;
-  use crate::msg::{ClientCommand, ClientCommandType, ClientInteractionCommand, PossibleRecvMsg};
+  use crate::handler::client::PossibleRecvMsg;
 
   #[test]
   fn ser_stock_recv() {

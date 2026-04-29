@@ -2,10 +2,8 @@ use libbridgething::{Device, ServerEventType, server::ServerBluetoothEvent};
 
 use crate::{
   bluetooth::BluetoothResult,
-  msg::stock::{
-    StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend,
-  },
   state::State,
+  stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
 };
 
 pub async fn connection_messages(state: &State, new_device: bool, device: &Device) -> BluetoothResult<()> {
@@ -72,7 +70,7 @@ pub async fn connection_messages(state: &State, new_device: bool, device: &Devic
     .broadcast_stock(StockInterAppSend {
       msg_id: None,
       data: StockInterAppSendPayload::SessionState {
-        connection_type: crate::msg::stock::StockConnectionType::FourG,
+        connection_type: crate::stock::StockConnectionType::FourG,
         is_in_forced_offline_mode: false,
         is_logged_in: true,
         is_offline: false,

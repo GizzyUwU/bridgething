@@ -140,6 +140,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	case ack
+	case nack
 	case done
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -148,6 +149,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			webapp,
 			forward,
 			ack,
+			nack,
 			done
 	}
 
@@ -182,6 +184,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .ack:
 				self = .ack
 				return
+			case .nack:
+				self = .nack
+				return
 			case .done:
 				self = .done
 				return
@@ -207,6 +212,8 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .ack:
 			try container.encode(CodingKeys.ack, forKey: .type)
+		case .nack:
+			try container.encode(CodingKeys.nack, forKey: .type)
 		case .done:
 			try container.encode(CodingKeys.done, forKey: .type)
 		}

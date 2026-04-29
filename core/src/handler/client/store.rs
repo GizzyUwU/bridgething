@@ -1,6 +1,6 @@
 use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
 
-use crate::msg::stock::StockSetupSend;
+use crate::stock::StockSetupSend;
 
 use super::{HandlerResult, MsgHandle};
 

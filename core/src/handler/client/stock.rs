@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use libbridgething::{client::ClientLegacyStockCommand, stock::StockSetPreset};
 
-use crate::msg::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
+use crate::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
 
 use super::{HandlerResult, MsgHandle};
 

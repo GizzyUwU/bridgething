@@ -1,5 +1,4 @@
 mod shared;
-pub use shared::*;
 
 pub mod client;
 pub mod gateway;
@@ -11,6 +10,13 @@ pub mod protocol;
 
 pub use client::{ClientCommand, ClientCommandType};
 pub use server::{ServerEvent, ServerEventData, ServerEventType};
+
+pub use shared::{
+  Album, Artist, BridgeThingMeta, CARTHING_HACKS_LOGO, CurrentlyActiveApplication, Device, DeviceType,
+  ForwardMessage, GatewayMeta, IMAGE_SIZE, Image, LIBBRIDGETHING_VERSION, PhoneCallDirection, PhoneCallStatus,
+  PlaybackOptions, PlaybackQueue, PlaybackRestrictions, THUMBNAIL_SIZE, Track, WebappInfo, WebappSource,
+  to_slug,
+};
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;
 pub const BRIDGETHING_PROFILE_UUID: uuid::Uuid = uuid::Uuid::from_u128(0xdead0000_854d_408e_81f0_fb6147f918fd);

@@ -7,12 +7,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-  msg::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx, stock::StockSendMsg},
-  server::{WSError, connection::Connection},
+  handler::client::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
   state::State,
+  stock::StockSendMsg,
 };
 
-use super::WSResult;
+use super::{WSError, WSResult, connection::Connection};
 
 #[derive(Debug)]
 struct ClientData {
