@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "adapters/node", "lib", "client/rust", "mfi", "mfi-proxy", "tools/codegen"]
+members = ["crates/*", "packages/adapter-node", "tools/codegen"]
 
 [workspace.dependencies]
 serde = { version = "1.0.228" }

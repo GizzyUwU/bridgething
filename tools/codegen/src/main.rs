@@ -4,11 +4,11 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use syn::{Item, Meta};
 
-const TS_BINDINGS_DIR: &str = "lib/ts/bindings";
-const SWIFT_OUTPUT: &str = "lib/swift/Sources/BridgethingSchema/Generated.swift";
-const KOTLIN_OUTPUT: &str = "lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt";
+const TS_BINDINGS_DIR: &str = "crates/lib/ts/bindings";
+const SWIFT_OUTPUT: &str = "crates/lib/swift/Sources/BridgethingSchema/Generated.swift";
+const KOTLIN_OUTPUT: &str = "crates/lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt";
 const KOTLIN_PACKAGE: &str = "dev.bridgething.schema";
-const LIB_SRC: &str = "lib/src";
+const LIB_SRC: &str = "crates/lib/src";
 
 fn workspace_root() -> PathBuf {
   Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -70,7 +70,8 @@ fn gen_kotlin() -> Result<()> {
     ],
   )?;
 
-  let adjacent_tagged = discover_adjacent_tagged_enums(LIB_SRC).context("discover adjacent-tagged enums in lib/src")?;
+  let adjacent_tagged =
+    discover_adjacent_tagged_enums(LIB_SRC).context("discover adjacent-tagged enums in crates/lib/src")?;
   println!(
     "    discovered {} adjacent-tagged enum(s): {}",
     adjacent_tagged.len(),
@@ -115,7 +116,7 @@ fn patch_kotlin(input: &str, adjacent_tagged: &[String]) -> Result<String> {
     let new_out = pattern.replace_all(&out, replacement.as_str()).into_owned();
     if new_out == out {
       eprintln!(
-        "    warning: adjacent-tagged enum {name} found in lib/src but not in kotlin output (unreachable from any #[typeshare]'d root, or typeshare's emitted shape changed)"
+        "    warning: adjacent-tagged enum {name} found in crates/lib/src but not in kotlin output (unreachable from any #[typeshare]'d root, or typeshare's emitted shape changed)"
       );
     }
     out = new_out;
@@ -145,7 +146,7 @@ fn patch_kotlin(input: &str, adjacent_tagged: &[String]) -> Result<String> {
 fn discover_adjacent_tagged_enums(dir: &str) -> Result<Vec<String>> {
   let mut found = Vec::new();
   for entry in walkdir::WalkDir::new(dir) {
-    let entry = entry.context("walk lib/src")?;
+    let entry = entry.context("walk crates/lib/src")?;
     let path = entry.path();
     if !entry.file_type().is_file() {
       continue;

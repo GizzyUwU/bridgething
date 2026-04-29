@@ -1,0 +1,13 @@
+mutation setPreset($input: SetPresetInput!) {
+  setPreset(input: $input) {
+    ... on Presets {
+      presets {
+        context_uri: contextUri
+        name
+        slot_index: slotIndex
+        description
+        image_url: imageUrl
+      }
+    }
+  }
+}

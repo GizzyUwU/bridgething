@@ -1,0 +1,246 @@
+mod connection;
+mod connman;
+
+use axum::{
+  Router,
+  body::Body,
+  extract::{ConnectInfo, FromRequest, Path, State as AxumState, WebSocketUpgrade, ws::WebSocket},
+  http::{self, Request},
+  response::{AppendHeaders, IntoResponse, Response},
+};
+pub use connman::{ClientMan, create_client_manager};
+
+use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
+use reqwest::StatusCode;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::{net::TcpListener, time::timeout};
+use tokio_util::sync::CancellationToken;
+use tower::util::ServiceExt;
+use tower_http::services::ServeDir;
+
+use crate::{
+  bluetooth::BluetoothMan,
+  handler::client::{ClientMode, PossibleSendMsg},
+  state::State as BridgeThingState,
+};
+
+type ServerTx = tokio::sync::mpsc::Sender<(WebSocket, SocketAddr, ClientMode)>;
+type ServerRx = tokio::sync::mpsc::Receiver<(WebSocket, SocketAddr, ClientMode)>;
+
+/// How long the bridge waits for the gateway to deliver an asset requested
+/// inside the `/_gateway/` namespace before 404'ing.
+const GATEWAY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub struct Server {
+  rx: ServerRx,
+  cancel_token: CancellationToken,
+
+  _stock_handle: tokio::task::JoinHandle<()>,
+  _modern_handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+struct ModernRouterState {
+  state: BridgeThingState,
+  bluetooth: BluetoothMan,
+  tx: ServerTx,
+}
+
+impl Server {
+  pub async fn bind(state: BridgeThingState, bluetooth: BluetoothMan) -> WSResult<Self> {
+    tracing::debug!(
+      "binding to ports {} (stock) and {} (modern + file serve)",
+      BRIDGETHING_STOCK_WS_PORT,
+      BRIDGETHING_WS_MODERN_PORT
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    let cancel_token = CancellationToken::new();
+
+    let stock_app = Router::new()
+      .fallback(axum::routing::any(stock_ws_handler))
+      .with_state(Arc::new(tx.clone()));
+
+    let modern_state = ModernRouterState { state, bluetooth, tx };
+    let modern_app = Router::new()
+      .route("/_gateway/{*path}", axum::routing::any(gateway_serve_handler))
+      .fallback(axum::routing::any(modern_handler))
+      .with_state(modern_state);
+
+    let stock_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
+    let modern_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
+    tracing::info!(
+      "listening on ports {} (stock) and {} (modern)",
+      BRIDGETHING_STOCK_WS_PORT,
+      BRIDGETHING_WS_MODERN_PORT
+    );
+
+    let stock_cancel_token = cancel_token.clone();
+    let _stock_handle = tokio::spawn(async move {
+      tokio::select! {
+        _ = axum::serve(stock_listener, stock_app.into_make_service_with_connect_info::<SocketAddr>()) => {
+          tracing::error!("FATAL: stock server stopped");
+        }
+        _ = stock_cancel_token.cancelled() => {
+          tracing::debug!("stock server shutting down");
+        }
+      }
+    });
+
+    let modern_cancel_token = cancel_token.clone();
+    let _modern_handle = tokio::spawn(async move {
+      tokio::select! {
+        _ = axum::serve(modern_listener, modern_app.into_make_service_with_connect_info::<SocketAddr>()) => {
+          tracing::error!("FATAL: modern server stopped");
+        }
+        _ = modern_cancel_token.cancelled() => {
+          tracing::debug!("modern server shutting down");
+        }
+      }
+    });
+
+    Ok(Self {
+      rx,
+      cancel_token,
+
+      _stock_handle,
+      _modern_handle,
+    })
+  }
+
+  /// cancel-safe
+  pub async fn listen(&mut self) -> WSResult<(WebSocket, SocketAddr, ClientMode)> {
+    self.rx.recv().await.ok_or(WSError::ChannelClosed)
+  }
+
+  pub async fn shutdown(self) {
+    self.cancel_token.cancel();
+    if let Err(err) = self._stock_handle.await {
+      tracing::error!("failed to shutdown stock server: {:?}", err);
+    }
+    if let Err(err) = self._modern_handle.await {
+      tracing::error!("failed to shutdown modern server: {:?}", err);
+    }
+  }
+}
+
+async fn stock_ws_handler(
+  ws: WebSocketUpgrade,
+  AxumState(tx): AxumState<Arc<ServerTx>>,
+  ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> impl IntoResponse {
+  tracing::info!("new stock port websocket connection from {}", addr);
+
+  let tx = tx.clone();
+  ws.on_upgrade(move |socket| async move {
+    if let Err(err) = tx.send((socket, addr, ClientMode::Stock)).await {
+      tracing::error!("failed to send new connection to server: {:?}", err);
+    }
+  })
+}
+
+async fn modern_handler(
+  ConnectInfo(addr): ConnectInfo<SocketAddr>,
+  AxumState(state): AxumState<ModernRouterState>,
+  req: Request<Body>,
+) -> Response {
+  if req.headers().contains_key("upgrade") {
+    return match WebSocketUpgrade::from_request(req, &()).await {
+      Ok(ws) => modern_ws_handler(ws, addr, state.tx.clone()).await.into_response(),
+      Err(err) => {
+        tracing::error!("failed to upgrade request to websocket: {:?}", err);
+        (StatusCode::BAD_REQUEST, err.body_text()).into_response()
+      }
+    };
+  }
+
+  let active_path = match resolve_active_webapp(&state.state).await {
+    Some(p) => p,
+    None => {
+      tracing::error!("no active webapp resolved; cannot serve request");
+      return (StatusCode::SERVICE_UNAVAILABLE, "no active webapp").into_response();
+    }
+  };
+
+  serve_from_dir(active_path, req).await
+}
+
+async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx) -> impl IntoResponse {
+  tracing::info!("new modern port websocket connection from {}", addr);
+
+  ws.on_upgrade(move |socket| async move {
+    if let Err(err) = tx.send((socket, addr, ClientMode::Modern)).await {
+      tracing::error!("failed to send new connection to server: {:?}", err);
+    }
+  })
+}
+
+/// Handler for the `/_gateway/<path>` namespace. Asks the connected
+/// gateway over Bluetooth to deliver the requested asset, falling
+/// through to 404 after a fixed timeout. SDK extensions document this
+/// route as the place to hang gateway-streamed assets the on-device
+/// webapp wants to fetch lazily.
+async fn gateway_serve_handler(Path(path): Path<String>, AxumState(state): AxumState<ModernRouterState>) -> Response {
+  if !state.state.gateway_status().await.connected {
+    tracing::trace!("gateway not connected, cannot fetch {:?}", path);
+    return (StatusCode::NOT_FOUND, "gateway not connected").into_response();
+  }
+
+  let (tx, rx) = tokio::sync::oneshot::channel();
+  state.bluetooth.request_file(path.clone(), tx).await;
+
+  match timeout(GATEWAY_FETCH_TIMEOUT, rx).await {
+    Ok(Ok((bytes, mime))) => {
+      tracing::debug!("served gateway file {:?} ({} bytes, {})", path, bytes.len(), mime);
+      let headers = AppendHeaders([(http::header::CONTENT_TYPE, mime.to_string())]);
+      (StatusCode::OK, headers, Body::from(bytes)).into_response()
+    }
+    _ => {
+      tracing::trace!("gateway did not deliver {:?} in time", path);
+      (StatusCode::NOT_FOUND, "Not Found").into_response()
+    }
+  }
+}
+
+/// Looks up the active webapp's bundle directory at request time. Falls
+/// back to the configured default if the persisted active app no longer
+/// resolves (e.g. it was uninstalled while the daemon was down).
+async fn resolve_active_webapp(state: &BridgeThingState) -> Option<PathBuf> {
+  let name = state.active_webapp().await;
+  state.webapps.resolve(&name)
+}
+
+/// Pumps the request through a `ServeDir` rooted at the given directory.
+/// Constructed per-request because the active webapp can change at runtime;
+/// `ServeDir::new` is cheap (no fs walk) and reusing one across requests
+/// would freeze the kiosk on the boot-time webapp.
+async fn serve_from_dir(dir: PathBuf, req: Request<Body>) -> Response {
+  let svc = ServeDir::new(dir).precompressed_gzip();
+  match svc.oneshot(req).await {
+    Ok(resp) => resp.map(Body::new),
+    Err(err) => {
+      tracing::error!("ServeDir error: {:?}", err);
+      (StatusCode::INTERNAL_SERVER_ERROR, "serve error").into_response()
+    }
+  }
+}
+
+pub type WSResult<T> = Result<T, WSError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum WSError {
+  #[error("failed to bind to port: {0}")]
+  Bind(#[from] std::io::Error),
+  #[error("websocket error: {0}")]
+  Websocket(#[from] axum::Error),
+  #[error("requested client to send to is not connected to the server!!")]
+  NotConnected,
+  #[error("could not send a message to requested client: {0}")]
+  MessageSend(#[from] tokio::sync::mpsc::error::SendError<PossibleSendMsg>),
+  #[error("could not send a message to requested client: {0}")]
+  MessageTrySend(#[from] tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>),
+  #[error("channel from connections to server struct has been dropped!!! this is bad.")]
+  ChannelClosed,
+  #[error("failed to broadcast to all devices. check the logs for more info.")]
+  BroadcastFailed,
+}

@@ -108,6 +108,29 @@ cdp port="9222":
 # + push; the tail blocks until you exit.
 iter: push logs
 
+# --- MFi dev proxy (dev-image only) ---
+#
+# bridgething-mfi-proxy listens on 10.42.1.2:9090 and forwards i2c-3
+# transactions to the chip so `cargo test -p bridgething-mfi --test
+# remote -- --ignored` (or any RemoteI2c-using tool) can drive the chip
+# from the dev host. The proxy unit Conflicts= with bridgething.service
+# and bridgething-als.service — starting it stops both, and blanks the
+# backlight on entry / restores it on exit.
+
+# Stop bridgething + ALS (via systemd Conflicts=) and start the i2c-3
+# proxy. Backlight goes to zero. Use mfi-proxy-down to reverse.
+mfi-proxy-up:
+  ssh {{ssh_args}} root@{{device_host}} 'systemctl start bridgething-mfi-proxy.service'
+
+# Stop the proxy and bring bridgething + ALS back up. Backlight restores
+# to whatever it was before the proxy started (then ALS takes over).
+mfi-proxy-down:
+  ssh {{ssh_args}} root@{{device_host}} 'systemctl stop bridgething-mfi-proxy.service; systemctl start bridgething-als.service bridgething.service'
+
+# Tail the proxy's journal. Ctrl-C to stop.
+mfi-proxy-logs:
+  ssh {{ssh_args}} root@{{device_host}} journalctl -fu bridgething-mfi-proxy.service
+
 # --- Misc ---
 
 # Set the host bluetooth class to the Car Thing class (0x7c0000) so

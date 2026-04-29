@@ -1,0 +1,32 @@
+[package]
+name = "libbridgething"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
+serde_with = { workspace = true, features = ["json"] }
+derive_more = { workspace = true, features = ["debug"] }
+
+# type generation
+ts-rs = { version = "12.0.1", features = ["uuid-impl", "no-serde-warnings"] }
+typeshare = "1.0.5"
+
+# codec/endec
+tokio-util = { workspace = true, features = ["codec"], optional = true }
+thiserror = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
+rmp-serde = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+[features]
+default = ["protocol"]
+protocol = [
+  "dep:tokio-util",
+  "dep:thiserror",
+  "dep:flate2",
+  "dep:rmp-serde",
+  "dep:tracing",
+]

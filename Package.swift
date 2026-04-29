@@ -18,7 +18,7 @@ let package = Package(
   targets: [
     .target(
       name: "BridgethingSchema",
-      path: "lib/swift/Sources/BridgethingSchema"
+      path: "crates/lib/swift/Sources/BridgethingSchema"
     ),
     .target(
       name: "BridgethingGateway",
@@ -27,12 +27,12 @@ let package = Package(
         .product(name: "DMMessagePack", package: "msgpack-swift"),
         .product(name: "Gzip", package: "GzipSwift"),
       ],
-      path: "gateway/swift/Sources/BridgethingGateway"
+      path: "packages/gateway/swift/Sources/BridgethingGateway"
     ),
     .testTarget(
       name: "BridgethingGatewayTests",
       dependencies: ["BridgethingGateway"],
-      path: "gateway/swift/Tests/BridgethingGatewayTests"
+      path: "packages/gateway/swift/Tests/BridgethingGatewayTests"
     ),
   ]
 )

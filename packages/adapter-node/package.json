@@ -1,0 +1,43 @@
+{
+  "name": "@bridgething/adapter-node",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "napi": {
+    "binaryName": "bridgething-adapter",
+    "targets": [
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-linux-android",
+      "arm-linux-androideabi",
+      "armv7-linux-androideabi",
+      "x86_64-linux-android",
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-apple-ios",
+      "aarch64-apple-ios-macabi",
+      "aarch64-apple-ios-sim",
+      "aarch64-pc-windows-msvc",
+      "x86_64-pc-windows-msvc"
+    ],
+    "npmClient": "bun"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@bridgething/gateway": "workspace:*"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.6.2"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build:release": "napi build --platform --release --esm -o ./native",
+    "build:debug": "napi build --platform --esm -o ./native",
+    "build": "bun run build:debug",
+    "version": "napi version"
+  }
+}

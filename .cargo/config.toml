@@ -1,2 +1,2 @@
 [env]
-TS_RS_EXPORT_DIR = { value = "./lib/ts/bindings", relative = true }
+TS_RS_EXPORT_DIR = { value = "./crates/lib/ts/bindings", relative = true }

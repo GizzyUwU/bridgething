@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BridgeThing Gateway Dev Page</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+      .collapsible-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-out;
+      }
+      .collapsible-content.expanded {
+        max-height: 1000px;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50">
+    <header class="my-4">
+      <h1 class="text-center text-3xl">BridgeThing Gateway Dev Page</h1>
+    </header>
+    <main class="flex flex-col items-center">
+      <div id="status" class="text-center mt-4 font-semibold"></div>
+
+      <div
+        class="mt-6 max-w-3xl mx-auto w-full p-4 border rounded-lg bg-white shadow-sm">
+        <button
+          id="toggleCommands"
+          class="flex justify-between items-center w-full text-xl font-semibold">
+          <span>Test Commands</span>
+          <svg
+            id="expandIcon"
+            class="w-5 h-5 transform transition-transform"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 9l-7 7-7-7"></path>
+          </svg>
+        </button>
+
+        <div id="commandsPanel" class="collapsible-content">
+          <div
+            id="testCommandsContainer"
+            class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 mt-3">
+            <!-- Test command buttons will be generated here -->
+          </div>
+
+          <div class="border-t pt-4 mb-4">
+            <h3 class="text-lg font-medium mb-2">Custom Command</h3>
+            <div class="mb-3">
+              <label
+                for="commandType"
+                class="block text-sm font-medium text-gray-700 mb-1"
+                >Command Type</label
+              >
+              <select id="commandType" class="w-full p-2 border rounded">
+                <!-- Command types will be populated here -->
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label
+                for="commandAction"
+                class="block text-sm font-medium text-gray-700 mb-1"
+                >Command Action</label
+              >
+              <input
+                type="text"
+                id="commandAction"
+                class="w-full p-2 border rounded"
+                placeholder="e.g. versionRequest" />
+            </div>
+
+            <div class="mb-3">
+              <label
+                for="commandPayload"
+                class="block text-sm font-medium text-gray-700 mb-1"
+                >Payload (JSON)</label
+              >
+              <textarea
+                id="commandPayload"
+                class="w-full p-2 border rounded font-mono text-sm"
+                rows="5"
+                placeholder='{ "key": "value" }'></textarea>
+            </div>
+
+            <button
+              id="sendCustomBtn"
+              class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+              Send Custom Command
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="flex justify-between items-center mt-6 max-w-3xl mx-auto w-full px-4">
+        <h2 class="text-xl font-semibold">Messages</h2>
+        <div>
+          <button
+            id="reconnectBtn"
+            class="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600">
+            Reconnect
+          </button>
+        </div>
+      </div>
+
+      <div
+        id="messages"
+        class="mt-2 max-w-3xl mx-auto w-full p-4 border rounded-lg bg-white shadow-sm"></div>
+    </main>
+
+    <script type="module" src="./index.js" defer></script>
+  </body>
+</html>

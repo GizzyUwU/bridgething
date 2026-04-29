@@ -1,0 +1,24 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": ["bridgething", "adapter"],
+  "ios": {
+    "iosModuleName": "BridgethingAdapter"
+  },
+  "android": {
+    "androidNamespace": ["bridgething", "adapter"],
+    "androidCxxLibName": "BridgethingAdapter"
+  },
+  "autolinking": {
+    "BridgethingTransport": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridBridgethingTransport"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridBridgethingTransport"
+      }
+    }
+  },
+  "ignorePaths": ["node_modules", "lib", "nitrogen/generated"]
+}
