@@ -8,6 +8,7 @@ mod systemd;
 mod chrome;
 
 mod handler;
+mod paths;
 mod player;
 mod state;
 

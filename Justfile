@@ -50,6 +50,8 @@ kotlin:
   perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeFileMsg\b/\@Serializable(with = GatewayToBridgeFileMsgSerializer::class)\nsealed class GatewayToBridgeFileMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
   perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeChromeMsg\b/\@Serializable(with = GatewayToBridgeChromeMsgSerializer::class)\nsealed class GatewayToBridgeChromeMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
   perl -i -0pe 's/\@Serializable\nsealed class ForwardMessage\b/\@Serializable(with = ForwardMessageSerializer::class)\nsealed class ForwardMessage/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
+  perl -i -0pe 's/\@Serializable\nsealed class BridgeToGatewayWebappMsg\b/\@Serializable(with = BridgeToGatewayWebappMsgSerializer::class)\nsealed class BridgeToGatewayWebappMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
+  perl -i -0pe 's/\@Serializable\nsealed class GatewayToBridgeWebappMsg\b/\@Serializable(with = GatewayToBridgeWebappMsgSerializer::class)\nsealed class GatewayToBridgeWebappMsg/g' lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt
   # Forward.Json carries an opaque payload typed as `Value = JsonElement`.
   # kotlinx's default JsonElement serializer only works with JsonDecoder;
   # UniversalValueSerializer dispatches on encoder/decoder type so the variant

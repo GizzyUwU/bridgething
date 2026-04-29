@@ -12,9 +12,11 @@ pub use connman::{ClientMan, create_client_manager};
 
 use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use reqwest::StatusCode;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, time::timeout};
-use tokio_util::{io::ReaderStream, sync::CancellationToken};
+use tokio_util::sync::CancellationToken;
+use tower::util::ServiceExt;
+use tower_http::services::ServeDir;
 
 use crate::{
   bluetooth::BluetoothMan,
@@ -25,12 +27,23 @@ use crate::{
 type ServerTx = tokio::sync::mpsc::Sender<(WebSocket, SocketAddr, ClientMode)>;
 type ServerRx = tokio::sync::mpsc::Receiver<(WebSocket, SocketAddr, ClientMode)>;
 
+/// How long the bridge waits for the gateway to deliver an asset requested
+/// inside the `/_gateway/` namespace before 404'ing.
+const GATEWAY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct Server {
   rx: ServerRx,
   cancel_token: CancellationToken,
 
   _stock_handle: tokio::task::JoinHandle<()>,
   _modern_handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+struct ModernRouterState {
+  state: BridgeThingState,
+  bluetooth: BluetoothMan,
+  tx: ServerTx,
 }
 
 impl Server {
@@ -47,10 +60,12 @@ impl Server {
     let stock_app = Router::new()
       .fallback(axum::routing::any(stock_ws_handler))
       .with_state(Arc::new(tx.clone()));
+
+    let modern_state = ModernRouterState { state, bluetooth, tx };
     let modern_app = Router::new()
-      .route("/{*path}", axum::routing::any(modern_handler))
+      .route("/_gateway/{*path}", axum::routing::any(gateway_serve_handler))
       .fallback(axum::routing::any(modern_handler))
-      .with_state(Arc::new((state, bluetooth, tx)));
+      .with_state(modern_state);
 
     let stock_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
     let modern_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
@@ -125,39 +140,34 @@ async fn stock_ws_handler(
 }
 
 async fn modern_handler(
-  path: Option<Path<String>>,
   ConnectInfo(addr): ConnectInfo<SocketAddr>,
-  AxumState(state): AxumState<Arc<(BridgeThingState, BluetoothMan, ServerTx)>>,
+  AxumState(state): AxumState<ModernRouterState>,
   req: Request<Body>,
 ) -> Response {
   if req.headers().contains_key("upgrade") {
-    match WebSocketUpgrade::from_request(req, &()).await {
-      Ok(ws) => modern_ws_handler(ws, addr, state).await.into_response(),
+    return match WebSocketUpgrade::from_request(req, &()).await {
+      Ok(ws) => modern_ws_handler(ws, addr, state.tx.clone()).await.into_response(),
       Err(err) => {
         tracing::error!("failed to upgrade request to websocket: {:?}", err);
         (StatusCode::BAD_REQUEST, err.body_text()).into_response()
       }
-    }
-  } else {
-    let path = match path {
-      Some(Path(path)) if path.is_empty() => "index.html".to_string(),
-      Some(Path(path)) => path,
-      None => "index.html".to_string(),
     };
-
-    tracing::trace!("got file request for {:?}", path);
-    modern_file_handler(state, path).await
   }
+
+  let active_path = match resolve_active_webapp(&state.state).await {
+    Some(p) => p,
+    None => {
+      tracing::error!("no active webapp resolved; cannot serve request");
+      return (StatusCode::SERVICE_UNAVAILABLE, "no active webapp").into_response();
+    }
+  };
+
+  serve_from_dir(active_path, req).await
 }
 
-async fn modern_ws_handler(
-  ws: WebSocketUpgrade,
-  addr: SocketAddr,
-  state: Arc<(BridgeThingState, BluetoothMan, ServerTx)>,
-) -> impl IntoResponse {
+async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx) -> impl IntoResponse {
   tracing::info!("new modern port websocket connection from {}", addr);
 
-  let tx = state.2.clone();
   ws.on_upgrade(move |socket| async move {
     if let Err(err) = tx.send((socket, addr, ClientMode::Modern)).await {
       tracing::error!("failed to send new connection to server: {:?}", err);
@@ -165,38 +175,52 @@ async fn modern_ws_handler(
   })
 }
 
-async fn modern_file_handler(state: Arc<(BridgeThingState, BluetoothMan, ServerTx)>, path: String) -> Response {
-  tracing::debug!("serving file request for {:?}", path);
-
-  if let Ok((file, mime)) = state.0.fs.get_file(&path).await {
-    tracing::debug!("serving file {:?} with content_type {:?}", path, &mime);
-    let stream = ReaderStream::new(file);
-    let body = Body::from_stream(stream);
-
-    let headers = AppendHeaders([(http::header::CONTENT_TYPE, mime.to_string())]);
-    return (StatusCode::OK, headers, body).into_response();
+/// Handler for the `/_gateway/<path>` namespace. Asks the connected
+/// gateway over Bluetooth to deliver the requested asset, falling
+/// through to 404 after a fixed timeout. SDK extensions document this
+/// route as the place to hang gateway-streamed assets the on-device
+/// webapp wants to fetch lazily.
+async fn gateway_serve_handler(Path(path): Path<String>, AxumState(state): AxumState<ModernRouterState>) -> Response {
+  if !state.state.gateway_status().await.connected {
+    tracing::trace!("gateway not connected, cannot fetch {:?}", path);
+    return (StatusCode::NOT_FOUND, "gateway not connected").into_response();
   }
 
-  if !state.0.gateway_status().await.connected {
-    tracing::trace!("gateway not connected, cannot request unknown file file {:?}", path);
-    return (StatusCode::NOT_FOUND, "Not Found").into_response();
-  }
-
-  // request an unknown file from the gateway
   let (tx, rx) = tokio::sync::oneshot::channel();
-  state.1.request_file(path.clone(), tx).await;
+  state.bluetooth.request_file(path.clone(), tx).await;
 
-  match timeout(Duration::from_secs(10), rx).await {
-    Ok(Ok(file)) => {
-      tracing::debug!("serving file {:?} with content_type {:?}", path, &file.1);
-      let body = Body::from(file.0);
-
-      let headers = AppendHeaders([(http::header::CONTENT_TYPE, file.1.to_string())]);
-      (StatusCode::OK, headers, body).into_response()
+  match timeout(GATEWAY_FETCH_TIMEOUT, rx).await {
+    Ok(Ok((bytes, mime))) => {
+      tracing::debug!("served gateway file {:?} ({} bytes, {})", path, bytes.len(), mime);
+      let headers = AppendHeaders([(http::header::CONTENT_TYPE, mime.to_string())]);
+      (StatusCode::OK, headers, Body::from(bytes)).into_response()
     }
     _ => {
-      tracing::trace!("failed to get file {:?} from gateway", path);
+      tracing::trace!("gateway did not deliver {:?} in time", path);
       (StatusCode::NOT_FOUND, "Not Found").into_response()
+    }
+  }
+}
+
+/// Looks up the active webapp's bundle directory at request time. Falls
+/// back to the configured default if the persisted active app no longer
+/// resolves (e.g. it was uninstalled while the daemon was down).
+async fn resolve_active_webapp(state: &BridgeThingState) -> Option<PathBuf> {
+  let name = state.active_webapp().await;
+  state.webapps.resolve(&name)
+}
+
+/// Pumps the request through a `ServeDir` rooted at the given directory.
+/// Constructed per-request because the active webapp can change at runtime;
+/// `ServeDir::new` is cheap (no fs walk) and reusing one across requests
+/// would freeze the kiosk on the boot-time webapp.
+async fn serve_from_dir(dir: PathBuf, req: Request<Body>) -> Response {
+  let svc = ServeDir::new(dir).precompressed_gzip();
+  match svc.oneshot(req).await {
+    Ok(resp) => resp.map(Body::new),
+    Err(err) => {
+      tracing::error!("ServeDir error: {:?}", err);
+      (StatusCode::INTERNAL_SERVER_ERROR, "serve error").into_response()
     }
   }
 }

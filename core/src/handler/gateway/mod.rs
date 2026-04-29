@@ -3,9 +3,11 @@ use handle::*;
 
 mod chrome;
 mod file;
+mod webapp;
 
 use chrome::*;
 use file::*;
+use webapp::*;
 
 use libbridgething::{
   ForwardMessage, GatewayMeta, ServerEventType,
@@ -54,6 +56,9 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
         tokio::spawn(async move { ChromeHandler::new(handle).handle(chrome_msg).await });
+      }
+      GatewayToBridgeMsgData::Webapp(webapp_msg) => {
+        tokio::spawn(async move { WebappHandler::new(handle).handle(webapp_msg).await });
       }
       GatewayToBridgeMsgData::Forward(forward) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(forward).await });

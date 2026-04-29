@@ -4,21 +4,43 @@ use libbridgething::{Device, ServerEventType, server::GatewayStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::{chrome, server::ClientMan};
+use crate::{chrome, paths, server::ClientMan};
 
-mod files;
+mod gateway_files;
 pub mod meta;
+mod webapps;
 
-pub use files::FileRequestTx;
+pub use gateway_files::FileRequestTx;
+pub use webapps::WebappRegistry;
 
 pub type State = Arc<AppState>;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+fn default_active_webapp() -> String {
+  "stock".to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct PersistentAppState {
   // TODO: only say that device is "connected" if it is connected to avrcp profile
+  #[serde(default)]
   pub last_device: Option<String>,
+  #[serde(default)]
   pub devices: HashMap<String, Device>,
+  #[serde(default)]
   pub storage: HashMap<String, String>,
+  #[serde(default = "default_active_webapp")]
+  pub active_webapp: String,
+}
+
+impl Default for PersistentAppState {
+  fn default() -> Self {
+    Self {
+      last_device: None,
+      devices: HashMap::new(),
+      storage: HashMap::new(),
+      active_webapp: default_active_webapp(),
+    }
+  }
 }
 
 impl PersistentAppState {
@@ -48,7 +70,8 @@ pub struct AppState {
   pub meta: meta::SuperbirdMeta,
   pub player: crate::player::Player,
   pub chrome: chrome::Chrome,
-  pub fs: files::FileSystem,
+  pub webapps: WebappRegistry,
+  pub gateway_files: gateway_files::GatewayFileBridge,
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
@@ -63,31 +86,51 @@ impl AppState {
     chrome: chrome::Chrome,
   ) -> Result<State, StateError> {
     tracing::info!("initializing state");
-    let config_dir_path = dirs::config_dir()
-      .unwrap_or("/home/superbird/.config".into())
-      .join("bridgething");
+    let state_dir = paths::state_dir();
 
-    if !config_dir_path.exists() {
-      tokio::fs::create_dir_all(&config_dir_path).await?;
+    if !state_dir.exists() {
+      tokio::fs::create_dir_all(&state_dir).await?;
     }
 
-    let persist_path = config_dir_path.join("bridgething.db");
-    let persist = PersistentAppState::restore_or_default(&persist_path).await;
+    let persist_path = state_dir.join("bridgething.db");
+    let mut persist = PersistentAppState::restore_or_default(&persist_path).await;
 
-    let fs = files::FileSystem::init().await?;
-    tracing::debug!("file system initialized");
+    let webapps = WebappRegistry::init().await?;
+    tracing::debug!("webapp registry initialized");
+
+    if webapps.resolve(&persist.active_webapp).is_none() {
+      tracing::warn!(
+        "active webapp '{}' not present on disk; falling back to '{}'",
+        &persist.active_webapp,
+        default_active_webapp()
+      );
+      persist.active_webapp = default_active_webapp();
+    }
+
+    let gateway_files = gateway_files::GatewayFileBridge::new();
 
     Ok(Arc::new(Self {
       client_man,
       meta,
       player,
       chrome,
-      fs,
+      webapps,
+      gateway_files,
 
       persist_path,
       persist: RwLock::new(persist),
       session: RwLock::new(SessionAppState::default()),
     }))
+  }
+
+  pub async fn active_webapp(&self) -> String {
+    self.persist.read().await.active_webapp.clone()
+  }
+
+  pub async fn set_active_webapp(&self, name: String) -> StateResult<()> {
+    self.persist.write().await.active_webapp = name;
+    self.save_persist().await?;
+    Ok(())
   }
 
   pub async fn gateway_status(&self) -> GatewayStatus {

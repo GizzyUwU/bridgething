@@ -102,7 +102,7 @@ impl BluetoothManager {
   }
 
   pub async fn request_file(&self, path: String, tx: FileRequestTx) {
-    self.state.fs.handle_request_file(path.clone(), tx).await;
+    self.state.gateway_files.request_file(path.clone(), tx).await;
 
     self
       .gateway_man
@@ -166,14 +166,23 @@ pub struct GatewayMan {
 
   tx: BluetoothTx,
 
-  ble: GatewayCon,
+  ble: Option<GatewayCon>,
   rfcomm: GatewayCon,
 }
 
 impl GatewayMan {
   pub async fn init(adapter: Adapter, session: &Session, state: State, tx: BluetoothTx) -> BluetoothResult<Self> {
     tracing::debug!("initializing bluetooth gateway manager");
-    let ble = GatewayCon::init(&adapter, session, state.clone(), GatewayType::Ble, tx.clone()).await?;
+    let ble = match GatewayCon::init(&adapter, session, state.clone(), GatewayType::Ble, tx.clone()).await {
+      Ok(con) => Some(con),
+      Err(err) => {
+        tracing::warn!(
+          "BLE gateway init failed; continuing without BLE (rfcomm + on-device webapp still work): {:?}",
+          err
+        );
+        None
+      }
+    };
     let rfcomm = GatewayCon::init(&adapter, session, state.clone(), GatewayType::Rfcomm, tx.clone()).await?;
 
     Ok(Self {
@@ -189,7 +198,10 @@ impl GatewayMan {
 
   pub async fn send_all(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
     match &data.protocol {
-      GatewayType::Ble => self.ble.send(data).await,
+      GatewayType::Ble => match &self.ble {
+        Some(ble) => ble.send(data).await,
+        None => tracing::trace!("dropping ble send: ble gateway not initialized"),
+      },
       GatewayType::Rfcomm => self.rfcomm.send(data).await,
     }
   }

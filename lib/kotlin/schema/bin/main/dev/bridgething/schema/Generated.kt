@@ -73,6 +73,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("file")
 	data class File(val data: BridgeToGatewayFileMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("webapp")
+	data class Webapp(val data: BridgeToGatewayWebappMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): BridgeToGatewayMsgData()
 	@Serializable
@@ -97,21 +100,6 @@ data class BridgeToGatewayMsg (
 @Serializable
 data class ChromeNavigate (
 	val url: String
-)
-
-@Serializable
-data class FileAdd (
-	val files: List<BridgeFile>
-)
-
-@Serializable
-data class FileDelete (
-	val files: List<String>
-)
-
-@Serializable
-data class FileList (
-	val files: List<String>
 )
 
 @Serializable
@@ -145,6 +133,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("chrome")
 	data class Chrome(val data: GatewayToBridgeChromeMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("webapp")
+	data class Webapp(val data: GatewayToBridgeWebappMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
@@ -184,15 +175,76 @@ data class Track (
 	val saved: Boolean
 )
 
+@Serializable
+data class WebappActive (
+	val name: String
+)
+
+/// Source of a webapp bundle. Built-in apps live in the read-only image
+/// (rootfs) and cannot be uninstalled. Installed apps live on the data
+/// partition and shadow built-ins of the same name.
+@Serializable
+enum class WebappSource(val string: String) {
+	@SerialName("builtin")
+	Builtin("builtin"),
+	@SerialName("installed")
+	Installed("installed"),
+}
+
+@Serializable
+data class WebappInfo (
+	val name: String,
+	val source: WebappSource,
+	val version: String? = null,
+	val description: String? = null
+)
+
+@Serializable
+data class WebappInstall (
+	val name: String,
+	/// zip archive whose top-level entries become the bundle contents.
+	/// Must include an `index.html` at the archive root.
+	val archive: ByteArray
+)
+
+@Serializable
+data class WebappList (
+	val webapps: List<WebappInfo>
+)
+
+@Serializable
+data class WebappSwitchTo (
+	val name: String
+)
+
+@Serializable
+data class WebappUninstall (
+	val name: String
+)
+
+/// Bridge-side request for a runtime file the gateway has access to.
+/// Triggered by HTTP misses inside the `/_gateway/` namespace.
 @Serializable(with = BridgeToGatewayFileMsgSerializer::class)
 sealed class BridgeToGatewayFileMsg {
 	@Serializable
-	@SerialName("files")
-	data class Files(val data: FileList): BridgeToGatewayFileMsg()
-	/// fileRequest occurs when a file is requested over http that is not known to the bridge
-	@Serializable
 	@SerialName("fileRequest")
 	data class FileRequest(val data: FileRequestData): BridgeToGatewayFileMsg()
+}
+
+@Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
+sealed class BridgeToGatewayWebappMsg {
+	/// response to List
+	@Serializable
+	@SerialName("webapps")
+	data class Webapps(val data: WebappList): BridgeToGatewayWebappMsg()
+	/// response to GetActive, and event broadcast on switch
+	@Serializable
+	@SerialName("active")
+	data class Active(val data: WebappActive): BridgeToGatewayWebappMsg()
+	/// response to SwitchTo / Install indicating the new active app
+	@Serializable
+	@SerialName("switched")
+	data class Switched(val data: WebappActive): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -215,22 +267,38 @@ sealed class GatewayToBridgeChromeMsg {
 	data class Navigate(val data: ChromeNavigate): GatewayToBridgeChromeMsg()
 }
 
+/// Gateway-served runtime file fetches. The bridge requests an asset on a
+/// `_gateway/<path>` HTTP miss; the gateway responds with the bytes if it
+/// has them.
 @Serializable(with = GatewayToBridgeFileMsgSerializer::class)
 sealed class GatewayToBridgeFileMsg {
 	@Serializable
-	@SerialName("list")
-	object List: GatewayToBridgeFileMsg()
-	@Serializable
-	@SerialName("delete")
-	data class Delete(val data: FileDelete): GatewayToBridgeFileMsg()
-	@Serializable
-	@SerialName("add")
-	data class Add(val data: FileAdd): GatewayToBridgeFileMsg()
-	/// fileResponse is a response to the fileRequest, which occurs when a file is requested over http that is not known
-	/// to the bridge. a fileResponse within a timely matter will be served to the client over http instead of 404'ing
-	@Serializable
 	@SerialName("fileResponse")
 	data class FileResponse(val data: FileResponseData): GatewayToBridgeFileMsg()
+}
+
+@Serializable(with = GatewayToBridgeWebappMsgSerializer::class)
+sealed class GatewayToBridgeWebappMsg {
+	/// request: bridge replies with the full list of installed + built-in webapps
+	@Serializable
+	@SerialName("list")
+	object List: GatewayToBridgeWebappMsg()
+	/// request: bridge replies with the active webapp's name
+	@Serializable
+	@SerialName("getActive")
+	object GetActive: GatewayToBridgeWebappMsg()
+	/// command: switch the kiosk to the named webapp; bridge replies with `Switched`
+	@Serializable
+	@SerialName("switchTo")
+	data class SwitchTo(val data: WebappSwitchTo): GatewayToBridgeWebappMsg()
+	/// command: extract the supplied zip into the installed root under `name`
+	@Serializable
+	@SerialName("install")
+	data class Install(val data: WebappInstall): GatewayToBridgeWebappMsg()
+	/// command: remove the named installed webapp (built-ins cannot be removed)
+	@Serializable
+	@SerialName("uninstall")
+	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()
 }
 
 @Serializable(with = ImageSerializer::class)

@@ -10,28 +10,19 @@ use crate::gateway::BridgeToGatewayMsgData;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-pub struct FileList {
-  pub files: Vec<String>,
-}
-
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
 pub struct FileRequestData {
   pub file: String,
 }
 
+/// Bridge-side request for a runtime file the gateway has access to.
+/// Triggered by HTTP misses inside the `/_gateway/` namespace.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum BridgeToGatewayFileMsg {
-  Files(FileList), // response
-  /// fileRequest occurs when a file is requested over http that is not known to the bridge
-  FileRequest(FileRequestData), // request
+  FileRequest(FileRequestData),
 }
 
 impl From<BridgeToGatewayFileMsg> for BridgeToGatewayMsgData {

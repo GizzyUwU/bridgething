@@ -1,5 +1,5 @@
 #[cfg(feature = "systemd")]
-use sd_notify::{booted, notify, NotifyState};
+use sd_notify::{NotifyState, booted, notify};
 
 pub trait Notify<'a> {
   fn new() -> Self
@@ -29,7 +29,7 @@ impl<'a> Notify<'a> for SystemdNotify {
     tracing::debug!("creating systemd notifier");
 
     if let Err(err) = match booted() {
-      Ok(true) => notify(false, &[NotifyState::Status("starting...")]),
+      Ok(true) => notify(&[NotifyState::Status("starting...")]),
       _ => panic!("system was not booted with systemd! please disable the systemd feature."),
     } {
       tracing::error!("failed to notify systemd!! {:?}", err);
@@ -46,7 +46,7 @@ impl<'a> Notify<'a> for SystemdNotify {
       messages.push(NotifyState::Status(status));
     };
 
-    if let Err(err) = notify(false, &messages) {
+    if let Err(err) = notify(&messages) {
       tracing::error!("failed to notify systemd!! {:?}", err);
     }
   }
@@ -54,7 +54,7 @@ impl<'a> Notify<'a> for SystemdNotify {
   fn status(&self, status: &'a str) {
     tracing::debug!("setting status to: {status}");
 
-    if let Err(err) = notify(false, &[NotifyState::Status(status)]) {
+    if let Err(err) = notify(&[NotifyState::Status(status)]) {
       tracing::error!("failed to notify systemd!! {:?}", err);
     }
   }

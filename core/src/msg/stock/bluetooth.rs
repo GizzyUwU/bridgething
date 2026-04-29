@@ -1,4 +1,4 @@
-use libbridgething::{client::ClientBluetoothCommand, server::ServerBluetoothEvent, Device, DeviceType};
+use libbridgething::{Device, DeviceType, client::ClientBluetoothCommand, server::ServerBluetoothEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::msg::{PossibleSendMsg, StockSendMsg};

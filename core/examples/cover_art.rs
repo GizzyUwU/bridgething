@@ -1,5 +1,5 @@
-use bluer::l2cap::{Opts, Socket, SocketAddr, Stream};
 use bluer::AddressType;
+use bluer::l2cap::{Opts, Socket, SocketAddr, Stream};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

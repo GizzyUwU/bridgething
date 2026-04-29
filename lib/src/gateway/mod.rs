@@ -58,6 +58,7 @@ pub enum GatewayToBridgeMsgData {
 
   File(GatewayToBridgeFileMsg),
   Chrome(GatewayToBridgeChromeMsg),
+  Webapp(GatewayToBridgeWebappMsg),
 
   // arbitrary data
   Forward(ForwardMessage), // request, response, event, command?
@@ -100,12 +101,14 @@ pub struct BridgeToGatewayMsg {
 pub enum BridgeToGatewayMsgData {
   Version(BridgeThingMeta), // event, response?
   File(BridgeToGatewayFileMsg),
+  Webapp(BridgeToGatewayWebappMsg),
 
   // arbitrary data
   Forward(ForwardMessage), // request, response, event, command?
 
   // acknowledgements
   Ack,  // response, happens when a command has been received and won't have a completion
+  Nack, // response, happens when a command has been received but will not be processed
   Done, // response, happens when a command has been completed
 }
 

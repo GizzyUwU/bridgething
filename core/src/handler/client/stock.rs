@@ -258,7 +258,15 @@ impl LegacyStockHandler {
     skip_to_uri: Option<String>,
     skip_to_uid: Option<String>,
   ) -> HandlerResult {
-    tracing::debug!("({}) playing Spotify uri: {}, feature identifier: {}, interaction id: {:?}, skip to uri: {:?}, skip to uid: {:?}", &self.handle.from, uri, feature_identifier, interaction_id, skip_to_uri, skip_to_uid);
+    tracing::debug!(
+      "({}) playing Spotify uri: {}, feature identifier: {}, interaction id: {:?}, skip to uri: {:?}, skip to uid: {:?}",
+      &self.handle.from,
+      uri,
+      feature_identifier,
+      interaction_id,
+      skip_to_uri,
+      skip_to_uid
+    );
     // Ok(self.handle.respond().await?)
     Ok(())
   }

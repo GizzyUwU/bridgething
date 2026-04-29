@@ -16,15 +16,10 @@ pub struct SuperbirdMeta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
-  #[serde(default)]
   pub image_build_id: String,
-  #[serde(default)]
   pub image_build_date: String,
-  #[serde(default)]
   pub image_distro: String,
-  #[serde(default)]
   pub image_distro_version: String,
-  #[serde(default)]
   pub image_machine: String,
 }
 

@@ -137,6 +137,7 @@ public enum GatewayMsgMeta: Codable, Sendable {
 public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case version(BridgeThingMeta)
 	case file(BridgeToGatewayFileMsg)
+	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	case ack
 	case done
@@ -144,6 +145,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
 			file,
+			webapp,
 			forward,
 			ack,
 			done
@@ -165,6 +167,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .file:
 				if let content = try? container.decode(BridgeToGatewayFileMsg.self, forKey: .data) {
 					self = .file(content)
+					return
+				}
+			case .webapp:
+				if let content = try? container.decode(BridgeToGatewayWebappMsg.self, forKey: .data) {
+					self = .webapp(content)
 					return
 				}
 			case .forward:
@@ -191,6 +198,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .file(let content):
 			try container.encode(CodingKeys.file, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .webapp(let content):
+			try container.encode(CodingKeys.webapp, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .forward(let content):
 			try container.encode(CodingKeys.forward, forKey: .type)
@@ -224,30 +234,6 @@ public struct ChromeNavigate: Codable, Sendable {
 
 	public init(url: String) {
 		self.url = url
-	}
-}
-
-public struct FileAdd: Codable, Sendable {
-	public let files: [BridgeFile]
-
-	public init(files: [BridgeFile]) {
-		self.files = files
-	}
-}
-
-public struct FileDelete: Codable, Sendable {
-	public let files: [String]
-
-	public init(files: [String]) {
-		self.files = files
-	}
-}
-
-public struct FileList: Codable, Sendable {
-	public let files: [String]
-
-	public init(files: [String]) {
-		self.files = files
 	}
 }
 
@@ -289,12 +275,14 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case version(GatewayMeta)
 	case file(GatewayToBridgeFileMsg)
 	case chrome(GatewayToBridgeChromeMsg)
+	case webapp(GatewayToBridgeWebappMsg)
 	case forward(ForwardMessage)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
 			file,
 			chrome,
+			webapp,
 			forward
 	}
 
@@ -321,6 +309,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .chrome(content)
 					return
 				}
+			case .webapp:
+				if let content = try? container.decode(GatewayToBridgeWebappMsg.self, forKey: .data) {
+					self = .webapp(content)
+					return
+				}
 			case .forward:
 				if let content = try? container.decode(ForwardMessage.self, forKey: .data) {
 					self = .forward(content)
@@ -342,6 +335,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .chrome(let content):
 			try container.encode(CodingKeys.chrome, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .webapp(let content):
+			try container.encode(CodingKeys.webapp, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .forward(let content):
 			try container.encode(CodingKeys.forward, forKey: .type)
@@ -406,14 +402,79 @@ public struct Track: Codable, Sendable {
 	}
 }
 
+public struct WebappActive: Codable, Sendable {
+	public let name: String
+
+	public init(name: String) {
+		self.name = name
+	}
+}
+
+/// Source of a webapp bundle. Built-in apps live in the read-only image
+/// (rootfs) and cannot be uninstalled. Installed apps live on the data
+/// partition and shadow built-ins of the same name.
+public enum WebappSource: String, Codable, Sendable {
+	case builtin
+	case installed
+}
+
+public struct WebappInfo: Codable, Sendable {
+	public let name: String
+	public let source: WebappSource
+	public let version: String?
+	public let description: String?
+
+	public init(name: String, source: WebappSource, version: String?, description: String?) {
+		self.name = name
+		self.source = source
+		self.version = version
+		self.description = description
+	}
+}
+
+public struct WebappInstall: Codable, Sendable {
+	public let name: String
+	/// zip archive whose top-level entries become the bundle contents.
+	/// Must include an `index.html` at the archive root.
+	public let archive: Data
+
+	public init(name: String, archive: Data) {
+		self.name = name
+		self.archive = archive
+	}
+}
+
+public struct WebappList: Codable, Sendable {
+	public let webapps: [WebappInfo]
+
+	public init(webapps: [WebappInfo]) {
+		self.webapps = webapps
+	}
+}
+
+public struct WebappSwitchTo: Codable, Sendable {
+	public let name: String
+
+	public init(name: String) {
+		self.name = name
+	}
+}
+
+public struct WebappUninstall: Codable, Sendable {
+	public let name: String
+
+	public init(name: String) {
+		self.name = name
+	}
+}
+
+/// Bridge-side request for a runtime file the gateway has access to.
+/// Triggered by HTTP misses inside the `/_gateway/` namespace.
 public enum BridgeToGatewayFileMsg: Codable, Sendable {
-	case files(FileList)
-	/// fileRequest occurs when a file is requested over http that is not known to the bridge
 	case fileRequest(FileRequestData)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case files,
-			fileRequest
+		case fileRequest
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -424,11 +485,6 @@ public enum BridgeToGatewayFileMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .files:
-				if let content = try? container.decode(FileList.self, forKey: .data) {
-					self = .files(content)
-					return
-				}
 			case .fileRequest:
 				if let content = try? container.decode(FileRequestData.self, forKey: .data) {
 					self = .fileRequest(content)
@@ -442,11 +498,66 @@ public enum BridgeToGatewayFileMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .files(let content):
-			try container.encode(CodingKeys.files, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .fileRequest(let content):
 			try container.encode(CodingKeys.fileRequest, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum BridgeToGatewayWebappMsg: Codable, Sendable {
+	/// response to List
+	case webapps(WebappList)
+	/// response to GetActive, and event broadcast on switch
+	case active(WebappActive)
+	/// response to SwitchTo / Install indicating the new active app
+	case switched(WebappActive)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case webapps,
+			active,
+			switched
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .webapps:
+				if let content = try? container.decode(WebappList.self, forKey: .data) {
+					self = .webapps(content)
+					return
+				}
+			case .active:
+				if let content = try? container.decode(WebappActive.self, forKey: .data) {
+					self = .active(content)
+					return
+				}
+			case .switched:
+				if let content = try? container.decode(WebappActive.self, forKey: .data) {
+					self = .switched(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayWebappMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayWebappMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .webapps(let content):
+			try container.encode(CodingKeys.webapps, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .active(let content):
+			try container.encode(CodingKeys.active, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .switched(let content):
+			try container.encode(CodingKeys.switched, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -542,19 +653,14 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 	}
 }
 
+/// Gateway-served runtime file fetches. The bridge requests an asset on a
+/// `_gateway/<path>` HTTP miss; the gateway responds with the bytes if it
+/// has them.
 public enum GatewayToBridgeFileMsg: Codable, Sendable {
-	case list
-	case delete(FileDelete)
-	case add(FileAdd)
-	/// fileResponse is a response to the fileRequest, which occurs when a file is requested over http that is not known
-	/// to the bridge. a fileResponse within a timely matter will be served to the client over http instead of 404'ing
 	case fileResponse(FileResponseData)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case list,
-			delete,
-			add,
-			fileResponse
+		case fileResponse
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -565,19 +671,6 @@ public enum GatewayToBridgeFileMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .list:
-				self = .list
-				return
-			case .delete:
-				if let content = try? container.decode(FileDelete.self, forKey: .data) {
-					self = .delete(content)
-					return
-				}
-			case .add:
-				if let content = try? container.decode(FileAdd.self, forKey: .data) {
-					self = .add(content)
-					return
-				}
 			case .fileResponse:
 				if let content = try? container.decode(FileResponseData.self, forKey: .data) {
 					self = .fileResponse(content)
@@ -591,16 +684,82 @@ public enum GatewayToBridgeFileMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .list:
-			try container.encode(CodingKeys.list, forKey: .event)
-		case .delete(let content):
-			try container.encode(CodingKeys.delete, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .add(let content):
-			try container.encode(CodingKeys.add, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .fileResponse(let content):
 			try container.encode(CodingKeys.fileResponse, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeWebappMsg: Codable, Sendable {
+	/// request: bridge replies with the full list of installed + built-in webapps
+	case list
+	/// request: bridge replies with the active webapp's name
+	case getActive
+	/// command: switch the kiosk to the named webapp; bridge replies with `Switched`
+	case switchTo(WebappSwitchTo)
+	/// command: extract the supplied zip into the installed root under `name`
+	case install(WebappInstall)
+	/// command: remove the named installed webapp (built-ins cannot be removed)
+	case uninstall(WebappUninstall)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case list,
+			getActive,
+			switchTo,
+			install,
+			uninstall
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .list:
+				self = .list
+				return
+			case .getActive:
+				self = .getActive
+				return
+			case .switchTo:
+				if let content = try? container.decode(WebappSwitchTo.self, forKey: .data) {
+					self = .switchTo(content)
+					return
+				}
+			case .install:
+				if let content = try? container.decode(WebappInstall.self, forKey: .data) {
+					self = .install(content)
+					return
+				}
+			case .uninstall:
+				if let content = try? container.decode(WebappUninstall.self, forKey: .data) {
+					self = .uninstall(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeWebappMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeWebappMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .list:
+			try container.encode(CodingKeys.list, forKey: .event)
+		case .getActive:
+			try container.encode(CodingKeys.getActive, forKey: .event)
+		case .switchTo(let content):
+			try container.encode(CodingKeys.switchTo, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .install(let content):
+			try container.encode(CodingKeys.install, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .uninstall(let content):
+			try container.encode(CodingKeys.uninstall, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

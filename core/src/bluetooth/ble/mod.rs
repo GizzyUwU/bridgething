@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, io::Write, pin::Pin};
 
 use bluer::{
   Adapter,
-  adv::{Advertisement, AdvertisementHandle, SecondaryChannel},
+  adv::{Advertisement, AdvertisementHandle},
   gatt::{
     CharacteristicReader, CharacteristicWriter,
     local::{
@@ -65,8 +65,6 @@ impl GattServer {
       manufacturer_data,
       discoverable: Some(true),
       local_name: Some("bridgething".to_string()),
-      solicit_uuids: vec![BRIDGETHING_SERVICE_UUID].into_iter().collect(),
-      secondary_channel: Some(SecondaryChannel::TwoM),
       ..Default::default()
     };
     let adv_handle = adapter.advertise(le_advertisement).await?;

@@ -227,18 +227,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(bridge_fixture(
-    "bridge_to_gateway/file-files-response",
-    "response to a fileList request - daemon returns the served file list",
-    BridgeToGatewayMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
-      data: BridgeToGatewayMsgData::File(BridgeToGatewayFileMsg::Files(FileList {
-        files: vec!["index.html".into(), "app.js".into(), "style.css".into()],
-      })),
-    },
-  ));
-
-  out.push(bridge_fixture(
     "bridge_to_gateway/file-request-request",
     "daemon requests a file from the gateway (browser fetched something we don't have)",
     BridgeToGatewayMsg {
@@ -247,6 +235,51 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       data: BridgeToGatewayMsgData::File(BridgeToGatewayFileMsg::FileRequest(FileRequestData {
         file: "/missing/asset.png".into(),
       })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-list-response",
+    "response to a webapp List request - bundles + their source",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Webapps(WebappList {
+        webapps: vec![
+          WebappInfo {
+            name: "stock".into(),
+            source: WebappSource::Builtin,
+            version: Some("8.9.2".into()),
+            description: Some("Spotify Car Thing stock UI".into()),
+          },
+          WebappInfo {
+            name: "demo".into(),
+            source: WebappSource::Installed,
+            version: Some("0.1.0".into()),
+            description: None,
+          },
+        ],
+      })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-active-response",
+    "response to a webapp GetActive request - currently active app name",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Active(WebappActive { name: "stock".into() })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-switched-response",
+    "broadcast event after the kiosk switches to a new webapp",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(WebappActive { name: "demo".into() })),
     },
   ));
 
@@ -294,43 +327,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/file-list-request",
-    "gateway asks for the served file list - unit variant of the file enum",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Request,
-      data: GatewayToBridgeMsgData::File(GatewayToBridgeFileMsg::List),
-    },
-  ));
-
-  out.push(gateway_fixture(
-    "gateway_to_bridge/file-delete-command",
-    "gateway tells daemon to drop some served files",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Command,
-      data: GatewayToBridgeMsgData::File(GatewayToBridgeFileMsg::Delete(FileDelete {
-        files: vec!["stale.html".into()],
-      })),
-    },
-  ));
-
-  out.push(gateway_fixture(
-    "gateway_to_bridge/file-add-command",
-    "gateway uploads a file - exercises BridgeFile (path + raw bytes)",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Command,
-      data: GatewayToBridgeMsgData::File(GatewayToBridgeFileMsg::Add(FileAdd {
-        files: vec![BridgeFile {
-          path: "/asset.png".into(),
-          data: fingerprint_bytes(),
-        }],
-      })),
-    },
-  ));
-
-  out.push(gateway_fixture(
     "gateway_to_bridge/file-response-response",
     "gateway answering a fileRequest from the daemon - returns BridgeFile",
     GatewayToBridgeMsg {
@@ -341,6 +337,63 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
           path: "/missing/asset.png".into(),
           data: fingerprint_bytes(),
         },
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/webapp-list-request",
+    "gateway asks the daemon to enumerate installed and built-in webapps",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Request,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::List),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/webapp-get-active-request",
+    "gateway asks the daemon which webapp is currently active",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Request,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::GetActive),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/webapp-switch-to-command",
+    "gateway tells the daemon to swap the kiosk to a different webapp",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Command,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::SwitchTo(WebappSwitchTo {
+        name: "demo".into(),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/webapp-install-command",
+    "gateway uploads a zip archive containing a webapp bundle",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Command,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Install(WebappInstall {
+        name: "demo".into(),
+        archive: fingerprint_bytes(),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/webapp-uninstall-command",
+    "gateway tells the daemon to remove a previously-installed webapp",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Command,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Uninstall(WebappUninstall {
+        name: "demo".into(),
       })),
     },
   ));

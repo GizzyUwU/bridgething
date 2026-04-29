@@ -85,3 +85,12 @@ export type Track = {
   image_id: string;
   saved: boolean;
 };
+
+export type WebappInfo = { name: string; source: WebappSource; version: string | null; description: string | null };
+
+/**
+ * Source of a webapp bundle. Built-in apps live in the read-only image
+ * (rootfs) and cannot be uninstalled. Installed apps live on the data
+ * partition and shadow built-ins of the same name.
+ */
+export type WebappSource = 'builtin' | 'installed';
