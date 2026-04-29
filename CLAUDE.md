@@ -14,6 +14,7 @@ Anything that crosses a websocket or bluetooth boundary lives here, plus
 the codec/framing for those boundaries. That's it.
 
 Allowed in lib:
+
 - Wire DTOs (every type that gets serialized to msgpack on the BT link
   or to JSON on the local websocket).
 - The codec / framing in `lib/src/protocol/`.
@@ -22,6 +23,7 @@ Allowed in lib:
   and the `protocol` feature deps (tokio-util, flate2, rmp-serde).
 
 Forbidden in lib:
+
 - Tokio runtime types (`tokio::sync::mpsc`, `tokio::task`, etc).
 - Handlers, managers, daemon state, hardware drivers.
 - Errors that aren't pure protocol errors. `EndecError` is fine.
@@ -68,7 +70,7 @@ pub enum RecvMsgData {
 ```
 
 The fields inside `Bluetooth(ClientBluetoothCommand)` are NOT redefined
-in core — they reuse the lib type. Only the *enum shell* is core-side
+in core — they reuse the lib type. Only the _enum shell_ is core-side
 because it has runtime-only variants.
 
 The cautionary tale: `WebappInfo` was at one point copy-pasted
@@ -78,6 +80,7 @@ for any wire type: `lib/`. Core imports it.
 If you find yourself writing a `struct` or `enum` in core that has the
 same fields (or near-identical fields) as one in lib, stop. The lib
 type either:
+
 - already does what you need — import it, or
 - needs a runtime extension — write a wrapper that holds it.
 
@@ -98,7 +101,7 @@ consumers will never use.
 
 There IS a `lib/src/stock/` module with a small handful of types
 (`StockSetPreset`, `StockPreset`). Those are not the same thing — they
-are SDK-facing types that a *modern* webapp uses to invoke legacy
+are SDK-facing types that a _modern_ webapp uses to invoke legacy
 operations through `ClientCommandType::LegacyStock`. The rule:
 
 - `lib/src/stock/` = SDK-facing types for legacy operations a modern
@@ -146,8 +149,8 @@ The build will tell you what's missing.
 
 ## Naming gotchas
 
-- "client" is overloaded. In bridgething's wire protocol it means *the
-  on-device webapp talking to the daemon over local websocket*. In any
+- "client" is overloaded. In bridgething's wire protocol it means _the
+  on-device webapp talking to the daemon over local websocket_. In any
   other context "client" is ambiguous. When writing comments or docs,
   prefer "webapp" or "on-device client" if there's any chance of
   confusion.

@@ -7,7 +7,8 @@
     "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "example:node-dev": "cd examples/node-dev && bun run dev"
+    "example:node-dev": "cd examples/node-dev && bun run dev",
+    "mobile": "cd mobile && bun run"
   },
   "devDependencies": {
     "turbo": "^2.9.6",

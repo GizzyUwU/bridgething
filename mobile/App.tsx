@@ -1,3 +1,5 @@
+import './global.css';
+
 import { type BridgethingTransportDevice, ReactNativeAdapter } from '@bridgething/adapter-react-native';
 import { BridgethingGateway, type GatewayEvent } from '@bridgething/gateway';
 import {
@@ -11,16 +13,8 @@ import {
 } from '@bridgething/lib';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  type Permission,
-  PermissionsAndroid,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { type Permission, PermissionsAndroid, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const GATEWAY_META: GatewayMeta = {
   adapterVersion: 'v0.1.0',
@@ -50,10 +44,7 @@ export default function App() {
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const appendLog = (text: string) => {
-    setLog(prev => {
-      const next = [...prev, { id: logIdRef.current++, text }];
-      return next.slice(-100);
-    });
+    setLog(prev => [...prev, { id: logIdRef.current++, text }].slice(-100));
   };
 
   useEffect(() => {
@@ -70,7 +61,7 @@ export default function App() {
       try {
         setKnownDevices(adapter.getKnownDevices());
       } catch {
-        // adapter not started yet - ignore
+        // adapter not started yet
       }
     }, 2000);
     return () => clearInterval(interval);
@@ -189,89 +180,102 @@ export default function App() {
   const peers = Object.values(connectedPeers);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
+    <SafeAreaProvider>
+      <SafeAreaView className="flex-1 bg-background px-4 dark:bg-background">
+        <StatusBar style="auto" />
 
-      <View style={styles.header}>
-        <Text style={styles.title}>bridgething</Text>
-        <Text style={styles.subtitle}>{running ? `running · ${peers.length} connected` : 'idle'}</Text>
-        <Pressable
-          style={[styles.button, running ? styles.buttonStop : styles.buttonStart]}
-          onPress={running ? stop : start}>
-          <Text style={styles.buttonText}>{running ? 'stop' : 'start'}</Text>
-        </Pressable>
-      </View>
-
-      <Section title={`known devices (${knownDevices.length})`}>
-        {knownDevices.length === 0 ? (
-          <Text style={styles.empty}>
-            {running ? 'no peers - pair a Car Thing in system Bluetooth settings' : 'press start to scan'}
-          </Text>
-        ) : (
-          knownDevices.map(d => (
-            <Pressable key={d.id} style={styles.row} onPress={() => connectDevice(d.id)}>
-              <Text style={styles.rowName}>{d.name}</Text>
-              <Text style={styles.rowDetail}>{d.id}</Text>
-            </Pressable>
-          ))
-        )}
-      </Section>
-
-      <Section title={`connected (${peers.length})`}>
-        {peers.length === 0 ? (
-          <Text style={styles.empty}>no active sessions</Text>
-        ) : (
-          peers.map(peer => (
-            <View key={peer.id} style={styles.peer}>
-              <View style={styles.peerHeader}>
-                <Text style={styles.rowName}>{peer.name}</Text>
-                <Pressable onPress={() => disconnectDevice(peer.id)}>
-                  <Text style={styles.disconnect}>disconnect</Text>
-                </Pressable>
-              </View>
-              {peer.bridgeMeta ? (
-                <View style={styles.metaBlock}>
-                  <MetaLine label="app" value={`${peer.bridgeMeta.appName} ${peer.bridgeMeta.appVersion}`} />
-                  <MetaLine label="os" value={`${peer.bridgeMeta.osName} ${peer.bridgeMeta.osVersion}`} />
-                  <MetaLine label="image" value={peer.bridgeMeta.imageBuildId} />
-                  <MetaLine label="model" value={peer.bridgeMeta.modelName} />
-                  <MetaLine label="serial" value={peer.bridgeMeta.serialNumber} />
-                </View>
-              ) : (
-                <Text style={styles.empty}>waiting for version…</Text>
-              )}
-            </View>
-          ))
-        )}
-      </Section>
-
-      <Section title="log">
-        <ScrollView style={styles.logScroll} contentContainerStyle={styles.logContent}>
-          {log.map(entry => (
-            <Text key={entry.id} style={styles.logLine}>
-              {entry.text}
+        <View className="mb-6 flex-row items-center justify-between">
+          <View className="flex-1">
+            <Text className="text-2xl font-bold text-foreground">bridgething</Text>
+            <Text className="mt-0.5 text-xs text-muted-foreground">
+              {running ? `running · ${peers.length} connected` : 'idle'}
             </Text>
-          ))}
-        </ScrollView>
-      </Section>
-    </View>
+          </View>
+          <Pressable
+            onPress={running ? stop : start}
+            className={`rounded-md px-5 py-2.5 ${running ? 'bg-destructive' : 'bg-primary'}`}>
+            <Text className="text-sm font-semibold text-primary-foreground">{running ? 'stop' : 'start'}</Text>
+          </Pressable>
+        </View>
+
+        <Section title={`known devices (${knownDevices.length})`}>
+          {knownDevices.length === 0 ? (
+            <Empty>
+              {running ? 'no peers - pair a Car Thing in system Bluetooth settings' : 'press start to scan'}
+            </Empty>
+          ) : (
+            knownDevices.map(d => (
+              <Pressable
+                key={d.id}
+                onPress={() => connectDevice(d.id)}
+                className="mb-1.5 rounded-md bg-secondary px-3 py-2 active:opacity-70">
+                <Text className="text-sm font-semibold text-secondary-foreground">{d.name}</Text>
+                <Text className="mt-0.5 text-xs text-muted-foreground">{d.id}</Text>
+              </Pressable>
+            ))
+          )}
+        </Section>
+
+        <Section title={`connected (${peers.length})`}>
+          {peers.length === 0 ? (
+            <Empty>no active sessions</Empty>
+          ) : (
+            peers.map(peer => (
+              <View key={peer.id} className="mb-2 rounded-md bg-card p-3">
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-sm font-semibold text-card-foreground">{peer.name}</Text>
+                  <Pressable onPress={() => disconnectDevice(peer.id)}>
+                    <Text className="text-xs text-destructive">disconnect</Text>
+                  </Pressable>
+                </View>
+                {peer.bridgeMeta ? (
+                  <View className="mt-2">
+                    <MetaLine label="app" value={`${peer.bridgeMeta.appName} ${peer.bridgeMeta.appVersion}`} />
+                    <MetaLine label="os" value={`${peer.bridgeMeta.osName} ${peer.bridgeMeta.osVersion}`} />
+                    <MetaLine label="image" value={peer.bridgeMeta.imageBuildId} />
+                    <MetaLine label="model" value={peer.bridgeMeta.modelName} />
+                    <MetaLine label="serial" value={peer.bridgeMeta.serialNumber} />
+                  </View>
+                ) : (
+                  <Empty>waiting for version…</Empty>
+                )}
+              </View>
+            ))
+          )}
+        </Section>
+
+        <Section title="log">
+          <ScrollView className="max-h-56 rounded-md bg-muted" contentContainerClassName="p-2.5">
+            {log.map(entry => (
+              <Text key={entry.id} className="font-mono text-[11px] leading-4 text-muted-foreground">
+                {entry.text}
+              </Text>
+            ))}
+          </ScrollView>
+        </Section>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+    <View className="mb-5">
+      <Text className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{title}</Text>
       {children}
     </View>
   );
 }
 
+function Empty({ children }: { children: React.ReactNode }) {
+  return <Text className="text-xs italic text-muted-foreground">{children}</Text>;
+}
+
 function MetaLine({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.metaLine}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text style={styles.metaValue}>{value || '-'}</Text>
+    <View className="mb-0.5 flex-row">
+      <Text className="w-16 text-xs text-muted-foreground">{label}</Text>
+      <Text className="flex-1 text-xs text-foreground">{value || '-'}</Text>
     </View>
   );
 }
@@ -290,66 +294,3 @@ function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#101114',
-    paddingTop: 64,
-    paddingHorizontal: 16,
-  },
-  header: {
-    marginBottom: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: { color: '#f8f8f2', fontSize: 24, fontWeight: '700' },
-  subtitle: { color: '#90a4ae', fontSize: 13, marginLeft: 12, flex: 1 },
-  button: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  buttonStart: { backgroundColor: '#2dd4bf' },
-  buttonStop: { backgroundColor: '#f87171' },
-  buttonText: { color: '#0b0c0f', fontSize: 14, fontWeight: '700' },
-  section: { marginBottom: 20 },
-  sectionTitle: {
-    color: '#90a4ae',
-    fontSize: 11,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  empty: { color: '#52606d', fontSize: 13, fontStyle: 'italic' },
-  row: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#1a1c20',
-    borderRadius: 6,
-    marginBottom: 6,
-  },
-  rowName: { color: '#f8f8f2', fontSize: 14, fontWeight: '600' },
-  rowDetail: { color: '#7a8794', fontSize: 11, marginTop: 2 },
-  peer: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#1a1c20',
-    borderRadius: 6,
-    marginBottom: 8,
-  },
-  peerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  disconnect: { color: '#f87171', fontSize: 12 },
-  metaBlock: { marginTop: 8 },
-  metaLine: { flexDirection: 'row', marginBottom: 2 },
-  metaLabel: { color: '#7a8794', fontSize: 12, width: 64 },
-  metaValue: { color: '#cfd8dc', fontSize: 12, flex: 1 },
-  logScroll: { maxHeight: 220, backgroundColor: '#0a0b0d', borderRadius: 6 },
-  logContent: { padding: 10 },
-  logLine: { color: '#cfd8dc', fontFamily: 'Menlo', fontSize: 11, lineHeight: 16 },
-});
