@@ -43,25 +43,13 @@ fn gen_typescript() -> Result<()> {
     std::fs::remove_dir_all(TS_BINDINGS_DIR).context("clear ts/bindings")?;
   }
   run("cargo", &["test", "-p", "libbridgething", "--quiet"])?;
-  run(
-    "bunx",
-    &[
-      "prettier",
-      TS_BINDINGS_DIR,
-      "--write",
-      "--log-level",
-      "warn",
-    ],
-  )?;
+  run("bunx", &["prettier", TS_BINDINGS_DIR, "--write", "--log-level", "warn"])?;
   Ok(())
 }
 
 fn gen_swift() -> Result<()> {
   println!("==> swift");
-  run(
-    "typeshare",
-    &["--lang=swift", "--output-file", SWIFT_OUTPUT, LIB_SRC],
-  )?;
+  run("typeshare", &["--lang=swift", "--output-file", SWIFT_OUTPUT, LIB_SRC])?;
 
   let content = std::fs::read_to_string(SWIFT_OUTPUT).context("read swift output")?;
   let patched = patch_swift(&content);
@@ -82,8 +70,7 @@ fn gen_kotlin() -> Result<()> {
     ],
   )?;
 
-  let adjacent_tagged = discover_adjacent_tagged_enums(LIB_SRC)
-    .context("discover adjacent-tagged enums in lib/src")?;
+  let adjacent_tagged = discover_adjacent_tagged_enums(LIB_SRC).context("discover adjacent-tagged enums in lib/src")?;
   println!(
     "    discovered {} adjacent-tagged enum(s): {}",
     adjacent_tagged.len(),
@@ -123,12 +110,8 @@ fn patch_kotlin(input: &str, adjacent_tagged: &[String]) -> Result<String> {
   // object. The `XSerializer` proxies in Serializers.kt produce that
   // shape, but only when the sealed class is annotated to use them.
   for name in adjacent_tagged {
-    let pattern = regex::Regex::new(&format!(
-      r"(?m)^@Serializable\nsealed class {}\b",
-      regex::escape(name)
-    ))?;
-    let replacement =
-      format!("@Serializable(with = {name}Serializer::class)\nsealed class {name}");
+    let pattern = regex::Regex::new(&format!(r"(?m)^@Serializable\nsealed class {}\b", regex::escape(name)))?;
+    let replacement = format!("@Serializable(with = {name}Serializer::class)\nsealed class {name}");
     let new_out = pattern.replace_all(&out, replacement.as_str()).into_owned();
     if new_out == out {
       eprintln!(
@@ -170,8 +153,7 @@ fn discover_adjacent_tagged_enums(dir: &str) -> Result<Vec<String>> {
     if path.extension().and_then(|s| s.to_str()) != Some("rs") {
       continue;
     }
-    let src =
-      std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let src = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let parsed = match syn::parse_file(&src) {
       Ok(p) => p,
       Err(e) => {
@@ -211,9 +193,8 @@ fn is_typeshared_adjacent_tagged(attrs: &[syn::Attribute]) -> bool {
       continue;
     }
     if attr.path().is_ident("serde") {
-      let Ok(nested) = attr.parse_args_with(
-        syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-      ) else {
+      let Ok(nested) = attr.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+      else {
         continue;
       };
       let mut has_tag = false;

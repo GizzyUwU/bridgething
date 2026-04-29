@@ -14,9 +14,9 @@ impl From<StockActionRecv> for RecvMsgData {
   fn from(data: StockActionRecv) -> Self {
     match data {
       StockActionRecv::VersionRequest => RecvMsgData::System(ClientSystemCommand::VersionRequest),
-      StockActionRecv::RcsRequest => {
-        RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(super::StockRecvMsg::Action(data)))
-      }
+      StockActionRecv::RcsRequest => RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(
+        super::StockRecvMsg::Action(data),
+      )),
     }
   }
 }

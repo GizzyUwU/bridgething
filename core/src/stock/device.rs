@@ -33,9 +33,9 @@ impl From<StockDeviceRecv> for RecvMsgData {
       StockDeviceRecv::PhoneCallEnd { attributes } => RecvMsgData::System(ClientSystemCommand::PhoneCallEnd {
         call_id: attributes.call_id,
       }),
-      StockDeviceRecv::ReturnToSpotify => {
-        RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(super::StockRecvMsg::Device(data)))
-      }
+      StockDeviceRecv::ReturnToSpotify => RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(
+        super::StockRecvMsg::Device(data),
+      )),
     }
   }
 }

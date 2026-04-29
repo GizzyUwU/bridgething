@@ -19,13 +19,7 @@ pub use handle::*;
 mod msg;
 pub use msg::*;
 
-use crate::{
-  bluetooth::BluetoothMan,
-  handler::HandlerError,
-  http::WSError,
-  state::State,
-  stock::StockInterAppSend,
-};
+use crate::{bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend};
 
 use super::HandlerResult;
 

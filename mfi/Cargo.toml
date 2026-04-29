@@ -1,0 +1,21 @@
+[package]
+name = "bridgething-mfi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+
+[dependencies]
+i2cdev = "0.6.1"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hex-literal = "1.0.0"
+
+[features]
+default = []
+mock = []
+remote = []
+
+[profile.test]
+features = ["mock", "remote"]

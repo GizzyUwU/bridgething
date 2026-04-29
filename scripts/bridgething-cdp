@@ -8,7 +8,7 @@
 # Google removed the bind-elsewhere path for security reasons (CVE
 # class). The Car Thing's only interface is the USB-CDC-ECM gadget so
 # there's no real LAN exposure to worry about, but chromium doesn't
-# care — it still refuses. SSH tunneling is the canonical workaround.
+# care - it still refuses. SSH tunneling is the canonical workaround.
 #
 # Once this script is running, point a host browser at:
 #   chrome://inspect              -> add discovery target localhost:9222

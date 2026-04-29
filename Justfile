@@ -1,8 +1,8 @@
 # bridgething Justfile
 #
 # Two flavors of recipes:
-#   1. Local dev — `cargo run`, `just codegen`, gateway/adapter builds.
-#   2. Device iteration — cross-build the daemon and push to a Car Thing
+#   1. Local dev - `cargo run`, `just codegen`, gateway/adapter builds.
+#   2. Device iteration - cross-build the daemon and push to a Car Thing
 #      over USB-CDC-ECM. Helper scripts live in scripts/. Host defaults
 #      to 10.42.1.2 (the gadget end of the USB-CDC link); override with
 #      SUPERBIRD_HOST.
