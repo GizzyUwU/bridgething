@@ -14,10 +14,13 @@ use std::time::Duration;
 
 use crate::error::TransportError;
 
+#[cfg(target_os = "linux")]
 mod linux;
+
 pub mod mock;
 pub mod remote;
 
+#[cfg(target_os = "linux")]
 pub use linux::{LinuxI2c, LinuxI2cConfig};
 
 pub(crate) const RETRY_LIMIT: u8 = 3;

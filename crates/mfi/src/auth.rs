@@ -158,6 +158,7 @@ impl<T: Transport> MfiAuth<T> {
   }
 }
 
+#[cfg(target_os = "linux")]
 impl MfiAuth<crate::LinuxI2c> {
   /// Open the chip with the default `/dev/i2c-3` config.
   pub fn open_default() -> Result<Self> {

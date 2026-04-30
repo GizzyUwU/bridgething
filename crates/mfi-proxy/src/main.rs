@@ -1,3 +1,4 @@
+#![cfg_attr(not(target_os = "linux"), allow(unused_imports, dead_code))]
 //! Device-side proxy that exposes the MFi chip over TCP.
 //!
 //! Run on the Car Thing during dev iteration; pair with
@@ -15,12 +16,15 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bridgething_mfi::{LinuxI2c, LinuxI2cConfig, serve_remote};
 use tracing::{error, info};
+
+#[cfg(target_os = "linux")]
+use bridgething_mfi::{LinuxI2c, LinuxI2cConfig, serve_remote};
 
 const DEFAULT_BIND: &str = "0.0.0.0:9090";
 const DEFAULT_DEVICE: &str = "/dev/i2c-3";
 
+#[cfg(target_os = "linux")]
 fn main() -> ExitCode {
   tracing_subscriber::fmt()
     .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
@@ -91,4 +95,10 @@ fn parse_addr(s: &str) -> Result<u16, std::num::ParseIntError> {
   } else {
     s.parse()
   }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() -> ExitCode {
+  eprintln!("bridgething-mfi-proxy is only supported on Linux");
+  ExitCode::from(1)
 }

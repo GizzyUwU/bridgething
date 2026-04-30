@@ -18,9 +18,14 @@ mod transport;
 
 pub use auth::MfiAuth;
 pub use error::{Error, Result, TransportError};
-pub use transport::mock::{MockTransport, MockTransportState};
-pub use transport::remote::{RemoteI2c, serve as serve_remote};
-pub use transport::{LinuxI2c, LinuxI2cConfig, Transport};
+pub use transport::{
+  Transport,
+  mock::{MockTransport, MockTransportState},
+  remote::{RemoteI2c, serve as serve_remote},
+};
+
+#[cfg(target_os = "linux")]
+pub use transport::{LinuxI2c, LinuxI2cConfig};
 
 /// Length of the challenge bytes the accessory writes to the chip.
 pub const CHALLENGE_LEN: usize = 32;
