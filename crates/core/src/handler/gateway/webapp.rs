@@ -1,5 +1,5 @@
 use libbridgething::gateway::{
-  BridgeToGatewayWebappMsg, GatewayToBridgeWebappMsg, WebappActive, WebappError, WebappInstall, WebappList,
+  GatewayToBridgeWebappMsg, GetActiveWebapp, ListWebapps, WebappActive, WebappError, WebappInstall, WebappList,
   WebappSwitchTo, WebappUninstall,
 };
 
@@ -25,31 +25,26 @@ impl WebappHandler {
     match msg {
       GatewayToBridgeWebappMsg::List => self.list().await,
       GatewayToBridgeWebappMsg::GetActive => self.get_active().await,
-      GatewayToBridgeWebappMsg::SwitchTo(WebappSwitchTo { name }) => self.switch_to(name).await,
-      GatewayToBridgeWebappMsg::Install(WebappInstall { name, archive }) => self.install(name, archive).await,
-      GatewayToBridgeWebappMsg::Uninstall(WebappUninstall { name }) => self.uninstall(name).await,
+      GatewayToBridgeWebappMsg::SwitchTo(req) => self.switch_to(req).await,
+      GatewayToBridgeWebappMsg::Install(req) => self.install(req).await,
+      GatewayToBridgeWebappMsg::Uninstall(req) => self.uninstall(req).await,
     }
   }
 
   async fn list(&self) -> HandlerResult {
     let webapps = self.handle.state.webapps.list().await;
-    self
-      .handle
-      .respond(BridgeToGatewayWebappMsg::Webapps(WebappList { webapps }))
-      .await;
+    self.handle.respond_to::<ListWebapps>(WebappList { webapps }).await;
     Ok(())
   }
 
   async fn get_active(&self) -> HandlerResult {
     let name = self.handle.state.active_webapp().await;
-    self
-      .handle
-      .respond(BridgeToGatewayWebappMsg::Active(WebappActive { name }))
-      .await;
+    self.handle.respond_to::<GetActiveWebapp>(WebappActive { name }).await;
     Ok(())
   }
 
-  async fn switch_to(&self, name: String) -> HandlerResult {
+  async fn switch_to(&self, req: WebappSwitchTo) -> HandlerResult {
+    let WebappSwitchTo { name } = req;
     if self.handle.state.webapps.resolve(&name).is_none() {
       tracing::warn!(
         "({:?}) refusing switch to unknown webapp {}",
@@ -58,30 +53,26 @@ impl WebappHandler {
       );
       self
         .handle
-        .respond(BridgeToGatewayWebappMsg::WebappError(WebappError::UnknownWebapp { name }))
+        .respond_err::<WebappSwitchTo>(WebappError::UnknownWebapp { name })
         .await;
       return Ok(());
     }
 
     self.handle.state.set_active_webapp(name.clone()).await?;
     self.reload_kiosk().await;
-    self
-      .handle
-      .respond(BridgeToGatewayWebappMsg::Switched(WebappActive { name }))
-      .await;
+    self.handle.respond_to::<WebappSwitchTo>(WebappActive { name }).await;
     Ok(())
   }
 
-  async fn install(&self, name: String, archive: Vec<u8>) -> HandlerResult {
+  async fn install(&self, req: WebappInstall) -> HandlerResult {
+    let WebappInstall { name, archive } = req;
     let installed = self.handle.state.webapps.install(&name, archive).await?;
-    self
-      .handle
-      .respond(BridgeToGatewayWebappMsg::Installed(installed))
-      .await;
+    self.handle.respond_to::<WebappInstall>(installed).await;
     Ok(())
   }
 
-  async fn uninstall(&self, name: String) -> HandlerResult {
+  async fn uninstall(&self, req: WebappUninstall) -> HandlerResult {
+    let WebappUninstall { name } = req;
     if self.handle.state.webapps.is_builtin(&name) {
       tracing::warn!(
         "({:?}) refusing uninstall of built-in webapp {}",
@@ -90,9 +81,7 @@ impl WebappHandler {
       );
       self
         .handle
-        .respond(BridgeToGatewayWebappMsg::WebappError(
-          WebappError::CannotUninstallBuiltin { name },
-        ))
+        .respond_err::<WebappUninstall>(WebappError::CannotUninstallBuiltin { name })
         .await;
       return Ok(());
     }
@@ -117,7 +106,7 @@ impl WebappHandler {
 
     self
       .handle
-      .respond(BridgeToGatewayWebappMsg::Uninstalled(WebappActive { name: active }))
+      .respond_to::<WebappUninstall>(WebappActive { name: active })
       .await;
     Ok(())
   }

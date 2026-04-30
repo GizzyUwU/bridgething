@@ -337,11 +337,11 @@ sealed class GatewayToBridgeFileMsg {
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)
 sealed class GatewayToBridgeWebappMsg {
-	/// request: bridge replies with the full list of installed + built-in webapps
+	/// request: bridge replies with `Webapps`
 	@Serializable
 	@SerialName("list")
 	object List: GatewayToBridgeWebappMsg()
-	/// request: bridge replies with the active webapp's name
+	/// request: bridge replies with `Active`
 	@Serializable
 	@SerialName("getActive")
 	object GetActive: GatewayToBridgeWebappMsg()
@@ -349,11 +349,13 @@ sealed class GatewayToBridgeWebappMsg {
 	@Serializable
 	@SerialName("switchTo")
 	data class SwitchTo(val data: WebappSwitchTo): GatewayToBridgeWebappMsg()
-	/// command: extract the supplied zip into the installed root under `name`
+	/// command: extract the supplied zip into the installed root under `name`;
+	/// bridge replies with `Installed`
 	@Serializable
 	@SerialName("install")
 	data class Install(val data: WebappInstall): GatewayToBridgeWebappMsg()
-	/// command: remove the named installed webapp (built-ins cannot be removed)
+	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
+	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	@Serializable
 	@SerialName("uninstall")
 	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()

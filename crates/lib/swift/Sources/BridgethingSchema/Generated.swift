@@ -830,15 +830,17 @@ public enum GatewayToBridgeFileMsg: Codable, Sendable {
 }
 
 public enum GatewayToBridgeWebappMsg: Codable, Sendable {
-	/// request: bridge replies with the full list of installed + built-in webapps
+	/// request: bridge replies with `Webapps`
 	case list
-	/// request: bridge replies with the active webapp's name
+	/// request: bridge replies with `Active`
 	case getActive
 	/// command: switch the kiosk to the named webapp; bridge replies with `Switched`
 	case switchTo(WebappSwitchTo)
-	/// command: extract the supplied zip into the installed root under `name`
+	/// command: extract the supplied zip into the installed root under `name`;
+	/// bridge replies with `Installed`
 	case install(WebappInstall)
-	/// command: remove the named installed webapp (built-ins cannot be removed)
+	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
+	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	case uninstall(WebappUninstall)
 
 	enum CodingKeys: String, CodingKey, Codable {

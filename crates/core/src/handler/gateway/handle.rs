@@ -1,5 +1,5 @@
 use bluer::Address;
-use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, ResponseMeta};
+use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayRequest, ResponseMeta};
 use uuid::Uuid;
 
 use crate::{
@@ -74,6 +74,17 @@ impl MsgHandle {
         GatewayMsgMeta::Response(ResponseMeta { request_id: self.id }),
       )
       .await
+  }
+
+  /// Ship a typed success response. The request type fixes the wire variant
+  /// so the handler can't accidentally encode the wrong shape.
+  pub async fn respond_to<R: GatewayRequest>(&self, response: R::Response) {
+    self.respond(R::encode_response(response)).await
+  }
+
+  /// Ship a typed domain error response paired with this request type.
+  pub async fn respond_err<R: GatewayRequest>(&self, err: R::DomainError) {
+    self.respond(R::encode_domain_error(err)).await
   }
 
   pub async fn send_info(&self, data: impl Into<BridgeToGatewayMsgData>) {
