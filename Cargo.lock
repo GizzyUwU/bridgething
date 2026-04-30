@@ -374,6 +374,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridgething-iap2"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.1",
+ "bridgething-mfi",
+ "bytes",
+ "futures",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "bridgething-mfi"
 version = "0.1.0"
 dependencies = [

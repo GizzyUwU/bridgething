@@ -1,7 +1,7 @@
 # bridgething agent guide
 
 Rules an agent has to follow when editing this repo. The codebase has a
-clean lib/core split that is easy to silently break — these rules exist
+clean lib/core split that is easy to silently break - these rules exist
 to keep that split intact.
 
 ## Crate layout and what goes where
@@ -153,6 +153,63 @@ anywhere — but you DO need to add the matching `XSerializer` object to
 `crates/lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Serializers.kt`.
 The build will tell you what's missing.
 
+## Concurrency + ownership
+
+The daemon is actor-style: one tokio task owns its state, and every state
+transition flows through messages, not locks. `RfcommGateway` in
+`crates/core/src/bluetooth/rfcomm/mod.rs` is the canonical example to
+copy when building a new subsystem.
+
+Rules:
+
+- **One task owns its data; other tasks reach it via mpsc.** In
+  `RfcommGateway::recv`, the `connections: HashMap<Address, Connection>`
+  is owned by the `recv()` task and only mutated inside its `select!`
+  loop. Outside callers post messages through `GatewaySendTx`. Do not
+  reach for `Arc<Mutex<Foo>>` to "share" Foo — either Foo's owner
+  spawns a task and accepts commands by mpsc, or Foo is cheaply
+  cloneable wire data.
+- **`Arc<RwLock<...>>` exists in this codebase but is the exception.**
+  `state::AppState` and `ProfileManager::profile_state` both wrap
+  read-mostly snapshot state read by many surfaces (HTTP, BT, agent).
+  New subsystems should reach for an mpsc before reaching for a lock;
+  locks are tolerated when the data is read-mostly snapshot, not when
+  it's the hot path of a protocol state machine.
+- **`init() -> Self` and `spawn(self) -> JoinHandle<()>` are separate.**
+  Construction takes ports, registers BlueZ profiles, opens sockets;
+  `spawn` consumes the struct and returns a handle so the daemon can
+  decide when loops start. See `RfcommGateway::init` /
+  `RfcommGateway::spawn`. Background tasks return `JoinHandle<()>`
+  stored in `_handle: JoinHandle<()>` fields — the underscore says
+  "kept alive to drop on Drop, never `.await`ed".
+- **Bounded mpsc, default capacity 16.** `tokio::sync::mpsc::channel(16)`
+  appears in `BluetoothManager::init`, `RfcommGateway::init`,
+  `GatewayCon::init`. The bound is the backpressure — propagate
+  upstream rather than allocating an unbounded buffer.
+- **Byte-stream protocols use `tokio_util::codec::Framed`.** The rfcomm
+  gateway frames `BridgeEndec` over `bluer::rfcomm::Stream`; the iap2
+  link layer frames `LinkCodec` over the same. Implement `Decoder` to
+  return `Ok(None)` until enough bytes are buffered, and to advance one
+  byte on resync paths. `Framed::split()` gives `Sink + Stream` halves
+  you can move into separate tasks.
+- **Heap discipline on protocol code.** Use `bytes::Bytes` for
+  zero-copy shared-readonly buffers and `bytes::BytesMut` for
+  build-phase. Avoid `Vec<u8>` clones for in-flight payloads:
+  retransmit queues hold `Bytes` (refcount-only clone), CSM builders
+  write into a single `BytesMut` then freeze.
+- **Tracing density matches `RfcommGateway`'s.** Every state transition
+  at `debug!`, every frame at `trace!`, every successful handshake /
+  connection-up at `info!`, every error path at `warn!` or `error!`.
+- **`thiserror` enums with `#[from]` for error conversion.** The shape
+  of `BluetoothError` is the model: each subsystem gets its own enum,
+  and the larger error types `#[from]` the smaller ones so `?` works
+  through layers.
+
+The Car Thing has 512 MB of RAM shared with chromium and the kiosk web
+app. Heap clones, unbounded queues, and mutex contention all cost real
+frames. The actor-with-bounded-mpsc shape is what keeps the hot paths
+cheap.
+
 ## Naming gotchas
 
 - "client" is overloaded. In bridgething's wire protocol it means _the
@@ -186,3 +243,4 @@ The build will tell you what's missing.
   `UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden`.
 - `just codegen` after any change to a lib type that crosses to TS /
   Swift / Kotlin.
+- No emdashes or endashes.

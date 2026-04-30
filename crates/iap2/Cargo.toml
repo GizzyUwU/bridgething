@@ -1,0 +1,24 @@
+[package]
+name = "bridgething-iap2"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.0"
+
+[dependencies]
+bridgething-mfi = { path = "../mfi" }
+bytes = "1.10.1"
+bitflags = "2.9.4"
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "rt",
+  "sync",
+  "time",
+  "io-util",
+  "macros",
+] }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+futures = { workspace = true }
