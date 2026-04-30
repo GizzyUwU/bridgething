@@ -1,0 +1,26 @@
+// Per-developer signing config for the bridgething iOS app.
+//
+// 1. Copy this file to `Local.xcconfig` (alongside this one). Local.xcconfig
+//    is gitignored - your team ID never enters the repo.
+// 2. Fill in DEVELOPMENT_TEAM with your Apple Developer team ID.
+// 3. Optionally override PRODUCT_BUNDLE_IDENTIFIER if you're forking and
+//    want your own TestFlight entry. Apple gates bundle IDs by team:
+//    `com.bridgething.gateway` is claimed by the maintainer's team for the
+//    canonical TestFlight build, so a fork that wants its own TestFlight
+//    must use a distinct bundle ID. For local sideload only, leave the
+//    default - Apple's bundle ID gate is per-team-namespace, not global.
+// 4. Run `pod install` once after creating Local.xcconfig - the Podfile
+//    post_install hook wires the include into the Pods xcconfigs.
+
+// Apple Developer team ID (10-char alphanumeric).
+// Find it at https://developer.apple.com/account/membership/
+DEVELOPMENT_TEAM =
+
+// Bundle ID. Default matches the canonical TestFlight build. Fork builds
+// that want their own TestFlight must change this; sideload-only forks
+// can leave it alone.
+PRODUCT_BUNDLE_IDENTIFIER = com.bridgething.gateway
+
+// Automatic signing - lets Xcode manage provisioning profiles for the
+// configured team without manual cert juggling.
+CODE_SIGN_STYLE = Automatic

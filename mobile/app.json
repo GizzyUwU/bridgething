@@ -1,31 +1,4 @@
 {
-  "expo": {
-    "name": "bridgething",
-    "slug": "bridgething-mobile",
-    "scheme": "bridgething",
-    "version": "0.1.0",
-    "orientation": "portrait",
-    "newArchEnabled": true,
-    "ios": {
-      "bundleIdentifier": "com.bridgething.gateway",
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "bridgething uses Bluetooth to connect to your Car Thing.",
-        "UIBackgroundModes": ["external-accessory"],
-        "UISupportedExternalAccessoryProtocols": ["com.bridgething.gateway"]
-      }
-    },
-    "android": {
-      "package": "com.bridgething.gateway",
-      "permissions": [
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH_SCAN"
-      ]
-    },
-    "plugins": [
-      "expo-dev-client"
-    ]
-  }
+  "name": "bridgething",
+  "displayName": "bridgething"
 }

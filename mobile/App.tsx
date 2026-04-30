@@ -11,9 +11,17 @@ import {
   LogLevel,
   newUuidBytes,
 } from '@bridgething/lib';
-import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { type Permission, PermissionsAndroid, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  type Permission,
+  PermissionsAndroid,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const GATEWAY_META: GatewayMeta = {
@@ -194,7 +202,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <SafeAreaView className="flex-1 bg-background px-4 dark:bg-background">
-        <StatusBar style="auto" />
+        <StatusBar barStyle="default" />
 
         <View className="mb-6 flex-row items-center justify-between">
           <View className="flex-1">
