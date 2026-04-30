@@ -7,7 +7,7 @@ mod voice;
 
 use bluetooth::*;
 use interaction::*;
-use libbridgething::ForwardMessage;
+use libbridgething::{ForwardMessage, gateway::GatewayError};
 use stock::*;
 use store::*;
 use system::*;
@@ -22,6 +22,29 @@ pub use msg::*;
 use crate::{bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend};
 
 use super::HandlerResult;
+
+/// Run a handler future on a fresh task; if it errors, log it AND surface it
+/// to the requesting webapp as a typed protocol-level Error so the caller
+/// isn't left wondering why their request never came back. Domain errors
+/// (when handlers add them later) take a different path through
+/// `MsgHandle::respond_err`. This catches the residual `?` propagation.
+fn dispatch<F, Fut>(handle: MsgHandle, work: F)
+where
+  F: FnOnce(MsgHandle) -> Fut + Send + 'static,
+  Fut: std::future::Future<Output = HandlerResult> + Send + 'static,
+{
+  let err_handle = handle.clone();
+  tokio::spawn(async move {
+    if let Err(e) = work(handle).await {
+      tracing::error!("({:?}) handler failed: {:?}", err_handle.from, e);
+      let _ = err_handle
+        .respond(GatewayError::HandlerFailed {
+          reason: format!("{e:?}"),
+        })
+        .await;
+    }
+  });
+}
 
 pub struct ClientHandler {
   state: State,
@@ -38,27 +61,27 @@ impl ClientHandler {
 
     match msg.data {
       RecvMsgData::Bluetooth(msg) => {
-        tokio::spawn(async move { BluetoothHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { BluetoothHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Store(msg) => {
-        tokio::spawn(async move { StorageHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { StorageHandler::new(h).handle(msg).await });
       }
       RecvMsgData::System(msg) => {
-        tokio::spawn(async move { SystemHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { SystemHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Voice(msg) => {
-        tokio::spawn(async move { VoiceHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { VoiceHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Interaction(msg) => {
-        tokio::spawn(async move { InteractionHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { InteractionHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Forward(msg) => {
-        tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(msg).await });
+        dispatch(handle, move |h| async move { TopLevelHandler::new(h).handle_forward(msg).await });
       }
 
       // stock compatibility
       RecvMsgData::LegacyStock(msg) => {
-        tokio::spawn(async move { LegacyStockHandler::new(handle).handle(msg).await });
+        dispatch(handle, move |h| async move { LegacyStockHandler::new(h).handle(msg).await });
       }
 
       // ignored and unsupported
