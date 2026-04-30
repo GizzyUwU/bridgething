@@ -22,7 +22,7 @@ use crate::{
   state::{FileRequestTx, State, StateError},
 };
 use ble::GattServer;
-use bluer::{Adapter, Address, Session};
+use bluer::{Adapter, Address, Session, agent::AgentHandle};
 use iap2::Iap2Manager;
 use libbridgething::gateway::FileRequestData;
 use libbridgething::{
@@ -50,6 +50,7 @@ pub struct BluetoothManager {
   pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
 
+  _agent_handle: AgentHandle,
   _iap2_handle: Option<JoinHandle<()>>,
 }
 
@@ -112,6 +113,7 @@ impl BluetoothManager {
       profile_man,
       gateway_man,
 
+      _agent_handle,
       _iap2_handle,
     }))
   }

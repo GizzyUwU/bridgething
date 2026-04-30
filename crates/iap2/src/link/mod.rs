@@ -175,8 +175,7 @@ impl Link {
         if pkt.header.control.contains(ControlBits::SYN) {
           let lsp = Lsp::decode(&pkt.payload)?;
           let peer_initial_psn = pkt.header.seq;
-          let ack = peer_initial_psn.wrapping_add(1);
-          let standalone_ack = LinkPacket::header_only(ControlBits::ACK, our_seq, ack);
+          let standalone_ack = LinkPacket::header_only(ControlBits::ACK, our_seq, peer_initial_psn);
           write_packet(writer, codec, standalone_ack).await?;
           return Ok((lsp, peer_initial_psn));
         }

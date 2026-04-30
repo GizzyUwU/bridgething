@@ -1,6 +1,8 @@
-use libbridgething::{client::ClientKVStoreCommand, server::{ServerStorageEvent, StorageResponse}};
+use libbridgething::{
+  client::ClientKVStoreCommand,
+  server::{ServerStorageEvent, StorageResponse},
+};
 use serde::{Deserialize, Serialize};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]

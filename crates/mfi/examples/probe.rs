@@ -60,7 +60,11 @@ fn main() -> ExitCode {
     Ok(c) => println!(
       "cert       : {} bytes, head=[{}]",
       c.len(),
-      c.iter().take(16).map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "),
+      c.iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" "),
     ),
     Err(e) => {
       println!("cert       : ERR {e:?}");

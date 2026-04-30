@@ -165,8 +165,14 @@ pub struct SessionTriple {
 impl Lsp {
   /// Production accessory defaults. Conservative `max_outgoing` and
   /// `max_len` plus generous timeouts; the iPhone replaces these with
-  /// its own proposal during SYN exchange. Always declares session 0
-  /// (control); higher layers append more sessions before connecting.
+  /// its own proposal during SYN exchange.
+  ///
+  /// Session list mirrors stock's profile: control on id 1, file-transfer
+  /// on id 2, external-accessory on id 3. We must declare all three even
+  /// though only the control session has a handler today: the iPhone
+  /// observes the EA session list before deciding to keep the link open
+  /// past NEGOTIATE, and tearing down the link with only "control" on
+  /// offer is what produces the silent RST observed in early iAP2 bring-up.
   pub fn accessory_default() -> Self {
     Self {
       version: 1,
@@ -176,11 +182,23 @@ impl Lsp {
       ack_timeout_ms: 3000,
       max_retransmissions: 30,
       max_ack: 3,
-      sessions: vec![SessionTriple {
-        id: 0,
-        session_type: 0,
-        version: 1,
-      }],
+      sessions: vec![
+        SessionTriple {
+          id: 1,
+          session_type: 0,
+          version: 1,
+        },
+        SessionTriple {
+          id: 2,
+          session_type: 1,
+          version: 2,
+        },
+        SessionTriple {
+          id: 3,
+          session_type: 2,
+          version: 1,
+        },
+      ],
     }
   }
 

@@ -64,11 +64,7 @@ impl GatewayHandler {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(forward).await });
       }
       GatewayToBridgeMsgData::Error(err) => {
-        tracing::warn!(
-          "({:?}) gateway reported a protocol error: {:?}",
-          &handle.address,
-          err
-        );
+        tracing::warn!("({:?}) gateway reported a protocol error: {:?}", &handle.address, err);
       }
     }
 

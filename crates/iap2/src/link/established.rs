@@ -146,8 +146,7 @@ impl EstablishedState {
   where
     W: AsyncWrite + Unpin,
   {
-    let ack = self.last_received_in_sequence_psn.wrapping_add(1);
-    let packet = LinkPacket::header_only(ControlBits::ACK, self.last_sent_psn, ack);
+    let packet = LinkPacket::header_only(ControlBits::ACK, self.last_sent_psn, self.last_received_in_sequence_psn);
     write_packet(writer, codec, packet).await?;
     self.cumulative_received = 0;
     self.must_send_ack = false;
@@ -174,11 +173,10 @@ impl EstablishedState {
     if payload.is_empty() {
       return Ok(());
     }
-    let ack = self.last_received_in_sequence_psn.wrapping_add(1);
     let packet = LinkPacket::with_payload(
       ControlBits::EAK | ControlBits::ACK,
       self.last_sent_psn,
-      ack,
+      self.last_received_in_sequence_psn,
       0,
       payload.freeze(),
     );
@@ -211,7 +209,12 @@ impl EstablishedState {
   pub(super) fn handle_inbound_ack(&mut self, ack_value: u8) {
     while let Some(front) = self.unacked.front() {
       let dist = ack_value.wrapping_sub(front.seq);
-      if dist > 0 && dist <= 128 {
+      // iAP2 ack is "last received in sequence PSN" (NOT next-expected),
+      // so ack==seq means the peer has acknowledged exactly this packet
+      // and we should drain it. Distances 1..=127 ack later packets;
+      // 128..=255 are negative (ack is behind our seq) and we leave the
+      // entry in unacked for retransmit.
+      if dist <= 127 {
         let p = self.unacked.pop_front().unwrap();
         self.last_acked_psn = p.seq;
       } else {
@@ -312,8 +315,13 @@ impl EstablishedState {
     W: AsyncWrite + Unpin,
   {
     let seq = self.last_sent_psn.wrapping_add(1);
-    let ack = self.last_received_in_sequence_psn.wrapping_add(1);
-    let packet = LinkPacket::with_payload(ControlBits::ACK, seq, ack, session_id, payload);
+    let packet = LinkPacket::with_payload(
+      ControlBits::ACK,
+      seq,
+      self.last_received_in_sequence_psn,
+      session_id,
+      payload,
+    );
     let wire = encode_packet(codec, packet)?;
     writer.write_all(&wire).await?;
     writer.flush().await?;
@@ -440,9 +448,8 @@ mod tests {
       retry_count: 0,
     });
     state.handle_inbound_ack(101);
-    assert_eq!(state.unacked.len(), 1);
-    assert_eq!(state.unacked.front().unwrap().seq, 101);
-    assert_eq!(state.last_acked_psn, 100);
+    assert!(state.unacked.is_empty());
+    assert_eq!(state.last_acked_psn, 101);
   }
 
   #[test]

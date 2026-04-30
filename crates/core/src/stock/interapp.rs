@@ -530,7 +530,10 @@ mod test {
   use libbridgething::client::ClientLegacyStockCommand;
   use uuid::Uuid;
 
-  use libbridgething::{ClientCommand, ClientCommandType, client::{ClientInteractionCommand, ClientMsgMeta}};
+  use libbridgething::{
+    ClientCommand, ClientCommandType,
+    client::{ClientInteractionCommand, ClientMsgMeta},
+  };
 
   use super::StockInterAppRecv;
   use crate::handler::client::PossibleRecvMsg;
@@ -732,8 +735,7 @@ mod test {
 
   #[test]
   fn de_recv_skip_to_index() {
-    let json =
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipToIndex","args":{"index":5}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipToIndex","args":{"index":5}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -765,8 +767,7 @@ mod test {
 
   #[test]
   fn de_recv_seek_to() {
-    let json =
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"position":120}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"position":120}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 

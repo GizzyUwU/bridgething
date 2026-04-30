@@ -123,4 +123,3 @@ macro_rules! impl_client_request {
     }
   };
 }
-

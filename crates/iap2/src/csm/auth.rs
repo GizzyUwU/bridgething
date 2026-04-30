@@ -13,21 +13,17 @@ use bytes::Bytes;
 
 use super::Csm;
 
-/// CSMs the accessory sends. Used to populate
-/// `IdentificationInformation::messages_sent_by_accessory`.
-pub const SENT_BY_ACCESSORY: &[u16] = &[
-  AuthenticationCertificate::CSM_MSG_ID,
-  AuthenticationResponse::CSM_MSG_ID,
-];
+/// CSMs the accessory sends. Empty: iAP2 treats auth (and
+/// identification) as framework-level messages that are implicitly
+/// allowed - including them in
+/// `IdentificationInformation::messages_sent_by_accessory` makes the
+/// iPhone return `IdentificationRejected` on params 6/7. Only
+/// app-level CSMs (NowPlaying, HID, EA, etc) belong in those lists.
+pub const SENT_BY_ACCESSORY: &[u16] = &[];
 
-/// CSMs the accessory accepts. Used to populate
-/// `IdentificationInformation::messages_received_from_accessory`.
-pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
-  RequestAuthenticationCertificate::CSM_MSG_ID,
-  RequestAuthenticationChallengeResponse::CSM_MSG_ID,
-  AuthenticationFailed::CSM_MSG_ID,
-  AuthenticationSucceeded::CSM_MSG_ID,
-];
+/// CSMs the accessory accepts. Empty for the same reason as
+/// `SENT_BY_ACCESSORY`.
+pub const RECEIVED_BY_ACCESSORY: &[u16] = &[];
 
 /// `0xAA00` iPhone -> accessory. Asks the accessory to read its MFi
 /// certificate from the coprocessor.
@@ -161,7 +157,7 @@ mod tests {
 
   #[test]
   fn supported_messages_lists_match_msg_ids() {
-    assert_eq!(SENT_BY_ACCESSORY, &[0xAA01, 0xAA03]);
-    assert_eq!(RECEIVED_BY_ACCESSORY, &[0xAA00, 0xAA02, 0xAA04, 0xAA05]);
+    assert!(SENT_BY_ACCESSORY.is_empty());
+    assert!(RECEIVED_BY_ACCESSORY.is_empty());
   }
 }

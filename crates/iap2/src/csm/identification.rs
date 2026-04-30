@@ -18,18 +18,15 @@ use bytes::Bytes;
 
 use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldEncode, encode_param_block};
 
-/// CSMs the accessory sends in this layer. Concatenated with
-/// `auth::SENT_BY_ACCESSORY` and the caller's
-/// `additional_messages_sent_by_accessory` to populate
-/// `IdentificationInformation::messages_sent_by_accessory`.
-pub const SENT_BY_ACCESSORY: &[u16] = &[IdentificationInformation::CSM_MSG_ID];
+/// CSMs the accessory sends in this layer. Empty: identification
+/// itself is a framework message and listing it makes the iPhone
+/// reject params 6/7. Only higher-level (app) CSMs belong in the
+/// accessory's messages_sent list.
+pub const SENT_BY_ACCESSORY: &[u16] = &[];
 
-/// CSMs the accessory accepts in this layer.
-pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
-  StartIdentification::CSM_MSG_ID,
-  IdentificationAccepted::CSM_MSG_ID,
-  IdentificationRejected::CSM_MSG_ID,
-];
+/// CSMs the accessory accepts in this layer. Empty for the same
+/// reason as `SENT_BY_ACCESSORY`.
+pub const RECEIVED_BY_ACCESSORY: &[u16] = &[];
 
 /// `0x1D00` iPhone -> accessory. Begins identification; accessory
 /// replies with `IdentificationInformation`.
@@ -135,6 +132,12 @@ impl EaProtocol {
 
 /// One Bluetooth transport component entry. Encoded as a group-typed
 /// param (id 17 inside `IdentificationInformation`).
+///
+/// `supports_iap2_connection` is a presence-only param in iAP2: it is
+/// emitted as field 2 with an empty payload when true, and omitted
+/// entirely when false. Encoding it as a 1-byte `[0x01]` (the default
+/// `bool` impl) makes the iPhone reject the whole BluetoothTransport
+/// group, which surfaces as `IdentificationRejected.rejected_params=[17]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BluetoothTransportComponent {
   pub id: u16,
@@ -149,7 +152,9 @@ impl BluetoothTransportComponent {
     let mut params: Vec<CsmParam> = Vec::with_capacity(4);
     self.id.encode_field(0, &mut params);
     self.name.encode_field(1, &mut params);
-    self.supports_iap2_connection.encode_field(2, &mut params);
+    if self.supports_iap2_connection {
+      ().encode_field(2, &mut params);
+    }
     Bytes::copy_from_slice(&self.mac).encode_field(3, &mut params);
     encode_param_block(params)
   }
@@ -394,7 +399,7 @@ mod tests {
   }
 
   #[test]
-  fn messages_lists_concat_auth_identification_and_extras() {
+  fn messages_lists_emit_caller_supplied_ids_only() {
     let mut cfg = minimal_config();
     cfg.additional_messages_sent_by_accessory = vec![0x5000, 0x5002];
     cfg.additional_messages_received_from_accessory = vec![0x5001];
@@ -406,17 +411,14 @@ mod tests {
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(sent_ids, vec![0xAA01, 0xAA03, 0x1D01, 0x5000, 0x5002]);
+    assert_eq!(sent_ids, vec![0x5000, 0x5002]);
     let recv_param = frame.find(7).unwrap();
     let recv_ids: Vec<u16> = recv_param
       .payload
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(
-      recv_ids,
-      vec![0xAA00, 0xAA02, 0xAA04, 0xAA05, 0x1D00, 0x1D02, 0x1D03, 0x5001]
-    );
+    assert_eq!(recv_ids, vec![0x5001]);
   }
 
   #[test]
@@ -438,7 +440,7 @@ mod tests {
       match pid {
         0 => got_id = Some(u16::from_be_bytes([payload[0], payload[1]])),
         1 => got_name = Some(String::from_utf8_lossy(&payload[..payload.len() - 1]).into_owned()),
-        2 => got_supports = Some(payload[0] != 0),
+        2 => got_supports = Some(payload.is_empty()),
         3 => {
           let mut mac = [0u8; 6];
           mac.copy_from_slice(&payload[..6]);

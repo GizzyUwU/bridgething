@@ -1,5 +1,7 @@
 use bluer::Address;
-use libbridgething::gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayRequest, ResponseMeta};
+use libbridgething::gateway::{
+  BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayRequest, ResponseMeta,
+};
 use uuid::Uuid;
 
 use crate::{

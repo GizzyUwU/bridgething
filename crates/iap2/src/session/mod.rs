@@ -55,9 +55,13 @@ pub trait MfiAccess: Send + 'static {
   async fn sign(&mut self, challenge: [u8; CHALLENGE_LEN]) -> MfiResult<[u8; RESPONSE_LEN]>;
 }
 
-/// iAP2 control-session id. Auth + identification ride session 0; EA
-/// sessions get distinct ids assigned at session-start time.
-pub(crate) const CONTROL_SESSION_ID: u8 = 0;
+/// iAP2 control-session id. Must match the entry declared in our
+/// `Lsp::accessory_default` and must NOT be 0: session_id 0 in the link
+/// header is reserved for "header-only / pure control" packets (per the
+/// link-layer doc), and the iPhone RSTs the link if the accessory's
+/// declared control session collides with that. wiomoc picks 10, stock
+/// picks 1; we pick 1 to match stock's wire profile.
+pub(crate) const CONTROL_SESSION_ID: u8 = 1;
 
 /// Events the session emits upstream. `LinkEstablished` carries the
 /// peer's negotiated LSP for any consumer that wants to log or

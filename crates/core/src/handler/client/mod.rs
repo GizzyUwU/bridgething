@@ -61,7 +61,10 @@ impl ClientHandler {
 
     match msg.data {
       RecvMsgData::Bluetooth(msg) => {
-        dispatch(handle, move |h| async move { BluetoothHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { BluetoothHandler::new(h).handle(msg).await },
+        );
       }
       RecvMsgData::Store(msg) => {
         dispatch(handle, move |h| async move { StorageHandler::new(h).handle(msg).await });
@@ -73,15 +76,23 @@ impl ClientHandler {
         dispatch(handle, move |h| async move { VoiceHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Interaction(msg) => {
-        dispatch(handle, move |h| async move { InteractionHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { InteractionHandler::new(h).handle(msg).await },
+        );
       }
       RecvMsgData::Forward(msg) => {
-        dispatch(handle, move |h| async move { TopLevelHandler::new(h).handle_forward(msg).await });
+        dispatch(handle, move |h| async move {
+          TopLevelHandler::new(h).handle_forward(msg).await
+        });
       }
 
       // stock compatibility
       RecvMsgData::LegacyStock(msg) => {
-        dispatch(handle, move |h| async move { LegacyStockHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { LegacyStockHandler::new(h).handle(msg).await },
+        );
       }
 
       // ignored and unsupported
