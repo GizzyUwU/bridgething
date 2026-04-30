@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 mod bluetooth;
 mod interaction;
+mod request;
 mod stock;
 mod store;
 mod system;
@@ -11,6 +12,7 @@ mod voice;
 
 pub use bluetooth::*;
 pub use interaction::*;
+pub use request::*;
 pub use stock::*;
 pub use store::*;
 pub use system::*;
