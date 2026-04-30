@@ -117,10 +117,12 @@ pub enum PossibleSendMsg {
 }
 
 impl PossibleSendMsg {
-  pub fn from_send_msg(msg: ServerEvent, mode: &ClientMode) -> Self {
+  /// Wrap a modern `ServerEvent` for outbound transmission. `stock_msg_id` is
+  /// the inter-app correlation id for stock connections (ignored for modern).
+  pub fn from_send_msg(msg: ServerEvent, mode: &ClientMode, stock_msg_id: Option<usize>) -> Self {
     match mode {
       ClientMode::Modern => Self::Modern(msg),
-      ClientMode::Stock => Self::Stock(msg.into()),
+      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id)),
     }
   }
 }

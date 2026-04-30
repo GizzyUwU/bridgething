@@ -100,13 +100,8 @@ impl ClientManager {
     let data = data.into();
     tracing::trace!("sending message to {to} with data {:?}", data);
 
-    let msg = ServerEvent {
-      id,
-      data,
-      meta,
-      stock_msg_id,
-    };
-    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode);
+    let msg = ServerEvent { id, data, meta };
+    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode, stock_msg_id);
 
     Ok(client.tx.send(msg).await?)
   }
@@ -122,14 +117,13 @@ impl ClientManager {
       id: uuid::Uuid::now_v7(),
       data: data.clone(),
       meta,
-      stock_msg_id: None,
     };
 
     let results: Vec<Result<(), WSError>> = self
       .connections
       .iter()
       .map(|c| {
-        let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode);
+        let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None);
         c.tx.try_send(msg).map_err(WSError::MessageTrySend)
       })
       .collect();
@@ -202,9 +196,8 @@ impl ClientManager {
         id: uuid::Uuid::now_v7(),
         data: state.meta.clone().into(),
         meta: ServerEventType::Event,
-        stock_msg_id: None,
       };
-      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
+      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode, None);
       data.tx.send(msg).await?;
       tracing::debug!("sent version info to {address}");
 
@@ -213,9 +206,8 @@ impl ClientManager {
         id: uuid::Uuid::now_v7(),
         data: status.into(),
         meta: ServerEventType::Event,
-        stock_msg_id: None,
       };
-      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode);
+      let msg = PossibleSendMsg::from_send_msg(msg, &data.mode, None);
       data.tx.send(msg).await?;
       tracing::debug!("sent gateway status to {address}");
     }

@@ -39,7 +39,6 @@ pub struct ServerEvent {
   pub data: ServerEventData,
   #[serde(flatten)]
   pub meta: ServerEventType,
-  pub stock_msg_id: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, derive_more::From)]

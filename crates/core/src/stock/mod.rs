@@ -82,26 +82,29 @@ pub enum StockSendMsg {
   Unsupported,
 }
 
-impl From<ServerEvent> for StockSendMsg {
-  fn from(msg: ServerEvent) -> Self {
-    match msg.data {
-      ServerEventData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
-      ServerEventData::Storage(data) => StockSendMsg::Storage(data.into()),
-      ServerEventData::System(data) => data.into(),
-      ServerEventData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(msg.stock_msg_id, data.into())),
-      ServerEventData::Interaction(data) => {
-        StockSendMsg::InterApp(StockInterAppSend::from_interaction_send(data, msg.stock_msg_id))
-      }
-      ServerEventData::Forward(_) => {
-        tracing::warn!("forward message is not supported in stock app!!");
-        StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id))
-      }
-      ServerEventData::Error(err) => {
-        tracing::warn!("typed error response is not supported in stock app: {:?}", err);
-        StockSendMsg::Unsupported
-      }
-      ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
+/// Translate a modern `ServerEvent` into a stock-format `StockSendMsg`.
+/// `stock_msg_id` is the inter-app correlation id from the originating
+/// `StockInterApp` request; it lives outside the modern wire type and is
+/// threaded through the connection layer so the modern `ServerEvent` stays
+/// free of stock-specific fields.
+pub fn server_event_to_stock(msg: ServerEvent, stock_msg_id: Option<usize>) -> StockSendMsg {
+  match msg.data {
+    ServerEventData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
+    ServerEventData::Storage(data) => StockSendMsg::Storage(data.into()),
+    ServerEventData::System(data) => data.into(),
+    ServerEventData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(stock_msg_id, data.into())),
+    ServerEventData::Interaction(data) => {
+      StockSendMsg::InterApp(StockInterAppSend::from_interaction_send(data, stock_msg_id))
     }
+    ServerEventData::Forward(_) => {
+      tracing::warn!("forward message is not supported in stock app!!");
+      StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
+    }
+    ServerEventData::Error(err) => {
+      tracing::warn!("typed error response is not supported in stock app: {:?}", err);
+      StockSendMsg::Unsupported
+    }
+    ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id)),
   }
 }
 
