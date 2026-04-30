@@ -290,13 +290,17 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case forward(ForwardMessage)
+	/// Protocol-level failure: the gateway could not reach or dispatch a request
+	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
+	case error(GatewayError)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
 			file,
 			chrome,
 			webapp,
-			forward
+			forward,
+			error
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -332,6 +336,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .forward(content)
 					return
 				}
+			case .error:
+				if let content = try? container.decode(GatewayError.self, forKey: .data) {
+					self = .error(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeMsgData.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeMsgData"))
@@ -354,6 +363,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .forward(let content):
 			try container.encode(CodingKeys.forward, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .error(let content):
+			try container.encode(CodingKeys.error, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}

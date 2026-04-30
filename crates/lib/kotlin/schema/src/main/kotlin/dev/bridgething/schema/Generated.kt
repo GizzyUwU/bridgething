@@ -145,6 +145,11 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
+	/// Protocol-level failure: the gateway could not reach or dispatch a request
+	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
+	@Serializable
+	@SerialName("error")
+	data class Error(val data: GatewayError): GatewayToBridgeMsgData()
 }
 
 /// gateway -> bridgething

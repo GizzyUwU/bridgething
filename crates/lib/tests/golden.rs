@@ -481,6 +481,18 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
     },
   ));
 
+  out.push(gateway_fixture(
+    "gateway_to_bridge/error-malformed",
+    "protocol error: gateway could not decode the request the daemon sent",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: GatewayToBridgeMsgData::Error(GatewayError::Malformed {
+        reason: "missing required field".into(),
+      }),
+    },
+  ));
+
   out
 }
 

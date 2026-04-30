@@ -6,10 +6,12 @@ use uuid::Uuid;
 
 mod error;
 mod from;
+mod request;
 mod to;
 
 pub use error::*;
 pub use from::*;
+pub use request::*;
 pub use to::*;
 
 use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta};
@@ -68,6 +70,11 @@ pub enum GatewayToBridgeMsgData {
 
   #[from]
   Forward(ForwardMessage),
+
+  /// Protocol-level failure: the gateway could not reach or dispatch a request
+  /// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
+  #[from]
+  Error(GatewayError),
 }
 
 #[typeshare]
