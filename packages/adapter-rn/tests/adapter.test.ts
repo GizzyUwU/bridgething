@@ -43,8 +43,8 @@ class FakeTransport implements BridgethingTransport {
     this.sentFrames.push({ deviceId, frame: new Uint8Array(frame) });
     return Promise.resolve();
   }
-  getKnownDevices(): BridgethingTransportDevice[] {
-    return this.knownDevices;
+  getKnownDevices(): Promise<BridgethingTransportDevice[]> {
+    return Promise.resolve(this.knownDevices);
   }
   setOnConnected(callback: (device: BridgethingTransportDevice) => void): void {
     this.onConnected = callback;

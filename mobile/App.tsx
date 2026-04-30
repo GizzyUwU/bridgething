@@ -57,14 +57,26 @@ export default function App() {
 
   useEffect(() => {
     if (!running) return;
-    const interval = setInterval(() => {
+    let cancelled = false;
+    let inFlight = false;
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
-        setKnownDevices(adapter.getKnownDevices());
+        const devices = await adapter.getKnownDevices();
+        if (!cancelled) setKnownDevices(devices);
       } catch {
         // adapter not started yet
+      } finally {
+        inFlight = false;
       }
-    }, 2000);
-    return () => clearInterval(interval);
+    };
+    void refresh();
+    const interval = setInterval(refresh, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [running, adapter]);
 
   const handleGatewayEvent = (event: GatewayEvent) => {
@@ -140,7 +152,7 @@ export default function App() {
     try {
       await gateway.start();
       setRunning(true);
-      setKnownDevices(adapter.getKnownDevices());
+      setKnownDevices(await adapter.getKnownDevices());
       appendLog('++ gateway started');
     } catch (err) {
       appendLog(`!! gateway start failed: ${errMsg(err)}`);

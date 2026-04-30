@@ -149,12 +149,12 @@ class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
         session.write(bytes)
     }
 
-    override fun getKnownDevices(): Array<BridgethingTransportDevice> {
-        val context = NitroModules.applicationContext ?: return emptyArray()
+    override fun getKnownDevices(): Promise<Array<BridgethingTransportDevice>> = Promise.async {
+        val context = NitroModules.applicationContext ?: return@async emptyArray()
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-            ?: return emptyArray()
-        val adapter: BluetoothAdapter = manager.adapter ?: return emptyArray()
-        return try {
+            ?: return@async emptyArray()
+        val adapter: BluetoothAdapter = manager.adapter ?: return@async emptyArray()
+        try {
             @SuppressLint("MissingPermission")
             adapter.bondedDevices.map { device ->
                 val name = try {

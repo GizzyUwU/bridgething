@@ -94,10 +94,17 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
     }
   }
 
-  public func getKnownDevices() throws -> [BridgethingTransportDevice] {
-    EAAccessoryManager.shared().connectedAccessories
-      .filter { $0.protocolStrings.contains(Self.protocolString) }
-      .map { Self.makeDevice(from: $0) }
+  public func getKnownDevices() throws -> Promise<[BridgethingTransportDevice]> {
+    // EAAccessoryManager state is owned by the main thread; hop there to read
+    // it rather than touching it from the JS thread. The Promise resolves
+    // back into JS via Nitro's normal callback path.
+    return Promise.async {
+      return await MainActor.run {
+        EAAccessoryManager.shared().connectedAccessories
+          .filter { $0.protocolStrings.contains(Self.protocolString) }
+          .map { Self.makeDevice(from: $0) }
+      }
+    }
   }
 
   public func setOnConnected(callback: @escaping (BridgethingTransportDevice) -> Void) throws {
@@ -127,6 +134,9 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
     manager.registerForLocalNotifications()
 
     let center = NotificationCenter.default
+    // `queue: .main` guarantees these blocks run on the main thread; assert
+    // the actor isolation rather than detaching a Task so we stay on the
+    // same trampoline EA delivered the notification on.
     let connectObserver = center.addObserver(
       forName: .EAAccessoryDidConnect,
       object: nil,
@@ -134,7 +144,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
     ) { [weak self] note in
       guard let self,
             let accessory = note.userInfo?[EAAccessoryKey] as? EAAccessory else { return }
-      self.handleAccessoryConnected(accessory)
+      MainActor.assumeIsolated { self.handleAccessoryConnected(accessory) }
     }
     let disconnectObserver = center.addObserver(
       forName: .EAAccessoryDidDisconnect,
@@ -143,7 +153,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
     ) { [weak self] note in
       guard let self,
             let accessory = note.userInfo?[EAAccessoryKey] as? EAAccessory else { return }
-      self.handleAccessoryDisconnected(accessory)
+      MainActor.assumeIsolated { self.handleAccessoryDisconnected(accessory) }
     }
     observers = [connectObserver, disconnectObserver]
 
@@ -237,7 +247,10 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
   }
 
   private static func makeArrayBuffer(from data: Data) -> ArrayBuffer {
-    ArrayBuffer.copy(data: data)
+    // The only failure mode is an empty `Data` (nil baseAddress); callers
+    // guard via the n > 0 check on stream reads, so this is a programmer
+    // error if it ever throws.
+    return try! ArrayBuffer.copy(data: data)
   }
 }
 
@@ -258,8 +271,12 @@ private final class Session {
   let session: EASession
   let delegate: StreamDelegateAdapter
 
-  private(set) var pendingWrites: Data = .init()
-  private var canWrite: Bool = false
+  // Chunked write queue. Each `enqueue` appends a `Data` to the back; `drain`
+  // pops from the front, advancing `firstOffset` to track partial writes.
+  // Avoids the O(N) shift cost of `Data.removeFirst(_:)` on the build-phase
+  // buffer when frames are large or arrive in bursts.
+  private var pendingChunks: [Data] = []
+  private var firstOffset: Int = 0
   private var closed: Bool = false
 
   init(
@@ -290,28 +307,35 @@ private final class Session {
   }
 
   func enqueue(_ chunk: Data) {
-    pendingWrites.append(chunk)
+    guard !chunk.isEmpty else { return }
+    pendingChunks.append(chunk)
     drain()
   }
 
-  func notifyHasSpace() {
-    canWrite = true
-    drain()
-  }
-
+  /// Drain as many bytes as the stream will accept right now. The stream
+  /// re-fires `Stream.Event.hasSpaceAvailable` whenever buffer space comes
+  /// back, which calls back into here - no flag bookkeeping needed; the
+  /// stream's `hasSpaceAvailable` property is the source of truth.
   func drain() {
-    guard canWrite, let output = session.outputStream, !pendingWrites.isEmpty else { return }
-    let written: Int = pendingWrites.withUnsafeBytes { raw in
-      guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
-      return output.write(base, maxLength: pendingWrites.count)
+    guard let output = session.outputStream else { return }
+    while let first = pendingChunks.first, output.hasSpaceAvailable {
+      let remaining = first.count - firstOffset
+      let n: Int = first.withUnsafeBytes { raw -> Int in
+        guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+        return output.write(base.advanced(by: firstOffset), maxLength: remaining)
+      }
+      if n < 0 {
+        delegate.onError(output.streamError?.localizedDescription ?? "write failed")
+        close()
+        return
+      }
+      if n == 0 { break }
+      firstOffset += n
+      if firstOffset == first.count {
+        pendingChunks.removeFirst()
+        firstOffset = 0
+      }
     }
-    if written < 0 {
-      delegate.onError(output.streamError?.localizedDescription ?? "write failed")
-      close()
-      return
-    }
-    pendingWrites.removeFirst(written)
-    if pendingWrites.isEmpty { canWrite = false }
   }
 
   func close() {
@@ -346,10 +370,12 @@ private final class StreamDelegateAdapter: NSObject, StreamDelegate {
     self.onError = onError
   }
 
+  /// Streams are scheduled on the main RunLoop, so this protocol method is
+  /// invoked on the main thread. Assert the isolation rather than re-dispatch
+  /// through the main queue (which would add a runloop tick of latency between
+  /// every byte arriving and being delivered to JS).
   nonisolated func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
-    DispatchQueue.main.async { [self] in
-      MainActor.assumeIsolated { handle(stream: aStream, event: eventCode) }
-    }
+    MainActor.assumeIsolated { handle(stream: aStream, event: eventCode) }
   }
 
   @MainActor
@@ -357,19 +383,26 @@ private final class StreamDelegateAdapter: NSObject, StreamDelegate {
     switch event {
     case .hasBytesAvailable:
       guard let input = stream as? InputStream else { return }
-      let n = readBuffer.withUnsafeMutableBufferPointer { buf -> Int in
-        guard let base = buf.baseAddress else { return 0 }
-        return input.read(base, maxLength: buf.count)
-      }
-      if n > 0 {
-        let chunk = Data(bytes: readBuffer, count: n)
-        onBytes(chunk)
-      } else if n < 0 {
-        onError(input.streamError?.localizedDescription ?? "read failed")
-        onClose()
+      // Pump every available chunk in one trampoline; the stream only fires
+      // `hasBytesAvailable` once per readable transition, and missing a read
+      // means waiting for the next one (latency for nothing).
+      while input.hasBytesAvailable {
+        let n = readBuffer.withUnsafeMutableBufferPointer { buf -> Int in
+          guard let base = buf.baseAddress else { return 0 }
+          return input.read(base, maxLength: buf.count)
+        }
+        if n > 0 {
+          onBytes(Data(bytes: readBuffer, count: n))
+        } else if n < 0 {
+          onError(input.streamError?.localizedDescription ?? "read failed")
+          onClose()
+          return
+        } else {
+          break
+        }
       }
     case .hasSpaceAvailable:
-      session?.notifyHasSpace()
+      session?.drain()
     case .errorOccurred:
       onError(stream.streamError?.localizedDescription ?? "stream error")
       onClose()

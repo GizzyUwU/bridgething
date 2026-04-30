@@ -59,8 +59,12 @@ export interface BridgethingTransport extends HybridObject<{ ios: 'swift'; andro
    * - Android: bonded BluetoothDevices (filtering by service is the consumer's
    *   responsibility - the Bluetooth API exposes UUIDs only after connect on
    *   most stacks)
+   *
+   * Async because the underlying read is platform-isolated state - iOS's
+   * `EAAccessoryManager` snapshot is main-thread, Android's `bondedDevices`
+   * touches the binder bridge. The JS thread never blocks waiting on either.
    */
-  getKnownDevices(): BridgethingTransportDevice[];
+  getKnownDevices(): Promise<BridgethingTransportDevice[]>;
 
   setOnConnected(callback: (device: BridgethingTransportDevice) => void): void;
   setOnDisconnected(callback: (deviceId: string) => void): void;

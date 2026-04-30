@@ -95,7 +95,7 @@ export class ReactNativeAdapter implements Adapter {
   }
 
   /** Snapshot of currently-connectable peers known to the OS. */
-  getKnownDevices(): BridgethingTransportDevice[] {
+  async getKnownDevices(): Promise<BridgethingTransportDevice[]> {
     return this.transport.getKnownDevices();
   }
 
