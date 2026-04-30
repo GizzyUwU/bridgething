@@ -1,4 +1,4 @@
-use libbridgething::{client::ClientBluetoothCommand, server::ServerBluetoothEvent};
+use libbridgething::client::{ClientBluetoothCommand, ListBluetoothDevices};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -37,7 +37,7 @@ impl BluetoothHandler {
     Ok(
       self
         .handle
-        .respond(ServerBluetoothEvent::PairedDevices(devices.into_iter().collect()))
+        .respond_to::<ListBluetoothDevices>(devices.into_iter().collect())
         .await?,
     )
   }

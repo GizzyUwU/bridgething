@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use libbridgething::{ServerEventData, ServerEventType};
+use libbridgething::{ServerEventData, ServerEventType, client::ClientRequest};
 use uuid::Uuid;
 
 use crate::{bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg};
@@ -58,6 +58,17 @@ impl MsgHandle {
         self.stock_msg_id,
       )
       .await
+  }
+
+  /// Ship a typed success response. The request type fixes the wire variant
+  /// so the handler can't accidentally encode the wrong shape.
+  pub async fn respond_to<R: ClientRequest>(&self, response: R::Response) -> WSResult<()> {
+    self.respond(R::encode_response(response)).await
+  }
+
+  /// Ship a typed domain-error response paired with this request type.
+  pub async fn respond_err<R: ClientRequest>(&self, err: R::DomainError) -> WSResult<()> {
+    self.respond(R::encode_domain_error(err)).await
   }
 
   #[allow(unused)]
