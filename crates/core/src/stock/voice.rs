@@ -1,10 +1,6 @@
 use libbridgething::client::ClientVoiceCommand;
 use serde::{Deserialize, Serialize};
 
-use crate::handler::client::PossibleSendMsg;
-
-use super::StockSendMsg;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum StockVoiceRecv {
@@ -76,18 +72,6 @@ pub enum StockLocalCommand {
   Next,
   Previous,
   Mute,
-}
-
-impl From<StockVoiceSend> for StockSendMsg {
-  fn from(val: StockVoiceSend) -> Self {
-    Self::Voice(val)
-  }
-}
-
-impl From<StockVoiceSend> for PossibleSendMsg {
-  fn from(val: StockVoiceSend) -> Self {
-    Self::Stock(StockSendMsg::Voice(val))
-  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

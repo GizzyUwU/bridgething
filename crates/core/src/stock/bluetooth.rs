@@ -1,8 +1,6 @@
 use libbridgething::{Device, DeviceType, client::ClientBluetoothCommand, server::ServerBluetoothEvent};
 use serde::{Deserialize, Serialize};
 
-use super::StockSendMsg;
-use crate::handler::client::PossibleSendMsg;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -48,18 +46,6 @@ pub enum StockBluetoothSend {
   DeviceList { payload: Vec<StockDevice> },
 }
 
-impl From<StockBluetoothSend> for StockSendMsg {
-  fn from(val: StockBluetoothSend) -> Self {
-    Self::Bluetooth(val)
-  }
-}
-
-impl From<StockBluetoothSend> for PossibleSendMsg {
-  fn from(val: StockBluetoothSend) -> Self {
-    Self::Stock(StockSendMsg::Bluetooth(val))
-  }
-}
-
 impl From<ServerBluetoothEvent> for StockBluetoothSend {
   fn from(data: ServerBluetoothEvent) -> Self {
     match data {
@@ -80,12 +66,6 @@ pub struct StockDevice {
   pub address: String, // mac address
   pub default: bool,
   pub device_info: StockDeviceInfo,
-}
-
-impl From<Vec<StockDevice>> for PossibleSendMsg {
-  fn from(payload: Vec<StockDevice>) -> Self {
-    PossibleSendMsg::Stock(StockSendMsg::Bluetooth(StockBluetoothSend::DeviceList { payload }))
-  }
 }
 
 impl From<Device> for StockDevice {

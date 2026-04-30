@@ -1,3 +1,4 @@
+mod macros;
 mod shared;
 
 pub mod client;

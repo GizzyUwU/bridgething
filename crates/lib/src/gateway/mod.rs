@@ -50,18 +50,22 @@ pub struct GatewayToBridgeMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
-  Version(GatewayMeta), // event, response?
+  #[from]
+  Version(GatewayMeta),
 
+  #[from]
   File(GatewayToBridgeFileMsg),
+  #[from]
   Chrome(GatewayToBridgeChromeMsg),
+  #[from]
   Webapp(GatewayToBridgeWebappMsg),
 
-  // arbitrary data
-  Forward(ForwardMessage), // request, response, event, command?
+  #[from]
+  Forward(ForwardMessage),
 }
 
 #[typeshare]
@@ -94,32 +98,22 @@ pub struct BridgeToGatewayMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[allow(clippy::large_enum_variant)] // TODO: maybe remove this allow later
+#[allow(clippy::large_enum_variant)]
 pub enum BridgeToGatewayMsgData {
-  Version(BridgeThingMeta), // event, response?
+  #[from]
+  Version(BridgeThingMeta),
+  #[from]
   File(BridgeToGatewayFileMsg),
+  #[from]
   Webapp(BridgeToGatewayWebappMsg),
 
-  // arbitrary data
-  Forward(ForwardMessage), // request, response, event, command?
+  #[from]
+  Forward(ForwardMessage),
 
-  // acknowledgements
-  Ack,  // response, happens when a command has been received and won't have a completion
-  Nack, // response, happens when a command has been received but will not be processed
-  Done, // response, happens when a command has been completed
-}
-
-impl From<ForwardMessage> for BridgeToGatewayMsgData {
-  fn from(msg: ForwardMessage) -> Self {
-    Self::Forward(msg)
-  }
-}
-
-impl From<ForwardMessage> for GatewayToBridgeMsgData {
-  fn from(msg: ForwardMessage) -> Self {
-    Self::Forward(msg)
-  }
+  Ack,  // response, command received and won't have a completion
+  Nack, // response, command received but will not be processed
+  Done, // response, command has been completed
 }

@@ -107,10 +107,12 @@ impl PossibleRecvMsg {
 }
 
 // --- sends ---
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, derive_more::From)]
 #[serde(untagged)]
 pub enum PossibleSendMsg {
+  #[from]
   Modern(ServerEvent),
+  #[from]
   Stock(StockSendMsg),
 }
 
@@ -120,11 +122,5 @@ impl PossibleSendMsg {
       ClientMode::Modern => Self::Modern(msg),
       ClientMode::Stock => Self::Stock(msg.into()),
     }
-  }
-}
-
-impl From<StockSendMsg> for PossibleSendMsg {
-  fn from(msg: StockSendMsg) -> Self {
-    Self::Stock(msg)
   }
 }

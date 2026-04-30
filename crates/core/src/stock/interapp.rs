@@ -8,8 +8,7 @@ use libbridgething::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::StockSendMsg;
-use crate::handler::client::{PossibleRecvMsg, PossibleSendMsg, RecvMsgData};
+use crate::handler::client::{PossibleRecvMsg, RecvMsgData};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -443,18 +442,6 @@ impl StockInterAppSend {
 impl From<ServerInteractionEvent> for StockInterAppSendPayload {
   fn from(payload: ServerInteractionEvent) -> Self {
     todo!()
-  }
-}
-
-impl From<StockInterAppSend> for StockSendMsg {
-  fn from(val: StockInterAppSend) -> Self {
-    Self::InterApp(val)
-  }
-}
-
-impl From<StockInterAppSend> for PossibleSendMsg {
-  fn from(val: StockInterAppSend) -> Self {
-    Self::Stock(StockSendMsg::InterApp(val))
   }
 }
 

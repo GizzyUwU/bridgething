@@ -1,7 +1,7 @@
-use libbridgething::{BridgeThingMeta, ServerEvent, ServerEventData, server::ServerSystemEvent};
+use libbridgething::{BridgeThingMeta, ServerEvent, ServerEventData, server::ServerSystemEvent, transitive_from};
 use serde::{Deserialize, Serialize};
 
-use crate::handler::client::RecvMsgData;
+use crate::handler::client::{PossibleSendMsg, RecvMsgData};
 
 mod action;
 mod bluetooth;
@@ -54,19 +54,30 @@ impl From<StockRecvMsg> for RecvMsgData {
   }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, derive_more::From)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum StockSendMsg {
+  #[from]
   Bluetooth(StockBluetoothSend),
+  #[from]
   Storage(StockStorageSend),
+  #[from]
   Setup(StockSetupSend),
+  #[from]
   Connection(StockConnectionSend),
+  #[from]
   Hardware(StockHardwareSend),
+  #[from]
   PhoneCall(StockPhoneCallSend),
+  #[from]
   Permissions(StockPermissionsSend),
+  #[from]
   Configuration(StockConfigurationSend),
+  #[from]
   Version(StockVersionSend),
+  #[from]
   Voice(StockVoiceSend),
+  #[from]
   InterApp(StockInterAppSend),
   Unsupported,
 }
@@ -143,4 +154,20 @@ impl From<ServerSystemEvent> for StockSendMsg {
       }),
     }
   }
+}
+
+transitive_from! {
+  StockBluetoothSend     => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Bluetooth(v)),
+  StockStorageSend       => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Storage(v)),
+  StockSetupSend         => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Setup(v)),
+  StockConnectionSend    => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Connection(v)),
+  StockHardwareSend      => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Hardware(v)),
+  StockPhoneCallSend     => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::PhoneCall(v)),
+  StockPermissionsSend   => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Permissions(v)),
+  StockConfigurationSend => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Configuration(v)),
+  StockVersionSend       => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Version(v)),
+  StockVoiceSend         => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Voice(v)),
+  StockInterAppSend      => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::InterApp(v)),
+  StockStoragePayload    => PossibleSendMsg: |payload| PossibleSendMsg::Stock(StockSendMsg::Storage(StockStorageSend::Response { payload })),
+  Vec<StockDevice>       => PossibleSendMsg: |payload| PossibleSendMsg::Stock(StockSendMsg::Bluetooth(StockBluetoothSend::DeviceList { payload })),
 }

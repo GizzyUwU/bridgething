@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::gateway::BridgeToGatewayMsgData;
-
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[typeshare]
@@ -35,12 +33,6 @@ pub struct BridgeThingMeta {
 impl BridgeThingMeta {
   pub fn libbridgething_version() -> String {
     format!("v{}", LIBBRIDGETHING_VERSION)
-  }
-}
-
-impl From<BridgeThingMeta> for BridgeToGatewayMsgData {
-  fn from(data: BridgeThingMeta) -> Self {
-    BridgeToGatewayMsgData::Version(data)
   }
 }
 

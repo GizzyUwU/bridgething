@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::gateway::BridgeToGatewayMsgData;
-
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -23,10 +21,4 @@ pub struct FileRequestData {
 #[ts(export, export_to = "gateway.ts")]
 pub enum BridgeToGatewayFileMsg {
   FileRequest(FileRequestData),
-}
-
-impl From<BridgeToGatewayFileMsg> for BridgeToGatewayMsgData {
-  fn from(val: BridgeToGatewayFileMsg) -> Self {
-    BridgeToGatewayMsgData::File(val)
-  }
 }

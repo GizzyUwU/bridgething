@@ -125,12 +125,4 @@ pub enum PlayerError {
   WS(#[from] WSError),
 }
 
-impl From<Vec<WSError>> for PlayerError {
-  fn from(errors: Vec<WSError>) -> Self {
-    for error in errors {
-      tracing::error!("failed to broadcast message: {:?}", error);
-    }
-
-    Self::WS(WSError::BroadcastFailed)
-  }
-}
+crate::impl_broadcast_failure_from!(PlayerError);

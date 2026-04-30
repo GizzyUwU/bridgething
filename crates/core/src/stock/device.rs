@@ -1,8 +1,7 @@
 use libbridgething::{PhoneCallDirection, PhoneCallStatus, client::ClientSystemCommand};
 use serde::{Deserialize, Serialize};
 
-use super::StockSendMsg;
-use crate::handler::client::{PossibleSendMsg, RecvMsgData};
+use crate::handler::client::RecvMsgData;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -48,18 +47,6 @@ pub enum StockHardwareSend {
   AmbientLightUpdate { payload: usize },
 }
 
-impl From<StockHardwareSend> for StockSendMsg {
-  fn from(val: StockHardwareSend) -> Self {
-    Self::Hardware(val)
-  }
-}
-
-impl From<StockHardwareSend> for PossibleSendMsg {
-  fn from(val: StockHardwareSend) -> Self {
-    Self::Stock(StockSendMsg::Hardware(val))
-  }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StockPhoneCallSend {
@@ -70,16 +57,4 @@ pub enum StockPhoneCallSend {
     call_dir: PhoneCallDirection,
     call_id: String,
   },
-}
-
-impl From<StockPhoneCallSend> for StockSendMsg {
-  fn from(val: StockPhoneCallSend) -> Self {
-    Self::PhoneCall(val)
-  }
-}
-
-impl From<StockPhoneCallSend> for PossibleSendMsg {
-  fn from(val: StockPhoneCallSend) -> Self {
-    Self::Stock(StockSendMsg::PhoneCall(val))
-  }
 }

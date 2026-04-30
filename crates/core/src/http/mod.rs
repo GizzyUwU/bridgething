@@ -244,3 +244,20 @@ pub enum WSError {
   #[error("failed to broadcast to all devices. check the logs for more info.")]
   BroadcastFailed,
 }
+
+/// Generate `From<Vec<WSError>> for $err` that logs each broadcast failure
+/// and collapses to `$err::WS(WSError::BroadcastFailed)`. Implementations are
+/// identical across handler error types, so this keeps them as one shape.
+#[macro_export]
+macro_rules! impl_broadcast_failure_from {
+  ($err:ty) => {
+    impl ::core::convert::From<::std::vec::Vec<$crate::http::WSError>> for $err {
+      fn from(errors: ::std::vec::Vec<$crate::http::WSError>) -> Self {
+        for error in errors {
+          tracing::error!("failed to broadcast message: {:?}", error);
+        }
+        Self::WS($crate::http::WSError::BroadcastFailed)
+      }
+    }
+  };
+}

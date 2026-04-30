@@ -42,51 +42,21 @@ pub struct ServerEvent {
   pub stock_msg_id: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, derive_more::From)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventData {
+  #[from]
   Bluetooth(ServerBluetoothEvent),
+  #[from]
   Storage(ServerStorageEvent),
+  #[from]
   System(ServerSystemEvent),
+  #[from]
   Interaction(ServerInteractionEvent),
+  #[from]
   Player(ServerPlayerEvent),
+  #[from]
   Forward(ForwardMessage),
   Ack,
-}
-
-impl From<ServerBluetoothEvent> for ServerEventData {
-  fn from(val: ServerBluetoothEvent) -> Self {
-    ServerEventData::Bluetooth(val)
-  }
-}
-
-impl From<ServerStorageEvent> for ServerEventData {
-  fn from(val: ServerStorageEvent) -> Self {
-    ServerEventData::Storage(val)
-  }
-}
-
-impl From<ServerSystemEvent> for ServerEventData {
-  fn from(val: ServerSystemEvent) -> Self {
-    ServerEventData::System(val)
-  }
-}
-
-impl From<ServerInteractionEvent> for ServerEventData {
-  fn from(val: ServerInteractionEvent) -> Self {
-    ServerEventData::Interaction(val)
-  }
-}
-
-impl From<ServerPlayerEvent> for ServerEventData {
-  fn from(val: ServerPlayerEvent) -> Self {
-    ServerEventData::Player(val)
-  }
-}
-
-impl From<ForwardMessage> for ServerEventData {
-  fn from(val: ForwardMessage) -> Self {
-    ServerEventData::Forward(val)
-  }
 }

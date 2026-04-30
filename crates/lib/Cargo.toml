@@ -8,7 +8,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 serde_with = { workspace = true, features = ["json"] }
-derive_more = { workspace = true, features = ["debug"] }
+derive_more = { workspace = true, features = ["debug", "from"] }
 
 # type generation
 ts-rs = { version = "12.0.1", features = ["uuid-impl", "no-serde-warnings"] }

@@ -4,7 +4,7 @@ pub mod gateway;
 pub use client::ClientHandler;
 pub use gateway::GatewayHandler;
 
-use crate::{bluetooth::BluetoothError, http::WSError, player::PlayerError, state::StateError};
+use crate::{bluetooth::BluetoothError, http::WSError, impl_broadcast_failure_from, player::PlayerError, state::StateError};
 
 type HandlerResult = Result<(), HandlerError>;
 
@@ -24,12 +24,4 @@ pub enum HandlerError {
   Player(#[from] PlayerError),
 }
 
-impl From<Vec<WSError>> for HandlerError {
-  fn from(errors: Vec<WSError>) -> Self {
-    for error in errors {
-      tracing::error!("failed to broadcast message: {:?}", error);
-    }
-
-    Self::WS(WSError::BroadcastFailed)
-  }
-}
+impl_broadcast_failure_from!(HandlerError);

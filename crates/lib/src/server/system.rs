@@ -23,14 +23,12 @@ pub struct GatewayStatus {
   pub os_name: String,
 }
 
-impl From<GatewayStatus> for ServerEventData {
-  fn from(status: GatewayStatus) -> Self {
-    ServerEventData::System(ServerSystemEvent::GatewayStatus(status))
-  }
+crate::transitive_from! {
+  GatewayStatus => ServerEventData: |s| ServerEventData::System(ServerSystemEvent::GatewayStatus(s)),
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
 #[serde(
   tag = "event",
   content = "data",
@@ -39,7 +37,9 @@ impl From<GatewayStatus> for ServerEventData {
 )]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerSystemEvent {
+  #[from]
   Version(BridgeThingMeta),
+  #[from]
   GatewayStatus(GatewayStatus),
 
   // TODO: do we need these?

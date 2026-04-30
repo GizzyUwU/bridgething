@@ -4,7 +4,6 @@ use ts_rs::TS;
 use typeshare::typeshare;
 
 use crate::WebappInfo;
-use crate::gateway::BridgeToGatewayMsgData;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -36,10 +35,4 @@ pub enum BridgeToGatewayWebappMsg {
   Active(WebappActive),
   /// response to SwitchTo / Install indicating the new active app
   Switched(WebappActive),
-}
-
-impl From<BridgeToGatewayWebappMsg> for BridgeToGatewayMsgData {
-  fn from(val: BridgeToGatewayWebappMsg) -> Self {
-    BridgeToGatewayMsgData::Webapp(val)
-  }
 }
