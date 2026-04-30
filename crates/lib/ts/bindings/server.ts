@@ -80,7 +80,7 @@ export type ServerPlayerEvent =
   | { event: 'queue'; data: { next: Array<Track>; current: Track; previous: Array<Track> } }
   | { event: 'image'; data: { id: string; height: number; width: number; data: string } };
 
-export type ServerStorageEvent = { event: 'response'; data: { key: string; value: string | null } };
+export type ServerStorageEvent = { event: 'response'; data: StorageResponse };
 
 export type ServerSystemEvent =
   | { event: 'version'; data: BridgeThingMeta }
@@ -98,3 +98,5 @@ export type ServerSystemEvent =
         callId: string;
       };
     };
+
+export type StorageResponse = { key: string; value: string | null };

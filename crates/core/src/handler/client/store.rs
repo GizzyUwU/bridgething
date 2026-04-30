@@ -1,4 +1,4 @@
-use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
+use libbridgething::{client::ClientKVStoreCommand, server::{ServerStorageEvent, StorageResponse}};
 
 use crate::stock::StockSetupSend;
 
@@ -54,7 +54,12 @@ impl StorageHandler {
       }
     }
 
-    Ok(self.handle.respond(ServerStorageEvent::Response { key, value }).await?)
+    Ok(
+      self
+        .handle
+        .respond(ServerStorageEvent::Response(StorageResponse { key, value }))
+        .await?,
+    )
   }
 
   async fn put(&mut self, key: String, value: String) -> HandlerResult {
@@ -64,10 +69,10 @@ impl StorageHandler {
     Ok(
       self
         .handle
-        .respond(ServerStorageEvent::Response {
+        .respond(ServerStorageEvent::Response(StorageResponse {
           key,
           value: Some(value),
-        })
+        }))
         .await?,
     )
   }
@@ -79,7 +84,7 @@ impl StorageHandler {
     Ok(
       self
         .handle
-        .respond(ServerStorageEvent::Response { key, value: None })
+        .respond(ServerStorageEvent::Response(StorageResponse { key, value: None }))
         .await?,
     )
   }

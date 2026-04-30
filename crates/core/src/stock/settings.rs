@@ -1,4 +1,4 @@
-use libbridgething::{client::ClientKVStoreCommand, server::ServerStorageEvent};
+use libbridgething::{client::ClientKVStoreCommand, server::{ServerStorageEvent, StorageResponse}};
 use serde::{Deserialize, Serialize};
 
 
@@ -35,7 +35,7 @@ pub enum StockStorageSend {
 impl From<ServerStorageEvent> for StockStorageSend {
   fn from(data: ServerStorageEvent) -> Self {
     match data {
-      ServerStorageEvent::Response { key, value } => StockStorageSend::Response {
+      ServerStorageEvent::Response(StorageResponse { key, value }) => StockStorageSend::Response {
         payload: StockStoragePayload {
           key,
           value,
