@@ -56,14 +56,16 @@ impl<T: Transport> MfiAuth<T> {
   }
 
   /// Read the X.509 certificate length (bytes) from the chip.
+  ///
+  /// The chip needs the same prepare-then-settle-then-raw-read shape
+  /// `cert()` uses: it NAKs the next command-byte write while it is
+  /// still readying the response, so the SMBus block-read path (which
+  /// would re-issue the register byte) cannot be used here.
   pub fn cert_len(&mut self) -> Result<u16> {
     self.transport.prepare(cmd::CERT_LEN).map_err(Error::Transport)?;
     self.transport.sleep(CERT_SETTLE);
     let mut buf = [0u8; 2];
-    self
-      .transport
-      .smbus_read_block(cmd::CERT_LEN, &mut buf)
-      .map_err(Error::Transport)?;
+    self.transport.raw_read(&mut buf).map_err(Error::Transport)?;
     Ok(u16::from_be_bytes(buf))
   }
 
