@@ -27,7 +27,7 @@ use iap2::Iap2Manager;
 use libbridgething::gateway::FileRequestData;
 use libbridgething::{
   ForwardMessage,
-  gateway::{BridgeToGatewayFileMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
 };
 use profiles::ProfileMan;
 use tokio::task::JoinHandle;
@@ -124,7 +124,7 @@ impl BluetoothManager {
       .send_all(GatewayMessage::rfcomm_all(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),
         meta: GatewayMsgMeta::Request,
-        data: BridgeToGatewayFileMsg::FileRequest(FileRequestData { file: path }).into(),
+        data: FileRequestData { file: path }.into(),
       }))
       .await;
   }

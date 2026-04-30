@@ -5,7 +5,8 @@ export type BridgeFile = { path: string, data: Uint8Array, };
 
 /**
  * Bridge-side request for a runtime file the gateway has access to.
- * Triggered by HTTP misses inside the `/_gateway/` namespace.
+ * Triggered by HTTP misses inside the `/_gateway/` namespace. The gateway
+ * replies with `GatewayToBridgeFileMsg::FileResponse`.
  */
 export type BridgeToGatewayFileMsg = { "event": "fileRequest", "data": FileRequestData };
 

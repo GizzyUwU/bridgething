@@ -494,7 +494,8 @@ public struct WebappUninstall: Codable, Sendable {
 }
 
 /// Bridge-side request for a runtime file the gateway has access to.
-/// Triggered by HTTP misses inside the `/_gateway/` namespace.
+/// Triggered by HTTP misses inside the `/_gateway/` namespace. The gateway
+/// replies with `GatewayToBridgeFileMsg::FileResponse`.
 public enum BridgeToGatewayFileMsg: Codable, Sendable {
 	case fileRequest(FileRequestData)
 
