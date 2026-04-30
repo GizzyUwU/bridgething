@@ -12,9 +12,11 @@
 //! negotiation, transition to Established. Authentication, identification,
 //! and steady-state CSM dispatch land in subsequent slices.
 
+pub mod csm;
 mod error;
 mod frame;
 mod link;
+pub mod session;
 
 pub use error::{Error, Result};
 pub use frame::{
@@ -22,3 +24,4 @@ pub use frame::{
   SessionType,
 };
 pub use link::{Iap2Command, Iap2Event, Link, LinkConfig};
+pub use session::{Iap2Session, MfiAccess, SessionEvent, WorkerMfiAccess};

@@ -377,7 +377,9 @@ dependencies = [
 name = "bridgething-iap2"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bitflags 2.11.1",
+ "bridgething-iap2-macros",
  "bridgething-mfi",
  "bytes",
  "futures",
@@ -385,6 +387,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "bridgething-iap2-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -17,7 +17,7 @@ mod error;
 mod transport;
 
 pub use auth::MfiAuth;
-pub use error::{Error, Result};
+pub use error::{Error, Result, TransportError};
 pub use transport::mock::{MockTransport, MockTransportState};
 pub use transport::remote::{RemoteI2c, serve as serve_remote};
 pub use transport::{LinuxI2c, LinuxI2cConfig, Transport};

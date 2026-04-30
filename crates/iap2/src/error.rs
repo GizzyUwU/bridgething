@@ -1,3 +1,4 @@
+use crate::csm::CsmDecodeError;
 use crate::frame::FrameError;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -20,4 +21,10 @@ pub enum Error {
   UnexpectedHandshakePacket(crate::frame::ControlBits),
   #[error("retransmission limit reached; link declared dead")]
   RetransmitLimit,
+  #[error("csm decode: {0}")]
+  CsmDecode(#[from] CsmDecodeError),
+  #[error("mfi: {0}")]
+  Mfi(#[from] bridgething_mfi::Error),
+  #[error("link task closed before session could send")]
+  LinkClosed,
 }
