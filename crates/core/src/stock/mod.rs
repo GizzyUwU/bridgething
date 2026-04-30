@@ -96,6 +96,10 @@ impl From<ServerEvent> for StockSendMsg {
         tracing::warn!("forward message is not supported in stock app!!");
         StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id))
       }
+      ServerEventData::Error(err) => {
+        tracing::warn!("typed error response is not supported in stock app: {:?}", err);
+        StockSendMsg::Unsupported
+      }
       ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(msg.stock_msg_id)),
     }
   }

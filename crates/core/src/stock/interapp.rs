@@ -530,7 +530,7 @@ mod test {
   use libbridgething::client::ClientLegacyStockCommand;
   use uuid::Uuid;
 
-  use libbridgething::{ClientCommand, ClientCommandType, client::ClientInteractionCommand};
+  use libbridgething::{ClientCommand, ClientCommandType, client::{ClientInteractionCommand, ClientMsgMeta}};
 
   use super::StockInterAppRecv;
   use crate::handler::client::PossibleRecvMsg;
@@ -679,6 +679,7 @@ mod test {
   fn ser_recv_get_image() {
     let ser = serde_json::to_string(&PossibleRecvMsg::Modern(ClientCommand {
       id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+      meta: ClientMsgMeta::Request,
       data: ClientCommandType::LegacyStock(ClientLegacyStockCommand::GetImage {
         id: "image_id".to_string(),
       }),
@@ -688,13 +689,13 @@ mod test {
 
     assert_eq!(
       ser,
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"legacyStock","action":"getImage","args":{"id":"image_id"}}"#
+      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"request"},"type":"legacyStock","action":"getImage","args":{"id":"image_id"}}"#
     );
   }
 
   #[test]
   fn de_recv_phone_call_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallImage","args":{"phoneNumber":"1234567890"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"phoneCallImage","args":{"phoneNumber":"1234567890"}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -702,6 +703,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::PhoneCallImage {
           phone_number: "1234567890".to_string()
         })
@@ -711,7 +713,7 @@ mod test {
 
   #[test]
   fn de_recv_phone_call_message() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"phoneCallMessage","args":{"phoneNumber":"1234567890","message":"Hello"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"phoneCallMessage","args":{"phoneNumber":"1234567890","message":"Hello"}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -719,6 +721,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::PhoneCallMessage {
           phone_number: "1234567890".to_string(),
           message: "Hello".to_string()
@@ -730,7 +733,7 @@ mod test {
   #[test]
   fn de_recv_skip_to_index() {
     let json =
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"skipToIndex","args":{"index":5}}"#;
+      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipToIndex","args":{"index":5}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -738,6 +741,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::SkipToIndex { index: 5 })
       })
     );
@@ -745,7 +749,7 @@ mod test {
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"skipPrev","args":{"allowSeeking":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipPrev","args":{"allowSeeking":true}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -753,6 +757,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::SkipPrev { allow_seeking: true })
       })
     );
@@ -761,7 +766,7 @@ mod test {
   #[test]
   fn de_recv_seek_to() {
     let json =
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"seekTo","args":{"position":120}}"#;
+      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"position":120}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -769,6 +774,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::SeekTo { position: 120 })
       })
     );
@@ -776,7 +782,7 @@ mod test {
 
   #[test]
   fn de_recv_set_shuffle() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"setShuffle","args":{"shuffle":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setShuffle","args":{"shuffle":true}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -784,6 +790,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::SetShuffle { shuffle: true })
       })
     );
@@ -791,7 +798,7 @@ mod test {
 
   #[test]
   fn de_recv_set_repeat() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","type":"interaction","action":"setRepeat","args":{"repeatMode":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setRepeat","args":{"repeatMode":true}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -799,6 +806,7 @@ mod test {
       de,
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
+        meta: ClientMsgMeta::Command,
         data: ClientCommandType::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode: true })
       })
     );

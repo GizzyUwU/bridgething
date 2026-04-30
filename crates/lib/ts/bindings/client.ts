@@ -10,13 +10,21 @@ export type ClientBluetoothCommand = { "action": "list" } | { "action": "connect
  *
  * these messages will pass through a websocket.
  */
-export type ClientCommand = { id: string, } & ({ "type": "bluetooth" } & ClientBluetoothCommand | { "type": "store" } & ClientKVStoreCommand | { "type": "system" } & ClientSystemCommand | { "type": "voice" } & ClientVoiceCommand | { "type": "interaction" } & ClientInteractionCommand | { "type": "forward" } & ForwardMessage);
+export type ClientCommand = { id: string, meta: ClientMsgMeta, } & ({ "type": "bluetooth" } & ClientBluetoothCommand | { "type": "store" } & ClientKVStoreCommand | { "type": "system" } & ClientSystemCommand | { "type": "voice" } & ClientVoiceCommand | { "type": "interaction" } & ClientInteractionCommand | { "type": "forward" } & ForwardMessage);
 
 export type ClientCommandType = { "type": "bluetooth" } & ClientBluetoothCommand | { "type": "store" } & ClientKVStoreCommand | { "type": "system" } & ClientSystemCommand | { "type": "voice" } & ClientVoiceCommand | { "type": "interaction" } & ClientInteractionCommand | { "type": "forward" } & ForwardMessage;
 
 export type ClientInteractionCommand = { "action": "phoneAnswer" } | { "action": "phoneDecline" } | { "action": "phoneCallImage", "args": { phoneNumber: string, } } | { "action": "phoneCallMessage", "args": { phoneNumber: string, message: string, } } | { "action": "increaseVolume" } | { "action": "decreaseVolume" } | { "action": "skipToIndex", "args": { index: number, } } | { "action": "skipNext" } | { "action": "skipPrev", "args": { allowSeeking: boolean, } } | { "action": "seekTo", "args": { position: number, } } | { "action": "pause" } | { "action": "resume" } | { "action": "setShuffle", "args": { shuffle: boolean, } } | { "action": "setRepeat", "args": { repeatMode: boolean, } };
 
 export type ClientKVStoreCommand = { "action": "get", "args": { key: string, } } | { "action": "put", "args": { key: string, value: string, } } | { "action": "delete", "args": { key: string, } };
+
+/**
+ * Intent the webapp signals to the daemon for each `ClientCommand`. Mirrors
+ * `GatewayMsgMeta` on the gateway side. Lets the SDK know whether to wait for
+ * a paired response, and lets the daemon validate that requests it can't
+ * satisfy surface as a typed `Error` rather than silent.
+ */
+export type ClientMsgMeta = { "kind": "request" } | { "kind": "command" } | { "kind": "event" };
 
 export type ClientSystemCommand = { "action": "versionRequest" } | { "action": "gatewayStatusRequest" } | { "action": "reboot" } | { "action": "powerOff" } | { "action": "factoryReset" } | { "action": "phoneCallAccept", "args": { callId: string, } } | { "action": "phoneCallEnd", "args": { callId: string, } };
 

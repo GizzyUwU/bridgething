@@ -14,7 +14,7 @@ pub use player::*;
 pub use storage::*;
 pub use system::*;
 
-use crate::ForwardMessage;
+use crate::{ForwardMessage, gateway::GatewayError};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "meta", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -58,5 +58,13 @@ pub enum ServerEventData {
   Player(ServerPlayerEvent),
   #[from]
   Forward(ForwardMessage),
+
+  /// Protocol-level failure: the daemon could not reach or dispatch the
+  /// request. Domain-level errors travel inside the per-op response variant.
+  /// Reuses `GatewayError` since its three variants (Unsupported, Malformed,
+  /// HandlerFailed) are universal across both protocols.
+  #[from]
+  Error(GatewayError),
+
   Ack,
 }
