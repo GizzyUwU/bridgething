@@ -78,12 +78,15 @@ sealed class BridgeToGatewayMsgData {
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): BridgeToGatewayMsgData()
+	/// Protocol-level failure: the request could not be reached or dispatched.
+	/// Domain-level errors travel inside the per-op response variant (see e.g.
+	/// `BridgeToGatewayWebappMsg::WebappError`).
+	@Serializable
+	@SerialName("error")
+	data class Error(val data: GatewayError): BridgeToGatewayMsgData()
 	@Serializable
 	@SerialName("ack")
 	object Ack: BridgeToGatewayMsgData()
-	@Serializable
-	@SerialName("nack")
-	object Nack: BridgeToGatewayMsgData()
 	@Serializable
 	@SerialName("done")
 	object Done: BridgeToGatewayMsgData()
@@ -244,10 +247,23 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("active")
 	data class Active(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// response to SwitchTo / Install indicating the new active app
+	/// response to SwitchTo indicating the new active app
 	@Serializable
 	@SerialName("switched")
 	data class Switched(val data: WebappActive): BridgeToGatewayWebappMsg()
+	/// response to Install indicating the freshly installed app's metadata
+	@Serializable
+	@SerialName("installed")
+	data class Installed(val data: WebappInfo): BridgeToGatewayWebappMsg()
+	/// response to Uninstall carrying the active app after the uninstall settled
+	@Serializable
+	@SerialName("uninstalled")
+	data class Uninstalled(val data: WebappActive): BridgeToGatewayWebappMsg()
+	/// domain-level error response for any webapp op (e.g. UnknownWebapp,
+	/// CannotUninstallBuiltin)
+	@Serializable
+	@SerialName("webappError")
+	data class WebappError(val data: WebappError): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -261,6 +277,40 @@ sealed class ForwardMessage {
 	@Serializable
 	@SerialName("binary")
 	data class Binary(val data: ByteArray): ForwardMessage()
+}
+
+/// Generated type representing the anonymous struct variant `Malformed` of the `GatewayError` Rust enum
+@Serializable
+data class GatewayErrorMalformedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `HandlerFailed` of the `GatewayError` Rust enum
+@Serializable
+data class GatewayErrorHandlerFailedInner (
+	val reason: String
+)
+
+/// Protocol-level failure that the bridge ships when a request could not be
+/// reached or dispatched. Carried by `BridgeToGatewayMsgData::Error`.
+/// 
+/// Domain-level errors (predictable, op-specific failures the caller may want
+/// to recover from) live inside the per-op response variant — for example
+/// `BridgeToGatewayWebappMsg::WebappError(WebappError)`.
+@Serializable(with = GatewayErrorSerializer::class)
+sealed class GatewayError {
+	/// The bridge does not implement this request variant.
+	@Serializable
+	@SerialName("unsupported")
+	object Unsupported: GatewayError()
+	/// The bridge could not decode or validate the request payload.
+	@Serializable
+	@SerialName("malformed")
+	data class Malformed(val data: GatewayErrorMalformedInner): GatewayError()
+	/// An unexpected internal error occurred while handling the request.
+	@Serializable
+	@SerialName("handlerFailed")
+	data class HandlerFailed(val data: GatewayErrorHandlerFailedInner): GatewayError()
 }
 
 @Serializable(with = GatewayToBridgeChromeMsgSerializer::class)
@@ -338,5 +388,39 @@ enum class PhoneCallStatus(val string: String) {
 	Held("Held"),
 	@SerialName("Disconnecting")
 	Disconnecting("Disconnecting"),
+}
+
+/// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorUnknownWebappInner (
+	val name: String
+)
+
+/// Generated type representing the anonymous struct variant `CannotUninstallBuiltin` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorCannotUninstallBuiltinInner (
+	val name: String
+)
+
+/// Generated type representing the anonymous struct variant `InstallFailed` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInstallFailedInner (
+	val reason: String
+)
+
+@Serializable(with = WebappErrorSerializer::class)
+sealed class WebappError {
+	/// The named webapp is not installed and not built-in.
+	@Serializable
+	@SerialName("unknownWebapp")
+	data class UnknownWebapp(val data: WebappErrorUnknownWebappInner): WebappError()
+	/// Built-in webapps cannot be uninstalled.
+	@Serializable
+	@SerialName("cannotUninstallBuiltin")
+	data class CannotUninstallBuiltin(val data: WebappErrorCannotUninstallBuiltinInner): WebappError()
+	/// The install archive could not be applied (corrupt zip, missing index.html, etc).
+	@Serializable
+	@SerialName("installFailed")
+	data class InstallFailed(val data: WebappErrorInstallFailedInner): WebappError()
 }
 

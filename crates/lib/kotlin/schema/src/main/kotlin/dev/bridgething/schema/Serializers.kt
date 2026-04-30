@@ -63,3 +63,9 @@ public object GatewayToBridgeWebappMsgSerializer :
         GatewayToBridgeWebappMsg::class,
         discriminator = "event"
     )
+
+public object GatewayErrorSerializer :
+    KSerializer<GatewayError> by AdjacentTaggedSerializer(GatewayError::class, discriminator = "type")
+
+public object WebappErrorSerializer :
+    KSerializer<WebappError> by AdjacentTaggedSerializer(WebappError::class, discriminator = "type")

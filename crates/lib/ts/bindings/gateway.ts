@@ -17,15 +17,25 @@ export type BridgeToGatewayFileMsg = { "event": "fileRequest", "data": FileReque
  */
 export type BridgeToGatewayMsg = { id: Uint8Array, meta: GatewayMsgMeta, data: BridgeToGatewayMsgData, };
 
-export type BridgeToGatewayMsgData = { "type": "version", "data": BridgeThingMeta } | { "type": "file", "data": BridgeToGatewayFileMsg } | { "type": "webapp", "data": BridgeToGatewayWebappMsg } | { "type": "forward", "data": ForwardMessage } | { "type": "ack" } | { "type": "nack" } | { "type": "done" };
+export type BridgeToGatewayMsgData = { "type": "version", "data": BridgeThingMeta } | { "type": "file", "data": BridgeToGatewayFileMsg } | { "type": "webapp", "data": BridgeToGatewayWebappMsg } | { "type": "forward", "data": ForwardMessage } | { "type": "error", "data": GatewayError } | { "type": "ack" } | { "type": "done" };
 
-export type BridgeToGatewayWebappMsg = { "event": "webapps", "data": WebappList } | { "event": "active", "data": WebappActive } | { "event": "switched", "data": WebappActive };
+export type BridgeToGatewayWebappMsg = { "event": "webapps", "data": WebappList } | { "event": "active", "data": WebappActive } | { "event": "switched", "data": WebappActive } | { "event": "installed", "data": WebappInfo } | { "event": "uninstalled", "data": WebappActive } | { "event": "webappError", "data": WebappError };
 
 export type ChromeNavigate = { url: string, };
 
 export type FileRequestData = { file: string, };
 
 export type FileResponseData = { file: BridgeFile, };
+
+/**
+ * Protocol-level failure that the bridge ships when a request could not be
+ * reached or dispatched. Carried by `BridgeToGatewayMsgData::Error`.
+ *
+ * Domain-level errors (predictable, op-specific failures the caller may want
+ * to recover from) live inside the per-op response variant — for example
+ * `BridgeToGatewayWebappMsg::WebappError(WebappError)`.
+ */
+export type GatewayError = { "type": "unsupported" } | { "type": "malformed", "data": { reason: string, } } | { "type": "handlerFailed", "data": { reason: string, } };
 
 export type GatewayMsgMeta = { "kind": "command" } | { "kind": "event" } | { "kind": "request" } | { "kind": "response", "data": ResponseMeta };
 
@@ -53,6 +63,8 @@ export type GatewayToBridgeWebappMsg = { "event": "list" } | { "event": "getActi
 export type ResponseMeta = { requestId: Uint8Array, };
 
 export type WebappActive = { name: string, };
+
+export type WebappError = { "type": "unknownWebapp", "data": { name: string, } } | { "type": "cannotUninstallBuiltin", "data": { name: string, } } | { "type": "installFailed", "data": { reason: string, } };
 
 export type WebappInstall = { name: string, 
 /**

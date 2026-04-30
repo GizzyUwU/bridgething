@@ -1,5 +1,5 @@
 use libbridgething::gateway::{
-  BridgeToGatewayMsgData, BridgeToGatewayWebappMsg, GatewayToBridgeWebappMsg, WebappActive, WebappInstall, WebappList,
+  BridgeToGatewayWebappMsg, GatewayToBridgeWebappMsg, WebappActive, WebappError, WebappInstall, WebappList,
   WebappSwitchTo, WebappUninstall,
 };
 
@@ -56,7 +56,10 @@ impl WebappHandler {
         &self.handle.address,
         name
       );
-      self.handle.respond(BridgeToGatewayMsgData::Nack).await;
+      self
+        .handle
+        .respond(BridgeToGatewayWebappMsg::WebappError(WebappError::UnknownWebapp { name }))
+        .await;
       return Ok(());
     }
 
@@ -73,9 +76,7 @@ impl WebappHandler {
     let installed = self.handle.state.webapps.install(&name, archive).await?;
     self
       .handle
-      .respond(BridgeToGatewayWebappMsg::Webapps(WebappList {
-        webapps: vec![installed],
-      }))
+      .respond(BridgeToGatewayWebappMsg::Installed(installed))
       .await;
     Ok(())
   }
@@ -87,7 +88,12 @@ impl WebappHandler {
         &self.handle.address,
         name
       );
-      self.handle.respond(BridgeToGatewayMsgData::Nack).await;
+      self
+        .handle
+        .respond(BridgeToGatewayWebappMsg::WebappError(
+          WebappError::CannotUninstallBuiltin { name },
+        ))
+        .await;
       return Ok(());
     }
 
@@ -100,15 +106,19 @@ impl WebappHandler {
       );
     }
 
-    let active = self.handle.state.active_webapp().await;
+    let mut active = self.handle.state.active_webapp().await;
     if active == name && self.handle.state.webapps.resolve(&active).is_none() {
       let fallback = "stock".to_string();
       tracing::info!("active webapp {} was uninstalled; falling back to {}", name, fallback);
-      self.handle.state.set_active_webapp(fallback).await?;
+      self.handle.state.set_active_webapp(fallback.clone()).await?;
       self.reload_kiosk().await;
+      active = fallback;
     }
 
-    self.handle.respond(BridgeToGatewayMsgData::Done).await;
+    self
+      .handle
+      .respond(BridgeToGatewayWebappMsg::Uninstalled(WebappActive { name: active }))
+      .await;
     Ok(())
   }
 

@@ -284,6 +284,67 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-installed-response",
+    "response to an Install request - full metadata of the freshly installed app",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Installed(WebappInfo {
+        name: "demo".into(),
+        source: WebappSource::Installed,
+        version: Some("0.1.0".into()),
+        description: None,
+      })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-uninstalled-response",
+    "response to an Uninstall request - active webapp after the uninstall settled",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Uninstalled(WebappActive {
+        name: "stock".into(),
+      })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/webapp-error-unknown",
+    "domain error: requested webapp is not installed and not built-in",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(WebappError::UnknownWebapp {
+        name: "ghost".into(),
+      })),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/error-unsupported",
+    "protocol error: bridge does not implement this request variant",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Error(GatewayError::Unsupported),
+    },
+  ));
+
+  out.push(bridge_fixture(
+    "bridge_to_gateway/error-handler-failed",
+    "protocol error: handler hit an unexpected internal failure",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: BridgeToGatewayMsgData::Error(GatewayError::HandlerFailed {
+        reason: "disk write failed".into(),
+      }),
+    },
+  ));
+
+  out.push(bridge_fixture(
     "bridge_to_gateway/forward-text-event",
     "arbitrary text payload over the Forward escape hatch",
     BridgeToGatewayMsg {

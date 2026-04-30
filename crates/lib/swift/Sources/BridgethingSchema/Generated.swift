@@ -139,8 +139,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case file(BridgeToGatewayFileMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
+	/// Protocol-level failure: the request could not be reached or dispatched.
+	/// Domain-level errors travel inside the per-op response variant (see e.g.
+	/// `BridgeToGatewayWebappMsg::WebappError`).
+	case error(GatewayError)
 	case ack
-	case nack
 	case done
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -148,8 +151,8 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			file,
 			webapp,
 			forward,
+			error,
 			ack,
-			nack,
 			done
 	}
 
@@ -181,11 +184,13 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 					self = .forward(content)
 					return
 				}
+			case .error:
+				if let content = try? container.decode(GatewayError.self, forKey: .data) {
+					self = .error(content)
+					return
+				}
 			case .ack:
 				self = .ack
-				return
-			case .nack:
-				self = .nack
 				return
 			case .done:
 				self = .done
@@ -210,10 +215,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 		case .forward(let content):
 			try container.encode(CodingKeys.forward, forKey: .type)
 			try container.encode(content, forKey: .data)
+		case .error(let content):
+			try container.encode(CodingKeys.error, forKey: .type)
+			try container.encode(content, forKey: .data)
 		case .ack:
 			try container.encode(CodingKeys.ack, forKey: .type)
-		case .nack:
-			try container.encode(CodingKeys.nack, forKey: .type)
 		case .done:
 			try container.encode(CodingKeys.done, forKey: .type)
 		}
@@ -517,13 +523,23 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	case webapps(WebappList)
 	/// response to GetActive, and event broadcast on switch
 	case active(WebappActive)
-	/// response to SwitchTo / Install indicating the new active app
+	/// response to SwitchTo indicating the new active app
 	case switched(WebappActive)
+	/// response to Install indicating the freshly installed app's metadata
+	case installed(WebappInfo)
+	/// response to Uninstall carrying the active app after the uninstall settled
+	case uninstalled(WebappActive)
+	/// domain-level error response for any webapp op (e.g. UnknownWebapp,
+	/// CannotUninstallBuiltin)
+	case webappError(WebappError)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case webapps,
 			active,
-			switched
+			switched,
+			installed,
+			uninstalled,
+			webappError
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -549,6 +565,21 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 					self = .switched(content)
 					return
 				}
+			case .installed:
+				if let content = try? container.decode(WebappInfo.self, forKey: .data) {
+					self = .installed(content)
+					return
+				}
+			case .uninstalled:
+				if let content = try? container.decode(WebappActive.self, forKey: .data) {
+					self = .uninstalled(content)
+					return
+				}
+			case .webappError:
+				if let content = try? container.decode(WebappError.self, forKey: .data) {
+					self = .webappError(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayWebappMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayWebappMsg"))
@@ -565,6 +596,15 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .switched(let content):
 			try container.encode(CodingKeys.switched, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .installed(let content):
+			try container.encode(CodingKeys.installed, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .uninstalled(let content):
+			try container.encode(CodingKeys.uninstalled, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .webappError(let content):
+			try container.encode(CodingKeys.webappError, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -620,6 +660,85 @@ public enum ForwardMessage: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .binary(let content):
 			try container.encode(CodingKeys.binary, forKey: .encoding)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+
+/// Generated type representing the anonymous struct variant `Malformed` of the `GatewayError` Rust enum
+public struct GatewayErrorMalformedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `HandlerFailed` of the `GatewayError` Rust enum
+public struct GatewayErrorHandlerFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+/// Protocol-level failure that the bridge ships when a request could not be
+/// reached or dispatched. Carried by `BridgeToGatewayMsgData::Error`.
+/// 
+/// Domain-level errors (predictable, op-specific failures the caller may want
+/// to recover from) live inside the per-op response variant — for example
+/// `BridgeToGatewayWebappMsg::WebappError(WebappError)`.
+public enum GatewayError: Codable, Sendable {
+	/// The bridge does not implement this request variant.
+	case unsupported
+	/// The bridge could not decode or validate the request payload.
+	case malformed(GatewayErrorMalformedInner)
+	/// An unexpected internal error occurred while handling the request.
+	case handlerFailed(GatewayErrorHandlerFailedInner)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case unsupported,
+			malformed,
+			handlerFailed
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .unsupported:
+				self = .unsupported
+				return
+			case .malformed:
+				if let content = try? container.decode(GatewayErrorMalformedInner.self, forKey: .data) {
+					self = .malformed(content)
+					return
+				}
+			case .handlerFailed:
+				if let content = try? container.decode(GatewayErrorHandlerFailedInner.self, forKey: .data) {
+					self = .handlerFailed(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .unsupported:
+			try container.encode(CodingKeys.unsupported, forKey: .type)
+		case .malformed(let content):
+			try container.encode(CodingKeys.malformed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .handlerFailed(let content):
+			try container.encode(CodingKeys.handlerFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -830,4 +949,89 @@ public enum PhoneCallStatus: String, Codable, Sendable {
 	case active = "Active"
 	case held = "Held"
 	case disconnecting = "Disconnecting"
+}
+
+
+/// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum
+public struct WebappErrorUnknownWebappInner: Codable, Sendable {
+	public let name: String
+
+	public init(name: String) {
+		self.name = name
+	}
+}
+
+/// Generated type representing the anonymous struct variant `CannotUninstallBuiltin` of the `WebappError` Rust enum
+public struct WebappErrorCannotUninstallBuiltinInner: Codable, Sendable {
+	public let name: String
+
+	public init(name: String) {
+		self.name = name
+	}
+}
+
+/// Generated type representing the anonymous struct variant `InstallFailed` of the `WebappError` Rust enum
+public struct WebappErrorInstallFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+public enum WebappError: Codable, Sendable {
+	/// The named webapp is not installed and not built-in.
+	case unknownWebapp(WebappErrorUnknownWebappInner)
+	/// Built-in webapps cannot be uninstalled.
+	case cannotUninstallBuiltin(WebappErrorCannotUninstallBuiltinInner)
+	/// The install archive could not be applied (corrupt zip, missing index.html, etc).
+	case installFailed(WebappErrorInstallFailedInner)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case unknownWebapp,
+			cannotUninstallBuiltin,
+			installFailed
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .unknownWebapp:
+				if let content = try? container.decode(WebappErrorUnknownWebappInner.self, forKey: .data) {
+					self = .unknownWebapp(content)
+					return
+				}
+			case .cannotUninstallBuiltin:
+				if let content = try? container.decode(WebappErrorCannotUninstallBuiltinInner.self, forKey: .data) {
+					self = .cannotUninstallBuiltin(content)
+					return
+				}
+			case .installFailed:
+				if let content = try? container.decode(WebappErrorInstallFailedInner.self, forKey: .data) {
+					self = .installFailed(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(WebappError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for WebappError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .unknownWebapp(let content):
+			try container.encode(CodingKeys.unknownWebapp, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .cannotUninstallBuiltin(let content):
+			try container.encode(CodingKeys.cannotUninstallBuiltin, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .installFailed(let content):
+			try container.encode(CodingKeys.installFailed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		}
+	}
 }

@@ -4,9 +4,11 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
+mod error;
 mod from;
 mod to;
 
+pub use error::*;
 pub use from::*;
 pub use to::*;
 
@@ -113,7 +115,12 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   Forward(ForwardMessage),
 
+  /// Protocol-level failure: the request could not be reached or dispatched.
+  /// Domain-level errors travel inside the per-op response variant (see e.g.
+  /// `BridgeToGatewayWebappMsg::WebappError`).
+  #[from]
+  Error(GatewayError),
+
   Ack,  // response, command received and won't have a completion
-  Nack, // response, command received but will not be processed
   Done, // response, command has been completed
 }

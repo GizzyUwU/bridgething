@@ -33,6 +33,27 @@ pub enum BridgeToGatewayWebappMsg {
   Webapps(WebappList),
   /// response to GetActive, and event broadcast on switch
   Active(WebappActive),
-  /// response to SwitchTo / Install indicating the new active app
+  /// response to SwitchTo indicating the new active app
   Switched(WebappActive),
+  /// response to Install indicating the freshly installed app's metadata
+  Installed(WebappInfo),
+  /// response to Uninstall carrying the active app after the uninstall settled
+  Uninstalled(WebappActive),
+  /// domain-level error response for any webapp op (e.g. UnknownWebapp,
+  /// CannotUninstallBuiltin)
+  WebappError(WebappError),
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub enum WebappError {
+  /// The named webapp is not installed and not built-in.
+  UnknownWebapp { name: String },
+  /// Built-in webapps cannot be uninstalled.
+  CannotUninstallBuiltin { name: String },
+  /// The install archive could not be applied (corrupt zip, missing index.html, etc).
+  InstallFailed { reason: String },
 }

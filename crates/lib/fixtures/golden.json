@@ -225,6 +225,133 @@
       "framed_hex": "dead020000000000000000000000005e83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a6776562617070a46461746182a56576656e74a87377697463686564a46461746181a46e616d65a464656d6f"
     },
     {
+      "name": "bridge_to_gateway/webapp-installed-response",
+      "description": "response to an Install request - full metadata of the freshly installed app",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "name": "demo",
+              "source": "installed",
+              "version": "0.1.0"
+            },
+            "event": "installed"
+          },
+          "type": "webapp"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74a9696e7374616c6c6564a46461746183a46e616d65a464656d6fa6736f75726365a9696e7374616c6c6564a776657273696f6ea5302e312e30",
+      "framed_hex": "dead02000000000000000000000000a383a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74a9696e7374616c6c6564a46461746183a46e616d65a464656d6fa6736f75726365a9696e7374616c6c6564a776657273696f6ea5302e312e30"
+    },
+    {
+      "name": "bridge_to_gateway/webapp-uninstalled-response",
+      "description": "response to an Uninstall request - active webapp after the uninstall settled",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "name": "stock"
+            },
+            "event": "uninstalled"
+          },
+          "type": "webapp"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74ab756e696e7374616c6c6564a46461746181a46e616d65a573746f636b",
+      "framed_hex": "dead020000000000000000000000008783a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74ab756e696e7374616c6c6564a46461746181a46e616d65a573746f636b"
+    },
+    {
+      "name": "bridge_to_gateway/webapp-error-unknown",
+      "description": "domain error: requested webapp is not installed and not built-in",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "data": {
+                "name": "ghost"
+              },
+              "type": "unknownWebapp"
+            },
+            "event": "webappError"
+          },
+          "type": "webapp"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74ab7765626170704572726f72a46461746182a474797065ad756e6b6e6f776e576562617070a46461746181a46e616d65a567686f7374",
+      "framed_hex": "dead02000000000000000000000000a083a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a6776562617070a46461746182a56576656e74ab7765626170704572726f72a46461746182a474797065ad756e6b6e6f776e576562617070a46461746181a46e616d65a567686f7374"
+    },
+    {
+      "name": "bridge_to_gateway/error-unsupported",
+      "description": "protocol error: bridge does not implement this request variant",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "type": "unsupported"
+          },
+          "type": "error"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56572726f72a46461746181a474797065ab756e737570706f72746564",
+      "framed_hex": "dead020000000000000000000000007483a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56572726f72a46461746181a474797065ab756e737570706f72746564"
+    },
+    {
+      "name": "bridge_to_gateway/error-handler-failed",
+      "description": "protocol error: handler hit an unexpected internal failure",
+      "direction": "bridge_to_gateway",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "reason": "disk write failed"
+            },
+            "type": "handlerFailed"
+          },
+          "type": "error"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56572726f72a46461746182a474797065ad68616e646c65724661696c6564a46461746181a6726561736f6eb16469736b207772697465206661696c6564",
+      "framed_hex": "dead020000000000000000000000009583a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56572726f72a46461746182a474797065ad68616e646c65724661696c6564a46461746181a6726561736f6eb16469736b207772697465206661696c6564"
+    },
+    {
       "name": "bridge_to_gateway/forward-text-event",
       "description": "arbitrary text payload over the Forward escape hatch",
       "direction": "bridge_to_gateway",
