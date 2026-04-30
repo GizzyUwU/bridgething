@@ -182,18 +182,18 @@ pub struct IdentificationConfig {
   pub additional_messages_received_from_accessory: Vec<u16>,
 }
 
-/// Caller-supplied fields that vary between Car Things; the rest of
-/// `IdentificationConfig` is locked to constants chosen for the
-/// product (`name = "Bridgething"`, manufacturer = "ThingLabs", power
-/// = None, etc.). Pass to [`IdentificationConfig::for_carthing`] to
-/// build a populated config; mutate the returned struct to add EA
+/// Caller-supplied fields that vary between Car Things; everything
+/// else in `IdentificationConfig` is locked to product-level constants
+/// (`name = "Bridgething"`, `manufacturer = "ThingLabs"`,
+/// `model_identifier = "Carthing"`, `hardware_version = "Spotify Car
+/// Thing"`, power = None, current = 0, language = en, BT transport
+/// component id = 1). Pass to [`IdentificationConfig::for_carthing`]
+/// to build a populated config; mutate the returned struct to add EA
 /// protocols or extra messages_*_by_accessory ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CarthingIdentification {
   pub serial_number: String,
   pub firmware_version: String,
-  pub hardware_version: String,
-  pub model_identifier: String,
   pub bt_mac: [u8; 6],
 }
 
@@ -205,11 +205,11 @@ impl IdentificationConfig {
   pub fn for_carthing(args: CarthingIdentification) -> Self {
     Self {
       name: "Bridgething".into(),
-      model_identifier: args.model_identifier,
+      model_identifier: "Carthing".into(),
       manufacturer: "ThingLabs".into(),
       serial_number: args.serial_number,
       firmware_version: args.firmware_version,
-      hardware_version: args.hardware_version,
+      hardware_version: "Spotify Car Thing".into(),
       power_providing_capability: PowerProvidingCapability::None,
       maximum_current_drawn_from_device_ma: 0,
       supported_external_accessory_protocols: vec![],

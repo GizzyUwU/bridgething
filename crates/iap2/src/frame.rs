@@ -163,6 +163,27 @@ pub struct SessionTriple {
 }
 
 impl Lsp {
+  /// Production accessory defaults. Conservative `max_outgoing` and
+  /// `max_len` plus generous timeouts; the iPhone replaces these with
+  /// its own proposal during SYN exchange. Always declares session 0
+  /// (control); higher layers append more sessions before connecting.
+  pub fn accessory_default() -> Self {
+    Self {
+      version: 1,
+      max_outgoing: 5,
+      max_len: 2048,
+      retransmission_timeout_ms: 6000,
+      ack_timeout_ms: 3000,
+      max_retransmissions: 30,
+      max_ack: 3,
+      sessions: vec![SessionTriple {
+        id: 0,
+        session_type: 0,
+        version: 1,
+      }],
+    }
+  }
+
   pub fn encode(&self) -> Bytes {
     let mut buf = BytesMut::with_capacity(10 + self.sessions.len() * 3);
     buf.put_u8(self.version);

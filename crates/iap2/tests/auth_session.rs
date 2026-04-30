@@ -51,8 +51,6 @@ fn identification_config() -> IdentificationConfig {
   IdentificationConfig::for_carthing(CarthingIdentification {
     serial_number: "BT-TEST-0001".into(),
     firmware_version: "v0.1.0".into(),
-    hardware_version: "Spotify Car Thing".into(),
-    model_identifier: "Carthing".into(),
     bt_mac: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
   })
 }

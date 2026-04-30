@@ -40,7 +40,7 @@ use crate::link::{Iap2Command, Iap2Event};
 use auth::AuthFlow;
 use identification::IdentificationFlow;
 
-pub use mfi_worker::WorkerMfiAccess;
+pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
 
 /// Result alias for `MfiAccess` ops; uses the mfi crate's error type
 /// directly since the iap2 layer only translates the result, doesn't

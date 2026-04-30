@@ -1,5 +1,6 @@
 // protocol modules
 mod ble;
+mod iap2;
 mod profiles;
 mod rfcomm;
 
@@ -22,6 +23,7 @@ use crate::{
 };
 use ble::GattServer;
 use bluer::{Adapter, Address, Session};
+use iap2::Iap2Manager;
 use libbridgething::gateway::FileRequestData;
 use libbridgething::{
   ForwardMessage,
@@ -47,6 +49,8 @@ pub struct BluetoothManager {
 
   pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
+
+  _iap2_handle: Option<JoinHandle<()>>,
 }
 
 impl BluetoothManager {
@@ -82,6 +86,15 @@ impl BluetoothManager {
     tracing::debug!("setting up bluetooth gateway manager");
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
+    tracing::debug!("setting up iap2 manager");
+    let _iap2_handle = match Iap2Manager::init(&session, &state).await? {
+      Some(manager) => Some(manager.spawn()),
+      None => {
+        tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
+        None
+      }
+    };
+
     // if we had a bdedr device with profile connections, try to reconnect
     if let Some(last) = state.last_device().await {
       if let Ok(mac) = last.parse() {
@@ -98,6 +111,8 @@ impl BluetoothManager {
 
       profile_man,
       gateway_man,
+
+      _iap2_handle,
     }))
   }
 

@@ -306,6 +306,8 @@ dependencies = [
  "base64",
  "bincode",
  "bluer",
+ "bridgething-iap2",
+ "bridgething-mfi",
  "dashmap",
  "derive_more",
  "dirs",
@@ -387,6 +389,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

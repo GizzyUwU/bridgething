@@ -53,6 +53,8 @@ reqwest = { version = "0.13.3", features = ["json"] }
 mime_guess = "2.0.5"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tower = { version = "0.5.3", features = ["util"] }
+bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
+bridgething-mfi = { version = "0.1.0", path = "../mfi" }
 
 
 [features]

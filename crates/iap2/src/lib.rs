@@ -24,4 +24,14 @@ pub use frame::{
   SessionType,
 };
 pub use link::{Iap2Command, Iap2Event, Link, LinkConfig};
-pub use session::{Iap2Session, MfiAccess, SessionEvent, WorkerMfiAccess};
+pub use session::{Iap2Session, MfiAccess, MfiHandle, SessionEvent, WorkerMfiAccess};
+
+/// SDP service-class UUID the accessory advertises for an iAP2-over-RFCOMM
+/// listener. iPhones scan for this UUID, read the channel from the
+/// matching SDP record, and open RFCOMM there.
+pub const IAP2_ACCESSORY_UUID: uuid::Uuid = uuid::Uuid::from_u128(0x00000000_DECA_FADE_DECA_DEAFDECACAFF);
+
+/// RFCOMM channel the accessory binds for iAP2. The protocol does not
+/// pin a channel; whatever we bind, we advertise. Channel 1 is taken
+/// by the bridgething-native gateway, so iAP2 lives on 2.
+pub const IAP2_RFCOMM_CHANNEL: u8 = 2;

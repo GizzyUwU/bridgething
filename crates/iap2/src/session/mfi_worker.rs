@@ -3,9 +3,11 @@
 //! `MfiAuth::cert` and `MfiAuth::sign` are blocking I²C ops; sign in
 //! particular sleeps ~500 ms inside the chip's signing window. The
 //! session task can't call them inline without stalling the runtime.
-//! `WorkerMfiAccess` runs the `MfiAuth` on a `spawn_blocking` thread,
-//! receives requests over an mpsc, replies via oneshot, and exposes
-//! the same async surface as any other [`MfiAccess`] impl.
+//! [`WorkerMfiAccess`] owns the chip on a dedicated thread; per-iPhone
+//! sessions hold a [`MfiHandle`] - a cheap clone of the request
+//! channel that implements [`MfiAccess`]. The worker exits when the
+//! last `MfiHandle` (and the parent `WorkerMfiAccess`) drops, closing
+//! the request channel.
 
 use std::thread::JoinHandle;
 
@@ -24,9 +26,11 @@ enum MfiRequest {
   },
 }
 
-/// `MfiAccess` impl that drives an `MfiAuth<T>` on a dedicated thread.
-/// Construct with [`WorkerMfiAccess::spawn`]; drop to shut the worker
-/// down (the receive loop exits when the request channel closes).
+/// Lifecycle owner for the MFi worker thread. Construct with
+/// [`WorkerMfiAccess::spawn`]; call [`Self::handle`] to obtain a
+/// cloneable [`MfiHandle`] for each [`crate::Iap2Session`] task. The
+/// worker thread runs until every handle (and this owner) is dropped.
+#[derive(Debug)]
 pub struct WorkerMfiAccess {
   tx: mpsc::Sender<MfiRequest>,
   _join: JoinHandle<()>,
@@ -44,10 +48,24 @@ impl WorkerMfiAccess {
       .expect("spawn iap2-mfi-worker thread");
     Self { tx, _join: join }
   }
+
+  /// Cheap clone of the request channel. Hand one of these to each
+  /// `Iap2Session`; they all funnel through the single worker thread.
+  pub fn handle(&self) -> MfiHandle {
+    MfiHandle { tx: self.tx.clone() }
+  }
+}
+
+/// Cloneable [`MfiAccess`] handle backed by a [`WorkerMfiAccess`]
+/// worker thread. Multiple sessions can each own a clone; requests
+/// serialize naturally through the single mpsc to the worker.
+#[derive(Clone, Debug)]
+pub struct MfiHandle {
+  tx: mpsc::Sender<MfiRequest>,
 }
 
 #[async_trait]
-impl MfiAccess for WorkerMfiAccess {
+impl MfiAccess for MfiHandle {
   async fn cert(&mut self) -> MfiResult<Bytes> {
     let (reply_tx, reply_rx) = oneshot::channel();
     self
