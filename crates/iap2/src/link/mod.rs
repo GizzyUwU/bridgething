@@ -1,26 +1,36 @@
 //! iAP2 link-layer state machine: drives the byte stream from initial
-//! detect handshake through SYN negotiation to Established.
+//! detect handshake through SYN negotiation into Established, then runs
+//! the reliable-delivery state machine (sequence numbers, retransmit,
+//! ACK piggyback / standalone, EAK, send-window backpressure) until
+//! either side disconnects.
 //!
-//! Scope of this wedge: detect → SYN → standalone-ACK → Established →
-//! idle until peer disconnects, peer sends RST, or daemon issues
-//! `Iap2Command::Disconnect`. Retransmit timer, ack-delay timer, EAK,
-//! DATA dispatch, and CSM-level handlers land in subsequent slices.
+//! CSM-level handlers (auth, identification, NowPlaying, EA dispatch)
+//! sit on top: they consume `Iap2Event::DataReceived` and produce
+//! `Iap2Command::Send`. The link layer is session-id-agnostic; chunking
+//! and reassembly are this layer's job, byte-content interpretation is
+//! the consumer's.
+
+mod established;
 
 use std::time::Duration;
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::error::{Error, Result};
 use crate::frame::{ControlBits, DETECT_MARKER, LINK_MAGIC, LinkCodec, LinkPacket, Lsp};
 
+use established::EstablishedState;
+
 const READ_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct LinkConfig {
-  /// First sequence number we'll stamp on outbound packets.
+  /// First sequence number we'll stamp on outbound packets. SYN consumes
+  /// this PSN; the first DATA send increments and uses `initial_psn + 1`.
   pub initial_psn: u8,
   /// What we propose in our SYN. The peer's proposal replaces this on
   /// receipt; see cleanroom doc `protocol/20_link_layer.md`.
@@ -48,11 +58,20 @@ pub enum Iap2Event {
   Established(Lsp),
   /// Link is going down for the reason given.
   LinkDown(String),
+  /// One DATA chunk for `session_id` was delivered in-sequence. Sessions
+  /// reassemble across chunks using their own framing (CSMs are
+  /// length-prefixed; EA streams use stream-id headers).
+  DataReceived { session_id: u8, payload: Bytes },
 }
 
 #[derive(Debug, Clone)]
 pub enum Iap2Command {
+  /// Send a tear-down RST and exit cleanly.
   Disconnect,
+  /// Enqueue `payload` for transmission on `session_id`. Payloads larger
+  /// than the negotiated `max_len` are chunked across multiple link
+  /// packets.
+  Send { session_id: u8, payload: Bytes },
 }
 
 pub struct Link;
@@ -72,19 +91,21 @@ impl Link {
     let mut codec = LinkCodec;
 
     Self::detect_phase(&mut reader, &mut writer, &mut buf, &config).await?;
-    let peer_lsp = Self::negotiate_phase(&mut reader, &mut writer, &mut buf, &mut codec, &config).await?;
+    let (peer_lsp, peer_initial_psn) =
+      Self::negotiate_phase(&mut reader, &mut writer, &mut buf, &mut codec, &config).await?;
 
-    if events_tx.send(Iap2Event::Established(peer_lsp)).await.is_err() {
+    if events_tx.send(Iap2Event::Established(peer_lsp.clone())).await.is_err() {
       tracing::debug!("iap2 events receiver dropped before Established could be delivered");
     }
     tracing::info!("iap2 link Established");
 
+    let mut state = EstablishedState::new(config.initial_psn, peer_initial_psn, &peer_lsp);
     Self::established_phase(
       &mut reader,
       &mut writer,
       &mut buf,
       &mut codec,
-      config.initial_psn,
+      &mut state,
       &events_tx,
       &mut commands_rx,
     )
@@ -132,7 +153,7 @@ impl Link {
     buf: &mut BytesMut,
     codec: &mut LinkCodec,
     config: &LinkConfig,
-  ) -> Result<Lsp>
+  ) -> Result<(Lsp, u8)>
   where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -153,10 +174,11 @@ impl Link {
         }
         if pkt.header.control.contains(ControlBits::SYN) {
           let lsp = Lsp::decode(&pkt.payload)?;
-          let ack = pkt.header.seq.wrapping_add(1);
+          let peer_initial_psn = pkt.header.seq;
+          let ack = peer_initial_psn.wrapping_add(1);
           let standalone_ack = LinkPacket::header_only(ControlBits::ACK, our_seq, ack);
           write_packet(writer, codec, standalone_ack).await?;
-          return Ok(lsp);
+          return Ok((lsp, peer_initial_psn));
         }
         return Err(Error::UnexpectedHandshakePacket(pkt.header.control));
       }
@@ -180,7 +202,7 @@ impl Link {
     writer: &mut W,
     buf: &mut BytesMut,
     codec: &mut LinkCodec,
-    our_seq: u8,
+    state: &mut EstablishedState,
     events_tx: &mpsc::Sender<Iap2Event>,
     commands_rx: &mut mpsc::Receiver<Iap2Command>,
   ) -> Result<()>
@@ -190,15 +212,44 @@ impl Link {
   {
     loop {
       while let Some(pkt) = codec.decode(buf)? {
-        tracing::trace!("iap2 established: received {:?}", pkt.header);
         if pkt.header.control.contains(ControlBits::RST) {
           let _ = events_tx.send(Iap2Event::LinkDown("peer RST".into())).await;
           return Err(Error::PeerReset);
         }
-        // Other steady-state traffic is intentionally ignored at the
-        // wedge boundary - the auth + identification handlers consume
-        // it in the next slice.
+
+        if pkt.header.control.contains(ControlBits::ACK) {
+          state.handle_inbound_ack(pkt.header.ack);
+        }
+
+        if pkt.header.control.contains(ControlBits::EAK) {
+          state.handle_inbound_eak(&pkt.payload, writer, codec).await?;
+          continue;
+        }
+
+        if pkt.header.has_payload() && !pkt.header.control.contains(ControlBits::SYN) {
+          let delivered = state.handle_inbound_data(pkt);
+          for d in delivered {
+            let _ = events_tx
+              .send(Iap2Event::DataReceived {
+                session_id: d.session_id,
+                payload: d.payload,
+              })
+              .await;
+          }
+          if state.has_buffered_out_of_order() {
+            state.send_eak(writer, codec).await?;
+          }
+        }
       }
+
+      if state.should_send_ack_now() {
+        state.send_standalone_ack(writer, codec).await?;
+      }
+
+      state.drain_pending_send(writer, codec).await?;
+
+      let retransmit_deadline = state.next_retransmit_deadline();
+      let ack_delay_deadline = state.ack_delay_deadline();
 
       tokio::select! {
         read = reader.read_buf(buf) => {
@@ -211,24 +262,39 @@ impl Link {
         cmd = commands_rx.recv() => {
           match cmd {
             Some(Iap2Command::Disconnect) | None => {
-              let rst = LinkPacket::header_only(ControlBits::RST, our_seq, 0);
+              let rst = LinkPacket::header_only(ControlBits::RST, state.last_sent_psn(), 0);
               if let Err(err) = write_packet(writer, codec, rst).await {
                 tracing::warn!("iap2 failed to send RST on disconnect: {:?}", err);
               }
               let _ = events_tx.send(Iap2Event::LinkDown("local disconnect".into())).await;
               return Ok(());
             }
+            Some(Iap2Command::Send { session_id, payload }) => {
+              state.enqueue_send(session_id, payload);
+            }
           }
+        }
+        _ = sleep_until_or_pending(retransmit_deadline) => {
+          if state.handle_retransmit_fire(writer).await? {
+            let _ = events_tx.send(Iap2Event::LinkDown("retransmit limit".into())).await;
+            return Err(Error::RetransmitLimit);
+          }
+        }
+        _ = sleep_until_or_pending(ack_delay_deadline) => {
+          state.send_standalone_ack(writer, codec).await?;
         }
       }
     }
   }
 }
 
-/// Returns true once we've seen evidence the peer is past the detect
-/// phase. Drains any leading detect markers from `buf`; if a link-packet
-/// magic appears in the leading position, treats that as an implicit
-/// detect-ack from a peer that skipped its own marker.
+async fn sleep_until_or_pending(deadline: Option<Instant>) {
+  match deadline {
+    Some(d) => tokio::time::sleep_until(d).await,
+    None => std::future::pending::<()>().await,
+  }
+}
+
 fn drain_detect_or_link_start(buf: &mut BytesMut) -> bool {
   use bytes::Buf;
   let mut drained_any = false;
@@ -239,9 +305,14 @@ fn drain_detect_or_link_start(buf: &mut BytesMut) -> bool {
   drained_any || (buf.len() >= 2 && buf[0..2] == LINK_MAGIC)
 }
 
-async fn write_packet<W: AsyncWrite + Unpin>(writer: &mut W, codec: &mut LinkCodec, packet: LinkPacket) -> Result<()> {
+fn encode_packet(codec: &mut LinkCodec, packet: LinkPacket) -> Result<Bytes> {
   let mut wire = BytesMut::new();
   codec.encode(packet, &mut wire)?;
+  Ok(wire.freeze())
+}
+
+async fn write_packet<W: AsyncWrite + Unpin>(writer: &mut W, codec: &mut LinkCodec, packet: LinkPacket) -> Result<()> {
+  let wire = encode_packet(codec, packet)?;
   writer.write_all(&wire).await?;
   writer.flush().await?;
   Ok(())

@@ -52,7 +52,11 @@ fn fast_config(our_lsp: Lsp) -> LinkConfig {
   config
 }
 
-async fn read_one_packet<R: AsyncRead + Unpin>(reader: &mut R, buf: &mut BytesMut, codec: &mut LinkCodec) -> LinkPacket {
+async fn read_one_packet<R: AsyncRead + Unpin>(
+  reader: &mut R,
+  buf: &mut BytesMut,
+  codec: &mut LinkCodec,
+) -> LinkPacket {
   loop {
     if let Some(pkt) = codec.decode(buf).expect("codec decode") {
       return pkt;

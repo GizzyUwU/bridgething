@@ -18,4 +18,6 @@ pub enum Error {
   HandshakeTimeout(&'static str),
   #[error("peer sent packet with unexpected control bits during handshake: {0:?}")]
   UnexpectedHandshakePacket(crate::frame::ControlBits),
+  #[error("retransmission limit reached; link declared dead")]
+  RetransmitLimit,
 }
