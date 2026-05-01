@@ -1,3 +1,4 @@
+mod asset;
 mod bluetooth;
 mod interaction;
 mod stock;
@@ -5,6 +6,7 @@ mod store;
 mod system;
 mod voice;
 
+use asset::*;
 use bluetooth::*;
 use interaction::*;
 use libbridgething::{ForwardMessage, gateway::GatewayError};
@@ -59,6 +61,9 @@ impl ClientHandler {
     let handle = MsgHandle::new(self, msg.id, msg.from, msg.stock_msg_id);
 
     match msg.data {
+      RecvMsgData::Asset(msg) => {
+        dispatch(handle, move |h| async move { AssetHandler::new(h).handle(msg).await });
+      }
       RecvMsgData::Bluetooth(msg) => {
         dispatch(
           handle,

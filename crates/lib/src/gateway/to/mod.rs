@@ -1,5 +1,5 @@
-mod file;
+mod asset;
 mod webapp;
 
-pub use file::*;
+pub use asset::*;
 pub use webapp::*;

@@ -1,4 +1,9 @@
-use libbridgething::{BridgeThingMeta, ServerEvent, ServerEventData, server::ServerSystemEvent, transitive_from};
+use base64::Engine as _;
+use libbridgething::{
+  BridgeThingMeta, ServerEvent, ServerEventData,
+  server::{ServerAssetEvent, ServerSystemEvent},
+  transitive_from,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::handler::client::{PossibleSendMsg, RecvMsgData};
@@ -105,6 +110,22 @@ pub fn server_event_to_stock(msg: ServerEvent, stock_msg_id: Option<usize>) -> S
       StockSendMsg::Unsupported
     }
     ServerEventData::Peer(_) => StockSendMsg::Unsupported,
+    ServerEventData::Asset(data) => match data {
+      ServerAssetEvent::Got(got) => {
+        let image_data = base64::engine::general_purpose::STANDARD.encode(&got.bytes);
+        StockSendMsg::InterApp(StockInterAppSend::new(
+          stock_msg_id,
+          StockInterAppSendPayload::Image {
+            height: 0,
+            width: 0,
+            image_data,
+          },
+        ))
+      }
+      ServerAssetEvent::NotFound(_) | ServerAssetEvent::Ready(_) | ServerAssetEvent::Cleared(_) => {
+        StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
+      }
+    },
     ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id)),
   }
 }

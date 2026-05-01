@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use base64::Engine as _;
 use libbridgething::{client::ClientLegacyStockCommand, stock::StockSetPreset};
 
 use super::{HandlerResult, MsgHandle};
@@ -68,18 +69,39 @@ impl LegacyStockHandler {
   }
 
   async fn get_image(self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting image with id: {}", &self.handle.from, id);
-
-    // TODO: don't clone the message handle, do this "synchronously"?
-    self.handle.state.player.request_cover_art(self.handle.clone()).await;
-    Ok(())
+    self.serve_asset_to_stock(id).await
   }
 
   async fn get_thumbnail_image(self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting thumbnail image for id: {}", &self.handle.from, id);
+    self.serve_asset_to_stock(id).await
+  }
 
-    // TODO: don't clone the message handle, do this "synchronously"?
-    self.handle.state.player.request_cover_art(self.handle.clone()).await;
+  async fn serve_asset_to_stock(self, id: String) -> HandlerResult {
+    tracing::debug!("({}) stock image lookup for id: {}", &self.handle.from, id);
+    let stock_msg_id = self.handle.stock_msg_id;
+    match self.handle.state.assets.get(&id).await? {
+      Some(asset) => {
+        let image_data = base64::engine::general_purpose::STANDARD.encode(&asset.bytes);
+        self
+          .handle
+          .send_stock(StockInterAppSend::new(
+            stock_msg_id,
+            StockInterAppSendPayload::Image {
+              height: 0,
+              width: 0,
+              image_data,
+            },
+          ))
+          .await?;
+      }
+      None => {
+        tracing::trace!("({}) asset miss for stock image: {}", &self.handle.from, id);
+        self
+          .handle
+          .send_stock(StockInterAppSend::make_ack(stock_msg_id))
+          .await?;
+      }
+    }
     Ok(())
   }
 

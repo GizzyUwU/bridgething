@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+mod asset;
 mod bluetooth;
 mod interaction;
 mod peer;
@@ -9,6 +10,7 @@ mod player;
 mod storage;
 mod system;
 
+pub use asset::*;
 pub use bluetooth::*;
 pub use interaction::*;
 pub use peer::*;
@@ -47,6 +49,8 @@ pub struct ServerEvent {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "server.ts")]
 pub enum ServerEventData {
+  #[from]
+  Asset(ServerAssetEvent),
   #[from]
   Bluetooth(ServerBluetoothEvent),
   #[from]

@@ -5,7 +5,8 @@ pub use client::ClientHandler;
 pub use gateway::GatewayHandler;
 
 use crate::{
-  bluetooth::BluetoothError, http::WSError, impl_broadcast_failure_from, player::PlayerError, state::StateError,
+  asset::AssetError, bluetooth::BluetoothError, http::WSError, impl_broadcast_failure_from, player::PlayerError,
+  state::StateError,
 };
 
 type HandlerResult = Result<(), HandlerError>;
@@ -24,6 +25,8 @@ pub enum HandlerError {
   IO(#[from] std::io::Error),
   #[error(transparent)]
   Player(#[from] PlayerError),
+  #[error(transparent)]
+  Asset(#[from] AssetError),
 }
 
 impl_broadcast_failure_from!(HandlerError);

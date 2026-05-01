@@ -1,7 +1,9 @@
+mod asset;
+mod authority;
 mod chrome;
-mod file;
 mod webapp;
 
+pub use asset::*;
+pub use authority::*;
 pub use chrome::*;
-pub use file::*;
 pub use webapp::*;

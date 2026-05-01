@@ -155,7 +155,7 @@ final class GatewayTests: XCTestCase {
     do {
       _ = try await gateway.request(
         deviceId: testDevice.id,
-        .file(.fileResponse(FileResponseData(file: BridgeFile(path: "/never", data: Data())))),
+        .webapp(.list),
         timeout: .milliseconds(100)
       )
       XCTFail("expected timeout error")

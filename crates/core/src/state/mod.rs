@@ -2,15 +2,20 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use libbridgething::{Device, server::GatewayStatus};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, task::JoinHandle};
 
-use crate::{chrome, http::ClientMan, paths, peer::PeerTracker};
+use crate::{
+  asset::{AssetCache, AssetError},
+  authority::AuthorityRegistry,
+  chrome,
+  http::ClientMan,
+  paths,
+  peer::PeerTracker,
+};
 
-mod gateway_files;
 pub mod meta;
 mod webapps;
 
-pub use gateway_files::FileRequestTx;
 pub use webapps::WebappRegistry;
 
 pub type State = Arc<AppState>;
@@ -66,11 +71,13 @@ pub struct AppState {
   pub player: crate::player::Player,
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
-  pub gateway_files: gateway_files::GatewayFileBridge,
+  pub assets: AssetCache,
+  pub authority: AuthorityRegistry,
   pub peers: PeerTracker,
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
+  _asset_cache_handle: JoinHandle<()>,
 }
 
 impl AppState {
@@ -79,6 +86,7 @@ impl AppState {
     meta: meta::SuperbirdMeta,
     player: crate::player::Player,
     chrome: chrome::Chrome,
+    authority: AuthorityRegistry,
   ) -> Result<State, StateError> {
     tracing::info!("initializing state");
     let state_dir = paths::state_dir();
@@ -87,7 +95,7 @@ impl AppState {
       tokio::fs::create_dir_all(&state_dir).await?;
     }
 
-    let persist_path = state_dir.join("bridgething.db");
+    let persist_path = state_dir.join("state.bin");
     let mut persist = PersistentAppState::restore_or_default(&persist_path).await;
 
     let webapps = WebappRegistry::init().await?;
@@ -102,8 +110,11 @@ impl AppState {
       persist.active_webapp = default_active_webapp();
     }
 
-    let gateway_files = gateway_files::GatewayFileBridge::new();
-    let peers = PeerTracker::new(client_man.clone());
+    let asset_db_path = state_dir.join("bridgething.db");
+    let asset_pending = AssetCache::init(asset_db_path).await?;
+    let (assets, _asset_cache_handle) = asset_pending.spawn();
+
+    let peers = PeerTracker::new(client_man.clone(), authority.clone());
 
     Ok(Arc::new(Self {
       client_man,
@@ -111,11 +122,13 @@ impl AppState {
       player,
       chrome,
       webapps,
-      gateway_files,
+      assets,
+      authority,
       peers,
 
       persist_path,
       persist: RwLock::new(persist),
+      _asset_cache_handle,
     }))
   }
 
@@ -247,6 +260,6 @@ pub enum StateError {
   Deserialize(#[from] bincode::Error),
   #[error("invalid path: {0}")]
   InvalidPath(String),
-  #[error("file does not exist: {0}")]
-  FileNotFound(String),
+  #[error(transparent)]
+  Asset(#[from] AssetError),
 }

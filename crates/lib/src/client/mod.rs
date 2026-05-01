@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+mod asset;
 mod bluetooth;
 mod interaction;
 mod request;
@@ -10,6 +11,7 @@ mod store;
 mod system;
 mod voice;
 
+pub use asset::*;
 pub use bluetooth::*;
 pub use interaction::*;
 pub use request::*;
@@ -56,6 +58,7 @@ pub struct ClientCommand {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub enum ClientCommandType {
+  Asset(ClientAssetCommand),
   Bluetooth(ClientBluetoothCommand),
   Store(ClientKVStoreCommand),
   System(ClientSystemCommand),

@@ -128,27 +128,28 @@
       "framed_hex": "dead020000000000000000000000005c83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746181a474797065a4646f6e65"
     },
     {
-      "name": "bridge_to_gateway/file-request-request",
-      "description": "daemon requests a file from the gateway (browser fetched something we don't have)",
+      "name": "bridge_to_gateway/asset-request-request",
+      "description": "daemon asks the companion for an asset id the cache missed",
       "direction": "bridge_to_gateway",
       "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
             "data": {
-              "file": "/missing/asset.png"
+              "id": "spotify/track/abc/image",
+              "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
             },
-            "event": "fileRequest"
+            "event": "request"
           },
-          "type": "file"
+          "type": "asset"
         },
         "id": "0192f2a0-bbb0-7c00-a000-000000000001",
         "meta": {
           "kind": "request"
         }
       },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746182a56576656e74ab66696c6552657175657374a46461746181a466696c65b22f6d697373696e672f61737365742e706e67",
-      "framed_hex": "dead020000000000000000000000006f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a466696c65a46461746182a56576656e74ab66696c6552657175657374a46461746181a466696c65b22f6d697373696e672f61737365742e706e67"
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a56173736574a46461746182a56576656e74a772657175657374a46461746182a26964b773706f746966792f747261636b2f6162632f696d616765a9726571756573744964c4100192f2a0bbb07c00a000000000000099",
+      "framed_hex": "dead020000000000000000000000008b83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a772657175657374a46461746182a474797065a56173736574a46461746182a56576656e74a772657175657374a46461746182a26964b773706f746966792f747261636b2f6162632f696d616765a9726571756573744964c4100192f2a0bbb07c00a000000000000099"
     },
     {
       "name": "bridge_to_gateway/webapp-list-response",
@@ -503,42 +504,110 @@
       "framed_hex": "dead02000000000000000000000000ba83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a776657273696f6ea46461746186ae6164617074657256657273696f6ea5312e302e30aa6c696256657273696f6ea5312e302e30b56c69626272696467657468696e6756657273696f6ea676302e312e30a76170704e616d65b26272696467657468696e672d6d6f62696c65aa61707056657273696f6ea5312e302e30a66f734e616d65a3694f53"
     },
     {
-      "name": "gateway_to_bridge/file-response-response",
-      "description": "gateway answering a fileRequest from the daemon - returns BridgeFile",
+      "name": "gateway_to_bridge/asset-push-event",
+      "description": "companion proactively pushes an asset blob into the daemon cache",
       "direction": "gateway_to_bridge",
       "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
             "data": {
-              "file": {
-                "data": [
-                  137,
-                  80,
-                  78,
-                  71,
-                  13,
-                  10,
-                  26,
-                  10
-                ],
-                "path": "/missing/asset.png"
+              "bytes": [
+                137,
+                80,
+                78,
+                71,
+                13,
+                10,
+                26,
+                10
+              ],
+              "id": "spotify/track/abc/image",
+              "mime": "image/jpeg",
+              "retention": {
+                "type": "pinned"
               }
             },
-            "event": "fileResponse"
+            "event": "push"
           },
-          "type": "file"
+          "type": "asset"
         },
         "id": "0192f2a0-bbb0-7c00-a000-000000000001",
         "meta": {
-          "data": {
-            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
-          },
-          "kind": "response"
+          "kind": "event"
         }
       },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74ac66696c65526573706f6e7365a46461746181a466696c6582a470617468b22f6d697373696e672f61737365742e706e67a464617461c40889504e470d0a1a0a",
-      "framed_hex": "dead02000000000000000000000000a883a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a466696c65a46461746182a56576656e74ac66696c65526573706f6e7365a46461746181a466696c6582a470617468b22f6d697373696e672f61737365742e706e67a464617461c40889504e470d0a1a0a"
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a470757368a46461746184a26964b773706f746966792f747261636b2f6162632f696d616765a56279746573c40889504e470d0a1a0aa46d696d65aa696d6167652f6a706567a9726574656e74696f6e81a474797065a670696e6e6564",
+      "framed_hex": "dead02000000000000000000000000a183a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a470757368a46461746184a26964b773706f746966792f747261636b2f6162632f696d616765a56279746573c40889504e470d0a1a0aa46d696d65aa696d6167652f6a706567a9726574656e74696f6e81a474797065a670696e6e6564"
+    },
+    {
+      "name": "gateway_to_bridge/asset-clear-event",
+      "description": "companion drops a previously pushed asset",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "id": "spotify/track/abc/image"
+            },
+            "event": "clear"
+          },
+          "type": "asset"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a5636c656172a46461746181a26964b773706f746966792f747261636b2f6162632f696d616765",
+      "framed_hex": "dead020000000000000000000000006b83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a5636c656172a46461746181a26964b773706f746966792f747261636b2f6162632f696d616765"
+    },
+    {
+      "name": "gateway_to_bridge/authority-claim-now-playing-metadata",
+      "description": "companion claims authority over the now-playing metadata scope",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "scope": "nowPlayingMetadata"
+            },
+            "event": "claim"
+          },
+          "type": "authority"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746181a573636f7065b26e6f77506c6179696e674d65746164617461",
+      "framed_hex": "dead020000000000000000000000006d83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746181a573636f7065b26e6f77506c6179696e674d65746164617461"
+    },
+    {
+      "name": "gateway_to_bridge/authority-release-now-playing-playback",
+      "description": "companion releases authority over the playback scope (e.g. user switched apps)",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "scope": "nowPlayingPlayback"
+            },
+            "event": "release"
+          },
+          "type": "authority"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a772656c65617365a46461746181a573636f7065b26e6f77506c6179696e67506c61796261636b",
+      "framed_hex": "dead020000000000000000000000006f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a772656c65617365a46461746181a573636f7065b26e6f77506c6179696e67506c61796261636b"
     },
     {
       "name": "gateway_to_bridge/webapp-list-request",

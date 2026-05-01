@@ -4,6 +4,12 @@ export type Album = { id: string; name: string };
 
 export type Artist = { id: string; name: string };
 
+export type AssetRetention =
+  | { type: 'lru' }
+  | { type: 'pinned' }
+  | { type: 'ttl'; data: TtlRetention }
+  | { type: 'persistent' };
+
 export type BridgeThingMeta = {
   bridgethingVersion: string;
   libbridgethingVersion: string;
@@ -51,9 +57,11 @@ export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8A
 /**
  * Per-track attributes that vary per song. `persistent_id` is a stable
  * per-platform identifier (iAP2 sends u64; we hex-encode it on the
- * wire). `artwork_id` is a stable per-image identifier scoped to its
- * transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
- * channel (iAP2 FileTransfer or a gateway file message).
+ * wire). `artwork_id` is an opaque asset id - webapps pass this value
+ * to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+ * is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
+ * companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
+ * Webapps treat the value as opaque.
  */
 export type MediaItemUpdate = {
   persistentId: string | null;
@@ -128,6 +136,8 @@ export type Track = {
   image_id: string;
   saved: boolean;
 };
+
+export type TtlRetention = { seconds: number };
 
 export type WebappInfo = { name: string; source: WebappSource; version: string | null; description: string | null };
 

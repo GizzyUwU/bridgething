@@ -59,6 +59,10 @@ tower = { version = "0.5.3", features = ["util"] }
 bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
 bridgething-mfi = { version = "0.1.0", path = "../mfi" }
 anyhow = "1.0.102"
+sea-orm = { version = "1.1.20", default-features = false, features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid"] }
+sea-orm-migration = { version = "1.1.20", default-features = false, features = ["sqlx-sqlite", "runtime-tokio-rustls", "with-uuid"] }
+bytes = "1.11.1"
+lru = "0.18.0"
 
 
 [features]

@@ -24,13 +24,125 @@ public struct Artist: Codable, Sendable {
 	}
 }
 
-public struct BridgeFile: Codable, Sendable {
-	public let path: String
-	public let data: Data
+public struct AssetClear: Codable, Sendable {
+	public let id: String
 
-	public init(path: String, data: Data) {
-		self.path = path
-		self.data = data
+	public init(id: String) {
+		self.id = id
+	}
+}
+
+public enum AssetRetention: Codable, Sendable {
+	case lru
+	case pinned
+	case ttl(TtlRetention)
+	case persistent
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case lru,
+			pinned,
+			ttl,
+			persistent
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .lru:
+				self = .lru
+				return
+			case .pinned:
+				self = .pinned
+				return
+			case .ttl:
+				if let content = try? container.decode(TtlRetention.self, forKey: .data) {
+					self = .ttl(content)
+					return
+				}
+			case .persistent:
+				self = .persistent
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(AssetRetention.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for AssetRetention"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .lru:
+			try container.encode(CodingKeys.lru, forKey: .type)
+		case .pinned:
+			try container.encode(CodingKeys.pinned, forKey: .type)
+		case .ttl(let content):
+			try container.encode(CodingKeys.ttl, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .persistent:
+			try container.encode(CodingKeys.persistent, forKey: .type)
+		}
+	}
+}
+
+public struct AssetPush: Codable, Sendable {
+	public let id: String
+	public let bytes: Data
+	public let mime: String?
+	public let retention: AssetRetention
+
+	public init(id: String, bytes: Data, mime: String?, retention: AssetRetention) {
+		self.id = id
+		self.bytes = bytes
+		self.mime = mime
+		self.retention = retention
+	}
+}
+
+public struct AssetRequest: Codable, Sendable {
+	public let id: String
+	public let requestId: Data
+
+	public init(id: String, requestId: Data) {
+		self.id = id
+		self.requestId = requestId
+	}
+}
+
+/// Surfaces the companion can declare authority over. Each scope has a
+/// scope-defined fallback source the daemon merges with when no claim is
+/// active or the claim has gone stale (see daemon-side merge in
+/// `core::player`). New scopes are forward-compat: an unknown scope
+/// arriving at an older daemon is stored opaquely and ignored.
+public enum CompanionAuthorityScope: String, Codable, Sendable {
+	/// Track metadata: title, album, artist, persistent_id, artwork_id,
+	/// duration, liked. Excludes playback state. Companion claims when it
+	/// has rich app-specific data for the currently-playing iOS app;
+	/// releases when the user switches to a non-tracked app.
+	case nowPlayingMetadata
+	/// Playback state: position, playing/paused, shuffle, repeat,
+	/// app_bundle, app_display_name. On iOS, iAP2 is usually the better
+	/// source (microsecond-fresh playhead). On Android the companion is
+	/// the only source and always claims this.
+	case nowPlayingPlayback
+}
+
+public struct AuthorityClaim: Codable, Sendable {
+	public let scope: CompanionAuthorityScope
+
+	public init(scope: CompanionAuthorityScope) {
+		self.scope = scope
+	}
+}
+
+public struct AuthorityRelease: Codable, Sendable {
+	public let scope: CompanionAuthorityScope
+
+	public init(scope: CompanionAuthorityScope) {
+		self.scope = scope
 	}
 }
 
@@ -136,7 +248,7 @@ public enum GatewayMsgMeta: Codable, Sendable {
 
 public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case version(BridgeThingMeta)
-	case file(BridgeToGatewayFileMsg)
+	case asset(BridgeToGatewayAssetMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	/// Protocol-level failure: the request could not be reached or dispatched.
@@ -148,7 +260,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
-			file,
+			asset,
 			webapp,
 			forward,
 			error,
@@ -169,9 +281,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 					self = .version(content)
 					return
 				}
-			case .file:
-				if let content = try? container.decode(BridgeToGatewayFileMsg.self, forKey: .data) {
-					self = .file(content)
+			case .asset:
+				if let content = try? container.decode(BridgeToGatewayAssetMsg.self, forKey: .data) {
+					self = .asset(content)
 					return
 				}
 			case .webapp:
@@ -206,8 +318,8 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 		case .version(let content):
 			try container.encode(CodingKeys.version, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .file(let content):
-			try container.encode(CodingKeys.file, forKey: .type)
+		case .asset(let content):
+			try container.encode(CodingKeys.asset, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
@@ -273,22 +385,6 @@ public struct Device: Codable, Sendable {
 	}
 }
 
-public struct FileRequestData: Codable, Sendable {
-	public let file: String
-
-	public init(file: String) {
-		self.file = file
-	}
-}
-
-public struct FileResponseData: Codable, Sendable {
-	public let file: BridgeFile
-
-	public init(file: BridgeFile) {
-		self.file = file
-	}
-}
-
 public struct GatewayMeta: Codable, Sendable {
 	public let adapterVersion: String
 	public let libVersion: String
@@ -309,7 +405,8 @@ public struct GatewayMeta: Codable, Sendable {
 
 public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case version(GatewayMeta)
-	case file(GatewayToBridgeFileMsg)
+	case asset(GatewayToBridgeAssetMsg)
+	case authority(GatewayToBridgeAuthorityMsg)
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case forward(ForwardMessage)
@@ -318,7 +415,8 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
-			file,
+			asset,
+			authority,
 			chrome,
 			webapp,
 			forward,
@@ -339,9 +437,14 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .version(content)
 					return
 				}
-			case .file:
-				if let content = try? container.decode(GatewayToBridgeFileMsg.self, forKey: .data) {
-					self = .file(content)
+			case .asset:
+				if let content = try? container.decode(GatewayToBridgeAssetMsg.self, forKey: .data) {
+					self = .asset(content)
+					return
+				}
+			case .authority:
+				if let content = try? container.decode(GatewayToBridgeAuthorityMsg.self, forKey: .data) {
+					self = .authority(content)
 					return
 				}
 			case .chrome:
@@ -380,8 +483,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 		case .version(let content):
 			try container.encode(CodingKeys.version, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .file(let content):
-			try container.encode(CodingKeys.file, forKey: .type)
+		case .asset(let content):
+			try container.encode(CodingKeys.asset, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .authority(let content):
+			try container.encode(CodingKeys.authority, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .chrome(let content):
 			try container.encode(CodingKeys.chrome, forKey: .type)
@@ -420,9 +526,11 @@ public struct GatewayToBridgeMsg: Codable, Sendable {
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
-/// wire). `artwork_id` is a stable per-image identifier scoped to its
-/// transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
-/// channel (iAP2 FileTransfer or a gateway file message).
+/// wire). `artwork_id` is an opaque asset id - webapps pass this value
+/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
+/// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
+/// Webapps treat the value as opaque.
 public struct MediaItemUpdate: Codable, Sendable {
 	public let persistentId: String?
 	public let title: String?
@@ -586,6 +694,14 @@ public struct Track: Codable, Sendable {
 	}
 }
 
+public struct TtlRetention: Codable, Sendable {
+	public let seconds: UInt32
+
+	public init(seconds: UInt32) {
+		self.seconds = seconds
+	}
+}
+
 public struct WebappActive: Codable, Sendable {
 	public let name: String
 
@@ -652,14 +768,16 @@ public struct WebappUninstall: Codable, Sendable {
 	}
 }
 
-/// Bridge-side request for a runtime file the gateway has access to.
-/// Triggered by HTTP misses inside the `/_gateway/` namespace. The gateway
-/// replies with `GatewayToBridgeFileMsg::FileResponse`.
-public enum BridgeToGatewayFileMsg: Codable, Sendable {
-	case fileRequest(FileRequestData)
+/// Bridge-side asset operations. Daemon emits `Request` when a webapp asks
+/// for an asset id that isn't in cache and a companion is connected; the
+/// companion fulfils via `GatewayToBridgeAssetMsg::Push` carrying the same
+/// id. v1 does not support bridge-initiated `Clear` - companions own the
+/// retention lifecycle of anything they pushed.
+public enum BridgeToGatewayAssetMsg: Codable, Sendable {
+	case request(AssetRequest)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case fileRequest
+		case request
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -670,21 +788,21 @@ public enum BridgeToGatewayFileMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .fileRequest:
-				if let content = try? container.decode(FileRequestData.self, forKey: .data) {
-					self = .fileRequest(content)
+			case .request:
+				if let content = try? container.decode(AssetRequest.self, forKey: .data) {
+					self = .request(content)
 					return
 				}
 			}
 		}
-		throw DecodingError.typeMismatch(BridgeToGatewayFileMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayFileMsg"))
+		throw DecodingError.typeMismatch(BridgeToGatewayAssetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayAssetMsg"))
 	}
 
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .fileRequest(let content):
-			try container.encode(CodingKeys.fileRequest, forKey: .event)
+		case .request(let content):
+			try container.encode(CodingKeys.request, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -916,6 +1034,104 @@ public enum GatewayError: Codable, Sendable {
 	}
 }
 
+/// Companion-side asset operations: proactive `Push` to load bytes into the
+/// daemon cache, and explicit `Clear` to drop a previously pushed asset.
+/// `Push` is also the wire shape used to fulfil a daemon `AssetRequest`;
+/// the daemon correlates by id on receipt.
+public enum GatewayToBridgeAssetMsg: Codable, Sendable {
+	case push(AssetPush)
+	case clear(AssetClear)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case push,
+			clear
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .push:
+				if let content = try? container.decode(AssetPush.self, forKey: .data) {
+					self = .push(content)
+					return
+				}
+			case .clear:
+				if let content = try? container.decode(AssetClear.self, forKey: .data) {
+					self = .clear(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeAssetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeAssetMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .push(let content):
+			try container.encode(CodingKeys.push, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .clear(let content):
+			try container.encode(CodingKeys.clear, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+/// Companion declares per-scope authority. `Claim` is idempotent and may
+/// be re-issued to refresh the freshness timestamp. `Release` is the
+/// "stop preferring my data for this scope" signal. Stale claims fall
+/// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
+	case claim(AuthorityClaim)
+	case release(AuthorityRelease)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case claim,
+			release
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .claim:
+				if let content = try? container.decode(AuthorityClaim.self, forKey: .data) {
+					self = .claim(content)
+					return
+				}
+			case .release:
+				if let content = try? container.decode(AuthorityRelease.self, forKey: .data) {
+					self = .release(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeAuthorityMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeAuthorityMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .claim(let content):
+			try container.encode(CodingKeys.claim, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .release(let content):
+			try container.encode(CodingKeys.release, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
 public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 	case navigate(ChromeNavigate)
 
@@ -946,44 +1162,6 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 		switch self {
 		case .navigate(let content):
 			try container.encode(CodingKeys.navigate, forKey: .event)
-			try container.encode(content, forKey: .data)
-		}
-	}
-}
-
-/// Gateway-served runtime file fetches. The bridge requests an asset on a
-/// `_gateway/<path>` HTTP miss; the gateway responds with the bytes if it
-/// has them.
-public enum GatewayToBridgeFileMsg: Codable, Sendable {
-	case fileResponse(FileResponseData)
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case fileResponse
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case event, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
-			switch type {
-			case .fileResponse:
-				if let content = try? container.decode(FileResponseData.self, forKey: .data) {
-					self = .fileResponse(content)
-					return
-				}
-			}
-		}
-		throw DecodingError.typeMismatch(GatewayToBridgeFileMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeFileMsg"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .fileResponse(let content):
-			try container.encode(CodingKeys.fileResponse, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

@@ -4,8 +4,8 @@ use std::net::SocketAddr;
 use libbridgething::{
   ClientCommand, ClientCommandType, ForwardMessage, ServerEvent,
   client::{
-    ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientLegacyStockCommand,
-    ClientSystemCommand, ClientVoiceCommand,
+    ClientAssetCommand, ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand,
+    ClientLegacyStockCommand, ClientSystemCommand, ClientVoiceCommand,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,7 @@ pub struct RecvMsg {
 
 #[derive(Debug)]
 pub enum RecvMsgData {
+  Asset(ClientAssetCommand),
   Bluetooth(ClientBluetoothCommand),
   Store(ClientKVStoreCommand),
   System(ClientSystemCommand),
@@ -61,6 +62,7 @@ pub enum RecvMsgData {
 impl From<ClientCommand> for RecvMsgData {
   fn from(msg: ClientCommand) -> Self {
     match msg.data {
+      ClientCommandType::Asset(msg) => Self::Asset(msg),
       ClientCommandType::Bluetooth(msg) => Self::Bluetooth(msg),
       ClientCommandType::Store(msg) => Self::Store(msg),
       ClientCommandType::System(msg) => Self::System(msg),

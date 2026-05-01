@@ -1,12 +1,14 @@
 mod handle;
 use handle::*;
 
+mod asset;
+mod authority;
 mod chrome;
-mod file;
 mod webapp;
 
+use asset::*;
+use authority::*;
 use chrome::*;
-use file::*;
 use libbridgething::{
   DeviceType, ForwardMessage, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
@@ -49,8 +51,11 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Version(data) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
-      GatewayToBridgeMsgData::File(file_msg) => {
-        tokio::spawn(async move { FileHandler::new(handle).handle(file_msg).await });
+      GatewayToBridgeMsgData::Asset(asset_msg) => {
+        tokio::spawn(async move { AssetHandler::new(handle).handle(asset_msg).await });
+      }
+      GatewayToBridgeMsgData::Authority(auth_msg) => {
+        tokio::spawn(async move { AuthorityHandler::new(handle).handle(auth_msg).await });
       }
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
         tokio::spawn(async move { ChromeHandler::new(handle).handle(chrome_msg).await });
@@ -121,7 +126,12 @@ impl TopLevelHandler {
 
   pub async fn handle_now_playing(&mut self, update: NowPlayingUpdate) -> HandlerResult {
     tracing::debug!("({:?}) handling now-playing delta from gateway", &self.handle.address);
-    self.handle.state.player.apply_now_playing(update).await?;
+    self
+      .handle
+      .state
+      .player
+      .apply_now_playing(crate::player::NowPlayingSource::Companion, update)
+      .await?;
     Ok(())
   }
 }

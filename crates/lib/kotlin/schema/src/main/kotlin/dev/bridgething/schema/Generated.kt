@@ -20,9 +20,69 @@ data class Artist (
 )
 
 @Serializable
-data class BridgeFile (
-	val path: String,
-	val data: ByteArray
+data class AssetClear (
+	val id: String
+)
+
+@Serializable(with = AssetRetentionSerializer::class)
+sealed class AssetRetention {
+	@Serializable
+	@SerialName("lru")
+	object Lru: AssetRetention()
+	@Serializable
+	@SerialName("pinned")
+	object Pinned: AssetRetention()
+	@Serializable
+	@SerialName("ttl")
+	data class Ttl(val data: TtlRetention): AssetRetention()
+	@Serializable
+	@SerialName("persistent")
+	object Persistent: AssetRetention()
+}
+
+@Serializable
+data class AssetPush (
+	val id: String,
+	val bytes: ByteArray,
+	val mime: String? = null,
+	val retention: AssetRetention
+)
+
+@Serializable
+data class AssetRequest (
+	val id: String,
+	val requestId: ByteArray
+)
+
+/// Surfaces the companion can declare authority over. Each scope has a
+/// scope-defined fallback source the daemon merges with when no claim is
+/// active or the claim has gone stale (see daemon-side merge in
+/// `core::player`). New scopes are forward-compat: an unknown scope
+/// arriving at an older daemon is stored opaquely and ignored.
+@Serializable
+enum class CompanionAuthorityScope(val string: String) {
+	/// Track metadata: title, album, artist, persistent_id, artwork_id,
+	/// duration, liked. Excludes playback state. Companion claims when it
+	/// has rich app-specific data for the currently-playing iOS app;
+	/// releases when the user switches to a non-tracked app.
+	@SerialName("nowPlayingMetadata")
+	NowPlayingMetadata("nowPlayingMetadata"),
+	/// Playback state: position, playing/paused, shuffle, repeat,
+	/// app_bundle, app_display_name. On iOS, iAP2 is usually the better
+	/// source (microsecond-fresh playhead). On Android the companion is
+	/// the only source and always claims this.
+	@SerialName("nowPlayingPlayback")
+	NowPlayingPlayback("nowPlayingPlayback"),
+}
+
+@Serializable
+data class AuthorityClaim (
+	val scope: CompanionAuthorityScope
+)
+
+@Serializable
+data class AuthorityRelease (
+	val scope: CompanionAuthorityScope
 )
 
 @Serializable
@@ -70,8 +130,8 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("version")
 	data class Version(val data: BridgeThingMeta): BridgeToGatewayMsgData()
 	@Serializable
-	@SerialName("file")
-	data class File(val data: BridgeToGatewayFileMsg): BridgeToGatewayMsgData()
+	@SerialName("asset")
+	data class Asset(val data: BridgeToGatewayAssetMsg): BridgeToGatewayMsgData()
 	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: BridgeToGatewayWebappMsg): BridgeToGatewayMsgData()
@@ -133,16 +193,6 @@ data class Device (
 )
 
 @Serializable
-data class FileRequestData (
-	val file: String
-)
-
-@Serializable
-data class FileResponseData (
-	val file: BridgeFile
-)
-
-@Serializable
 data class GatewayMeta (
 	val adapterVersion: String,
 	val libVersion: String,
@@ -158,8 +208,11 @@ sealed class GatewayToBridgeMsgData {
 	@SerialName("version")
 	data class Version(val data: GatewayMeta): GatewayToBridgeMsgData()
 	@Serializable
-	@SerialName("file")
-	data class File(val data: GatewayToBridgeFileMsg): GatewayToBridgeMsgData()
+	@SerialName("asset")
+	data class Asset(val data: GatewayToBridgeAssetMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("authority")
+	data class Authority(val data: GatewayToBridgeAuthorityMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("chrome")
 	data class Chrome(val data: GatewayToBridgeChromeMsg): GatewayToBridgeMsgData()
@@ -190,9 +243,11 @@ data class GatewayToBridgeMsg (
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
-/// wire). `artwork_id` is a stable per-image identifier scoped to its
-/// transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
-/// channel (iAP2 FileTransfer or a gateway file message).
+/// wire). `artwork_id` is an opaque asset id - webapps pass this value
+/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
+/// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
+/// Webapps treat the value as opaque.
 @Serializable
 data class MediaItemUpdate (
 	val persistentId: String? = null,
@@ -282,6 +337,11 @@ data class Track (
 )
 
 @Serializable
+data class TtlRetention (
+	val seconds: UInt
+)
+
+@Serializable
 data class WebappActive (
 	val name: String
 )
@@ -328,14 +388,16 @@ data class WebappUninstall (
 	val name: String
 )
 
-/// Bridge-side request for a runtime file the gateway has access to.
-/// Triggered by HTTP misses inside the `/_gateway/` namespace. The gateway
-/// replies with `GatewayToBridgeFileMsg::FileResponse`.
-@Serializable(with = BridgeToGatewayFileMsgSerializer::class)
-sealed class BridgeToGatewayFileMsg {
+/// Bridge-side asset operations. Daemon emits `Request` when a webapp asks
+/// for an asset id that isn't in cache and a companion is connected; the
+/// companion fulfils via `GatewayToBridgeAssetMsg::Push` carrying the same
+/// id. v1 does not support bridge-initiated `Clear` - companions own the
+/// retention lifecycle of anything they pushed.
+@Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
+sealed class BridgeToGatewayAssetMsg {
 	@Serializable
-	@SerialName("fileRequest")
-	data class FileRequest(val data: FileRequestData): BridgeToGatewayFileMsg()
+	@SerialName("request")
+	data class Request(val data: AssetRequest): BridgeToGatewayAssetMsg()
 }
 
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
@@ -414,21 +476,39 @@ sealed class GatewayError {
 	data class HandlerFailed(val data: GatewayErrorHandlerFailedInner): GatewayError()
 }
 
+/// Companion-side asset operations: proactive `Push` to load bytes into the
+/// daemon cache, and explicit `Clear` to drop a previously pushed asset.
+/// `Push` is also the wire shape used to fulfil a daemon `AssetRequest`;
+/// the daemon correlates by id on receipt.
+@Serializable(with = GatewayToBridgeAssetMsgSerializer::class)
+sealed class GatewayToBridgeAssetMsg {
+	@Serializable
+	@SerialName("push")
+	data class Push(val data: AssetPush): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("clear")
+	data class Clear(val data: AssetClear): GatewayToBridgeAssetMsg()
+}
+
+/// Companion declares per-scope authority. `Claim` is idempotent and may
+/// be re-issued to refresh the freshness timestamp. `Release` is the
+/// "stop preferring my data for this scope" signal. Stale claims fall
+/// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+@Serializable(with = GatewayToBridgeAuthorityMsgSerializer::class)
+sealed class GatewayToBridgeAuthorityMsg {
+	@Serializable
+	@SerialName("claim")
+	data class Claim(val data: AuthorityClaim): GatewayToBridgeAuthorityMsg()
+	@Serializable
+	@SerialName("release")
+	data class Release(val data: AuthorityRelease): GatewayToBridgeAuthorityMsg()
+}
+
 @Serializable(with = GatewayToBridgeChromeMsgSerializer::class)
 sealed class GatewayToBridgeChromeMsg {
 	@Serializable
 	@SerialName("navigate")
 	data class Navigate(val data: ChromeNavigate): GatewayToBridgeChromeMsg()
-}
-
-/// Gateway-served runtime file fetches. The bridge requests an asset on a
-/// `_gateway/<path>` HTTP miss; the gateway responds with the bytes if it
-/// has them.
-@Serializable(with = GatewayToBridgeFileMsgSerializer::class)
-sealed class GatewayToBridgeFileMsg {
-	@Serializable
-	@SerialName("fileResponse")
-	data class FileResponse(val data: FileResponseData): GatewayToBridgeFileMsg()
 }
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)

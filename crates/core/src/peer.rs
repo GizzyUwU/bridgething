@@ -26,7 +26,10 @@ use libbridgething::{
 };
 use tokio::sync::RwLock;
 
-use crate::http::{ClientMan, WSError};
+use crate::{
+  authority::AuthorityRegistry,
+  http::{ClientMan, WSError},
+};
 
 pub type PeerResult<T> = Result<T, Vec<WSError>>;
 
@@ -34,13 +37,15 @@ pub type PeerResult<T> = Result<T, Vec<WSError>>;
 pub struct PeerTracker {
   inner: RwLock<HashMap<Address, Peer>>,
   client_man: ClientMan,
+  authority: AuthorityRegistry,
 }
 
 impl PeerTracker {
-  pub fn new(client_man: ClientMan) -> Self {
+  pub fn new(client_man: ClientMan, authority: AuthorityRegistry) -> Self {
     Self {
       inner: RwLock::new(HashMap::new()),
       client_man,
+      authority,
     }
   }
 
@@ -166,22 +171,21 @@ impl PeerTracker {
       }
     }
 
-    if diff.paired_transitioned_up {
-      if let Err(errs) = self
+    if diff.paired_transitioned_up
+      && let Err(errs) = self
         .client_man
         .broadcast(
           ServerBluetoothEvent::ParingResult { success: true },
           ServerEventType::Event,
         )
         .await
-      {
-        errors.extend(errs);
-      }
+    {
+      errors.extend(errs);
     }
 
     if diff.useful_link_transitioned_up {
-      if let Some(device) = diff.useful_device.as_ref() {
-        if let Err(errs) = self
+      if let Some(device) = diff.useful_device.as_ref()
+        && let Err(errs) = self
           .client_man
           .broadcast(
             ServerBluetoothEvent::ConnectedDevice {
@@ -191,9 +195,8 @@ impl PeerTracker {
             ServerEventType::Event,
           )
           .await
-        {
-          errors.extend(errs);
-        }
+      {
+        errors.extend(errs);
       }
       if let Err(errs) = self
         .client_man
@@ -202,17 +205,16 @@ impl PeerTracker {
       {
         errors.extend(errs);
       }
-    } else if diff.useful_link_transitioned_down {
-      if let Err(errs) = self
+    } else if diff.useful_link_transitioned_down
+      && let Err(errs) = self
         .client_man
         .broadcast(
           ServerBluetoothEvent::Status { connected: false },
           ServerEventType::Event,
         )
         .await
-      {
-        errors.extend(errs);
-      }
+    {
+      errors.extend(errs);
     }
 
     if diff.companion_changed {
@@ -220,6 +222,10 @@ impl PeerTracker {
       if let Err(errs) = self.client_man.broadcast(status, ServerEventType::Event).await {
         errors.extend(errs);
       }
+    }
+
+    if diff.companion_lost {
+      self.authority.drop_all();
     }
 
     if errors.is_empty() { Ok(()) } else { Err(errors) }
@@ -234,6 +240,7 @@ struct Diff {
   useful_link_transitioned_down: bool,
   useful_device: Option<Device>,
   companion_changed: bool,
+  companion_lost: bool,
 }
 
 impl Diff {
@@ -255,6 +262,16 @@ impl Diff {
     let prior_companion = prior.as_ref().map(|p| std::mem::discriminant(&p.companion));
     let current_companion = current.as_ref().map(|p| std::mem::discriminant(&p.companion));
 
+    let was_companion_connected = matches!(
+      prior.as_ref().map(|p| &p.companion),
+      Some(PeerCompanionStatus::Connected(_))
+    );
+    let is_companion_connected = matches!(
+      current.as_ref().map(|p| &p.companion),
+      Some(PeerCompanionStatus::Connected(_))
+    );
+    let companion_lost = was_companion_connected && !is_companion_connected;
+
     let snapshot = peers
       .iter()
       .map(|(addr, peer)| (addr.to_string(), peer.clone()))
@@ -272,6 +289,7 @@ impl Diff {
         None
       },
       companion_changed: prior_companion != current_companion,
+      companion_lost,
     }
   }
 }

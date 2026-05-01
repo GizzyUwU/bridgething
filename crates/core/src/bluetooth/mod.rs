@@ -5,7 +5,7 @@ use bluer::{Adapter, Address, Session, agent::AgentHandle};
 use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle};
 use libbridgething::{
   ForwardMessage, Priority,
-  gateway::{BridgeToGatewayMsg, FileRequestData, GatewayMsgMeta, GatewayToBridgeMsg},
+  gateway::{BridgeToGatewayMsg, GatewayMsgMeta, GatewayToBridgeMsg},
 };
 use tokio::task::JoinHandle;
 
@@ -31,7 +31,7 @@ use rfcomm::RfcommGateway;
 use crate::{
   http::WSError,
   player::PlayerError,
-  state::{FileRequestTx, State, StateError},
+  state::{State, StateError},
 };
 
 pub type BluetoothMan = Arc<BluetoothManager>;
@@ -137,19 +137,6 @@ impl BluetoothManager {
       tracing::debug!(%address, "iAP2 manager not running; connect command has no effect");
     }
     Ok(())
-  }
-
-  pub async fn request_file(&self, path: String, tx: FileRequestTx) {
-    self.state.gateway_files.request_file(path.clone(), tx).await;
-
-    self
-      .gateway_man
-      .send_all(GatewayMessage::rfcomm_all(BridgeToGatewayMsg {
-        id: uuid::Uuid::now_v7(),
-        meta: GatewayMsgMeta::Request,
-        data: FileRequestData { file: path }.into(),
-      }))
-      .await;
   }
 }
 

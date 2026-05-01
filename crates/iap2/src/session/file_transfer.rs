@@ -1,0 +1,387 @@
+//! iAP2 File Transfer session - the iOS-proactive accessory bound stream
+//! that delivers album-art bytes whenever a track changes. Sits on link
+//! session id 2 (per `Lsp::accessory_default()`); not a CSM session, the
+//! per-packet payload is `[u8 id][u8 op][...]`.
+//!
+//! State machine per `id`:
+//!
+//! ```text
+//!   (idle)
+//!     │  Setup(0x04) total=N type=2
+//!     ▼                          ──── reply: SetupAck(0x01)
+//!   Buffering ── FirstAndOnly(0xC0) ─── reply: CompleteAck(0x05) ──> emit
+//!         │
+//!         │  FirstData(0x80) | Data(0x00) ... LastData(0x40)
+//!         ▼                          ──── reply: CompleteAck(0x05) ──> emit
+//!   Cancel(0x02)  ──> drop buffer (no ack)
+//!   Pause(0x03)   ──> log only, partial buffer retained
+//! ```
+//!
+//! Type 2 (artwork) is the only file type stock and bridgething accept;
+//! anything else logs and is dropped. The reassembly buffer is
+//! pre-allocated with the Setup-declared size so we don't grow as bytes
+//! arrive. Bytes that exceed the declared size hard-stop the transfer
+//! (drops the buffer, drops the future SetupAck). Cleanroom doc 70.
+
+use std::collections::HashMap;
+
+use bytes::{Buf, Bytes, BytesMut};
+use tokio::sync::mpsc;
+
+use crate::{
+  error::{Error, Result},
+  link::Iap2Command,
+  session::SessionEvent,
+};
+
+/// Link session id reserved for File Transfer in our LSP. Must match
+/// `Lsp::accessory_default()`'s `SessionTriple { id: 2, type: 1 }`.
+pub(crate) const FILE_TRANSFER_LINK_SESSION_ID: u8 = 2;
+
+const OP_DATA: u8 = 0x00;
+const OP_SETUP_ACK: u8 = 0x01;
+const OP_CANCEL: u8 = 0x02;
+const OP_PAUSE: u8 = 0x03;
+const OP_SETUP: u8 = 0x04;
+const OP_COMPLETE_ACK: u8 = 0x05;
+const OP_LAST_DATA: u8 = 0x40;
+const OP_FIRST_DATA: u8 = 0x80;
+const OP_FIRST_AND_ONLY: u8 = 0xC0;
+
+const FILE_TYPE_ARTWORK: u16 = 2;
+
+#[derive(Debug)]
+struct InFlight {
+  buffer: BytesMut,
+  declared_size: usize,
+  file_type: u16,
+}
+
+#[derive(Debug)]
+pub(crate) struct FileTransferFlow {
+  link_command_tx: mpsc::Sender<Iap2Command>,
+  in_flight: HashMap<u8, InFlight>,
+}
+
+impl FileTransferFlow {
+  pub(crate) fn new(link_command_tx: mpsc::Sender<Iap2Command>) -> Self {
+    Self {
+      link_command_tx,
+      in_flight: HashMap::new(),
+    }
+  }
+
+  /// Decode a session-2 link payload and dispatch to the right
+  /// per-id state. Emits `SessionEvent::ArtworkBytes` upstream when
+  /// a transfer completes for `file_type == 2`.
+  pub(crate) async fn dispatch_link_data(
+    &mut self,
+    payload: Bytes,
+    events_tx: &mpsc::Sender<SessionEvent>,
+  ) -> Result<()> {
+    if payload.len() < 2 {
+      tracing::warn!(len = payload.len(), "file-transfer: short packet");
+      return Ok(());
+    }
+    let id = payload[0];
+    let op = payload[1];
+    let rest = payload.slice(2..);
+
+    match op {
+      OP_SETUP => self.handle_setup(id, rest).await,
+      OP_FIRST_AND_ONLY => self.handle_first_and_only(id, rest, events_tx).await,
+      OP_FIRST_DATA => {
+        self
+          .handle_chunk(id, rest, /*first*/ true, /*last*/ false, events_tx)
+          .await
+      }
+      OP_DATA => self.handle_chunk(id, rest, false, false, events_tx).await,
+      OP_LAST_DATA => self.handle_chunk(id, rest, false, true, events_tx).await,
+      OP_CANCEL => {
+        tracing::debug!(transfer_id = id, "file-transfer: peer Cancel - dropping buffer");
+        self.in_flight.remove(&id);
+        Ok(())
+      }
+      OP_PAUSE => {
+        tracing::trace!(transfer_id = id, "file-transfer: peer Pause - retaining partial buffer");
+        Ok(())
+      }
+      OP_SETUP_ACK | OP_COMPLETE_ACK => {
+        // these are accessory-originated; receiving them from peer is unexpected
+        tracing::warn!(
+          transfer_id = id,
+          op,
+          "file-transfer: ignoring accessory-shape op from peer"
+        );
+        Ok(())
+      }
+      _ => {
+        tracing::warn!(transfer_id = id, op, "file-transfer: unknown opcode");
+        Ok(())
+      }
+    }
+  }
+
+  async fn handle_setup(&mut self, id: u8, mut rest: Bytes) -> Result<()> {
+    if rest.len() < 11 {
+      tracing::warn!(transfer_id = id, len = rest.len(), "file-transfer: short Setup payload");
+      return Ok(());
+    }
+    let declared_size = rest.get_u64() as usize;
+    let _reserved = rest.get_u8();
+    let file_type = rest.get_u16();
+
+    if file_type != FILE_TYPE_ARTWORK {
+      tracing::debug!(
+        transfer_id = id,
+        file_type,
+        "file-transfer: ignoring non-artwork file type"
+      );
+      return Ok(());
+    }
+
+    tracing::debug!(transfer_id = id, declared_size, "file-transfer: Setup");
+    self.in_flight.insert(
+      id,
+      InFlight {
+        buffer: BytesMut::with_capacity(declared_size),
+        declared_size,
+        file_type,
+      },
+    );
+    self.send_op(id, OP_SETUP_ACK).await
+  }
+
+  async fn handle_first_and_only(&mut self, id: u8, body: Bytes, events_tx: &mpsc::Sender<SessionEvent>) -> Result<()> {
+    let Some(state) = self.in_flight.get_mut(&id) else {
+      tracing::warn!(transfer_id = id, "file-transfer: FirstAndOnly without Setup");
+      return Ok(());
+    };
+    if !state.buffer.is_empty() {
+      tracing::warn!(
+        transfer_id = id,
+        existing = state.buffer.len(),
+        "file-transfer: FirstAndOnly on partially-filled buffer; resetting"
+      );
+      state.buffer.clear();
+    }
+    state.buffer.extend_from_slice(&body);
+    self.complete(id, events_tx).await
+  }
+
+  async fn handle_chunk(
+    &mut self,
+    id: u8,
+    body: Bytes,
+    first: bool,
+    last: bool,
+    events_tx: &mpsc::Sender<SessionEvent>,
+  ) -> Result<()> {
+    let Some(state) = self.in_flight.get_mut(&id) else {
+      tracing::warn!(transfer_id = id, "file-transfer: chunk without Setup");
+      return Ok(());
+    };
+    if first && !state.buffer.is_empty() {
+      tracing::warn!(
+        transfer_id = id,
+        existing = state.buffer.len(),
+        "file-transfer: FirstData on partially-filled buffer; resetting"
+      );
+      state.buffer.clear();
+    }
+    if state.buffer.len() + body.len() > state.declared_size {
+      tracing::warn!(
+        transfer_id = id,
+        accumulated = state.buffer.len() + body.len(),
+        declared = state.declared_size,
+        "file-transfer: payload exceeds declared size; aborting"
+      );
+      self.in_flight.remove(&id);
+      return Ok(());
+    }
+    state.buffer.extend_from_slice(&body);
+    if last {
+      self.complete(id, events_tx).await
+    } else {
+      Ok(())
+    }
+  }
+
+  async fn complete(&mut self, id: u8, events_tx: &mpsc::Sender<SessionEvent>) -> Result<()> {
+    let Some(state) = self.in_flight.remove(&id) else {
+      return Ok(());
+    };
+    if state.buffer.len() != state.declared_size {
+      tracing::warn!(
+        transfer_id = id,
+        actual = state.buffer.len(),
+        declared = state.declared_size,
+        "file-transfer: completed transfer size mismatch (still emitting)"
+      );
+    }
+    self.send_op(id, OP_COMPLETE_ACK).await?;
+
+    if state.file_type == FILE_TYPE_ARTWORK {
+      let bytes = state.buffer.freeze();
+      let _ = events_tx
+        .send(SessionEvent::ArtworkBytes { transfer_id: id, bytes })
+        .await;
+    }
+    Ok(())
+  }
+
+  async fn send_op(&self, id: u8, op: u8) -> Result<()> {
+    let payload = Bytes::copy_from_slice(&[id, op]);
+    self
+      .link_command_tx
+      .send(Iap2Command::Send {
+        session_id: FILE_TRANSFER_LINK_SESSION_ID,
+        payload,
+      })
+      .await
+      .map_err(|_| Error::LinkClosed)?;
+    Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn flow_with_outbox() -> (
+    FileTransferFlow,
+    mpsc::Receiver<Iap2Command>,
+    mpsc::Receiver<SessionEvent>,
+    mpsc::Sender<SessionEvent>,
+  ) {
+    let (link_tx, link_rx) = mpsc::channel(16);
+    let (evt_tx, evt_rx) = mpsc::channel(16);
+    (FileTransferFlow::new(link_tx), link_rx, evt_rx, evt_tx)
+  }
+
+  fn setup_payload(id: u8, size: u64, file_type: u16) -> Bytes {
+    let mut p = BytesMut::new();
+    p.extend_from_slice(&[id, OP_SETUP]);
+    p.extend_from_slice(&size.to_be_bytes());
+    p.extend_from_slice(&[0u8]); // reserved
+    p.extend_from_slice(&file_type.to_be_bytes());
+    p.freeze()
+  }
+
+  fn op_only(id: u8, op: u8) -> Bytes {
+    Bytes::copy_from_slice(&[id, op])
+  }
+
+  fn data_with(id: u8, op: u8, body: &[u8]) -> Bytes {
+    let mut p = BytesMut::new();
+    p.extend_from_slice(&[id, op]);
+    p.extend_from_slice(body);
+    p.freeze()
+  }
+
+  #[tokio::test]
+  async fn first_and_only_round_trip() {
+    let (mut flow, mut outbox, mut events, evt_tx) = flow_with_outbox();
+    flow.dispatch_link_data(setup_payload(7, 5, 2), &evt_tx).await.unwrap();
+    // SetupAck queued
+    let cmd = outbox.recv().await.unwrap();
+    match cmd {
+      Iap2Command::Send { session_id: 2, payload } => {
+        assert_eq!(&payload[..], &[7, OP_SETUP_ACK]);
+      }
+      _ => panic!("unexpected command"),
+    }
+
+    flow
+      .dispatch_link_data(data_with(7, OP_FIRST_AND_ONLY, b"hello"), &evt_tx)
+      .await
+      .unwrap();
+    // CompleteAck queued
+    let cmd = outbox.recv().await.unwrap();
+    match cmd {
+      Iap2Command::Send { session_id: 2, payload } => {
+        assert_eq!(&payload[..], &[7, OP_COMPLETE_ACK]);
+      }
+      _ => panic!("unexpected command"),
+    }
+    let evt = events.recv().await.unwrap();
+    match evt {
+      SessionEvent::ArtworkBytes { transfer_id, bytes } => {
+        assert_eq!(transfer_id, 7);
+        assert_eq!(&bytes[..], b"hello");
+      }
+      _ => panic!("unexpected event"),
+    }
+  }
+
+  #[tokio::test]
+  async fn multi_chunk_round_trip() {
+    let (mut flow, _outbox, mut events, evt_tx) = flow_with_outbox();
+    flow.dispatch_link_data(setup_payload(3, 6, 2), &evt_tx).await.unwrap();
+    flow
+      .dispatch_link_data(data_with(3, OP_FIRST_DATA, b"ab"), &evt_tx)
+      .await
+      .unwrap();
+    flow
+      .dispatch_link_data(data_with(3, OP_DATA, b"cd"), &evt_tx)
+      .await
+      .unwrap();
+    flow
+      .dispatch_link_data(data_with(3, OP_LAST_DATA, b"ef"), &evt_tx)
+      .await
+      .unwrap();
+    let evt = events.recv().await.unwrap();
+    match evt {
+      SessionEvent::ArtworkBytes { transfer_id, bytes } => {
+        assert_eq!(transfer_id, 3);
+        assert_eq!(&bytes[..], b"abcdef");
+      }
+      _ => panic!("unexpected event"),
+    }
+  }
+
+  #[tokio::test]
+  async fn cancel_drops_buffer() {
+    let (mut flow, _outbox, mut events, evt_tx) = flow_with_outbox();
+    flow.dispatch_link_data(setup_payload(1, 4, 2), &evt_tx).await.unwrap();
+    flow
+      .dispatch_link_data(data_with(1, OP_FIRST_DATA, b"ab"), &evt_tx)
+      .await
+      .unwrap();
+    flow.dispatch_link_data(op_only(1, OP_CANCEL), &evt_tx).await.unwrap();
+    // any subsequent Data without Setup is ignored
+    flow
+      .dispatch_link_data(data_with(1, OP_LAST_DATA, b"cd"), &evt_tx)
+      .await
+      .unwrap();
+    assert!(events.try_recv().is_err());
+  }
+
+  #[tokio::test]
+  async fn non_artwork_type_is_ignored() {
+    let (mut flow, mut outbox, mut events, evt_tx) = flow_with_outbox();
+    flow.dispatch_link_data(setup_payload(9, 4, 1), &evt_tx).await.unwrap(); // type 1
+    // no SetupAck for non-artwork
+    assert!(outbox.try_recv().is_err());
+    flow
+      .dispatch_link_data(data_with(9, OP_FIRST_AND_ONLY, b"abcd"), &evt_tx)
+      .await
+      .unwrap();
+    assert!(events.try_recv().is_err());
+  }
+
+  #[tokio::test]
+  async fn oversize_aborts() {
+    let (mut flow, _outbox, mut events, evt_tx) = flow_with_outbox();
+    flow.dispatch_link_data(setup_payload(2, 3, 2), &evt_tx).await.unwrap();
+    flow
+      .dispatch_link_data(data_with(2, OP_FIRST_DATA, b"abcdef"), &evt_tx)
+      .await
+      .unwrap();
+    flow
+      .dispatch_link_data(data_with(2, OP_LAST_DATA, b""), &evt_tx)
+      .await
+      .unwrap();
+    assert!(events.try_recv().is_err());
+  }
+}

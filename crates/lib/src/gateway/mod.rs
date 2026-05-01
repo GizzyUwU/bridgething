@@ -62,7 +62,9 @@ pub enum GatewayToBridgeMsgData {
   Version(GatewayMeta),
 
   #[from]
-  File(GatewayToBridgeFileMsg),
+  Asset(GatewayToBridgeAssetMsg),
+  #[from]
+  Authority(GatewayToBridgeAuthorityMsg),
   #[from]
   Chrome(GatewayToBridgeChromeMsg),
   #[from]
@@ -76,19 +78,6 @@ pub enum GatewayToBridgeMsgData {
 
   #[from]
   Error(GatewayError),
-}
-
-#[typeshare]
-#[serde_with::serde_as]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct BridgeFile {
-  pub path: String,
-  #[serde_as(as = "serde_with::Bytes")]
-  #[ts(type = "Uint8Array")]
-  pub data: Vec<u8>,
 }
 
 /// bridgething -> gateway
@@ -116,7 +105,7 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   Version(BridgeThingMeta),
   #[from]
-  File(BridgeToGatewayFileMsg),
+  Asset(BridgeToGatewayAssetMsg),
   #[from]
   Webapp(BridgeToGatewayWebappMsg),
 

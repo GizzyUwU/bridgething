@@ -1,3 +1,4 @@
+mod asset;
 mod bluetooth;
 mod forward;
 mod now_playing;
@@ -7,6 +8,7 @@ mod priority;
 mod system;
 mod webapp;
 
+pub use asset::*;
 pub use bluetooth::*;
 pub use forward::*;
 pub use now_playing::*;

@@ -1,19 +1,19 @@
 mod connection;
 mod connman;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
   Router,
   body::Body,
-  extract::{ConnectInfo, FromRequest, Path, State as AxumState, WebSocketUpgrade, ws::WebSocket},
-  http::{self, Request},
-  response::{AppendHeaders, IntoResponse, Response},
+  extract::{ConnectInfo, FromRequest, State as AxumState, WebSocketUpgrade, ws::WebSocket},
+  http::Request,
+  response::{IntoResponse, Response},
 };
 pub use connman::{ClientMan, create_client_manager};
 use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use reqwest::StatusCode;
-use tokio::{net::TcpListener, time::timeout};
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tower::util::ServiceExt;
 use tower_http::services::ServeDir;
@@ -26,10 +26,6 @@ use crate::{
 
 type ServerTx = tokio::sync::mpsc::Sender<(WebSocket, SocketAddr, ClientMode)>;
 type ServerRx = tokio::sync::mpsc::Receiver<(WebSocket, SocketAddr, ClientMode)>;
-
-/// How long the bridge waits for the gateway to deliver an asset requested
-/// inside the `/_gateway/` namespace before 404'ing.
-const GATEWAY_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Server {
   rx: ServerRx,
@@ -63,7 +59,6 @@ impl Server {
 
     let modern_state = ModernRouterState { state, bluetooth, tx };
     let modern_app = Router::new()
-      .route("/_gateway/{*path}", axum::routing::any(gateway_serve_handler))
       .fallback(axum::routing::any(modern_handler))
       .with_state(modern_state);
 
@@ -173,33 +168,6 @@ async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx)
       tracing::error!("failed to send new connection to server: {:?}", err);
     }
   })
-}
-
-/// Handler for the `/_gateway/<path>` namespace. Asks the connected
-/// gateway over Bluetooth to deliver the requested asset, falling
-/// through to 404 after a fixed timeout. SDK extensions document this
-/// route as the place to hang gateway-streamed assets the on-device
-/// webapp wants to fetch lazily.
-async fn gateway_serve_handler(Path(path): Path<String>, AxumState(state): AxumState<ModernRouterState>) -> Response {
-  if !state.state.gateway_status().await.connected {
-    tracing::trace!("gateway not connected, cannot fetch {:?}", path);
-    return (StatusCode::NOT_FOUND, "gateway not connected").into_response();
-  }
-
-  let (tx, rx) = tokio::sync::oneshot::channel();
-  state.bluetooth.request_file(path.clone(), tx).await;
-
-  match timeout(GATEWAY_FETCH_TIMEOUT, rx).await {
-    Ok(Ok((bytes, mime))) => {
-      tracing::debug!("served gateway file {:?} ({} bytes, {})", path, bytes.len(), mime);
-      let headers = AppendHeaders([(http::header::CONTENT_TYPE, mime.to_string())]);
-      (StatusCode::OK, headers, Body::from(bytes)).into_response()
-    }
-    _ => {
-      tracing::trace!("gateway did not deliver {:?} in time", path);
-      (StatusCode::NOT_FOUND, "Not Found").into_response()
-    }
-  }
 }
 
 /// Looks up the active webapp's bundle directory at request time. Falls

@@ -45,9 +45,11 @@ impl NowPlayingUpdate {
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
-/// wire). `artwork_id` is a stable per-image identifier scoped to its
-/// transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
-/// channel (iAP2 FileTransfer or a gateway file message).
+/// wire). `artwork_id` is an opaque asset id - webapps pass this value
+/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
+/// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
+/// Webapps treat the value as opaque.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]

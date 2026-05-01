@@ -31,17 +31,26 @@ public object GatewayToBridgeMsgDataSerializer :
 public object ImageSerializer :
     KSerializer<Image> by AdjacentTaggedSerializer(Image::class, discriminator = "type")
 
-public object BridgeToGatewayFileMsgSerializer :
-    KSerializer<BridgeToGatewayFileMsg> by AdjacentTaggedSerializer(
-        BridgeToGatewayFileMsg::class,
+public object BridgeToGatewayAssetMsgSerializer :
+    KSerializer<BridgeToGatewayAssetMsg> by AdjacentTaggedSerializer(
+        BridgeToGatewayAssetMsg::class,
         discriminator = "event"
     )
 
-public object GatewayToBridgeFileMsgSerializer :
-    KSerializer<GatewayToBridgeFileMsg> by AdjacentTaggedSerializer(
-        GatewayToBridgeFileMsg::class,
+public object GatewayToBridgeAssetMsgSerializer :
+    KSerializer<GatewayToBridgeAssetMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeAssetMsg::class,
         discriminator = "event"
     )
+
+public object GatewayToBridgeAuthorityMsgSerializer :
+    KSerializer<GatewayToBridgeAuthorityMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeAuthorityMsg::class,
+        discriminator = "event"
+    )
+
+public object AssetRetentionSerializer :
+    KSerializer<AssetRetention> by AdjacentTaggedSerializer(AssetRetention::class, discriminator = "type")
 
 public object GatewayToBridgeChromeMsgSerializer :
     KSerializer<GatewayToBridgeChromeMsg> by AdjacentTaggedSerializer(

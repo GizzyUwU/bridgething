@@ -168,11 +168,13 @@ impl Lsp {
   /// its own proposal during SYN exchange.
   ///
   /// Session list mirrors stock's profile: control on id 1, file-transfer
-  /// on id 2, external-accessory on id 3. We must declare all three even
-  /// though only the control session has a handler today: the iPhone
-  /// observes the EA session list before deciding to keep the link open
-  /// past NEGOTIATE, and tearing down the link with only "control" on
-  /// offer is what produces the silent RST observed in early iAP2 bring-up.
+  /// on id 2 (version 2), external-accessory on id 3. The iPhone observes
+  /// the full session list before deciding to keep the link open past
+  /// NEGOTIATE - tearing down with only "control" on offer is what
+  /// produces the silent RST observed in early bring-up. File-transfer
+  /// version 2 is what stock advertises; iOS proactively pushes album-art
+  /// blobs into this session whenever a track changes (subscription is
+  /// implicit via NowPlayingUpdate's MediaItemAttribute 0x1A).
   pub fn accessory_default() -> Self {
     Self {
       version: 1,

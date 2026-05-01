@@ -1,6 +1,10 @@
 import {
+  type AssetClear,
+  type AssetPush,
+  type AssetRetention,
   type BridgeToGatewayMsg,
   Codec,
+  type CompanionAuthorityScope,
   FrameAccumulator,
   type GatewayToBridgeMsg,
   type GatewayToBridgeMsgData,
@@ -155,6 +159,64 @@ export class BridgethingGateway {
   /** Bulk-priority shorthand for `send`. */
   async sendBulk(deviceId: string, message: GatewayToBridgeMsg): Promise<void> {
     await this.send(deviceId, message, { priority: 'bulk' });
+  }
+
+  /**
+   * Push a binary blob into the daemon's asset cache. Companion-managed
+   * retention - the daemon enforces it but expects companion to clear
+   * pinned assets explicitly when no longer needed.
+   *
+   * Bulk priority is the right default: asset blobs may be sizable
+   * (full-size album art, glyph atlases) and shouldn't preempt latency-
+   * sensitive traffic like NowPlaying deltas.
+   */
+  async pushAsset(
+    deviceId: string,
+    asset: { id: string; bytes: Uint8Array; mime?: string; retention?: AssetRetention },
+  ): Promise<void> {
+    const push: AssetPush = {
+      id: asset.id,
+      bytes: asset.bytes,
+      mime: asset.mime ?? null,
+      retention: asset.retention ?? { type: 'lru' },
+    };
+    await this.send(
+      deviceId,
+      {
+        id: newUuidBytes(),
+        meta: { kind: 'event' },
+        data: { type: 'asset', data: { event: 'push', data: push } },
+      },
+      { priority: 'bulk' },
+    );
+  }
+
+  /** Drop a previously pushed asset. */
+  async clearAsset(deviceId: string, id: string): Promise<void> {
+    const clear: AssetClear = { id };
+    await this.send(deviceId, {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'asset', data: { event: 'clear', data: clear } },
+    });
+  }
+
+  /** Claim authority over a scope. Idempotent; re-issue to refresh staleness. */
+  async claimAuthority(deviceId: string, scope: CompanionAuthorityScope): Promise<void> {
+    await this.send(deviceId, {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'authority', data: { event: 'claim', data: { scope } } },
+    });
+  }
+
+  /** Release authority over a scope. */
+  async releaseAuthority(deviceId: string, scope: CompanionAuthorityScope): Promise<void> {
+    await this.send(deviceId, {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'authority', data: { event: 'release', data: { scope } } },
+    });
   }
 
   /**

@@ -12,6 +12,14 @@ import type {
   Track,
 } from './shared';
 
+export type AssetCleared = { id: string };
+
+export type AssetGot = { requestId: string; id: string; bytes: Uint8Array; mime: string | null };
+
+export type AssetNotFound = { requestId: string; id: string };
+
+export type AssetReady = { id: string };
+
 export type GatewayStatus = {
   address: string;
   connected: boolean;
@@ -22,6 +30,21 @@ export type GatewayStatus = {
   appVersion: string;
   osName: string;
 };
+
+/**
+ * Daemon-side asset events. `Got` and `NotFound` resolve a webapp `Get`
+ * (correlated by request_id). `Ready` broadcasts to all connected
+ * webapps whenever the cache gains an asset, regardless of source
+ * (companion push, iAP2 FileTransfer, request fulfilment, lazy disk
+ * load). `Cleared` broadcasts on every eviction path - LRU pressure,
+ * TTL expiry, companion-issued Clear, daemon shutdown - so SDK
+ * consumers can drop Blob URLs and refetch as needed.
+ */
+export type ServerAssetEvent =
+  | { event: 'got'; data: AssetGot }
+  | { event: 'notFound'; data: AssetNotFound }
+  | { event: 'ready'; data: AssetReady }
+  | { event: 'cleared'; data: AssetCleared };
 
 export type ServerBluetoothEvent =
   | { event: 'status'; data: { connected: boolean } }
@@ -38,6 +61,7 @@ export type ServerBluetoothEvent =
  * these messages will pass through a websocket.
  */
 export type ServerEvent = { id: string } & (
+  | ({ type: 'asset' } & ServerAssetEvent)
   | ({ type: 'bluetooth' } & ServerBluetoothEvent)
   | ({ type: 'storage' } & ServerStorageEvent)
   | ({ type: 'system' } & ServerSystemEvent)
@@ -51,6 +75,7 @@ export type ServerEvent = { id: string } & (
   ({ meta: 'request' } | { meta: 'response'; requestId: string } | { meta: 'event' });
 
 export type ServerEventData =
+  | ({ type: 'asset' } & ServerAssetEvent)
   | ({ type: 'bluetooth' } & ServerBluetoothEvent)
   | ({ type: 'storage' } & ServerStorageEvent)
   | ({ type: 'system' } & ServerSystemEvent)

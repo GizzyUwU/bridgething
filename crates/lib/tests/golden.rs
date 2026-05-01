@@ -246,13 +246,14 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(bridge_fixture(
-    "bridge_to_gateway/file-request-request",
-    "daemon requests a file from the gateway (browser fetched something we don't have)",
+    "bridge_to_gateway/asset-request-request",
+    "daemon asks the companion for an asset id the cache missed",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Request,
-      data: BridgeToGatewayMsgData::File(BridgeToGatewayFileMsg::FileRequest(FileRequestData {
-        file: "/missing/asset.png".into(),
+      data: BridgeToGatewayMsgData::Asset(BridgeToGatewayAssetMsg::Request(AssetRequest {
+        id: "spotify/track/abc/image".into(),
+        request_id: req_id(),
       })),
     },
   ));
@@ -418,16 +419,52 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/file-response-response",
-    "gateway answering a fileRequest from the daemon - returns BridgeFile",
+    "gateway_to_bridge/asset-push-event",
+    "companion proactively pushes an asset blob into the daemon cache",
     GatewayToBridgeMsg {
       id: id(),
-      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
-      data: GatewayToBridgeMsgData::File(GatewayToBridgeFileMsg::FileResponse(FileResponseData {
-        file: BridgeFile {
-          path: "/missing/asset.png".into(),
-          data: fingerprint_bytes(),
-        },
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Push(AssetPush {
+        id: "spotify/track/abc/image".into(),
+        bytes: fingerprint_bytes(),
+        mime: Some("image/jpeg".into()),
+        retention: AssetRetention::Pinned,
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/asset-clear-event",
+    "companion drops a previously pushed asset",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Clear(AssetClear {
+        id: "spotify/track/abc/image".into(),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/authority-claim-now-playing-metadata",
+    "companion claims authority over the now-playing metadata scope",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Authority(GatewayToBridgeAuthorityMsg::Claim(AuthorityClaim {
+        scope: CompanionAuthorityScope::NowPlayingMetadata,
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/authority-release-now-playing-playback",
+    "companion releases authority over the playback scope (e.g. user switched apps)",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Authority(GatewayToBridgeAuthorityMsg::Release(AuthorityRelease {
+        scope: CompanionAuthorityScope::NowPlayingPlayback,
       })),
     },
   ));

@@ -401,6 +401,14 @@ async fn observe_session_events(
   ea_gateway: Iap2EaGatewayHandle,
   reconnect_tx: mpsc::Sender<Address>,
 ) {
+  // Tracks the most recent `persistent_id` hex form we've seen across
+  // NowPlayingUpdate deltas. iAP2 sends MediaItemAttributes only when a
+  // field actually changed, so a delta carrying just `artwork_id`
+  // doesn't repeat persistent_id; we have to remember it. Used both to
+  // synthesise the asset-id URL on outbound NowPlayingUpdates and to
+  // tag inbound FileTransfer bytes with their owning track.
+  let mut last_persistent_hex: Option<String> = None;
+
   while let Some(event) = rx.recv().await {
     match event {
       SessionEvent::LinkEstablished(lsp) => {
@@ -428,10 +436,37 @@ async fn observe_session_events(
         tracing::warn!(%address, ?rejected_params, "iAP2 identification rejected");
       }
       SessionEvent::NowPlayingUpdate(update) => {
-        let lib_update = translate_now_playing(update);
+        if let Some(pid) = update.media_item.as_ref().and_then(|m| m.persistent_id) {
+          last_persistent_hex = Some(format!("{pid:016x}"));
+        }
+        let lib_update = translate_now_playing(update, last_persistent_hex.as_deref());
         tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
-        if let Err(err) = state.player.apply_now_playing(lib_update).await {
+        if let Err(err) = state
+          .player
+          .apply_now_playing(crate::player::NowPlayingSource::Iap2, lib_update)
+          .await
+        {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
+        }
+      }
+      SessionEvent::ArtworkBytes { transfer_id, bytes } => {
+        let Some(pid_hex) = last_persistent_hex.as_deref() else {
+          tracing::warn!(%address, transfer_id, "iAP2 artwork bytes received before any NowPlayingUpdate; dropping");
+          continue;
+        };
+        let id = format!("iap2/art/{pid_hex}/{transfer_id}");
+        tracing::debug!(%address, asset_id = %id, bytes = bytes.len(), "iAP2 artwork bytes -> AssetCache");
+        if let Err(err) = state
+          .assets
+          .insert(
+            id,
+            tokio_util::bytes::Bytes::copy_from_slice(&bytes),
+            Some("image/jpeg".to_string()),
+            libbridgething::AssetRetention::Lru,
+          )
+          .await
+        {
+          tracing::warn!(%address, ?err, "failed to insert iAP2 artwork into asset cache");
         }
       }
       SessionEvent::EaStreamOpened {
@@ -466,21 +501,29 @@ async fn observe_session_events(
   }
 }
 
-fn translate_now_playing(update: Iap2NowPlayingUpdate) -> NowPlayingUpdate {
+fn translate_now_playing(update: Iap2NowPlayingUpdate, persistent_hex: Option<&str>) -> NowPlayingUpdate {
   NowPlayingUpdate {
-    media_item: update.media_item.map(translate_media_item),
+    media_item: update.media_item.map(|m| translate_media_item(m, persistent_hex)),
     playback: update.playback.map(translate_playback),
   }
 }
 
-fn translate_media_item(media: MediaItemAttributes) -> MediaItemUpdate {
+fn translate_media_item(media: MediaItemAttributes, persistent_hex: Option<&str>) -> MediaItemUpdate {
+  let pid_hex = media
+    .persistent_id
+    .map(|id| format!("{id:016x}"))
+    .or_else(|| persistent_hex.map(str::to_string));
+  let artwork_id = match (media.artwork_id, pid_hex.as_deref()) {
+    (Some(id), Some(pid)) => Some(format!("iap2/art/{pid}/{id}")),
+    _ => None,
+  };
   MediaItemUpdate {
-    persistent_id: media.persistent_id.map(|id| format!("iap2:track:{id:016x}")),
+    persistent_id: pid_hex.map(|hex| format!("iap2:track:{hex}")),
     title: media.title,
     album: media.album,
     artist: media.artist,
     liked: media.liked,
-    artwork_id: media.artwork_id.map(|id| format!("iap2:artwork:{id}")),
+    artwork_id,
     duration_ms: None,
   }
 }

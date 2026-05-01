@@ -5,6 +5,8 @@ mod als;
 mod mic;
 mod systemd;
 
+mod asset;
+mod authority;
 mod chrome;
 
 mod handler;
@@ -17,6 +19,7 @@ mod stock;
 
 mod monitoring;
 
+use authority::AuthorityRegistry;
 use bluetooth::BluetoothManager;
 use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler};
@@ -31,11 +34,11 @@ use systemd::Notify;
 fn check_and_mark_restart() -> bool {
   let path = paths::restart_marker_path();
   let was_restart = path.exists();
-  if let Some(parent) = path.parent() {
-    if let Err(e) = std::fs::create_dir_all(parent) {
-      tracing::warn!("failed to create runtime dir {}: {}", parent.display(), e);
-      return false;
-    }
+  if let Some(parent) = path.parent()
+    && let Err(e) = std::fs::create_dir_all(parent)
+  {
+    tracing::warn!("failed to create runtime dir {}: {}", parent.display(), e);
+    return false;
   }
   if let Err(e) = std::fs::write(&path, b"") {
     tracing::warn!("failed to write restart marker {}: {}", path.display(), e);
@@ -62,17 +65,16 @@ async fn main() {
   let is_restart = check_and_mark_restart();
 
   let (client_man, mut client_listener) = http::create_client_manager();
-  let player = Player::new(client_man.clone());
+  let authority = AuthorityRegistry::new();
+  let player = Player::new(client_man.clone(), authority.clone());
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
 
-  if is_restart {
-    if let Err(e) = chrome.send(ChromeCommand::Reload).await {
-      tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
-    }
+  if is_restart && let Err(e) = chrome.send(ChromeCommand::Reload).await {
+    tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
   }
 
-  let state = AppState::init(client_man.clone(), meta, player, chrome)
+  let state = AppState::init(client_man.clone(), meta, player, chrome, authority)
     .await
     .expect("failed to initialize state!!");
 

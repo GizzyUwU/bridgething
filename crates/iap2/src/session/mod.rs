@@ -24,6 +24,7 @@
 
 mod auth;
 mod external_accessory;
+mod file_transfer;
 mod identification;
 mod mfi_worker;
 mod now_playing;
@@ -34,6 +35,7 @@ use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::{Bytes, BytesMut};
 use external_accessory::EaFlow;
 pub use external_accessory::{EaPriority, EaSendError, EaStreamSender};
+use file_transfer::FileTransferFlow;
 use identification::IdentificationFlow;
 pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
 use now_playing::NowPlayingFlow;
@@ -99,6 +101,10 @@ pub enum SessionEvent {
   EaStreamClosed {
     stream_id: u16,
   },
+  ArtworkBytes {
+    transfer_id: u8,
+    bytes: Bytes,
+  },
   LinkDown(String),
 }
 
@@ -118,6 +124,7 @@ pub struct Iap2Session<M: MfiAccess> {
   ident: IdentificationFlow,
   now_playing: NowPlayingFlow,
   ea: Option<EaFlow>,
+  file_transfer: FileTransferFlow,
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
@@ -151,16 +158,17 @@ impl<M: MfiAccess> Iap2Session<M> {
     session_events_tx: mpsc::Sender<SessionEvent>,
   ) -> Self {
     Self {
+      auth: AuthFlow::new(),
+      ident: IdentificationFlow::new(),
+      now_playing: NowPlayingFlow::new(),
+      ea: None,
+      file_transfer: FileTransferFlow::new(link_command_tx.clone()),
       identification,
       app_launch_bundle_id,
       mfi,
       link_command_tx,
       link_events_rx,
       session_events_tx,
-      auth: AuthFlow::new(),
-      ident: IdentificationFlow::new(),
-      now_playing: NowPlayingFlow::new(),
-      ea: None,
     }
   }
 
@@ -213,6 +221,14 @@ impl<M: MfiAccess> Iap2Session<M> {
               ea.dispatch_link_data(payload).await;
             } else {
               tracing::warn!("iap2 session: EA data received before link Established");
+            }
+          } else if session_id == file_transfer::FILE_TRANSFER_LINK_SESSION_ID {
+            if let Err(err) = self
+              .file_transfer
+              .dispatch_link_data(payload, &self.session_events_tx)
+              .await
+            {
+              tracing::warn!(?err, "iap2 session: file transfer dispatch error");
             }
           } else {
             tracing::trace!(session_id, "iap2 session: ignoring data on non-control session");

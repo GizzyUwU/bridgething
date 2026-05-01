@@ -1,7 +1,6 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use futures::StreamExt;
-use libbridgething::DeviceType;
 use tokio::{sync::RwLock, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use zbus::Connection;
@@ -12,28 +11,22 @@ mod state;
 use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
 pub use state::*;
 
-use super::{art::CoverArtCache, state::PlayerState};
-use crate::{
-  bluetooth::avrcp::art::CoverArt,
-  http::{ClientMan, WSError},
-};
+use super::state::PlayerState;
+use crate::http::{ClientMan, WSError};
 
 #[derive(Debug)]
 pub struct DBusPlayer {
   state: Arc<RwLock<PlayerState>>,
   player: MediaPlayer1Proxy<'static>,
-  pub art: Option<CoverArt>,
 
   cancel_token: CancellationToken,
   _change_handle: JoinHandle<()>,
-  _avrcp_handle: JoinHandle<DBusResult<()>>,
 }
 
 impl DBusPlayer {
   pub async fn init(
-    client_man: ClientMan,
+    _client_man: ClientMan,
     state: Arc<RwLock<PlayerState>>,
-    art_cache: CoverArtCache,
     device: bluer::Device,
   ) -> DBusResult<Self> {
     let path = format!(
@@ -48,40 +41,13 @@ impl DBusPlayer {
 
     let cancel_token = CancellationToken::new();
     let changes = DBusPlayerChanges::init(state.clone(), &player).await;
-
-    let avrcp_cancel = cancel_token.child_token();
     let change_cancel = cancel_token.child_token();
-
-    let mut art = None;
-    if let Ok(obex_port) = player.obex_port().await {
-      if obex_port == 0x1007 {
-        tracing::debug!("obex port 0x1007 detected from device - assuming ios");
-        if let Some(device) = &mut state.write().await.device {
-          device.device_type = DeviceType::Ios;
-        };
-        art = Some(CoverArt::init(
-          client_man.clone(),
-          art_cache,
-          cancel_token.child_token(),
-          device.address(),
-        ));
-      } else if obex_port == 0x1001 {
-        tracing::debug!("obex port 0x1001 detected from device - assuming android");
-        if let Some(device) = &mut state.write().await.device {
-          device.device_type = DeviceType::Android;
-        };
-      }
-    } else {
-      tracing::warn!("could not get obex port for device!");
-    }
 
     Ok(Self {
       state,
       player,
-      art,
 
       _change_handle: tokio::spawn(async move { changes.spawn(change_cancel).await }),
-      _avrcp_handle: tokio::spawn(async move { ensure_avrcp(conn, path, device, avrcp_cancel).await }),
       cancel_token,
     })
   }
@@ -227,38 +193,9 @@ impl DBusPlayerChanges {
   }
 }
 
-async fn ensure_avrcp(
-  conn: Connection,
-  path: String,
-  device: bluer::Device,
-  cancel_token: CancellationToken,
-) -> DBusResult<()> {
-  tokio::time::sleep(Duration::from_secs(15)).await;
-  let player = MediaPlayer1Proxy::builder(&conn).path(path)?.build().await?;
-
-  loop {
-    if cancel_token.is_cancelled() {
-      tracing::debug!("avrcp cancel token cancelled, exiting...");
-      break;
-    }
-
-    // tracing::trace!("ensuring avrcp is connected");
-    if let Err(err) = player.status().await {
-      tracing::debug!("error received from avrcp, attempting reconnect: {:?}", err);
-      if crate::bluetooth::avrcp::connect_avrcp(&device).await {
-        tracing::debug!("connected to avrcp, quitting this loop");
-        break;
-      }
-    };
-
-    tokio::time::sleep(Duration::from_secs(5)).await;
-  }
-
-  Ok(())
-}
-
 pub type DBusResult<T> = Result<T, DBusError>;
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum DBusError {
   #[error(transparent)]
   DbusError(#[from] zbus::Error),
