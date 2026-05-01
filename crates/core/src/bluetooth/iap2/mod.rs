@@ -43,6 +43,48 @@ use super::BluetoothResult;
 const IAP2_PROFILE_NAME: &str = "iAP2";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
 
+/// Custom SDP record advertised for the iAP2 RFCOMM listener. iOS does
+/// not engage iAP2 on the auto-generated record bluez emits when only
+/// `Profile { uuid, channel, ... }` is supplied - it specifically wants
+/// the BluetoothProfileDescriptorList entry pointing at SerialPort
+/// (0x1101 v1.0). Without that, iOS Bluetooth Settings shows
+/// "<name> is Not Supported" without ever opening RFCOMM. The shape
+/// here mirrors what the wiomoc-iap2 reference implementation publishes,
+/// adjusted for our UUID and channel. Attribute ids:
+///   0x0001 ServiceClassIDList            -> the iAP2 accessory UUID
+///   0x0004 ProtocolDescriptorList        -> L2CAP + RFCOMM/<channel>
+///   0x0005 BrowseGroupList               -> PublicBrowseGroup
+///   0x0006 LanguageBaseAttributeIDList   -> en/UTF-8/0x0100
+///   0x0008 ServiceAvailability           -> 0xff (fully available)
+///   0x0009 BluetoothProfileDescriptorList -> SerialPort 0x1101 v1.0
+///   0x0100 ServiceName (en)              -> "Wireless iAP"
+fn iap2_service_record() -> String {
+  format!(
+    r#"<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+    <attribute id="0x0001"><sequence><uuid value="{uuid}" /></sequence></attribute>
+    <attribute id="0x0004"><sequence>
+        <sequence><uuid value="0x0100" /></sequence>
+        <sequence><uuid value="0x0003" /><uint8 value="0x{channel:02x}" /></sequence>
+    </sequence></attribute>
+    <attribute id="0x0005"><sequence><uuid value="0x1002" /></sequence></attribute>
+    <attribute id="0x0006"><sequence>
+        <uint16 value="0x656e" />
+        <uint16 value="0x006a" />
+        <uint16 value="0x0100" />
+    </sequence></attribute>
+    <attribute id="0x0008"><uint8 value="0xff" /></attribute>
+    <attribute id="0x0009"><sequence>
+        <sequence><uuid value="0x1101" /><uint16 value="0x0100" /></sequence>
+    </sequence></attribute>
+    <attribute id="0x0100"><text value="Wireless iAP" /></attribute>
+</record>
+"#,
+    uuid = IAP2_ACCESSORY_UUID,
+    channel = IAP2_RFCOMM_CHANNEL,
+  )
+}
+
 #[derive(Debug)]
 struct ActiveSession {
   _link_handle: JoinHandle<bridgething_iap2::Result<()>>,
@@ -76,6 +118,7 @@ impl Iap2Manager {
       channel: Some(IAP2_RFCOMM_CHANNEL as u16),
       require_authentication: Some(false),
       require_authorization: Some(false),
+      service_record: Some(iap2_service_record()),
       ..Default::default()
     };
 
