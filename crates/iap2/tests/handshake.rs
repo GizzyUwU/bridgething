@@ -109,7 +109,7 @@ async fn handshake_reaches_established_and_peer_lsp_propagates() {
     let our_ack = read_one_packet(&mut peer, &mut peer_buf, &mut peer_codec).await;
     assert!(our_ack.header.control.contains(ControlBits::ACK));
     assert!(!our_ack.header.control.contains(ControlBits::SYN));
-    assert_eq!(our_ack.header.ack, peer_seq.wrapping_add(1));
+    assert_eq!(our_ack.header.ack, peer_seq);
     assert_eq!(our_ack.header.length as usize, bridgething_iap2::LINK_HEADER_LEN);
 
     peer

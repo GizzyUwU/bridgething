@@ -38,7 +38,7 @@ use tokio::task::JoinHandle;
 
 use crate::state::State;
 
-use super::BluetoothResult;
+use super::{BluetoothResult, profiles::ProfileMan};
 
 const IAP2_PROFILE_NAME: &str = "iAP2";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
@@ -98,11 +98,12 @@ pub struct Iap2Manager {
   identification: IdentificationConfig,
   mfi_worker: WorkerMfiAccess,
   state: State,
+  profile_man: ProfileMan,
   sessions: HashMap<Address, ActiveSession>,
 }
 
 impl Iap2Manager {
-  pub async fn init(session: &Session, state: &State) -> BluetoothResult<Option<Self>> {
+  pub async fn init(session: &Session, state: &State, profile_man: ProfileMan) -> BluetoothResult<Option<Self>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
@@ -132,6 +133,7 @@ impl Iap2Manager {
       identification,
       mfi_worker,
       state: state.clone(),
+      profile_man,
       sessions: HashMap::new(),
     }))
   }
@@ -175,7 +177,12 @@ impl Iap2Manager {
     );
     let _session_handle = tokio::spawn(session.run());
 
-    let _events_handle = tokio::spawn(observe_session_events(address, session_events_rx, self.state.clone()));
+    let _events_handle = tokio::spawn(observe_session_events(
+      address,
+      session_events_rx,
+      self.state.clone(),
+      self.profile_man.clone(),
+    ));
 
     self.sessions.insert(
       address,
@@ -190,7 +197,12 @@ impl Iap2Manager {
   }
 }
 
-async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<SessionEvent>, state: State) {
+async fn observe_session_events(
+  address: Address,
+  mut rx: mpsc::Receiver<SessionEvent>,
+  state: State,
+  profile_man: ProfileMan,
+) {
   while let Some(event) = rx.recv().await {
     match event {
       SessionEvent::LinkEstablished(lsp) => {
@@ -202,14 +214,19 @@ async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<Session
         );
       }
       SessionEvent::Authenticated => tracing::info!(%address, "iAP2 authenticated"),
-      SessionEvent::Identified => tracing::info!(%address, "iAP2 identified"),
+      SessionEvent::Identified => {
+        tracing::info!(%address, "iAP2 identified");
+        if let Err(err) = profile_man.iap2_device_connected(address).await {
+          tracing::warn!(%address, ?err, "failed to surface iAP2 device-connected state");
+        }
+      }
       SessionEvent::AuthFailed => tracing::warn!(%address, "iAP2 auth failed"),
       SessionEvent::IdentificationRejected { rejected_params } => {
         tracing::warn!(%address, ?rejected_params, "iAP2 identification rejected");
       }
       SessionEvent::NowPlayingUpdate(update) => {
         let lib_update = translate_now_playing(update);
-        tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
+        tracing::info!(%address, ?lib_update, "iAP2 now-playing delta");
         if let Err(err) = state.player.apply_now_playing(lib_update).await {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
         }
@@ -219,15 +236,6 @@ async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<Session
   }
 }
 
-/// Translate the iap2 crate's wire-decoded NowPlaying delta into the
-/// canonical lib type. Two scope changes happen here:
-///
-/// - iAP2's u64 persistent identifier becomes a namespaced string key
-///   (`iap2:track:{hex}`) so it cannot collide with identifiers minted
-///   by other transports (Android companion, future plugins).
-/// - iAP2's u8 artwork reference becomes a namespaced string key
-///   (`iap2:artwork:{n}`) for the same reason; FileTransfer-side
-///   slice 5 will resolve it to bytes through the same key.
 fn translate_now_playing(update: Iap2NowPlayingUpdate) -> NowPlayingUpdate {
   NowPlayingUpdate {
     media_item: update.media_item.map(translate_media_item),
@@ -267,11 +275,6 @@ fn build_identification(state: &State) -> IdentificationConfig {
   })
 }
 
-/// Parse a `XX:XX:XX:XX:XX:XX` BT MAC into the byte order iAP2's
-/// transport-component group expects (big-endian, same order BlueZ
-/// prints). Returns all-zeros and warns on malformed input - we'd
-/// rather attempt identification with a sentinel MAC than refuse to
-/// register iAP2 at all.
 fn parse_bt_mac(s: &str) -> [u8; 6] {
   let parts: Vec<&str> = s.split(':').collect();
   if parts.len() != 6 {

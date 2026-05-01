@@ -198,6 +198,39 @@ impl ProfileManager {
     connection_messages(&self.state, new_device, state_device).await
   }
 
+  // iAP2's Identified is the iOS "we're fully connected" signal;
+  // BlueZ's DeviceAdded path no longer drives connection_messages so
+  // the iap2 manager triggers the broadcast set directly from here
+  pub async fn iap2_device_connected(&self, mac: Address) -> BluetoothResult<()> {
+    let bluez = self.adapter.device(mac)?;
+    if !bluez.is_trusted().await.unwrap_or(false) {
+      let _ = bluez.set_trusted(true).await;
+    }
+    let name = bluez.name().await?.unwrap_or_else(|| mac.to_string());
+    let mac_str = mac.to_string();
+
+    let device = libbridgething::Device {
+      name,
+      device_type: libbridgething::DeviceType::Ios,
+      mac: mac_str.clone(),
+      default: true,
+    };
+
+    let new_device = self.state.get_device(&mac_str).await.is_none();
+    if new_device {
+      self.state.add_device(device.clone()).await?;
+      self.set_discoverable(false).await?;
+    }
+    self.state.set_last_device(mac_str).await?;
+
+    {
+      let mut profile_state = self.profile_state.write().await;
+      profile_state.device = Some(bluez);
+    }
+
+    connection_messages(&self.state, new_device, &device).await
+  }
+
   /// the returned bool is whether this is a new pairing or not
   async fn handle_device(&self, mac: Address) -> bluer::Result<bool> {
     tracing::debug!("setting current bluetooth device to {:?}", &mac);

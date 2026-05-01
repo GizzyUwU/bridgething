@@ -59,16 +59,8 @@ impl PlayerState {
     }
   }
 
-  /// Merge a delta-shaped `NowPlayingUpdate` into the canonical
-  /// `PlayerState`. Two writers feed this method: the iAP2 control
-  /// session decoded by `bridgething_iap2` (iOS path) and the
-  /// gateway protocol's `NowPlayingUpdate` variant (Android companion
-  /// path). The update is partial - only fields the producer had
-  /// fresh information about - so the merge skips fields that are
-  /// `None`. When the producer signals a track change via
-  /// `persistent_id`, we reset the track to a default and then layer
-  /// the delta on top, so stale fields from the previous track
-  /// don't leak across boundaries.
+  // resets the track on persistent_id change so fields the producer
+  // didn't re-send across the boundary don't leak
   pub(crate) async fn apply_now_playing(&mut self, update: NowPlayingUpdate) -> PlayerResult<()> {
     let NowPlayingUpdate { media_item, playback } = update;
 

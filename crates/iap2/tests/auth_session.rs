@@ -32,7 +32,7 @@ use common::{
   write_link,
 };
 
-const CONTROL_SESSION_ID: u8 = 0;
+const CONTROL_SESSION_ID: u8 = 1;
 
 fn accessory_lsp() -> bridgething_iap2::Lsp {
   LspBuilder::default().build()

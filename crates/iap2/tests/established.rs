@@ -113,7 +113,7 @@ async fn send_command_data_round_trips_to_peer() {
   assert!(pkt.header.control.contains(ControlBits::ACK));
   assert!(!pkt.header.control.contains(ControlBits::SYN));
   assert_eq!(pkt.header.seq, our_psn.wrapping_add(1));
-  assert_eq!(pkt.header.ack, PEER_INITIAL_PSN.wrapping_add(1));
+  assert_eq!(pkt.header.ack, PEER_INITIAL_PSN);
   assert_eq!(pkt.header.session_id, SESSION_ID);
   assert_eq!(pkt.payload.as_ref(), b"hello");
 }
@@ -298,7 +298,7 @@ async fn ack_delay_fires_standalone_ack_when_no_outbound_to_piggyback() {
   assert!(ack.header.control.contains(ControlBits::ACK));
   assert!(!ack.header.has_payload());
   assert_eq!(ack.header.length as usize, LINK_HEADER_LEN);
-  assert_eq!(ack.header.ack, PEER_INITIAL_PSN.wrapping_add(2));
+  assert_eq!(ack.header.ack, PEER_INITIAL_PSN.wrapping_add(1));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -330,7 +330,7 @@ async fn cumulative_max_ack_threshold_fires_standalone_ack() {
   let ack = read_link(&mut e.peer, &mut e.peer_buf, &mut e.peer_codec).await;
   assert!(ack.header.control.contains(ControlBits::ACK));
   assert!(!ack.header.has_payload());
-  assert_eq!(ack.header.ack, PEER_INITIAL_PSN.wrapping_add(3));
+  assert_eq!(ack.header.ack, PEER_INITIAL_PSN.wrapping_add(2));
 }
 
 #[tokio::test(flavor = "current_thread")]

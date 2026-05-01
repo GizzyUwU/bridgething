@@ -88,7 +88,7 @@ impl BluetoothManager {
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let _iap2_handle = match Iap2Manager::init(&session, &state).await? {
+    let _iap2_handle = match Iap2Manager::init(&session, &state, profile_man.clone()).await? {
       Some(manager) => Some(manager.spawn()),
       None => {
         tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");

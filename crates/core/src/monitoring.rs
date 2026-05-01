@@ -13,7 +13,7 @@ pub fn init_logger() {
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething=trace,bridgething::ws::connection::send=debug,libbridgething=trace".to_string()
+    "bridgething=trace,bridgething::ws::connection::send=debug,libbridgething=trace,bridgething-iap2=trace,bridgething-mfi=trace".to_string()
   };
 
   // directives for release builds
@@ -24,7 +24,7 @@ pub fn init_logger() {
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
     filter
   } else {
-    "bridgething=info,libbridgething=info".to_string()
+    "bridgething=info,libbridgething=info,bridgething-iap2=info,bridgething-mfi=info".to_string()
   };
 
   let filter = EnvFilter::builder()
