@@ -1,6 +1,7 @@
 mod bluetooth;
 mod forward;
 mod now_playing;
+mod peer;
 mod player;
 mod system;
 mod webapp;
@@ -8,6 +9,7 @@ mod webapp;
 pub use bluetooth::*;
 pub use forward::*;
 pub use now_playing::*;
+pub use peer::*;
 pub use player::*;
 pub use system::*;
 pub use webapp::*;

@@ -145,18 +145,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
-	/// A delta update for the connected phone's "now playing" state. Used
-	/// by gateway implementations on platforms where the daemon cannot
-	/// observe playback state itself (Android primarily): the companion
-	/// app pushes whatever changed, the daemon merges into its canonical
-	/// `Player` view, and webapps render the result via the existing
-	/// `ServerPlayerEvent`. iOS does not need this path - the iAP2
-	/// control session populates the same daemon-internal state directly.
 	@Serializable
 	@SerialName("nowPlayingUpdate")
 	data class NowPlayingUpdate(val data: NowPlayingUpdate): GatewayToBridgeMsgData()
-	/// Protocol-level failure: the gateway could not reach or dispatch a request
-	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
 	@Serializable
 	@SerialName("error")
 	data class Error(val data: GatewayError): GatewayToBridgeMsgData()
@@ -208,6 +199,39 @@ data class PlaybackUpdate (
 data class NowPlayingUpdate (
 	val mediaItem: MediaItemUpdate? = null,
 	val playback: PlaybackUpdate? = null
+)
+
+@Serializable
+enum class PeerIap2Status(val string: String) {
+	@SerialName("none")
+	None("none"),
+	@SerialName("linkUp")
+	LinkUp("linkUp"),
+	@SerialName("authenticated")
+	Authenticated("authenticated"),
+	@SerialName("identified")
+	Identified("identified"),
+}
+
+@Serializable(with = PeerCompanionStatusSerializer::class)
+sealed class PeerCompanionStatus {
+	@Serializable
+	@SerialName("none")
+	object None: PeerCompanionStatus()
+	@Serializable
+	@SerialName("pending")
+	object Pending: PeerCompanionStatus()
+	@Serializable
+	@SerialName("connected")
+	data class Connected(val data: GatewayMeta): PeerCompanionStatus()
+}
+
+@Serializable
+data class Peer (
+	val device: Device,
+	val paired: Boolean,
+	val iap2: PeerIap2Status,
+	val companion: PeerCompanionStatus
 )
 
 @Serializable

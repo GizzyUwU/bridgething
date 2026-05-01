@@ -1,4 +1,4 @@
-use libbridgething::{Device, ServerEventType, server::ServerBluetoothEvent};
+use libbridgething::Device;
 
 use crate::{
   bluetooth::BluetoothResult,
@@ -6,39 +6,7 @@ use crate::{
   stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload, StockSetupSend},
 };
 
-pub async fn connection_messages(state: &State, new_device: bool, device: &Device) -> BluetoothResult<()> {
-  if new_device {
-    state
-      .client_man
-      .broadcast(
-        ServerBluetoothEvent::ParingResult { success: true },
-        ServerEventType::Event,
-      )
-      .await?;
-  }
-
-  state
-    .client_man
-    .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Event)
-    .await?;
-  state
-    .client_man
-    .broadcast(
-      ServerBluetoothEvent::PairedDevices(state.get_devices().await),
-      ServerEventType::Event,
-    )
-    .await?;
-  state
-    .client_man
-    .broadcast(
-      ServerBluetoothEvent::ConnectedDevice {
-        name: device.name.clone(),
-        mac: device.mac.clone(),
-      },
-      ServerEventType::Event,
-    )
-    .await?;
-
+pub async fn connection_messages_stock(state: &State, new_device: bool, device: &Device) -> BluetoothResult<()> {
   state
     .client_man
     .broadcast_stock(StockConnectionSend::RemoteStatus {
@@ -98,22 +66,7 @@ pub async fn connection_messages(state: &State, new_device: bool, device: &Devic
   Ok(())
 }
 
-pub async fn disconnection_messages(state: &State) -> BluetoothResult<()> {
-  state
-    .client_man
-    .broadcast(
-      ServerBluetoothEvent::Status { connected: false },
-      ServerEventType::Event,
-    )
-    .await?;
-  state
-    .client_man
-    .broadcast(
-      ServerBluetoothEvent::PairedDevices(state.get_devices().await),
-      ServerEventType::Event,
-    )
-    .await?;
-
+pub async fn disconnection_messages_stock(state: &State) -> BluetoothResult<()> {
   state
     .client_man
     .broadcast_stock(StockConnectionSend::TransportStatus { payload: false })

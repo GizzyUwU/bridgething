@@ -4,12 +4,14 @@ use uuid::Uuid;
 
 mod bluetooth;
 mod interaction;
+mod peer;
 mod player;
 mod storage;
 mod system;
 
 pub use bluetooth::*;
 pub use interaction::*;
+pub use peer::*;
 pub use player::*;
 pub use storage::*;
 pub use system::*;
@@ -56,14 +58,10 @@ pub enum ServerEventData {
   #[from]
   Player(ServerPlayerEvent),
   #[from]
+  Peer(ServerPeerEvent),
+  #[from]
   Forward(ForwardMessage),
-
-  /// Protocol-level failure: the daemon could not reach or dispatch the
-  /// request. Domain-level errors travel inside the per-op response variant.
-  /// Reuses `GatewayError` since its three variants (Unsupported, Malformed,
-  /// HandlerFailed) are universal across both protocols.
   #[from]
   Error(GatewayError),
-
   Ack,
 }

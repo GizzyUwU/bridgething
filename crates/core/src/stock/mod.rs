@@ -104,6 +104,7 @@ pub fn server_event_to_stock(msg: ServerEvent, stock_msg_id: Option<usize>) -> S
       tracing::warn!("typed error response is not supported in stock app: {:?}", err);
       StockSendMsg::Unsupported
     }
+    ServerEventData::Peer(_) => StockSendMsg::Unsupported,
     ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id)),
   }
 }

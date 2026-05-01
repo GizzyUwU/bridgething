@@ -290,16 +290,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case forward(ForwardMessage)
-	/// A delta update for the connected phone's "now playing" state. Used
-	/// by gateway implementations on platforms where the daemon cannot
-	/// observe playback state itself (Android primarily): the companion
-	/// app pushes whatever changed, the daemon merges into its canonical
-	/// `Player` view, and webapps render the result via the existing
-	/// `ServerPlayerEvent`. iOS does not need this path - the iAP2
-	/// control session populates the same daemon-internal state directly.
 	case nowPlayingUpdate(NowPlayingUpdate)
-	/// Protocol-level failure: the gateway could not reach or dispatch a request
-	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
 	case error(GatewayError)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -459,6 +450,76 @@ public struct NowPlayingUpdate: Codable, Sendable {
 	public init(mediaItem: MediaItemUpdate?, playback: PlaybackUpdate?) {
 		self.mediaItem = mediaItem
 		self.playback = playback
+	}
+}
+
+public enum PeerIap2Status: String, Codable, Sendable {
+	case none
+	case linkUp
+	case authenticated
+	case identified
+}
+
+public enum PeerCompanionStatus: Codable, Sendable {
+	case none
+	case pending
+	case connected(GatewayMeta)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case none,
+			pending,
+			connected
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .none:
+				self = .none
+				return
+			case .pending:
+				self = .pending
+				return
+			case .connected:
+				if let content = try? container.decode(GatewayMeta.self, forKey: .data) {
+					self = .connected(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(PeerCompanionStatus.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PeerCompanionStatus"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .none:
+			try container.encode(CodingKeys.none, forKey: .type)
+		case .pending:
+			try container.encode(CodingKeys.pending, forKey: .type)
+		case .connected(let content):
+			try container.encode(CodingKeys.connected, forKey: .type)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public struct Peer: Codable, Sendable {
+	public let device: Device
+	public let paired: Bool
+	public let iap2: PeerIap2Status
+	public let companion: PeerCompanionStatus
+
+	public init(device: Device, paired: Bool, iap2: PeerIap2Status, companion: PeerCompanionStatus) {
+		self.device = device
+		self.paired = paired
+		self.iap2 = iap2
+		self.companion = companion
 	}
 }
 

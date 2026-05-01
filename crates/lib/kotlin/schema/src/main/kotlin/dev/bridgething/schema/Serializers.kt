@@ -69,3 +69,12 @@ public object GatewayErrorSerializer :
 
 public object WebappErrorSerializer :
     KSerializer<WebappError> by AdjacentTaggedSerializer(WebappError::class, discriminator = "type")
+
+public object PeerCompanionStatusSerializer :
+    KSerializer<PeerCompanionStatus> by AdjacentTaggedSerializer(
+        PeerCompanionStatus::class,
+        discriminator = "type"
+    )
+
+public object ServerPeerEventSerializer :
+    KSerializer<ServerPeerEvent> by AdjacentTaggedSerializer(ServerPeerEvent::class, discriminator = "event")

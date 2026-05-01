@@ -32,7 +32,7 @@ use bridgething_iap2::{
 };
 use bridgething_mfi::MfiAuth;
 use futures::StreamExt;
-use libbridgething::{MediaItemUpdate, NowPlayingUpdate, PlaybackUpdate};
+use libbridgething::{DeviceType, MediaItemUpdate, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -212,13 +212,18 @@ async fn observe_session_events(
           peer_max_len = lsp.max_len,
           "iAP2 link Established",
         );
+        if let Err(err) = profile_man.upsert_paired_device(address, DeviceType::Ios).await {
+          tracing::warn!(%address, ?err, "failed to upsert peer for iAP2 link");
+        }
+        let _ = state.peers.set_iap2(address, PeerIap2Status::LinkUp).await;
       }
-      SessionEvent::Authenticated => tracing::info!(%address, "iAP2 authenticated"),
+      SessionEvent::Authenticated => {
+        tracing::info!(%address, "iAP2 authenticated");
+        let _ = state.peers.set_iap2(address, PeerIap2Status::Authenticated).await;
+      }
       SessionEvent::Identified => {
         tracing::info!(%address, "iAP2 identified");
-        if let Err(err) = profile_man.iap2_device_connected(address).await {
-          tracing::warn!(%address, ?err, "failed to surface iAP2 device-connected state");
-        }
+        let _ = state.peers.set_iap2(address, PeerIap2Status::Identified).await;
       }
       SessionEvent::AuthFailed => tracing::warn!(%address, "iAP2 auth failed"),
       SessionEvent::IdentificationRejected { rejected_params } => {
@@ -226,12 +231,15 @@ async fn observe_session_events(
       }
       SessionEvent::NowPlayingUpdate(update) => {
         let lib_update = translate_now_playing(update);
-        tracing::info!(%address, ?lib_update, "iAP2 now-playing delta");
+        tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
         if let Err(err) = state.player.apply_now_playing(lib_update).await {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
         }
       }
-      SessionEvent::LinkDown(reason) => tracing::info!(%address, %reason, "iAP2 link down"),
+      SessionEvent::LinkDown(reason) => {
+        tracing::info!(%address, %reason, "iAP2 link down");
+        let _ = state.peers.set_iap2(address, PeerIap2Status::None).await;
+      }
     }
   }
 }

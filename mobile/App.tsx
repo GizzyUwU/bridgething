@@ -1,6 +1,9 @@
 import './global.css';
 
-import { type BridgethingTransportDevice, ReactNativeAdapter } from '@bridgething/adapter-react-native';
+import {
+  type BridgethingTransportDevice,
+  ReactNativeAdapter,
+} from '@bridgething/adapter-react-native';
 import { BridgethingGateway, type GatewayEvent } from '@bridgething/gateway';
 import {
   type BridgeThingMeta,
@@ -43,12 +46,19 @@ type LogEntry = { id: number; text: string };
 
 export default function App() {
   const adapter = useMemo(() => new ReactNativeAdapter(), []);
-  const gateway = useMemo(() => new BridgethingGateway(adapter, { logLevel: LogLevel.Trace }), [adapter]);
+  const gateway = useMemo(
+    () => new BridgethingGateway(adapter, { logLevel: LogLevel.Trace }),
+    [adapter],
+  );
   const logIdRef = useRef(0);
 
   const [running, setRunning] = useState(false);
-  const [knownDevices, setKnownDevices] = useState<BridgethingTransportDevice[]>([]);
-  const [connectedPeers, setConnectedPeers] = useState<Record<string, ConnectedPeer>>({});
+  const [knownDevices, setKnownDevices] = useState<
+    BridgethingTransportDevice[]
+  >([]);
+  const [connectedPeers, setConnectedPeers] = useState<
+    Record<string, ConnectedPeer>
+  >({});
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const appendLog = (text: string) => {
@@ -113,11 +123,16 @@ export default function App() {
     }
   };
 
-  const handleBridgeMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
+  const handleBridgeMessage = async (
+    deviceId: string,
+    msg: BridgeToGatewayMsg,
+  ) => {
     switch (msg.data.type) {
       case 'version': {
         const meta = msg.data.data;
-        appendLog(`<< version from ${deviceId}: ${meta.appName} ${meta.appVersion}`);
+        appendLog(
+          `<< version from ${deviceId}: ${meta.appName} ${meta.appVersion}`,
+        );
         setConnectedPeers(prev => {
           const peer = prev[deviceId];
           if (!peer) return prev;
@@ -206,31 +221,43 @@ export default function App() {
 
         <View className="mb-6 flex-row items-center justify-between">
           <View className="flex-1">
-            <Text className="text-2xl font-bold text-foreground">bridgething</Text>
+            <Text className="text-2xl font-bold text-foreground">
+              bridgething
+            </Text>
             <Text className="mt-0.5 text-xs text-muted-foreground">
               {running ? `running · ${peers.length} connected` : 'idle'}
             </Text>
           </View>
           <Pressable
             onPress={running ? stop : start}
-            className={`rounded-md px-5 py-2.5 ${running ? 'bg-destructive' : 'bg-primary'}`}>
-            <Text className="text-sm font-semibold text-primary-foreground">{running ? 'stop' : 'start'}</Text>
+            className={`rounded-md px-5 py-2.5 ${running ? 'bg-destructive' : 'bg-primary'}`}
+          >
+            <Text className="text-sm font-semibold text-primary-foreground">
+              {running ? 'stop' : 'start'}
+            </Text>
           </Pressable>
         </View>
 
         <Section title={`known devices (${knownDevices.length})`}>
           {knownDevices.length === 0 ? (
             <Empty>
-              {running ? 'no peers - pair a Car Thing in system Bluetooth settings' : 'press start to scan'}
+              {running
+                ? 'no peers - pair a Car Thing in system Bluetooth settings'
+                : 'press start to scan'}
             </Empty>
           ) : (
             knownDevices.map(d => (
               <Pressable
                 key={d.id}
                 onPress={() => connectDevice(d.id)}
-                className="mb-1.5 rounded-md bg-secondary px-3 py-2 active:opacity-70">
-                <Text className="text-sm font-semibold text-secondary-foreground">{d.name}</Text>
-                <Text className="mt-0.5 text-xs text-muted-foreground">{d.id}</Text>
+                className="mb-1.5 rounded-md bg-secondary px-3 py-2 active:opacity-70"
+              >
+                <Text className="text-sm font-semibold text-secondary-foreground">
+                  {d.name}
+                </Text>
+                <Text className="mt-0.5 text-xs text-muted-foreground">
+                  {d.id}
+                </Text>
               </Pressable>
             ))
           )}
@@ -243,18 +270,32 @@ export default function App() {
             peers.map(peer => (
               <View key={peer.id} className="mb-2 rounded-md bg-card p-3">
                 <View className="flex-row items-center justify-between">
-                  <Text className="text-sm font-semibold text-card-foreground">{peer.name}</Text>
+                  <Text className="text-sm font-semibold text-card-foreground">
+                    {peer.name}
+                  </Text>
                   <Pressable onPress={() => disconnectDevice(peer.id)}>
                     <Text className="text-xs text-destructive">disconnect</Text>
                   </Pressable>
                 </View>
                 {peer.bridgeMeta ? (
                   <View className="mt-2">
-                    <MetaLine label="app" value={`${peer.bridgeMeta.appName} ${peer.bridgeMeta.appVersion}`} />
-                    <MetaLine label="os" value={`${peer.bridgeMeta.osName} ${peer.bridgeMeta.osVersion}`} />
-                    <MetaLine label="image" value={peer.bridgeMeta.imageBuildId} />
+                    <MetaLine
+                      label="app"
+                      value={`${peer.bridgeMeta.appName} ${peer.bridgeMeta.appVersion}`}
+                    />
+                    <MetaLine
+                      label="os"
+                      value={`${peer.bridgeMeta.osName} ${peer.bridgeMeta.osVersion}`}
+                    />
+                    <MetaLine
+                      label="image"
+                      value={peer.bridgeMeta.imageBuildId}
+                    />
                     <MetaLine label="model" value={peer.bridgeMeta.modelName} />
-                    <MetaLine label="serial" value={peer.bridgeMeta.serialNumber} />
+                    <MetaLine
+                      label="serial"
+                      value={peer.bridgeMeta.serialNumber}
+                    />
                   </View>
                 ) : (
                   <Empty>waiting for version…</Empty>
@@ -265,9 +306,15 @@ export default function App() {
         </Section>
 
         <Section title="log">
-          <ScrollView className="max-h-56 rounded-md bg-muted" contentContainerClassName="p-2.5">
+          <ScrollView
+            className="max-h-56 rounded-md bg-muted"
+            contentContainerClassName="p-2.5"
+          >
             {log.map(entry => (
-              <Text key={entry.id} className="font-mono text-[11px] leading-4 text-muted-foreground">
+              <Text
+                key={entry.id}
+                className="font-mono text-[11px] leading-4 text-muted-foreground"
+              >
                 {entry.text}
               </Text>
             ))}
@@ -278,17 +325,27 @@ export default function App() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <View className="mb-5">
-      <Text className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{title}</Text>
+      <Text className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+        {title}
+      </Text>
       {children}
     </View>
   );
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <Text className="text-xs italic text-muted-foreground">{children}</Text>;
+  return (
+    <Text className="text-xs italic text-muted-foreground">{children}</Text>
+  );
 }
 
 function MetaLine({ label, value }: { label: string; value: string }) {
@@ -303,11 +360,16 @@ function MetaLine({ label, value }: { label: string; value: string }) {
 async function ensureAndroidBluetoothPermissions(): Promise<boolean> {
   const permissions: Permission[] = [];
   if (Platform.Version && Number(Platform.Version) >= 31) {
-    permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT, PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
+    permissions.push(
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+    );
   }
   if (permissions.length === 0) return true;
   const result = await PermissionsAndroid.requestMultiple(permissions);
-  return permissions.every(p => result[p] === PermissionsAndroid.RESULTS.GRANTED);
+  return permissions.every(
+    p => result[p] === PermissionsAndroid.RESULTS.GRANTED,
+  );
 }
 
 function errMsg(err: unknown): string {

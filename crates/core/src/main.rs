@@ -9,6 +9,7 @@ mod chrome;
 
 mod handler;
 mod paths;
+mod peer;
 mod player;
 mod state;
 

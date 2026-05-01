@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use libbridgething::{ServerEventType, server::ServerBluetoothEvent};
-use message::{connection_messages, disconnection_messages};
+use message::{connection_messages_stock, disconnection_messages_stock};
 use tokio::sync::RwLock;
 
 use crate::state::State;
@@ -124,35 +124,17 @@ impl ProfileManager {
         // adapter
         BluetoothConnectionEvent::DeviceAdded { mac } => {
           tracing::info!("bluetooth device added with mac address: {:?}", &mac);
-          return Ok(());
-          let just_connected = self.handle_device(mac).await?;
-
-          if let Some(device) = &self.profile_state.read().await.device {
-            self.state.player.init_dbus_player(device.clone()).await?;
-
-            if just_connected {
-              tracing::info!("bluetooth device connected with mac address: {:?}", &mac);
-              self.state.set_last_device(mac.to_string()).await?;
-
-              let state_device = libbridgething::Device {
-                name: device.name().await?.unwrap_or(mac.to_string()),
-                device_type: libbridgething::DeviceType::Unknown,
-                mac: mac.to_string(),
-                default: true,
-              };
-
-              let mut new_device = false;
-              if self.state.get_device(&mac.to_string()).await.is_none() {
-                new_device = true;
-                self.state.add_device(state_device.clone()).await?;
-
-                self.set_discoverable(false).await?;
-              };
-
-              self.handle_connection(new_device).await?;
-            };
-          };
-
+          let bluez_device = self.adapter.device(mac)?;
+          if !bluez_device.is_paired().await.unwrap_or(false) {
+            tracing::trace!("device added but not yet paired; awaiting pair-complete event");
+            return Ok(());
+          }
+          if let Err(err) = self
+            .upsert_paired_device(mac, libbridgething::DeviceType::Unknown)
+            .await
+          {
+            tracing::warn!(?err, "failed to register newly-paired device");
+          }
           Ok(())
         }
         BluetoothConnectionEvent::DeviceRemoved { mac } => {
@@ -169,7 +151,8 @@ impl ProfileManager {
             tracing::info!("current device with mac address {:?} has disconnected!", &mac);
             self.state.handle_disconnect().await?;
 
-            disconnection_messages(&self.state).await?;
+            let _ = self.state.peers.remove(mac).await;
+            disconnection_messages_stock(&self.state).await?;
 
             tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
             #[cfg(not(debug_assertions))]
@@ -195,13 +178,14 @@ impl ProfileManager {
       return Ok(());
     };
 
-    connection_messages(&self.state, new_device, state_device).await
+    connection_messages_stock(&self.state, new_device, state_device).await
   }
 
-  // iAP2's Identified is the iOS "we're fully connected" signal;
-  // BlueZ's DeviceAdded path no longer drives connection_messages so
-  // the iap2 manager triggers the broadcast set directly from here
-  pub async fn iap2_device_connected(&self, mac: Address) -> BluetoothResult<()> {
+  pub async fn upsert_paired_device(
+    &self,
+    mac: Address,
+    device_type: libbridgething::DeviceType,
+  ) -> BluetoothResult<libbridgething::Device> {
     let bluez = self.adapter.device(mac)?;
     if !bluez.is_trusted().await.unwrap_or(false) {
       let _ = bluez.set_trusted(true).await;
@@ -211,11 +195,12 @@ impl ProfileManager {
 
     let device = libbridgething::Device {
       name,
-      device_type: libbridgething::DeviceType::Ios,
+      device_type,
       mac: mac_str.clone(),
       default: true,
     };
 
+    let already_active = self.state.peers.get(&mac).await.is_some_and(|p| p.paired);
     let new_device = self.state.get_device(&mac_str).await.is_none();
     if new_device {
       self.state.add_device(device.clone()).await?;
@@ -228,28 +213,14 @@ impl ProfileManager {
       profile_state.device = Some(bluez);
     }
 
-    connection_messages(&self.state, new_device, &device).await
-  }
+    let _ = self.state.peers.upsert(mac, device.clone()).await;
+    let _ = self.state.peers.set_paired(mac, true).await;
 
-  /// the returned bool is whether this is a new pairing or not
-  async fn handle_device(&self, mac: Address) -> bluer::Result<bool> {
-    tracing::debug!("setting current bluetooth device to {:?}", &mac);
-    let device = self.adapter.device(mac)?;
-
-    #[cfg(debug_assertions)]
-    super::debug::query_device(&device).await?;
-
-    let state_device = &mut self.profile_state.write().await.device;
-    if state_device.is_none() && device.is_paired().await? {
-      if !device.is_trusted().await? {
-        device.set_trusted(true).await?;
-      }
-
-      *state_device = Some(device);
-      return Ok(true);
+    if !already_active {
+      connection_messages_stock(&self.state, new_device, &device).await?;
     }
 
-    Ok(false)
+    Ok(device)
   }
 }
 

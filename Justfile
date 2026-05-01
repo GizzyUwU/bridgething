@@ -69,7 +69,7 @@ goldens:
 # flag selects the on-device build (sd-notify, ALS, mic, chromium CDP
 # wired up; dev-host features dropped).
 cross-build:
-  CARGO_TARGET_DIR={{cross_target_dir}} cross build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird
+  CARGO_TARGET_DIR={{cross_target_dir}} cross build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird --config profile.release.lto=false --config profile.release.codegen-units=32
 
 # Cross-build then push the daemon to /opt/bridgething/daemon/ on the
 # device. The push script stops bridgething + bridgething-weston first

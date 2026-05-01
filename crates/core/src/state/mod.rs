@@ -1,10 +1,10 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use libbridgething::{Device, ServerEventType, server::GatewayStatus};
+use libbridgething::{Device, server::GatewayStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::{chrome, http::ClientMan, paths};
+use crate::{chrome, http::ClientMan, paths, peer::PeerTracker};
 
 mod gateway_files;
 pub mod meta;
@@ -59,11 +59,6 @@ impl PersistentAppState {
   }
 }
 
-#[derive(Debug, Default)]
-struct SessionAppState {
-  pub gateway: GatewayStatus,
-}
-
 #[derive(Debug)]
 pub struct AppState {
   pub client_man: ClientMan,
@@ -72,10 +67,10 @@ pub struct AppState {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub gateway_files: gateway_files::GatewayFileBridge,
+  pub peers: PeerTracker,
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
-  session: RwLock<SessionAppState>,
 }
 
 impl AppState {
@@ -108,6 +103,7 @@ impl AppState {
     }
 
     let gateway_files = gateway_files::GatewayFileBridge::new();
+    let peers = PeerTracker::new(client_man.clone());
 
     Ok(Arc::new(Self {
       client_man,
@@ -116,10 +112,10 @@ impl AppState {
       chrome,
       webapps,
       gateway_files,
+      peers,
 
       persist_path,
       persist: RwLock::new(persist),
-      session: RwLock::new(SessionAppState::default()),
     }))
   }
 
@@ -134,21 +130,7 @@ impl AppState {
   }
 
   pub async fn gateway_status(&self) -> GatewayStatus {
-    // cloning here so that the lock is not held open
-    self.session.read().await.gateway.clone()
-  }
-
-  /// SIDE EFFECTS: broadcasts the new status to all clients
-  pub async fn set_gateway_status(&self, status: GatewayStatus) -> StateResult<()> {
-    self.session.write().await.gateway = status.clone();
-    self.save_persist().await?;
-    if let Err(errors) = self.client_man.broadcast(status, ServerEventType::Event).await {
-      for error in errors {
-        tracing::error!("failed to send gateway status: {:?}", error);
-      }
-    }
-
-    Ok(())
+    self.peers.first_connected_gateway().await
   }
 
   pub async fn get_devices(&self) -> HashMap<String, Device> {

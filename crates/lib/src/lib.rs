@@ -14,9 +14,9 @@ pub use server::{ServerEvent, ServerEventData, ServerEventType};
 
 pub use shared::{
   Album, Artist, BridgeThingMeta, CARTHING_HACKS_LOGO, CurrentlyActiveApplication, Device, DeviceType, ForwardMessage,
-  GatewayMeta, IMAGE_SIZE, Image, LIBBRIDGETHING_VERSION, MediaItemUpdate, NowPlayingUpdate, PhoneCallDirection,
-  PhoneCallStatus, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackUpdate, THUMBNAIL_SIZE, Track,
-  WebappInfo, WebappSource, to_slug,
+  GatewayMeta, IMAGE_SIZE, Image, LIBBRIDGETHING_VERSION, MediaItemUpdate, NowPlayingUpdate, Peer, PeerCompanionStatus,
+  PeerIap2Status, PhoneCallDirection, PhoneCallStatus, PlaybackOptions, PlaybackQueue, PlaybackRestrictions,
+  PlaybackUpdate, THUMBNAIL_SIZE, Track, WebappInfo, WebappSource, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

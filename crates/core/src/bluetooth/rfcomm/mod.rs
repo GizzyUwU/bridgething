@@ -9,10 +9,9 @@ use futures::{
   stream::{SplitSink, SplitStream},
 };
 use libbridgething::{
-  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL,
+  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
   protocol::BridgeEndec,
-  server::GatewayStatus,
 };
 use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
@@ -25,6 +24,7 @@ use crate::{
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum ConnectionMessage {
   Msg(GatewayToBridgeMsg),
   Close,
@@ -171,13 +171,7 @@ impl RfcommGateway {
             ConnectionMessage::Close => {
               tracing::debug!("rfcomm connection closed: {:?}", address);
               self.connections.remove(&address);
-
-              if self.state.gateway_status().await.address == address.to_string() {
-                tracing::debug!("\"current\" rfcomm connection closed - setting gateway status to disconnected");
-                if let Err(e) = self.state.set_gateway_status(GatewayStatus::default()).await {
-                  tracing::error!("failed to set gateway status: {:?}", e);
-                }
-              }
+              let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
             },
             ConnectionMessage::Msg(msg) => {
               if let Err(e) = self.recv_tx.send(GatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await {
@@ -211,6 +205,11 @@ impl RfcommGateway {
       .await?;
 
     self.connections.insert(address, connection);
+    let _ = self
+      .state
+      .peers
+      .set_companion(address, PeerCompanionStatus::Pending)
+      .await;
 
     Ok(())
   }

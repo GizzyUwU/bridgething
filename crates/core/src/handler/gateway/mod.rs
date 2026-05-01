@@ -10,9 +10,8 @@ use file::*;
 use webapp::*;
 
 use libbridgething::{
-  ForwardMessage, GatewayMeta, NowPlayingUpdate, ServerEventType,
+  DeviceType, ForwardMessage, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
-  server::{GatewayStatus, ServerSystemEvent},
 };
 
 use crate::{
@@ -87,20 +86,24 @@ impl TopLevelHandler {
 
   pub async fn handle_version(&mut self, version: GatewayMeta) -> HandlerResult {
     tracing::debug!("({:?}) version: {:?};", &self.handle.address, &version);
-
-    let status = GatewayStatus {
-      address: self.handle.address.unwrap_or_default().to_string(),
-      connected: true,
-
-      lib_version: version.lib_version,
-      libbridgething_version: version.libbridgething_version,
-      adapter_version: version.adapter_version,
-      app_name: version.app_name,
-      app_version: version.app_version,
-      os_name: version.os_name,
-    };
-    self.handle.state.set_gateway_status(status.clone()).await?;
-
+    if let Some(mac) = self.handle.address {
+      let device_type = device_type_from_os(&version.os_name);
+      if let Err(err) = self
+        .handle
+        .bluetooth
+        .profile_man
+        .upsert_paired_device(mac, device_type)
+        .await
+      {
+        tracing::warn!(?err, "failed to upsert paired device on Version exchange");
+      }
+      let _ = self
+        .handle
+        .state
+        .peers
+        .set_companion(mac, PeerCompanionStatus::Connected(version))
+        .await;
+    }
     Ok(())
   }
 
@@ -121,5 +124,16 @@ impl TopLevelHandler {
     tracing::debug!("({:?}) handling now-playing delta from gateway", &self.handle.address);
     self.handle.state.player.apply_now_playing(update).await?;
     Ok(())
+  }
+}
+
+fn device_type_from_os(os_name: &str) -> DeviceType {
+  match os_name.to_ascii_lowercase().as_str() {
+    "android" => DeviceType::Android,
+    "ios" => DeviceType::Ios,
+    "linux" => DeviceType::Linux,
+    "macos" | "darwin" => DeviceType::MacOS,
+    "windows" => DeviceType::Windows,
+    _ => DeviceType::Unknown,
   }
 }
