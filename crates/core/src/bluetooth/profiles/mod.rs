@@ -257,7 +257,7 @@ pub async fn connect_profiles(profile_man: ProfileMan, mac: Address, max_attempt
     attempts += 1;
   }
 
-  avrcp::connect_avrcp(&connected_device).await;
+  // avrcp::connect_avrcp(&connected_device).await;
 
   if let Err(err) = profile_man
     .handle_event(BluetoothConnectionEvent::DeviceAdded { mac })
