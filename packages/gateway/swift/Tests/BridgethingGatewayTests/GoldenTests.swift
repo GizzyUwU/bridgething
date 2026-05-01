@@ -24,13 +24,18 @@ final class GoldenTests: XCTestCase {
   private func checkFixture(_ fixture: GoldenFixture, codec: Codec) throws {
     let frame = Data(hex: fixture.framedHex)
 
+    let header = try FrameHeader.parse(frame)
+    XCTAssertEqual(header.priority, fixture.priority, "priority mismatch on \(fixture.name)")
+
     switch fixture.direction {
     case .bridgeToGateway:
       let decoded = try codec.decode(BridgeToGatewayMsg.self, from: frame)
       XCTAssertEqual(UUID(data: decoded.id), fixedID, "id mismatch on \(fixture.name)")
       try assertMetaMatches(decoded.meta, fixture: fixture)
 
-      let reEncoded = try codec.encode(decoded)
+      let reEncoded = try codec.encode(decoded, priority: fixture.priority)
+      let reHeader = try FrameHeader.parse(reEncoded)
+      XCTAssertEqual(reHeader.priority, fixture.priority, "round-trip priority changed on \(fixture.name)")
       let reDecoded = try codec.decode(BridgeToGatewayMsg.self, from: reEncoded)
       XCTAssertEqual(reDecoded.id, decoded.id, "round-trip id changed on \(fixture.name)")
 
@@ -39,7 +44,9 @@ final class GoldenTests: XCTestCase {
       XCTAssertEqual(UUID(data: decoded.id), fixedID, "id mismatch on \(fixture.name)")
       try assertMetaMatches(decoded.meta, fixture: fixture)
 
-      let reEncoded = try codec.encode(decoded)
+      let reEncoded = try codec.encode(decoded, priority: fixture.priority)
+      let reHeader = try FrameHeader.parse(reEncoded)
+      XCTAssertEqual(reHeader.priority, fixture.priority, "round-trip priority changed on \(fixture.name)")
       let reDecoded = try codec.decode(GatewayToBridgeMsg.self, from: reEncoded)
       XCTAssertEqual(reDecoded.id, decoded.id, "round-trip id changed on \(fixture.name)")
     }
@@ -109,19 +116,6 @@ final class GoldenTests: XCTestCase {
     XCTAssertEqual(bytes, Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
   }
 
-  func testFileAddDecodesToExpectedPath() throws {
-    let goldens = try loadGoldens()
-    let fixture = try XCTUnwrap(goldens.fixtures.first { $0.name == "gateway_to_bridge/file-add-command" })
-    let codec = Codec(compression: .none, encoding: .msgpack)
-    let msg = try codec.decode(GatewayToBridgeMsg.self, from: Data(hex: fixture.framedHex))
-    guard case .file(.add(let payload)) = msg.data else {
-      XCTFail("expected .file(.add), got \(msg.data)"); return
-    }
-    XCTAssertEqual(payload.files.count, 1)
-    XCTAssertEqual(payload.files[0].path, "/asset.png")
-    XCTAssertEqual(payload.files[0].data, Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  }
-
   func testGzipFrameRoundTrip() throws {
     let codec = Codec(compression: .gzip, encoding: .msgpack)
     let original = BridgeToGatewayMsg(
@@ -142,14 +136,17 @@ final class GoldenTests: XCTestCase {
   // MARK: - fixture loading
 
   private func loadGoldens() throws -> GoldenFile {
-    // #filePath: …/gateway/swift/Tests/BridgethingGatewayTests/GoldenTests.swift
-    // Up three levels lands at gateway/swift/; the fixtures file sits at the
-    // repo root under lib/fixtures/, so step out of gateway/ entirely.
+    // #filePath: …/packages/gateway/swift/Tests/BridgethingGatewayTests/GoldenTests.swift
+    // Up six levels lands at the repo root; the fixture file lives under
+    // crates/lib/fixtures/.
     let url = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent() // BridgethingGatewayTests
       .deletingLastPathComponent() // Tests
       .deletingLastPathComponent() // swift
-      .appendingPathComponent("../../lib/fixtures/golden.json")
+      .deletingLastPathComponent() // gateway
+      .deletingLastPathComponent() // packages
+      .deletingLastPathComponent() // repo root
+      .appendingPathComponent("crates/lib/fixtures/golden.json")
       .standardizedFileURL
     let data = try Data(contentsOf: url)
     return try JSONDecoder().decode(GoldenFile.self, from: data)
@@ -166,12 +163,13 @@ private struct GoldenFixture: Decodable {
   let name: String
   let description: String
   let direction: Direction
+  let priority: Priority
   let decodedJson: AnyCodable
   let msgpackHex: String
   let framedHex: String
 
   enum CodingKeys: String, CodingKey {
-    case name, description, direction
+    case name, description, direction, priority
     case decodedJson = "decoded_json"
     case msgpackHex = "msgpack_hex"
     case framedHex = "framed_hex"

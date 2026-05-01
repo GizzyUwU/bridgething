@@ -72,10 +72,11 @@ pub struct AuthenticationSucceeded;
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::csm::{CsmCodec, CsmDecodeError, CsmFrame};
   use bytes::BytesMut;
   use tokio_util::codec::{Decoder, Encoder};
+
+  use super::*;
+  use crate::csm::{CsmCodec, CsmDecodeError, CsmFrame};
 
   #[test]
   fn empty_auth_csm_roundtrips_through_frame() {

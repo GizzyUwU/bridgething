@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{BridgeThingMeta, PhoneCallDirection, PhoneCallStatus};
-
 use super::ServerEventData;
+use crate::{BridgeThingMeta, PhoneCallDirection, PhoneCallStatus};
 
 #[serde_with::skip_serializing_none]
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -36,6 +35,7 @@ crate::transitive_from! {
   rename_all_fields = "camelCase"
 )]
 #[ts(export, export_to = "server.ts")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerSystemEvent {
   #[from]
   Version(BridgeThingMeta),

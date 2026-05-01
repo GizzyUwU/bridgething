@@ -22,9 +22,14 @@ public enum CodecError: Error, Equatable {
   case payloadTooShort(have: Int, need: Int)
 }
 
+public extension Priority {
+  static func fromByte(_ byte: UInt8) -> Priority { byte == 0x01 ? .bulk : .normal }
+  var asByte: UInt8 { self == .bulk ? 0x01 : 0x00 }
+}
+
 /// 16-byte wire header.
 ///
-/// `| magic u16 BE | version u8 | compression u8 | encoding u8 | reserved [3]u8 | length u64 BE |`
+/// `| magic u16 BE | version u8 | compression u8 | encoding u8 | priority u8 | reserved [2]u8 | length u64 BE |`
 public struct FrameHeader: Sendable, Equatable {
   public static let magic: UInt16 = 0xDEAD
   public static let version: UInt8 = 2
@@ -32,11 +37,18 @@ public struct FrameHeader: Sendable, Equatable {
 
   public let compression: Compression
   public let encoding: Encoding
+  public let priority: Priority
   public let payloadLength: UInt64
 
-  public init(compression: Compression, encoding: Encoding, payloadLength: UInt64) {
+  public init(
+    compression: Compression,
+    encoding: Encoding,
+    priority: Priority = .normal,
+    payloadLength: UInt64
+  ) {
     self.compression = compression
     self.encoding = encoding
+    self.priority = priority
     self.payloadLength = payloadLength
   }
 
@@ -55,13 +67,19 @@ public struct FrameHeader: Sendable, Equatable {
     guard let encoding = Encoding(rawValue: bytes[4]) else {
       throw CodecError.unsupportedEncoding(bytes[4])
     }
-    // bytes[5..<8] reserved
+    let priority = Priority.fromByte(bytes[5])
+    // bytes[6..<8] reserved
     var len: UInt64 = 0
     for i in 8 ..< 16 {
       len = (len << 8) | UInt64(bytes[i])
     }
 
-    return FrameHeader(compression: compression, encoding: encoding, payloadLength: len)
+    return FrameHeader(
+      compression: compression,
+      encoding: encoding,
+      priority: priority,
+      payloadLength: len
+    )
   }
 
   public func write() -> Data {
@@ -71,7 +89,8 @@ public struct FrameHeader: Sendable, Equatable {
     buf.append(Self.version)
     buf.append(compression.rawValue)
     buf.append(encoding.rawValue)
-    buf.append(contentsOf: [0, 0, 0])
+    buf.append(priority.asByte)
+    buf.append(contentsOf: [0, 0])
     for shift in stride(from: 56, through: 0, by: -8) {
       buf.append(UInt8((payloadLength >> shift) & 0xFF))
     }
@@ -98,6 +117,7 @@ public struct Codec: Sendable {
 
   public func encode(
     _ message: some Encodable,
+    priority: Priority = .normal,
     compression: Compression? = nil,
     encoding: Encoding? = nil
   ) throws -> Data {
@@ -114,7 +134,12 @@ public struct Codec: Sendable {
     case .gzip: try payload.gzipped()
     }
 
-    let header = FrameHeader(compression: comp, encoding: enc, payloadLength: UInt64(body.count))
+    let header = FrameHeader(
+      compression: comp,
+      encoding: enc,
+      priority: priority,
+      payloadLength: UInt64(body.count)
+    )
     var frame = header.write()
     frame.append(body)
     return frame

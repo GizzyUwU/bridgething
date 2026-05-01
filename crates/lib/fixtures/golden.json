@@ -29,9 +29,15 @@
         "description": "u8: 0x00 msgpack-named, 0x01 json"
       },
       {
-        "name": "reserved",
+        "name": "priority",
         "offset": 5,
-        "size": 3,
+        "size": 1,
+        "description": "u8: 0x00 normal, 0x01 bulk - sender hint for transport-level scheduling. Default zero on legacy senders is interpreted as normal."
+      },
+      {
+        "name": "reserved",
+        "offset": 6,
+        "size": 2,
         "description": "must be zero on encode, ignored on decode"
       },
       {
@@ -47,6 +53,7 @@
       "name": "bridge_to_gateway/version-event",
       "description": "daemon announcing its version + hardware metadata as an event",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -84,6 +91,7 @@
       "name": "bridge_to_gateway/ack-response",
       "description": "ack to a request - meta carries requestId, data is the unit Ack variant",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "type": "ack"
@@ -103,6 +111,7 @@
       "name": "bridge_to_gateway/done-response",
       "description": "completion response to a long-running command",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "type": "done"
@@ -122,6 +131,7 @@
       "name": "bridge_to_gateway/file-request-request",
       "description": "daemon requests a file from the gateway (browser fetched something we don't have)",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -144,6 +154,7 @@
       "name": "bridge_to_gateway/webapp-list-response",
       "description": "response to a webapp List request - bundles + their source",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -181,6 +192,7 @@
       "name": "bridge_to_gateway/webapp-active-response",
       "description": "response to a webapp GetActive request - currently active app name",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -206,6 +218,7 @@
       "name": "bridge_to_gateway/webapp-switched-response",
       "description": "broadcast event after the kiosk switches to a new webapp",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -228,6 +241,7 @@
       "name": "bridge_to_gateway/webapp-installed-response",
       "description": "response to an Install request - full metadata of the freshly installed app",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -255,6 +269,7 @@
       "name": "bridge_to_gateway/webapp-uninstalled-response",
       "description": "response to an Uninstall request - active webapp after the uninstall settled",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -280,6 +295,7 @@
       "name": "bridge_to_gateway/webapp-error-unknown",
       "description": "domain error: requested webapp is not installed and not built-in",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -308,6 +324,7 @@
       "name": "bridge_to_gateway/error-unsupported",
       "description": "protocol error: bridge does not implement this request variant",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -330,6 +347,7 @@
       "name": "bridge_to_gateway/error-handler-failed",
       "description": "protocol error: handler hit an unexpected internal failure",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -355,6 +373,7 @@
       "name": "bridge_to_gateway/forward-text-event",
       "description": "arbitrary text payload over the Forward escape hatch",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -375,6 +394,7 @@
       "name": "bridge_to_gateway/forward-json-event",
       "description": "arbitrary JSON payload over the Forward escape hatch",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -401,6 +421,7 @@
       "name": "bridge_to_gateway/forward-binary-event",
       "description": "raw bytes over the Forward escape hatch - verifies msgpack bin tag, not base64 string",
       "direction": "bridge_to_gateway",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -427,9 +448,40 @@
       "framed_hex": "dead020000000000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
     },
     {
+      "name": "bridge_to_gateway/forward-binary-bulk-event",
+      "description": "same Forward.Binary payload but framed on the Bulk priority lane - exercises the priority byte at header offset 5",
+      "direction": "bridge_to_gateway",
+      "priority": "bulk",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": [
+              137,
+              80,
+              78,
+              71,
+              13,
+              10,
+              26,
+              10
+            ],
+            "encoding": "binary"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead020000010000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
+    },
+    {
       "name": "gateway_to_bridge/version-event",
       "description": "phone announcing its gateway version",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -454,6 +506,7 @@
       "name": "gateway_to_bridge/file-response-response",
       "description": "gateway answering a fileRequest from the daemon - returns BridgeFile",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -491,6 +544,7 @@
       "name": "gateway_to_bridge/webapp-list-request",
       "description": "gateway asks the daemon to enumerate installed and built-in webapps",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -510,6 +564,7 @@
       "name": "gateway_to_bridge/webapp-get-active-request",
       "description": "gateway asks the daemon which webapp is currently active",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -529,6 +584,7 @@
       "name": "gateway_to_bridge/webapp-switch-to-command",
       "description": "gateway tells the daemon to swap the kiosk to a different webapp",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -551,6 +607,7 @@
       "name": "gateway_to_bridge/webapp-install-command",
       "description": "gateway uploads a zip archive containing a webapp bundle",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -583,6 +640,7 @@
       "name": "gateway_to_bridge/webapp-uninstall-command",
       "description": "gateway tells the daemon to remove a previously-installed webapp",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -605,6 +663,7 @@
       "name": "gateway_to_bridge/chrome-navigate-command",
       "description": "gateway driving the Car Thing chromium kiosk to a new URL",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -627,6 +686,7 @@
       "name": "gateway_to_bridge/forward-binary-event",
       "description": "gateway sending raw bytes through the Forward escape hatch",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {
@@ -653,9 +713,40 @@
       "framed_hex": "dead020000000000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
     },
     {
+      "name": "gateway_to_bridge/forward-binary-bulk-event",
+      "description": "Bulk-priority Forward.Binary from the gateway - the shape an OTA chunk push will take",
+      "direction": "gateway_to_bridge",
+      "priority": "bulk",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": [
+              137,
+              80,
+              78,
+              71,
+              13,
+              10,
+              26,
+              10
+            ],
+            "encoding": "binary"
+          },
+          "type": "forward"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead020000010000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
+    },
+    {
       "name": "gateway_to_bridge/error-malformed",
       "description": "protocol error: gateway could not decode the request the daemon sent",
       "direction": "gateway_to_bridge",
+      "priority": "normal",
       "decoded_json": {
         "data": {
           "data": {

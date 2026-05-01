@@ -1,11 +1,12 @@
 //! Linux i2c-dev transport for the MFi chip.
 
-use std::io;
-use std::path::{Path, PathBuf};
-use std::thread;
+use std::{
+  io,
+  path::{Path, PathBuf},
+  thread,
+};
 
-use i2cdev::core::I2CDevice;
-use i2cdev::linux::LinuxI2CDevice;
+use i2cdev::{core::I2CDevice, linux::LinuxI2CDevice};
 
 use super::{RETRY_DELAY, RETRY_LIMIT, Transport};
 use crate::error::TransportError;

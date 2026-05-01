@@ -1,6 +1,7 @@
 package dev.bridgething.gateway
 
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
+import dev.bridgething.schema.Priority
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
@@ -9,6 +10,11 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
+
+public fun Priority.toWireByte(): Byte = if (this == Priority.Bulk) 0x01 else 0x00
+
+public fun priorityFromWireByte(b: Byte): Priority =
+  if (b == 0x01.toByte()) Priority.Bulk else Priority.Normal
 
 public enum class Compression(public val byte: Byte) {
   NONE(0x00),
@@ -44,11 +50,12 @@ public sealed class CodecException(message: String) : RuntimeException(message) 
 /**
  * 16-byte wire header.
  *
- * `| magic u16 BE | version u8 | compression u8 | encoding u8 | reserved [3]u8 | length u64 BE |`
+ * `| magic u16 BE | version u8 | compression u8 | encoding u8 | priority u8 | reserved [2]u8 | length u64 BE |`
  */
 public data class FrameHeader(
   val compression: Compression,
   val encoding: Encoding,
+  val priority: Priority,
   val payloadLength: Long,
 ) {
   public companion object {
@@ -65,9 +72,10 @@ public data class FrameHeader(
       if (ver != VERSION) throw CodecException.UnsupportedVersion(ver)
       val compression = Compression.fromByte(buf.get())
       val encoding = Encoding.fromByte(buf.get())
-      buf.position(buf.position() + 3) // reserved
+      val priority = priorityFromWireByte(buf.get())
+      buf.position(buf.position() + 2) // reserved
       val length = buf.long
-      return FrameHeader(compression, encoding, length)
+      return FrameHeader(compression, encoding, priority, length)
     }
   }
 
@@ -77,7 +85,8 @@ public data class FrameHeader(
     buf.put(VERSION)
     buf.put(compression.byte)
     buf.put(encoding.byte)
-    buf.put(byteArrayOf(0, 0, 0)) // reserved
+    buf.put(priority.toWireByte())
+    buf.put(byteArrayOf(0, 0)) // reserved
     buf.putLong(payloadLength)
     return buf.array()
   }
@@ -102,6 +111,7 @@ public class Codec(
   public fun <T> encode(
     serializer: SerializationStrategy<T>,
     message: T,
+    priority: Priority = Priority.Normal,
     compression: Compression = defaultCompression,
     encoding: Encoding = defaultEncoding,
   ): ByteArray {
@@ -113,7 +123,7 @@ public class Codec(
       Compression.NONE -> payload
       Compression.GZIP -> gzip(payload)
     }
-    val header = FrameHeader(compression, encoding, body.size.toLong())
+    val header = FrameHeader(compression, encoding, priority, body.size.toLong())
     return header.write() + body
   }
 

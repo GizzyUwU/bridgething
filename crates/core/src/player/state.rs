@@ -3,9 +3,8 @@ use libbridgething::{
   server::ServerPlayerEvent,
 };
 
-use crate::http::ClientMan;
-
 use super::{PlayerResult, dbus::DBusPlayerEvent};
+use crate::http::ClientMan;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum RepeatState {

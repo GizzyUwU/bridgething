@@ -20,8 +20,10 @@
 use std::collections::HashMap;
 
 use bluer::Address;
-use libbridgething::server::{GatewayStatus, ServerBluetoothEvent, ServerPeerEvent};
-use libbridgething::{Device, Peer, PeerCompanionStatus, PeerIap2Status, ServerEventType};
+use libbridgething::{
+  Device, Peer, PeerCompanionStatus, PeerIap2Status, ServerEventType,
+  server::{GatewayStatus, ServerBluetoothEvent, ServerPeerEvent},
+};
 use tokio::sync::RwLock;
 
 use crate::http::{ClientMan, WSError};

@@ -11,26 +11,28 @@ mod common;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bridgething_iap2::csm::auth::{
-  AuthenticationCertificate, AuthenticationFailed, AuthenticationResponse, AuthenticationSucceeded,
-  RequestAuthenticationCertificate, RequestAuthenticationChallengeResponse,
+use bridgething_iap2::{
+  ControlBits, Iap2Session, LinkCodec, LinkPacket, MfiAccess, SessionEvent,
+  csm::{
+    CsmCodec, CsmFrame,
+    auth::{
+      AuthenticationCertificate, AuthenticationFailed, AuthenticationResponse, AuthenticationSucceeded,
+      RequestAuthenticationCertificate, RequestAuthenticationChallengeResponse,
+    },
+    identification::{
+      CarthingIdentification, IdentificationAccepted, IdentificationConfig, IdentificationInformation,
+      IdentificationRejected, StartIdentification,
+    },
+  },
 };
-use bridgething_iap2::csm::identification::{
-  CarthingIdentification, IdentificationAccepted, IdentificationConfig, IdentificationInformation,
-  IdentificationRejected, StartIdentification,
-};
-use bridgething_iap2::csm::{CsmCodec, CsmFrame};
-use bridgething_iap2::{ControlBits, Iap2Session, LinkCodec, LinkPacket, MfiAccess, SessionEvent};
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::{Bytes, BytesMut};
-use tokio::io::DuplexStream;
-use tokio::sync::mpsc;
-use tokio_util::codec::{Decoder, Encoder};
-
 use common::{
   LspBuilder, PEER_INITIAL_PSN, drive_peer_handshake, fast_link_config, read_link, recv_with_timeout, spawn_link,
   write_link,
 };
+use tokio::{io::DuplexStream, sync::mpsc};
+use tokio_util::codec::{Decoder, Encoder};
 
 const CONTROL_SESSION_ID: u8 = 1;
 

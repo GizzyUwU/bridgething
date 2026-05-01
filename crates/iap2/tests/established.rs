@@ -9,14 +9,11 @@ use std::time::Duration;
 
 use bridgething_iap2::{ControlBits, Error, Iap2Command, Iap2Event, LINK_HEADER_LEN, LinkCodec, LinkPacket};
 use bytes::{Bytes, BytesMut};
-use tokio::io::DuplexStream;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
-
 use common::{
   LspBuilder, PEER_INITIAL_PSN, drive_peer_handshake, fast_link_config, read_link, recv_with_timeout, spawn_link,
   write_link,
 };
+use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 
 const SESSION_ID: u8 = 1;
 

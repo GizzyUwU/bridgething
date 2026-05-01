@@ -11,15 +11,11 @@
 //! Defaults: `0.0.0.0:9090 /dev/i2c-3 0x10`. The follower address may be
 //! passed as decimal or `0x`-prefixed hex.
 
-use std::env;
-use std::net::TcpListener;
-use std::path::PathBuf;
-use std::process::ExitCode;
-
-use tracing::{error, info};
+use std::{env, net::TcpListener, path::PathBuf, process::ExitCode};
 
 #[cfg(target_os = "linux")]
 use bridgething_mfi::{LinuxI2c, LinuxI2cConfig, serve_remote};
+use tracing::{error, info};
 
 const DEFAULT_BIND: &str = "0.0.0.0:9090";
 const DEFAULT_DEVICE: &str = "/dev/i2c-3";

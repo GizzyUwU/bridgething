@@ -5,8 +5,7 @@
 //! [`MfiAuth<RemoteI2c>`] from the main thread. Exercises the full
 //! request/response shape for every wire op.
 
-use std::net::TcpListener;
-use std::thread;
+use std::{net::TcpListener, thread};
 
 use bridgething_mfi::{
   CHALLENGE_LEN, Error, MfiAuth, MockTransport, RESPONSE_LEN, RemoteI2c, SERIAL_LEN, serve_remote,

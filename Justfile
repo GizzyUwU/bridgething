@@ -39,6 +39,9 @@ build:
   cargo build
   bun run build
 
+fmt:
+  cargo +nightly fmt
+
 gateway:
   bun run build -- --filter=@bridgething/gateway
   bun run gateway:example:dev

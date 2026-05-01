@@ -4,12 +4,11 @@ use libbridgething::gateway::{
 };
 use uuid::Uuid;
 
+use super::GatewayHandler;
 use crate::{
   bluetooth::{BluetoothMan, GatewayMessage, GatewayType},
   state::State,
 };
-
-use super::GatewayHandler;
 
 #[derive(Debug)]
 pub struct MsgHandle {

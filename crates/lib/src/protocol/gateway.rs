@@ -7,12 +7,12 @@ use tokio_util::{
 };
 use tracing;
 
-use crate::{
-  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{Compression, Encoding, mbps},
-};
-
 use super::{COMPRESSION_GZIP, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
+use crate::{
+  Priority,
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
+  protocol::{Compression, Encoding, PrioritizedFrame, mbps},
+};
 
 #[derive(Debug, Default)]
 pub struct GatewayEndec {
@@ -20,7 +20,7 @@ pub struct GatewayEndec {
 }
 
 impl Decoder for GatewayEndec {
-  type Item = BridgeToGatewayMsg;
+  type Item = PrioritizedFrame<BridgeToGatewayMsg>;
   type Error = EndecError;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -55,10 +55,11 @@ impl Decoder for GatewayEndec {
 
       state.compression = src[3].into();
       state.encoding = src[4].into();
-      // src[5..8] reserved
+      state.priority = Priority::from_byte(src[5]);
+      // src[6..8] reserved
       state.length = u64::from_be_bytes(src[8..16].try_into().unwrap());
       state.total_length = HEADER_LEN + state.length as usize;
-      tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "message length {}, compression {:?}, encoding {:?}", state.length, state.compression, state.encoding);
+      tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "message length {}, compression {:?}, encoding {:?}, priority {:?}", state.length, state.compression, state.encoding, state.priority);
     }
 
     if src.len() < state.total_length {
@@ -82,7 +83,7 @@ impl Decoder for GatewayEndec {
     };
 
     tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "deserializing message with {} bytes", payload.len());
-    let msg: Self::Item = match state.encoding {
+    let msg: BridgeToGatewayMsg = match state.encoding {
       Encoding::Msgpack => rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?,
       Encoding::Json => serde_json::from_slice(&payload).map_err(EndecError::Json)?,
     };
@@ -94,8 +95,9 @@ impl Decoder for GatewayEndec {
       tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "transfer rate: {:.2}mbps, effective rate: {:.2}mbps", mbps(elapsed_time, state.total_length as f64), mbps(elapsed_time, (HEADER_LEN + payload.len()) as f64));
     }
 
+    let priority = state.priority;
     self.state = None;
-    Ok(Some(msg))
+    Ok(Some(PrioritizedFrame { priority, msg }))
   }
 }
 
@@ -103,10 +105,18 @@ impl Encoder<GatewayToBridgeMsg> for GatewayEndec {
   type Error = EndecError;
 
   fn encode(&mut self, item: GatewayToBridgeMsg, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    self.encode(PrioritizedFrame::normal(item), dst)
+  }
+}
+
+impl Encoder<PrioritizedFrame<GatewayToBridgeMsg>> for GatewayEndec {
+  type Error = EndecError;
+
+  fn encode(&mut self, item: PrioritizedFrame<GatewayToBridgeMsg>, dst: &mut BytesMut) -> Result<(), Self::Error> {
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serializing message");
     // rmp-serde to_vec_named keeps field-name metadata in the wire so polyglot
     // decoders (Swift / Kotlin / TS) don't depend on Rust struct field order.
-    let packed = rmp_serde::to_vec_named(&item).map_err(EndecError::RmpSerialization)?;
+    let packed = rmp_serde::to_vec_named(&item.msg).map_err(EndecError::RmpSerialization)?;
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serialized to {} bytes", packed.len());
 
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "compressing with gzip");
@@ -114,13 +124,14 @@ impl Encoder<GatewayToBridgeMsg> for GatewayEndec {
     encoder.write_all(&packed)?;
     let compressed = encoder.finish()?;
     let len = compressed.len() as u64;
-    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "compressed to {} bytes", len);
+    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "compressed to {} bytes, priority {:?}", len, item.priority);
 
     dst.put_u16(MAGIC);
     dst.put_u8(VERSION);
     dst.put_u8(COMPRESSION_GZIP);
     dst.put_u8(ENCODING_MSGPACK);
-    dst.put_bytes(0, 3); // reserved
+    dst.put_u8(item.priority.as_byte());
+    dst.put_bytes(0, 2); // reserved
     dst.put_u64(len);
 
     dst.extend_from_slice(&compressed);

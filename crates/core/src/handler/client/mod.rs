@@ -19,9 +19,8 @@ pub use handle::*;
 mod msg;
 pub use msg::*;
 
-use crate::{bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend};
-
 use super::HandlerResult;
+use crate::{bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend};
 
 /// Run a handler future on a fresh task; if it errors, log it AND surface it
 /// to the requesting webapp as a typed protocol-level Error so the caller

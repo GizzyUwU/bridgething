@@ -9,14 +9,15 @@
 
 use tokio::sync::mpsc;
 
-use crate::csm::{
-  CsmFrame,
-  now_playing::{NowPlayingUpdate, StartNowPlayingUpdates},
-};
-use crate::error::Result;
-use crate::link::Iap2Command;
-
 use super::{SessionEvent, emit, send_csm};
+use crate::{
+  csm::{
+    CsmFrame,
+    now_playing::{NowPlayingUpdate, StartNowPlayingUpdates},
+  },
+  error::Result,
+  link::Iap2Command,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NowPlayingState {

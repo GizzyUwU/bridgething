@@ -2,9 +2,8 @@ use std::collections::HashMap;
 
 use libbridgething::{client::ClientLegacyStockCommand, stock::StockSetPreset};
 
-use crate::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
-
 use super::{HandlerResult, MsgHandle};
+use crate::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
 
 #[derive(Debug)]
 pub struct LegacyStockHandler {

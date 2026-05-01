@@ -75,14 +75,20 @@ pub trait BridgeRequest: Into<BridgeToGatewayMsgData> {
 #[macro_export]
 macro_rules! impl_gateway_request {
   (
-    request: $req:ty,
-    response: $resp:ty,
-    error: $err:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr,
-    extract_error: $err_pat:pat => $err_extract:expr,
-    encode_error: $err_id:ident => $err_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,error:
+    $err:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr,extract_error:
+    $err_pat:pat =>
+    $err_extract:expr,encode_error:
+    $err_id:ident =>
+    $err_wrap:expr $(,)?
   ) => {
     impl $crate::gateway::GatewayRequest for $req {
       type Response = $resp;
@@ -118,11 +124,15 @@ macro_rules! impl_gateway_request {
   };
 
   (
-    request: $req:ty,
-    response: $resp:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr $(,)?
   ) => {
     impl $crate::gateway::GatewayRequest for $req {
       type Response = $resp;
@@ -162,14 +172,20 @@ macro_rules! impl_gateway_request {
 #[macro_export]
 macro_rules! impl_bridge_request {
   (
-    request: $req:ty,
-    response: $resp:ty,
-    error: $err:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr,
-    extract_error: $err_pat:pat => $err_extract:expr,
-    encode_error: $err_id:ident => $err_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,error:
+    $err:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr,extract_error:
+    $err_pat:pat =>
+    $err_extract:expr,encode_error:
+    $err_id:ident =>
+    $err_wrap:expr $(,)?
   ) => {
     impl $crate::gateway::BridgeRequest for $req {
       type Response = $resp;
@@ -205,11 +221,15 @@ macro_rules! impl_bridge_request {
   };
 
   (
-    request: $req:ty,
-    response: $resp:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr $(,)?
   ) => {
     impl $crate::gateway::BridgeRequest for $req {
       type Response = $resp;

@@ -109,6 +109,30 @@ data class ChromeNavigate (
 )
 
 @Serializable
+enum class DeviceType(val string: String) {
+	@SerialName("android")
+	Android("android"),
+	@SerialName("iOS")
+	Ios("iOS"),
+	@SerialName("windows")
+	Windows("windows"),
+	@SerialName("macOS")
+	MacOS("macOS"),
+	@SerialName("linux")
+	Linux("linux"),
+	@SerialName("unknown")
+	Unknown("unknown"),
+}
+
+@Serializable
+data class Device (
+	val name: String,
+	val type: DeviceType,
+	val mac: String,
+	val default: Boolean
+)
+
+@Serializable
 data class FileRequestData (
 	val file: String
 )
@@ -147,7 +171,7 @@ sealed class GatewayToBridgeMsgData {
 	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("nowPlayingUpdate")
-	data class NowPlayingUpdate(val data: NowPlayingUpdate): GatewayToBridgeMsgData()
+	data class NowPlayingUpdate(val data: dev.bridgething.schema.NowPlayingUpdate): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("error")
 	data class Error(val data: GatewayError): GatewayToBridgeMsgData()
@@ -340,7 +364,7 @@ sealed class BridgeToGatewayWebappMsg {
 	/// CannotUninstallBuiltin)
 	@Serializable
 	@SerialName("webappError")
-	data class WebappError(val data: WebappError): BridgeToGatewayWebappMsg()
+	data class WebappError(val data: dev.bridgething.schema.WebappError): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -467,6 +491,21 @@ enum class PhoneCallStatus(val string: String) {
 	Held("Held"),
 	@SerialName("Disconnecting")
 	Disconnecting("Disconnecting"),
+}
+
+@Serializable
+enum class Priority(val string: String) {
+	@SerialName("normal")
+	Normal("normal"),
+	@SerialName("bulk")
+	Bulk("bulk"),
+}
+
+@Serializable(with = ServerPeerEventSerializer::class)
+sealed class ServerPeerEvent {
+	@Serializable
+	@SerialName("snapshot")
+	data class Snapshot(val data: HashMap<String, Peer>): ServerPeerEvent()
 }
 
 /// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum

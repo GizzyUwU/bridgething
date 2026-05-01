@@ -1,7 +1,8 @@
-use super::{BluetoothError, BluetoothResult, profiles::ProfileMan};
 use bluer::{Adapter, AdapterEvent, Session};
 use futures::{Stream, StreamExt};
 use tokio::task::JoinHandle;
+
+use super::{BluetoothError, BluetoothResult, profiles::ProfileMan};
 
 pub struct AdapterEventStream(pub Box<dyn Stream<Item = AdapterEvent> + Send + Unpin>);
 impl AdapterEventStream {

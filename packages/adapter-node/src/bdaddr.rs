@@ -16,9 +16,11 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 // ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Debug, Display, Formatter, LowerHex, UpperHex};
-use std::str::FromStr;
+use std::{
+  convert::{TryFrom, TryInto},
+  fmt::{self, Debug, Display, Formatter, LowerHex, UpperHex},
+  str::FromStr,
+};
 
 /// Stores the 6 byte address used to identify Bluetooth devices.
 #[derive(Copy, Clone, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -223,8 +225,8 @@ pub mod serde {
     de::{Deserialize, Deserializer, Error as DeError, Visitor},
     ser::{Serialize, Serializer},
   };
-  // use serde_cr as serde;
 
+  // use serde_cr as serde;
   use super::*;
 
   impl Serialize for BDAddr {

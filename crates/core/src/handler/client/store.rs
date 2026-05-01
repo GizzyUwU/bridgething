@@ -3,9 +3,8 @@ use libbridgething::{
   server::StorageResponse,
 };
 
-use crate::stock::StockSetupSend;
-
 use super::{HandlerResult, MsgHandle};
+use crate::stock::StockSetupSend;
 
 #[derive(Debug)]
 pub struct StorageHandler {

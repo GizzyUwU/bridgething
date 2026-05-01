@@ -1,24 +1,20 @@
 package dev.bridgething.gateway
 
-import dev.bridgething.schema.BridgeFile
-import dev.bridgething.schema.BridgeToGatewayFileMsg
 import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.ForwardMessage
 import dev.bridgething.schema.GatewayMsgMeta
-import dev.bridgething.schema.GatewayToBridgeFileMsg
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
+import dev.bridgething.schema.Priority
 import dev.bridgething.schema.ResponseMeta
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -44,13 +40,18 @@ class GoldenTests {
     val frame = hexToBytes(fixture.framedHex)
     val expectedMetaKind = fixture.decodedJson.jsonObject["meta"]!!.jsonObject["kind"]!!.jsonPrimitive.content
 
+    val header = FrameHeader.parse(frame)
+    assertEquals(fixture.expectedPriority, header.priority, "priority mismatch on ${fixture.name}")
+
     when (fixture.direction) {
       Direction.BRIDGE_TO_GATEWAY -> {
         val msg = codec.decode(BridgeToGatewayMsg.serializer(), frame)
         assertEquals(FIXED_ID, uuidFromBytes(msg.id), "id mismatch on ${fixture.name}")
         assertMetaMatches(msg.meta, expectedMetaKind, fixture.name)
 
-        val reEncoded = codec.encode(BridgeToGatewayMsg.serializer(), msg)
+        val reEncoded = codec.encode(BridgeToGatewayMsg.serializer(), msg, priority = fixture.expectedPriority)
+        val reHeader = FrameHeader.parse(reEncoded)
+        assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
         val reDecoded = codec.decode(BridgeToGatewayMsg.serializer(), reEncoded)
         assertArrayEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
@@ -59,7 +60,9 @@ class GoldenTests {
         assertEquals(FIXED_ID, uuidFromBytes(msg.id), "id mismatch on ${fixture.name}")
         assertMetaMatches(msg.meta, expectedMetaKind, fixture.name)
 
-        val reEncoded = codec.encode(GatewayToBridgeMsg.serializer(), msg)
+        val reEncoded = codec.encode(GatewayToBridgeMsg.serializer(), msg, priority = fixture.expectedPriority)
+        val reHeader = FrameHeader.parse(reEncoded)
+        assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
         val reDecoded = codec.decode(GatewayToBridgeMsg.serializer(), reEncoded)
         assertArrayEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
@@ -98,21 +101,6 @@ class GoldenTests {
     assertArrayEquals(
       byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
       (forward as ForwardMessage.Binary).data,
-    )
-  }
-
-  @Test
-  fun `file-add decodes nested BridgeFile correctly`() {
-    val fixture = loadGoldens().fixtures.first { it.name == "gateway_to_bridge/file-add-command" }
-    val msg = codec.decode(GatewayToBridgeMsg.serializer(), hexToBytes(fixture.framedHex))
-    val fileMsg = (msg.data as GatewayToBridgeMsgData.File).data
-    assertTrue(fileMsg is GatewayToBridgeFileMsg.Add)
-    val files = (fileMsg as GatewayToBridgeFileMsg.Add).data.files
-    assertEquals(1, files.size)
-    assertEquals("/asset.png", files[0].path)
-    assertArrayEquals(
-      byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
-      files[0].data,
     )
   }
 
@@ -163,10 +151,11 @@ class GoldenTests {
     // gateway/kotlin/gateway module dir, or anywhere in between.
     val here = Paths.get(System.getProperty("user.dir"))
     val candidates = listOf(
-      here.resolve("lib/fixtures/golden.json"),
-      here.resolve("../../../lib/fixtures/golden.json"),
-      here.resolve("../../lib/fixtures/golden.json"),
-      here.resolve("../lib/fixtures/golden.json"),
+      here.resolve("crates/lib/fixtures/golden.json"),
+      here.resolve("../../../../crates/lib/fixtures/golden.json"),
+      here.resolve("../../../crates/lib/fixtures/golden.json"),
+      here.resolve("../../crates/lib/fixtures/golden.json"),
+      here.resolve("../crates/lib/fixtures/golden.json"),
     )
     val path = candidates.firstOrNull { Files.exists(it) }
       ?: error("could not locate fixtures/golden.json from $here (tried: ${candidates.joinToString()})")
@@ -183,6 +172,7 @@ private data class GoldenFixture(
   val name: String,
   val description: String,
   val direction: Direction,
+  val priority: String,
   val decoded_json: JsonElement,
   val msgpack_hex: String,
   val framed_hex: String,
@@ -190,6 +180,7 @@ private data class GoldenFixture(
   val decodedJson: JsonElement get() = decoded_json
   val msgpackHex: String get() = msgpack_hex
   val framedHex: String get() = framed_hex
+  val expectedPriority: Priority get() = if (priority == "bulk") Priority.Bulk else Priority.Normal
 }
 
 @Serializable

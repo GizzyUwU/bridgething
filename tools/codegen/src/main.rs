@@ -1,5 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+  path::{Path, PathBuf},
+  process::Command,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use syn::{Item, Meta};
@@ -134,6 +136,27 @@ fn patch_kotlin(input: &str, adjacent_tagged: &[String]) -> Result<String> {
     ));
   }
   out = out.replace(json_pattern, json_replacement);
+
+  // Kotlin scopes the variant's name above its sibling sealed-class
+  // peers, so `data class WebappError(val data: WebappError)` makes the
+  // inner type recursively resolve to the variant itself instead of the
+  // package-level `WebappError` sealed class. Fully-qualify any
+  // self-shadowing variant payload so it points at the outer type.
+  // Match `data class X(val data: Y):` and rewrite when X == Y.
+  let self_shadow = regex::Regex::new(r"(?m)^(\tdata class (\w+)\(val data: )(\w+)(\): )")?;
+  out = self_shadow
+    .replace_all(&out, |caps: &regex::Captures| {
+      let prefix = &caps[1];
+      let variant = &caps[2];
+      let payload = &caps[3];
+      let suffix = &caps[4];
+      if variant == payload {
+        format!("{prefix}{KOTLIN_PACKAGE}.{payload}{suffix}")
+      } else {
+        format!("{prefix}{payload}{suffix}")
+      }
+    })
+    .into_owned();
 
   Ok(out)
 }

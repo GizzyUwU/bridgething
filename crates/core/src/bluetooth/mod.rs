@@ -1,3 +1,15 @@
+
+use std::sync::Arc;
+
+use ble::GattServer;
+use bluer::{Adapter, Address, Session, agent::AgentHandle};
+use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager};
+use libbridgething::{
+  ForwardMessage, Priority,
+  gateway::{BridgeToGatewayMsg, FileRequestData, GatewayMsgMeta, GatewayToBridgeMsg},
+};
+use tokio::task::JoinHandle;
+
 // protocol modules
 mod ble;
 mod iap2;
@@ -9,28 +21,22 @@ mod adapter;
 mod auth;
 #[cfg(debug_assertions)]
 mod debug;
+mod packer;
+
+
+pub(crate) use packer::OutboundPacker;
+use profiles::ProfileMan;
 
 // reexports // TODO: review these
 pub use profiles::avrcp;
 use rfcomm::RfcommGateway;
 
-use std::sync::Arc;
 
 use crate::{
   http::WSError,
   player::PlayerError,
   state::{FileRequestTx, State, StateError},
 };
-use ble::GattServer;
-use bluer::{Adapter, Address, Session, agent::AgentHandle};
-use iap2::Iap2Manager;
-use libbridgething::gateway::FileRequestData;
-use libbridgething::{
-  ForwardMessage,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
-};
-use profiles::ProfileMan;
-use tokio::task::JoinHandle;
 
 pub type BluetoothMan = Arc<BluetoothManager>;
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
@@ -88,20 +94,20 @@ impl BluetoothManager {
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let _iap2_handle = match Iap2Manager::init(&session, &state, profile_man.clone()).await? {
-      Some(manager) => Some(manager.spawn()),
-      None => {
-        tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-        None
-      }
-    };
+    let _iap2_handle =
+      match Iap2Manager::init(&session, &state, profile_man.clone(), gateway_man.iap2_ea_handle()).await? {
+        Some(manager) => Some(manager.spawn()),
+        None => {
+          tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
+          None
+        }
+      };
 
     // if we had a bdedr device with profile connections, try to reconnect
-    if let Some(last) = state.last_device().await {
-      if let Ok(mac) = last.parse() {
+    if let Some(last) = state.last_device().await
+      && let Ok(mac) = last.parse() {
         tokio::spawn(profiles::connect_profiles(profile_man.clone(), mac, None));
       };
-    }
 
     Ok(Arc::new(Self {
       session,
@@ -136,18 +142,25 @@ impl BluetoothManager {
 pub enum GatewayType {
   Ble,
   Rfcomm,
+  Iap2Ea,
 }
 
 #[derive(Debug, Clone)]
 pub struct GatewayMessage<T: Clone> {
   pub address: Option<Address>,
   pub protocol: GatewayType,
+  pub priority: Priority,
   pub msg: T,
 }
 
 impl<T: Clone> GatewayMessage<T> {
   pub fn new(address: Option<Address>, protocol: GatewayType, msg: T) -> Self {
-    Self { address, protocol, msg }
+    Self {
+      address,
+      protocol,
+      priority: Priority::Normal,
+      msg,
+    }
   }
 
   pub fn all(protocol: GatewayType, msg: T) -> Self {
@@ -169,6 +182,15 @@ impl<T: Clone> GatewayMessage<T> {
   pub fn rfcomm_all(msg: T) -> Self {
     Self::new(None, GatewayType::Rfcomm, msg)
   }
+
+  pub fn with_priority(mut self, priority: Priority) -> Self {
+    self.priority = priority;
+    self
+  }
+
+  pub fn bulk(self) -> Self {
+    self.with_priority(Priority::Bulk)
+  }
 }
 
 pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayMessage<GatewayToBridgeMsg>>;
@@ -185,6 +207,9 @@ pub struct GatewayMan {
 
   ble: Option<GatewayCon>,
   rfcomm: GatewayCon,
+  iap2_ea_send_tx: GatewaySendTx,
+  iap2_ea_handle: Iap2EaGatewayHandle,
+  _iap2_ea_handle: JoinHandle<()>,
 }
 
 impl GatewayMan {
@@ -202,6 +227,10 @@ impl GatewayMan {
     };
     let rfcomm = GatewayCon::init(&adapter, session, state.clone(), GatewayType::Rfcomm, tx.clone()).await?;
 
+    let (iap2_ea, iap2_ea_handle) = Iap2EaGateway::init(state.clone(), tx.clone());
+    let iap2_ea_send_tx = iap2_ea.send_tx();
+    let _iap2_ea_handle = iap2_ea.spawn();
+
     Ok(Self {
       adapter,
       state,
@@ -210,7 +239,14 @@ impl GatewayMan {
 
       ble,
       rfcomm,
+      iap2_ea_send_tx,
+      iap2_ea_handle,
+      _iap2_ea_handle,
     })
+  }
+
+  pub fn iap2_ea_handle(&self) -> Iap2EaGatewayHandle {
+    self.iap2_ea_handle.clone()
   }
 
   pub async fn send_all(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
@@ -220,6 +256,11 @@ impl GatewayMan {
         None => tracing::trace!("dropping ble send: ble gateway not initialized"),
       },
       GatewayType::Rfcomm => self.rfcomm.send(data).await,
+      GatewayType::Iap2Ea => {
+        if let Err(err) = self.iap2_ea_send_tx.send(data).await {
+          tracing::error!(?err, "failed to send to iap2 ea gateway");
+        }
+      }
     }
   }
 
@@ -264,6 +305,7 @@ impl GatewayCon {
     let _handle = match gateway_type {
       GatewayType::Ble => GattServer::init(adapter, state, recv_tx, notify_rx).await?.spawn(),
       GatewayType::Rfcomm => RfcommGateway::init(session, state, recv_tx, notify_rx).await?.spawn(),
+      GatewayType::Iap2Ea => unreachable!("Iap2Ea is initialized via Iap2EaGateway, not GatewayCon"),
     };
 
     let _listener = Self::spawn_listener(gateway_type, rx, bluetooth_tx);

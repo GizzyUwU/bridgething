@@ -4,24 +4,35 @@ use bluer::{
   Address, Session,
   rfcomm::{self, ConnectRequest, Profile, ProfileHandle, Stream},
 };
-use futures::{
-  SinkExt, StreamExt,
-  stream::{SplitSink, SplitStream},
-};
+use futures::StreamExt;
 use libbridgething::{
-  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus,
+  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
-  protocol::BridgeEndec,
+  protocol::{BridgeEndec, PrioritizedFrame},
 };
-use tokio::task::JoinHandle;
-use tokio_util::codec::Framed;
-
-use crate::{
-  bluetooth::{GatewayMessage, GatewayType},
-  state::State,
+use tokio::{
+  io::{AsyncWriteExt, ReadHalf, WriteHalf},
+  sync::mpsc,
+  task::JoinHandle,
+};
+use tokio_util::{
+  bytes::{Bytes, BytesMut},
+  codec::{Encoder, FramedRead},
 };
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
+use crate::{
+  bluetooth::{GatewayMessage, GatewayType, OutboundPacker},
+  state::State,
+};
+
+/// Soft cap on a single batched write. RFCOMM transparently segments
+/// at L2CAP so this is purely about how many small frames the packer
+/// coalesces per writer-task tick. Big enough to amortize Normal-Bulk
+/// preemption overhead, small enough that the packer doesn't hog the
+/// writer task across many milliseconds of throughput.
+const RFCOMM_BATCH_BYTES: usize = 4 * 1024;
+const LANE_CAPACITY: usize = 16;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -36,39 +47,59 @@ impl From<GatewayToBridgeMsg> for ConnectionMessage {
   }
 }
 
-type ConnectionTx = tokio::sync::mpsc::Sender<(Address, ConnectionMessage)>;
-type ConnectionRx = tokio::sync::mpsc::Receiver<(Address, ConnectionMessage)>;
+type ConnectionTx = mpsc::Sender<(Address, ConnectionMessage)>;
+type ConnectionRx = mpsc::Receiver<(Address, ConnectionMessage)>;
 
 #[derive(Debug)]
 struct Connection {
   address: Address,
-  writer: SplitSink<Framed<Stream, BridgeEndec>, BridgeToGatewayMsg>,
+  normal_tx: mpsc::Sender<Bytes>,
+  bulk_tx: mpsc::Sender<Bytes>,
+  _writer_handle: JoinHandle<()>,
   _reader_handle: JoinHandle<()>,
 }
 
 impl Connection {
   fn new(address: Address, stream: Stream, tx: ConnectionTx) -> Self {
-    let framed = Framed::new(stream, BridgeEndec::default());
-    let (writer, reader) = framed.split();
+    let (read_half, write_half) = tokio::io::split(stream);
+    let reader = FramedRead::new(read_half, BridgeEndec::default());
     let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
+
+    let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
+    let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
+    let packer = OutboundPacker::new(normal_rx, bulk_rx, RFCOMM_BATCH_BYTES);
+    let _writer_handle = tokio::spawn(writer_task(address, write_half, packer));
+
     Self {
       address,
-      writer,
+      normal_tx,
+      bulk_tx,
+      _writer_handle,
       _reader_handle,
     }
   }
 
-  async fn send(&mut self, msg: BridgeToGatewayMsg) -> BluetoothResult<()> {
-    tracing::trace!("({}) sending rfcomm message: {:?}", self.address, msg);
-    Ok(self.writer.send(msg).await?)
+  async fn send(&self, msg: BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
+    tracing::trace!("({}) sending rfcomm message ({:?}): {:?}", self.address, priority, msg);
+    let mut buf = BytesMut::new();
+    BridgeEndec::default().encode(PrioritizedFrame { priority, msg }, &mut buf)?;
+    let bytes = buf.freeze();
+    let lane = match priority {
+      Priority::Normal => &self.normal_tx,
+      Priority::Bulk => &self.bulk_tx,
+    };
+    if lane.send(bytes).await.is_err() {
+      tracing::debug!("({}) rfcomm writer lane closed; dropping frame", self.address);
+    }
+    Ok(())
   }
 }
 
-async fn reader_task(address: Address, mut reader: SplitStream<Framed<Stream, BridgeEndec>>, tx: ConnectionTx) {
+async fn reader_task(address: Address, mut reader: FramedRead<ReadHalf<Stream>, BridgeEndec>, tx: ConnectionTx) {
   while let Some(frame) = reader.next().await {
     match frame {
-      Ok(msg) => {
-        if let Err(e) = tx.send((address, msg.into())).await {
+      Ok(frame) => {
+        if let Err(e) = tx.send((address, frame.msg.into())).await {
           tracing::error!("({address}) failed to forward gateway message: {:?}", e);
         }
       }
@@ -83,6 +114,20 @@ async fn reader_task(address: Address, mut reader: SplitStream<Framed<Stream, Br
   if let Err(e) = tx.send((address, ConnectionMessage::Close)).await {
     tracing::error!("({address}) failed to send close message: {:?}", e);
   }
+}
+
+async fn writer_task(address: Address, mut writer: WriteHalf<Stream>, mut packer: OutboundPacker) {
+  while let Some(batch) = packer.next_batch().await {
+    if let Err(err) = writer.write_all(&batch).await {
+      tracing::debug!("({address}) rfcomm write error: {:?}", err);
+      break;
+    }
+    if let Err(err) = writer.flush().await {
+      tracing::debug!("({address}) rfcomm flush error: {:?}", err);
+      break;
+    }
+  }
+  tracing::debug!("({address}) rfcomm writer task exiting");
 }
 
 #[derive(Debug)]
@@ -117,7 +162,7 @@ impl RfcommGateway {
     };
 
     let handle = session.register_profile(profile).await?;
-    let (conn_tx, conn_rx) = tokio::sync::mpsc::channel(16);
+    let (conn_tx, conn_rx) = mpsc::channel(16);
 
     Ok(Self {
       state,
@@ -148,18 +193,18 @@ impl RfcommGateway {
         },
         Some(data) = self.send_rx.recv() => {
           tracing::trace!("rfcomm gateway received message: {:?}", data);
-          if let Some(address) = data.address {
-            if let Some(conn) = self.connections.get_mut(&address) {
-              if let Err(e) = conn.send(data.msg).await {
+          let GatewayMessage { address, priority, msg, .. } = data;
+          if let Some(address) = address {
+            if let Some(conn) = self.connections.get(&address) {
+              if let Err(e) = conn.send(msg, priority).await {
                 tracing::error!("failed to send rfcomm frame: {:?}", e);
               }
             } else {
               tracing::warn!("rfcomm connection not found for address: {:?}", address);
             }
           } else {
-            // send bridge message to all connected peers
-            for conn in self.connections.values_mut() {
-              if let Err(e) = conn.writer.send(data.msg.clone()).await {
+            for conn in self.connections.values() {
+              if let Err(e) = conn.send(msg.clone(), priority).await {
                 tracing::error!("failed to send rfcomm frame: {:?}", e);
               }
             }
@@ -195,13 +240,16 @@ impl RfcommGateway {
     let stream = request.accept()?;
     tracing::debug!("rfcomm accepted connection from: {address}");
 
-    let mut connection = Connection::new(address, stream, self.conn_tx.clone());
+    let connection = Connection::new(address, stream, self.conn_tx.clone());
     connection
-      .send(BridgeToGatewayMsg {
-        id: uuid::Uuid::now_v7(),
-        meta: GatewayMsgMeta::Event,
-        data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
-      })
+      .send(
+        BridgeToGatewayMsg {
+          id: uuid::Uuid::now_v7(),
+          meta: GatewayMsgMeta::Event,
+          data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
+        },
+        Priority::Normal,
+      )
       .await?;
 
     self.connections.insert(address, connection);

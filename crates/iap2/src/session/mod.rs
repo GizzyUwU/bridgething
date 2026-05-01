@@ -23,26 +23,29 @@
 //! [`Link`]: crate::Link
 
 mod auth;
+mod external_accessory;
 mod identification;
 mod mfi_worker;
 mod now_playing;
 
 use async_trait::async_trait;
+use auth::AuthFlow;
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::{Bytes, BytesMut};
+use external_accessory::EaFlow;
+pub use external_accessory::{EaPriority, EaSendError, EaStreamSender};
+use identification::IdentificationFlow;
+pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
+use now_playing::NowPlayingFlow;
 use tokio::sync::mpsc;
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::csm::{CsmCodec, CsmFrame, identification::IdentificationConfig};
-use crate::error::{Error, Result};
-use crate::frame::Lsp;
-use crate::link::{Iap2Command, Iap2Event};
-
-use auth::AuthFlow;
-use identification::IdentificationFlow;
-use now_playing::NowPlayingFlow;
-
-pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
+use crate::{
+  csm::{CsmCodec, CsmFrame, identification::IdentificationConfig},
+  error::{Error, Result},
+  frame::Lsp,
+  link::{Iap2Command, Iap2Event},
+};
 
 /// Result alias for `MfiAccess` ops; uses the mfi crate's error type
 /// directly since the iap2 layer only translates the result, doesn't
@@ -70,14 +73,32 @@ pub(crate) const CONTROL_SESSION_ID: u8 = 1;
 /// surface negotiated parameters. `LinkDown` is always the final
 /// event before the task exits (success, peer disconnect, auth/ident
 /// failure, or hard error - all paths emit it).
-#[derive(Debug, Clone)]
+///
+/// `EaStreamOpened` carries the byte channels for an EA stream the
+/// iPhone just opened: `inbound_rx` yields per-stream byte chunks
+/// after the link layer's reassembly + EA-stream-id demux, and
+/// `outbound` is a pre-bound sender the consumer uses to push frames
+/// (chunked + tagged on the way out by the EA flow's chunker task).
+/// Not `Clone` because the channels live single-consumer.
+#[derive(Debug)]
 pub enum SessionEvent {
   LinkEstablished(Lsp),
   Authenticated,
   Identified,
   AuthFailed,
-  IdentificationRejected { rejected_params: Vec<u16> },
+  IdentificationRejected {
+    rejected_params: Vec<u16>,
+  },
   NowPlayingUpdate(crate::csm::now_playing::NowPlayingUpdate),
+  EaStreamOpened {
+    stream_id: u16,
+    protocol_id: u8,
+    inbound_rx: mpsc::Receiver<Bytes>,
+    outbound: EaStreamSender,
+  },
+  EaStreamClosed {
+    stream_id: u16,
+  },
   LinkDown(String),
 }
 
@@ -88,6 +109,7 @@ pub enum SessionEvent {
 /// success or failure path.
 pub struct Iap2Session<M: MfiAccess> {
   identification: IdentificationConfig,
+  app_launch_bundle_id: Option<String>,
   mfi: M,
   link_command_tx: mpsc::Sender<Iap2Command>,
   link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -95,6 +117,7 @@ pub struct Iap2Session<M: MfiAccess> {
   auth: AuthFlow,
   ident: IdentificationFlow,
   now_playing: NowPlayingFlow,
+  ea: Option<EaFlow>,
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
@@ -105,8 +128,31 @@ impl<M: MfiAccess> Iap2Session<M> {
     link_events_rx: mpsc::Receiver<Iap2Event>,
     session_events_tx: mpsc::Sender<SessionEvent>,
   ) -> Self {
+    Self::with_app_launch(
+      identification,
+      None,
+      mfi,
+      link_command_tx,
+      link_events_rx,
+      session_events_tx,
+    )
+  }
+
+  /// Construct a session that will auto-fire `RequestAppLaunch` for
+  /// `bundle_id` once identification reaches Accepted. Pass `None`
+  /// to skip the launch step (companion-less mode, dev builds with
+  /// no installed companion, etc.).
+  pub fn with_app_launch(
+    identification: IdentificationConfig,
+    app_launch_bundle_id: Option<String>,
+    mfi: M,
+    link_command_tx: mpsc::Sender<Iap2Command>,
+    link_events_rx: mpsc::Receiver<Iap2Event>,
+    session_events_tx: mpsc::Sender<SessionEvent>,
+  ) -> Self {
     Self {
       identification,
+      app_launch_bundle_id,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -114,6 +160,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       auth: AuthFlow::new(),
       ident: IdentificationFlow::new(),
       now_playing: NowPlayingFlow::new(),
+      ea: None,
     }
   }
 
@@ -144,17 +191,29 @@ impl<M: MfiAccess> Iap2Session<M> {
         }
         if self.ident.is_accepted() {
           self.now_playing.ensure_subscribed(&self.link_command_tx).await?;
+          if let (Some(ea), Some(bundle)) = (self.ea.as_mut(), self.app_launch_bundle_id.as_deref()) {
+            ea.ensure_app_launch_requested(bundle, &self.link_command_tx).await?;
+          }
         }
       }
 
       match self.link_events_rx.recv().await {
         Some(Iap2Event::Established(lsp)) => {
           tracing::debug!("iap2 session: link established");
+          if self.ea.is_none() {
+            self.ea = Some(EaFlow::new(self.link_command_tx.clone(), lsp.max_len));
+          }
           emit(&self.session_events_tx, SessionEvent::LinkEstablished(lsp)).await;
         }
         Some(Iap2Event::DataReceived { session_id, payload }) => {
           if session_id == CONTROL_SESSION_ID {
             control_buf.extend_from_slice(&payload);
+          } else if session_id == external_accessory::EA_LINK_SESSION_ID {
+            if let Some(ea) = self.ea.as_mut() {
+              ea.dispatch_link_data(payload).await;
+            } else {
+              tracing::warn!("iap2 session: EA data received before link Established");
+            }
           } else {
             tracing::trace!(session_id, "iap2 session: ignoring data on non-control session");
           }
@@ -201,6 +260,16 @@ impl<M: MfiAccess> Iap2Session<M> {
     }
     if NowPlayingFlow::handles(msg_id) {
       return self.now_playing.handle(frame, &self.session_events_tx).await;
+    }
+    if EaFlow::handles(msg_id) {
+      if let Some(ea) = self.ea.as_mut() {
+        return ea.handle(frame, &self.link_command_tx, &self.session_events_tx).await;
+      }
+      tracing::warn!(
+        msg_id = format!("{msg_id:#06x}"),
+        "iap2 session: EA CSM before link Established"
+      );
+      return Ok(None);
     }
     tracing::trace!(msg_id = format!("{msg_id:#06x}"), "iap2 session: unhandled CSM");
     Ok(None)

@@ -7,19 +7,17 @@ mod webapp;
 
 use chrome::*;
 use file::*;
-use webapp::*;
-
 use libbridgething::{
   DeviceType, ForwardMessage, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
 };
+use webapp::*;
 
+use super::HandlerResult;
 use crate::{
   bluetooth::{BluetoothMan, GatewayMessage},
   state::State,
 };
-
-use super::HandlerResult;
 
 pub struct GatewayHandler {
   state: State,
@@ -42,6 +40,7 @@ impl GatewayHandler {
     let GatewayMessage {
       address,
       protocol,
+      priority,
       msg: GatewayToBridgeMsg { id, meta, data },
     } = data;
     let handle = MsgHandle::new(self, id, meta, address, protocol);

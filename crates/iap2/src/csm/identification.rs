@@ -263,6 +263,7 @@ impl From<IdentificationInformation> for CsmFrame {
         super::auth::SENT_BY_ACCESSORY,
         SENT_BY_ACCESSORY,
         super::now_playing::SENT_BY_ACCESSORY,
+        super::external_accessory::SENT_BY_ACCESSORY,
       ],
       &cfg.additional_messages_sent_by_accessory,
     );
@@ -272,6 +273,7 @@ impl From<IdentificationInformation> for CsmFrame {
         super::auth::RECEIVED_BY_ACCESSORY,
         RECEIVED_BY_ACCESSORY,
         super::now_playing::RECEIVED_BY_ACCESSORY,
+        super::external_accessory::RECEIVED_BY_ACCESSORY,
       ],
       &cfg.additional_messages_received_from_accessory,
     );
@@ -420,7 +422,7 @@ mod tests {
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(sent_ids, vec![0x5000, 0x5002, 0x6800]);
+    assert_eq!(sent_ids, vec![0x5000, 0x5002, 0xEA02, 0xEA03, 0x6800]);
 
     let recv_param = frame.find(7).unwrap();
     let recv_ids: Vec<u16> = recv_param
@@ -428,7 +430,7 @@ mod tests {
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(recv_ids, vec![0x5001, 0x6804]);
+    assert_eq!(recv_ids, vec![0x5001, 0xEA00, 0xEA01, 0x6804]);
   }
 
   #[test]

@@ -1,7 +1,7 @@
+use std::{collections::HashMap, sync::Arc};
+
 use libbridgething::gateway::BridgeFile;
 use mime_guess::Mime;
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub type FileRequestTx = tokio::sync::oneshot::Sender<(Vec<u8>, Mime)>;

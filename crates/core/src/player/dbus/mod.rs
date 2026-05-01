@@ -12,12 +12,11 @@ mod state;
 use media_player1::{DBusPlayerStream, MediaPlayer1Proxy, MediaPlayer1Track};
 pub use state::*;
 
+use super::{art::CoverArtCache, state::PlayerState};
 use crate::{
   bluetooth::avrcp::art::CoverArt,
   http::{ClientMan, WSError},
 };
-
-use super::{art::CoverArtCache, state::PlayerState};
 
 #[derive(Debug)]
 pub struct DBusPlayer {

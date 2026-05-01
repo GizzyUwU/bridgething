@@ -4,6 +4,7 @@ import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.GatewayMsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
+import dev.bridgething.schema.Priority
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -105,10 +106,23 @@ public class BridgethingGateway(
    * `meta` ([GatewayMsgMeta.Command], [GatewayMsgMeta.Event], etc.). For
    * request/response, prefer [request] which handles id generation and
    * awaiting the matching response.
+   *
+   * `priority` is a transport-level scheduling hint - Bulk yields to Normal at
+   * frame boundaries so latency-sensitive traffic interleaves between long
+   * bulk transfers (file/OTA chunks). Default is [Priority.Normal].
    */
-  public suspend fun send(deviceId: String, message: GatewayToBridgeMsg) {
-    val frame = codec.encode(GatewayToBridgeMsg.serializer(), message)
+  public suspend fun send(
+    deviceId: String,
+    message: GatewayToBridgeMsg,
+    priority: Priority = Priority.Normal,
+  ) {
+    val frame = codec.encode(GatewayToBridgeMsg.serializer(), message, priority = priority)
     adapter.send(deviceId, frame)
+  }
+
+  /** Bulk-priority shorthand for [send]. */
+  public suspend fun sendBulk(deviceId: String, message: GatewayToBridgeMsg) {
+    send(deviceId, message, priority = Priority.Bulk)
   }
 
   /**

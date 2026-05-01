@@ -1,6 +1,9 @@
-use bluer::AddressType;
-use bluer::l2cap::{Opts, Socket, SocketAddr, Stream};
 use std::time::Duration;
+
+use bluer::{
+  AddressType,
+  l2cap::{Opts, Socket, SocketAddr, Stream},
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const OBEX_HELLO: [u8; 26] = [

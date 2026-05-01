@@ -13,7 +13,7 @@ public enum GatewayEvent: Sendable {
   case decodeError(deviceId: String, description: String)
 }
 
-public enum GatewayError: Error, Sendable {
+public enum BridgethingGatewayError: Error, Sendable {
   case notRunning
   case alreadyRunning
   case requestTimedOut
@@ -47,7 +47,7 @@ public actor BridgethingGateway {
   }
 
   public func start() async throws {
-    guard consumerTask == nil else { throw GatewayError.alreadyRunning }
+    guard consumerTask == nil else { throw BridgethingGatewayError.alreadyRunning }
     try await adapter.start()
     let stream = adapter.events
     consumerTask = Task { [weak self] in
@@ -63,7 +63,7 @@ public actor BridgethingGateway {
     await adapter.stop()
 
     for (_, cont) in pendingRequests {
-      cont.resume(throwing: GatewayError.shutdown)
+      cont.resume(throwing: BridgethingGatewayError.shutdown)
     }
     pendingRequests.removeAll()
     buffers.removeAll()
@@ -77,9 +77,23 @@ public actor BridgethingGateway {
   /// Encode and ship a fully-formed message. Caller is responsible for picking
   /// `meta` (`.command`, `.event`, etc.). For request/response, prefer
   /// `request(deviceId:_:timeout:)` which handles id generation and awaiting.
-  public func send(deviceId: String, _ message: GatewayToBridgeMsg) async throws {
-    let frame = try codec.encode(message)
+  ///
+  /// `priority` is a transport-level scheduling hint - Bulk yields to Normal at
+  /// frame boundaries so latency-sensitive traffic (NowPlaying deltas, like
+  /// taps) interleaves between long bulk transfers (file/OTA chunks). Default
+  /// is `.normal`.
+  public func send(
+    deviceId: String,
+    _ message: GatewayToBridgeMsg,
+    priority: Priority = .normal
+  ) async throws {
+    let frame = try codec.encode(message, priority: priority)
     try await adapter.send(deviceId: deviceId, frame: frame)
+  }
+
+  /// Bulk-priority shorthand for `send(deviceId:_:priority:)`.
+  public func sendBulk(deviceId: String, _ message: GatewayToBridgeMsg) async throws {
+    try await send(deviceId: deviceId, message, priority: .bulk)
   }
 
   /// Send a request and await the matching response by id. The wire id is
@@ -108,7 +122,7 @@ public actor BridgethingGateway {
 
       Task { [weak self] in
         try? await Task.sleep(for: timeout)
-        await self?.failPendingRequest(id: id, with: GatewayError.requestTimedOut)
+        await self?.failPendingRequest(id: id, with: BridgethingGatewayError.requestTimedOut)
       }
     }
   }

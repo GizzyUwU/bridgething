@@ -8,17 +8,18 @@ use bridgething_mfi::CHALLENGE_LEN;
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
-use crate::csm::{
-  CsmDecodeError, CsmFrame,
-  auth::{
-    AuthenticationCertificate, AuthenticationFailed, AuthenticationResponse, AuthenticationSucceeded,
-    RequestAuthenticationCertificate, RequestAuthenticationChallengeResponse,
-  },
-};
-use crate::error::{Error, Result};
-use crate::link::Iap2Command;
-
 use super::{MfiAccess, SessionEvent, emit, send_csm};
+use crate::{
+  csm::{
+    CsmDecodeError, CsmFrame,
+    auth::{
+      AuthenticationCertificate, AuthenticationFailed, AuthenticationResponse, AuthenticationSucceeded,
+      RequestAuthenticationCertificate, RequestAuthenticationChallengeResponse,
+    },
+  },
+  error::{Error, Result},
+  link::Iap2Command,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AuthState {

@@ -3,9 +3,8 @@ use std::net::SocketAddr;
 use libbridgething::{ServerEventData, ServerEventType, client::ClientRequest};
 use uuid::Uuid;
 
-use crate::{bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg};
-
 use super::ClientHandler;
+use crate::{bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg};
 
 // TODO: don't allow cloning of message handle
 #[derive(Debug, Clone)]

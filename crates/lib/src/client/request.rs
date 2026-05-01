@@ -9,9 +9,7 @@
 //! Implementations are produced by the `impl_client_request!` macro (see
 //! crate root).
 
-use crate::client::ClientCommandType;
-use crate::gateway::RequestError;
-use crate::server::ServerEventData;
+use crate::{client::ClientCommandType, gateway::RequestError, server::ServerEventData};
 
 /// client (webapp) → bridge: a typed request whose response shape is statically known.
 pub trait ClientRequest: Into<ClientCommandType> {
@@ -42,14 +40,20 @@ pub trait ClientRequest: Into<ClientCommandType> {
 #[macro_export]
 macro_rules! impl_client_request {
   (
-    request: $req:ty,
-    response: $resp:ty,
-    error: $err:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr,
-    extract_error: $err_pat:pat => $err_extract:expr,
-    encode_error: $err_id:ident => $err_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,error:
+    $err:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr,extract_error:
+    $err_pat:pat =>
+    $err_extract:expr,encode_error:
+    $err_id:ident =>
+    $err_wrap:expr $(,)?
   ) => {
     impl $crate::client::ClientRequest for $req {
       type Response = $resp;
@@ -85,11 +89,15 @@ macro_rules! impl_client_request {
   };
 
   (
-    request: $req:ty,
-    response: $resp:ty,
-    encode_request: $req_id:ident => $req_wrap:expr,
-    extract_response: $resp_pat:pat => $resp_extract:expr,
-    encode_response: $resp_id:ident => $resp_wrap:expr $(,)?
+    request:
+    $req:ty,response:
+    $resp:ty,encode_request:
+    $req_id:ident =>
+    $req_wrap:expr,extract_response:
+    $resp_pat:pat =>
+    $resp_extract:expr,encode_response:
+    $resp_id:ident =>
+    $resp_wrap:expr $(,)?
   ) => {
     impl $crate::client::ClientRequest for $req {
       type Response = $resp;

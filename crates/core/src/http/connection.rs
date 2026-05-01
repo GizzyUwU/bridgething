@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use axum::{
   body::Bytes,
   extract::ws::{self, Utf8Bytes, WebSocket},
@@ -6,7 +8,6 @@ use futures::{
   SinkExt, StreamExt,
   stream::{SplitSink, SplitStream},
 };
-use std::net::SocketAddr;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;

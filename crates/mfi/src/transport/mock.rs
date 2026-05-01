@@ -5,14 +5,10 @@
 //! before the chip "wakes" and replies. The retry loop inside each
 //! method matches `LinuxI2c`'s contract.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-use std::time::Duration;
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 use super::{RETRY_LIMIT, Transport};
-use crate::cmd;
-use crate::error::TransportError;
+use crate::{cmd, error::TransportError};
 
 /// Shared state between a [`MockTransport`] and the test that drives it.
 #[derive(Debug)]

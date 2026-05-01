@@ -1,12 +1,14 @@
+use std::{
+  collections::BTreeMap,
+  path::{Component, Path, PathBuf},
+};
+
 use libbridgething::{WebappInfo, WebappSource};
 use serde::Deserialize;
-use std::collections::BTreeMap;
-use std::path::{Component, Path, PathBuf};
 use tokio::fs;
 
-use crate::paths;
-
 use super::{StateError, StateResult};
+use crate::paths;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -407,10 +407,11 @@ fn take_optional_presence_bool(param_id: u16, params: &mut Vec<CsmParam>) -> Res
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::csm::{CSM_OUTER_HEADER_LEN, CSM_PARAM_HEADER_LEN, CsmCodec};
   use bytes::{BufMut, BytesMut};
   use tokio_util::codec::{Decoder, Encoder};
+
+  use super::*;
+  use crate::csm::{CSM_OUTER_HEADER_LEN, CSM_PARAM_HEADER_LEN, CsmCodec};
 
   fn build_group(sub_params: &[(u16, &[u8])]) -> Bytes {
     let params: Vec<CsmParam> = sub_params

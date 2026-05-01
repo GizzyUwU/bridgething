@@ -5,17 +5,18 @@
 
 use tokio::sync::mpsc;
 
-use crate::csm::{
-  CsmFrame,
-  identification::{
-    IdentificationAccepted, IdentificationConfig, IdentificationInformation, IdentificationRejected,
-    StartIdentification,
-  },
-};
-use crate::error::Result;
-use crate::link::Iap2Command;
-
 use super::{SessionEvent, emit, send_csm};
+use crate::{
+  csm::{
+    CsmFrame,
+    identification::{
+      IdentificationAccepted, IdentificationConfig, IdentificationInformation, IdentificationRejected,
+      StartIdentification,
+    },
+  },
+  error::Result,
+  link::Iap2Command,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum IdentState {

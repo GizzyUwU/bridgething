@@ -1,8 +1,7 @@
 use libbridgething::gateway::{BridgeToGatewayMsgData, ChromeNavigate, GatewayToBridgeChromeMsg};
 
-use crate::chrome::ChromeCommand;
-
 use super::{HandlerResult, MsgHandle};
+use crate::chrome::ChromeCommand;
 
 #[derive(Debug)]
 pub struct ChromeHandler {

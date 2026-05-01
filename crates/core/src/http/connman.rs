@@ -1,18 +1,18 @@
+use std::{net::SocketAddr, sync::Arc};
+
 use axum::extract::ws::WebSocket;
 use dashmap::DashMap;
 use libbridgething::{ServerEvent, ServerEventData, ServerEventType};
-use std::{net::SocketAddr, sync::Arc};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::{WSError, WSResult, connection::Connection};
 use crate::{
   handler::client::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
   state::State,
   stock::StockSendMsg,
 };
-
-use super::{WSError, WSResult, connection::Connection};
 
 #[derive(Debug)]
 struct ClientData {

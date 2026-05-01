@@ -116,6 +116,8 @@ export type PlaybackUpdate = {
   appDisplayName: string | null;
 };
 
+export type Priority = 'normal' | 'bulk';
+
 export type Track = {
   id: string;
   name: string;

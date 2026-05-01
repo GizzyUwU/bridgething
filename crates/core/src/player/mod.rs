@@ -4,17 +4,15 @@ pub mod art;
 mod dbus;
 
 mod state;
-use state::*;
-
 use art::{CoverArtCache, ImageCache};
 use dbus::DBusPlayer;
+use state::*;
+use tokio::sync::RwLock;
 
 use crate::{
   handler::client::MsgHandle,
   http::{ClientMan, WSError},
 };
-
-use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub struct Player {
@@ -107,8 +105,8 @@ impl Player {
   }
 
   pub async fn request_cover_art(&self, msg_handle: MsgHandle) {
-    if let Some(player) = &*self.dbus_player.read().await {
-      if let Some(art) = &player.art {
+    if let Some(player) = &*self.dbus_player.read().await
+      && let Some(art) = &player.art {
         art
           .fetch(
             &self.state.read().await.track.clone().unwrap_or_default().image_id,
@@ -116,7 +114,6 @@ impl Player {
           )
           .await;
       }
-    }
   }
 }
 

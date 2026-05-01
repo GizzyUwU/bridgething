@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::BridgeThingMeta;
-use crate::client::{ClientCommandType, ClientRequest};
-use crate::impl_client_request;
-use crate::server::{GatewayStatus, ServerEventData, ServerSystemEvent};
+use crate::{
+  BridgeThingMeta,
+  client::ClientCommandType,
+  impl_client_request,
+  server::{GatewayStatus, ServerEventData, ServerSystemEvent},
+};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

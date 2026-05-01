@@ -2,10 +2,11 @@
 
 use std::time::Duration;
 
-use crate::cmd;
-use crate::error::{Error, Result};
-use crate::transport::{CERT_SETTLE, Transport};
-use crate::{CHALLENGE_LEN, RESPONSE_LEN, SERIAL_LEN};
+use crate::{
+  CHALLENGE_LEN, RESPONSE_LEN, SERIAL_LEN, cmd,
+  error::{Error, Result},
+  transport::{CERT_SETTLE, Transport},
+};
 
 const SIGN_POLL_DELAY: Duration = Duration::from_millis(500);
 

@@ -20,28 +20,35 @@
 
 use std::collections::HashMap;
 
-use bluer::rfcomm::{ConnectRequest, Profile, ProfileHandle, Role};
-use bluer::{Address, Session};
-use bridgething_iap2::csm::identification::{CarthingIdentification, IdentificationConfig};
-use bridgething_iap2::csm::now_playing::{
-  MediaItemAttributes, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState, RepeatMode,
+use bluer::{
+  Address, Session,
+  rfcomm::{ConnectRequest, Profile, ProfileHandle, Role},
 };
-use bridgething_iap2::session::WorkerMfiAccess;
 use bridgething_iap2::{
   IAP2_ACCESSORY_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link, LinkConfig, Lsp, SessionEvent,
+  csm::{
+    identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
+    now_playing::{
+      MediaItemAttributes, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState, RepeatMode,
+    },
+  },
+  session::WorkerMfiAccess,
 };
+pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
+
 use bridgething_mfi::MfiAuth;
 use futures::StreamExt;
 use libbridgething::{DeviceType, MediaItemUpdate, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate};
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::state::State;
+mod ea;
 
 use super::{BluetoothResult, profiles::ProfileMan};
+use crate::state::State;
 
 const IAP2_PROFILE_NAME: &str = "iAP2";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
+const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 
 /// Custom SDP record advertised for the iAP2 RFCOMM listener. iOS does
 /// not engage iAP2 on the auto-generated record bluez emits when only
@@ -99,11 +106,17 @@ pub struct Iap2Manager {
   mfi_worker: WorkerMfiAccess,
   state: State,
   profile_man: ProfileMan,
+  ea_gateway: Iap2EaGatewayHandle,
   sessions: HashMap<Address, ActiveSession>,
 }
 
 impl Iap2Manager {
-  pub async fn init(session: &Session, state: &State, profile_man: ProfileMan) -> BluetoothResult<Option<Self>> {
+  pub async fn init(
+    session: &Session,
+    state: &State,
+    profile_man: ProfileMan,
+    ea_gateway: Iap2EaGatewayHandle,
+  ) -> BluetoothResult<Option<Self>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
@@ -134,6 +147,7 @@ impl Iap2Manager {
       mfi_worker,
       state: state.clone(),
       profile_man,
+      ea_gateway,
       sessions: HashMap::new(),
     }))
   }
@@ -168,8 +182,9 @@ impl Iap2Manager {
     let _link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
 
     let mfi = self.mfi_worker.handle();
-    let session = Iap2Session::new(
+    let session = Iap2Session::with_app_launch(
       self.identification.clone(),
+      Some(COMPANION_BUNDLE_ID.to_string()),
       mfi,
       link_command_tx,
       link_events_rx,
@@ -182,6 +197,7 @@ impl Iap2Manager {
       session_events_rx,
       self.state.clone(),
       self.profile_man.clone(),
+      self.ea_gateway.clone(),
     ));
 
     self.sessions.insert(
@@ -202,6 +218,7 @@ async fn observe_session_events(
   mut rx: mpsc::Receiver<SessionEvent>,
   state: State,
   profile_man: ProfileMan,
+  ea_gateway: Iap2EaGatewayHandle,
 ) {
   while let Some(event) = rx.recv().await {
     match event {
@@ -235,6 +252,27 @@ async fn observe_session_events(
         if let Err(err) = state.player.apply_now_playing(lib_update).await {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
         }
+      }
+      SessionEvent::EaStreamOpened {
+        stream_id,
+        protocol_id,
+        inbound_rx,
+        outbound,
+      } => {
+        tracing::info!(%address, stream_id, protocol_id, "iAP2 EA stream opened");
+        ea_gateway
+          .notify_open(StreamOpened {
+            address,
+            stream_id,
+            protocol_id,
+            inbound_rx,
+            outbound,
+          })
+          .await;
+      }
+      SessionEvent::EaStreamClosed { stream_id } => {
+        tracing::info!(%address, stream_id, "iAP2 EA stream closed");
+        ea_gateway.notify_closed(StreamClosed { address, stream_id }).await;
       }
       SessionEvent::LinkDown(reason) => {
         tracing::info!(%address, %reason, "iAP2 link down");
@@ -276,11 +314,18 @@ fn translate_playback(play: PlaybackAttributes) -> PlaybackUpdate {
 
 fn build_identification(state: &State) -> IdentificationConfig {
   let bt_mac = parse_bt_mac(&state.meta.bt_mac);
-  IdentificationConfig::for_carthing(CarthingIdentification {
+  let mut config = IdentificationConfig::for_carthing(CarthingIdentification {
     serial_number: state.meta.serial_number.clone(),
     firmware_version: format!("v{}", env!("CARGO_PKG_VERSION")),
     bt_mac,
-  })
+  });
+  config.supported_external_accessory_protocols = vec![EaProtocol {
+    id: 1,
+    name: COMPANION_BUNDLE_ID.to_string(),
+    match_action: EaProtocolMatchAction::NoAlertAction,
+    native_transport_component_identifier: None,
+  }];
+  config
 }
 
 fn parse_bt_mac(s: &str) -> [u8; 6] {

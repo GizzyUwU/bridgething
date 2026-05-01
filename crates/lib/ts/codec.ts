@@ -1,5 +1,6 @@
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { gzip, ungzip } from 'pako';
+import type { Priority } from './bindings/shared';
 
 export const Compression = {
   None: 0x00,
@@ -16,6 +17,9 @@ export type Encoding = (typeof Encoding)[keyof typeof Encoding];
 export const FRAME_HEADER_LENGTH = 16;
 export const FRAME_MAGIC = 0xdead;
 export const FRAME_VERSION = 2;
+
+export const priorityToByte = (p: Priority): number => (p === 'bulk' ? 0x01 : 0x00);
+export const priorityFromByte = (b: number): Priority => (b === 0x01 ? 'bulk' : 'normal');
 
 export class CodecError extends Error {
   constructor(
@@ -35,11 +39,12 @@ export class CodecError extends Error {
 
 /**
  * Wire header: `magic u16 BE | version u8 | compression u8 | encoding u8 |
- * reserved [3]u8 | length u64 BE`. Total 16 bytes.
+ * priority u8 | reserved [2]u8 | length u64 BE`. Total 16 bytes.
  */
 export type FrameHeader = {
   compression: Compression;
   encoding: Encoding;
+  priority: Priority;
   payloadLength: number;
 };
 
@@ -50,7 +55,8 @@ export function writeFrameHeader(header: FrameHeader): Uint8Array {
   view.setUint8(2, FRAME_VERSION);
   view.setUint8(3, header.compression);
   view.setUint8(4, header.encoding);
-  // bytes 5..8 reserved zero
+  view.setUint8(5, priorityToByte(header.priority));
+  // bytes 6..8 reserved zero
   // u64 BE length - JS can't address > 2^53 but BigInt path keeps the wire honest.
   view.setBigUint64(8, BigInt(header.payloadLength), false);
   return buf;
@@ -73,13 +79,15 @@ export function parseFrameHeader(frame: Uint8Array): FrameHeader {
   if (encoding !== Encoding.Msgpack && encoding !== Encoding.Json) {
     throw new CodecError(`unsupported encoding ${encoding}`, 'unsupported-encoding');
   }
+  const priority = priorityFromByte(view.getUint8(5));
   const length = Number(view.getBigUint64(8, false));
-  return { compression, encoding, payloadLength: length };
+  return { compression, encoding, priority, payloadLength: length };
 }
 
 export type CodecOptions = {
   compression?: Compression;
   encoding?: Encoding;
+  priority?: Priority;
 };
 
 /**
@@ -103,12 +111,13 @@ export class Codec {
   encode<T>(message: T, overrides: CodecOptions = {}): Uint8Array {
     const compression = overrides.compression ?? this.compression;
     const encoding = overrides.encoding ?? this.encoding;
+    const priority: Priority = overrides.priority ?? 'normal';
 
     const payload =
       encoding === Encoding.Msgpack ? msgpackEncode(message) : new TextEncoder().encode(JSON.stringify(message));
     const body = compression === Compression.Gzip ? gzip(payload) : payload;
 
-    const header = writeFrameHeader({ compression, encoding, payloadLength: body.length });
+    const header = writeFrameHeader({ compression, encoding, priority, payloadLength: body.length });
     const out = new Uint8Array(header.length + body.length);
     out.set(header, 0);
     out.set(body, header.length);

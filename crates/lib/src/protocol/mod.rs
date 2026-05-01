@@ -1,10 +1,14 @@
 use std::time::{Duration, Instant};
 
 mod bridge;
+mod frame;
 mod gateway;
 
 pub use bridge::*;
+pub use frame::*;
 pub use gateway::*;
+
+use crate::Priority;
 
 const HEADER_LEN: usize = 16;
 const MAGIC: u16 = 0xdead;
@@ -21,6 +25,7 @@ struct EndecState {
   version: u8,
   compression: Compression,
   encoding: Encoding,
+  priority: Priority,
   length: u64,
 
   total_length: usize,
@@ -34,6 +39,7 @@ impl Default for EndecState {
       version: VERSION,
       compression: Compression::Gzip,
       encoding: Encoding::Msgpack,
+      priority: Priority::Normal,
       length: 0,
 
       total_length: 0,

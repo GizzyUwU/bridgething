@@ -15,15 +15,18 @@ mod established;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
-use tokio::time::Instant;
+use established::EstablishedState;
+use tokio::{
+  io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+  sync::mpsc,
+  time::Instant,
+};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::error::{Error, Result};
-use crate::frame::{ControlBits, DETECT_MARKER, LINK_MAGIC, LinkCodec, LinkPacket, Lsp};
-
-use established::EstablishedState;
+use crate::{
+  error::{Error, Result},
+  frame::{ControlBits, DETECT_MARKER, LINK_MAGIC, LinkCodec, LinkPacket, Lsp},
+};
 
 const READ_CAPACITY: usize = 4096;
 

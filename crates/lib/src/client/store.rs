@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::client::{ClientCommandType, ClientRequest};
-use crate::impl_client_request;
-use crate::server::{ServerEventData, ServerStorageEvent, StorageResponse};
+use crate::{
+  client::ClientCommandType,
+  impl_client_request,
+  server::{ServerEventData, ServerStorageEvent, StorageResponse},
+};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

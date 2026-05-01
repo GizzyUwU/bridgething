@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::Device;
-use crate::client::{ClientCommandType, ClientRequest};
-use crate::impl_client_request;
-use crate::server::{ServerBluetoothEvent, ServerEventData};
+use crate::{
+  Device,
+  client::ClientCommandType,
+  impl_client_request,
+  server::{ServerBluetoothEvent, ServerEventData},
+};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

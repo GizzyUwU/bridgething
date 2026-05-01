@@ -527,13 +527,11 @@ impl RecvMsgData {
 
 #[cfg(test)]
 mod test {
-  use libbridgething::client::ClientLegacyStockCommand;
-  use uuid::Uuid;
-
   use libbridgething::{
     ClientCommand, ClientCommandType,
-    client::{ClientInteractionCommand, ClientMsgMeta},
+    client::{ClientInteractionCommand, ClientLegacyStockCommand, ClientMsgMeta},
   };
+  use uuid::Uuid;
 
   use super::StockInterAppRecv;
   use crate::handler::client::PossibleRecvMsg;

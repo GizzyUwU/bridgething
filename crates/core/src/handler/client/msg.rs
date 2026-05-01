@@ -1,13 +1,14 @@
 #![allow(clippy::large_enum_variant)]
+use std::net::SocketAddr;
+
 use libbridgething::{
-  ClientCommand, ClientCommandType, ForwardMessage, ServerEvent, ServerEventData,
+  ClientCommand, ClientCommandType, ForwardMessage, ServerEvent,
   client::{
     ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand, ClientLegacyStockCommand,
     ClientSystemCommand, ClientVoiceCommand,
   },
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::stock::{StockInterAppRecv, StockRecvMsg, StockSendMsg};

@@ -27,8 +27,10 @@
 //! [`Transport`]: super::Transport
 //! [`MfiAuth`]: crate::MfiAuth
 
-use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::{
+  io::{self, Read, Write},
+  net::{TcpStream, ToSocketAddrs},
+};
 
 use super::Transport;
 use crate::error::TransportError;

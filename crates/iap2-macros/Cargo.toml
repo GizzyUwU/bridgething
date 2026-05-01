@@ -1,8 +1,11 @@
 [package]
 name = "bridgething-iap2-macros"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.94.0"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
 
 [lib]
 proc-macro = true

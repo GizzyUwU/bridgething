@@ -5,9 +5,8 @@ use libbridgething::{ServerEventType, server::ServerBluetoothEvent};
 use message::{connection_messages_stock, disconnection_messages_stock};
 use tokio::sync::RwLock;
 
-use crate::state::State;
-
 use super::{BluetoothResult, BluetoothTx};
+use crate::state::State;
 
 pub mod avrcp;
 mod message;
@@ -224,17 +223,17 @@ impl ProfileManager {
   }
 }
 
+// TODO: figure out reconnect
 pub async fn connect_profiles(profile_man: ProfileMan, mac: Address, max_attempts: Option<usize>) {
   let mut attempts: usize = 0;
   let connected_device: Device;
 
   loop {
-    if let Some(max) = max_attempts {
-      if attempts > max {
+    if let Some(max) = max_attempts
+      && attempts > max {
         tracing::warn!("max connect attempts for mac {:?} exceeded.", &mac);
         return;
       }
-    }
 
     tracing::debug!("attempting to connect to device with mac: {:?}", &mac);
     if let Ok(device) = profile_man.adapter.device(mac) {

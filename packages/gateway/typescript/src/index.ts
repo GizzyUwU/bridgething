@@ -7,6 +7,7 @@ import {
   Logger,
   LogLevel,
   newUuidBytes,
+  type Priority,
 } from '@bridgething/lib';
 
 import { version } from './version';
@@ -139,11 +140,21 @@ export class BridgethingGateway {
    * Encode and ship a fully-formed message. Caller is responsible for picking
    * `meta` (`command`, `event`, etc.). For request/response, prefer `request`
    * which handles id generation and awaiting the matching response.
+   *
+   * `priority` is a transport-level scheduling hint - Bulk yields to Normal at
+   * frame boundaries so latency-sensitive traffic (NowPlaying deltas, like
+   * taps) interleaves between long bulk transfers (file/OTA chunks). Default
+   * is `'normal'`.
    */
-  async send(deviceId: string, message: GatewayToBridgeMsg): Promise<void> {
-    const frame = this.codec.encode(message);
-    this.logger.trace('send', deviceId, message);
+  async send(deviceId: string, message: GatewayToBridgeMsg, options: { priority?: Priority } = {}): Promise<void> {
+    const frame = this.codec.encode(message, { priority: options.priority });
+    this.logger.trace('send', deviceId, message, options.priority ?? 'normal');
     await this.adapter.send(deviceId, frame);
+  }
+
+  /** Bulk-priority shorthand for `send`. */
+  async sendBulk(deviceId: string, message: GatewayToBridgeMsg): Promise<void> {
+    await this.send(deviceId, message, { priority: 'bulk' });
   }
 
   /**

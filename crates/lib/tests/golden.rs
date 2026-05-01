@@ -10,8 +10,7 @@
 
 use std::path::PathBuf;
 
-use libbridgething::gateway::*;
-use libbridgething::*;
+use libbridgething::{gateway::*, *};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -20,6 +19,8 @@ const MAGIC: u16 = 0xdead;
 const VERSION: u8 = 2;
 const COMPRESSION_NONE: u8 = 0x00;
 const ENCODING_MSGPACK: u8 = 0x00;
+const PRIORITY_NORMAL: u8 = 0x00;
+const PRIORITY_BULK: u8 = 0x01;
 
 const FIXED_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000001";
 const FIXED_REQUEST_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000099";
@@ -57,6 +58,10 @@ struct GoldenFixture {
   description: String,
   /// Which direction (and therefore which Rust type) this message decodes to.
   direction: Direction,
+  /// Priority lane this fixture was framed with; recorded in header byte 5.
+  /// `"normal"` (0x00) or `"bulk"` (0x01). Cross-language SDKs round-trip
+  /// the byte and surface it on decode.
+  priority: String,
   /// Canonical structural form of the decoded message. Cross-language tests
   /// should compare structurally, not by string match - field order from
   /// msgpack named maps is implementation-defined.
@@ -109,9 +114,15 @@ fn header_spec() -> HeaderSpec {
         description: "u8: 0x00 msgpack-named, 0x01 json".into(),
       },
       HeaderField {
-        name: "reserved".into(),
+        name: "priority".into(),
         offset: 5,
-        size: 3,
+        size: 1,
+        description: "u8: 0x00 normal, 0x01 bulk - sender hint for transport-level scheduling. Default zero on legacy senders is interpreted as normal.".into(),
+      },
+      HeaderField {
+        name: "reserved".into(),
+        offset: 6,
+        size: 2,
         description: "must be zero on encode, ignored on decode".into(),
       },
       HeaderField {
@@ -124,16 +135,24 @@ fn header_spec() -> HeaderSpec {
   }
 }
 
-fn frame(payload: &[u8]) -> Vec<u8> {
+fn frame(payload: &[u8], priority: u8) -> Vec<u8> {
   let mut out = Vec::with_capacity(HEADER_LEN + payload.len());
   out.extend_from_slice(&MAGIC.to_be_bytes());
   out.push(VERSION);
   out.push(COMPRESSION_NONE);
   out.push(ENCODING_MSGPACK);
-  out.extend_from_slice(&[0, 0, 0]); // reserved
+  out.push(priority);
+  out.extend_from_slice(&[0, 0]); // reserved
   out.extend_from_slice(&(payload.len() as u64).to_be_bytes());
   out.extend_from_slice(payload);
   out
+}
+
+fn priority_label(byte: u8) -> &'static str {
+  match byte {
+    PRIORITY_BULK => "bulk",
+    _ => "normal",
+  }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -377,6 +396,17 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
     },
   ));
 
+  out.push(bridge_fixture_with(
+    "bridge_to_gateway/forward-binary-bulk-event",
+    "same Forward.Binary payload but framed on the Bulk priority lane - exercises the priority byte at header offset 5",
+    BridgeToGatewayMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: BridgeToGatewayMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
+    },
+    PRIORITY_BULK,
+  ));
+
   out.push(gateway_fixture(
     "gateway_to_bridge/version-event",
     "phone announcing its gateway version",
@@ -481,6 +511,17 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
     },
   ));
 
+  out.push(gateway_fixture_with(
+    "gateway_to_bridge/forward-binary-bulk-event",
+    "Bulk-priority Forward.Binary from the gateway - the shape an OTA chunk push will take",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
+    },
+    PRIORITY_BULK,
+  ));
+
   out.push(gateway_fixture(
     "gateway_to_bridge/error-malformed",
     "protocol error: gateway could not decode the request the daemon sent",
@@ -497,13 +538,23 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 }
 
 fn bridge_fixture(name: &str, description: &str, msg: BridgeToGatewayMsg) -> (GoldenFixture, Vec<u8>) {
+  bridge_fixture_with(name, description, msg, PRIORITY_NORMAL)
+}
+
+fn bridge_fixture_with(
+  name: &str,
+  description: &str,
+  msg: BridgeToGatewayMsg,
+  priority: u8,
+) -> (GoldenFixture, Vec<u8>) {
   let packed = rmp_serde::to_vec_named(&msg).expect("encode bridge msg");
-  let framed = frame(&packed);
+  let framed = frame(&packed, priority);
   let decoded_json = serde_json::to_value(&msg).expect("re-encode as json");
   let fix = GoldenFixture {
     name: name.into(),
     description: description.into(),
     direction: Direction::BridgeToGateway,
+    priority: priority_label(priority).into(),
     decoded_json,
     msgpack_hex: hex(&packed),
     framed_hex: hex(&framed),
@@ -512,13 +563,23 @@ fn bridge_fixture(name: &str, description: &str, msg: BridgeToGatewayMsg) -> (Go
 }
 
 fn gateway_fixture(name: &str, description: &str, msg: GatewayToBridgeMsg) -> (GoldenFixture, Vec<u8>) {
+  gateway_fixture_with(name, description, msg, PRIORITY_NORMAL)
+}
+
+fn gateway_fixture_with(
+  name: &str,
+  description: &str,
+  msg: GatewayToBridgeMsg,
+  priority: u8,
+) -> (GoldenFixture, Vec<u8>) {
   let packed = rmp_serde::to_vec_named(&msg).expect("encode gateway msg");
-  let framed = frame(&packed);
+  let framed = frame(&packed, priority);
   let decoded_json = serde_json::to_value(&msg).expect("re-encode as json");
   let fix = GoldenFixture {
     name: name.into(),
     description: description.into(),
     direction: Direction::GatewayToBridge,
+    priority: priority_label(priority).into(),
     decoded_json,
     msgpack_hex: hex(&packed),
     framed_hex: hex(&framed),
@@ -584,4 +645,101 @@ fn golden_fixtures_round_trip_through_rust_codec() {
       }
     }
   }
+}
+
+#[test]
+fn priority_round_trips_through_codec_on_both_lanes() {
+  use libbridgething::{
+    Priority,
+    protocol::{BridgeEndec, GatewayEndec, PrioritizedFrame},
+  };
+  use tokio_util::{
+    bytes::BytesMut,
+    codec::{Decoder, Encoder},
+  };
+
+  let bridge_msg = BridgeToGatewayMsg {
+    id: id(),
+    meta: GatewayMsgMeta::Event,
+    data: BridgeToGatewayMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
+  };
+  let gateway_msg = GatewayToBridgeMsg {
+    id: id(),
+    meta: GatewayMsgMeta::Event,
+    data: GatewayToBridgeMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
+  };
+
+  for priority in [Priority::Normal, Priority::Bulk] {
+    // Daemon -> phone: encode with BridgeEndec, decode with GatewayEndec.
+    let mut wire = BytesMut::new();
+    BridgeEndec::default()
+      .encode(
+        PrioritizedFrame {
+          priority,
+          msg: bridge_msg.clone(),
+        },
+        &mut wire,
+      )
+      .expect("encode bridge");
+    assert_eq!(wire[5], priority.as_byte(), "priority byte at offset 5");
+    let decoded = GatewayEndec::default()
+      .decode(&mut wire)
+      .expect("decode bridge")
+      .expect("frame ready");
+    assert_eq!(decoded.priority, priority, "decoded priority preserved");
+    assert_eq!(decoded.msg, bridge_msg, "decoded payload matches");
+
+    // Phone -> daemon: encode with GatewayEndec, decode with BridgeEndec.
+    let mut wire = BytesMut::new();
+    GatewayEndec::default()
+      .encode(
+        PrioritizedFrame {
+          priority,
+          msg: gateway_msg.clone(),
+        },
+        &mut wire,
+      )
+      .expect("encode gateway");
+    assert_eq!(wire[5], priority.as_byte());
+    let decoded = BridgeEndec::default()
+      .decode(&mut wire)
+      .expect("decode gateway")
+      .expect("frame ready");
+    assert_eq!(decoded.priority, priority);
+    assert_eq!(decoded.msg, gateway_msg);
+  }
+}
+
+#[test]
+fn legacy_zero_priority_byte_decodes_as_normal() {
+  // Locks in the back-compat property that motivated picking byte 5 of the
+  // existing reserved range: any frame produced by a pre-priority sender
+  // (the priority byte sits at zero) decodes as Normal.
+  use libbridgething::{
+    Priority,
+    protocol::{BridgeEndec, GatewayEndec},
+  };
+  use tokio_util::{
+    bytes::BytesMut,
+    codec::{Decoder, Encoder},
+  };
+
+  let msg = BridgeToGatewayMsg {
+    id: id(),
+    meta: GatewayMsgMeta::Event,
+    data: BridgeToGatewayMsgData::Ack,
+  };
+
+  let mut wire = BytesMut::new();
+  BridgeEndec::default()
+    .encode(msg.clone(), &mut wire)
+    .expect("encode bare msg");
+  assert_eq!(wire[5], 0x00, "bare-msg encoder defaults to Normal");
+
+  let decoded = GatewayEndec::default()
+    .decode(&mut wire)
+    .expect("decode")
+    .expect("frame ready");
+  assert_eq!(decoded.priority, Priority::Normal);
+  assert_eq!(decoded.msg, msg);
 }

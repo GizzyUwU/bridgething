@@ -15,9 +15,11 @@ use bridgething_iap2::{
   ControlBits, DETECT_MARKER, Iap2Command, Iap2Event, Link, LinkCodec, LinkConfig, LinkPacket, Lsp, SessionTriple,
 };
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::{
+  io::{AsyncReadExt, AsyncWriteExt, DuplexStream},
+  sync::mpsc,
+  task::JoinHandle,
+};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub const PEER_INITIAL_PSN: u8 = 50;

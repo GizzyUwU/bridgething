@@ -250,6 +250,29 @@ public struct ChromeNavigate: Codable, Sendable {
 	}
 }
 
+public enum DeviceType: String, Codable, Sendable {
+	case android
+	case ios = "iOS"
+	case windows
+	case macOS
+	case linux
+	case unknown
+}
+
+public struct Device: Codable, Sendable {
+	public let name: String
+	public let type: DeviceType
+	public let mac: String
+	public let `default`: Bool
+
+	public init(name: String, type: DeviceType, mac: String, default: Bool) {
+		self.name = name
+		self.type = type
+		self.mac = mac
+		self.default = `default`
+	}
+}
+
 public struct FileRequestData: Codable, Sendable {
 	public let file: String
 
@@ -1100,6 +1123,46 @@ public enum PhoneCallStatus: String, Codable, Sendable {
 	case active = "Active"
 	case held = "Held"
 	case disconnecting = "Disconnecting"
+}
+
+public enum Priority: String, Codable, Sendable {
+	case normal
+	case bulk
+}
+
+public enum ServerPeerEvent: Codable, Sendable {
+	case snapshot([String: Peer])
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case snapshot
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .snapshot:
+				if let content = try? container.decode([String: Peer].self, forKey: .data) {
+					self = .snapshot(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(ServerPeerEvent.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for ServerPeerEvent"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .snapshot(let content):
+			try container.encode(CodingKeys.snapshot, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
 }
 
 

@@ -93,7 +93,7 @@ final class GatewayTests: XCTestCase {
     let outbound = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .command,
-      data: .file(.list)
+      data: .webapp(.list)
     )
     try await gateway.send(deviceId: testDevice.id, outbound)
 
@@ -118,7 +118,7 @@ final class GatewayTests: XCTestCase {
     let deviceId = testDevice.id
 
     let requestTask = Task {
-      try await gateway.request(deviceId: deviceId, .file(.list))
+      try await gateway.request(deviceId: deviceId, .webapp(.list))
     }
 
     var sentIter = adapter.sentFrames.makeAsyncIterator()
@@ -155,11 +155,11 @@ final class GatewayTests: XCTestCase {
     do {
       _ = try await gateway.request(
         deviceId: testDevice.id,
-        .file(.list),
+        .file(.fileResponse(FileResponseData(file: BridgeFile(path: "/never", data: Data())))),
         timeout: .milliseconds(100)
       )
       XCTFail("expected timeout error")
-    } catch let error as GatewayError {
+    } catch let error as BridgethingGatewayError {
       XCTAssertEqual(error, .requestTimedOut)
     }
 
@@ -167,8 +167,8 @@ final class GatewayTests: XCTestCase {
   }
 }
 
-extension GatewayError: Equatable {
-  public static func == (lhs: GatewayError, rhs: GatewayError) -> Bool {
+extension BridgethingGatewayError: Equatable {
+  public static func == (lhs: BridgethingGatewayError, rhs: BridgethingGatewayError) -> Bool {
     switch (lhs, rhs) {
     case (.notRunning, .notRunning),
          (.alreadyRunning, .alreadyRunning),

@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::WebappInfo;
-use crate::gateway::{
-  BridgeToGatewayMsgData, BridgeToGatewayWebappMsg, GatewayToBridgeMsgData, WebappActive, WebappError, WebappList,
+use crate::{
+  WebappInfo,
+  gateway::{
+    BridgeToGatewayMsgData, BridgeToGatewayWebappMsg, GatewayToBridgeMsgData, WebappActive, WebappError, WebappList,
+  },
+  impl_gateway_request,
 };
-use crate::impl_gateway_request;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]

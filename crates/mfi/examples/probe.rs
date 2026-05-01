@@ -9,8 +9,7 @@
 //! Usage: `cargo run -p bridgething-mfi --example probe -- <host:port>`
 //! Default target: `127.0.0.1:9090`.
 
-use std::env;
-use std::process::ExitCode;
+use std::{env, process::ExitCode};
 
 use bridgething_mfi::{MfiAuth, RemoteI2c};
 

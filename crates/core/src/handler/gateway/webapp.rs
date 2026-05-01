@@ -3,9 +3,8 @@ use libbridgething::gateway::{
   WebappSwitchTo, WebappUninstall,
 };
 
-use crate::chrome::ChromeCommand;
-
 use super::{HandlerResult, MsgHandle};
+use crate::chrome::ChromeCommand;
 
 const KIOSK_HOME_URL: &str = "http://127.0.0.1:8891/";
 

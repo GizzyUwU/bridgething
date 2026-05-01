@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::gateway::{BridgeToGatewayMsgData, FileResponseData, GatewayToBridgeFileMsg, GatewayToBridgeMsgData};
-use crate::impl_bridge_request;
+use crate::{
+  gateway::{BridgeToGatewayMsgData, FileResponseData, GatewayToBridgeFileMsg, GatewayToBridgeMsgData},
+  impl_bridge_request,
+};
 
 #[typeshare]
 #[serde_with::skip_serializing_none]

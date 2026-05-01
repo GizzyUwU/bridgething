@@ -1,8 +1,8 @@
 pub fn init_logger(level_directive: Option<String>) {
   use tracing::metadata::LevelFilter;
-  use tracing_subscriber::fmt::format::FmtSpan;
   use tracing_subscriber::{
-    EnvFilter, Layer, filter::Directive, fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
+    EnvFilter, Layer, filter::Directive, fmt, fmt::format::FmtSpan, prelude::__tracing_subscriber_SubscriberExt,
+    util::SubscriberInitExt,
   };
 
   let default_directive = Directive::from(LevelFilter::INFO);

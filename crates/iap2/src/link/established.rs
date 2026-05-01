@@ -6,17 +6,22 @@
 //! (codec encode, raw socket write) live in the parent module; this
 //! module reaches up via `super::` for them.
 
-use std::collections::{BTreeMap, VecDeque};
-use std::time::Duration;
+use std::{
+  collections::{BTreeMap, VecDeque},
+  time::Duration,
+};
 
 use bytes::{Bytes, BytesMut};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tokio::time::Instant;
-
-use crate::error::Result;
-use crate::frame::{ControlBits, LINK_HEADER_LEN, LinkCodec, LinkPacket, Lsp};
+use tokio::{
+  io::{AsyncWrite, AsyncWriteExt},
+  time::Instant,
+};
 
 use super::{encode_packet, write_packet};
+use crate::{
+  error::Result,
+  frame::{ControlBits, LINK_HEADER_LEN, LinkCodec, LinkPacket, Lsp},
+};
 
 const PAYLOAD_TRAILER: usize = 1;
 const FRAME_OVERHEAD: usize = LINK_HEADER_LEN + PAYLOAD_TRAILER;

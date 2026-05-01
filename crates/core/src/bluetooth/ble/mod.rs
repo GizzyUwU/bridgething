@@ -23,9 +23,8 @@ use tokio::{
   task::JoinHandle,
 };
 
-use crate::{bluetooth::BluetoothError, state::State};
-
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
+use crate::{bluetooth::BluetoothError, state::State};
 
 // TODO: handle errors ffs
 pub struct GattServer {

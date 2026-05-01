@@ -1,5 +1,4 @@
-use crate::csm::CsmDecodeError;
-use crate::frame::FrameError;
+use crate::{csm::CsmDecodeError, frame::FrameError};
 
 pub type Result<T> = std::result::Result<T, Error>;
 

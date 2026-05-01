@@ -10,6 +10,7 @@ type Fixture = {
   name: string;
   description: string;
   direction: Direction;
+  priority: 'normal' | 'bulk';
   decoded_json: unknown;
   msgpack_hex: string;
   framed_hex: string;
@@ -67,6 +68,7 @@ describe('golden fixtures', () => {
       const header = parseFrameHeader(framed);
       expect(header.compression).toBe(Compression.None);
       expect(header.encoding).toBe(Encoding.Msgpack);
+      expect(header.priority).toBe(fixture.priority);
 
       const decoded =
         fixture.direction === 'bridge_to_gateway'
@@ -83,7 +85,10 @@ describe('golden fixtures', () => {
           ? codec.decode<BridgeToGatewayMsg>(framed)
           : codec.decode<GatewayToBridgeMsg>(framed);
 
-      const reEncoded = codec.encode(decoded);
+      const reEncoded = codec.encode(decoded, { priority: fixture.priority });
+      const reHeader = parseFrameHeader(reEncoded);
+      expect(reHeader.priority).toBe(fixture.priority);
+
       const redecoded =
         fixture.direction === 'bridge_to_gateway'
           ? codec.decode<BridgeToGatewayMsg>(reEncoded)

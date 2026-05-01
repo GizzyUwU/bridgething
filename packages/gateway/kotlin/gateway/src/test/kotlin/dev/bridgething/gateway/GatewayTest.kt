@@ -4,9 +4,9 @@ import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.ForwardMessage
 import dev.bridgething.schema.GatewayMsgMeta
-import dev.bridgething.schema.GatewayToBridgeFileMsg
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
+import dev.bridgething.schema.GatewayToBridgeWebappMsg
 import dev.bridgething.schema.ResponseMeta
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.take
@@ -104,7 +104,7 @@ class GatewayTest {
     val outbound = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Command,
-      data = GatewayToBridgeMsgData.File(GatewayToBridgeFileMsg.List),
+      data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List),
     )
     gateway.send(testDevice.id, outbound)
 
@@ -126,7 +126,7 @@ class GatewayTest {
     val pending = async {
       gateway.request(
         testDevice.id,
-        GatewayToBridgeMsgData.File(GatewayToBridgeFileMsg.List),
+        GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List),
       )
     }
 
@@ -161,7 +161,7 @@ class GatewayTest {
     val outcome = runCatching {
       gateway.request(
         testDevice.id,
-        GatewayToBridgeMsgData.File(GatewayToBridgeFileMsg.List),
+        GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List),
         timeout = 100.milliseconds,
       )
     }
