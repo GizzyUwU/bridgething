@@ -212,7 +212,25 @@ impl ClientManager {
       tracing::debug!("sent gateway status to {address}");
     }
 
+    let synthesize_change_mode = data.mode == ClientMode::Stock;
     self.connections.insert(address, data);
+
+    // Stock-port connections start in Stock mode without the upgrade
+    // path that fires ChangeMode in `connection.rs::handle_text`,
+    // so they never trigger the handler that broadcasts current
+    // bond/connection state. Synthesize one here, after insertion,
+    // so the broadcast that follows reaches the new connection.
+    if synthesize_change_mode {
+      let msg = RecvMsg {
+        id: uuid::Uuid::now_v7(),
+        from: address,
+        data: RecvMsgData::ChangeMode(ClientMode::Stock),
+        stock_msg_id: None,
+      };
+      if let Err(err) = self.tx.send(msg).await {
+        tracing::error!("failed to fire synthetic ChangeMode for {address}: {:?}", err);
+      }
+    }
 
     Ok(())
   }

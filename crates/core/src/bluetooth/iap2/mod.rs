@@ -18,14 +18,15 @@
 //! directly. Reading `SUPERBIRD_HOST` selects the device for the dev
 //! path; production never consults it.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use bluer::{
-  Address, Session,
+  Adapter, Address, Session,
   rfcomm::{ConnectRequest, Profile, ProfileHandle, Role},
 };
 use bridgething_iap2::{
-  IAP2_ACCESSORY_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link, LinkConfig, Lsp, SessionEvent,
+  IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link, LinkConfig,
+  Lsp, SessionEvent,
   csm::{
     identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
     now_playing::{
@@ -34,9 +35,8 @@ use bridgething_iap2::{
   },
   session::WorkerMfiAccess,
 };
-pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
-
 use bridgething_mfi::MfiAuth;
+pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
 use futures::StreamExt;
 use libbridgething::{DeviceType, MediaItemUpdate, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate};
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -47,8 +47,13 @@ use super::{BluetoothResult, profiles::ProfileMan};
 use crate::state::State;
 
 const IAP2_PROFILE_NAME: &str = "iAP2";
+const IAP2_CLIENT_PROFILE_NAME: &str = "iAP2 (device dial-in)";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
+
+const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
+const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+const RECONNECT_KICK_CAPACITY: usize = 16;
 
 /// Custom SDP record advertised for the iAP2 RFCOMM listener. iOS does
 /// not engage iAP2 on the auto-generated record bluez emits when only
@@ -99,24 +104,48 @@ struct ActiveSession {
   _events_handle: JoinHandle<()>,
 }
 
+/// Cloneable handle to kick the iAP2 reconnect loop for a given peer.
+/// Held by the daemon entry points that learn an iOS peer needs the
+/// link brought up: startup, LinkDown observers, the stock-webapp
+/// "connect to device" command. Sending is fire-and-forget; the
+/// manager dedups outstanding tasks per mac.
+#[derive(Debug, Clone)]
+pub struct Iap2ReconnectHandle {
+  tx: mpsc::Sender<Address>,
+}
+
+impl Iap2ReconnectHandle {
+  pub async fn kick(&self, mac: Address) {
+    if self.tx.send(mac).await.is_err() {
+      tracing::debug!(%mac, "iap2 reconnect kick dropped; manager exited");
+    }
+  }
+}
+
 #[derive(Debug)]
 pub struct Iap2Manager {
-  handle: ProfileHandle,
+  server_handle: ProfileHandle,
+  client_handle: ProfileHandle,
   identification: IdentificationConfig,
   mfi_worker: WorkerMfiAccess,
   state: State,
   profile_man: ProfileMan,
   ea_gateway: Iap2EaGatewayHandle,
+  adapter: Adapter,
   sessions: HashMap<Address, ActiveSession>,
+  reconnects: HashMap<Address, JoinHandle<()>>,
+  reconnect_tx: mpsc::Sender<Address>,
+  reconnect_rx: mpsc::Receiver<Address>,
 }
 
 impl Iap2Manager {
   pub async fn init(
     session: &Session,
+    adapter: Adapter,
     state: &State,
     profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
-  ) -> BluetoothResult<Option<Self>> {
+  ) -> BluetoothResult<Option<(Self, Iap2ReconnectHandle)>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
@@ -125,31 +154,56 @@ impl Iap2Manager {
       }
     };
 
-    let profile = Profile {
+    let server_profile = Profile {
       uuid: IAP2_ACCESSORY_UUID,
       name: Some(IAP2_PROFILE_NAME.to_string()),
       role: Some(Role::Server),
       channel: Some(IAP2_RFCOMM_CHANNEL as u16),
       require_authentication: Some(false),
       require_authorization: Some(false),
+      auto_connect: Some(true),
       service_record: Some(iap2_service_record()),
       ..Default::default()
     };
+    let server_handle = session.register_profile(server_profile).await?;
+    tracing::info!(channel = IAP2_RFCOMM_CHANNEL, "registered iAP2 RFCOMM server profile");
 
-    let handle = session.register_profile(profile).await?;
-    tracing::info!(channel = IAP2_RFCOMM_CHANNEL, "registered iAP2 RFCOMM profile");
+    let client_profile = Profile {
+      uuid: IAP2_DEVICE_UUID,
+      name: Some(IAP2_CLIENT_PROFILE_NAME.to_string()),
+      role: Some(Role::Client),
+      require_authentication: Some(false),
+      require_authorization: Some(false),
+      auto_connect: Some(true),
+      ..Default::default()
+    };
+    let client_handle = session.register_profile(client_profile).await?;
+    tracing::info!("registered iAP2 RFCOMM client profile (accessory-initiated reconnect)");
 
     let identification = build_identification(state);
 
-    Ok(Some(Self {
-      handle,
-      identification,
-      mfi_worker,
-      state: state.clone(),
-      profile_man,
-      ea_gateway,
-      sessions: HashMap::new(),
-    }))
+    let (reconnect_tx, reconnect_rx) = mpsc::channel(RECONNECT_KICK_CAPACITY);
+    let reconnect_handle = Iap2ReconnectHandle {
+      tx: reconnect_tx.clone(),
+    };
+
+    Ok(Some((
+      Self {
+        server_handle,
+        client_handle,
+        identification,
+        mfi_worker,
+        state: state.clone(),
+        profile_man,
+        ea_gateway,
+        adapter,
+        sessions: HashMap::new(),
+        reconnects: HashMap::new(),
+        reconnect_tx,
+        reconnect_rx,
+      },
+      reconnect_handle,
+    )))
   }
 
   pub fn spawn(mut self) -> JoinHandle<()> {
@@ -158,21 +212,39 @@ impl Iap2Manager {
 
   async fn recv(&mut self) {
     tracing::info!("iAP2 manager listening for iPhone connections");
-    while let Some(request) = self.handle.next().await {
-      if let Err(err) = self.accept(request).await {
-        tracing::error!(?err, "iAP2 accept failed");
+    self.kickoff_reconnects_for_paired_ios().await;
+
+    loop {
+      tokio::select! {
+        Some(request) = self.server_handle.next() => {
+          if let Err(err) = self.accept(request, ConnectDirection::Inbound).await {
+            tracing::error!(?err, "iAP2 server accept failed");
+          }
+        }
+        Some(request) = self.client_handle.next() => {
+          if let Err(err) = self.accept(request, ConnectDirection::Outbound).await {
+            tracing::error!(?err, "iAP2 client accept failed");
+          }
+        }
+        Some(mac) = self.reconnect_rx.recv() => {
+          self.spawn_reconnect(mac);
+        }
+        else => {
+          tracing::error!("iAP2 manager streams all ended - this should not happen");
+          return;
+        }
       }
     }
-    tracing::error!("iAP2 profile handle stream ended - this should not happen");
   }
 
-  async fn accept(&mut self, request: ConnectRequest) -> BluetoothResult<()> {
+  async fn accept(&mut self, request: ConnectRequest, direction: ConnectDirection) -> BluetoothResult<()> {
     let address = request.device();
-    tracing::info!(%address, "iAP2 connect request");
+    tracing::info!(%address, ?direction, "iAP2 connect request");
 
     let stream = request.accept()?;
 
     self.sessions.remove(&address);
+    self.cancel_reconnect(&address);
 
     let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(IAP2_CHANNEL_CAPACITY);
     let (link_events_tx, link_events_rx) = mpsc::channel::<Iap2Event>(IAP2_CHANNEL_CAPACITY);
@@ -198,6 +270,7 @@ impl Iap2Manager {
       self.state.clone(),
       self.profile_man.clone(),
       self.ea_gateway.clone(),
+      self.reconnect_tx.clone(),
     ));
 
     self.sessions.insert(
@@ -211,6 +284,113 @@ impl Iap2Manager {
 
     Ok(())
   }
+
+  async fn kickoff_reconnects_for_paired_ios(&mut self) {
+    let addresses = match self.adapter.device_addresses().await {
+      Ok(a) => a,
+      Err(err) => {
+        tracing::warn!(?err, "failed to enumerate paired devices for iAP2 reconnect");
+        return;
+      }
+    };
+    for mac in addresses {
+      if self.peer_advertises_iap2(mac).await {
+        self.spawn_reconnect(mac);
+      }
+    }
+  }
+
+  async fn peer_advertises_iap2(&self, mac: Address) -> bool {
+    let Ok(device) = self.adapter.device(mac) else {
+      return false;
+    };
+    if !device.is_paired().await.unwrap_or(false) {
+      return false;
+    }
+    device
+      .uuids()
+      .await
+      .ok()
+      .flatten()
+      .is_some_and(|set| set.contains(&IAP2_DEVICE_UUID))
+  }
+
+  fn spawn_reconnect(&mut self, mac: Address) {
+    if self.sessions.contains_key(&mac) {
+      tracing::trace!(%mac, "iAP2 session already active; skipping reconnect kick");
+      return;
+    }
+    if let Some(handle) = self.reconnects.get(&mac) {
+      if !handle.is_finished() {
+        tracing::trace!(%mac, "iAP2 reconnect already in flight; skipping kick");
+        return;
+      }
+    }
+    let adapter = self.adapter.clone();
+    let state = self.state.clone();
+    let task = tokio::spawn(reconnect_loop(adapter, state, mac));
+    self.reconnects.insert(mac, task);
+  }
+
+  fn cancel_reconnect(&mut self, mac: &Address) {
+    if let Some(handle) = self.reconnects.remove(mac) {
+      handle.abort();
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConnectDirection {
+  Inbound,
+  Outbound,
+}
+
+async fn reconnect_loop(adapter: Adapter, state: State, mac: Address) {
+  let device = match adapter.device(mac) {
+    Ok(d) => d,
+    Err(err) => {
+      tracing::debug!(%mac, ?err, "iAP2 reconnect aborted: no device handle");
+      return;
+    }
+  };
+  let mut delay = RECONNECT_INITIAL_DELAY;
+  loop {
+    tokio::time::sleep(delay).await;
+
+    if !still_should_reconnect(&adapter, &state, mac).await {
+      tracing::debug!(%mac, "iAP2 reconnect loop exiting (peer unbonded or already up)");
+      return;
+    }
+
+    tracing::debug!(%mac, ?delay, "dialing iPhone iAP2-device channel");
+    match device.connect_profile(&IAP2_DEVICE_UUID).await {
+      Ok(()) => {
+        tracing::info!(%mac, "iAP2 connect_profile dial succeeded; awaiting NewConnection");
+        return;
+      }
+      Err(err) => {
+        tracing::debug!(%mac, ?err, "iAP2 connect_profile dial failed; backing off");
+        delay = (delay * 2).min(RECONNECT_MAX_DELAY);
+      }
+    }
+  }
+}
+
+async fn still_should_reconnect(adapter: &Adapter, state: &State, mac: Address) -> bool {
+  let Ok(device) = adapter.device(mac) else {
+    return false;
+  };
+  if !device.is_paired().await.unwrap_or(false) {
+    return false;
+  }
+  if device.is_connected().await.unwrap_or(false) {
+    if let Some(peer) = state.peers.get(&mac).await {
+      if peer.iap2 != PeerIap2Status::None {
+        return false;
+      }
+    }
+  }
+  true
 }
 
 async fn observe_session_events(
@@ -219,6 +399,7 @@ async fn observe_session_events(
   state: State,
   profile_man: ProfileMan,
   ea_gateway: Iap2EaGatewayHandle,
+  reconnect_tx: mpsc::Sender<Address>,
 ) {
   while let Some(event) = rx.recv().await {
     match event {
@@ -277,6 +458,9 @@ async fn observe_session_events(
       SessionEvent::LinkDown(reason) => {
         tracing::info!(%address, %reason, "iAP2 link down");
         let _ = state.peers.set_iap2(address, PeerIap2Status::None).await;
+        if reconnect_tx.send(address).await.is_err() {
+          tracing::debug!(%address, "iap2 reconnect channel closed; not requeuing");
+        }
       }
     }
   }

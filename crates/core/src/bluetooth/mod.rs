@@ -1,9 +1,8 @@
-
 use std::sync::Arc;
 
 use ble::GattServer;
 use bluer::{Adapter, Address, Session, agent::AgentHandle};
-use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager};
+use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle};
 use libbridgething::{
   ForwardMessage, Priority,
   gateway::{BridgeToGatewayMsg, FileRequestData, GatewayMsgMeta, GatewayToBridgeMsg},
@@ -23,14 +22,11 @@ mod auth;
 mod debug;
 mod packer;
 
-
 pub(crate) use packer::OutboundPacker;
 use profiles::ProfileMan;
-
 // reexports // TODO: review these
 pub use profiles::avrcp;
 use rfcomm::RfcommGateway;
-
 
 use crate::{
   http::WSError,
@@ -55,6 +51,7 @@ pub struct BluetoothManager {
 
   pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
+  iap2_reconnect: Option<Iap2ReconnectHandle>,
 
   _agent_handle: AgentHandle,
   _iap2_handle: Option<JoinHandle<()>>,
@@ -94,20 +91,21 @@ impl BluetoothManager {
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let _iap2_handle =
-      match Iap2Manager::init(&session, &state, profile_man.clone(), gateway_man.iap2_ea_handle()).await? {
-        Some(manager) => Some(manager.spawn()),
-        None => {
-          tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-          None
-        }
-      };
-
-    // if we had a bdedr device with profile connections, try to reconnect
-    if let Some(last) = state.last_device().await
-      && let Ok(mac) = last.parse() {
-        tokio::spawn(profiles::connect_profiles(profile_man.clone(), mac, None));
-      };
+    let (iap2_reconnect, _iap2_handle) = match Iap2Manager::init(
+      &session,
+      adapter.clone(),
+      &state,
+      profile_man.clone(),
+      gateway_man.iap2_ea_handle(),
+    )
+    .await?
+    {
+      Some((manager, reconnect_handle)) => (Some(reconnect_handle), Some(manager.spawn())),
+      None => {
+        tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
+        (None, None)
+      }
+    };
 
     Ok(Arc::new(Self {
       session,
@@ -118,10 +116,27 @@ impl BluetoothManager {
 
       profile_man,
       gateway_man,
+      iap2_reconnect,
 
       _agent_handle,
       _iap2_handle,
     }))
+  }
+
+  /// Stock-webapp-driven "connect to this paired device" entry point.
+  /// For iOS peers this kicks the accessory-initiated iAP2 dial into
+  /// the iPhone's iAP2-device channel. Android peers can't be dialed
+  /// from accessory side - the companion app is the initiator there
+  /// - so the call is a no-op aside from the trace.
+  pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
+    let address: Address = mac.parse()?;
+    if let Some(handle) = &self.iap2_reconnect {
+      tracing::debug!(%address, "kicking iAP2 reconnect from connect command");
+      handle.kick(address).await;
+    } else {
+      tracing::debug!(%address, "iAP2 manager not running; connect command has no effect");
+    }
+    Ok(())
   }
 
   pub async fn request_file(&self, path: String, tx: FileRequestTx) {

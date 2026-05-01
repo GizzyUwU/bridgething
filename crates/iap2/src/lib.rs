@@ -31,6 +31,12 @@ pub use session::{Iap2Session, MfiAccess, MfiHandle, SessionEvent, WorkerMfiAcce
 /// matching SDP record, and open RFCOMM there.
 pub const IAP2_ACCESSORY_UUID: uuid::Uuid = uuid::Uuid::from_u128(0x00000000_DECA_FADE_DECA_DEAFDECACAFF);
 
+/// SDP service-class UUID iOS devices advertise for inbound iAP2-over-RFCOMM.
+/// The trailing nibble (`E` vs the accessory's `F`) is the only difference.
+/// Accessories register a client-role profile against this UUID and dial it
+/// when reconnecting after wake (cleanroom doc `protocol/10_rfcomm_transport.md`).
+pub const IAP2_DEVICE_UUID: uuid::Uuid = uuid::Uuid::from_u128(0x00000000_DECA_FADE_DECA_DEAFDECACAFE);
+
 /// RFCOMM channel the accessory binds for iAP2. The protocol does not
 /// pin a channel; whatever we bind, we advertise. Channel 1 is taken
 /// by the bridgething-native gateway, so iAP2 lives on 2.

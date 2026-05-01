@@ -44,7 +44,7 @@ impl BluetoothHandler {
 
   async fn connect(&self, mac: String) -> HandlerResult {
     tracing::debug!("({}) connecting to device with MAC: {}", &self.handle.from, mac);
-    Ok(self.handle.bluetooth.profile_man.connect(&mac)?)
+    Ok(self.handle.bluetooth.connect(&mac).await?)
   }
 
   async fn scan(&self) -> HandlerResult {

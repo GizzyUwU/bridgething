@@ -40,7 +40,8 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use super::{SessionEvent, emit, send_csm};
 use crate::{
   csm::{
-    CsmFrame, external_accessory::{
+    CsmFrame,
+    external_accessory::{
       EaSessionStatus, RequestAppLaunch, StartExternalAccessoryProtocolSession, StatusExternalAccessoryProtocolSession,
       StopExternalAccessoryProtocolSession,
     },

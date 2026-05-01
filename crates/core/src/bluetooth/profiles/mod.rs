@@ -51,13 +51,6 @@ impl ProfileManager {
     self.adapter.set_discoverable(discoverable).await
   }
 
-  pub fn connect(self: &ProfileMan, mac: &str) -> bluer::Result<()> {
-    tracing::debug!("attempting to connect to device with mac address {:?}", &mac);
-    tokio::spawn(connect_profiles(self.clone(), mac.parse()?, Some(12)));
-
-    Ok(())
-  }
-
   pub async fn forget(&self, mac: &str) -> bluer::Result<()> {
     tracing::debug!("attempting to forget device with mac address {:?}", &mac);
 
@@ -152,10 +145,6 @@ impl ProfileManager {
 
             let _ = self.state.peers.remove(mac).await;
             disconnection_messages_stock(&self.state).await?;
-
-            tracing::debug!("spawning reconnect loop for mac {:?}", &mac);
-            #[cfg(not(debug_assertions))]
-            tokio::spawn(connect_profiles(self.clone(), mac, None));
           }
 
           Ok(())
@@ -220,49 +209,6 @@ impl ProfileManager {
     }
 
     Ok(device)
-  }
-}
-
-// TODO: figure out reconnect
-pub async fn connect_profiles(profile_man: ProfileMan, mac: Address, max_attempts: Option<usize>) {
-  let mut attempts: usize = 0;
-  let connected_device: Device;
-
-  loop {
-    if let Some(max) = max_attempts
-      && attempts > max {
-        tracing::warn!("max connect attempts for mac {:?} exceeded.", &mac);
-        return;
-      }
-
-    tracing::debug!("attempting to connect to device with mac: {:?}", &mac);
-    if let Ok(device) = profile_man.adapter.device(mac) {
-      tracing::debug!("found handle to device with mac: {:?}", &mac);
-
-      if let Ok(connected) = device.is_connected().await {
-        if connected {
-          tracing::info!("connected to device with mac: {:?}", &mac);
-          connected_device = device;
-          break;
-        } else if device.connect().await.is_ok() {
-          tracing::info!("connected to device with mac: {:?}", &mac);
-          connected_device = device;
-          break;
-        }
-      };
-    };
-
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    attempts += 1;
-  }
-
-  // avrcp::connect_avrcp(&connected_device).await;
-
-  if let Err(err) = profile_man
-    .handle_event(BluetoothConnectionEvent::DeviceAdded { mac })
-    .await
-  {
-    tracing::error!("failed to handle device added event: {:?}", err);
   }
 }
 
