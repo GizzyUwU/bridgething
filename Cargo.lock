@@ -302,6 +302,7 @@ name = "bridgething"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "anyhow",
  "axum",
  "base64",
  "bincode",

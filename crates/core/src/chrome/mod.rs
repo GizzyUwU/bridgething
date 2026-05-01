@@ -1,12 +1,38 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::{
+  sync::{Arc, atomic::AtomicBool},
+  time::Duration,
+};
 
-use headless_chrome::Browser;
+use headless_chrome::{Browser, Tab};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
-const CHROME_PORT: u16 = 9222;
-const CHROME_STATUS_URL: &str = "http://127.0.1:9222/json/version";
-const CHROME_WS_URL: &str = "ws://127.0.1:9222/devtools/browser/{}";
+const ENV_CHROME_PORT: &str = "BRIDGETHING_CHROME_PORT";
+
+const CHROME_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60 * 24 * 365 * 10);
+const CHROME_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const CHROME_CONNECT_BACKOFF: Duration = Duration::from_secs(30);
+
+#[cfg(not(debug_assertions))]
+const DEFAULT_CHROME_PORT: u16 = 9223;
+#[cfg(debug_assertions)]
+const DEFAULT_CHROME_PORT: u16 = 9222;
+
+fn chrome_port() -> u16 {
+  if let Ok(raw) = std::env::var(ENV_CHROME_PORT) {
+    match raw.parse::<u16>() {
+      Ok(p) => return p,
+      Err(_) => {
+        tracing::warn!("ignoring invalid {ENV_CHROME_PORT}={raw:?}, falling back to default {DEFAULT_CHROME_PORT}")
+      }
+    }
+  }
+  DEFAULT_CHROME_PORT
+}
+
+fn chrome_status_url() -> String {
+  format!("http://127.0.0.1:{}/json/version", chrome_port())
+}
 
 type ChromeTx = tokio::sync::mpsc::Sender<ChromeCommand>;
 type ChromeRx = tokio::sync::mpsc::Receiver<ChromeCommand>;
@@ -28,12 +54,12 @@ pub struct Chrome {
 
 impl Chrome {
   pub async fn init() -> Result<Self> {
-    tracing::debug!("initializing chrome worker");
+    tracing::debug!("initializing chrome worker (port {})", chrome_port());
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let connected = Arc::new(AtomicBool::new(false));
 
     let cancel_token = tokio_util::sync::CancellationToken::new();
-    let mut worker = ChromeWorker::new(connected.clone(), rx, cancel_token.clone());
+    let mut worker = ChromeWorker::new(connected.clone(), rx, cancel_token.clone())?;
 
     Ok(Self {
       connected: connected.clone(),
@@ -61,23 +87,31 @@ impl Chrome {
 struct ChromeWorker {
   connected: Arc<AtomicBool>,
   browser: Option<Browser>,
+  http: reqwest::Client,
 
   rx: ChromeRx,
   cancel_token: CancellationToken,
 }
 
 impl ChromeWorker {
-  pub fn new(connected: Arc<AtomicBool>, rx: ChromeRx, cancel_token: CancellationToken) -> Self {
-    Self {
+  fn new(connected: Arc<AtomicBool>, rx: ChromeRx, cancel_token: CancellationToken) -> Result<Self> {
+    let http = reqwest::Client::builder()
+      .connect_timeout(CHROME_PROBE_TIMEOUT)
+      .timeout(CHROME_PROBE_TIMEOUT)
+      .build()
+      .map_err(|e| ChromeError::Connect(Box::new(e)))?;
+
+    Ok(Self {
       connected,
       browser: None,
+      http,
 
       rx,
       cancel_token,
-    }
+    })
   }
 
-  pub async fn run(&mut self) {
+  async fn run(&mut self) {
     loop {
       tokio::select! {
         Some(message) = self.rx.recv() => {
@@ -96,111 +130,137 @@ impl ChromeWorker {
 
   async fn handle_reload(&mut self) {
     tracing::debug!("reloading current chrome tab");
-
-    let Some(browser) = self.get_connection().await else {
-      tracing::warn!("chrome not connected");
-      return;
-    };
-
-    if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      browser.register_missing_tabs();
-    })) {
-      tracing::error!("failed to register missing tabs: {:?} - browser likely closed", e);
-      self.browser = None;
-      return;
-    }
-
-    let Some(tab) = (if let Ok(tabs) = browser.get_tabs().lock() {
-      tabs.first().cloned()
-    } else {
-      tracing::error!("tab mutex poisoned!!");
-      return;
-    }) else {
-      tracing::error!("no tabs found!");
-      return;
-    };
-
-    if let Err(e) = tab.reload(true, None) {
-      tracing::error!("failed to reload tab: {}", e);
-    }
+    self
+      .with_first_tab("reload", |tab| tab.reload(true, None).map(|_| ()))
+      .await;
   }
 
   async fn handle_navigate(&mut self, url: String) {
     tracing::debug!("navigating to {}", url);
-
-    let Some(browser) = self.get_connection().await else {
-      tracing::warn!("chrome not connected");
-      return;
-    };
-
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      browser.register_missing_tabs();
-    }));
-    let Some(browser) = (if let Err(e) = result {
-      tracing::debug!("failed to register missing tabs: {:?}, restarting connection", e);
-      self.browser = None;
-
-      let browser = self.get_connection().await;
-      if let Some(b) = browser {
-        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-          b.register_missing_tabs();
-        })) {
-          tracing::error!("failed to register missing tabs: {:?} - browser likely closed", e);
-          self.browser = None;
-          return;
-        }
-      }
-
-      browser.as_ref()
-    } else {
-      Some(browser)
-    }) else {
-      tracing::error!("failed to get browser connection");
-      return;
-    };
-
-    browser.register_missing_tabs();
-    let Some(tab) = (if let Ok(tabs) = browser.get_tabs().lock() {
-      tabs.first().cloned()
-    } else {
-      tracing::error!("tab mutex poisoned!!");
-      return;
-    }) else {
-      tracing::error!("no tabs found!");
-      return;
-    };
-
-    if let Err(e) = tab.navigate_to(&url) {
-      tracing::error!("failed to navigate to {}: {}", url, e);
-    }
+    self
+      .with_first_tab("navigate", |tab| tab.navigate_to(&url).map(|_| ()))
+      .await;
   }
 
-  async fn get_connection(&mut self) -> &Option<Browser> {
-    tracing::debug!("getting chrome connection");
-    if self.browser.is_some() {
-      return &self.browser;
+  // Apply `op` to the kiosk's first tab, retrying once if the cached
+  // browser handle's transport has gone dead since the last call.
+  // Any Err return OR panic from headless_chrome marks the connection
+  // as dead, drops the cached handle, and reconnects on the second
+  // attempt. Without this, headless_chrome's silent Err returns
+  // (e.g. when chromium has crashed and respawned) are dropped on
+  // the floor and the daemon believes navigations succeeded when they
+  // were actually no-ops.
+  async fn with_first_tab<F>(&mut self, label: &'static str, op: F)
+  where
+    F: Fn(&Arc<Tab>) -> anyhow::Result<()>,
+  {
+    for attempt in 0..2u8 {
+      let tab = match self.first_tab().await {
+        Some(tab) => tab,
+        None => {
+          // first_tab() already logged + slept on connect failure;
+          // don't retry-spin here.
+          return;
+        }
+      };
+
+      match safe_call(label, || op(&tab)) {
+        Ok(()) => return,
+        Err(e) => {
+          tracing::warn!("chrome {label} failed (attempt {attempt}): {e:?}; dropping connection");
+          self.browser = None;
+          self.connected.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+      }
+    }
+    tracing::error!("chrome {label} gave up after one retry");
+  }
+
+  async fn first_tab(&mut self) -> Option<Arc<Tab>> {
+    if self.browser.is_none() {
+      self.connect_browser().await;
+    }
+    let browser = self.browser.take()?;
+
+    if let Err(e) = catch_panic("register_missing_tabs", || browser.register_missing_tabs()) {
+      tracing::warn!("{e:?}; dropping cached browser");
+      self.connected.store(false, std::sync::atomic::Ordering::SeqCst);
+      return None;
     }
 
-    let Ok(res) = reqwest::get(CHROME_STATUS_URL).await else {
-      tracing::error!("failed to connect to chrome");
-      tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-      return &None;
+    let tab = {
+      let guard = match browser.get_tabs().lock() {
+        Ok(g) => g,
+        Err(e) => {
+          tracing::error!("tabs mutex poisoned: {e:?}; dropping cached browser");
+          self.connected.store(false, std::sync::atomic::Ordering::SeqCst);
+          return None;
+        }
+      };
+      guard.first().cloned()
     };
 
-    let Ok(status) = res.json::<ChromeStatus>().await else {
-      tracing::error!("failed to parse chrome status");
-      tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-      return &None;
-    };
-    tracing::trace!("chrome status: {:?}", &status);
-
-    if let Ok(c) = Browser::connect(status.url) {
-      self.connected.store(true, std::sync::atomic::Ordering::SeqCst);
-      self.browser = Some(c);
-      &self.browser
-    } else {
-      &None
+    self.browser = Some(browser);
+    if tab.is_none() {
+      tracing::warn!("chrome reports no tabs");
     }
+    tab
+  }
+
+  async fn connect_browser(&mut self) {
+    let url = chrome_status_url();
+    tracing::debug!("probing {url}");
+
+    let res = match self.http.get(&url).send().await {
+      Ok(r) => r,
+      Err(e) => {
+        tracing::warn!("failed to GET {url}: {e}");
+        tokio::time::sleep(CHROME_CONNECT_BACKOFF).await;
+        return;
+      }
+    };
+
+    let status = match res.json::<ChromeStatus>().await {
+      Ok(s) => s,
+      Err(e) => {
+        tracing::warn!("failed to parse {url}: {e}");
+        tokio::time::sleep(CHROME_CONNECT_BACKOFF).await;
+        return;
+      }
+    };
+    tracing::trace!("chrome status: {status:?}");
+
+    match Browser::connect_with_timeout(status.url, CHROME_IDLE_TIMEOUT) {
+      Ok(browser) => {
+        self.connected.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.browser = Some(browser);
+      }
+      Err(e) => {
+        tracing::warn!("Browser::connect_with_timeout failed: {e:?}");
+        tokio::time::sleep(CHROME_CONNECT_BACKOFF).await;
+      }
+    }
+  }
+}
+
+fn safe_call<F, R>(label: &str, f: F) -> anyhow::Result<R>
+where
+  F: FnOnce() -> anyhow::Result<R>,
+{
+  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    Ok(Ok(r)) => Ok(r),
+    Ok(Err(e)) => Err(e),
+    Err(p) => anyhow::bail!("{label} panicked: {p:?}"),
+  }
+}
+
+fn catch_panic<F>(label: &str, f: F) -> anyhow::Result<()>
+where
+  F: FnOnce(),
+{
+  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    Ok(()) => Ok(()),
+    Err(p) => anyhow::bail!("{label} panicked: {p:?}"),
   }
 }
 
@@ -214,7 +274,7 @@ type Result<T> = std::result::Result<T, ChromeError>;
 #[derive(Debug, thiserror::Error)]
 pub enum ChromeError {
   #[error("chrome connection error: {0}")]
-  Connect(Box<dyn std::error::Error>),
+  Connect(Box<dyn std::error::Error + Send + Sync>),
   #[error(transparent)]
   Tx(#[from] tokio::sync::mpsc::error::SendError<ChromeCommand>),
 }

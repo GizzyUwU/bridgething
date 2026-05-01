@@ -55,6 +55,7 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tower = { version = "0.5.3", features = ["util"] }
 bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
 bridgething-mfi = { version = "0.1.0", path = "../mfi" }
+anyhow = "1.0.102"
 
 
 [features]
