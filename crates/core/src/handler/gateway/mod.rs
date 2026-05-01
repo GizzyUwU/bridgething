@@ -10,7 +10,7 @@ use file::*;
 use webapp::*;
 
 use libbridgething::{
-  ForwardMessage, GatewayMeta, ServerEventType,
+  ForwardMessage, GatewayMeta, NowPlayingUpdate, ServerEventType,
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
   server::{GatewayStatus, ServerSystemEvent},
 };
@@ -63,6 +63,9 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Forward(forward) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(forward).await });
       }
+      GatewayToBridgeMsgData::NowPlayingUpdate(update) => {
+        tokio::spawn(async move { TopLevelHandler::new(handle).handle_now_playing(update).await });
+      }
       GatewayToBridgeMsgData::Error(err) => {
         tracing::warn!("({:?}) gateway reported a protocol error: {:?}", &handle.address, err);
       }
@@ -111,6 +114,12 @@ impl TopLevelHandler {
       .broadcast(data, ServerEventType::Event)
       .await?;
 
+    Ok(())
+  }
+
+  pub async fn handle_now_playing(&mut self, update: NowPlayingUpdate) -> HandlerResult {
+    tracing::debug!("({:?}) handling now-playing delta from gateway", &self.handle.address);
+    self.handle.state.player.apply_now_playing(update).await?;
     Ok(())
   }
 }

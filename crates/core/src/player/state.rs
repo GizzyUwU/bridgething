@@ -1,22 +1,18 @@
 use libbridgething::{
-  Device, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, ServerEventType, Track, server::ServerPlayerEvent,
+  Device, NowPlayingUpdate, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, ServerEventType, Track,
+  server::ServerPlayerEvent,
 };
 
 use crate::http::ClientMan;
 
 use super::{PlayerResult, dbus::DBusPlayerEvent};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum RepeatState {
+  #[default]
   Off,
   All,
   Track,
-}
-
-impl Default for RepeatState {
-  fn default() -> Self {
-    Self::Off
-  }
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +57,83 @@ impl PlayerState {
       options: PlaybackOptions::default(),
       restrictions: PlaybackRestrictions::default(),
     }
+  }
+
+  /// Merge a delta-shaped `NowPlayingUpdate` into the canonical
+  /// `PlayerState`. Two writers feed this method: the iAP2 control
+  /// session decoded by `bridgething_iap2` (iOS path) and the
+  /// gateway protocol's `NowPlayingUpdate` variant (Android companion
+  /// path). The update is partial - only fields the producer had
+  /// fresh information about - so the merge skips fields that are
+  /// `None`. When the producer signals a track change via
+  /// `persistent_id`, we reset the track to a default and then layer
+  /// the delta on top, so stale fields from the previous track
+  /// don't leak across boundaries.
+  pub(crate) async fn apply_now_playing(&mut self, update: NowPlayingUpdate) -> PlayerResult<()> {
+    let NowPlayingUpdate { media_item, playback } = update;
+
+    if let Some(media) = media_item {
+      let same_track = match (
+        self.track.as_ref().map(|t| t.id.as_str()),
+        media.persistent_id.as_deref(),
+      ) {
+        (Some(existing), Some(new)) => existing == new,
+        (None, _) | (_, None) => false,
+      };
+      let mut track = if same_track {
+        self.track.clone().unwrap_or_default()
+      } else {
+        Track::default()
+      };
+
+      if let Some(id) = media.persistent_id {
+        track.id = id;
+      }
+      if let Some(title) = media.title {
+        track.name = title;
+      }
+      if let Some(album) = media.album {
+        track.album = album.into();
+      }
+      if let Some(artist) = media.artist {
+        track.artist = artist.clone().into();
+        track.artists = vec![artist.into()];
+      }
+      if let Some(image_id) = media.artwork_id {
+        track.image_id = image_id;
+      }
+      if let Some(duration) = media.duration_ms {
+        track.duration_ms = duration;
+      }
+      if let Some(liked) = media.liked {
+        track.saved = liked;
+      }
+      self.track = Some(track);
+    }
+
+    if let Some(play) = playback {
+      if let Some(playing) = play.playing {
+        self.playing = playing;
+      }
+      if let Some(position) = play.position_ms {
+        self.position_ms = position as usize;
+      }
+      if let Some(shuffle) = play.shuffle {
+        self.options.shuffle = shuffle;
+      }
+      if let Some(repeat) = play.repeat {
+        self.options.repeat = repeat;
+      }
+      if let Some(name) = play.app_display_name {
+        self.context_title = name;
+      }
+      if let Some(bundle) = play.app_bundle {
+        self.context_id = Some(bundle);
+      }
+    }
+
+    self.send_state().await?;
+    Ok(())
   }
 
   // TODO: change how this works so that it doesn't spam the client with new events

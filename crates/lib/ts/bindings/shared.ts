@@ -18,6 +18,17 @@ export type GatewayMeta = { adapterVersion: string, libVersion: string, libbridg
 
 export type Image = { "type": "id", "data": string } | { "type": "bytes", "data": Uint8Array };
 
+/**
+ * Per-track attributes that vary per song. `persistent_id` is a stable
+ * per-platform identifier (iAP2 sends u64; we hex-encode it on the
+ * wire). `artwork_id` is a stable per-image identifier scoped to its
+ * transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
+ * channel (iAP2 FileTransfer or a gateway file message).
+ */
+export type MediaItemUpdate = { persistentId: string | null, title: string | null, album: string | null, artist: string | null, liked: boolean | null, artworkId: string | null, durationMs: number | null, };
+
+export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null, playback: PlaybackUpdate | null, };
+
 export type PhoneCallDirection = "Incoming" | "Outgoing";
 
 export type PhoneCallStatus = "Disconnected" | "Sending" | "Ringing" | "Connecting" | "Active" | "Held" | "Disconnecting";
@@ -27,6 +38,15 @@ export type PlaybackOptions = { repeat: number, shuffle: boolean, };
 export type PlaybackQueue = { next: Array<Track>, current: Track, previous: Array<Track>, };
 
 export type PlaybackRestrictions = { can_repeat_context: boolean, can_repeat_track: boolean, can_seek: boolean, can_skip_next: boolean, can_skip_prev: boolean, can_toggle_shuffle: boolean, can_like: boolean, can_change_volume: boolean, can_set_output: boolean, };
+
+/**
+ * Per-playback-session attributes that vary regardless of track:
+ * playing/paused, position, shuffle/repeat, and the iOS bundle
+ * identifier of the app currently driving playback (e.g.
+ * `"com.spotify.client"`). `app_bundle` is null on the Android path
+ * since it isn't a meaningful surface there.
+ */
+export type PlaybackUpdate = { playing: boolean | null, positionMs: number | null, shuffle: boolean | null, repeat: number | null, appBundle: string | null, appDisplayName: string | null, };
 
 export type Track = { id: string, name: string, album: Album, artist: Artist, artists: Array<Artist>, duration_ms: number, image_id: string, saved: boolean, };
 

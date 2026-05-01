@@ -27,6 +27,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 pub mod auth;
 pub mod identification;
+pub mod now_playing;
 
 pub use bridgething_iap2_macros::Csm;
 
@@ -192,12 +193,21 @@ fn encode_params_into(params: Vec<CsmParam>, dst: &mut BytesMut) {
 /// Encode a list of parameters as a "group" payload (the same TLV
 /// shape used for the outer CSM body, minus the 6-byte outer header).
 /// Used by `IdentificationInformation`'s group-typed params (EA
-/// protocols, BT transport components).
+/// protocols, BT transport components) and by `NowPlayingUpdate`'s
+/// nested MediaItem / Playback attribute groups.
 pub fn encode_param_block(params: Vec<CsmParam>) -> Bytes {
   let body_len: usize = params.iter().map(|p| CSM_PARAM_HEADER_LEN + p.payload.len()).sum();
   let mut out = BytesMut::with_capacity(body_len);
   encode_params_into(params, &mut out);
   out.freeze()
+}
+
+/// Decode a group-typed param's payload (a sub-block of CSM-format
+/// params, no outer 6-byte header) back into a `Vec<CsmParam>`.
+/// Inverse of [`encode_param_block`]; used to walk nested groups like
+/// `NowPlayingUpdate`'s MediaItem / Playback attribute lists.
+pub fn decode_param_block(body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {
+  decode_params(body)
 }
 
 fn decode_params(mut body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {

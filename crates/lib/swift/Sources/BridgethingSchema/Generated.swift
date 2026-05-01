@@ -290,6 +290,14 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case forward(ForwardMessage)
+	/// A delta update for the connected phone's "now playing" state. Used
+	/// by gateway implementations on platforms where the daemon cannot
+	/// observe playback state itself (Android primarily): the companion
+	/// app pushes whatever changed, the daemon merges into its canonical
+	/// `Player` view, and webapps render the result via the existing
+	/// `ServerPlayerEvent`. iOS does not need this path - the iAP2
+	/// control session populates the same daemon-internal state directly.
+	case nowPlayingUpdate(NowPlayingUpdate)
 	/// Protocol-level failure: the gateway could not reach or dispatch a request
 	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
 	case error(GatewayError)
@@ -300,6 +308,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			chrome,
 			webapp,
 			forward,
+			nowPlayingUpdate,
 			error
 	}
 
@@ -336,6 +345,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .forward(content)
 					return
 				}
+			case .nowPlayingUpdate:
+				if let content = try? container.decode(NowPlayingUpdate.self, forKey: .data) {
+					self = .nowPlayingUpdate(content)
+					return
+				}
 			case .error:
 				if let content = try? container.decode(GatewayError.self, forKey: .data) {
 					self = .error(content)
@@ -364,6 +378,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 		case .forward(let content):
 			try container.encode(CodingKeys.forward, forKey: .type)
 			try container.encode(content, forKey: .data)
+		case .nowPlayingUpdate(let content):
+			try container.encode(CodingKeys.nowPlayingUpdate, forKey: .type)
+			try container.encode(content, forKey: .data)
 		case .error(let content):
 			try container.encode(CodingKeys.error, forKey: .type)
 			try container.encode(content, forKey: .data)
@@ -384,6 +401,64 @@ public struct GatewayToBridgeMsg: Codable, Sendable {
 		self.id = id
 		self.meta = meta
 		self.data = data
+	}
+}
+
+/// Per-track attributes that vary per song. `persistent_id` is a stable
+/// per-platform identifier (iAP2 sends u64; we hex-encode it on the
+/// wire). `artwork_id` is a stable per-image identifier scoped to its
+/// transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
+/// channel (iAP2 FileTransfer or a gateway file message).
+public struct MediaItemUpdate: Codable, Sendable {
+	public let persistentId: String?
+	public let title: String?
+	public let album: String?
+	public let artist: String?
+	public let liked: Bool?
+	public let artworkId: String?
+	public let durationMs: UInt32?
+
+	public init(persistentId: String?, title: String?, album: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?) {
+		self.persistentId = persistentId
+		self.title = title
+		self.album = album
+		self.artist = artist
+		self.liked = liked
+		self.artworkId = artworkId
+		self.durationMs = durationMs
+	}
+}
+
+/// Per-playback-session attributes that vary regardless of track:
+/// playing/paused, position, shuffle/repeat, and the iOS bundle
+/// identifier of the app currently driving playback (e.g.
+/// `"com.spotify.client"`). `app_bundle` is null on the Android path
+/// since it isn't a meaningful surface there.
+public struct PlaybackUpdate: Codable, Sendable {
+	public let playing: Bool?
+	public let positionMs: UInt32?
+	public let shuffle: Bool?
+	public let `repeat`: UInt32?
+	public let appBundle: String?
+	public let appDisplayName: String?
+
+	public init(playing: Bool?, positionMs: UInt32?, shuffle: Bool?, repeat: UInt32?, appBundle: String?, appDisplayName: String?) {
+		self.playing = playing
+		self.positionMs = positionMs
+		self.shuffle = shuffle
+		self.repeat = `repeat`
+		self.appBundle = appBundle
+		self.appDisplayName = appDisplayName
+	}
+}
+
+public struct NowPlayingUpdate: Codable, Sendable {
+	public let mediaItem: MediaItemUpdate?
+	public let playback: PlaybackUpdate?
+
+	public init(mediaItem: MediaItemUpdate?, playback: PlaybackUpdate?) {
+		self.mediaItem = mediaItem
+		self.playback = playback
 	}
 }
 

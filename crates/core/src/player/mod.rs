@@ -40,6 +40,10 @@ impl Player {
     self.state.read().await.send_state().await
   }
 
+  pub async fn apply_now_playing(&self, update: libbridgething::NowPlayingUpdate) -> PlayerResult<()> {
+    self.state.write().await.apply_now_playing(update).await
+  }
+
   pub async fn next(&self) -> PlayerResult<()> {
     if let Some(player) = &*self.dbus_player.read().await {
       player.next().await?;

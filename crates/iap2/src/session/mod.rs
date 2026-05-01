@@ -25,6 +25,7 @@
 mod auth;
 mod identification;
 mod mfi_worker;
+mod now_playing;
 
 use async_trait::async_trait;
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
@@ -39,6 +40,7 @@ use crate::link::{Iap2Command, Iap2Event};
 
 use auth::AuthFlow;
 use identification::IdentificationFlow;
+use now_playing::NowPlayingFlow;
 
 pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
 
@@ -75,6 +77,7 @@ pub enum SessionEvent {
   Identified,
   AuthFailed,
   IdentificationRejected { rejected_params: Vec<u16> },
+  NowPlayingUpdate(crate::csm::now_playing::NowPlayingUpdate),
   LinkDown(String),
 }
 
@@ -91,6 +94,7 @@ pub struct Iap2Session<M: MfiAccess> {
   session_events_tx: mpsc::Sender<SessionEvent>,
   auth: AuthFlow,
   ident: IdentificationFlow,
+  now_playing: NowPlayingFlow,
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
@@ -109,6 +113,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       session_events_tx,
       auth: AuthFlow::new(),
       ident: IdentificationFlow::new(),
+      now_playing: NowPlayingFlow::new(),
     }
   }
 
@@ -136,6 +141,9 @@ impl<M: MfiAccess> Iap2Session<M> {
         if let Some(reason) = self.handle_csm(frame).await? {
           self.disconnect_link().await;
           emit(&self.session_events_tx, reason).await;
+        }
+        if self.ident.is_accepted() {
+          self.now_playing.ensure_subscribed(&self.link_command_tx).await?;
         }
       }
 
@@ -190,6 +198,9 @@ impl<M: MfiAccess> Iap2Session<M> {
           &self.session_events_tx,
         )
         .await;
+    }
+    if NowPlayingFlow::handles(msg_id) {
+      return self.now_playing.handle(frame, &self.session_events_tx).await;
     }
     tracing::trace!(msg_id = format!("{msg_id:#06x}"), "iap2 session: unhandled CSM");
     Ok(None)

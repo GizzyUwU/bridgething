@@ -40,6 +40,10 @@ impl IdentificationFlow {
     (0x1D00..=0x1D03).contains(&msg_id)
   }
 
+  pub(super) fn is_accepted(&self) -> bool {
+    self.state == IdentState::Accepted
+  }
+
   /// Process one identification-range CSM. Same return-shape contract
   /// as [`AuthFlow::handle`]: `Some` means "terminal, emit + tear down."
   ///

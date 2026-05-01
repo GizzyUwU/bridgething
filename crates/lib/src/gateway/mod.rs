@@ -14,7 +14,7 @@ pub use from::*;
 pub use request::*;
 pub use to::*;
 
-use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta};
+use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta, NowPlayingUpdate};
 
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -71,8 +71,9 @@ pub enum GatewayToBridgeMsgData {
   #[from]
   Forward(ForwardMessage),
 
-  /// Protocol-level failure: the gateway could not reach or dispatch a request
-  /// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
+  #[from]
+  NowPlayingUpdate(NowPlayingUpdate),
+
   #[from]
   Error(GatewayError),
 }

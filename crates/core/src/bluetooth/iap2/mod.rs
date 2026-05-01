@@ -23,12 +23,16 @@ use std::collections::HashMap;
 use bluer::rfcomm::{ConnectRequest, Profile, ProfileHandle, Role};
 use bluer::{Address, Session};
 use bridgething_iap2::csm::identification::{CarthingIdentification, IdentificationConfig};
+use bridgething_iap2::csm::now_playing::{
+  MediaItemAttributes, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState, RepeatMode,
+};
 use bridgething_iap2::session::WorkerMfiAccess;
 use bridgething_iap2::{
   IAP2_ACCESSORY_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link, LinkConfig, Lsp, SessionEvent,
 };
 use bridgething_mfi::MfiAuth;
 use futures::StreamExt;
+use libbridgething::{MediaItemUpdate, NowPlayingUpdate, PlaybackUpdate};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -51,6 +55,7 @@ pub struct Iap2Manager {
   handle: ProfileHandle,
   identification: IdentificationConfig,
   mfi_worker: WorkerMfiAccess,
+  state: State,
   sessions: HashMap<Address, ActiveSession>,
 }
 
@@ -83,6 +88,7 @@ impl Iap2Manager {
       handle,
       identification,
       mfi_worker,
+      state: state.clone(),
       sessions: HashMap::new(),
     }))
   }
@@ -126,7 +132,7 @@ impl Iap2Manager {
     );
     let _session_handle = tokio::spawn(session.run());
 
-    let _events_handle = tokio::spawn(observe_session_events(address, session_events_rx));
+    let _events_handle = tokio::spawn(observe_session_events(address, session_events_rx, self.state.clone()));
 
     self.sessions.insert(
       address,
@@ -141,7 +147,7 @@ impl Iap2Manager {
   }
 }
 
-async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<SessionEvent>) {
+async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<SessionEvent>, state: State) {
   while let Some(event) = rx.recv().await {
     match event {
       SessionEvent::LinkEstablished(lsp) => {
@@ -158,8 +164,54 @@ async fn observe_session_events(address: Address, mut rx: mpsc::Receiver<Session
       SessionEvent::IdentificationRejected { rejected_params } => {
         tracing::warn!(%address, ?rejected_params, "iAP2 identification rejected");
       }
+      SessionEvent::NowPlayingUpdate(update) => {
+        let lib_update = translate_now_playing(update);
+        tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
+        if let Err(err) = state.player.apply_now_playing(lib_update).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
+        }
+      }
       SessionEvent::LinkDown(reason) => tracing::info!(%address, %reason, "iAP2 link down"),
     }
+  }
+}
+
+/// Translate the iap2 crate's wire-decoded NowPlaying delta into the
+/// canonical lib type. Two scope changes happen here:
+///
+/// - iAP2's u64 persistent identifier becomes a namespaced string key
+///   (`iap2:track:{hex}`) so it cannot collide with identifiers minted
+///   by other transports (Android companion, future plugins).
+/// - iAP2's u8 artwork reference becomes a namespaced string key
+///   (`iap2:artwork:{n}`) for the same reason; FileTransfer-side
+///   slice 5 will resolve it to bytes through the same key.
+fn translate_now_playing(update: Iap2NowPlayingUpdate) -> NowPlayingUpdate {
+  NowPlayingUpdate {
+    media_item: update.media_item.map(translate_media_item),
+    playback: update.playback.map(translate_playback),
+  }
+}
+
+fn translate_media_item(media: MediaItemAttributes) -> MediaItemUpdate {
+  MediaItemUpdate {
+    persistent_id: media.persistent_id.map(|id| format!("iap2:track:{id:016x}")),
+    title: media.title,
+    album: media.album,
+    artist: media.artist,
+    liked: media.liked,
+    artwork_id: media.artwork_id.map(|id| format!("iap2:artwork:{id}")),
+    duration_ms: None,
+  }
+}
+
+fn translate_playback(play: PlaybackAttributes) -> PlaybackUpdate {
+  PlaybackUpdate {
+    playing: play.state.map(|s| matches!(s, PlaybackState::Playing)),
+    position_ms: play.position_ms,
+    shuffle: play.shuffle,
+    repeat: play.repeat.map(RepeatMode::as_u32),
+    app_bundle: play.app_bundle,
+    app_display_name: play.app_display_name,
   }
 }
 

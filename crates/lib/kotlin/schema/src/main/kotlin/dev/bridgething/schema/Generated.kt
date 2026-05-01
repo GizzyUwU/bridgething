@@ -145,6 +145,16 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
+	/// A delta update for the connected phone's "now playing" state. Used
+	/// by gateway implementations on platforms where the daemon cannot
+	/// observe playback state itself (Android primarily): the companion
+	/// app pushes whatever changed, the daemon merges into its canonical
+	/// `Player` view, and webapps render the result via the existing
+	/// `ServerPlayerEvent`. iOS does not need this path - the iAP2
+	/// control session populates the same daemon-internal state directly.
+	@Serializable
+	@SerialName("nowPlayingUpdate")
+	data class NowPlayingUpdate(val data: NowPlayingUpdate): GatewayToBridgeMsgData()
 	/// Protocol-level failure: the gateway could not reach or dispatch a request
 	/// the bridge sent. Mirrors `BridgeToGatewayMsgData::Error`.
 	@Serializable
@@ -161,6 +171,43 @@ data class GatewayToBridgeMsg (
 	val id: ByteArray,
 	val meta: GatewayMsgMeta,
 	val data: GatewayToBridgeMsgData
+)
+
+/// Per-track attributes that vary per song. `persistent_id` is a stable
+/// per-platform identifier (iAP2 sends u64; we hex-encode it on the
+/// wire). `artwork_id` is a stable per-image identifier scoped to its
+/// transport (e.g. `"iap2:7"`); the actual bytes arrive via a separate
+/// channel (iAP2 FileTransfer or a gateway file message).
+@Serializable
+data class MediaItemUpdate (
+	val persistentId: String? = null,
+	val title: String? = null,
+	val album: String? = null,
+	val artist: String? = null,
+	val liked: Boolean? = null,
+	val artworkId: String? = null,
+	val durationMs: UInt? = null
+)
+
+/// Per-playback-session attributes that vary regardless of track:
+/// playing/paused, position, shuffle/repeat, and the iOS bundle
+/// identifier of the app currently driving playback (e.g.
+/// `"com.spotify.client"`). `app_bundle` is null on the Android path
+/// since it isn't a meaningful surface there.
+@Serializable
+data class PlaybackUpdate (
+	val playing: Boolean? = null,
+	val positionMs: UInt? = null,
+	val shuffle: Boolean? = null,
+	val repeat: UInt? = null,
+	val appBundle: String? = null,
+	val appDisplayName: String? = null
+)
+
+@Serializable
+data class NowPlayingUpdate (
+	val mediaItem: MediaItemUpdate? = null,
+	val playback: PlaybackUpdate? = null
 )
 
 @Serializable

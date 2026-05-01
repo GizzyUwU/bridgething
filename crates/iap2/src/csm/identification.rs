@@ -259,12 +259,20 @@ impl From<IdentificationInformation> for CsmFrame {
     cfg.hardware_version.encode_field(5, &mut params);
 
     let sent = merge_messages(
-      &[super::auth::SENT_BY_ACCESSORY, SENT_BY_ACCESSORY],
+      &[
+        super::auth::SENT_BY_ACCESSORY,
+        SENT_BY_ACCESSORY,
+        super::now_playing::SENT_BY_ACCESSORY,
+      ],
       &cfg.additional_messages_sent_by_accessory,
     );
     encode_messages_list(sent).encode_field(6, &mut params);
     let received = merge_messages(
-      &[super::auth::RECEIVED_BY_ACCESSORY, RECEIVED_BY_ACCESSORY],
+      &[
+        super::auth::RECEIVED_BY_ACCESSORY,
+        RECEIVED_BY_ACCESSORY,
+        super::now_playing::RECEIVED_BY_ACCESSORY,
+      ],
       &cfg.additional_messages_received_from_accessory,
     );
     encode_messages_list(received).encode_field(7, &mut params);
@@ -399,26 +407,28 @@ mod tests {
   }
 
   #[test]
-  fn messages_lists_emit_caller_supplied_ids_only() {
+  fn messages_lists_merge_builtin_layers_and_extras() {
     let mut cfg = minimal_config();
-    cfg.additional_messages_sent_by_accessory = vec![0x5000, 0x5002];
-    cfg.additional_messages_received_from_accessory = vec![0x5001];
+    cfg.additional_messages_sent_by_accessory = vec![0x6800];
+    cfg.additional_messages_received_from_accessory = vec![0x6804];
     let info = IdentificationInformation { config: cfg };
     let frame: CsmFrame = info.into();
+
     let sent_param = frame.find(6).expect("messages_sent_by_accessory");
     let sent_ids: Vec<u16> = sent_param
       .payload
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(sent_ids, vec![0x5000, 0x5002]);
+    assert_eq!(sent_ids, vec![0x5000, 0x5002, 0x6800]);
+
     let recv_param = frame.find(7).unwrap();
     let recv_ids: Vec<u16> = recv_param
       .payload
       .chunks_exact(2)
       .map(|c| u16::from_be_bytes([c[0], c[1]]))
       .collect();
-    assert_eq!(recv_ids, vec![0x5001]);
+    assert_eq!(recv_ids, vec![0x5001, 0x6804]);
   }
 
   #[test]
