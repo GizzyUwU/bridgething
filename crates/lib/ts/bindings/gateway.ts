@@ -11,6 +11,23 @@ import type {
 
 export type AssetClear = { id: string };
 
+/**
+ * Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
+ * without the retention hint — the daemon picks retention for assets
+ * it asked for, since the lifecycle is request-scoped rather than
+ * companion-managed.
+ *
+ * Distinct from `server::AssetGot` (webapp protocol, uses payload-id
+ * correlation rather than meta correlation).
+ */
+export type AssetGotReply = { id: string; bytes: Uint8Array; mime: string | null };
+
+/**
+ * Domain error response for an `AssetRequest`: the companion does not
+ * have the requested asset.
+ */
+export type AssetNotFoundReply = { id: string };
+
 export type AssetPush = { id: string; bytes: Uint8Array; mime: string | null; retention: AssetRetention };
 
 export type AssetRequest = { id: string; requestId: Uint8Array };
@@ -109,12 +126,18 @@ export type GatewayMsgMeta =
   | { kind: 'response'; data: ResponseMeta };
 
 /**
- * Companion-side asset operations: proactive `Push` to load bytes into the
- * daemon cache, and explicit `Clear` to drop a previously pushed asset.
- * `Push` is also the wire shape used to fulfil a daemon `AssetRequest`;
- * the daemon correlates by id on receipt.
+ * Companion-side asset operations:
+ * - `Push` (event): proactive load into the daemon cache.
+ * - `Clear` (event): drop a previously pushed asset.
+ * - `Got` (response): typed reply to a daemon `AssetRequest`.
+ * - `NotFound` (response): typed domain error for `AssetRequest` when
+ *   the companion does not have the asset.
  */
-export type GatewayToBridgeAssetMsg = { event: 'push'; data: AssetPush } | { event: 'clear'; data: AssetClear };
+export type GatewayToBridgeAssetMsg =
+  | { event: 'push'; data: AssetPush }
+  | { event: 'clear'; data: AssetClear }
+  | { event: 'got'; data: AssetGotReply }
+  | { event: 'notFound'; data: AssetNotFoundReply };
 
 /**
  * Companion declares per-scope authority. `Claim` is idempotent and may
@@ -142,7 +165,6 @@ export type GatewayToBridgeMsgData =
   | { type: 'authority'; data: GatewayToBridgeAuthorityMsg }
   | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
-  | { type: 'forward'; data: ForwardMessage }
   | { type: 'nowPlayingUpdate'; data: NowPlayingUpdate }
   | { type: 'error'; data: GatewayError };
 

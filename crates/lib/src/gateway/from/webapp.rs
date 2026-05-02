@@ -5,9 +5,7 @@ use typeshare::typeshare;
 
 use crate::{
   WebappInfo,
-  gateway::{
-    BridgeToGatewayMsgData, BridgeToGatewayWebappMsg, GatewayToBridgeMsgData, WebappActive, WebappError, WebappList,
-  },
+  gateway::{WebappActive, WebappError, WebappList},
   impl_gateway_request,
 };
 
@@ -75,70 +73,46 @@ pub struct GetActiveWebapp;
 
 impl_gateway_request! {
   request: ListWebapps,
+  surface: Webapp,
+  request_variant: List,
   response: WebappList,
-  encode_request:
-    _r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::List),
-  extract_response:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Webapps(v)) => v,
-  encode_response:
-    v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Webapps(v)),
+  response_variant: Webapps(_),
 }
 
 impl_gateway_request! {
   request: GetActiveWebapp,
+  surface: Webapp,
+  request_variant: GetActive,
   response: WebappActive,
-  encode_request:
-    _r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::GetActive),
-  extract_response:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Active(v)) => v,
-  encode_response:
-    v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Active(v)),
+  response_variant: Active(_),
 }
 
 impl_gateway_request! {
   request: WebappSwitchTo,
+  surface: Webapp,
+  request_variant: SwitchTo(_),
   response: WebappActive,
+  response_variant: Switched(_),
   error: WebappError,
-  encode_request:
-    r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::SwitchTo(r)),
-  extract_response:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(v)) => v,
-  encode_response:
-    v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(v)),
-  extract_error:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)) => e,
-  encode_error:
-    e => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)),
+  error_variant: WebappError(_),
 }
 
 impl_gateway_request! {
   request: WebappInstall,
+  surface: Webapp,
+  request_variant: Install(_),
   response: WebappInfo,
+  response_variant: Installed(_),
   error: WebappError,
-  encode_request:
-    r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Install(r)),
-  extract_response:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Installed(v)) => v,
-  encode_response:
-    v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Installed(v)),
-  extract_error:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)) => e,
-  encode_error:
-    e => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)),
+  error_variant: WebappError(_),
 }
 
 impl_gateway_request! {
   request: WebappUninstall,
+  surface: Webapp,
+  request_variant: Uninstall(_),
   response: WebappActive,
+  response_variant: Uninstalled(_),
   error: WebappError,
-  encode_request:
-    r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Uninstall(r)),
-  extract_response:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Uninstalled(v)) => v,
-  encode_response:
-    v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Uninstalled(v)),
-  extract_error:
-    BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)) => e,
-  encode_error:
-    e => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)),
+  error_variant: WebappError(_),
 }

@@ -6,11 +6,13 @@ use uuid::Uuid;
 
 mod error;
 mod from;
+mod marker;
 mod request;
 mod to;
 
 pub use error::*;
 pub use from::*;
+pub use marker::*;
 pub use request::*;
 pub use to::*;
 
@@ -68,8 +70,6 @@ pub enum GatewayToBridgeMsgData {
   Chrome(GatewayToBridgeChromeMsg),
   #[from]
   Webapp(GatewayToBridgeWebappMsg),
-  #[from]
-  Forward(ForwardMessage),
   #[from]
   NowPlayingUpdate(NowPlayingUpdate),
   #[from]

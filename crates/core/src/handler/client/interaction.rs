@@ -69,6 +69,4 @@ impl InteractionHandler {
     );
     Ok(())
   }
-
-
 }

@@ -150,8 +150,7 @@ pub fn transport_report(mask: u8) -> AccessoryHIDReport {
 
 #[cfg(test)]
 mod tests {
-  use super::super::CsmFrame;
-  use super::*;
+  use super::{super::CsmFrame, *};
 
   #[test]
   fn start_hid_round_trips() {

@@ -387,6 +387,7 @@ name = "bridgething-codegen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "quote",
  "regex",
  "syn",
  "walkdir",
@@ -398,7 +399,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bitflags 2.11.1",
- "bridgething-iap2-macros",
+ "bridgething-macros",
  "bridgething-mfi",
  "bytes",
  "futures",
@@ -410,7 +411,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridgething-iap2-macros"
+name = "bridgething-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro-crate",
@@ -1851,8 +1852,10 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 name = "libbridgething"
 version = "0.1.0"
 dependencies = [
+ "bridgething-macros",
  "derive_more",
  "flate2",
+ "paste",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -2319,6 +2322,12 @@ dependencies = [
  "smallvec",
  "windows-link",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pem-rfc7468"

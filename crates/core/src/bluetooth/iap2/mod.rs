@@ -368,10 +368,11 @@ impl Iap2Manager {
       return;
     }
     if let Some(handle) = self.reconnects.get(&mac)
-      && !handle.is_finished() {
-        tracing::trace!(%mac, "iAP2 reconnect already in flight; skipping kick");
-        return;
-      }
+      && !handle.is_finished()
+    {
+      tracing::trace!(%mac, "iAP2 reconnect already in flight; skipping kick");
+      return;
+    }
     let adapter = self.adapter.clone();
     let state = self.state.clone();
     let task = tokio::spawn(reconnect_loop(adapter, state, mac));
@@ -431,9 +432,10 @@ async fn still_should_reconnect(adapter: &Adapter, state: &State, mac: Address) 
   }
   if device.is_connected().await.unwrap_or(false)
     && let Some(peer) = state.peers.get(&mac).await
-      && peer.iap2 != PeerIap2Status::None {
-        return false;
-      }
+    && peer.iap2 != PeerIap2Status::None
+  {
+    return false;
+  }
   true
 }
 

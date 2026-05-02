@@ -1,10 +1,6 @@
 import {
-  type AssetClear,
-  type AssetPush,
-  type AssetRetention,
   type BridgeToGatewayMsg,
   Codec,
-  type CompanionAuthorityScope,
   FrameAccumulator,
   type GatewayToBridgeMsg,
   type GatewayToBridgeMsgData,
@@ -60,9 +56,11 @@ export class GatewayError extends Error {
   constructor(
     message: string,
     public readonly kind: 'not-running' | 'already-running' | 'request-timed-out' | 'shutdown' | 'send-failed',
+    err?: unknown,
   ) {
     super(message);
     this.name = 'GatewayError';
+    if (err instanceof Error && err.stack) this.stack = `${this.name}: ${this.message}\nCaused by: ${err.stack}`;
   }
 }
 
@@ -88,7 +86,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * matching response by id.
  */
 export class BridgethingGateway {
-  private readonly logger: Logger;
+  public readonly logger: Logger;
   private readonly codec: Codec;
   private readonly buffers: Map<string, FrameAccumulator> = new Map();
   private readonly pending: Map<string, PendingRequest> = new Map();
@@ -103,6 +101,11 @@ export class BridgethingGateway {
     this.logger = new Logger('Gateway', options.logLevel ?? LogLevel.Log);
     this.codec = options.codec ?? new Codec();
     this.adapterListener = event => this.handleAdapterEvent(event);
+  }
+
+  /** Currently connected peer ids (the keys of `buffers`). */
+  get connectedDeviceIds(): string[] {
+    return Array.from(this.buffers.keys());
   }
 
   on(listener: GatewayListener): () => void {
@@ -162,64 +165,6 @@ export class BridgethingGateway {
   }
 
   /**
-   * Push a binary blob into the daemon's asset cache. Companion-managed
-   * retention - the daemon enforces it but expects companion to clear
-   * pinned assets explicitly when no longer needed.
-   *
-   * Bulk priority is the right default: asset blobs may be sizable
-   * (full-size album art, glyph atlases) and shouldn't preempt latency-
-   * sensitive traffic like NowPlaying deltas.
-   */
-  async pushAsset(
-    deviceId: string,
-    asset: { id: string; bytes: Uint8Array; mime?: string; retention?: AssetRetention },
-  ): Promise<void> {
-    const push: AssetPush = {
-      id: asset.id,
-      bytes: asset.bytes,
-      mime: asset.mime ?? null,
-      retention: asset.retention ?? { type: 'lru' },
-    };
-    await this.send(
-      deviceId,
-      {
-        id: newUuidBytes(),
-        meta: { kind: 'event' },
-        data: { type: 'asset', data: { event: 'push', data: push } },
-      },
-      { priority: 'bulk' },
-    );
-  }
-
-  /** Drop a previously pushed asset. */
-  async clearAsset(deviceId: string, id: string): Promise<void> {
-    const clear: AssetClear = { id };
-    await this.send(deviceId, {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'asset', data: { event: 'clear', data: clear } },
-    });
-  }
-
-  /** Claim authority over a scope. Idempotent; re-issue to refresh staleness. */
-  async claimAuthority(deviceId: string, scope: CompanionAuthorityScope): Promise<void> {
-    await this.send(deviceId, {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'authority', data: { event: 'claim', data: { scope } } },
-    });
-  }
-
-  /** Release authority over a scope. */
-  async releaseAuthority(deviceId: string, scope: CompanionAuthorityScope): Promise<void> {
-    await this.send(deviceId, {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'authority', data: { event: 'release', data: { scope } } },
-    });
-  }
-
-  /**
    * Send a request and await the matching response by id. The wire id is
    * generated here and matched against
    * `BridgeToGatewayMsg.meta.data.requestId` on the way back.
@@ -244,7 +189,7 @@ export class BridgethingGateway {
       this.send(deviceId, message).catch(err => {
         if (this.pending.delete(key)) {
           clearTimeout(timeout);
-          reject(err);
+          reject(new GatewayError(`failed to send request ${key}`, 'send-failed', err));
         }
       });
     });
@@ -340,3 +285,10 @@ function errorMessage(err: unknown): string {
 const GATEWAY_VERSION = `v${version}`;
 
 export { GATEWAY_VERSION };
+
+// Apply codegen-emitted prototype augmentations (`onTransport`, `onAsset...`,
+// `dispatch({...})`, etc.) to BridgethingGateway. Wrapped in a function call
+// rather than a side-effect import to defer until after the class is defined,
+// because dispatch.generated.ts needs `BridgethingGateway` as a value.
+import { applyDispatch } from './dispatch.generated';
+applyDispatch();

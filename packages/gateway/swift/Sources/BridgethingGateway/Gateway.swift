@@ -74,6 +74,11 @@ public actor BridgethingGateway {
     try await adapter.disconnect(deviceId: deviceId)
   }
 
+  /// Snapshot of currently connected peer ids.
+  public func connectedDeviceIds() -> [String] {
+    Array(buffers.keys)
+  }
+
   /// Encode and ship a fully-formed message. Caller is responsible for picking
   /// `meta` (`.command`, `.event`, etc.). For request/response, prefer
   /// `request(deviceId:_:timeout:)` which handles id generation and awaiting.
@@ -94,59 +99,6 @@ public actor BridgethingGateway {
   /// Bulk-priority shorthand for `send(deviceId:_:priority:)`.
   public func sendBulk(deviceId: String, _ message: GatewayToBridgeMsg) async throws {
     try await send(deviceId: deviceId, message, priority: .bulk)
-  }
-
-  /// Push a binary blob into the daemon's asset cache. Companion-managed
-  /// retention - the daemon enforces it but expects companion to clear
-  /// pinned assets explicitly when no longer needed.
-  ///
-  /// Bulk priority is the right default: asset blobs may be sizable
-  /// (full-size album art, glyph atlases) and shouldn't preempt latency-
-  /// sensitive traffic like NowPlaying deltas.
-  public func pushAsset(
-    deviceId: String,
-    id: String,
-    bytes: Data,
-    mime: String? = nil,
-    retention: AssetRetention = .lru
-  ) async throws {
-    let push = AssetPush(id: id, bytes: bytes, mime: mime, retention: retention)
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .event,
-      data: .asset(.push(push))
-    )
-    try await send(deviceId: deviceId, msg, priority: .bulk)
-  }
-
-  /// Drop a previously pushed asset.
-  public func clearAsset(deviceId: String, id: String) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .event,
-      data: .asset(.clear(AssetClear(id: id)))
-    )
-    try await send(deviceId: deviceId, msg)
-  }
-
-  /// Claim authority over a scope. Idempotent; re-issue to refresh staleness.
-  public func claimAuthority(deviceId: String, scope: CompanionAuthorityScope) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .event,
-      data: .authority(.claim(AuthorityClaim(scope: scope)))
-    )
-    try await send(deviceId: deviceId, msg)
-  }
-
-  /// Release authority over a scope.
-  public func releaseAuthority(deviceId: String, scope: CompanionAuthorityScope) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .event,
-      data: .authority(.release(AuthorityRelease(scope: scope)))
-    )
-    try await send(deviceId: deviceId, msg)
   }
 
   /// Send a request and await the matching response by id. The wire id is

@@ -9,9 +9,12 @@
 //!
 //! Implementations are produced by the `impl_gateway_request!` and
 //! `impl_bridge_request!` macros (see crate root). Each invocation describes
-//! the variant chain in one place: how to wrap a request for the wire, how to
-//! narrow an inbound response into the typed payload, and how to encode a
-//! response or domain error from a handler.
+//! the variant chain in structured form: a `surface` ident names the outer
+//! variant of the wire enum (and, by convention, the suffix of the inner
+//! enum name — `Webapp` -> `<Direction>WebappMsg`), and one ident per
+//! request/response/error gives the inner-enum variant. The macro derives
+//! the actual enum-constructor paths via the `paste` crate; codegen reads
+//! the same structured idents to generate per-language SDK helpers.
 
 use crate::gateway::{BridgeToGatewayMsgData, GatewayError, GatewayToBridgeMsgData};
 
@@ -51,117 +54,295 @@ pub trait BridgeRequest: Into<BridgeToGatewayMsgData> {
 
 /// Generate `GatewayRequest` impl + `From<Req> for GatewayToBridgeMsgData`.
 ///
-/// Two forms: with-domain-error (six named sections) and without (three named
-/// sections; sets `DomainError = Infallible` and gives `encode_domain_error`
-/// an unreachable body).
+/// Four arms cover the matrix of {tuple-request, unit-request} ×
+/// {with-error, without-error}. The variant-ident syntax `SwitchTo(_)`
+/// signals tuple (the variant carries a payload bound by the macro);
+/// `List` (no parens) signals unit (the variant carries no value).
+/// Response and error variants are always tuple-shaped in our protocol;
+/// the `(_)` is required there too for syntactic regularity and so
+/// codegen can parse all variant idents the same way.
 ///
 /// ```ignore
 /// impl_gateway_request! {
 ///   request: WebappSwitchTo,
+///   surface: Webapp,
+///   request_variant: SwitchTo(_),
 ///   response: WebappActive,
+///   response_variant: Switched(_),
 ///   error: WebappError,
-///   encode_request:
-///     r => GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::SwitchTo(r)),
-///   extract_response:
-///     BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(v)) => v,
-///   encode_response:
-///     v => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(v)),
-///   extract_error:
-///     BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)) => e,
-///   encode_error:
-///     e => BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(e)),
+///   error_variant: WebappError(_),
 /// }
 /// ```
 #[macro_export]
 macro_rules! impl_gateway_request {
+  // Tuple-request, with domain error.
   (
     request:
-    $req:ty,response:
-    $resp:ty,error:
-    $err:ty,encode_request:
-    $req_id:ident =>
-    $req_wrap:expr,extract_response:
-    $resp_pat:pat =>
-    $resp_extract:expr,encode_response:
-    $resp_id:ident =>
-    $resp_wrap:expr,extract_error:
-    $err_pat:pat =>
-    $err_extract:expr,encode_error:
-    $err_id:ident =>
-    $err_wrap:expr $(,)?
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident(_),response:
+    $resp:ty,response_variant:
+    $rspv:ident(_),error:
+    $err:ty,error_variant:
+    $ev:ident(_) $(,)?
   ) => {
-    impl $crate::gateway::GatewayRequest for $req {
-      type Response = $resp;
-      type DomainError = $err;
+    $crate::__impl_gateway_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: true,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: with_error,
+      error_type: $err,
+      error_variant: $ev,
+    }
+  };
 
-      fn extract(
-        data: $crate::gateway::BridgeToGatewayMsgData,
-      ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
-        match data {
-          $resp_pat => ::core::result::Result::Ok($resp_extract),
-          $err_pat => ::core::result::Result::Err($crate::gateway::RequestError::Domain($err_extract)),
-          $crate::gateway::BridgeToGatewayMsgData::Error(e) => {
-            ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+  // Tuple-request, no domain error.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident(_),response:
+    $resp:ty,response_variant:
+    $rspv:ident(_) $(,)?
+  ) => {
+    $crate::__impl_gateway_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: true,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: without_error,
+    }
+  };
+
+  // Unit-request, no domain error. Unit-request with error is unused
+  // today; add an arm if/when it becomes needed.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident,response:
+    $resp:ty,response_variant:
+    $rspv:ident(_) $(,)?
+  ) => {
+    $crate::__impl_gateway_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: false,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: without_error,
+    }
+  };
+}
+
+/// Internal expansion target for `impl_gateway_request!`. Centralizes the
+/// `paste!`-driven enum-path construction so each public arm above only
+/// describes what it captures.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __impl_gateway_request_body {
+  // With domain error.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: true,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: with_error,error_type:
+    $err:ty,error_variant:
+    $ev:ident $(,)?
+  ) => {
+    ::paste::paste! {
+      impl $crate::gateway::GatewayRequest for $req {
+        type Response = $resp;
+        type DomainError = $err;
+
+        fn extract(
+          data: $crate::gateway::BridgeToGatewayMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::BridgeToGatewayMsgData::$surf(
+              $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::BridgeToGatewayMsgData::$surf(
+              $crate::gateway::[<BridgeToGateway $surf Msg>]::$ev(e),
+            ) => ::core::result::Result::Err($crate::gateway::RequestError::Domain(e)),
+            $crate::gateway::BridgeToGatewayMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
           }
-          _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::BridgeToGatewayMsgData {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(e: Self::DomainError) -> $crate::gateway::BridgeToGatewayMsgData {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$ev(e),
+          )
         }
       }
 
-      fn encode_response($resp_id: Self::Response) -> $crate::gateway::BridgeToGatewayMsgData {
-        $resp_wrap
+      impl ::core::convert::From<$req> for $crate::gateway::GatewayToBridgeMsgData {
+        fn from($rval: $req) -> Self {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rv($rval),
+          )
+        }
       }
 
-      fn encode_domain_error($err_id: Self::DomainError) -> $crate::gateway::BridgeToGatewayMsgData {
-        $err_wrap
-      }
-    }
-
-    impl ::core::convert::From<$req> for $crate::gateway::GatewayToBridgeMsgData {
-      fn from($req_id: $req) -> Self {
-        $req_wrap
+      impl $req {
+        /// Returns true if `msg` is the typed-response or domain-error
+        /// variant of this request. Used by upstream filters to drop
+        /// stray response-shape arrivals that bypass the request-id
+        /// match (timed-out, late, non-SDK senders).
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<BridgeToGateway $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(_)
+              | $crate::gateway::[<BridgeToGateway $surf Msg>]::$ev(_),
+          )
+        }
       }
     }
   };
 
+  // Tuple-request, no domain error.
   (
     request:
-    $req:ty,response:
-    $resp:ty,encode_request:
-    $req_id:ident =>
-    $req_wrap:expr,extract_response:
-    $resp_pat:pat =>
-    $resp_extract:expr,encode_response:
-    $resp_id:ident =>
-    $resp_wrap:expr $(,)?
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: true,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: without_error
+    $(,)?
   ) => {
-    impl $crate::gateway::GatewayRequest for $req {
-      type Response = $resp;
-      type DomainError = ::core::convert::Infallible;
+    ::paste::paste! {
+      impl $crate::gateway::GatewayRequest for $req {
+        type Response = $resp;
+        type DomainError = ::core::convert::Infallible;
 
-      fn extract(
-        data: $crate::gateway::BridgeToGatewayMsgData,
-      ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
-        match data {
-          $resp_pat => ::core::result::Result::Ok($resp_extract),
-          $crate::gateway::BridgeToGatewayMsgData::Error(e) => {
-            ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+        fn extract(
+          data: $crate::gateway::BridgeToGatewayMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::BridgeToGatewayMsgData::$surf(
+              $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::BridgeToGatewayMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
           }
-          _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::BridgeToGatewayMsgData {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::BridgeToGatewayMsgData {
+          match err {}
         }
       }
 
-      fn encode_response($resp_id: Self::Response) -> $crate::gateway::BridgeToGatewayMsgData {
-        $resp_wrap
+      impl ::core::convert::From<$req> for $crate::gateway::GatewayToBridgeMsgData {
+        fn from($rval: $req) -> Self {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rv($rval),
+          )
+        }
       }
 
-      fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::BridgeToGatewayMsgData {
-        match err {}
+      impl $req {
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<BridgeToGateway $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(_),
+          )
+        }
       }
     }
+  };
 
-    impl ::core::convert::From<$req> for $crate::gateway::GatewayToBridgeMsgData {
-      fn from($req_id: $req) -> Self {
-        $req_wrap
+  // Unit-request, no domain error.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: false,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: without_error
+    $(,)?
+  ) => {
+    ::paste::paste! {
+      impl $crate::gateway::GatewayRequest for $req {
+        type Response = $resp;
+        type DomainError = ::core::convert::Infallible;
+
+        fn extract(
+          data: $crate::gateway::BridgeToGatewayMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::BridgeToGatewayMsgData::$surf(
+              $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::BridgeToGatewayMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+          }
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::BridgeToGatewayMsgData {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::BridgeToGatewayMsgData {
+          match err {}
+        }
+      }
+
+      impl ::core::convert::From<$req> for $crate::gateway::GatewayToBridgeMsgData {
+        fn from(_: $req) -> Self {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rv,
+          )
+        }
+      }
+
+      impl $req {
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<BridgeToGateway $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rspv(_),
+          )
+        }
       }
     }
   };
@@ -171,94 +352,267 @@ macro_rules! impl_gateway_request {
 /// Same shape, opposite outer types.
 #[macro_export]
 macro_rules! impl_bridge_request {
+  // Tuple-request, with domain error.
   (
     request:
-    $req:ty,response:
-    $resp:ty,error:
-    $err:ty,encode_request:
-    $req_id:ident =>
-    $req_wrap:expr,extract_response:
-    $resp_pat:pat =>
-    $resp_extract:expr,encode_response:
-    $resp_id:ident =>
-    $resp_wrap:expr,extract_error:
-    $err_pat:pat =>
-    $err_extract:expr,encode_error:
-    $err_id:ident =>
-    $err_wrap:expr $(,)?
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident(_),response:
+    $resp:ty,response_variant:
+    $rspv:ident(_),error:
+    $err:ty,error_variant:
+    $ev:ident(_) $(,)?
   ) => {
-    impl $crate::gateway::BridgeRequest for $req {
-      type Response = $resp;
-      type DomainError = $err;
+    $crate::__impl_bridge_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: true,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: with_error,
+      error_type: $err,
+      error_variant: $ev,
+    }
+  };
 
-      fn extract(
-        data: $crate::gateway::GatewayToBridgeMsgData,
-      ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
-        match data {
-          $resp_pat => ::core::result::Result::Ok($resp_extract),
-          $err_pat => ::core::result::Result::Err($crate::gateway::RequestError::Domain($err_extract)),
-          $crate::gateway::GatewayToBridgeMsgData::Error(e) => {
-            ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+  // Tuple-request, no domain error.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident(_),response:
+    $resp:ty,response_variant:
+    $rspv:ident(_) $(,)?
+  ) => {
+    $crate::__impl_bridge_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: true,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: without_error,
+    }
+  };
+
+  // Unit-request, no domain error.
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_variant:
+    $rv:ident,response:
+    $resp:ty,response_variant:
+    $rspv:ident(_) $(,)?
+  ) => {
+    $crate::__impl_bridge_request_body! {
+      request: $req,
+      surface: $surf,
+      request_ctor: $rv,
+      request_value: payload,
+      request_takes_payload: false,
+      response: $resp,
+      response_variant: $rspv,
+      error_kind: without_error,
+    }
+  };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __impl_bridge_request_body {
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: true,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: with_error,error_type:
+    $err:ty,error_variant:
+    $ev:ident $(,)?
+  ) => {
+    ::paste::paste! {
+      impl $crate::gateway::BridgeRequest for $req {
+        type Response = $resp;
+        type DomainError = $err;
+
+        fn extract(
+          data: $crate::gateway::GatewayToBridgeMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::GatewayToBridgeMsgData::$surf(
+              $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::GatewayToBridgeMsgData::$surf(
+              $crate::gateway::[<GatewayToBridge $surf Msg>]::$ev(e),
+            ) => ::core::result::Result::Err($crate::gateway::RequestError::Domain(e)),
+            $crate::gateway::GatewayToBridgeMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
           }
-          _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::GatewayToBridgeMsgData {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(e: Self::DomainError) -> $crate::gateway::GatewayToBridgeMsgData {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$ev(e),
+          )
         }
       }
 
-      fn encode_response($resp_id: Self::Response) -> $crate::gateway::GatewayToBridgeMsgData {
-        $resp_wrap
+      impl ::core::convert::From<$req> for $crate::gateway::BridgeToGatewayMsgData {
+        fn from($rval: $req) -> Self {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rv($rval),
+          )
+        }
       }
 
-      fn encode_domain_error($err_id: Self::DomainError) -> $crate::gateway::GatewayToBridgeMsgData {
-        $err_wrap
-      }
-    }
-
-    impl ::core::convert::From<$req> for $crate::gateway::BridgeToGatewayMsgData {
-      fn from($req_id: $req) -> Self {
-        $req_wrap
+      impl $req {
+        /// Returns true if `msg` is the typed-response or domain-error
+        /// variant of this request. Used by upstream filters to drop
+        /// stray response-shape arrivals that bypass the request-id
+        /// match (timed-out, late, non-SDK senders).
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<GatewayToBridge $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(_)
+              | $crate::gateway::[<GatewayToBridge $surf Msg>]::$ev(_),
+          )
+        }
       }
     }
   };
 
   (
     request:
-    $req:ty,response:
-    $resp:ty,encode_request:
-    $req_id:ident =>
-    $req_wrap:expr,extract_response:
-    $resp_pat:pat =>
-    $resp_extract:expr,encode_response:
-    $resp_id:ident =>
-    $resp_wrap:expr $(,)?
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: true,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: without_error
+    $(,)?
   ) => {
-    impl $crate::gateway::BridgeRequest for $req {
-      type Response = $resp;
-      type DomainError = ::core::convert::Infallible;
+    ::paste::paste! {
+      impl $crate::gateway::BridgeRequest for $req {
+        type Response = $resp;
+        type DomainError = ::core::convert::Infallible;
 
-      fn extract(
-        data: $crate::gateway::GatewayToBridgeMsgData,
-      ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
-        match data {
-          $resp_pat => ::core::result::Result::Ok($resp_extract),
-          $crate::gateway::GatewayToBridgeMsgData::Error(e) => {
-            ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+        fn extract(
+          data: $crate::gateway::GatewayToBridgeMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::GatewayToBridgeMsgData::$surf(
+              $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::GatewayToBridgeMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
           }
-          _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::GatewayToBridgeMsgData {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::GatewayToBridgeMsgData {
+          match err {}
         }
       }
 
-      fn encode_response($resp_id: Self::Response) -> $crate::gateway::GatewayToBridgeMsgData {
-        $resp_wrap
+      impl ::core::convert::From<$req> for $crate::gateway::BridgeToGatewayMsgData {
+        fn from($rval: $req) -> Self {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rv($rval),
+          )
+        }
       }
 
-      fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::GatewayToBridgeMsgData {
-        match err {}
+      impl $req {
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<GatewayToBridge $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(_),
+          )
+        }
       }
     }
+  };
 
-    impl ::core::convert::From<$req> for $crate::gateway::BridgeToGatewayMsgData {
-      fn from($req_id: $req) -> Self {
-        $req_wrap
+  (
+    request:
+    $req:ty,surface:
+    $surf:ident,request_ctor:
+    $rv:ident,request_value:
+    $rval:ident,request_takes_payload: false,response:
+    $resp:ty,response_variant:
+    $rspv:ident,error_kind: without_error
+    $(,)?
+  ) => {
+    ::paste::paste! {
+      impl $crate::gateway::BridgeRequest for $req {
+        type Response = $resp;
+        type DomainError = ::core::convert::Infallible;
+
+        fn extract(
+          data: $crate::gateway::GatewayToBridgeMsgData,
+        ) -> ::core::result::Result<Self::Response, $crate::gateway::RequestError<Self::DomainError>> {
+          match data {
+            $crate::gateway::GatewayToBridgeMsgData::$surf(
+              $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+            ) => ::core::result::Result::Ok(v),
+            $crate::gateway::GatewayToBridgeMsgData::Error(e) => {
+              ::core::result::Result::Err($crate::gateway::RequestError::Protocol(e))
+            }
+            _ => ::core::result::Result::Err($crate::gateway::RequestError::ResponseMismatch),
+          }
+        }
+
+        fn encode_response(v: Self::Response) -> $crate::gateway::GatewayToBridgeMsgData {
+          $crate::gateway::GatewayToBridgeMsgData::$surf(
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(v),
+          )
+        }
+
+        fn encode_domain_error(err: Self::DomainError) -> $crate::gateway::GatewayToBridgeMsgData {
+          match err {}
+        }
+      }
+
+      impl ::core::convert::From<$req> for $crate::gateway::BridgeToGatewayMsgData {
+        fn from(_: $req) -> Self {
+          $crate::gateway::BridgeToGatewayMsgData::$surf(
+            $crate::gateway::[<BridgeToGateway $surf Msg>]::$rv,
+          )
+        }
+      }
+
+      impl $req {
+        pub fn is_response_variant(
+          msg: &$crate::gateway::[<GatewayToBridge $surf Msg>],
+        ) -> bool {
+          ::core::matches!(
+            msg,
+            $crate::gateway::[<GatewayToBridge $surf Msg>]::$rspv(_),
+          )
+        }
       }
     }
   };

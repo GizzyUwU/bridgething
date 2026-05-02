@@ -1,13 +1,21 @@
-use std::sync::Arc;
+use std::{
+  collections::HashMap,
+  sync::{Arc, Mutex},
+  time::Duration,
+};
 
 use ble::GattServer;
 use bluer::{Adapter, Address, Session, agent::AgentHandle};
 use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle};
 use libbridgething::{
-  ForwardMessage, Priority,
-  gateway::{BridgeToGatewayMsg, GatewayMsgMeta, GatewayToBridgeMsg},
+  Priority,
+  gateway::{
+    BridgeCommand, BridgeEvent, BridgeRequest, BridgeToGatewayMsg, GatewayError, GatewayMsgMeta, GatewayToBridgeMsg,
+    GatewayToBridgeMsgData, RequestError,
+  },
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
+use uuid::Uuid;
 
 // protocol modules
 mod ble;
@@ -99,11 +107,9 @@ impl BluetoothManager {
     )
     .await?
     {
-      Some((manager, reconnect_handle, transport_handle)) => (
-        Some(reconnect_handle),
-        Some(transport_handle),
-        Some(manager.spawn()),
-      ),
+      Some((manager, reconnect_handle, transport_handle)) => {
+        (Some(reconnect_handle), Some(transport_handle), Some(manager.spawn()))
+      }
       None => {
         tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
         (None, None, None)
@@ -232,6 +238,17 @@ pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<InboundGatewayMessage>;
 pub type GatewaySendTx = tokio::sync::mpsc::Sender<OutboundGatewayMessage>;
 pub type GatewaySendRx = tokio::sync::mpsc::Receiver<OutboundGatewayMessage>;
 
+/// Default timeout for daemon-initiated typed gateway requests. Long
+/// enough for the companion's encode + transport, short enough that
+/// the requesting webapp doesn't hang.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Pending-request map: in-flight `request_id`s the daemon is waiting
+/// to correlate against incoming `Response`-meta messages. The
+/// `oneshot::Sender` carries the response's wire data; the requester
+/// awaits the receiver and runs `R::extract` on the result.
+type PendingRequests = Arc<Mutex<HashMap<Uuid, oneshot::Sender<GatewayToBridgeMsgData>>>>;
+
 #[derive(Debug)]
 pub struct GatewayMan {
   adapter: Adapter,
@@ -244,6 +261,7 @@ pub struct GatewayMan {
   iap2_ea_send_tx: GatewaySendTx,
   iap2_ea_handle: Iap2EaGatewayHandle,
   _iap2_ea_handle: JoinHandle<()>,
+  pending: PendingRequests,
 }
 
 impl GatewayMan {
@@ -276,6 +294,7 @@ impl GatewayMan {
       iap2_ea_send_tx,
       iap2_ea_handle,
       _iap2_ea_handle,
+      pending: Arc::new(Mutex::new(HashMap::new())),
     })
   }
 
@@ -299,13 +318,120 @@ impl GatewayMan {
     }
   }
 
-  pub async fn forward_all(&self, data: ForwardMessage) {
+  /// Broadcast a typed event to every connected companion. Meta is
+  /// `Event` by definition of the trait — caller doesn't choose.
+  pub async fn broadcast<E: BridgeEvent>(&self, event: E) {
+    self
+      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
+        id: uuid::Uuid::now_v7(),
+        meta: GatewayMsgMeta::Event,
+        data: event.into(),
+      }))
+      .await;
+  }
+
+  /// Send a typed event to one specific companion.
+  pub async fn send_event<E: BridgeEvent>(&self, address: Address, event: E) {
+    self
+      .send_all(OutboundGatewayMessage::to(
+        address,
+        BridgeToGatewayMsg {
+          id: uuid::Uuid::now_v7(),
+          meta: GatewayMsgMeta::Event,
+          data: event.into(),
+        },
+      ))
+      .await;
+  }
+
+  /// Broadcast a typed command to every connected companion.
+  pub async fn broadcast_command<C: BridgeCommand>(&self, cmd: C) {
+    self
+      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
+        id: uuid::Uuid::now_v7(),
+        meta: GatewayMsgMeta::Command,
+        data: cmd.into(),
+      }))
+      .await;
+  }
+
+  /// Send a typed command to one specific companion.
+  pub async fn send_command<C: BridgeCommand>(&self, address: Address, cmd: C) {
+    self
+      .send_all(OutboundGatewayMessage::to(
+        address,
+        BridgeToGatewayMsg {
+          id: uuid::Uuid::now_v7(),
+          meta: GatewayMsgMeta::Command,
+          data: cmd.into(),
+        },
+      ))
+      .await;
+  }
+
+  /// Send a typed request and await the typed response. `address: None`
+  /// broadcasts to every connected companion; the first peer to reply
+  /// with a matching `request_id` resolves the future. With one peer
+  /// connected (Car Thing's typical case) addressed and broadcast forms
+  /// behave identically. Times out after 10 seconds.
+  ///
+  /// Domain errors surface as `RequestError::Domain(_)`; protocol
+  /// failures (`GatewayError`, channel close, timeout) as
+  /// `RequestError::Protocol(_)`.
+  pub async fn request<R: BridgeRequest>(
+    &self,
+    address: Option<Address>,
+    req: R,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
+    let id = Uuid::now_v7();
+    let (tx, rx) = oneshot::channel();
+    self
+      .pending
+      .lock()
+      .expect("pending-request map poisoned")
+      .insert(id, tx);
+
     let msg = BridgeToGatewayMsg {
-      id: uuid::Uuid::now_v7(),
-      meta: GatewayMsgMeta::Event,
-      data: data.into(),
+      id,
+      meta: GatewayMsgMeta::Request,
+      data: req.into(),
     };
-    self.send_all(OutboundGatewayMessage::all(msg)).await;
+    self.send_all(OutboundGatewayMessage::new(address, msg)).await;
+
+    match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+      Ok(Ok(data)) => R::extract(data),
+      Ok(Err(_)) => {
+        self.pending.lock().expect("pending poisoned").remove(&id);
+        Err(RequestError::Protocol(GatewayError::HandlerFailed {
+          reason: "response channel closed".into(),
+        }))
+      }
+      Err(_) => {
+        self.pending.lock().expect("pending poisoned").remove(&id);
+        Err(RequestError::Protocol(GatewayError::HandlerFailed {
+          reason: "request timed out".into(),
+        }))
+      }
+    }
+  }
+
+  /// Consume an inbound `Response`-meta message by completing the
+  /// matching pending request. Returns `true` if the message was
+  /// consumed (caller should not dispatch further); `false` if no
+  /// pending request matched (caller falls through to normal handler
+  /// dispatch).
+  pub fn complete_pending(&self, request_id: &Uuid, data: GatewayToBridgeMsgData) -> bool {
+    let tx = self
+      .pending
+      .lock()
+      .expect("pending-request map poisoned")
+      .remove(request_id);
+    if let Some(tx) = tx {
+      let _ = tx.send(data);
+      true
+    } else {
+      false
+    }
   }
 }
 

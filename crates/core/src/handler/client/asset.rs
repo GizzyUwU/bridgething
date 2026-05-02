@@ -1,21 +1,13 @@
-use std::time::Duration;
-
 use libbridgething::{
+  AssetRetention,
   client::ClientAssetCommand,
-  gateway::{AssetRequest, BridgeToGatewayAssetMsg, BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta},
-  server::{AssetGot, AssetNotFound, ServerAssetEvent},
+  gateway::{AssetRequest, RequestError},
+  server::{AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, ServerAssetEvent},
 };
-use tokio::sync::broadcast::error::RecvError;
+use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::{asset::AssetCacheEvent, bluetooth::OutboundGatewayMessage};
-
-/// How long the daemon waits after issuing an `AssetRequest` to the
-/// companion before giving up and returning `NotFound`. Long enough to
-/// cover BT round-trip plus the companion's encode time, short enough
-/// that webapps don't hang their UI.
-const ASSET_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct AssetHandler {
@@ -37,7 +29,7 @@ impl AssetHandler {
     if let Some(asset) = self.handle.state.assets.get(&id).await? {
       return self
         .handle
-        .respond(ServerAssetEvent::Got(AssetGot {
+        .respond(ServerAssetEvent::Got(WireAssetGot {
           request_id,
           id,
           bytes: asset.bytes.to_vec(),
@@ -50,62 +42,68 @@ impl AssetHandler {
     if !self.handle.state.gateway_status().await.connected {
       return self
         .handle
-        .respond(ServerAssetEvent::NotFound(AssetNotFound { request_id, id }))
+        .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
         .await
         .map_err(Into::into);
     }
 
-    let mut events_rx = self.handle.state.assets.subscribe();
-    self.send_asset_request(&id, request_id).await;
+    let req = AssetRequest {
+      id: id.clone(),
+      request_id: Uuid::now_v7(),
+    };
+    let response = self.handle.bluetooth.gateway_man.request(None, req).await;
 
-    let resolved = tokio::time::timeout(ASSET_REQUEST_TIMEOUT, async {
-      loop {
-        match events_rx.recv().await {
-          Ok(AssetCacheEvent::Ready { id: ready }) if ready == id => return Some(()),
-          Ok(_) => continue,
-          Err(RecvError::Lagged(_)) => continue,
-          Err(RecvError::Closed) => return None,
+    match response {
+      Ok(got) => {
+        if let Err(err) = self
+          .handle
+          .state
+          .assets
+          .insert(
+            id.clone(),
+            Bytes::from(got.bytes.clone()),
+            got.mime.clone(),
+            AssetRetention::Lru,
+          )
+          .await
+        {
+          tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
         }
+        self
+          .handle
+          .respond(ServerAssetEvent::Got(WireAssetGot {
+            request_id,
+            id: got.id,
+            bytes: got.bytes,
+            mime: got.mime,
+          }))
+          .await
+          .map_err(Into::into)
       }
-    })
-    .await;
-
-    if resolved.is_ok()
-      && let Some(asset) = self.handle.state.assets.get(&id).await?
-    {
-      return self
-        .handle
-        .respond(ServerAssetEvent::Got(AssetGot {
-          request_id,
-          id,
-          bytes: asset.bytes.to_vec(),
-          mime: asset.mime,
-        }))
-        .await
-        .map_err(Into::into);
+      Err(RequestError::Domain(nf)) => {
+        tracing::debug!(id = %nf.id, "companion reported asset not found");
+        self
+          .handle
+          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id: nf.id }))
+          .await
+          .map_err(Into::into)
+      }
+      Err(RequestError::Protocol(err)) => {
+        tracing::warn!(?err, %id, "asset request failed at protocol level");
+        self
+          .handle
+          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
+          .await
+          .map_err(Into::into)
+      }
+      Err(RequestError::ResponseMismatch) => {
+        tracing::error!(%id, "asset response did not match expected shape");
+        self
+          .handle
+          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
+          .await
+          .map_err(Into::into)
+      }
     }
-
-    self
-      .handle
-      .respond(ServerAssetEvent::NotFound(AssetNotFound { request_id, id }))
-      .await
-      .map_err(Into::into)
-  }
-
-  async fn send_asset_request(&self, id: &str, request_id: Uuid) {
-    let payload = BridgeToGatewayMsgData::Asset(BridgeToGatewayAssetMsg::Request(AssetRequest {
-      id: id.to_string(),
-      request_id,
-    }));
-    self
-      .handle
-      .bluetooth
-      .gateway_man
-      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
-        id: Uuid::now_v7(),
-        meta: GatewayMsgMeta::Request,
-        data: payload,
-      }))
-      .await;
   }
 }

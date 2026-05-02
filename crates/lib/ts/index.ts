@@ -21,4 +21,4 @@ export * from './logger';
 
 import { version } from './version';
 export const LIB_VERSION = `v${version}`;
-export const LIBBRIDGETHING_VERSION = 'v0.1.0';
+export const LIBBRIDGETHING_VERSION = 'v12.0.1';

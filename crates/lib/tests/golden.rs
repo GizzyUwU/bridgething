@@ -539,27 +539,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/forward-binary-event",
-    "gateway sending raw bytes through the Forward escape hatch",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Event,
-      data: GatewayToBridgeMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
-    },
-  ));
-
-  out.push(gateway_fixture_with(
-    "gateway_to_bridge/forward-binary-bulk-event",
-    "Bulk-priority Forward.Binary from the gateway - the shape an OTA chunk push will take",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Event,
-      data: GatewayToBridgeMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
-    },
-    PRIORITY_BULK,
-  ));
-
-  out.push(gateway_fixture(
     "gateway_to_bridge/error-malformed",
     "protocol error: gateway could not decode the request the daemon sent",
     GatewayToBridgeMsg {
@@ -703,7 +682,7 @@ fn priority_round_trips_through_codec_on_both_lanes() {
   let gateway_msg = GatewayToBridgeMsg {
     id: id(),
     meta: GatewayMsgMeta::Event,
-    data: GatewayToBridgeMsgData::Forward(ForwardMessage::Binary(fingerprint_bytes())),
+    data: GatewayToBridgeMsgData::Version(gateway_meta()),
   };
 
   for priority in [Priority::Normal, Priority::Bulk] {

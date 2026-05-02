@@ -24,6 +24,27 @@ data class AssetClear (
 	val id: String
 )
 
+/// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
+/// without the retention hint — the daemon picks retention for assets
+/// it asked for, since the lifecycle is request-scoped rather than
+/// companion-managed.
+/// 
+/// Distinct from `server::AssetGot` (webapp protocol, uses payload-id
+/// correlation rather than meta correlation).
+@Serializable
+data class AssetGotReply (
+	val id: String,
+	val bytes: ByteArray,
+	val mime: String? = null
+)
+
+/// Domain error response for an `AssetRequest`: the companion does not
+/// have the requested asset.
+@Serializable
+data class AssetNotFoundReply (
+	val id: String
+)
+
 @Serializable(with = AssetRetentionSerializer::class)
 sealed class AssetRetention {
 	@Serializable
@@ -141,15 +162,14 @@ sealed class BridgeToGatewayMsgData {
 	@Serializable
 	@SerialName("forward")
 	data class Forward(val data: ForwardMessage): BridgeToGatewayMsgData()
-	/// Protocol-level failure: the request could not be reached or dispatched.
-	/// Domain-level errors travel inside the per-op response variant (see e.g.
-	/// `BridgeToGatewayWebappMsg::WebappError`).
 	@Serializable
 	@SerialName("error")
 	data class Error(val data: GatewayError): BridgeToGatewayMsgData()
+	/// response, command received and won't have a completion
 	@Serializable
 	@SerialName("ack")
 	object Ack: BridgeToGatewayMsgData()
+	/// response, command has been completed
 	@Serializable
 	@SerialName("done")
 	object Done: BridgeToGatewayMsgData()
@@ -222,9 +242,6 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: GatewayToBridgeWebappMsg): GatewayToBridgeMsgData()
-	@Serializable
-	@SerialName("forward")
-	data class Forward(val data: ForwardMessage): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("nowPlayingUpdate")
 	data class NowPlayingUpdate(val data: dev.bridgething.schema.NowPlayingUpdate): GatewayToBridgeMsgData()
@@ -563,10 +580,12 @@ sealed class GatewayError {
 	data class HandlerFailed(val data: GatewayErrorHandlerFailedInner): GatewayError()
 }
 
-/// Companion-side asset operations: proactive `Push` to load bytes into the
-/// daemon cache, and explicit `Clear` to drop a previously pushed asset.
-/// `Push` is also the wire shape used to fulfil a daemon `AssetRequest`;
-/// the daemon correlates by id on receipt.
+/// Companion-side asset operations:
+/// - `Push` (event): proactive load into the daemon cache.
+/// - `Clear` (event): drop a previously pushed asset.
+/// - `Got` (response): typed reply to a daemon `AssetRequest`.
+/// - `NotFound` (response): typed domain error for `AssetRequest` when
+/// the companion does not have the asset.
 @Serializable(with = GatewayToBridgeAssetMsgSerializer::class)
 sealed class GatewayToBridgeAssetMsg {
 	@Serializable
@@ -575,6 +594,12 @@ sealed class GatewayToBridgeAssetMsg {
 	@Serializable
 	@SerialName("clear")
 	data class Clear(val data: AssetClear): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("got")
+	data class Got(val data: AssetGotReply): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("notFound")
+	data class NotFound(val data: AssetNotFoundReply): GatewayToBridgeAssetMsg()
 }
 
 /// Companion declares per-scope authority. `Claim` is idempotent and may

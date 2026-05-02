@@ -32,6 +32,35 @@ public struct AssetClear: Codable, Sendable {
 	}
 }
 
+/// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
+/// without the retention hint — the daemon picks retention for assets
+/// it asked for, since the lifecycle is request-scoped rather than
+/// companion-managed.
+/// 
+/// Distinct from `server::AssetGot` (webapp protocol, uses payload-id
+/// correlation rather than meta correlation).
+public struct AssetGotReply: Codable, Sendable {
+	public let id: String
+	public let bytes: Data
+	public let mime: String?
+
+	public init(id: String, bytes: Data, mime: String?) {
+		self.id = id
+		self.bytes = bytes
+		self.mime = mime
+	}
+}
+
+/// Domain error response for an `AssetRequest`: the companion does not
+/// have the requested asset.
+public struct AssetNotFoundReply: Codable, Sendable {
+	public let id: String
+
+	public init(id: String) {
+		self.id = id
+	}
+}
+
 public enum AssetRetention: Codable, Sendable {
 	case lru
 	case pinned
@@ -252,11 +281,10 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case transport(BridgeToGatewayTransportMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
-	/// Protocol-level failure: the request could not be reached or dispatched.
-	/// Domain-level errors travel inside the per-op response variant (see e.g.
-	/// `BridgeToGatewayWebappMsg::WebappError`).
 	case error(GatewayError)
+	/// response, command received and won't have a completion
 	case ack
+	/// response, command has been completed
 	case done
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -419,7 +447,6 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case authority(GatewayToBridgeAuthorityMsg)
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
-	case forward(ForwardMessage)
 	case nowPlayingUpdate(NowPlayingUpdate)
 	case error(GatewayError)
 
@@ -429,7 +456,6 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			authority,
 			chrome,
 			webapp,
-			forward,
 			nowPlayingUpdate,
 			error
 	}
@@ -467,11 +493,6 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .webapp(content)
 					return
 				}
-			case .forward:
-				if let content = try? container.decode(ForwardMessage.self, forKey: .data) {
-					self = .forward(content)
-					return
-				}
 			case .nowPlayingUpdate:
 				if let content = try? container.decode(NowPlayingUpdate.self, forKey: .data) {
 					self = .nowPlayingUpdate(content)
@@ -504,9 +525,6 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .forward(let content):
-			try container.encode(CodingKeys.forward, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .nowPlayingUpdate(let content):
 			try container.encode(CodingKeys.nowPlayingUpdate, forKey: .type)
@@ -1217,17 +1235,23 @@ public enum GatewayError: Codable, Sendable {
 	}
 }
 
-/// Companion-side asset operations: proactive `Push` to load bytes into the
-/// daemon cache, and explicit `Clear` to drop a previously pushed asset.
-/// `Push` is also the wire shape used to fulfil a daemon `AssetRequest`;
-/// the daemon correlates by id on receipt.
+/// Companion-side asset operations:
+/// - `Push` (event): proactive load into the daemon cache.
+/// - `Clear` (event): drop a previously pushed asset.
+/// - `Got` (response): typed reply to a daemon `AssetRequest`.
+/// - `NotFound` (response): typed domain error for `AssetRequest` when
+/// the companion does not have the asset.
 public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 	case push(AssetPush)
 	case clear(AssetClear)
+	case got(AssetGotReply)
+	case notFound(AssetNotFoundReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case push,
-			clear
+			clear,
+			got,
+			notFound
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1248,6 +1272,16 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 					self = .clear(content)
 					return
 				}
+			case .got:
+				if let content = try? container.decode(AssetGotReply.self, forKey: .data) {
+					self = .got(content)
+					return
+				}
+			case .notFound:
+				if let content = try? container.decode(AssetNotFoundReply.self, forKey: .data) {
+					self = .notFound(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeAssetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeAssetMsg"))
@@ -1261,6 +1295,12 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .clear(let content):
 			try container.encode(CodingKeys.clear, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .got(let content):
+			try container.encode(CodingKeys.got, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .notFound(let content):
+			try container.encode(CodingKeys.notFound, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

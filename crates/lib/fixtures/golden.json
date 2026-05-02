@@ -752,66 +752,6 @@
       "framed_hex": "dead020000000000000000000000006e83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a7636f6d6d616e64a46461746182a474797065a66368726f6d65a46461746182a56576656e74a86e61766967617465a46461746181a375726cb368747470733a2f2f6578616d706c652e636f6d"
     },
     {
-      "name": "gateway_to_bridge/forward-binary-event",
-      "description": "gateway sending raw bytes through the Forward escape hatch",
-      "direction": "gateway_to_bridge",
-      "priority": "normal",
-      "decoded_json": {
-        "data": {
-          "data": {
-            "data": [
-              137,
-              80,
-              78,
-              71,
-              13,
-              10,
-              26,
-              10
-            ],
-            "encoding": "binary"
-          },
-          "type": "forward"
-        },
-        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
-        "meta": {
-          "kind": "event"
-        }
-      },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
-      "framed_hex": "dead020000000000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
-    },
-    {
-      "name": "gateway_to_bridge/forward-binary-bulk-event",
-      "description": "Bulk-priority Forward.Binary from the gateway - the shape an OTA chunk push will take",
-      "direction": "gateway_to_bridge",
-      "priority": "bulk",
-      "decoded_json": {
-        "data": {
-          "data": {
-            "data": [
-              137,
-              80,
-              78,
-              71,
-              13,
-              10,
-              26,
-              10
-            ],
-            "encoding": "binary"
-          },
-          "type": "forward"
-        },
-        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
-        "meta": {
-          "kind": "event"
-        }
-      },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a",
-      "framed_hex": "dead020000010000000000000000005f83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a7666f7277617264a46461746182a8656e636f64696e67a662696e617279a464617461c40889504e470d0a1a0a"
-    },
-    {
       "name": "gateway_to_bridge/error-malformed",
       "description": "protocol error: gateway could not decode the request the daemon sent",
       "direction": "gateway_to_bridge",

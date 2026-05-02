@@ -160,7 +160,7 @@ impl TopLevelHandler {
 
   pub async fn handle_forward(&mut self, data: ForwardMessage) -> HandlerResult {
     tracing::debug!("({:?}) handling forward message", &self.handle.from);
-    self.handle.bluetooth.gateway_man.forward_all(data).await;
+    self.handle.bluetooth.gateway_man.broadcast(data).await;
 
     Ok(())
   }

@@ -264,7 +264,11 @@ async fn reader_task(
     loop {
       match codec.decode(&mut buf) {
         Ok(Some(frame)) => {
-          let event = BluetoothEvent::Gateway(InboundGatewayMessage::new(Some(address), GatewayType::Iap2Ea, frame.msg));
+          let event = BluetoothEvent::Gateway(InboundGatewayMessage::new(
+            Some(address),
+            GatewayType::Iap2Ea,
+            frame.msg,
+          ));
           if bluetooth_tx.send(event).await.is_err() {
             tracing::error!(%address, "iap2 ea gateway: bluetooth bus closed");
             let _ = conn_close_tx.send(key).await;

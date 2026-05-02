@@ -6,6 +6,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use syn::{Item, Meta};
 
+mod dispatch;
+
 const TS_BINDINGS_DIR: &str = "crates/lib/ts/bindings";
 const SWIFT_OUTPUT: &str = "crates/lib/swift/Sources/BridgethingSchema/Generated.swift";
 const KOTLIN_OUTPUT: &str = "crates/lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt";
@@ -46,6 +48,20 @@ fn gen_typescript() -> Result<()> {
   }
   run("cargo", &["test", "-p", "libbridgething", "--quiet"])?;
   run("bunx", &["prettier", TS_BINDINGS_DIR, "--write", "--log-level", "warn"])?;
+
+  println!("    emitting ts dispatch helpers");
+  let plan = build_dispatch_plan()?;
+  dispatch::emit_typescript(&plan).context("emit typescript dispatch")?;
+  run(
+    "bunx",
+    &[
+      "prettier",
+      "packages/gateway/typescript/src/dispatch.generated.ts",
+      "--write",
+      "--log-level",
+      "warn",
+    ],
+  )?;
   Ok(())
 }
 
@@ -56,6 +72,10 @@ fn gen_swift() -> Result<()> {
   let content = std::fs::read_to_string(SWIFT_OUTPUT).context("read swift output")?;
   let patched = patch_swift(&content);
   std::fs::write(SWIFT_OUTPUT, patched).context("write swift output")?;
+
+  println!("    emitting swift dispatch helpers");
+  let plan = build_dispatch_plan()?;
+  dispatch::emit_swift(&plan).context("emit swift dispatch")?;
   Ok(())
 }
 
@@ -83,7 +103,22 @@ fn gen_kotlin() -> Result<()> {
   let content = std::fs::read_to_string(KOTLIN_OUTPUT).context("read kotlin output")?;
   let patched = patch_kotlin(&content, &adjacent_tagged)?;
   std::fs::write(KOTLIN_OUTPUT, patched).context("write kotlin output")?;
+
+  println!("    emitting kotlin dispatch helpers");
+  let plan = build_dispatch_plan()?;
+  dispatch::emit_kotlin(&plan).context("emit kotlin dispatch")?;
   Ok(())
+}
+
+fn build_dispatch_plan() -> Result<dispatch::Plan> {
+  let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  println!(
+    "    dispatch inventory: {} marker-tagged types, {} gateway-requests, {} bridge-requests",
+    inv.markers.len(),
+    inv.gateway_requests.len(),
+    inv.bridge_requests.len(),
+  );
+  dispatch::build_plan(&inv).context("dispatch plan")
 }
 
 fn patch_swift(input: &str) -> String {

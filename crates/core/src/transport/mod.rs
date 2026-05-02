@@ -25,16 +25,12 @@
 use bridgething_iap2::HidCommand;
 use libbridgething::{
   RepeatMode,
-  gateway::{
-    BridgeToGatewayMsg, BridgeToGatewayMsgData, BridgeToGatewayTransportMsg, CompanionAuthorityScope, GatewayMsgMeta,
-    RepeatSet, SeekToSet, ShuffleSet, SkipToIndexSet,
-  },
+  gateway::{BridgeToGatewayTransportMsg, CompanionAuthorityScope, RepeatSet, SeekToSet, ShuffleSet, SkipToIndexSet},
 };
-use uuid::Uuid;
 
 use crate::{
   authority::AuthorityRegistry,
-  bluetooth::{BluetoothMan, OutboundGatewayMessage, iap2::Iap2TransportHandle},
+  bluetooth::{BluetoothMan, iap2::Iap2TransportHandle},
   player::Player,
 };
 
@@ -90,7 +86,11 @@ impl TransportController {
 
   pub async fn play_pause(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("play_pause", BridgeToGatewayTransportMsg::PlayPause, hid_bit::PLAY_PAUSE)
+      .dispatch_simple(
+        "play_pause",
+        BridgeToGatewayTransportMsg::PlayPause,
+        hid_bit::PLAY_PAUSE,
+      )
       .await
   }
 
@@ -228,22 +228,16 @@ impl TransportController {
   }
 
   async fn send_companion(&self, msg: BridgeToGatewayTransportMsg) -> TransportResult<()> {
-    let payload = BridgeToGatewayMsgData::Transport(msg);
-    self
-      .bluetooth
-      .gateway_man
-      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
-        id: Uuid::now_v7(),
-        meta: GatewayMsgMeta::Command,
-        data: payload,
-      }))
-      .await;
+    self.bluetooth.gateway_man.broadcast_command(msg).await;
     Ok(())
   }
 
   async fn send_iap2(&self, cmd: HidCommand) -> TransportResult<()> {
     let Some(handle) = &self.iap2 else {
-      tracing::debug!(?cmd, "iap2 transport not available (MFi probe failed); dropping HID command");
+      tracing::debug!(
+        ?cmd,
+        "iap2 transport not available (MFi probe failed); dropping HID command"
+      );
       return Err(TransportError::NoTarget);
     };
     handle.send(cmd).await;

@@ -1,5 +1,5 @@
 [package]
-name = "bridgething-iap2-macros"
+name = "bridgething-macros"
 rust-version.workspace = true
 version.workspace = true
 edition.workspace = true

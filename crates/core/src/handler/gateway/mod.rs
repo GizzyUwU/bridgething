@@ -10,8 +10,8 @@ use asset::*;
 use authority::*;
 use chrome::*;
 use libbridgething::{
-  DeviceType, ForwardMessage, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus, ServerEventType,
-  gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  DeviceType, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus,
+  gateway::{GatewayMsgMeta, GatewayToBridgeMsg, GatewayToBridgeMsgData, is_response_variant},
 };
 use webapp::*;
 
@@ -44,6 +44,36 @@ impl GatewayHandler {
       msg: GatewayToBridgeMsg { id, meta, data },
       ..
     } = data;
+
+    // Response messages may be completing a daemon-initiated typed
+    // request (`gateway_man.request::<R>()`). Consume those here
+    // before normal dispatch so the requester's awaiting future
+    // resolves. If no pending request matches, fall through.
+    if let GatewayMsgMeta::Response(meta_resp) = &meta
+      && self
+        .bluetooth
+        .gateway_man
+        .complete_pending(&meta_resp.request_id, data.clone())
+    {
+      return Ok(());
+    }
+
+    // Stray response shape that didn't match any pending request:
+    // timed-out, late reply, or a non-SDK companion sending the
+    // response form without response-meta. The per-surface dispatchers
+    // are event-only by contract; let them stay event-only by filtering
+    // these out here for every `impl_bridge_request!`-declared surface
+    // at once.
+    if is_response_variant(&data) {
+      tracing::warn!(
+        ?meta,
+        ?data,
+        "({:?}) stray response-shape arrival with no matching pending request; dropping",
+        address,
+      );
+      return Ok(());
+    }
+
     let handle = MsgHandle::new(self, id, meta, address);
 
     match data {
@@ -51,7 +81,9 @@ impl GatewayHandler {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
       GatewayToBridgeMsgData::Asset(asset_msg) => {
-        tokio::spawn(async move { AssetHandler::new(handle).handle(asset_msg).await });
+        if let Some(event) = asset_msg.into_event() {
+          tokio::spawn(async move { AssetHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Authority(auth_msg) => {
         tokio::spawn(async move { AuthorityHandler::new(handle).handle(auth_msg).await });
@@ -61,9 +93,6 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {
         tokio::spawn(async move { WebappHandler::new(handle).handle(webapp_msg).await });
-      }
-      GatewayToBridgeMsgData::Forward(forward) => {
-        tokio::spawn(async move { TopLevelHandler::new(handle).handle_forward(forward).await });
       }
       GatewayToBridgeMsgData::NowPlayingUpdate(update) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_now_playing(update).await });
@@ -107,19 +136,6 @@ impl TopLevelHandler {
         .set_companion(mac, PeerCompanionStatus::Connected(version))
         .await;
     }
-    Ok(())
-  }
-
-  pub async fn handle_forward(&mut self, data: ForwardMessage) -> HandlerResult {
-    tracing::debug!("({:?}) handling forward message", &self.handle.address);
-
-    self
-      .handle
-      .state
-      .client_man
-      .broadcast(data, ServerEventType::Event)
-      .await?;
-
     Ok(())
   }
 

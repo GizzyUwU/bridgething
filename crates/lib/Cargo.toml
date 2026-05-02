@@ -13,6 +13,8 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
 serde_with = { workspace = true, features = ["json"] }
 derive_more = { workspace = true, features = ["debug", "from"] }
+paste = "1.0.15"
+bridgething-macros = { path = "../macros" }
 
 # type generation
 ts-rs = { version = "12.0.1", features = ["uuid-impl", "no-serde-warnings"] }

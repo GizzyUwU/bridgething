@@ -1,28 +1,17 @@
-//! Derive macro for iAP2 control-session messages (CSMs).
-//!
-//! Annotate a struct with `#[derive(Csm)]` and `#[csm(id = 0x____)]` to
-//! generate `From<X> for CsmFrame` and `TryFrom<CsmFrame> for X`. Each
-//! field gets `#[csm(param = N)]` to fix its parameter id; without an
-//! override, ids are assigned in declaration order starting at 0.
+//! `#[derive(Csm)]` — generates `From<X> for CsmFrame` and
+//! `TryFrom<CsmFrame> for X` for iAP2 control-session messages.
+//! Annotate a struct with `#[csm(id = 0x____)]`. Each field gets
+//! `#[csm(param = N)]` to fix its parameter id; without an override,
+//! ids are assigned in declaration order starting at 0.
 //!
 //! Field encoding is type-driven via the `CsmParamFieldEncode` /
 //! `CsmParamFieldDecode` traits in `bridgething_iap2::csm`. Add a new
 //! field type by impl'ing those traits; no macro changes required.
 
-use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Ident, Lit, parse_macro_input, spanned::Spanned};
-
-#[proc_macro_derive(Csm, attributes(csm))]
-pub fn derive_csm(input: TokenStream) -> TokenStream {
-  let ast = parse_macro_input!(input as DeriveInput);
-  match expand(&ast) {
-    Ok(ts) => ts.into(),
-    Err(err) => err.to_compile_error().into(),
-  }
-}
+use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Ident, Lit, spanned::Spanned};
 
 /// Resolve the path the macro should use to refer to the iap2 crate.
 /// In-crate (`crate_name` returns `Itself`) -> `crate`. External callers
@@ -41,7 +30,7 @@ fn iap2_crate_path() -> TokenStream2 {
   }
 }
 
-fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
+pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
   let name = &ast.ident;
   let msg_id = parse_msg_id(&ast.attrs, ast.span())?;
   let iap2 = iap2_crate_path();
@@ -130,7 +119,7 @@ fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
   })
 }
 
-fn parse_msg_id(attrs: &[Attribute], parent_span: proc_macro2::Span) -> syn::Result<u16> {
+fn parse_msg_id(attrs: &[Attribute], parent_span: Span) -> syn::Result<u16> {
   for attr in attrs {
     if !attr.path().is_ident("csm") {
       continue;

@@ -8,7 +8,7 @@ authors.workspace = true
 homepage.workspace = true
 
 [dependencies]
-bridgething-iap2-macros = { path = "../iap2-macros" }
+bridgething-macros = { path = "../macros" }
 bridgething-mfi = { path = "../mfi" }
 bytes = "1.10.1"
 bitflags = "2.9.4"

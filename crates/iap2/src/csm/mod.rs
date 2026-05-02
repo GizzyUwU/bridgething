@@ -13,7 +13,7 @@
 //! drains complete CSMs out of it.
 //!
 //! Typed CSMs are flat structs annotated with `#[derive(Csm)]` (from
-//! `bridgething-iap2-macros`). The macro generates `From<X> for
+//! `bridgething-macros`). The macro generates `From<X> for
 //! CsmFrame` and `TryFrom<CsmFrame> for X`, dispatching field encoding
 //! through the [`CsmParamFieldEncode`] / [`CsmParamFieldDecode`] traits
 //! defined here. Field encoding is type-driven: `Bytes` rides as raw,
@@ -31,7 +31,7 @@ pub mod hid;
 pub mod identification;
 pub mod now_playing;
 
-pub use bridgething_iap2_macros::Csm;
+pub use bridgething_macros::Csm;
 
 pub const CSM_START_MARKER: u16 = 0x4040;
 pub const CSM_OUTER_HEADER_LEN: usize = 6;

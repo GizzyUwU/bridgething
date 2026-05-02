@@ -1,6 +1,6 @@
 use libbridgething::{
   AssetRetention,
-  gateway::{AssetClear, AssetPush, GatewayToBridgeAssetMsg},
+  gateway::{AssetClear, AssetPush, GatewayToBridgeAssetMsgEvent},
 };
 use tokio_util::bytes::Bytes;
 
@@ -16,10 +16,10 @@ impl AssetHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: GatewayToBridgeAssetMsg) -> HandlerResult {
+  pub async fn handle(&mut self, msg: GatewayToBridgeAssetMsgEvent) -> HandlerResult {
     match msg {
-      GatewayToBridgeAssetMsg::Push(push) => self.handle_push(push).await,
-      GatewayToBridgeAssetMsg::Clear(clear) => self.handle_clear(clear).await,
+      GatewayToBridgeAssetMsgEvent::Push(push) => self.handle_push(push).await,
+      GatewayToBridgeAssetMsgEvent::Clear(clear) => self.handle_clear(clear).await,
     }
   }
 

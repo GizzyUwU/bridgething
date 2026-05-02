@@ -1,15 +1,7 @@
 package dev.bridgething.gateway
 
-import dev.bridgething.schema.AssetClear
-import dev.bridgething.schema.AssetPush
-import dev.bridgething.schema.AssetRetention
-import dev.bridgething.schema.AuthorityClaim
-import dev.bridgething.schema.AuthorityRelease
 import dev.bridgething.schema.BridgeToGatewayMsg
-import dev.bridgething.schema.CompanionAuthorityScope
 import dev.bridgething.schema.GatewayMsgMeta
-import dev.bridgething.schema.GatewayToBridgeAssetMsg
-import dev.bridgething.schema.GatewayToBridgeAuthorityMsg
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.Priority
@@ -109,6 +101,9 @@ public class BridgethingGateway(
     adapter.disconnect(deviceId)
   }
 
+  /** Snapshot of currently connected peer ids. */
+  public suspend fun connectedDeviceIds(): List<String> = mutex.withLock { buffers.keys.toList() }
+
   /**
    * Encode and ship a fully-formed message. Caller is responsible for picking
    * `meta` ([GatewayMsgMeta.Command], [GatewayMsgMeta.Event], etc.). For
@@ -131,61 +126,6 @@ public class BridgethingGateway(
   /** Bulk-priority shorthand for [send]. */
   public suspend fun sendBulk(deviceId: String, message: GatewayToBridgeMsg) {
     send(deviceId, message, priority = Priority.Bulk)
-  }
-
-  /**
-   * Push a binary blob into the daemon's asset cache. Companion-managed
-   * retention - the daemon enforces it but expects companion to clear
-   * pinned assets explicitly when no longer needed.
-   *
-   * Bulk priority is the right default: asset blobs may be sizable
-   * (full-size album art, glyph atlases) and shouldn't preempt latency-
-   * sensitive traffic like NowPlaying deltas.
-   */
-  public suspend fun pushAsset(
-    deviceId: String,
-    id: String,
-    bytes: ByteArray,
-    mime: String? = null,
-    retention: AssetRetention = AssetRetention.Lru,
-  ) {
-    val push = AssetPush(id = id, bytes = bytes, mime = mime, retention = retention)
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(push)),
-    )
-    send(deviceId, msg, priority = Priority.Bulk)
-  }
-
-  /** Drop a previously pushed asset. */
-  public suspend fun clearAsset(deviceId: String, id: String) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(AssetClear(id = id))),
-    )
-    send(deviceId, msg)
-  }
-
-  /** Claim authority over a scope. Idempotent; re-issue to refresh staleness. */
-  public suspend fun claimAuthority(deviceId: String, scope: CompanionAuthorityScope) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Claim(AuthorityClaim(scope = scope))),
-    )
-    send(deviceId, msg)
-  }
-
-  /** Release authority over a scope. */
-  public suspend fun releaseAuthority(deviceId: String, scope: CompanionAuthorityScope) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Release(AuthorityRelease(scope = scope))),
-    )
-    send(deviceId, msg)
   }
 
   /**
