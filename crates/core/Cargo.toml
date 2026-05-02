@@ -61,13 +61,14 @@ bytes = "1.11.1"
 lru = "0.18.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
+zbus = { version = "5.15.0", default-features = false, features = ["tokio"], optional = true }
 
 [features]
 default = ["dev-linux-host"]
 als = []
 mic = []
 chrome = ["dep:headless_chrome"]
-systemd = ["dep:sd-notify"]
+systemd = ["dep:sd-notify", "dep:zbus"]
 swupdate = ["dep:bridgething-swupdate-sys"]
 superbird = ["als", "mic", "systemd", "chrome", "swupdate"]
 # dev features

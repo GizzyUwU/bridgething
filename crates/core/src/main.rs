@@ -135,23 +135,12 @@ fn spawn_ota_event_forwarder(
   });
 }
 
-/// Triggers a reboot when the OTA orchestrator finishes its `Reboot`
-/// phase. In release builds shells out to `sudo reboot`; in debug
-/// builds it logs and does nothing so dev hosts don't actually
-/// reboot during testing. Sweep to systemd D-Bus tracked separately
-/// alongside the existing `client::system::reboot` callsite.
 fn trigger_reboot() {
-  #[cfg(not(debug_assertions))]
-  {
-    let status = std::process::Command::new("sh").arg("-c").arg("sudo reboot").status();
-    match status {
-      Ok(s) if s.success() => {}
-      Ok(s) => tracing::error!("ota reboot returned non-zero: {s:?}"),
-      Err(err) => tracing::error!("ota reboot failed to spawn: {err:?}"),
+  tokio::spawn(async {
+    if let Err(err) = systemd::power::reboot().await {
+      tracing::error!("ota reboot failed: {err}");
     }
-  }
-  #[cfg(debug_assertions)]
-  tracing::warn!("ota reboot requested in debug build - no-op (would reboot in release)");
+  });
 }
 
 /// Marks the volatile-runtime path that signals "bridgething has run

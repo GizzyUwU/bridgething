@@ -31,10 +31,19 @@ fn main() {
     );
   }
 
+  // Cross-bindgen with meta-clang's `clang-native` libclang otherwise
+  // sees `__x86_64__` defined on the build host and trips on glibc's
+  // `__float128` typedef in `bits/floatn.h` ("not supported on this
+  // target"). Pinning clang's effective target to cargo's `TARGET`
+  // makes its builtin set agree with the host glibc headers it ends
+  // up parsing.
+  let target = env::var("TARGET").expect("TARGET set by cargo");
+
   let bindings = bindgen::Builder::default()
     .header(network_ipc.to_string_lossy().into_owned())
     .header(progress_ipc.to_string_lossy().into_owned())
     .clang_arg(format!("-I{}", include_dir.display()))
+    .clang_arg(format!("--target={target}"))
     // Public surface only. Block transitively-included libc symbols so
     // we don't drag in the entire system header tree as Rust types.
     .allowlist_function("swupdate_.*")

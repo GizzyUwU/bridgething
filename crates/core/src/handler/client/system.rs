@@ -3,6 +3,7 @@ use libbridgething::client::{
 };
 
 use super::{HandlerResult, MsgHandle};
+use crate::systemd::power;
 
 pub struct SystemHandler {
   handle: MsgHandle,
@@ -49,37 +50,17 @@ impl SystemHandler {
 
   async fn reboot(&self) -> HandlerResult {
     tracing::debug!("({}) handling reboot request", &self.handle.from);
-
-    #[cfg(not(debug_assertions))]
-    let status = tokio::process::Command::new("sh")
-      .arg("-c")
-      .arg("sudo reboot")
-      .status()
-      .await?;
-
-    #[cfg(not(debug_assertions))]
-    if !status.success() {
-      tracing::error!("Failed to reboot: {:?}", status);
+    if let Err(err) = power::reboot().await {
+      tracing::error!("reboot failed: {err}");
     }
-
     Ok(())
   }
 
   async fn power_off(&self) -> HandlerResult {
     tracing::debug!("({}) handling power off request", &self.handle.from);
-
-    #[cfg(not(debug_assertions))]
-    let status = tokio::process::Command::new("sh")
-      .arg("-c")
-      .arg("sudo shutdown now")
-      .status()
-      .await?;
-
-    #[cfg(not(debug_assertions))]
-    if !status.success() {
-      tracing::error!("Failed to reboot: {:?}", status);
+    if let Err(err) = power::power_off().await {
+      tracing::error!("power_off failed: {err}");
     }
-
     Ok(())
   }
 
