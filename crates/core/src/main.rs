@@ -74,9 +74,11 @@ async fn main() {
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 
+  let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
+  spawn_ota_event_forwarder(bluetooth.clone(), ota_events_rx);
   let (ota, _ota_handle) = OtaOrchestrator::spawn(
     state.assets.clone(),
-    bluetooth.clone(),
+    ota_events_tx,
     paths::ota_workdir(),
     std::sync::Arc::new(trigger_reboot),
   );
@@ -120,6 +122,17 @@ async fn main() {
   server.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");
+}
+
+fn spawn_ota_event_forwarder(
+  bluetooth: bluetooth::BluetoothMan,
+  mut rx: tokio::sync::mpsc::Receiver<libbridgething::gateway::BridgeToGatewaySystemMsgEvent>,
+) {
+  tokio::spawn(async move {
+    while let Some(event) = rx.recv().await {
+      bluetooth.gateway_man.broadcast(event).await;
+    }
+  });
 }
 
 /// Triggers a reboot when the OTA orchestrator finishes its `Reboot`

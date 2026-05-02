@@ -63,7 +63,7 @@ sha2 = "0.11.0"
 hex = "0.4.3"
 
 [features]
-default = ["superbird"]
+default = ["dev-linux-host"]
 als = []
 mic = []
 chrome = ["dep:headless_chrome"]
@@ -71,8 +71,12 @@ systemd = ["dep:sd-notify"]
 swupdate = ["dep:bridgething-swupdate-sys"]
 superbird = ["als", "mic", "systemd", "chrome", "swupdate"]
 # dev features
+dev-linux-host = ["als", "mic", "systemd", "chrome"]
 no-persist = []
 
 [[example]]
 name = "cover_art"
 path = "./examples/cover_art.rs"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
