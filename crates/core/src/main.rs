@@ -1,5 +1,5 @@
 mod bluetooth;
-mod http;
+mod net;
 
 mod als;
 mod mic;
@@ -40,7 +40,7 @@ async fn main() {
   let meta = state::meta::SuperbirdMeta::read_or_default().await;
   tracing::debug!("metadata: {:?}", &meta);
 
-  let (client_man, mut client_listener) = http::create_client_manager();
+  let (client_man, mut client_listener) = net::create_client_manager();
   let authority = AuthorityRegistry::new();
   let player = Player::new(client_man.clone(), authority.clone());
 
@@ -68,7 +68,7 @@ async fn main() {
   );
 
   notifier.status("initializing server binds...");
-  let mut server = http::Server::bind(state.clone(), bluetooth.clone())
+  let mut server = net::Server::bind(state.clone(), bluetooth.clone())
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 

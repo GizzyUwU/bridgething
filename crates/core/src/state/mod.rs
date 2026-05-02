@@ -8,7 +8,7 @@ use crate::{
   asset::{AssetCache, AssetError},
   authority::AuthorityRegistry,
   chrome,
-  http::ClientMan,
+  net::ClientMan,
   paths,
   peer::PeerTracker,
 };

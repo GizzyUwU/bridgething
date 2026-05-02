@@ -7,7 +7,7 @@ use libbridgething::{
 };
 
 use super::PlayerResult;
-use crate::{authority::AuthorityRegistry, http::ClientMan};
+use crate::{authority::AuthorityRegistry, net::ClientMan};
 
 /// Which producer fed an inbound `NowPlayingUpdate`. The merge stage
 /// uses this to route the partial fields into the right source-snapshot

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::ClientHandler;
 use crate::{
-  bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg, transport::TransportController,
+  bluetooth::BluetoothMan, net::WSResult, state::State, stock::StockSendMsg, transport::TransportController,
 };
 
 // TODO: don't allow cloning of message handle

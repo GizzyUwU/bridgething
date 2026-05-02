@@ -32,7 +32,7 @@ use tokio::sync::RwLock;
 
 use crate::{
   authority::AuthorityRegistry,
-  http::{ClientMan, WSError},
+  net::{ClientMan, WSError},
   player::Player,
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };

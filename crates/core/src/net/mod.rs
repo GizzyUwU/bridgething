@@ -225,12 +225,12 @@ pub enum WSError {
 #[macro_export]
 macro_rules! impl_broadcast_failure_from {
   ($err:ty) => {
-    impl ::core::convert::From<::std::vec::Vec<$crate::http::WSError>> for $err {
-      fn from(errors: ::std::vec::Vec<$crate::http::WSError>) -> Self {
+    impl ::core::convert::From<::std::vec::Vec<$crate::net::WSError>> for $err {
+      fn from(errors: ::std::vec::Vec<$crate::net::WSError>) -> Self {
         for error in errors {
           tracing::error!("failed to broadcast message: {:?}", error);
         }
-        Self::WS($crate::http::WSError::BroadcastFailed)
+        Self::WS($crate::net::WSError::BroadcastFailed)
       }
     }
   };

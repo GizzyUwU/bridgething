@@ -23,7 +23,7 @@ pub use msg::*;
 
 use super::HandlerResult;
 use crate::{
-  bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend,
+  bluetooth::BluetoothMan, handler::HandlerError, net::WSError, state::State, stock::StockInterAppSend,
   transport::TransportController,
 };
 

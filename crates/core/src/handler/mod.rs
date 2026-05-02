@@ -5,7 +5,7 @@ pub use client::ClientHandler;
 pub use gateway::GatewayHandler;
 
 use crate::{
-  asset::AssetError, bluetooth::BluetoothError, http::WSError, impl_broadcast_failure_from, player::PlayerError,
+  asset::AssetError, bluetooth::BluetoothError, impl_broadcast_failure_from, net::WSError, player::PlayerError,
   state::StateError, transport::TransportError,
 };
 

@@ -1,7 +1,7 @@
 use libbridgething::Device;
 
 use crate::{
-  http::{ClientMan, WSError},
+  net::{ClientMan, WSError},
   stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload},
 };
 

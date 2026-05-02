@@ -33,7 +33,7 @@ use profiles::ProfileMan;
 use rfcomm::RfcommGateway;
 
 use crate::{
-  http::WSError,
+  net::WSError,
   player::PlayerError,
   state::{State, StateError},
 };

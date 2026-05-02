@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 
 use crate::{
   authority::AuthorityRegistry,
-  http::{ClientMan, WSError},
+  net::{ClientMan, WSError},
 };
 
 #[derive(Debug, Clone)]
