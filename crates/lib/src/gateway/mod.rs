@@ -60,7 +60,6 @@ pub struct GatewayToBridgeMsg {
 pub enum GatewayToBridgeMsgData {
   #[from]
   Version(GatewayMeta),
-
   #[from]
   Asset(GatewayToBridgeAssetMsg),
   #[from]
@@ -69,13 +68,10 @@ pub enum GatewayToBridgeMsgData {
   Chrome(GatewayToBridgeChromeMsg),
   #[from]
   Webapp(GatewayToBridgeWebappMsg),
-
   #[from]
   Forward(ForwardMessage),
-
   #[from]
   NowPlayingUpdate(NowPlayingUpdate),
-
   #[from]
   Error(GatewayError),
 }
@@ -107,17 +103,15 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   Asset(BridgeToGatewayAssetMsg),
   #[from]
+  Transport(BridgeToGatewayTransportMsg),
+  #[from]
   Webapp(BridgeToGatewayWebappMsg),
-
   #[from]
   Forward(ForwardMessage),
-
-  /// Protocol-level failure: the request could not be reached or dispatched.
-  /// Domain-level errors travel inside the per-op response variant (see e.g.
-  /// `BridgeToGatewayWebappMsg::WebappError`).
   #[from]
   Error(GatewayError),
-
-  Ack,  // response, command received and won't have a completion
-  Done, // response, command has been completed
+  /// response, command received and won't have a completion
+  Ack,
+  /// response, command has been completed
+  Done,
 }

@@ -4,13 +4,16 @@ use libbridgething::{ServerEventData, ServerEventType, client::ClientRequest};
 use uuid::Uuid;
 
 use super::ClientHandler;
-use crate::{bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg};
+use crate::{
+  bluetooth::BluetoothMan, http::WSResult, state::State, stock::StockSendMsg, transport::TransportController,
+};
 
 // TODO: don't allow cloning of message handle
 #[derive(Debug, Clone)]
 pub struct MsgHandle {
   pub state: State,
   pub bluetooth: BluetoothMan,
+  pub transport: TransportController,
 
   pub id: Uuid,
   pub from: SocketAddr,
@@ -24,6 +27,7 @@ impl MsgHandle {
     Self {
       state: handler.state.clone(),
       bluetooth: handler.bluetooth.clone(),
+      transport: handler.transport.clone(),
 
       id,
       from,
@@ -59,13 +63,10 @@ impl MsgHandle {
       .await
   }
 
-  /// Ship a typed success response. The request type fixes the wire variant
-  /// so the handler can't accidentally encode the wrong shape.
   pub async fn respond_to<R: ClientRequest>(&self, response: R::Response) -> WSResult<()> {
     self.respond(R::encode_response(response)).await
   }
 
-  /// Ship a typed domain-error response paired with this request type.
   pub async fn respond_err<R: ClientRequest>(&self, err: R::DomainError) -> WSResult<()> {
     self.respond(R::encode_domain_error(err)).await
   }

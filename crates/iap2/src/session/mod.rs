@@ -25,6 +25,7 @@
 mod auth;
 mod external_accessory;
 mod file_transfer;
+mod hid;
 mod identification;
 mod mfi_worker;
 mod now_playing;
@@ -36,6 +37,8 @@ use bytes::{Bytes, BytesMut};
 use external_accessory::EaFlow;
 pub use external_accessory::{EaPriority, EaSendError, EaStreamSender};
 use file_transfer::FileTransferFlow;
+pub use hid::HidCommand;
+use hid::HidFlow;
 use identification::IdentificationFlow;
 pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
 use now_playing::NowPlayingFlow;
@@ -125,6 +128,7 @@ pub struct Iap2Session<M: MfiAccess> {
   now_playing: NowPlayingFlow,
   ea: Option<EaFlow>,
   file_transfer: FileTransferFlow,
+  hid: HidFlow,
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
@@ -134,6 +138,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     link_command_tx: mpsc::Sender<Iap2Command>,
     link_events_rx: mpsc::Receiver<Iap2Event>,
     session_events_tx: mpsc::Sender<SessionEvent>,
+    hid_command_rx: mpsc::Receiver<HidCommand>,
   ) -> Self {
     Self::with_app_launch(
       identification,
@@ -142,6 +147,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       link_command_tx,
       link_events_rx,
       session_events_tx,
+      hid_command_rx,
     )
   }
 
@@ -156,6 +162,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     link_command_tx: mpsc::Sender<Iap2Command>,
     link_events_rx: mpsc::Receiver<Iap2Event>,
     session_events_tx: mpsc::Sender<SessionEvent>,
+    hid_command_rx: mpsc::Receiver<HidCommand>,
   ) -> Self {
     Self {
       auth: AuthFlow::new(),
@@ -163,6 +170,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       now_playing: NowPlayingFlow::new(),
       ea: None,
       file_transfer: FileTransferFlow::new(link_command_tx.clone()),
+      hid: HidFlow::new(hid_command_rx),
       identification,
       app_launch_bundle_id,
       mfi,
@@ -199,54 +207,64 @@ impl<M: MfiAccess> Iap2Session<M> {
         }
         if self.ident.is_accepted() {
           self.now_playing.ensure_subscribed(&self.link_command_tx).await?;
+          self.hid.ensure_started(&self.link_command_tx).await?;
           if let (Some(ea), Some(bundle)) = (self.ea.as_mut(), self.app_launch_bundle_id.as_deref()) {
             ea.ensure_app_launch_requested(bundle, &self.link_command_tx).await?;
           }
         }
       }
 
-      match self.link_events_rx.recv().await {
-        Some(Iap2Event::Established(lsp)) => {
-          tracing::debug!("iap2 session: link established");
-          if self.ea.is_none() {
-            self.ea = Some(EaFlow::new(self.link_command_tx.clone(), lsp.max_len));
+      tokio::select! {
+        biased;
+        link_event = self.link_events_rx.recv() => match link_event {
+          Some(Iap2Event::Established(lsp)) => {
+            tracing::debug!("iap2 session: link established");
+            if self.ea.is_none() {
+              self.ea = Some(EaFlow::new(self.link_command_tx.clone(), lsp.max_len));
+            }
+            emit(&self.session_events_tx, SessionEvent::LinkEstablished(lsp)).await;
           }
-          emit(&self.session_events_tx, SessionEvent::LinkEstablished(lsp)).await;
-        }
-        Some(Iap2Event::DataReceived { session_id, payload }) => {
-          if session_id == CONTROL_SESSION_ID {
-            control_buf.extend_from_slice(&payload);
-          } else if session_id == external_accessory::EA_LINK_SESSION_ID {
-            if let Some(ea) = self.ea.as_mut() {
-              ea.dispatch_link_data(payload).await;
+          Some(Iap2Event::DataReceived { session_id, payload }) => {
+            if session_id == CONTROL_SESSION_ID {
+              control_buf.extend_from_slice(&payload);
+            } else if session_id == external_accessory::EA_LINK_SESSION_ID {
+              if let Some(ea) = self.ea.as_mut() {
+                ea.dispatch_link_data(payload).await;
+              } else {
+                tracing::warn!("iap2 session: EA data received before link Established");
+              }
+            } else if session_id == file_transfer::FILE_TRANSFER_LINK_SESSION_ID {
+              if let Err(err) = self
+                .file_transfer
+                .dispatch_link_data(payload, &self.session_events_tx)
+                .await
+              {
+                tracing::warn!(?err, "iap2 session: file transfer dispatch error");
+              }
             } else {
-              tracing::warn!("iap2 session: EA data received before link Established");
+              tracing::trace!(session_id, "iap2 session: ignoring data on non-control session");
             }
-          } else if session_id == file_transfer::FILE_TRANSFER_LINK_SESSION_ID {
-            if let Err(err) = self
-              .file_transfer
-              .dispatch_link_data(payload, &self.session_events_tx)
-              .await
-            {
-              tracing::warn!(?err, "iap2 session: file transfer dispatch error");
-            }
-          } else {
-            tracing::trace!(session_id, "iap2 session: ignoring data on non-control session");
           }
-        }
-        Some(Iap2Event::LinkDown(reason)) => {
-          tracing::info!(reason = %reason, "iap2 session: link down");
-          emit(&self.session_events_tx, SessionEvent::LinkDown(reason)).await;
-          return Ok(());
-        }
-        None => {
-          tracing::debug!("iap2 session: link events channel closed");
-          emit(
-            &self.session_events_tx,
-            SessionEvent::LinkDown("link task exited".into()),
-          )
-          .await;
-          return Ok(());
+          Some(Iap2Event::LinkDown(reason)) => {
+            tracing::info!(reason = %reason, "iap2 session: link down");
+            let _ = self.hid.shutdown(&self.link_command_tx).await;
+            emit(&self.session_events_tx, SessionEvent::LinkDown(reason)).await;
+            return Ok(());
+          }
+          None => {
+            tracing::debug!("iap2 session: link events channel closed");
+            emit(
+              &self.session_events_tx,
+              SessionEvent::LinkDown("link task exited".into()),
+            )
+            .await;
+            return Ok(());
+          }
+        },
+        Some(hid_cmd) = self.hid.recv() => {
+          if let Err(err) = self.hid.handle_command(hid_cmd, &self.link_command_tx).await {
+            tracing::warn!(?err, "iap2 session: hid command dispatch failed");
+          }
         }
       }
     }

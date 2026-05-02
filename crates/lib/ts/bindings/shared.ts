@@ -127,8 +127,12 @@ export type PlaybackUpdate = {
 export type Priority = 'normal' | 'bulk';
 
 /**
- * Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
- * outbound `SetRepeat` interaction command. `Off` is the default.
+ * `repeat` is a typed enum (Off/All/One) shared with
+ * the canonical `PlaybackOptions` shape webapps already render and
+ * with the outbound `SetRepeat` interaction command. iOS, Android,
+ * Spotify, and Apple Music all expose three repeat states; the
+ * underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
+ * translate to/from this enum.
  */
 export type RepeatMode = 'off' | 'all' | 'one';
 

@@ -27,6 +27,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 pub mod auth;
 pub mod external_accessory;
+pub mod hid;
 pub mod identification;
 pub mod now_playing;
 

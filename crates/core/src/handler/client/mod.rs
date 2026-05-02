@@ -22,7 +22,10 @@ mod msg;
 pub use msg::*;
 
 use super::HandlerResult;
-use crate::{bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend};
+use crate::{
+  bluetooth::BluetoothMan, handler::HandlerError, http::WSError, state::State, stock::StockInterAppSend,
+  transport::TransportController,
+};
 
 /// Run a handler future on a fresh task; if it errors, log it AND surface it
 /// to the requesting webapp as a typed protocol-level Error so the caller
@@ -50,11 +53,16 @@ where
 pub struct ClientHandler {
   state: State,
   bluetooth: BluetoothMan,
+  transport: TransportController,
 }
 
 impl ClientHandler {
-  pub fn new(state: State, bluetooth: BluetoothMan) -> Self {
-    Self { state, bluetooth }
+  pub fn new(state: State, bluetooth: BluetoothMan, transport: TransportController) -> Self {
+    Self {
+      state,
+      bluetooth,
+      transport,
+    }
   }
 
   pub async fn handle(&self, msg: RecvMsg) -> HandlerResult {

@@ -11,7 +11,7 @@ use crate::{
   http::{ClientMan, WSError},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Player {
   state: Arc<RwLock<PlayerState>>,
 }

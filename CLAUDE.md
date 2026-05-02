@@ -244,3 +244,4 @@ cheap.
 - `just codegen` after any change to a lib type that crosses to TS /
   Swift / Kotlin.
 - No emdashes or endashes.
+- NEVER #[allow(dead_code)]. Period. It's a useful metric.

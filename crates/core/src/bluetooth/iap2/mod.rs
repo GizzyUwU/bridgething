@@ -25,8 +25,8 @@ use bluer::{
   rfcomm::{ConnectRequest, Profile, ProfileHandle, Role},
 };
 use bridgething_iap2::{
-  IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link, LinkConfig,
-  Lsp, SessionEvent,
+  HidCommand, IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link,
+  LinkConfig, Lsp, SessionEvent,
   csm::{
     identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
     now_playing::{
@@ -99,6 +99,7 @@ fn iap2_service_record() -> String {
 
 #[derive(Debug)]
 struct ActiveSession {
+  hid_tx: mpsc::Sender<HidCommand>,
   _link_handle: JoinHandle<bridgething_iap2::Result<()>>,
   _session_handle: JoinHandle<bridgething_iap2::Result<()>>,
   _events_handle: JoinHandle<()>,
@@ -122,6 +123,24 @@ impl Iap2ReconnectHandle {
   }
 }
 
+/// Cloneable handle the daemon's `TransportController` uses to dispatch
+/// outbound HID commands when iAP2 (not the companion) holds playback
+/// authority. Each send routes to the currently-active session's
+/// HID flow; if no session is active the command is dropped with a
+/// trace log.
+#[derive(Debug, Clone)]
+pub struct Iap2TransportHandle {
+  tx: mpsc::Sender<HidCommand>,
+}
+
+impl Iap2TransportHandle {
+  pub async fn send(&self, cmd: HidCommand) {
+    if self.tx.send(cmd).await.is_err() {
+      tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+    }
+  }
+}
+
 #[derive(Debug)]
 pub struct Iap2Manager {
   server_handle: ProfileHandle,
@@ -136,6 +155,7 @@ pub struct Iap2Manager {
   reconnects: HashMap<Address, JoinHandle<()>>,
   reconnect_tx: mpsc::Sender<Address>,
   reconnect_rx: mpsc::Receiver<Address>,
+  transport_rx: mpsc::Receiver<HidCommand>,
 }
 
 impl Iap2Manager {
@@ -145,7 +165,7 @@ impl Iap2Manager {
     state: &State,
     profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
-  ) -> BluetoothResult<Option<(Self, Iap2ReconnectHandle)>> {
+  ) -> BluetoothResult<Option<(Self, Iap2ReconnectHandle, Iap2TransportHandle)>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
@@ -187,6 +207,9 @@ impl Iap2Manager {
       tx: reconnect_tx.clone(),
     };
 
+    let (transport_tx, transport_rx) = mpsc::channel(IAP2_CHANNEL_CAPACITY);
+    let transport_handle = Iap2TransportHandle { tx: transport_tx };
+
     Ok(Some((
       Self {
         server_handle,
@@ -201,8 +224,10 @@ impl Iap2Manager {
         reconnects: HashMap::new(),
         reconnect_tx,
         reconnect_rx,
+        transport_rx,
       },
       reconnect_handle,
+      transport_handle,
     )))
   }
 
@@ -229,6 +254,9 @@ impl Iap2Manager {
         Some(mac) = self.reconnect_rx.recv() => {
           self.spawn_reconnect(mac);
         }
+        Some(cmd) = self.transport_rx.recv() => {
+          self.dispatch_transport(cmd).await;
+        }
         else => {
           tracing::error!("iAP2 manager streams all ended - this should not happen");
           return;
@@ -249,6 +277,7 @@ impl Iap2Manager {
     let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(IAP2_CHANNEL_CAPACITY);
     let (link_events_tx, link_events_rx) = mpsc::channel::<Iap2Event>(IAP2_CHANNEL_CAPACITY);
     let (session_events_tx, session_events_rx) = mpsc::channel::<SessionEvent>(IAP2_CHANNEL_CAPACITY);
+    let (hid_tx, hid_rx) = mpsc::channel::<HidCommand>(IAP2_CHANNEL_CAPACITY);
 
     let link_config = LinkConfig::new(Lsp::accessory_default());
     let _link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
@@ -261,6 +290,7 @@ impl Iap2Manager {
       link_command_tx,
       link_events_rx,
       session_events_tx,
+      hid_rx,
     );
     let _session_handle = tokio::spawn(session.run());
 
@@ -276,6 +306,7 @@ impl Iap2Manager {
     self.sessions.insert(
       address,
       ActiveSession {
+        hid_tx,
         _link_handle,
         _session_handle,
         _events_handle,
@@ -283,6 +314,22 @@ impl Iap2Manager {
     );
 
     Ok(())
+  }
+
+  /// Forward a transport command to whichever active iAP2 session is up.
+  /// In practice the Car Thing only ever has one iPhone connected, so the
+  /// "first session" we find is the right one. If no session is active the
+  /// command is dropped at trace level - the controller's authority check
+  /// already gated on iAP2 being a viable target, so a missing session
+  /// here means a race with link teardown, not a bug.
+  async fn dispatch_transport(&self, cmd: HidCommand) {
+    let Some(session) = self.sessions.values().next() else {
+      tracing::trace!(?cmd, "iAP2 transport command with no active session; dropping");
+      return;
+    };
+    if session.hid_tx.send(cmd).await.is_err() {
+      tracing::debug!(?cmd, "iAP2 session HID receiver closed; dropping command");
+    }
   }
 
   async fn kickoff_reconnects_for_paired_ios(&mut self) {

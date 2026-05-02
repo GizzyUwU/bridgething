@@ -98,12 +98,14 @@ impl Harness {
     let (mut peer, link_command_tx, link_events_rx, _link) = spawn_link(fast_link_config(accessory_lsp()));
     let (session_events_tx, mut session_events_rx) = mpsc::channel::<SessionEvent>(32);
 
+    let (_hid_command_tx, hid_command_rx) = mpsc::channel(8);
     let session = Iap2Session::new(
       identification_config(),
       mfi,
       link_command_tx,
       link_events_rx,
       session_events_tx,
+      hid_command_rx,
     );
     tokio::spawn(session.run());
 

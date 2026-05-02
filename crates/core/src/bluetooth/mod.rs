@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 // protocol modules
 mod ble;
-mod iap2;
+pub mod iap2;
 mod profiles;
 mod rfcomm;
 
@@ -50,6 +50,7 @@ pub struct BluetoothManager {
   pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
   iap2_reconnect: Option<Iap2ReconnectHandle>,
+  iap2_transport: Option<iap2::Iap2TransportHandle>,
 
   _agent_handle: AgentHandle,
   _iap2_handle: Option<JoinHandle<()>>,
@@ -89,7 +90,7 @@ impl BluetoothManager {
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let (iap2_reconnect, _iap2_handle) = match Iap2Manager::init(
+    let (iap2_reconnect, iap2_transport, _iap2_handle) = match Iap2Manager::init(
       &session,
       adapter.clone(),
       &state,
@@ -98,10 +99,14 @@ impl BluetoothManager {
     )
     .await?
     {
-      Some((manager, reconnect_handle)) => (Some(reconnect_handle), Some(manager.spawn())),
+      Some((manager, reconnect_handle, transport_handle)) => (
+        Some(reconnect_handle),
+        Some(transport_handle),
+        Some(manager.spawn()),
+      ),
       None => {
         tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-        (None, None)
+        (None, None, None)
       }
     };
 
@@ -115,10 +120,18 @@ impl BluetoothManager {
       profile_man,
       gateway_man,
       iap2_reconnect,
+      iap2_transport,
 
       _agent_handle,
       _iap2_handle,
     }))
+  }
+
+  /// Cloneable handle the daemon's `TransportController` uses to send
+  /// outbound HID commands when iAP2 holds playback authority. Returns
+  /// `None` when the iAP2 manager isn't running (no MFi chip available).
+  pub fn iap2_transport_handle(&self) -> Option<iap2::Iap2TransportHandle> {
+    self.iap2_transport.clone()
   }
 
   /// Stock-webapp-driven "connect to this paired device" entry point.

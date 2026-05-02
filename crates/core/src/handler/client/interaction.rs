@@ -27,17 +27,17 @@ impl InteractionHandler {
       ClientInteractionCommand::PhoneCallMessage { phone_number, message } => {
         self.phone_call_message(phone_number, message).await
       }
-      ClientInteractionCommand::IncreaseVolume => Ok(self.handle.state.transport.volume_up().await?),
-      ClientInteractionCommand::DecreaseVolume => Ok(self.handle.state.transport.volume_down().await?),
-      ClientInteractionCommand::MuteToggle => Ok(self.handle.state.transport.mute_toggle().await?),
-      ClientInteractionCommand::SkipToIndex { index } => Ok(self.handle.state.transport.skip_to_index(index).await?),
-      ClientInteractionCommand::SkipNext => Ok(self.handle.state.transport.next().await?),
-      ClientInteractionCommand::SkipPrev => Ok(self.handle.state.transport.prev().await?),
-      ClientInteractionCommand::SeekTo { position_ms } => Ok(self.handle.state.transport.seek_to(position_ms).await?),
-      ClientInteractionCommand::Pause => Ok(self.handle.state.transport.pause().await?),
-      ClientInteractionCommand::Resume => Ok(self.handle.state.transport.play().await?),
-      ClientInteractionCommand::SetShuffle { shuffle } => Ok(self.handle.state.transport.set_shuffle(shuffle).await?),
-      ClientInteractionCommand::SetRepeat { repeat_mode } => Ok(self.handle.state.transport.set_repeat(repeat_mode).await?),
+      ClientInteractionCommand::IncreaseVolume => Ok(self.handle.transport.volume_up().await?),
+      ClientInteractionCommand::DecreaseVolume => Ok(self.handle.transport.volume_down().await?),
+      ClientInteractionCommand::MuteToggle => Ok(self.handle.transport.mute_toggle().await?),
+      ClientInteractionCommand::SkipToIndex { index } => Ok(self.handle.transport.skip_to_index(index).await?),
+      ClientInteractionCommand::SkipNext => Ok(self.handle.transport.next().await?),
+      ClientInteractionCommand::SkipPrev => Ok(self.handle.transport.prev().await?),
+      ClientInteractionCommand::SeekTo { position_ms } => Ok(self.handle.transport.seek_to(position_ms).await?),
+      ClientInteractionCommand::Pause => Ok(self.handle.transport.pause().await?),
+      ClientInteractionCommand::Resume => Ok(self.handle.transport.play().await?),
+      ClientInteractionCommand::SetShuffle { shuffle } => Ok(self.handle.transport.set_shuffle(shuffle).await?),
+      ClientInteractionCommand::SetRepeat { repeat_mode } => Ok(self.handle.transport.set_repeat(repeat_mode).await?),
     }
   }
 

@@ -249,6 +249,7 @@ public enum GatewayMsgMeta: Codable, Sendable {
 public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case version(BridgeThingMeta)
 	case asset(BridgeToGatewayAssetMsg)
+	case transport(BridgeToGatewayTransportMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	/// Protocol-level failure: the request could not be reached or dispatched.
@@ -261,6 +262,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
 			asset,
+			transport,
 			webapp,
 			forward,
 			error,
@@ -284,6 +286,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .asset:
 				if let content = try? container.decode(BridgeToGatewayAssetMsg.self, forKey: .data) {
 					self = .asset(content)
+					return
+				}
+			case .transport:
+				if let content = try? container.decode(BridgeToGatewayTransportMsg.self, forKey: .data) {
+					self = .transport(content)
 					return
 				}
 			case .webapp:
@@ -320,6 +327,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .asset(let content):
 			try container.encode(CodingKeys.asset, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .transport(let content):
+			try container.encode(CodingKeys.transport, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
@@ -551,8 +561,12 @@ public struct MediaItemUpdate: Codable, Sendable {
 	}
 }
 
-/// Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
-/// outbound `SetRepeat` interaction command. `Off` is the default.
+/// `repeat` is a typed enum (Off/All/One) shared with
+/// the canonical `PlaybackOptions` shape webapps already render and
+/// with the outbound `SetRepeat` interaction command. iOS, Android,
+/// Spotify, and Apple Music all expose three repeat states; the
+/// underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
+/// translate to/from this enum.
 public enum RepeatMode: String, Codable, Sendable {
 	case off
 	case all
@@ -672,11 +686,43 @@ public struct PlaybackOptions: Codable, Sendable {
 	}
 }
 
+public struct RepeatSet: Codable, Sendable {
+	public let mode: RepeatMode
+
+	public init(mode: RepeatMode) {
+		self.mode = mode
+	}
+}
+
 public struct ResponseMeta: Codable, Sendable {
 	public let requestId: Data
 
 	public init(requestId: Data) {
 		self.requestId = requestId
+	}
+}
+
+public struct SeekToSet: Codable, Sendable {
+	public let positionMs: UInt32
+
+	public init(positionMs: UInt32) {
+		self.positionMs = positionMs
+	}
+}
+
+public struct ShuffleSet: Codable, Sendable {
+	public let on: Bool
+
+	public init(on: Bool) {
+		self.on = on
+	}
+}
+
+public struct SkipToIndexSet: Codable, Sendable {
+	public let index: UInt32
+
+	public init(index: UInt32) {
+		self.index = index
 	}
 }
 
@@ -811,6 +857,135 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 		switch self {
 		case .request(let content):
 			try container.encode(CodingKeys.request, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+/// Bridge-side outbound transport command targeting the connected companion.
+/// The companion-side SDK dispatches each verb to its native player
+/// integration (Spotify SDK, Apple Music, MediaSession, etc).
+/// 
+/// Routing decision lives in `core::transport::TransportController`; this
+/// surface only carries the typed verb. The controller emits Transport when
+/// the companion has claimed `NowPlayingPlayback` authority; iAP2 HID is
+/// the alternate path when authority is held by iAP2.
+public enum BridgeToGatewayTransportMsg: Codable, Sendable {
+	case play
+	case pause
+	case playPause
+	case next
+	case prev
+	case volumeUp
+	case volumeDown
+	case muteToggle
+	case shuffle(ShuffleSet)
+	case `repeat`(RepeatSet)
+	case seekTo(SeekToSet)
+	case skipToIndex(SkipToIndexSet)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case play,
+			pause,
+			playPause,
+			next,
+			prev,
+			volumeUp,
+			volumeDown,
+			muteToggle,
+			shuffle,
+			`repeat`,
+			seekTo,
+			skipToIndex
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .play:
+				self = .play
+				return
+			case .pause:
+				self = .pause
+				return
+			case .playPause:
+				self = .playPause
+				return
+			case .next:
+				self = .next
+				return
+			case .prev:
+				self = .prev
+				return
+			case .volumeUp:
+				self = .volumeUp
+				return
+			case .volumeDown:
+				self = .volumeDown
+				return
+			case .muteToggle:
+				self = .muteToggle
+				return
+			case .shuffle:
+				if let content = try? container.decode(ShuffleSet.self, forKey: .data) {
+					self = .shuffle(content)
+					return
+				}
+			case .repeat:
+				if let content = try? container.decode(RepeatSet.self, forKey: .data) {
+					self = .repeat(content)
+					return
+				}
+			case .seekTo:
+				if let content = try? container.decode(SeekToSet.self, forKey: .data) {
+					self = .seekTo(content)
+					return
+				}
+			case .skipToIndex:
+				if let content = try? container.decode(SkipToIndexSet.self, forKey: .data) {
+					self = .skipToIndex(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayTransportMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayTransportMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .play:
+			try container.encode(CodingKeys.play, forKey: .event)
+		case .pause:
+			try container.encode(CodingKeys.pause, forKey: .event)
+		case .playPause:
+			try container.encode(CodingKeys.playPause, forKey: .event)
+		case .next:
+			try container.encode(CodingKeys.next, forKey: .event)
+		case .prev:
+			try container.encode(CodingKeys.prev, forKey: .event)
+		case .volumeUp:
+			try container.encode(CodingKeys.volumeUp, forKey: .event)
+		case .volumeDown:
+			try container.encode(CodingKeys.volumeDown, forKey: .event)
+		case .muteToggle:
+			try container.encode(CodingKeys.muteToggle, forKey: .event)
+		case .shuffle(let content):
+			try container.encode(CodingKeys.shuffle, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .repeat(let content):
+			try container.encode(CodingKeys.repeat, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .seekTo(let content):
+			try container.encode(CodingKeys.seekTo, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .skipToIndex(let content):
+			try container.encode(CodingKeys.skipToIndex, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

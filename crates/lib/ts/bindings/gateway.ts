@@ -5,6 +5,7 @@ import type {
   ForwardMessage,
   GatewayMeta,
   NowPlayingUpdate,
+  RepeatMode,
   WebappInfo,
 } from './shared';
 
@@ -38,11 +39,36 @@ export type BridgeToGatewayMsg = { id: Uint8Array; meta: GatewayMsgMeta; data: B
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
   | { type: 'asset'; data: BridgeToGatewayAssetMsg }
+  | { type: 'transport'; data: BridgeToGatewayTransportMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'error'; data: GatewayError }
   | { type: 'ack' }
   | { type: 'done' };
+
+/**
+ * Bridge-side outbound transport command targeting the connected companion.
+ * The companion-side SDK dispatches each verb to its native player
+ * integration (Spotify SDK, Apple Music, MediaSession, etc).
+ *
+ * Routing decision lives in `core::transport::TransportController`; this
+ * surface only carries the typed verb. The controller emits Transport when
+ * the companion has claimed `NowPlayingPlayback` authority; iAP2 HID is
+ * the alternate path when authority is held by iAP2.
+ */
+export type BridgeToGatewayTransportMsg =
+  | { event: 'play' }
+  | { event: 'pause' }
+  | { event: 'playPause' }
+  | { event: 'next' }
+  | { event: 'prev' }
+  | { event: 'volumeUp' }
+  | { event: 'volumeDown' }
+  | { event: 'muteToggle' }
+  | { event: 'shuffle'; data: ShuffleSet }
+  | { event: 'repeat'; data: RepeatSet }
+  | { event: 'seekTo'; data: SeekToSet }
+  | { event: 'skipToIndex'; data: SkipToIndexSet };
 
 export type BridgeToGatewayWebappMsg =
   | { event: 'webapps'; data: WebappList }
@@ -127,7 +153,15 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'install'; data: WebappInstall }
   | { event: 'uninstall'; data: WebappUninstall };
 
+export type RepeatSet = { mode: RepeatMode };
+
 export type ResponseMeta = { requestId: Uint8Array };
+
+export type SeekToSet = { positionMs: number };
+
+export type ShuffleSet = { on: boolean };
+
+export type SkipToIndexSet = { index: number };
 
 export type WebappActive = { name: string };
 

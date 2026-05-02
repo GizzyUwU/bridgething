@@ -61,6 +61,12 @@ public object GatewayToBridgeChromeMsgSerializer :
 public object ForwardMessageSerializer :
     KSerializer<ForwardMessage> by AdjacentTaggedSerializer(ForwardMessage::class, discriminator = "encoding")
 
+public object BridgeToGatewayTransportMsgSerializer :
+    KSerializer<BridgeToGatewayTransportMsg> by AdjacentTaggedSerializer(
+        BridgeToGatewayTransportMsg::class,
+        discriminator = "event"
+    )
+
 public object BridgeToGatewayWebappMsgSerializer :
     KSerializer<BridgeToGatewayWebappMsg> by AdjacentTaggedSerializer(
         BridgeToGatewayWebappMsg::class,

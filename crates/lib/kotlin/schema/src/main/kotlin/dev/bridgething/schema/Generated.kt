@@ -133,6 +133,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("asset")
 	data class Asset(val data: BridgeToGatewayAssetMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("transport")
+	data class Transport(val data: BridgeToGatewayTransportMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: BridgeToGatewayWebappMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -259,8 +262,12 @@ data class MediaItemUpdate (
 	val durationMs: UInt? = null
 )
 
-/// Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
-/// outbound `SetRepeat` interaction command. `Off` is the default.
+/// `repeat` is a typed enum (Off/All/One) shared with
+/// the canonical `PlaybackOptions` shape webapps already render and
+/// with the outbound `SetRepeat` interaction command. iOS, Android,
+/// Spotify, and Apple Music all expose three repeat states; the
+/// underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
+/// translate to/from this enum.
 @Serializable
 enum class RepeatMode(val string: String) {
 	@SerialName("off")
@@ -332,8 +339,28 @@ data class PlaybackOptions (
 )
 
 @Serializable
+data class RepeatSet (
+	val mode: RepeatMode
+)
+
+@Serializable
 data class ResponseMeta (
 	val requestId: ByteArray
+)
+
+@Serializable
+data class SeekToSet (
+	val positionMs: UInt
+)
+
+@Serializable
+data class ShuffleSet (
+	val on: Boolean
+)
+
+@Serializable
+data class SkipToIndexSet (
+	val index: UInt
 )
 
 @Serializable
@@ -410,6 +437,54 @@ sealed class BridgeToGatewayAssetMsg {
 	@Serializable
 	@SerialName("request")
 	data class Request(val data: AssetRequest): BridgeToGatewayAssetMsg()
+}
+
+/// Bridge-side outbound transport command targeting the connected companion.
+/// The companion-side SDK dispatches each verb to its native player
+/// integration (Spotify SDK, Apple Music, MediaSession, etc).
+/// 
+/// Routing decision lives in `core::transport::TransportController`; this
+/// surface only carries the typed verb. The controller emits Transport when
+/// the companion has claimed `NowPlayingPlayback` authority; iAP2 HID is
+/// the alternate path when authority is held by iAP2.
+@Serializable(with = BridgeToGatewayTransportMsgSerializer::class)
+sealed class BridgeToGatewayTransportMsg {
+	@Serializable
+	@SerialName("play")
+	object Play: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("pause")
+	object Pause: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("playPause")
+	object PlayPause: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("next")
+	object Next: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("prev")
+	object Prev: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("volumeUp")
+	object VolumeUp: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("volumeDown")
+	object VolumeDown: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("muteToggle")
+	object MuteToggle: BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("shuffle")
+	data class Shuffle(val data: ShuffleSet): BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("repeat")
+	data class Repeat(val data: RepeatSet): BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("seekTo")
+	data class SeekTo(val data: SeekToSet): BridgeToGatewayTransportMsg()
+	@Serializable
+	@SerialName("skipToIndex")
+	data class SkipToIndex(val data: SkipToIndexSet): BridgeToGatewayTransportMsg()
 }
 
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
