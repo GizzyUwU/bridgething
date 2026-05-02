@@ -259,6 +259,18 @@ data class MediaItemUpdate (
 	val durationMs: UInt? = null
 )
 
+/// Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
+/// outbound `SetRepeat` interaction command. `Off` is the default.
+@Serializable
+enum class RepeatMode(val string: String) {
+	@SerialName("off")
+	Off("off"),
+	@SerialName("all")
+	All("all"),
+	@SerialName("one")
+	One("one"),
+}
+
 /// Per-playback-session attributes that vary regardless of track:
 /// playing/paused, position, shuffle/repeat, and the iOS bundle
 /// identifier of the app currently driving playback (e.g.
@@ -269,7 +281,7 @@ data class PlaybackUpdate (
 	val playing: Boolean? = null,
 	val positionMs: UInt? = null,
 	val shuffle: Boolean? = null,
-	val repeat: UInt? = null,
+	val repeat: RepeatMode? = null,
 	val appBundle: String? = null,
 	val appDisplayName: String? = null
 )
@@ -315,7 +327,7 @@ data class Peer (
 
 @Serializable
 data class PlaybackOptions (
-	val repeat: UInt,
+	val repeat: RepeatMode,
 	val shuffle: Boolean
 )
 

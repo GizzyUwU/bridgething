@@ -24,8 +24,6 @@ mod packer;
 
 pub(crate) use packer::OutboundPacker;
 use profiles::ProfileMan;
-// reexports // TODO: review these
-pub use profiles::avrcp;
 use rfcomm::RfcommGateway;
 
 use crate::{

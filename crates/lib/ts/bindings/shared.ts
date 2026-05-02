@@ -92,7 +92,7 @@ export type PhoneCallStatus =
   | 'Held'
   | 'Disconnecting';
 
-export type PlaybackOptions = { repeat: number; shuffle: boolean };
+export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
 
 export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
 
@@ -119,12 +119,18 @@ export type PlaybackUpdate = {
   playing: boolean | null;
   positionMs: number | null;
   shuffle: boolean | null;
-  repeat: number | null;
+  repeat: RepeatMode | null;
   appBundle: string | null;
   appDisplayName: string | null;
 };
 
 export type Priority = 'normal' | 'bulk';
+
+/**
+ * Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
+ * outbound `SetRepeat` interaction command. `Off` is the default.
+ */
+export type RepeatMode = 'off' | 'all' | 'one';
 
 export type Track = {
   id: string;

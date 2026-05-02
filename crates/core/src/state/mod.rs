@@ -11,6 +11,7 @@ use crate::{
   http::ClientMan,
   paths,
   peer::PeerTracker,
+  transport::TransportController,
 };
 
 pub mod meta;
@@ -74,6 +75,7 @@ pub struct AppState {
   pub assets: AssetCache,
   pub authority: AuthorityRegistry,
   pub peers: PeerTracker,
+  pub transport: TransportController,
 
   persist_path: PathBuf,
   persist: RwLock<PersistentAppState>,
@@ -115,6 +117,7 @@ impl AppState {
     let (assets, _asset_cache_handle) = asset_pending.spawn();
 
     let peers = PeerTracker::new(client_man.clone(), authority.clone());
+    let transport = TransportController::new();
 
     Ok(Arc::new(Self {
       client_man,
@@ -125,6 +128,7 @@ impl AppState {
       assets,
       authority,
       peers,
+      transport,
 
       persist_path,
       persist: RwLock::new(persist),

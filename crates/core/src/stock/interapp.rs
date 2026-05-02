@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, Track,
+  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, RepeatMode, Track,
   client::{ClientInteractionCommand, ClientLegacyStockCommand},
   server::{ServerInteractionEvent, ServerPlayerEvent},
   stock::StockSetPreset,
@@ -203,7 +203,7 @@ pub enum StockInterAppSendPayload {
     context_uri: String,
     is_paused: bool,
     is_paused_bool: bool,
-    playback_options: PlaybackOptions,
+    playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
     playback_speed: f64, // TODO: this is a float. i don't care right now.
@@ -215,7 +215,7 @@ pub enum StockInterAppSendPayload {
     context_title: String,
     is_paused: bool,
     is_paused_bool: bool,
-    playback_options: PlaybackOptions,
+    playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
     playback_speed: f64, // TODO: this is a float. i don't care right now.
@@ -227,7 +227,7 @@ pub enum StockInterAppSendPayload {
     context_title: String,
     is_paused: bool,
     is_paused_bool: bool,
-    playback_options: PlaybackOptions,
+    playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
     playback_speed: f64, // TODO: this is a float. i don't care right now.
@@ -253,6 +253,25 @@ pub enum StockInterAppSendPayload {
     #[debug(skip)]
     image_data: String,
   },
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+pub struct StockPlaybackOptions {
+  pub repeat: u32,
+  pub shuffle: bool,
+}
+
+impl From<PlaybackOptions> for StockPlaybackOptions {
+  fn from(options: PlaybackOptions) -> Self {
+    Self {
+      repeat: match options.repeat {
+        RepeatMode::Off => 0,
+        RepeatMode::One => 1,
+        RepeatMode::All => 2,
+      },
+      shuffle: options.shuffle,
+    }
+  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -283,7 +302,7 @@ impl From<ServerPlayerEvent> for StockInterAppSendPayload {
         is_paused: false,
         is_paused_bool: false,
         playback_position: 0,
-        playback_options: PlaybackOptions::default(),
+        playback_options: StockPlaybackOptions::default(),
         playback_restrictions: PlaybackRestrictions::default(),
         playback_speed: 0.0,
       },
@@ -301,7 +320,7 @@ impl From<ServerPlayerEvent> for StockInterAppSendPayload {
         context_title,
         is_paused,
         is_paused_bool: is_paused,
-        playback_options,
+        playback_options: playback_options.into(),
         playback_position,
         playback_restrictions,
         playback_speed,
@@ -500,21 +519,26 @@ impl RecvMsgData {
       }
       StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Interaction(ClientInteractionCommand::IncreaseVolume),
       StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Interaction(ClientInteractionCommand::DecreaseVolume),
-      StockInterAppRecv::SkipToIndex { index } => {
-        RecvMsgData::Interaction(ClientInteractionCommand::SkipToIndex { index })
-      }
+      StockInterAppRecv::SkipToIndex { index } => RecvMsgData::Interaction(ClientInteractionCommand::SkipToIndex {
+        index: u32::try_from(index).unwrap_or(u32::MAX),
+      }),
       StockInterAppRecv::SkipNext {} => RecvMsgData::Interaction(ClientInteractionCommand::SkipNext),
-      StockInterAppRecv::SkipPrev { allow_seeking } => {
-        RecvMsgData::Interaction(ClientInteractionCommand::SkipPrev { allow_seeking })
-      }
-      StockInterAppRecv::SeekTo { position } => RecvMsgData::Interaction(ClientInteractionCommand::SeekTo { position }),
+      StockInterAppRecv::SkipPrev { allow_seeking: _ } => RecvMsgData::Interaction(ClientInteractionCommand::SkipPrev),
+      StockInterAppRecv::SeekTo { position } => RecvMsgData::Interaction(ClientInteractionCommand::SeekTo {
+        position_ms: u32::try_from(position).unwrap_or(u32::MAX),
+      }),
       StockInterAppRecv::Pause {} => RecvMsgData::Interaction(ClientInteractionCommand::Pause),
       StockInterAppRecv::Resume {} => RecvMsgData::Interaction(ClientInteractionCommand::Resume),
       StockInterAppRecv::SetShuffle { shuffle } => {
         RecvMsgData::Interaction(ClientInteractionCommand::SetShuffle { shuffle })
       }
       StockInterAppRecv::SetRepeat { repeat_mode } => {
-        RecvMsgData::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode })
+        let mode = if repeat_mode {
+          libbridgething::RepeatMode::All
+        } else {
+          libbridgething::RepeatMode::Off
+        };
+        RecvMsgData::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode: mode })
       }
       StockInterAppRecv::GetPermissions { .. } => {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions)
@@ -749,7 +773,7 @@ mod test {
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipPrev","args":{"allowSeeking":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipPrev"}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -758,14 +782,14 @@ mod test {
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: ClientMsgMeta::Command,
-        data: ClientCommandType::Interaction(ClientInteractionCommand::SkipPrev { allow_seeking: true })
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SkipPrev)
       })
     );
   }
 
   #[test]
   fn de_recv_seek_to() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"position":120}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"positionMs":120}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -774,7 +798,7 @@ mod test {
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: ClientMsgMeta::Command,
-        data: ClientCommandType::Interaction(ClientInteractionCommand::SeekTo { position: 120 })
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SeekTo { position_ms: 120 })
       })
     );
   }
@@ -797,7 +821,7 @@ mod test {
 
   #[test]
   fn de_recv_set_repeat() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setRepeat","args":{"repeatMode":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setRepeat","args":{"repeatMode":"all"}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -806,7 +830,9 @@ mod test {
       PossibleRecvMsg::Modern(ClientCommand {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: ClientMsgMeta::Command,
-        data: ClientCommandType::Interaction(ClientInteractionCommand::SetRepeat { repeat_mode: true })
+        data: ClientCommandType::Interaction(ClientInteractionCommand::SetRepeat {
+          repeat_mode: libbridgething::RepeatMode::All
+        })
       })
     );
   }

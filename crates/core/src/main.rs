@@ -14,6 +14,7 @@ mod paths;
 mod peer;
 mod player;
 mod state;
+mod transport;
 
 mod stock;
 

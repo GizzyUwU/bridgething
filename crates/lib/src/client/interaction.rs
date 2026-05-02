@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-// TODO: refactor this into more command types so not spotify-specific
+use crate::shared::RepeatMode;
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(
@@ -18,12 +19,13 @@ pub enum ClientInteractionCommand {
   PhoneCallMessage { phone_number: String, message: String },
   IncreaseVolume,
   DecreaseVolume,
-  SkipToIndex { index: usize },
+  MuteToggle,
+  SkipToIndex { index: u32 },
   SkipNext,
-  SkipPrev { allow_seeking: bool },
-  SeekTo { position: usize },
+  SkipPrev,
+  SeekTo { position_ms: u32 },
   Pause,
   Resume,
   SetShuffle { shuffle: bool },
-  SetRepeat { repeat_mode: bool },
+  SetRepeat { repeat_mode: RepeatMode },
 }

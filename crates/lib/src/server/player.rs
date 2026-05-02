@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Album, Artist, CARTHING_HACKS_LOGO, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, Track};
+use crate::{
+  Album, Artist, CARTHING_HACKS_LOGO, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, RepeatMode, Track,
+};
 
 // TODO: refactor this into more command types so not spotify-specific
 
@@ -53,7 +55,7 @@ impl ServerPlayerEvent {
       context_title: "BridgeThing".to_string(),
       is_paused: false,
       playback_options: PlaybackOptions {
-        repeat: 0,
+        repeat: RepeatMode::Off,
         shuffle: false,
       },
       playback_position: 500,

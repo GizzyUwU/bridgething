@@ -551,6 +551,14 @@ public struct MediaItemUpdate: Codable, Sendable {
 	}
 }
 
+/// Repeat mode shared by inbound `NowPlayingUpdate` snapshots and the
+/// outbound `SetRepeat` interaction command. `Off` is the default.
+public enum RepeatMode: String, Codable, Sendable {
+	case off
+	case all
+	case one
+}
+
 /// Per-playback-session attributes that vary regardless of track:
 /// playing/paused, position, shuffle/repeat, and the iOS bundle
 /// identifier of the app currently driving playback (e.g.
@@ -560,11 +568,11 @@ public struct PlaybackUpdate: Codable, Sendable {
 	public let playing: Bool?
 	public let positionMs: UInt32?
 	public let shuffle: Bool?
-	public let `repeat`: UInt32?
+	public let `repeat`: RepeatMode?
 	public let appBundle: String?
 	public let appDisplayName: String?
 
-	public init(playing: Bool?, positionMs: UInt32?, shuffle: Bool?, repeat: UInt32?, appBundle: String?, appDisplayName: String?) {
+	public init(playing: Bool?, positionMs: UInt32?, shuffle: Bool?, repeat: RepeatMode?, appBundle: String?, appDisplayName: String?) {
 		self.playing = playing
 		self.positionMs = positionMs
 		self.shuffle = shuffle
@@ -655,10 +663,10 @@ public struct Peer: Codable, Sendable {
 }
 
 public struct PlaybackOptions: Codable, Sendable {
-	public let `repeat`: UInt32
+	public let `repeat`: RepeatMode
 	public let shuffle: Bool
 
-	public init(repeat: UInt32, shuffle: Bool) {
+	public init(repeat: RepeatMode, shuffle: Bool) {
 		self.repeat = `repeat`
 		self.shuffle = shuffle
 	}

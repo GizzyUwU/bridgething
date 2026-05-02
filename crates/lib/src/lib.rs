@@ -15,8 +15,8 @@ pub use shared::{
   Album, Artist, AssetRetention, BridgeThingMeta, CARTHING_HACKS_LOGO, CurrentlyActiveApplication, Device, DeviceType,
   ForwardMessage, GatewayMeta, IMAGE_SIZE, Image, LIBBRIDGETHING_VERSION, MediaItemUpdate, NowPlayingUpdate, Peer,
   PeerCompanionStatus, PeerIap2Status, PhoneCallDirection, PhoneCallStatus, PlaybackOptions, PlaybackQueue,
-  PlaybackRestrictions, PlaybackUpdate, Priority, THUMBNAIL_SIZE, Track, TtlRetention, WebappInfo, WebappSource,
-  to_slug,
+  PlaybackRestrictions, PlaybackUpdate, Priority, RepeatMode, THUMBNAIL_SIZE, Track, TtlRetention, WebappInfo,
+  WebappSource, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

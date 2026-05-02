@@ -16,14 +16,27 @@
 //! `NowPlayingUpdate` whenever any subscribed attribute changes,
 //! sending only that attribute) and gives the Android companion the
 //! freedom to push partial updates without a full snapshot every time.
-//!
-//! `repeat` is encoded as a u32 (0 = off, 1 = single track, 2 = full
-//! context) to stay compatible with the existing `PlaybackOptions`
-//! convention webapps already render.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
+
+/// `repeat` is a typed enum (Off/All/One) shared with
+/// the canonical `PlaybackOptions` shape webapps already render and
+/// with the outbound `SetRepeat` interaction command. iOS, Android,
+/// Spotify, and Apple Music all expose three repeat states; the
+/// underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
+/// translate to/from this enum.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum RepeatMode {
+  #[default]
+  Off,
+  All,
+  One,
+}
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -91,7 +104,7 @@ pub struct PlaybackUpdate {
   pub playing: Option<bool>,
   pub position_ms: Option<u32>,
   pub shuffle: Option<bool>,
-  pub repeat: Option<u32>,
+  pub repeat: Option<RepeatMode>,
   pub app_bundle: Option<String>,
   pub app_display_name: Option<String>,
 }

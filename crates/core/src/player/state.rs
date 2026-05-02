@@ -3,16 +3,8 @@ use libbridgething::{
   ServerEventType, Track, gateway::CompanionAuthorityScope, server::ServerPlayerEvent,
 };
 
-use super::{PlayerResult, dbus::DBusPlayerEvent};
+use super::PlayerResult;
 use crate::{authority::AuthorityRegistry, http::ClientMan};
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum RepeatState {
-  #[default]
-  Off,
-  All,
-  Track,
-}
 
 /// Which producer fed an inbound `NowPlayingUpdate`. The merge stage
 /// uses this to route the partial fields into the right source-snapshot
@@ -233,31 +225,8 @@ impl PlayerState {
     }
   }
 
-  // TODO: change how this works so that it doesn't spam the client with new events
-  pub(crate) async fn handle_dbus_event(&mut self, event: DBusPlayerEvent) -> PlayerResult<()> {
-    tracing::trace!("new dbus message: {:?}", &event);
-
-    match event {
-      DBusPlayerEvent::Status(status) => {
-        self.playing = status.into();
-      }
-      DBusPlayerEvent::Track(track) => {
-        self.track = Some(track.into());
-      }
-      DBusPlayerEvent::Position(position) => {
-        self.position_ms = position;
-      }
-      DBusPlayerEvent::Shuffle(shuffle) => {
-        self.options.shuffle = shuffle.into();
-      }
-      DBusPlayerEvent::Repeat(repeat) => {
-        self.options.repeat = repeat.into();
-      }
-    }
-
-    self.send_state().await?;
-
-    Ok(())
+  pub fn iap2_playback_snapshot(&self) -> PlaybackUpdate {
+    self.iap2_playback.clone()
   }
 
   pub async fn send_state(&self) -> PlayerResult<()> {

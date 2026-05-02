@@ -8,7 +8,6 @@ use tokio::sync::RwLock;
 use super::{BluetoothResult, BluetoothTx};
 use crate::state::State;
 
-pub mod avrcp;
 mod message;
 
 pub type ProfileMan = Arc<ProfileManager>;
