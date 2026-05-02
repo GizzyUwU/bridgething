@@ -37,7 +37,7 @@ pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
 
 #[derive(Debug)]
 pub enum BluetoothEvent {
-  Gateway(GatewayMessage<GatewayToBridgeMsg>),
+  Gateway(InboundGatewayMessage),
 }
 
 #[derive(Debug)]
@@ -158,16 +158,21 @@ pub enum GatewayType {
   Iap2Ea,
 }
 
+/// Inbound message from a gateway to the daemon. `protocol` records
+/// which transport carried the message — useful for tracing and for
+/// any handler that needs to know the source transport. Outbound
+/// responses do not carry a transport tag; they fan out across all
+/// gateways and the gateway holding the peer connection delivers.
 #[derive(Debug, Clone)]
-pub struct GatewayMessage<T: Clone> {
+pub struct InboundGatewayMessage {
   pub address: Option<Address>,
   pub protocol: GatewayType,
   pub priority: Priority,
-  pub msg: T,
+  pub msg: GatewayToBridgeMsg,
 }
 
-impl<T: Clone> GatewayMessage<T> {
-  pub fn new(address: Option<Address>, protocol: GatewayType, msg: T) -> Self {
+impl InboundGatewayMessage {
+  pub fn new(address: Option<Address>, protocol: GatewayType, msg: GatewayToBridgeMsg) -> Self {
     Self {
       address,
       protocol,
@@ -176,24 +181,40 @@ impl<T: Clone> GatewayMessage<T> {
     }
   }
 
-  pub fn all(protocol: GatewayType, msg: T) -> Self {
-    Self::new(None, protocol, msg)
+  pub fn with_priority(mut self, priority: Priority) -> Self {
+    self.priority = priority;
+    self
+  }
+}
+
+/// Outbound message from the daemon to a gateway-connected peer.
+/// `address: Some(_)` targets one peer (delivered by whichever gateway
+/// holds the connection); `address: None` broadcasts to every peer
+/// across every gateway. No transport selection at the call site —
+/// per the iAP2 strategy doc each peer is on at most one transport,
+/// so fanning out across all gateways is safe and the right answer.
+#[derive(Debug, Clone)]
+pub struct OutboundGatewayMessage {
+  pub address: Option<Address>,
+  pub priority: Priority,
+  pub msg: BridgeToGatewayMsg,
+}
+
+impl OutboundGatewayMessage {
+  pub fn new(address: Option<Address>, msg: BridgeToGatewayMsg) -> Self {
+    Self {
+      address,
+      priority: Priority::Normal,
+      msg,
+    }
   }
 
-  pub fn ble(address: Address, msg: T) -> Self {
-    Self::new(Some(address), GatewayType::Ble, msg)
+  pub fn to(address: Address, msg: BridgeToGatewayMsg) -> Self {
+    Self::new(Some(address), msg)
   }
 
-  pub fn ble_all(msg: T) -> Self {
-    Self::new(None, GatewayType::Ble, msg)
-  }
-
-  pub fn rfcomm(address: Address, msg: T) -> Self {
-    Self::new(Some(address), GatewayType::Rfcomm, msg)
-  }
-
-  pub fn rfcomm_all(msg: T) -> Self {
-    Self::new(None, GatewayType::Rfcomm, msg)
+  pub fn all(msg: BridgeToGatewayMsg) -> Self {
+    Self::new(None, msg)
   }
 
   pub fn with_priority(mut self, priority: Priority) -> Self {
@@ -206,10 +227,10 @@ impl<T: Clone> GatewayMessage<T> {
   }
 }
 
-pub type GatewayRecvTx = tokio::sync::mpsc::Sender<GatewayMessage<GatewayToBridgeMsg>>;
-pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<GatewayMessage<GatewayToBridgeMsg>>;
-pub type GatewaySendTx = tokio::sync::mpsc::Sender<GatewayMessage<BridgeToGatewayMsg>>;
-pub type GatewaySendRx = tokio::sync::mpsc::Receiver<GatewayMessage<BridgeToGatewayMsg>>;
+pub type GatewayRecvTx = tokio::sync::mpsc::Sender<InboundGatewayMessage>;
+pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<InboundGatewayMessage>;
+pub type GatewaySendTx = tokio::sync::mpsc::Sender<OutboundGatewayMessage>;
+pub type GatewaySendRx = tokio::sync::mpsc::Receiver<OutboundGatewayMessage>;
 
 #[derive(Debug)]
 pub struct GatewayMan {
@@ -262,18 +283,19 @@ impl GatewayMan {
     self.iap2_ea_handle.clone()
   }
 
-  pub async fn send_all(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
-    match &data.protocol {
-      GatewayType::Ble => match &self.ble {
-        Some(ble) => ble.send(data).await,
-        None => tracing::trace!("dropping ble send: ble gateway not initialized"),
-      },
-      GatewayType::Rfcomm => self.rfcomm.send(data).await,
-      GatewayType::Iap2Ea => {
-        if let Err(err) = self.iap2_ea_send_tx.send(data).await {
-          tracing::error!(?err, "failed to send to iap2 ea gateway");
-        }
-      }
+  /// Fan an outbound message out to every gateway. Each gateway
+  /// filters by `data.address` internally and no-ops silently if it
+  /// has no connection for that peer; for `address: None` each
+  /// gateway broadcasts to its own connected peers. At most one
+  /// gateway has a given peer connected at a time, so the fan-out
+  /// does not double-deliver.
+  pub async fn send_all(&self, data: OutboundGatewayMessage) {
+    if let Some(ble) = &self.ble {
+      ble.send(data.clone()).await;
+    }
+    self.rfcomm.send(data.clone()).await;
+    if let Err(err) = self.iap2_ea_send_tx.send(data).await {
+      tracing::error!(?err, "failed to enqueue iap2 ea gateway send");
     }
   }
 
@@ -283,13 +305,7 @@ impl GatewayMan {
       meta: GatewayMsgMeta::Event,
       data: data.into(),
     };
-
-    // if let Err(err) = self.ble.tx.send(GatewayMessage::ble_all(msg.clone())).await {
-    //   tracing::error!("failed to send message to bluetooth gateway: {:?}", err);
-    // }
-    if let Err(err) = self.rfcomm.tx.send(GatewayMessage::rfcomm_all(msg)).await {
-      tracing::error!("failed to send message to bluetooth gateway: {:?}", err);
-    }
+    self.send_all(OutboundGatewayMessage::all(msg)).await;
   }
 }
 
@@ -333,7 +349,7 @@ impl GatewayCon {
     })
   }
 
-  pub async fn send(&self, data: GatewayMessage<BridgeToGatewayMsg>) {
+  pub async fn send(&self, data: OutboundGatewayMessage) {
     if let Err(err) = self.tx.send(data).await {
       tracing::error!("failed to send message to gateway: {:?}", err);
     }

@@ -8,10 +8,10 @@
 //! The iAP2 manager calls [`Iap2EaGatewayHandle::notify_open`] on
 //! every `SessionEvent::EaStreamOpened`; the gateway task then spawns
 //! a per-stream reader/writer pair that wraps the iap2 byte channels
-//! with `BridgeEndec`. Outbound `GatewayMessage`s coming from the
-//! handler ride the existing priority byte through the iap2 chunker -
-//! Bulk frames yield to Normal at chunk boundaries inside the iap2
-//! crate.
+//! with `BridgeEndec`. Outbound `OutboundGatewayMessage`s coming from
+//! the handler ride the existing priority byte through the iap2
+//! chunker - Bulk frames yield to Normal at chunk boundaries inside
+//! the iap2 crate.
 
 use std::collections::HashMap;
 
@@ -30,7 +30,7 @@ use tokio_util::{
 
 use super::super::BluetoothResult;
 use crate::{
-  bluetooth::{BluetoothEvent, GatewayMessage, GatewayType},
+  bluetooth::{BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage},
   state::State,
 };
 
@@ -98,8 +98,8 @@ struct StreamConn {
 pub struct Iap2EaGateway {
   state: State,
   bluetooth_tx: mpsc::Sender<BluetoothEvent>,
-  send_tx: mpsc::Sender<GatewayMessage<BridgeToGatewayMsg>>,
-  send_rx: mpsc::Receiver<GatewayMessage<BridgeToGatewayMsg>>,
+  send_tx: mpsc::Sender<OutboundGatewayMessage>,
+  send_rx: mpsc::Receiver<OutboundGatewayMessage>,
   open_rx: mpsc::Receiver<StreamOpened>,
   closed_rx: mpsc::Receiver<StreamClosed>,
   conn_close_tx: mpsc::Sender<Key>,
@@ -128,7 +128,7 @@ impl Iap2EaGateway {
     (gateway, handle)
   }
 
-  pub fn send_tx(&self) -> mpsc::Sender<GatewayMessage<BridgeToGatewayMsg>> {
+  pub fn send_tx(&self) -> mpsc::Sender<OutboundGatewayMessage> {
     self.send_tx.clone()
   }
 
@@ -203,14 +203,12 @@ impl Iap2EaGateway {
     Ok(())
   }
 
-  async fn dispatch_outbound(&mut self, message: GatewayMessage<BridgeToGatewayMsg>) {
-    let GatewayMessage {
-      address, priority, msg, ..
-    } = message;
+  async fn dispatch_outbound(&mut self, message: OutboundGatewayMessage) {
+    let OutboundGatewayMessage { address, priority, msg } = message;
     if let Some(address) = address {
       let keys: Vec<Key> = self.conns.keys().copied().filter(|(a, _)| *a == address).collect();
       if keys.is_empty() {
-        tracing::warn!(%address, "iap2 ea gateway: no stream open for outbound");
+        tracing::trace!(%address, "iap2 ea gateway: no stream for {address}; addressed send dropped");
         return;
       }
       for key in keys {
@@ -266,7 +264,7 @@ async fn reader_task(
     loop {
       match codec.decode(&mut buf) {
         Ok(Some(frame)) => {
-          let event = BluetoothEvent::Gateway(GatewayMessage::new(Some(address), GatewayType::Iap2Ea, frame.msg));
+          let event = BluetoothEvent::Gateway(InboundGatewayMessage::new(Some(address), GatewayType::Iap2Ea, frame.msg));
           if bluetooth_tx.send(event).await.is_err() {
             tracing::error!(%address, "iap2 ea gateway: bluetooth bus closed");
             let _ = conn_close_tx.send(key).await;

@@ -9,10 +9,7 @@ use tokio::sync::broadcast::error::RecvError;
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::{
-  asset::AssetCacheEvent,
-  bluetooth::{GatewayMessage, GatewayType},
-};
+use crate::{asset::AssetCacheEvent, bluetooth::OutboundGatewayMessage};
 
 /// How long the daemon waits after issuing an `AssetRequest` to the
 /// companion before giving up and returning `NotFound`. Long enough to
@@ -104,15 +101,11 @@ impl AssetHandler {
       .handle
       .bluetooth
       .gateway_man
-      .send_all(GatewayMessage::new(
-        None,
-        GatewayType::Rfcomm,
-        BridgeToGatewayMsg {
-          id: Uuid::now_v7(),
-          meta: GatewayMsgMeta::Request,
-          data: payload,
-        },
-      ))
+      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
+        id: Uuid::now_v7(),
+        meta: GatewayMsgMeta::Request,
+        data: payload,
+      }))
       .await;
   }
 }

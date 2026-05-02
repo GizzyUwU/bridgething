@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::GatewayHandler;
 use crate::{
-  bluetooth::{BluetoothMan, GatewayMessage, GatewayType},
+  bluetooth::{BluetoothMan, OutboundGatewayMessage},
   state::State,
 };
 
@@ -18,23 +18,11 @@ pub struct MsgHandle {
   pub id: Uuid,
   pub meta: GatewayMsgMeta,
   pub address: Option<Address>,
-  pub protocol: GatewayType,
 }
 
 impl MsgHandle {
-  pub fn new(
-    handler: &GatewayHandler,
-    id: Uuid,
-    meta: GatewayMsgMeta,
-    address: Option<Address>,
-    protocol: GatewayType,
-  ) -> Self {
-    tracing::trace!(
-      "creating connection handle for {:?} message id {} from {:?}",
-      protocol,
-      id,
-      address
-    );
+  pub fn new(handler: &GatewayHandler, id: Uuid, meta: GatewayMsgMeta, address: Option<Address>) -> Self {
+    tracing::trace!("creating connection handle for message id {id} from {address:?}");
 
     Self {
       state: handler.state.clone(),
@@ -43,7 +31,6 @@ impl MsgHandle {
       id,
       meta,
       address,
-      protocol,
     }
   }
 
@@ -51,9 +38,8 @@ impl MsgHandle {
     self
       .bluetooth
       .gateway_man
-      .send_all(GatewayMessage::new(
+      .send_all(OutboundGatewayMessage::new(
         self.address,
-        self.protocol,
         BridgeToGatewayMsg {
           id,
           meta,

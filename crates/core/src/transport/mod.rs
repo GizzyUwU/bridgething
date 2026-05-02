@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::{
   authority::AuthorityRegistry,
-  bluetooth::{BluetoothMan, GatewayMessage, GatewayType, iap2::Iap2TransportHandle},
+  bluetooth::{BluetoothMan, OutboundGatewayMessage, iap2::Iap2TransportHandle},
   player::Player,
 };
 
@@ -232,15 +232,11 @@ impl TransportController {
     self
       .bluetooth
       .gateway_man
-      .send_all(GatewayMessage::new(
-        None,
-        GatewayType::Rfcomm,
-        BridgeToGatewayMsg {
-          id: Uuid::now_v7(),
-          meta: GatewayMsgMeta::Command,
-          data: payload,
-        },
-      ))
+      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
+        id: Uuid::now_v7(),
+        meta: GatewayMsgMeta::Command,
+        data: payload,
+      }))
       .await;
     Ok(())
   }

@@ -22,7 +22,7 @@ use tokio_util::{
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
 use crate::{
-  bluetooth::{GatewayMessage, GatewayType, OutboundPacker},
+  bluetooth::{GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker},
   state::State,
 };
 
@@ -193,14 +193,14 @@ impl RfcommGateway {
         },
         Some(data) = self.send_rx.recv() => {
           tracing::trace!("rfcomm gateway received message: {:?}", data);
-          let GatewayMessage { address, priority, msg, .. } = data;
+          let OutboundGatewayMessage { address, priority, msg } = data;
           if let Some(address) = address {
             if let Some(conn) = self.connections.get(&address) {
               if let Err(e) = conn.send(msg, priority).await {
                 tracing::error!("failed to send rfcomm frame: {:?}", e);
               }
             } else {
-              tracing::warn!("rfcomm connection not found for address: {:?}", address);
+              tracing::trace!("rfcomm: no connection for {address}; addressed send dropped");
             }
           } else {
             for conn in self.connections.values() {
@@ -219,7 +219,7 @@ impl RfcommGateway {
               let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
             },
             ConnectionMessage::Msg(msg) => {
-              if let Err(e) = self.recv_tx.send(GatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await {
+              if let Err(e) = self.recv_tx.send(InboundGatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await {
                 tracing::error!("failed to send rfcomm message to gateway: {:?}", e);
               }
             }

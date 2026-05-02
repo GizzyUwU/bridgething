@@ -17,7 +17,7 @@ use webapp::*;
 
 use super::HandlerResult;
 use crate::{
-  bluetooth::{BluetoothMan, GatewayMessage},
+  bluetooth::{BluetoothMan, InboundGatewayMessage},
   state::State,
 };
 
@@ -31,7 +31,7 @@ impl GatewayHandler {
     Self { state, bluetooth }
   }
 
-  pub async fn handle(&self, data: GatewayMessage<GatewayToBridgeMsg>) -> HandlerResult {
+  pub async fn handle(&self, data: InboundGatewayMessage) -> HandlerResult {
     tracing::trace!(
       "handling {:?} bluetooth event from {:?}: {:?}",
       data.protocol,
@@ -39,13 +39,12 @@ impl GatewayHandler {
       data.msg
     );
 
-    let GatewayMessage {
+    let InboundGatewayMessage {
       address,
-      protocol,
-      priority,
       msg: GatewayToBridgeMsg { id, meta, data },
+      ..
     } = data;
-    let handle = MsgHandle::new(self, id, meta, address, protocol);
+    let handle = MsgHandle::new(self, id, meta, address);
 
     match data {
       GatewayToBridgeMsgData::Version(data) => {
