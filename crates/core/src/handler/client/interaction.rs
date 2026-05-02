@@ -1,4 +1,6 @@
-use libbridgething::client::ClientInteractionCommand;
+use libbridgething::client::{
+  ClientToBridgeInteractionMsgCommand, PhoneCallImage, PhoneCallMessage, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -12,7 +14,7 @@ impl InteractionHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: ClientInteractionCommand) -> HandlerResult {
+  pub async fn handle(self, msg: ClientToBridgeInteractionMsgCommand) -> HandlerResult {
     tracing::debug!(
       "({}) handling interaction message: id: {:?}; stock_msg_id: {:?}",
       &self.handle.from,
@@ -21,23 +23,33 @@ impl InteractionHandler {
     );
 
     match msg {
-      ClientInteractionCommand::PhoneAnswer => self.phone_answer().await,
-      ClientInteractionCommand::PhoneDecline => self.phone_decline().await,
-      ClientInteractionCommand::PhoneCallImage { phone_number } => self.phone_call_image(phone_number).await,
-      ClientInteractionCommand::PhoneCallMessage { phone_number, message } => {
+      ClientToBridgeInteractionMsgCommand::PhoneAnswer => self.phone_answer().await,
+      ClientToBridgeInteractionMsgCommand::PhoneDecline => self.phone_decline().await,
+      ClientToBridgeInteractionMsgCommand::PhoneCallImage(PhoneCallImage { phone_number }) => {
+        self.phone_call_image(phone_number).await
+      }
+      ClientToBridgeInteractionMsgCommand::PhoneCallMessage(PhoneCallMessage { phone_number, message }) => {
         self.phone_call_message(phone_number, message).await
       }
-      ClientInteractionCommand::IncreaseVolume => Ok(self.handle.transport.volume_up().await?),
-      ClientInteractionCommand::DecreaseVolume => Ok(self.handle.transport.volume_down().await?),
-      ClientInteractionCommand::MuteToggle => Ok(self.handle.transport.mute_toggle().await?),
-      ClientInteractionCommand::SkipToIndex { index } => Ok(self.handle.transport.skip_to_index(index).await?),
-      ClientInteractionCommand::SkipNext => Ok(self.handle.transport.next().await?),
-      ClientInteractionCommand::SkipPrev => Ok(self.handle.transport.prev().await?),
-      ClientInteractionCommand::SeekTo { position_ms } => Ok(self.handle.transport.seek_to(position_ms).await?),
-      ClientInteractionCommand::Pause => Ok(self.handle.transport.pause().await?),
-      ClientInteractionCommand::Resume => Ok(self.handle.transport.play().await?),
-      ClientInteractionCommand::SetShuffle { shuffle } => Ok(self.handle.transport.set_shuffle(shuffle).await?),
-      ClientInteractionCommand::SetRepeat { repeat_mode } => Ok(self.handle.transport.set_repeat(repeat_mode).await?),
+      ClientToBridgeInteractionMsgCommand::IncreaseVolume => Ok(self.handle.transport.volume_up().await?),
+      ClientToBridgeInteractionMsgCommand::DecreaseVolume => Ok(self.handle.transport.volume_down().await?),
+      ClientToBridgeInteractionMsgCommand::MuteToggle => Ok(self.handle.transport.mute_toggle().await?),
+      ClientToBridgeInteractionMsgCommand::SkipToIndex(SkipToIndex { index }) => {
+        Ok(self.handle.transport.skip_to_index(index).await?)
+      }
+      ClientToBridgeInteractionMsgCommand::SkipNext => Ok(self.handle.transport.next().await?),
+      ClientToBridgeInteractionMsgCommand::SkipPrev => Ok(self.handle.transport.prev().await?),
+      ClientToBridgeInteractionMsgCommand::SeekTo(SeekTo { position_ms }) => {
+        Ok(self.handle.transport.seek_to(position_ms).await?)
+      }
+      ClientToBridgeInteractionMsgCommand::Pause => Ok(self.handle.transport.pause().await?),
+      ClientToBridgeInteractionMsgCommand::Resume => Ok(self.handle.transport.play().await?),
+      ClientToBridgeInteractionMsgCommand::SetShuffle(SetShuffle { shuffle }) => {
+        Ok(self.handle.transport.set_shuffle(shuffle).await?)
+      }
+      ClientToBridgeInteractionMsgCommand::SetRepeat(SetRepeat { repeat_mode }) => {
+        Ok(self.handle.transport.set_repeat(repeat_mode).await?)
+      }
     }
   }
 

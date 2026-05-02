@@ -3,14 +3,12 @@ mod shared;
 
 pub mod client;
 pub mod gateway;
-pub mod server;
 pub mod stock;
+pub mod wire;
 
 #[cfg(feature = "protocol")]
 pub mod protocol;
 
-pub use client::{ClientCommand, ClientCommandType};
-pub use server::{ServerEvent, ServerEventData, ServerEventType};
 pub use shared::{
   Album, Artist, AssetRetention, BridgeThingMeta, CARTHING_HACKS_LOGO, CurrentlyActiveApplication, Device, DeviceType,
   ForwardMessage, GatewayMeta, IMAGE_SIZE, Image, LIBBRIDGETHING_VERSION, MediaItemUpdate, NowPlayingUpdate, Peer,

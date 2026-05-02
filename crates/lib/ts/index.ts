@@ -1,8 +1,8 @@
 export * from './bindings/client';
 export * from './bindings/gateway';
-export * from './bindings/server';
 export * from './bindings/shared';
 export * from './bindings/stock';
+export * from './bindings/wire';
 
 export * from './codec';
 export * from './framing';

@@ -1,4 +1,4 @@
-use bridgething_macros::{BridgeEnum, BridgeRequest};
+use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -8,10 +8,11 @@ use uuid::Uuid;
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[bridge_request(
+#[wire_request(
+  direction = BridgeToGateway,
   surface = Asset,
   request_variant = Request,
   response = crate::gateway::AssetGotReply,

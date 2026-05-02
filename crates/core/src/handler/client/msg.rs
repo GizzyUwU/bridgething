@@ -2,10 +2,11 @@
 use std::net::SocketAddr;
 
 use libbridgething::{
-  ClientCommand, ClientCommandType, ForwardMessage, ServerEvent,
+  ForwardMessage,
   client::{
-    ClientAssetCommand, ClientBluetoothCommand, ClientInteractionCommand, ClientKVStoreCommand,
-    ClientLegacyStockCommand, ClientSystemCommand, ClientVoiceCommand,
+    BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsgRequest, ClientToBridgeBluetoothMsg,
+    ClientToBridgeInteractionMsgCommand, ClientToBridgeMsg, ClientToBridgeMsgData, ClientToBridgeStoreMsgRequest,
+    ClientToBridgeSystemMsg, ClientToBridgeVoiceMsgCommand,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -36,16 +37,25 @@ pub struct RecvMsg {
 
 #[derive(Debug)]
 pub enum RecvMsgData {
-  Asset(ClientAssetCommand),
-  Bluetooth(ClientBluetoothCommand),
-  Store(ClientKVStoreCommand),
-  System(ClientSystemCommand),
-  Voice(ClientVoiceCommand),
-  Interaction(ClientInteractionCommand),
+  Asset(ClientToBridgeAssetMsgRequest),
+  Bluetooth(ClientToBridgeBluetoothMsg),
+  Store(ClientToBridgeStoreMsgRequest),
+  System(ClientToBridgeSystemMsg),
+  Voice(ClientToBridgeVoiceMsgCommand),
+  Interaction(ClientToBridgeInteractionMsgCommand),
   Forward(ForwardMessage),
 
   // stock compatibility
   LegacyStock(ClientLegacyStockCommand),
+
+  // typed-request response: the connection layer extracts these from
+  // any modern inbound message with `MsgMeta::Response { request_id }`
+  // and the listener routes them to `ClientManager::complete_pending`
+  // before normal handler dispatch.
+  Response {
+    request_id: Uuid,
+    data: ClientToBridgeMsgData,
+  },
 
   // ignored and unsupported
   Hole,
@@ -59,19 +69,29 @@ pub enum RecvMsgData {
   Error(axum::Error),
 }
 
-impl From<ClientCommand> for RecvMsgData {
-  fn from(msg: ClientCommand) -> Self {
+impl From<ClientToBridgeMsg> for RecvMsgData {
+  fn from(msg: ClientToBridgeMsg) -> Self {
     match msg.data {
-      ClientCommandType::Asset(msg) => Self::Asset(msg),
-      ClientCommandType::Bluetooth(msg) => Self::Bluetooth(msg),
-      ClientCommandType::Store(msg) => Self::Store(msg),
-      ClientCommandType::System(msg) => Self::System(msg),
-      ClientCommandType::Voice(msg) => Self::Voice(msg),
-      ClientCommandType::Interaction(msg) => Self::Interaction(msg),
-      ClientCommandType::Forward(data) => Self::Forward(data),
-
-      // legacy
-      ClientCommandType::LegacyStock(msg) => Self::LegacyStock(msg),
+      ClientToBridgeMsgData::Asset(inner) => match inner.into_request() {
+        Some(req) => Self::Asset(req),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::Bluetooth(inner) => Self::Bluetooth(inner),
+      ClientToBridgeMsgData::Store(inner) => match inner.into_request() {
+        Some(req) => Self::Store(req),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::System(inner) => Self::System(inner),
+      ClientToBridgeMsgData::Voice(inner) => match inner.into_command() {
+        Some(cmd) => Self::Voice(cmd),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::Interaction(inner) => match inner.into_command() {
+        Some(cmd) => Self::Interaction(cmd),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::Forward(data) => Self::Forward(data),
+      ClientToBridgeMsgData::LegacyStock(msg) => Self::LegacyStock(msg),
     }
   }
 }
@@ -79,7 +99,7 @@ impl From<ClientCommand> for RecvMsgData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum PossibleRecvMsg {
-  Modern(ClientCommand),
+  Modern(ClientToBridgeMsg),
   Stock(StockRecvMsg),
   #[serde(rename_all = "camelCase")]
   StockInterApp {
@@ -114,15 +134,16 @@ impl PossibleRecvMsg {
 #[serde(untagged)]
 pub enum PossibleSendMsg {
   #[from]
-  Modern(ServerEvent),
+  Modern(BridgeToClientMsg),
   #[from]
   Stock(StockSendMsg),
 }
 
 impl PossibleSendMsg {
-  /// Wrap a modern `ServerEvent` for outbound transmission. `stock_msg_id` is
-  /// the inter-app correlation id for stock connections (ignored for modern).
-  pub fn from_send_msg(msg: ServerEvent, mode: &ClientMode, stock_msg_id: Option<usize>) -> Self {
+  /// Wrap a modern `BridgeToClientMsg` for outbound transmission.
+  /// `stock_msg_id` is the inter-app correlation id for stock connections
+  /// (ignored for modern).
+  pub fn from_send_msg(msg: BridgeToClientMsg, mode: &ClientMode, stock_msg_id: Option<usize>) -> Self {
     match mode {
       ClientMode::Modern => Self::Modern(msg),
       ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id)),

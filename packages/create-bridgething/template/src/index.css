@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* Car Thing browser is chromium 147 ARM at 800x480. We disable hover
+   effects and overscroll to keep the touch UI feeling native. */
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+}

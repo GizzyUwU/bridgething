@@ -6,8 +6,8 @@
 //! control session (sets `iap2`), and the bridgething gateway
 //! protocol (sets `companion`). Each transport's manager calls the
 //! matching `set_*` method; this module owns delta detection and
-//! fires both the new `ServerPeerEvent` snapshot and the legacy
-//! `ServerBluetoothEvent` / `ServerSystemEvent::GatewayStatus`
+//! fires both the new `BridgeToClientPeerMsg` snapshot and the legacy
+//! `BridgeToClientBluetoothMsg` / `BridgeToClientAssetMsg::GatewayStatus`
 //! events derived from the same transition. The legacy fires let the
 //! stock webapp keep working without it understanding the new state
 //! model.
@@ -21,8 +21,12 @@ use std::collections::HashMap;
 
 use bluer::Address;
 use libbridgething::{
-  Device, Peer, PeerCompanionStatus, PeerIap2Status, ServerEventType,
-  server::{GatewayStatus, ServerBluetoothEvent, ServerPeerEvent},
+  Device, Peer, PeerCompanionStatus, PeerIap2Status,
+  client::{
+    BluetoothPairingResult, BluetoothStatus, BridgeToClientBluetoothMsg, BridgeToClientPeerMsg,
+    ConnectedDevice as WireConnectedDevice, GatewayStatus, PairedDevicesMap, PeerSnapshotMap,
+  },
+  wire::MsgMeta,
 };
 use tokio::sync::RwLock;
 
@@ -149,7 +153,10 @@ impl PeerTracker {
 
     if let Err(errs) = self
       .client_man
-      .broadcast(ServerPeerEvent::Snapshot(diff.snapshot.clone()), ServerEventType::Event)
+      .broadcast(
+        BridgeToClientPeerMsg::Snapshot(PeerSnapshotMap(diff.snapshot.clone())),
+        MsgMeta::Event,
+      )
       .await
     {
       errors.extend(errs);
@@ -164,7 +171,10 @@ impl PeerTracker {
         .collect();
       if let Err(errs) = self
         .client_man
-        .broadcast(ServerBluetoothEvent::PairedDevices(paired_map), ServerEventType::Event)
+        .broadcast(
+          BridgeToClientBluetoothMsg::PairedDevices(PairedDevicesMap(paired_map)),
+          MsgMeta::Event,
+        )
         .await
       {
         errors.extend(errs);
@@ -175,8 +185,8 @@ impl PeerTracker {
       && let Err(errs) = self
         .client_man
         .broadcast(
-          ServerBluetoothEvent::ParingResult { success: true },
-          ServerEventType::Event,
+          BridgeToClientBluetoothMsg::PairingResult(BluetoothPairingResult { success: true }),
+          MsgMeta::Event,
         )
         .await
     {
@@ -188,11 +198,11 @@ impl PeerTracker {
         && let Err(errs) = self
           .client_man
           .broadcast(
-            ServerBluetoothEvent::ConnectedDevice {
+            BridgeToClientBluetoothMsg::ConnectedDevice(WireConnectedDevice {
               name: device.name.clone(),
               mac: device.mac.clone(),
-            },
-            ServerEventType::Event,
+            }),
+            MsgMeta::Event,
           )
           .await
       {
@@ -200,7 +210,10 @@ impl PeerTracker {
       }
       if let Err(errs) = self
         .client_man
-        .broadcast(ServerBluetoothEvent::Status { connected: true }, ServerEventType::Event)
+        .broadcast(
+          BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: true }),
+          MsgMeta::Event,
+        )
         .await
       {
         errors.extend(errs);
@@ -209,8 +222,8 @@ impl PeerTracker {
       && let Err(errs) = self
         .client_man
         .broadcast(
-          ServerBluetoothEvent::Status { connected: false },
-          ServerEventType::Event,
+          BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: false }),
+          MsgMeta::Event,
         )
         .await
     {
@@ -218,10 +231,9 @@ impl PeerTracker {
     }
 
     if diff.companion_changed {
-      let status = derive_gateway_status(&diff.snapshot);
-      if let Err(errs) = self.client_man.broadcast(status, ServerEventType::Event).await {
-        errors.extend(errs);
-      }
+      let _status = derive_gateway_status(&diff.snapshot);
+      // GatewayStatus is now request-only (webapp asks via system.gatewayStatusRequest);
+      // there is no event-shape variant on the wire so we don't broadcast on changes.
     }
 
     if diff.companion_lost {

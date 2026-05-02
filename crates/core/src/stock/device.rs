@@ -1,4 +1,7 @@
-use libbridgething::{PhoneCallDirection, PhoneCallStatus, client::ClientSystemCommand};
+use libbridgething::{
+  PhoneCallDirection, PhoneCallStatus,
+  client::{ClientToBridgeSystemMsg, PhoneCallAccept, PhoneCallEnd},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::handler::client::RecvMsgData;
@@ -23,15 +26,19 @@ pub struct PhoneCallAttributes {
 impl From<StockDeviceRecv> for RecvMsgData {
   fn from(data: StockDeviceRecv) -> Self {
     match data {
-      StockDeviceRecv::Reboot => RecvMsgData::System(ClientSystemCommand::Reboot),
-      StockDeviceRecv::PowerOff => RecvMsgData::System(ClientSystemCommand::PowerOff),
-      StockDeviceRecv::FactoryReset => RecvMsgData::System(ClientSystemCommand::FactoryReset),
-      StockDeviceRecv::PhoneCallAnswer { attributes } => RecvMsgData::System(ClientSystemCommand::PhoneCallAccept {
-        call_id: attributes.call_id,
-      }),
-      StockDeviceRecv::PhoneCallEnd { attributes } => RecvMsgData::System(ClientSystemCommand::PhoneCallEnd {
-        call_id: attributes.call_id,
-      }),
+      StockDeviceRecv::Reboot => RecvMsgData::System(ClientToBridgeSystemMsg::Reboot),
+      StockDeviceRecv::PowerOff => RecvMsgData::System(ClientToBridgeSystemMsg::PowerOff),
+      StockDeviceRecv::FactoryReset => RecvMsgData::System(ClientToBridgeSystemMsg::FactoryReset),
+      StockDeviceRecv::PhoneCallAnswer { attributes } => {
+        RecvMsgData::System(ClientToBridgeSystemMsg::PhoneCallAccept(PhoneCallAccept {
+          call_id: attributes.call_id,
+        }))
+      }
+      StockDeviceRecv::PhoneCallEnd { attributes } => {
+        RecvMsgData::System(ClientToBridgeSystemMsg::PhoneCallEnd(PhoneCallEnd {
+          call_id: attributes.call_id,
+        }))
+      }
       StockDeviceRecv::ReturnToSpotify => RecvMsgData::Unsupported(crate::handler::client::PossibleRecvMsg::Stock(
         super::StockRecvMsg::Device(data),
       )),

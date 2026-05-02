@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
-use libbridgething::{ServerEventType, server::ServerBluetoothEvent};
+use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
 use message::{connection_messages_stock, disconnection_messages_stock};
 use tokio::sync::RwLock;
 
@@ -100,12 +100,12 @@ impl ProfileManager {
             .state
             .client_man
             .broadcast(
-              ServerBluetoothEvent::Pin {
+              BridgeToClientBluetoothMsg::Pin(libbridgething::client::BluetoothPin {
                 mac: mac.to_string(),
                 name: mac.to_string(),
                 pin: pin.to_owned(),
-              },
-              ServerEventType::Event,
+              }),
+              MsgMeta::Event,
             )
             .await?;
 

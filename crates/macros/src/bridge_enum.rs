@@ -1,5 +1,5 @@
-//! `#[derive(BridgeEnum)]` — split a gateway-wire enum into per-category
-//! sibling enums and emit the supporting trait infrastructure.
+//! `#[derive(BridgeEnum)]` — split a wire enum into per-category sibling
+//! enums and emit the supporting trait infrastructure.
 //!
 //! Each variant is tagged with exactly one of `#[bridge_event]`,
 //! `#[bridge_command]`, `#[bridge_request]`, `#[bridge_response]`. The
@@ -10,33 +10,57 @@
 //! - `<Parent>::into_<bucket>(self) -> Option<<Parent><Bucket>>` and
 //!   `<Parent>::is_<bucket>_variant(&self) -> bool`;
 //! - For Event/Command: marker trait impl on the sibling
-//!   (`BridgeEvent`/`BridgeCommand` for `BridgeToGateway*` parents,
-//!   `GatewayEvent`/`GatewayCommand` for `GatewayToBridge*` parents),
-//!   plus `From<Sibling> for <OuterMsgData>` when the parent declares
-//!   `#[bridge_enum(into = OuterPath)]`.
+//!   (`impl WireEvent<<wire>> for <Sibling>` /
+//!   `impl WireCommand<<wire>> for <Sibling>`), where `<wire>` is inferred
+//!   from the parent ident's prefix. Plus `From<Sibling> for <OuterMsgData>`
+//!   when the parent declares `#[bridge_enum(into = OuterPath)]`.
 //! - For Response: a hidden `__<Parent>_responses` marker module,
 //!   carrying one phantom-typed struct per response variant. The
-//!   `GatewayRequest`/`BridgeRequest` derives reference these to
-//!   compile-time-validate that a declared response variant exists,
-//!   is tagged `#[bridge_response]`, and matches the declared payload
-//!   type. See `request.rs` for the consumer side.
+//!   `#[derive(WireRequest)]` derive references these to compile-time-
+//!   validate that a declared response variant exists, is tagged
+//!   `#[bridge_response]`, and matches the declared payload type. See
+//!   `request.rs` for the consumer side.
 //!
-//! Direction is inferred from the parent ident — `BridgeToGateway*` is
-//! daemon-emitted (markers `BridgeEvent`/`BridgeCommand`),
-//! `GatewayToBridge*` is companion-emitted (markers
-//! `GatewayEvent`/`GatewayCommand`).
+//! Direction is inferred from the parent ident — one of the four
+//! recognized prefixes:
+//!
+//! - `BridgeToGateway*` — daemon → companion (Bluetooth gateway protocol)
+//! - `GatewayToBridge*` — companion → daemon (Bluetooth gateway protocol)
+//! - `BridgeToClient*`  — daemon → webapp (local WebSocket protocol)
+//! - `ClientToBridge*`  — webapp → daemon (local WebSocket protocol)
 
 use std::collections::BTreeMap;
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Fields, Ident, Path, Variant, Visibility, spanned::Spanned};
+use syn::{Attribute, Data, DeriveInput, Fields, Ident, Path, Type, Variant, Visibility, spanned::Spanned};
+
+/// Returns a token stream referencing `ty` from inside an inner
+/// submodule. Absolute paths (`crate::`, `::`, `self::`, `super::`)
+/// pass through unchanged; relative paths get a `super::` prefix.
+fn qualify_payload_type(ty: &Type) -> TokenStream2 {
+  if let Type::Path(p) = ty {
+    let absolute = p.path.leading_colon.is_some()
+      || p
+        .path
+        .segments
+        .first()
+        .map(|s| s.ident == "crate" || s.ident == "self" || s.ident == "super")
+        .unwrap_or(false);
+    if absolute {
+      return quote!(#ty);
+    }
+  }
+  quote!(super::#ty)
+}
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Direction {
   BridgeToGateway,
   GatewayToBridge,
+  BridgeToClient,
+  ClientToBridge,
 }
 
 impl Direction {
@@ -46,27 +70,28 @@ impl Direction {
       Ok(Self::BridgeToGateway)
     } else if s.starts_with("GatewayToBridge") {
       Ok(Self::GatewayToBridge)
+    } else if s.starts_with("BridgeToClient") {
+      Ok(Self::BridgeToClient)
+    } else if s.starts_with("ClientToBridge") {
+      Ok(Self::ClientToBridge)
     } else {
       Err(syn::Error::new(
         ident.span(),
-        "BridgeEnum requires the enum to be named with prefix \
-         `BridgeToGateway` (daemon-emitted) or `GatewayToBridge` \
-         (companion-emitted) so direction can be inferred",
+        "BridgeEnum requires the enum name to start with one of the four wire \
+         direction prefixes: `BridgeToGateway`, `GatewayToBridge`, \
+         `BridgeToClient`, or `ClientToBridge`",
       ))
     }
   }
 
-  fn event_marker(self) -> Ident {
+  /// Path to the matching outer wire data enum. Lives in `lib::gateway`
+  /// for the Bluetooth pair, `lib::client` for the WebSocket pair.
+  fn wire_data_path(self, lib: &TokenStream2) -> TokenStream2 {
     match self {
-      Self::BridgeToGateway => format_ident!("BridgeEvent"),
-      Self::GatewayToBridge => format_ident!("GatewayEvent"),
-    }
-  }
-
-  fn command_marker(self) -> Ident {
-    match self {
-      Self::BridgeToGateway => format_ident!("BridgeCommand"),
-      Self::GatewayToBridge => format_ident!("GatewayCommand"),
+      Self::BridgeToGateway => quote!(#lib::gateway::BridgeToGatewayMsgData),
+      Self::GatewayToBridge => quote!(#lib::gateway::GatewayToBridgeMsgData),
+      Self::BridgeToClient => quote!(#lib::client::BridgeToClientMsgData),
+      Self::ClientToBridge => quote!(#lib::client::ClientToBridgeMsgData),
     }
   }
 }
@@ -195,6 +220,7 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
 
   let total: usize = grouped.values().map(|v| v.len()).sum();
   let lib_path = lib_crate_path();
+  let wire_path = direction.wire_data_path(&lib_path);
 
   let mut out = TokenStream2::new();
   let mut method_pieces: Vec<TokenStream2> = Vec::new();
@@ -204,12 +230,12 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
     out.extend(emit_from_sibling_for_parent(parent, bucket, variants));
 
     if bucket == Bucket::Event || bucket == Bucket::Command {
-      let marker = match bucket {
-        Bucket::Event => direction.event_marker(),
-        Bucket::Command => direction.command_marker(),
+      let marker_name = match bucket {
+        Bucket::Event => format_ident!("WireEvent"),
+        Bucket::Command => format_ident!("WireCommand"),
         _ => unreachable!(),
       };
-      out.extend(emit_marker_impl(&lib_path, &marker, parent, bucket));
+      out.extend(emit_marker_impl(&lib_path, &marker_name, &wire_path, parent, bucket));
       if let Some(outer) = &into_outer {
         out.extend(emit_from_sibling_for_outer(parent, bucket, outer));
       }
@@ -296,10 +322,16 @@ fn emit_from_sibling_for_outer(parent: &Ident, bucket: Bucket, outer: &Path) -> 
   }
 }
 
-fn emit_marker_impl(lib_path: &TokenStream2, marker: &Ident, parent: &Ident, bucket: Bucket) -> TokenStream2 {
+fn emit_marker_impl(
+  lib_path: &TokenStream2,
+  marker: &Ident,
+  wire: &TokenStream2,
+  parent: &Ident,
+  bucket: Bucket,
+) -> TokenStream2 {
   let sibling = format_ident!("{}{}", parent, bucket.suffix());
   quote! {
-    impl #lib_path::gateway::#marker for #sibling {}
+    impl #lib_path::wire::#marker<#wire> for #sibling {}
   }
 }
 
@@ -365,14 +397,20 @@ fn emit_response_marker_module(parent: &Ident, vis: &Visibility, variants: &[&Va
       Fields::Unit => quote! { pub struct #v_ident; },
       Fields::Unnamed(u) => {
         let ty = &u.unnamed[0].ty;
-        quote! { pub struct #v_ident(pub ::core::marker::PhantomData<super::#ty>); }
+        // Reference the payload type from inside the marker submodule.
+        // Relative paths need a `super::` prefix to climb back to the
+        // enum's scope; absolute paths (`crate::`, `::`, `self::`,
+        // `super::`) must NOT be prefixed because `crate` only resolves
+        // at path-start position.
+        let qualified = qualify_payload_type(ty);
+        quote! { pub struct #v_ident(pub ::core::marker::PhantomData<#qualified>); }
       }
       _ => unreachable!(),
     }
   });
   let doc = format!(
     "Hidden marker module emitted by `BridgeEnum` for response variants of [`{}`]. \
-     `GatewayRequest` / `BridgeRequest` derives reference these structs in a `const _: () = {{ \
+     `#[derive(WireRequest)]` references these structs in a `const _: () = {{ \
      ... }}` block to compile-time-validate that the declared response variant exists, is tagged \
      `#[bridge_response]`, and matches the declared payload type.",
     parent

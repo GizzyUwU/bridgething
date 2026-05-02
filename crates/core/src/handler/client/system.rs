@@ -1,4 +1,6 @@
-use libbridgething::client::{ClientSystemCommand, RequestGatewayStatus, RequestVersion};
+use libbridgething::client::{
+  ClientToBridgeSystemMsg, PhoneCallAccept, PhoneCallEnd, RequestGatewayStatus, RequestVersion,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,17 +13,17 @@ impl SystemHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: ClientSystemCommand) -> HandlerResult {
+  pub async fn handle(&mut self, msg: ClientToBridgeSystemMsg) -> HandlerResult {
     tracing::debug!("({}) handling system message", &self.handle.from);
 
     match msg {
-      ClientSystemCommand::VersionRequest => self.version_request().await,
-      ClientSystemCommand::GatewayStatusRequest => self.gateway_status_request().await,
-      ClientSystemCommand::Reboot => self.reboot().await,
-      ClientSystemCommand::PowerOff => self.power_off().await,
-      ClientSystemCommand::FactoryReset => self.factory_reset().await,
-      ClientSystemCommand::PhoneCallAccept { call_id } => self.phone_call_accept(call_id).await,
-      ClientSystemCommand::PhoneCallEnd { call_id } => self.phone_call_end(call_id).await,
+      ClientToBridgeSystemMsg::VersionRequest => self.version_request().await,
+      ClientToBridgeSystemMsg::GatewayStatusRequest => self.gateway_status_request().await,
+      ClientToBridgeSystemMsg::Reboot => self.reboot().await,
+      ClientToBridgeSystemMsg::PowerOff => self.power_off().await,
+      ClientToBridgeSystemMsg::FactoryReset => self.factory_reset().await,
+      ClientToBridgeSystemMsg::PhoneCallAccept(PhoneCallAccept { call_id }) => self.phone_call_accept(call_id).await,
+      ClientToBridgeSystemMsg::PhoneCallEnd(PhoneCallEnd { call_id }) => self.phone_call_end(call_id).await,
     }
   }
 

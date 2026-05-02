@@ -10,7 +10,11 @@
 
 use std::path::PathBuf;
 
-use libbridgething::{gateway::*, *};
+use libbridgething::{
+  gateway::*,
+  wire::{MsgMeta as GatewayMsgMeta, ResponseMeta, WireError as GatewayError},
+  *,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

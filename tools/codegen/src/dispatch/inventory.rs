@@ -1,17 +1,19 @@
-//! Walks `crates/lib/src/` and builds an `Inventory` of the wire
-//! protocol's structural pieces: top-level enums, inner enums, marker
-//! trait impls (inferred from `#[derive(BridgeEnum)]` per-variant tags
-//! plus standalone `#[derive(BridgeEvent/...)]` derives), and typed-
-//! request declarations (read from `#[gateway_request(...)]` /
-//! `#[bridge_request(...)]` attributes paired with their derives).
-//! The plan layer consumes this to produce the per-language emit plan.
+//! Walks `crates/lib/src/` and builds an `Inventory` of wire-protocol
+//! structural pieces across both transports:
 //!
-//! Codegen used to walk hand-written `impl Trait for Type {}` blocks in
-//! `crates/lib/src/gateway/marker.rs` and regex-parse `impl_*_request!`
-//! macro tokens. Both have been replaced by proc-macro derives, so this
-//! file now reads attributes via `syn` directly. The shape of `Inventory`
-//! is unchanged — the plan layer is decoupled from how the inventory is
-//! discovered.
+//! - **Gateway** (Bluetooth, msgpack+gzip): `BridgeToGatewayMsgData` /
+//!   `GatewayToBridgeMsgData`.
+//! - **Client** (local WebSocket, JSON): `BridgeToClientMsgData` /
+//!   `ClientToBridgeMsgData`.
+//!
+//! Discovers top-level enums, inner enums, marker trait impls (inferred
+//! from `#[derive(BridgeEnum)]` per-variant tags + parent ident's
+//! direction prefix, plus standalone `#[derive(WireEvent/...)]` derives
+//! keyed off `#[wire(<Direction>, ...)]`), and typed-request declarations
+//! (`#[derive(WireRequest)]` keyed off `#[wire_request(...)]`).
+//!
+//! The plan layer groups results by `Protocol` and emits per-protocol
+//! per-language helper files.
 
 use std::collections::HashMap;
 
@@ -20,39 +22,97 @@ use syn::{Attribute, Fields, GenericArgument, Item, ItemEnum, ItemStruct, Meta, 
 
 pub const BRIDGE_TO_GATEWAY: &str = "BridgeToGatewayMsgData";
 pub const GATEWAY_TO_BRIDGE: &str = "GatewayToBridgeMsgData";
+pub const BRIDGE_TO_CLIENT: &str = "BridgeToClientMsgData";
+pub const CLIENT_TO_BRIDGE: &str = "ClientToBridgeMsgData";
 
+/// Wire-direction tag — one per recognized parent-ident prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MarkerKind {
-  BridgeEvent,
-  GatewayEvent,
-  BridgeCommand,
-  GatewayCommand,
-  BridgeUnicast,
-  GatewayUnicast,
+pub enum Direction {
+  BridgeToGateway,
+  GatewayToBridge,
+  BridgeToClient,
+  ClientToBridge,
 }
 
-impl MarkerKind {
-  fn from_path(name: &str) -> Option<Self> {
-    match name {
-      "BridgeEvent" => Some(Self::BridgeEvent),
-      "GatewayEvent" => Some(Self::GatewayEvent),
-      "BridgeCommand" => Some(Self::BridgeCommand),
-      "GatewayCommand" => Some(Self::GatewayCommand),
-      "BridgeUnicast" => Some(Self::BridgeUnicast),
-      "GatewayUnicast" => Some(Self::GatewayUnicast),
+impl Direction {
+  pub fn from_str(s: &str) -> Option<Self> {
+    match s {
+      "BridgeToGateway" => Some(Self::BridgeToGateway),
+      "GatewayToBridge" => Some(Self::GatewayToBridge),
+      "BridgeToClient" => Some(Self::BridgeToClient),
+      "ClientToBridge" => Some(Self::ClientToBridge),
       _ => None,
     }
   }
+
+  pub fn from_parent_ident(ident: &str) -> Option<Self> {
+    if ident.starts_with("BridgeToGateway") {
+      Some(Self::BridgeToGateway)
+    } else if ident.starts_with("GatewayToBridge") {
+      Some(Self::GatewayToBridge)
+    } else if ident.starts_with("BridgeToClient") {
+      Some(Self::BridgeToClient)
+    } else if ident.starts_with("ClientToBridge") {
+      Some(Self::ClientToBridge)
+    } else {
+      None
+    }
+  }
+
+  pub fn wire_data_name(self) -> &'static str {
+    match self {
+      Self::BridgeToGateway => BRIDGE_TO_GATEWAY,
+      Self::GatewayToBridge => GATEWAY_TO_BRIDGE,
+      Self::BridgeToClient => BRIDGE_TO_CLIENT,
+      Self::ClientToBridge => CLIENT_TO_BRIDGE,
+    }
+  }
+
+  /// Opposite direction in the same protocol family. Used for typed
+  /// requests where the response arrives on the opposite-direction
+  /// wire.
+  pub fn opposite(self) -> Self {
+    match self {
+      Self::BridgeToGateway => Self::GatewayToBridge,
+      Self::GatewayToBridge => Self::BridgeToGateway,
+      Self::BridgeToClient => Self::ClientToBridge,
+      Self::ClientToBridge => Self::BridgeToClient,
+    }
+  }
+}
+
+/// Coarse-grained protocol family. Each protocol owns one pair of
+/// `Direction`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Protocol {
+  Gateway,
+  Client,
+}
+
+impl Protocol {
+  pub fn of(direction: Direction) -> Self {
+    match direction {
+      Direction::BridgeToGateway | Direction::GatewayToBridge => Self::Gateway,
+      Direction::BridgeToClient | Direction::ClientToBridge => Self::Client,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MarkerKind {
+  Event,
+  Command,
+  Unicast,
 }
 
 #[derive(Debug, Clone)]
 pub struct WireVariant {
   pub name: String,
-  /// Single-field tuple-variant payload. `None` for unit variants
-  /// AND for struct-shaped variants — the latter are exposed only at
-  /// the parent enum level because per-language type-paths to them
-  /// differ enough that codegen for the inner field set isn't worth
-  /// the surface.
+  /// Single-field tuple-variant payload. `None` for unit variants AND
+  /// for struct-shaped variants — the latter are exposed only at the
+  /// parent enum level because per-language type-paths to them differ
+  /// enough that codegen for the inner field set isn't worth the
+  /// surface.
   pub payload: Option<PayloadType>,
   /// True for `Foo { ... }` named-field variants. Outbound codegen
   /// skips these because constructing the variant requires per-field
@@ -109,18 +169,30 @@ pub struct EnumDef {
   pub variants: Vec<WireVariant>,
   /// Adjacent-tagged discriminator field name (e.g. `"event"` for most
   /// inner enums, `"encoding"` for `ForwardMessage`, `"type"` for the
-  /// outer wire enums and `GatewayError`). Defaults to `"type"` if the
-  /// enum isn't tagged.
+  /// outer wire enums). Defaults to `"type"` if the enum isn't tagged.
   pub tag_field: String,
+}
+
+/// Markers attached to one named type, with the wire direction each
+/// marker applies to. A type may carry multiple markers across multiple
+/// directions (e.g. `ForwardMessage` is `WireEvent<W>` for three wires).
+#[derive(Debug, Clone, Default)]
+pub struct MarkerSet {
+  pub entries: Vec<(MarkerKind, Direction)>,
+}
+
+impl MarkerSet {
+  pub fn has(&self, kind: MarkerKind, direction: Direction) -> bool {
+    self.entries.iter().any(|(k, d)| *k == kind && *d == direction)
+  }
 }
 
 #[derive(Debug)]
 pub struct Inventory {
   pub wire_enums: HashMap<String, EnumDef>,
   pub enums: HashMap<String, EnumDef>,
-  pub markers: HashMap<String, Vec<MarkerKind>>,
-  pub gateway_requests: Vec<TypedRequest>,
-  pub bridge_requests: Vec<TypedRequest>,
+  pub markers: HashMap<String, MarkerSet>,
+  pub typed_requests: Vec<TypedRequest>,
 }
 
 /// A single typed-request declaration, captured in structured form.
@@ -129,6 +201,9 @@ pub struct Inventory {
 #[derive(Debug, Clone)]
 pub struct TypedRequest {
   pub request: String,
+  /// Outbound direction: the direction the request enters. Response
+  /// arrives on `direction.opposite()`.
+  pub direction: Direction,
   pub surface: String,
   pub request_variant: String,
   pub request_takes_payload: bool,
@@ -141,9 +216,8 @@ pub struct TypedRequest {
 pub fn inventory(lib_src: &str) -> Result<Inventory> {
   let mut wire_enums = HashMap::new();
   let mut enums = HashMap::new();
-  let mut markers: HashMap<String, Vec<MarkerKind>> = HashMap::new();
-  let mut gateway_requests: Vec<TypedRequest> = Vec::new();
-  let mut bridge_requests: Vec<TypedRequest> = Vec::new();
+  let mut markers: HashMap<String, MarkerSet> = HashMap::new();
+  let mut typed_requests: Vec<TypedRequest> = Vec::new();
 
   for entry in walkdir::WalkDir::new(lib_src) {
     let entry = entry.context("walk lib_src")?;
@@ -167,22 +241,15 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
       &mut wire_enums,
       &mut enums,
       &mut markers,
-      &mut gateway_requests,
-      &mut bridge_requests,
+      &mut typed_requests,
     );
-  }
-
-  for kinds in markers.values_mut() {
-    kinds.sort_by_key(|k| *k as u8);
-    kinds.dedup();
   }
 
   Ok(Inventory {
     wire_enums,
     enums,
     markers,
-    gateway_requests,
-    bridge_requests,
+    typed_requests,
   })
 }
 
@@ -190,56 +257,53 @@ fn walk_items(
   items: &[Item],
   wire_enums: &mut HashMap<String, EnumDef>,
   enums: &mut HashMap<String, EnumDef>,
-  markers: &mut HashMap<String, Vec<MarkerKind>>,
-  gateway_requests: &mut Vec<TypedRequest>,
-  bridge_requests: &mut Vec<TypedRequest>,
+  markers: &mut HashMap<String, MarkerSet>,
+  typed_requests: &mut Vec<TypedRequest>,
 ) {
   for item in items {
     match item {
       Item::Enum(en) => {
         let def = collect_enum(en);
         let name = def.name.clone();
-        if name == BRIDGE_TO_GATEWAY || name == GATEWAY_TO_BRIDGE {
+        if matches!(
+          name.as_str(),
+          BRIDGE_TO_GATEWAY | GATEWAY_TO_BRIDGE | BRIDGE_TO_CLIENT | CLIENT_TO_BRIDGE
+        ) {
           wire_enums.insert(name.clone(), def);
         } else {
           enums.insert(name.clone(), def);
         }
         // Standalone marker derives can appear on enums too
         // (e.g. `ForwardMessage`).
-        for kind in standalone_marker_derives(&en.attrs) {
-          markers.entry(name.clone()).or_default().push(kind);
+        for (kind, dir) in standalone_markers(&en.attrs) {
+          markers.entry(name.clone()).or_default().entries.push((kind, dir));
         }
         // BridgeEnum-derived enums infer their parent-level marker from
         // per-variant `#[bridge_*]` tags. Direction comes from the parent
         // ident prefix.
-        if has_derive(&en.attrs, "BridgeEnum") {
+        if has_derive(&en.attrs, "BridgeEnum")
+          && let Some(direction) = Direction::from_parent_ident(&name)
+        {
           let variants: Vec<&Variant> = en.variants.iter().collect();
-          for kind in infer_bridge_enum_markers(&name, &variants) {
-            markers.entry(name.clone()).or_default().push(kind);
+          for kind in infer_bridge_enum_markers(&variants) {
+            markers.entry(name.clone()).or_default().entries.push((kind, direction));
           }
         }
       }
       Item::Struct(s) => {
-        // Structs only contribute markers (top-level outer-wire variant
-        // payloads like `BridgeThingMeta`) and typed-request declarations.
         let name = s.ident.to_string();
-        for kind in standalone_marker_derives(&s.attrs) {
-          markers.entry(name.clone()).or_default().push(kind);
+        for (kind, dir) in standalone_markers(&s.attrs) {
+          markers.entry(name.clone()).or_default().entries.push((kind, dir));
         }
-        if has_derive(&s.attrs, "GatewayRequest")
-          && let Some(req) = parse_request_attr(s, "gateway_request")
+        if has_derive(&s.attrs, "WireRequest")
+          && let Some(req) = parse_wire_request_attr(s)
         {
-          gateway_requests.push(req);
-        }
-        if has_derive(&s.attrs, "BridgeRequest")
-          && let Some(req) = parse_request_attr(s, "bridge_request")
-        {
-          bridge_requests.push(req);
+          typed_requests.push(req);
         }
       }
       Item::Mod(m) => {
         if let Some((_, sub_items)) = &m.content {
-          walk_items(sub_items, wire_enums, enums, markers, gateway_requests, bridge_requests);
+          walk_items(sub_items, wire_enums, enums, markers, typed_requests);
         }
       }
       _ => {}
@@ -248,25 +312,53 @@ fn walk_items(
 }
 
 /// Returns the markers declared via standalone derives on this item:
-/// `BridgeEvent`, `GatewayEvent`, `BridgeCommand`, `GatewayCommand`.
-/// `BridgeUnicast` / `GatewayUnicast` are still hand-written impls today
-/// (no current users); they don't go through this path.
-fn standalone_marker_derives(attrs: &[Attribute]) -> Vec<MarkerKind> {
-  let mut out = Vec::new();
+/// `WireEvent`, `WireCommand`, `WireUnicast`, each paired with one or
+/// more directions read from the `#[wire(<Direction>, ...)]` attribute
+/// on the same item.
+fn standalone_markers(attrs: &[Attribute]) -> Vec<(MarkerKind, Direction)> {
+  let mut kinds: Vec<MarkerKind> = Vec::new();
   for attr in attrs {
     if !attr.path().is_ident("derive") {
       continue;
     }
     let _ = attr.parse_nested_meta(|meta| {
-      if let Some(seg) = meta.path.segments.last()
-        && let Some(kind) = MarkerKind::from_path(&seg.ident.to_string())
-      {
-        out.push(kind);
+      if let Some(seg) = meta.path.segments.last() {
+        match seg.ident.to_string().as_str() {
+          "WireEvent" => kinds.push(MarkerKind::Event),
+          "WireCommand" => kinds.push(MarkerKind::Command),
+          "WireUnicast" => kinds.push(MarkerKind::Unicast),
+          _ => {}
+        }
       }
       Ok(())
     });
   }
-  out
+  if kinds.is_empty() {
+    return Vec::new();
+  }
+  let directions = parse_wire_directions(attrs);
+  kinds
+    .into_iter()
+    .flat_map(|kind| directions.iter().map(move |dir| (kind, *dir)))
+    .collect()
+}
+
+fn parse_wire_directions(attrs: &[Attribute]) -> Vec<Direction> {
+  let mut directions = Vec::new();
+  for attr in attrs {
+    if !attr.path().is_ident("wire") {
+      continue;
+    }
+    let _ = attr.parse_nested_meta(|meta| {
+      if let Some(seg) = meta.path.segments.last()
+        && let Some(dir) = Direction::from_str(&seg.ident.to_string())
+      {
+        directions.push(dir);
+      }
+      Ok(())
+    });
+  }
+  directions
 }
 
 fn has_derive(attrs: &[Attribute], name: &str) -> bool {
@@ -292,17 +384,12 @@ fn has_derive(attrs: &[Attribute], name: &str) -> bool {
 
 /// For an enum with `#[derive(BridgeEnum)]`, infer the parent-level
 /// marker traits from the per-variant `#[bridge_*]` tags. A variant
-/// tagged `#[bridge_event]` contributes the direction's Event marker;
+/// tagged `#[bridge_event]` contributes the Event marker;
 /// `#[bridge_command]` contributes Command. Request and Response tags
 /// don't contribute parent-level markers (typed requests route through
-/// `BridgeRequest`/`GatewayRequest` traits on the request payload type;
-/// responses go through `respond_to` and don't need a marker).
-fn infer_bridge_enum_markers(parent_name: &str, variants: &[&Variant]) -> Vec<MarkerKind> {
-  let direction_is_bridge_to_gateway = parent_name.starts_with("BridgeToGateway");
-  let direction_is_gateway_to_bridge = parent_name.starts_with("GatewayToBridge");
-  if !direction_is_bridge_to_gateway && !direction_is_gateway_to_bridge {
-    return Vec::new();
-  }
+/// `WireRequest` on the request payload type; responses go through
+/// `respond_to` and don't need a marker).
+fn infer_bridge_enum_markers(variants: &[&Variant]) -> Vec<MarkerKind> {
   let mut has_event = false;
   let mut has_command = false;
   for v in variants {
@@ -316,26 +403,19 @@ fn infer_bridge_enum_markers(parent_name: &str, variants: &[&Variant]) -> Vec<Ma
   }
   let mut out = Vec::new();
   if has_event {
-    out.push(if direction_is_bridge_to_gateway {
-      MarkerKind::BridgeEvent
-    } else {
-      MarkerKind::GatewayEvent
-    });
+    out.push(MarkerKind::Event);
   }
   if has_command {
-    out.push(if direction_is_bridge_to_gateway {
-      MarkerKind::BridgeCommand
-    } else {
-      MarkerKind::GatewayCommand
-    });
+    out.push(MarkerKind::Command);
   }
   out
 }
 
-/// Parse a `#[gateway_request(...)]` / `#[bridge_request(...)]` attribute
-/// off a struct decorated with the matching derive. Format:
+/// Parse a `#[wire_request(...)]` attribute off a struct decorated with
+/// `#[derive(WireRequest)]`. Format:
 ///
 /// ```text
+/// direction = <Ident>,
 /// surface = <Ident>,
 /// request_variant = <Ident>,
 /// response = <TypePath>,
@@ -343,11 +423,9 @@ fn infer_bridge_enum_markers(parent_name: &str, variants: &[&Variant]) -> Vec<Ma
 /// [error = <TypePath>,
 ///  error_variant = <Ident>,]
 /// ```
-///
-/// `request_takes_payload` is determined from the struct's shape:
-/// `Fields::Unit` → unit-variant; anything else → tuple-variant.
-fn parse_request_attr(s: &ItemStruct, attr_name: &str) -> Option<TypedRequest> {
-  let attr = s.attrs.iter().find(|a| a.path().is_ident(attr_name))?;
+fn parse_wire_request_attr(s: &ItemStruct) -> Option<TypedRequest> {
+  let attr = s.attrs.iter().find(|a| a.path().is_ident("wire_request"))?;
+  let mut direction: Option<Direction> = None;
   let mut surface: Option<String> = None;
   let mut request_variant: Option<String> = None;
   let mut response: Option<String> = None;
@@ -356,7 +434,10 @@ fn parse_request_attr(s: &ItemStruct, attr_name: &str) -> Option<TypedRequest> {
   let mut error_variant: Option<String> = None;
 
   let _ = attr.parse_nested_meta(|meta| {
-    if meta.path.is_ident("surface") {
+    if meta.path.is_ident("direction") {
+      let id: syn::Ident = meta.value()?.parse()?;
+      direction = Direction::from_str(&id.to_string());
+    } else if meta.path.is_ident("surface") {
       let v: syn::Path = meta.value()?.parse()?;
       surface = v.segments.last().map(|s| s.ident.to_string());
     } else if meta.path.is_ident("request_variant") {
@@ -383,6 +464,7 @@ fn parse_request_attr(s: &ItemStruct, attr_name: &str) -> Option<TypedRequest> {
   let request_takes_payload = !matches!(s.fields, Fields::Unit);
   Some(TypedRequest {
     request: s.ident.to_string(),
+    direction: direction?,
     surface: surface?,
     request_variant: request_variant?,
     request_takes_payload,

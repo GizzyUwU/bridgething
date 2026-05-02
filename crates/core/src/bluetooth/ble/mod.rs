@@ -16,7 +16,8 @@ use flate2::Compression;
 use futures::{StreamExt, future};
 use libbridgething::{
   BRIDGETHING_CHARACTERISTIC_UUID, BRIDGETHING_MANUFACTURER_ID, BRIDGETHING_SERVICE_UUID,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData},
+  wire::MsgMeta,
 };
 use tokio::{
   io::{AsyncReadExt, AsyncWriteExt},
@@ -232,7 +233,7 @@ impl GattServer {
         self
           .write(BridgeToGatewayMsg {
             id: uuid::Uuid::now_v7(),
-            meta: GatewayMsgMeta::Event,
+            meta: MsgMeta::Event,
             data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
           })
           .await

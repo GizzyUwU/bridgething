@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 
-use libbridgething::{ServerEventData, ServerEventType, client::ClientRequest};
+use libbridgething::{
+  client::BridgeToClientMsgData,
+  wire::{MsgMeta, ResponseMeta, WireRequest},
+};
 use uuid::Uuid;
 
 use super::ClientHandler;
@@ -36,20 +39,20 @@ impl MsgHandle {
   }
 
   #[allow(unused)]
-  pub async fn send(&self, id: Uuid, data: impl Into<ServerEventData>, meta: ServerEventType) -> WSResult<()> {
+  pub async fn send(&self, id: Uuid, data: impl Into<BridgeToClientMsgData>, meta: MsgMeta) -> WSResult<()> {
     self.state.client_man.send(id, self.from, data, meta, None).await
   }
 
   #[allow(unused)]
-  pub async fn request(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
+  pub async fn request(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
       .client_man
-      .send(Uuid::now_v7(), self.from, data, ServerEventType::Request, None)
+      .send(Uuid::now_v7(), self.from, data, MsgMeta::Request, None)
       .await
   }
 
-  pub async fn respond(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
+  pub async fn respond(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
       .client_man
@@ -57,26 +60,32 @@ impl MsgHandle {
         Uuid::now_v7(),
         self.from,
         data,
-        ServerEventType::Response { request_id: self.id },
+        MsgMeta::Response(ResponseMeta { request_id: self.id }),
         self.stock_msg_id,
       )
       .await
   }
 
-  pub async fn respond_to<R: ClientRequest>(&self, response: R::Response) -> WSResult<()> {
+  pub async fn respond_to<R: WireRequest<Inbound = BridgeToClientMsgData>>(
+    &self,
+    response: R::Response,
+  ) -> WSResult<()> {
     self.respond(R::encode_response(response)).await
   }
 
-  pub async fn respond_err<R: ClientRequest>(&self, err: R::DomainError) -> WSResult<()> {
+  pub async fn respond_err<R: WireRequest<Inbound = BridgeToClientMsgData>>(
+    &self,
+    err: R::DomainError,
+  ) -> WSResult<()> {
     self.respond(R::encode_domain_error(err)).await
   }
 
   #[allow(unused)]
-  pub async fn send_info(&self, data: impl Into<ServerEventData>) -> WSResult<()> {
+  pub async fn send_info(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
       .client_man
-      .send(Uuid::now_v7(), self.from, data, ServerEventType::Event, None)
+      .send(Uuid::now_v7(), self.from, data, MsgMeta::Event, None)
       .await
   }
 

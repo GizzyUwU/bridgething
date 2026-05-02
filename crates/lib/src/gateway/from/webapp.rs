@@ -1,12 +1,13 @@
-use bridgething_macros::{BridgeEnum, GatewayRequest};
+use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
 /// Marker struct for the `List` request — pairs with `BridgeToGatewayWebappMsg::Webapps`.
-#[derive(Debug, Clone, Copy, Default, GatewayRequest)]
-#[gateway_request(
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = GatewayToBridge,
   surface = Webapp,
   request_variant = List,
   response = crate::gateway::WebappList,
@@ -15,8 +16,9 @@ use typeshare::typeshare;
 pub struct ListWebapps;
 
 /// Marker struct for the `GetActive` request — pairs with `BridgeToGatewayWebappMsg::Active`.
-#[derive(Debug, Clone, Copy, Default, GatewayRequest)]
-#[gateway_request(
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = GatewayToBridge,
   surface = Webapp,
   request_variant = GetActive,
   response = crate::gateway::WebappActive,
@@ -26,10 +28,11 @@ pub struct GetActiveWebapp;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[gateway_request(
+#[wire_request(
+  direction = GatewayToBridge,
   surface = Webapp,
   request_variant = SwitchTo,
   response = crate::gateway::WebappActive,
@@ -44,10 +47,11 @@ pub struct WebappSwitchTo {
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[gateway_request(
+#[wire_request(
+  direction = GatewayToBridge,
   surface = Webapp,
   request_variant = Install,
   response = crate::WebappInfo,
@@ -67,10 +71,11 @@ pub struct WebappInstall {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[gateway_request(
+#[wire_request(
+  direction = GatewayToBridge,
   surface = Webapp,
   request_variant = Uninstall,
   response = crate::gateway::WebappActive,

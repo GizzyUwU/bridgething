@@ -97,6 +97,22 @@
     },
     "packages/client-ts": {
       "name": "@bridgething/client",
+      "dependencies": {
+        "@bridgething/lib": "workspace:*",
+      },
+      "devDependencies": {
+        "tsdown": "^0.21.10",
+      },
+      "peerDependencies": {
+        "typescript": "^6.0.3",
+      },
+    },
+    "packages/create-bridgething": {
+      "name": "create-bridgething",
+      "version": "0.1.0",
+      "bin": {
+        "create-bridgething": "./dist/index.mjs",
+      },
       "devDependencies": {
         "tsdown": "^0.21.10",
       },
@@ -948,6 +964,8 @@
     "core-js-compat": ["core-js-compat@3.49.0", "", { "dependencies": { "browserslist": "^4.28.1" } }, "sha512-VQXt1jr9cBz03b331DFDCCP90b3fanciLkgiOoy8SBHy06gNf+vQ1A3WFLqG7I8TipYIKeYK9wxd0tUrvHcOZA=="],
 
     "cosmiconfig": ["cosmiconfig@9.0.0", "", { "dependencies": { "env-paths": "^2.2.1", "import-fresh": "^3.3.0", "js-yaml": "^4.1.0", "parse-json": "^5.2.0" }, "peerDependencies": { "typescript": ">=4.9.5" }, "optionalPeers": ["typescript"] }, "sha512-itvL5h8RETACmOTFc4UfIyB2RfEHi71Ax6E/PivVxq9NseKbOWpeyHEOIbmAw1rs8Ak0VursQNww7lf7YtUwzg=="],
+
+    "create-bridgething": ["create-bridgething@workspace:packages/create-bridgething"],
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 

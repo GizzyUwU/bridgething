@@ -19,8 +19,9 @@ use bluer::Address;
 use bridgething_iap2::session::{EaPriority, EaStreamSender};
 use libbridgething::{
   PeerCompanionStatus, Priority,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData},
   protocol::{BridgeEndec, PrioritizedFrame},
+  wire::MsgMeta,
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::{
@@ -190,7 +191,7 @@ impl Iap2EaGateway {
 
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
-      meta: GatewayMsgMeta::Event,
+      meta: MsgMeta::Event,
       data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
     };
     self.send_to_stream(key, version, Priority::Normal).await;

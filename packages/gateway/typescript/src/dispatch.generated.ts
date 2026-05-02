@@ -408,6 +408,26 @@ export class ForwardSurface {
 export class AssetSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
+  /** Typed inbound `AssetRequest` request: handler is given a typed handle for the response. */
+  onRequest(handler: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'asset') return;
+      const inner = data.data;
+      if (inner.event !== 'request') return;
+      const handle = new AssetRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onRequest handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Send `Asset::Push` to every connected peer (broadcast). */
   async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
@@ -952,6 +972,27 @@ export class AssetSurfaceForDevice {
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
   ) {}
+
+  /** Typed inbound `AssetRequest` request from this peer: handler is given a typed handle for the response. */
+  onRequest(handler: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'asset') return;
+      const inner = data.data;
+      if (inner.event !== 'request') return;
+      const handle = new AssetRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onRequest handler threw:', err);
+        });
+      }
+    });
+  }
 
   /** Send `Asset::Push` to this peer. */
   async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {

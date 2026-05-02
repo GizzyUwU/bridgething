@@ -1,0 +1,26 @@
+{
+  "name": "__PROJECT_NAME__",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "push": "bash scripts/push.sh"
+  },
+  "dependencies": {
+    "@bridgething/client": "^0.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.16",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tailwindcss": "^4.1.16",
+    "typescript": "^6.0.3",
+    "vite": "^7.1.13"
+  }
+}

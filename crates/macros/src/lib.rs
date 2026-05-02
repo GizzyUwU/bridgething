@@ -1,16 +1,19 @@
 //! Proc-macro derives shared across the bridgething workspace.
 //!
 //! - `#[derive(Csm)]` — iAP2 control-session messages (see `csm.rs`).
-//! - `#[derive(BridgeEnum)]` — gateway wire enums; per-bucket sibling
-//!   enums + marker impls + cross-enum response-validation modules
-//!   (see `bridge_enum.rs`).
-//! - `#[derive(GatewayRequest)]` / `#[derive(BridgeRequest)]` — typed
-//!   request implementation + cross-enum compile-time validation
-//!   (see `request.rs`).
-//! - `#[derive(BridgeEvent)]` / `#[derive(GatewayEvent)]` /
-//!   `#[derive(BridgeCommand)]` / `#[derive(GatewayCommand)]` — zero-arg
+//! - `#[derive(BridgeEnum)]` — wire enums; per-bucket sibling enums +
+//!   marker impls + cross-enum response-validation modules. Direction
+//!   inferred from one of four parent-ident prefixes: `BridgeToGateway`,
+//!   `GatewayToBridge`, `BridgeToClient`, `ClientToBridge`. See
+//!   `bridge_enum.rs`.
+//! - `#[derive(WireRequest)]` keyed off `#[wire_request(...)]` —
+//!   typed-request implementation + cross-enum compile-time validation.
+//!   See `request.rs`.
+//! - `#[derive(WireEvent)]` / `#[derive(WireCommand)]` /
+//!   `#[derive(WireUnicast)]` keyed off `#[wire(<Direction>, ...)]` —
 //!   marker derives for top-level outer-wire variant payload types
-//!   (see `markers.rs`).
+//!   (e.g. `BridgeThingMeta`, `GatewayMeta`, `ForwardMessage`,
+//!   `NowPlayingUpdate`). See `markers.rs`.
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -41,73 +44,37 @@ pub fn derive_bridge_enum(input: TokenStream) -> TokenStream {
   }
 }
 
-#[proc_macro_derive(GatewayRequest, attributes(gateway_request))]
-pub fn derive_gateway_request(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(WireRequest, attributes(wire_request))]
+pub fn derive_wire_request(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
-  match request::expand(&ast, request::Direction::Gateway) {
+  match request::expand(&ast) {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }
 }
 
-#[proc_macro_derive(BridgeRequest, attributes(bridge_request))]
-pub fn derive_bridge_request(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(WireEvent, attributes(wire))]
+pub fn derive_wire_event(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
-  match request::expand(&ast, request::Direction::Bridge) {
+  match markers::expand(&ast, "WireEvent") {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }
 }
 
-#[proc_macro_derive(BridgeEvent)]
-pub fn derive_bridge_event(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(WireCommand, attributes(wire))]
+pub fn derive_wire_command(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "BridgeEvent") {
+  match markers::expand(&ast, "WireCommand") {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }
 }
 
-#[proc_macro_derive(GatewayEvent)]
-pub fn derive_gateway_event(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(WireUnicast, attributes(wire))]
+pub fn derive_wire_unicast(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "GatewayEvent") {
-    Ok(ts) => ts.into(),
-    Err(err) => err.to_compile_error().into(),
-  }
-}
-
-#[proc_macro_derive(BridgeCommand)]
-pub fn derive_bridge_command(input: TokenStream) -> TokenStream {
-  let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "BridgeCommand") {
-    Ok(ts) => ts.into(),
-    Err(err) => err.to_compile_error().into(),
-  }
-}
-
-#[proc_macro_derive(GatewayCommand)]
-pub fn derive_gateway_command(input: TokenStream) -> TokenStream {
-  let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "GatewayCommand") {
-    Ok(ts) => ts.into(),
-    Err(err) => err.to_compile_error().into(),
-  }
-}
-
-#[proc_macro_derive(BridgeUnicast)]
-pub fn derive_bridge_unicast(input: TokenStream) -> TokenStream {
-  let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "BridgeUnicast") {
-    Ok(ts) => ts.into(),
-    Err(err) => err.to_compile_error().into(),
-  }
-}
-
-#[proc_macro_derive(GatewayUnicast)]
-pub fn derive_gateway_unicast(input: TokenStream) -> TokenStream {
-  let ast = parse_macro_input!(input as DeriveInput);
-  match markers::expand(&ast, "GatewayUnicast") {
+  match markers::expand(&ast, "WireUnicast") {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }

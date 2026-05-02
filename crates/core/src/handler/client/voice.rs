@@ -1,4 +1,4 @@
-use libbridgething::client::ClientVoiceCommand;
+use libbridgething::client::{ClientToBridgeVoiceMsgCommand, MicMute, MicUnmute};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -12,14 +12,14 @@ impl VoiceHandler {
     Self { handle }
   }
 
-  pub async fn handle(&self, msg: ClientVoiceCommand) -> HandlerResult {
+  pub async fn handle(&self, msg: ClientToBridgeVoiceMsgCommand) -> HandlerResult {
     tracing::debug!("({}) handling voice message", &self.handle.from);
 
     match msg {
-      ClientVoiceCommand::Cancel => self.cancel().await,
-      ClientVoiceCommand::PushToTalk => self.push_to_talk().await,
-      ClientVoiceCommand::MuteMic { preserve } => self.mute_mic(preserve).await,
-      ClientVoiceCommand::UnmuteMic { preserve } => self.unmute_mic(preserve).await,
+      ClientToBridgeVoiceMsgCommand::Cancel => self.cancel().await,
+      ClientToBridgeVoiceMsgCommand::PushToTalk => self.push_to_talk().await,
+      ClientToBridgeVoiceMsgCommand::MuteMic(MicMute { preserve }) => self.mute_mic(preserve).await,
+      ClientToBridgeVoiceMsgCommand::UnmuteMic(MicUnmute { preserve }) => self.unmute_mic(preserve).await,
     }
   }
 

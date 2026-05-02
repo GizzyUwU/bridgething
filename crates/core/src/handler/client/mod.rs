@@ -9,7 +9,7 @@ mod voice;
 use asset::*;
 use bluetooth::*;
 use interaction::*;
-use libbridgething::{ForwardMessage, gateway::GatewayError};
+use libbridgething::{ForwardMessage, wire::WireError};
 use stock::*;
 use store::*;
 use system::*;
@@ -42,7 +42,7 @@ where
     if let Err(e) = work(handle).await {
       tracing::error!("({:?}) handler failed: {:?}", err_handle.from, e);
       let _ = err_handle
-        .respond(GatewayError::HandlerFailed {
+        .respond(WireError::HandlerFailed {
           reason: format!("{e:?}"),
         })
         .await;
@@ -104,6 +104,16 @@ impl ClientHandler {
         dispatch(
           handle,
           move |h| async move { LegacyStockHandler::new(h).handle(msg).await },
+        );
+      }
+
+      // Response-meta inbound messages are intercepted by `ClientListener::recv`
+      // and routed to `ClientManager::complete_pending` before they reach the
+      // handler. Anything that arrives here is a bug — the listener leaked one.
+      RecvMsgData::Response { request_id, .. } => {
+        tracing::error!(
+          "({}) Response-meta message {request_id} reached the handler — listener interception is broken",
+          &handle.from
         );
       }
 

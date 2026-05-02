@@ -9,10 +9,8 @@ use bluer::{Adapter, Address, Session, agent::AgentHandle};
 use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle};
 use libbridgething::{
   Priority,
-  gateway::{
-    BridgeCommand, BridgeEvent, BridgeRequest, BridgeToGatewayMsg, GatewayError, GatewayMsgMeta, GatewayToBridgeMsg,
-    GatewayToBridgeMsgData, RequestError,
-  },
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  wire::{MsgMeta, RequestError, WireCommand, WireError, WireEvent, WireRequest},
 };
 use tokio::{sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
@@ -320,24 +318,24 @@ impl GatewayMan {
 
   /// Broadcast a typed event to every connected companion. Meta is
   /// `Event` by definition of the trait — caller doesn't choose.
-  pub async fn broadcast<E: BridgeEvent>(&self, event: E) {
+  pub async fn broadcast<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
     self
       .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),
-        meta: GatewayMsgMeta::Event,
+        meta: MsgMeta::Event,
         data: event.into(),
       }))
       .await;
   }
 
   /// Send a typed event to one specific companion.
-  pub async fn send_event<E: BridgeEvent>(&self, address: Address, event: E) {
+  pub async fn send_event<E: WireEvent<BridgeToGatewayMsgData>>(&self, address: Address, event: E) {
     self
       .send_all(OutboundGatewayMessage::to(
         address,
         BridgeToGatewayMsg {
           id: uuid::Uuid::now_v7(),
-          meta: GatewayMsgMeta::Event,
+          meta: MsgMeta::Event,
           data: event.into(),
         },
       ))
@@ -345,24 +343,24 @@ impl GatewayMan {
   }
 
   /// Broadcast a typed command to every connected companion.
-  pub async fn broadcast_command<C: BridgeCommand>(&self, cmd: C) {
+  pub async fn broadcast_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
     self
       .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
         id: uuid::Uuid::now_v7(),
-        meta: GatewayMsgMeta::Command,
+        meta: MsgMeta::Command,
         data: cmd.into(),
       }))
       .await;
   }
 
   /// Send a typed command to one specific companion.
-  pub async fn send_command<C: BridgeCommand>(&self, address: Address, cmd: C) {
+  pub async fn send_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, address: Address, cmd: C) {
     self
       .send_all(OutboundGatewayMessage::to(
         address,
         BridgeToGatewayMsg {
           id: uuid::Uuid::now_v7(),
-          meta: GatewayMsgMeta::Command,
+          meta: MsgMeta::Command,
           data: cmd.into(),
         },
       ))
@@ -376,9 +374,9 @@ impl GatewayMan {
   /// behave identically. Times out after 10 seconds.
   ///
   /// Domain errors surface as `RequestError::Domain(_)`; protocol
-  /// failures (`GatewayError`, channel close, timeout) as
+  /// failures (`WireError`, channel close, timeout) as
   /// `RequestError::Protocol(_)`.
-  pub async fn request<R: BridgeRequest>(
+  pub async fn request<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
     &self,
     address: Option<Address>,
     req: R,
@@ -393,7 +391,7 @@ impl GatewayMan {
 
     let msg = BridgeToGatewayMsg {
       id,
-      meta: GatewayMsgMeta::Request,
+      meta: MsgMeta::Request,
       data: req.into(),
     };
     self.send_all(OutboundGatewayMessage::new(address, msg)).await;
@@ -402,13 +400,13 @@ impl GatewayMan {
       Ok(Ok(data)) => R::extract(data),
       Ok(Err(_)) => {
         self.pending.lock().expect("pending poisoned").remove(&id);
-        Err(RequestError::Protocol(GatewayError::HandlerFailed {
+        Err(RequestError::Protocol(WireError::HandlerFailed {
           reason: "response channel closed".into(),
         }))
       }
       Err(_) => {
         self.pending.lock().expect("pending poisoned").remove(&id);
-        Err(RequestError::Protocol(GatewayError::HandlerFailed {
+        Err(RequestError::Protocol(WireError::HandlerFailed {
           reason: "request timed out".into(),
         }))
       }

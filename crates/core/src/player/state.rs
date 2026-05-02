@@ -1,6 +1,9 @@
 use libbridgething::{
   Device, MediaItemUpdate, NowPlayingUpdate, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackUpdate,
-  ServerEventType, Track, gateway::CompanionAuthorityScope, server::ServerPlayerEvent,
+  Track,
+  client::{BridgeToClientPlayerMsg, PlayerQueue, PlayerState as WirePlayerState},
+  gateway::CompanionAuthorityScope,
+  wire::MsgMeta,
 };
 
 use super::PlayerResult;
@@ -230,20 +233,14 @@ impl PlayerState {
   }
 
   pub async fn send_state(&self) -> PlayerResult<()> {
-    self
-      .client_man
-      .broadcast(self.to_send_state(), ServerEventType::Event)
-      .await?;
-    self
-      .client_man
-      .broadcast(self.to_send_queue(), ServerEventType::Event)
-      .await?;
+    self.client_man.broadcast(self.to_send_state(), MsgMeta::Event).await?;
+    self.client_man.broadcast(self.to_send_queue(), MsgMeta::Event).await?;
 
     Ok(())
   }
 
-  pub fn to_send_state(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::PlayerState {
+  pub fn to_send_state(&self) -> BridgeToClientPlayerMsg {
+    BridgeToClientPlayerMsg::PlayerState(WirePlayerState {
       context_id: self
         .context_id
         .clone()
@@ -255,15 +252,15 @@ impl PlayerState {
       playback_restrictions: self.restrictions.clone(),
       playback_speed: self.playback_speed,
       track: self.track.clone().unwrap_or_default(),
-    }
+    })
   }
 
-  pub fn to_send_queue(&self) -> ServerPlayerEvent {
-    ServerPlayerEvent::Queue {
+  pub fn to_send_queue(&self) -> BridgeToClientPlayerMsg {
+    BridgeToClientPlayerMsg::Queue(PlayerQueue {
       current: self.track.clone().unwrap_or_default(),
       previous: vec![],
       next: vec![],
-    }
+    })
   }
 }
 

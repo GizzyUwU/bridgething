@@ -1,6 +1,7 @@
 use bluer::Address;
-use libbridgething::gateway::{
-  BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayRequest, ResponseMeta,
+use libbridgething::{
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsgData},
+  wire::{MsgMeta, ResponseMeta, WireRequest},
 };
 use uuid::Uuid;
 
@@ -16,12 +17,12 @@ pub struct MsgHandle {
   pub bluetooth: BluetoothMan,
 
   pub id: Uuid,
-  pub meta: GatewayMsgMeta,
+  pub meta: MsgMeta,
   pub address: Option<Address>,
 }
 
 impl MsgHandle {
-  pub fn new(handler: &GatewayHandler, id: Uuid, meta: GatewayMsgMeta, address: Option<Address>) -> Self {
+  pub fn new(handler: &GatewayHandler, id: Uuid, meta: MsgMeta, address: Option<Address>) -> Self {
     tracing::trace!("creating connection handle for message id {id} from {address:?}");
 
     Self {
@@ -34,7 +35,7 @@ impl MsgHandle {
     }
   }
 
-  pub async fn send(&self, id: Uuid, data: impl Into<BridgeToGatewayMsgData>, meta: GatewayMsgMeta) {
+  pub async fn send(&self, id: Uuid, data: impl Into<BridgeToGatewayMsgData>, meta: MsgMeta) {
     self
       .bluetooth
       .gateway_man
@@ -50,7 +51,7 @@ impl MsgHandle {
   }
 
   pub async fn request(&self, data: impl Into<BridgeToGatewayMsgData>) {
-    self.send(Uuid::now_v7(), data, GatewayMsgMeta::Request).await
+    self.send(Uuid::now_v7(), data, MsgMeta::Request).await
   }
 
   pub async fn respond(&self, data: impl Into<BridgeToGatewayMsgData>) {
@@ -58,23 +59,29 @@ impl MsgHandle {
       .send(
         Uuid::now_v7(),
         data,
-        GatewayMsgMeta::Response(ResponseMeta { request_id: self.id }),
+        MsgMeta::Response(ResponseMeta { request_id: self.id }),
       )
       .await
   }
 
   /// Ship a typed success response. The request type fixes the wire variant
   /// so the handler can't accidentally encode the wrong shape.
-  pub async fn respond_to<R: GatewayRequest>(&self, response: R::Response) {
+  pub async fn respond_to<R>(&self, response: R::Response)
+  where
+    R: WireRequest<Inbound = BridgeToGatewayMsgData, Outbound = GatewayToBridgeMsgData>,
+  {
     self.respond(R::encode_response(response)).await
   }
 
   /// Ship a typed domain error response paired with this request type.
-  pub async fn respond_err<R: GatewayRequest>(&self, err: R::DomainError) {
+  pub async fn respond_err<R>(&self, err: R::DomainError)
+  where
+    R: WireRequest<Inbound = BridgeToGatewayMsgData, Outbound = GatewayToBridgeMsgData>,
+  {
     self.respond(R::encode_domain_error(err)).await
   }
 
   pub async fn send_info(&self, data: impl Into<BridgeToGatewayMsgData>) {
-    self.send(Uuid::now_v7(), data, GatewayMsgMeta::Event).await
+    self.send(Uuid::now_v7(), data, MsgMeta::Event).await
   }
 }

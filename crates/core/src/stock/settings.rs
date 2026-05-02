@@ -1,7 +1,4 @@
-use libbridgething::{
-  client::ClientKVStoreCommand,
-  server::{ServerStorageEvent, StorageResponse},
-};
+use libbridgething::client::{BridgeToClientStoreMsg, ClientToBridgeStoreMsgRequest, KVGet, KVPut, StorageResponse};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -18,11 +15,11 @@ pub enum StockStorageRecv {
   },
 }
 
-impl From<StockStorageRecv> for ClientKVStoreCommand {
+impl From<StockStorageRecv> for ClientToBridgeStoreMsgRequest {
   fn from(data: StockStorageRecv) -> Self {
     match data {
-      StockStorageRecv::Get { key, .. } => ClientKVStoreCommand::Get { key },
-      StockStorageRecv::Put { key, value, .. } => ClientKVStoreCommand::Put { key, value },
+      StockStorageRecv::Get { key, .. } => ClientToBridgeStoreMsgRequest::Get(KVGet { key }),
+      StockStorageRecv::Put { key, value, .. } => ClientToBridgeStoreMsgRequest::Put(KVPut { key, value }),
     }
   }
 }
@@ -34,10 +31,10 @@ pub enum StockStorageSend {
   Response { payload: StockStoragePayload },
 }
 
-impl From<ServerStorageEvent> for StockStorageSend {
-  fn from(data: ServerStorageEvent) -> Self {
+impl From<BridgeToClientStoreMsg> for StockStorageSend {
+  fn from(data: BridgeToClientStoreMsg) -> Self {
     match data {
-      ServerStorageEvent::Response(StorageResponse { key, value }) => StockStorageSend::Response {
+      BridgeToClientStoreMsg::Response(StorageResponse { key, value }) => StockStorageSend::Response {
         payload: StockStoragePayload {
           key,
           value,

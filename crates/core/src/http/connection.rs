@@ -8,6 +8,10 @@ use futures::{
   SinkExt, StreamExt,
   stream::{SplitSink, SplitStream},
 };
+use libbridgething::{
+  client::{ClientToBridgeMsg, ClientToBridgeMsgData},
+  wire::MsgMeta,
+};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -125,6 +129,31 @@ impl Connection {
       self.forward(ForwardMsg::ChangeMode(ClientMode::Stock)).await;
     };
 
+    // Daemon-initiated typed-request response interception. Mirrors the
+    // gateway dispatcher's response-meta short circuit: any modern
+    // inbound message tagged `MsgMeta::Response` is routed to
+    // `ClientManager::complete_pending` by the listener instead of the
+    // normal handler dispatch path.
+    if let PossibleRecvMsg::Modern(ClientToBridgeMsg {
+      meta: MsgMeta::Response(meta_resp),
+      data,
+      ..
+    }) = msg
+    {
+      tracing::trace!(
+        "(incoming: {}) routing response-meta message to pending request {}",
+        &self.address,
+        meta_resp.request_id
+      );
+      self
+        .forward(ForwardMsg::Response {
+          request_id: meta_resp.request_id,
+          data,
+        })
+        .await;
+      return;
+    }
+
     tracing::trace!("(incoming: {}) decoded message: {:?}", &self.address, &msg);
     self.forward(msg).await;
   }
@@ -193,6 +222,10 @@ impl Connection {
 #[derive(Debug)]
 enum ForwardMsg {
   Msg(Uuid, PossibleRecvMsg),
+  Response {
+    request_id: Uuid,
+    data: ClientToBridgeMsgData,
+  },
   ConnectionClosed(ws::CloseCode, String),
   Error(axum::Error),
   ChangeMode(ClientMode),
@@ -233,6 +266,12 @@ impl From<(SocketAddr, ForwardMsg)> for RecvMsg {
           stock_msg_id,
         }
       }
+      ForwardMsg::Response { request_id, data } => Self {
+        id: Uuid::now_v7(),
+        from,
+        data: RecvMsgData::Response { request_id, data },
+        stock_msg_id: None,
+      },
       ForwardMsg::ConnectionClosed(close_code, msg) => Self {
         id: Uuid::now_v7(),
         from,

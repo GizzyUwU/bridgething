@@ -41,7 +41,7 @@ pub fn emit_swift(plan: &Plan) -> Result<()> {
   out.push_str("import BridgethingSchema\n");
   out.push_str("import Foundation\n\n");
 
-  if !plan.gateway_requests.is_empty() || !plan.bridge_requests.is_empty() {
+  if !plan.outbound_requests.is_empty() || !plan.inbound_requests.is_empty() {
     out.push_str(&swift_request_result_enum());
   }
 

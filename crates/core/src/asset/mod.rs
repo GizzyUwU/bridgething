@@ -5,7 +5,7 @@
 //! iAP2 FileTransfer (`iap2/art/...` ids), or any future daemon-internal
 //! source that wants a place to put bytes a webapp will fetch later.
 //!
-//! Consumers: webapps via `ClientAssetCommand::Get`, stock GetImage via
+//! Consumers: webapps via `ClientToBridgeAssetMsg::Get`, stock GetImage via
 //! the legacy player-image WS event, and direct in-process callers.
 //!
 //! Retention follows `AssetRetention`: `Lru` participates in a global

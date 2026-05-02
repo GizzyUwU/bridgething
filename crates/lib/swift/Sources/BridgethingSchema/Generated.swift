@@ -219,7 +219,10 @@ public struct BridgeThingMeta: Codable, Sendable {
 	}
 }
 
-public enum GatewayMsgMeta: Codable, Sendable {
+/// Intent the sender signals for each message. Lets the receiver know
+/// whether to send back a typed response, treat it as a one-way command,
+/// or pair it against a pending request.
+public enum MsgMeta: Codable, Sendable {
 	case command
 	case event
 	case request
@@ -256,7 +259,7 @@ public enum GatewayMsgMeta: Codable, Sendable {
 				}
 			}
 		}
-		throw DecodingError.typeMismatch(GatewayMsgMeta.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayMsgMeta"))
+		throw DecodingError.typeMismatch(MsgMeta.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for MsgMeta"))
 	}
 
 	public func encode(to encoder: Encoder) throws {
@@ -281,7 +284,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case transport(BridgeToGatewayTransportMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
-	case error(GatewayError)
+	case error(WireError)
 	/// response, command received and won't have a completion
 	case ack
 	/// response, command has been completed
@@ -332,7 +335,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 					return
 				}
 			case .error:
-				if let content = try? container.decode(GatewayError.self, forKey: .data) {
+				if let content = try? container.decode(WireError.self, forKey: .data) {
 					self = .error(content)
 					return
 				}
@@ -382,10 +385,10 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 /// these messages will pass over bluetooth.
 public struct BridgeToGatewayMsg: Codable, Sendable {
 	public let id: Data
-	public let meta: GatewayMsgMeta
+	public let meta: MsgMeta
 	public let data: BridgeToGatewayMsgData
 
-	public init(id: Data, meta: GatewayMsgMeta, data: BridgeToGatewayMsgData) {
+	public init(id: Data, meta: MsgMeta, data: BridgeToGatewayMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -448,7 +451,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case chrome(GatewayToBridgeChromeMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case nowPlayingUpdate(NowPlayingUpdate)
-	case error(GatewayError)
+	case error(WireError)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
@@ -499,7 +502,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					return
 				}
 			case .error:
-				if let content = try? container.decode(GatewayError.self, forKey: .data) {
+				if let content = try? container.decode(WireError.self, forKey: .data) {
 					self = .error(content)
 					return
 				}
@@ -542,10 +545,10 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 /// these messages will pass over bluetooth.
 public struct GatewayToBridgeMsg: Codable, Sendable {
 	public let id: Data
-	public let meta: GatewayMsgMeta
+	public let meta: MsgMeta
 	public let data: GatewayToBridgeMsgData
 
-	public init(id: Data, meta: GatewayMsgMeta, data: GatewayToBridgeMsgData) {
+	public init(id: Data, meta: MsgMeta, data: GatewayToBridgeMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -555,7 +558,7 @@ public struct GatewayToBridgeMsg: Codable, Sendable {
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
 /// wire). `artwork_id` is an opaque asset id - webapps pass this value
-/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// to `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace
 /// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
 /// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
 /// Webapps treat the value as opaque.
@@ -712,6 +715,8 @@ public struct RepeatSet: Codable, Sendable {
 	}
 }
 
+/// Correlation handle the responder echoes back so the requester's
+/// pending future can resolve.
 public struct ResponseMeta: Codable, Sendable {
 	public let requestId: Data
 
@@ -1156,85 +1161,6 @@ public enum ForwardMessage: Codable, Sendable {
 	}
 }
 
-
-/// Generated type representing the anonymous struct variant `Malformed` of the `GatewayError` Rust enum
-public struct GatewayErrorMalformedInner: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-
-/// Generated type representing the anonymous struct variant `HandlerFailed` of the `GatewayError` Rust enum
-public struct GatewayErrorHandlerFailedInner: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-/// Protocol-level failure that the bridge ships when a request could not be
-/// reached or dispatched. Carried by `BridgeToGatewayMsgData::Error`.
-/// 
-/// Domain-level errors (predictable, op-specific failures the caller may want
-/// to recover from) live inside the per-op response variant — for example
-/// `BridgeToGatewayWebappMsg::WebappError(WebappError)`.
-public enum GatewayError: Codable, Sendable {
-	/// The bridge does not implement this request variant.
-	case unsupported
-	/// The bridge could not decode or validate the request payload.
-	case malformed(GatewayErrorMalformedInner)
-	/// An unexpected internal error occurred while handling the request.
-	case handlerFailed(GatewayErrorHandlerFailedInner)
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case unsupported,
-			malformed,
-			handlerFailed
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case type, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
-			switch type {
-			case .unsupported:
-				self = .unsupported
-				return
-			case .malformed:
-				if let content = try? container.decode(GatewayErrorMalformedInner.self, forKey: .data) {
-					self = .malformed(content)
-					return
-				}
-			case .handlerFailed:
-				if let content = try? container.decode(GatewayErrorHandlerFailedInner.self, forKey: .data) {
-					self = .handlerFailed(content)
-					return
-				}
-			}
-		}
-		throw DecodingError.typeMismatch(GatewayError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayError"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .unsupported:
-			try container.encode(CodingKeys.unsupported, forKey: .type)
-		case .malformed(let content):
-			try container.encode(CodingKeys.malformed, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .handlerFailed(let content):
-			try container.encode(CodingKeys.handlerFailed, forKey: .type)
-			try container.encode(content, forKey: .data)
-		}
-	}
-}
-
 /// Companion-side asset operations:
 /// - `Push` (event): proactive load into the daemon cache.
 /// - `Clear` (event): drop a previously pushed asset.
@@ -1531,41 +1457,6 @@ public enum Priority: String, Codable, Sendable {
 	case bulk
 }
 
-public enum ServerPeerEvent: Codable, Sendable {
-	case snapshot([String: Peer])
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case snapshot
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case event, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
-			switch type {
-			case .snapshot:
-				if let content = try? container.decode([String: Peer].self, forKey: .data) {
-					self = .snapshot(content)
-					return
-				}
-			}
-		}
-		throw DecodingError.typeMismatch(ServerPeerEvent.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for ServerPeerEvent"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .snapshot(let content):
-			try container.encode(CodingKeys.snapshot, forKey: .event)
-			try container.encode(content, forKey: .data)
-		}
-	}
-}
-
 
 /// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum
 public struct WebappErrorUnknownWebappInner: Codable, Sendable {
@@ -1646,6 +1537,86 @@ public enum WebappError: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .installFailed(let content):
 			try container.encode(CodingKeys.installFailed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+
+/// Generated type representing the anonymous struct variant `Malformed` of the `WireError` Rust enum
+public struct WireErrorMalformedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `HandlerFailed` of the `WireError` Rust enum
+public struct WireErrorHandlerFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+/// Protocol-level failure the responder ships when a request could not be
+/// reached or dispatched. Carried by the `Error` variant on every
+/// `*MsgData` enum.
+/// 
+/// Domain-level errors (predictable, op-specific failures the caller may
+/// want to recover from) live inside the per-op response variant, not
+/// here.
+public enum WireError: Codable, Sendable {
+	/// The receiver does not implement this request variant.
+	case unsupported
+	/// The receiver could not decode or validate the request payload.
+	case malformed(WireErrorMalformedInner)
+	/// An unexpected internal error occurred while handling the request.
+	case handlerFailed(WireErrorHandlerFailedInner)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case unsupported,
+			malformed,
+			handlerFailed
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .unsupported:
+				self = .unsupported
+				return
+			case .malformed:
+				if let content = try? container.decode(WireErrorMalformedInner.self, forKey: .data) {
+					self = .malformed(content)
+					return
+				}
+			case .handlerFailed:
+				if let content = try? container.decode(WireErrorHandlerFailedInner.self, forKey: .data) {
+					self = .handlerFailed(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(WireError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for WireError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .unsupported:
+			try container.encode(CodingKeys.unsupported, forKey: .type)
+		case .malformed(let content):
+			try container.encode(CodingKeys.malformed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .handlerFailed(let content):
+			try container.encode(CodingKeys.handlerFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}

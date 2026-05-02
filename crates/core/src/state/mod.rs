@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use libbridgething::{Device, server::GatewayStatus};
+use libbridgething::{Device, client::GatewayStatus};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, task::JoinHandle};
 

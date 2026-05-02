@@ -1,0 +1,23 @@
+{
+  "name": "create-bridgething",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Scaffold a new bridgething webapp (React + Vite + Tailwind v4)",
+  "bin": {
+    "create-bridgething": "./dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "template"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "devDependencies": {
+    "tsdown": "^0.21.10"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

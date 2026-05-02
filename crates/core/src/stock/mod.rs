@@ -1,7 +1,10 @@
 use base64::Engine as _;
 use libbridgething::{
-  BridgeThingMeta, ServerEvent, ServerEventData,
-  server::{ServerAssetEvent, ServerSystemEvent},
+  BridgeThingMeta,
+  client::{
+    AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientMsg, BridgeToClientMsgData, BridgeToClientSystemMsg,
+    OtaPowerOff, OtaReboot, PhoneCallInfo,
+  },
   transitive_from,
 };
 use serde::{Deserialize, Serialize};
@@ -87,31 +90,29 @@ pub enum StockSendMsg {
   Unsupported,
 }
 
-/// Translate a modern `ServerEvent` into a stock-format `StockSendMsg`.
+/// Translate a modern `BridgeToClientMsg` into a stock-format `StockSendMsg`.
 /// `stock_msg_id` is the inter-app correlation id from the originating
 /// `StockInterApp` request; it lives outside the modern wire type and is
-/// threaded through the connection layer so the modern `ServerEvent` stays
-/// free of stock-specific fields.
-pub fn server_event_to_stock(msg: ServerEvent, stock_msg_id: Option<usize>) -> StockSendMsg {
+/// threaded through the connection layer so the modern `BridgeToClientMsg`
+/// stays free of stock-specific fields.
+pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>) -> StockSendMsg {
   match msg.data {
-    ServerEventData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
-    ServerEventData::Storage(data) => StockSendMsg::Storage(data.into()),
-    ServerEventData::System(data) => data.into(),
-    ServerEventData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(stock_msg_id, data.into())),
-    ServerEventData::Interaction(data) => {
-      StockSendMsg::InterApp(StockInterAppSend::from_interaction_send(data, stock_msg_id))
-    }
-    ServerEventData::Forward(_) => {
+    BridgeToClientMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
+    BridgeToClientMsgData::Store(data) => StockSendMsg::Storage(data.into()),
+    BridgeToClientMsgData::System(data) => data.into(),
+    BridgeToClientMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(stock_msg_id, data.into())),
+    BridgeToClientMsgData::Interaction(_) => StockSendMsg::Unsupported,
+    BridgeToClientMsgData::Forward(_) => {
       tracing::warn!("forward message is not supported in stock app!!");
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
-    ServerEventData::Error(err) => {
+    BridgeToClientMsgData::Error(err) => {
       tracing::warn!("typed error response is not supported in stock app: {:?}", err);
       StockSendMsg::Unsupported
     }
-    ServerEventData::Peer(_) => StockSendMsg::Unsupported,
-    ServerEventData::Asset(data) => match data {
-      ServerAssetEvent::Got(got) => {
+    BridgeToClientMsgData::Peer(_) => StockSendMsg::Unsupported,
+    BridgeToClientMsgData::Asset(data) => match data {
+      BridgeToClientAssetMsg::Got(got) => {
         let image_data = base64::engine::general_purpose::STANDARD.encode(&got.bytes);
         StockSendMsg::InterApp(StockInterAppSend::new(
           stock_msg_id,
@@ -122,18 +123,20 @@ pub fn server_event_to_stock(msg: ServerEvent, stock_msg_id: Option<usize>) -> S
           },
         ))
       }
-      ServerAssetEvent::NotFound(_) | ServerAssetEvent::Ready(_) | ServerAssetEvent::Cleared(_) => {
+      BridgeToClientAssetMsg::NotFound(_) | BridgeToClientAssetMsg::Ready(_) | BridgeToClientAssetMsg::Cleared(_) => {
         StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
       }
     },
-    ServerEventData::Ack => StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id)),
+    BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
+      StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
+    }
   }
 }
 
-impl From<ServerSystemEvent> for StockSendMsg {
-  fn from(value: ServerSystemEvent) -> Self {
+impl From<BridgeToClientSystemMsg> for StockSendMsg {
+  fn from(value: BridgeToClientSystemMsg) -> Self {
     match value {
-      ServerSystemEvent::Version(BridgeThingMeta {
+      BridgeToClientSystemMsg::Version(BridgeThingMeta {
         serial_number,
         os_version,
         app_version,
@@ -156,25 +159,29 @@ impl From<ServerSystemEvent> for StockSendMsg {
         credits,
       }),
 
-      ServerSystemEvent::GatewayStatus { .. } => StockSendMsg::Unsupported,
+      BridgeToClientSystemMsg::GatewayStatus(_) => StockSendMsg::Unsupported,
 
-      ServerSystemEvent::OtaReboot { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaReboot {
-        delay_ms: delay_ms.to_string(),
-      }),
-      ServerSystemEvent::OtaPowerOff { delay_ms } => StockSendMsg::Hardware(StockHardwareSend::OtaPowerOff {
-        delay_ms: delay_ms.to_string(),
-      }),
-      ServerSystemEvent::AmbientLightUpdate { brightness } => {
+      BridgeToClientSystemMsg::OtaReboot(OtaReboot { delay_ms }) => {
+        StockSendMsg::Hardware(StockHardwareSend::OtaReboot {
+          delay_ms: delay_ms.to_string(),
+        })
+      }
+      BridgeToClientSystemMsg::OtaPowerOff(OtaPowerOff { delay_ms }) => {
+        StockSendMsg::Hardware(StockHardwareSend::OtaPowerOff {
+          delay_ms: delay_ms.to_string(),
+        })
+      }
+      BridgeToClientSystemMsg::AmbientLightUpdate(AmbientLightUpdate { brightness }) => {
         StockSendMsg::Hardware(StockHardwareSend::AmbientLightUpdate { payload: brightness })
       }
 
-      ServerSystemEvent::PhoneCallInfo {
+      BridgeToClientSystemMsg::PhoneCallInfo(PhoneCallInfo {
         remote_id,
         display_name,
         status,
         call_dir,
         call_id,
-      } => StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
+      }) => StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
         remote_id,
         display_name,
         status,

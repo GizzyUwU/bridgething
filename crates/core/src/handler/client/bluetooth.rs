@@ -1,4 +1,7 @@
-use libbridgething::client::{ClientBluetoothCommand, ListBluetoothDevices};
+use libbridgething::client::{
+  ClientToBridgeBluetoothMsg, ConnectBluetooth, DisablePan, EnablePan, ForgetBluetooth, ListBluetoothDevices,
+  PairBluetooth, PairedDevicesMap, SetBluetoothAlias,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,20 +14,20 @@ impl BluetoothHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: ClientBluetoothCommand) -> HandlerResult {
+  pub async fn handle(&mut self, msg: ClientToBridgeBluetoothMsg) -> HandlerResult {
     tracing::debug!("({}) handling bluetooth message", &self.handle.from);
 
     match msg {
-      ClientBluetoothCommand::List => self.list().await,
-      ClientBluetoothCommand::Connect { mac } => self.connect(mac).await,
-      ClientBluetoothCommand::Scan => self.scan().await,
-      ClientBluetoothCommand::EnableDiscoverable => self.enable_discoverable().await,
-      ClientBluetoothCommand::DisableDiscoverable => self.disable_discoverable().await,
-      ClientBluetoothCommand::Pair { mac } => self.pair(mac).await,
-      ClientBluetoothCommand::Forget { mac } => self.forget(mac).await,
-      ClientBluetoothCommand::EnablePAN { mac } => self.enable_pan(mac).await,
-      ClientBluetoothCommand::DisablePAN { mac } => self.disable_pan(mac).await,
-      ClientBluetoothCommand::SetAlias { name } => self.set_alias(name).await,
+      ClientToBridgeBluetoothMsg::List => self.list().await,
+      ClientToBridgeBluetoothMsg::Connect(ConnectBluetooth { mac }) => self.connect(mac).await,
+      ClientToBridgeBluetoothMsg::Scan => self.scan().await,
+      ClientToBridgeBluetoothMsg::EnableDiscoverable => self.enable_discoverable().await,
+      ClientToBridgeBluetoothMsg::DisableDiscoverable => self.disable_discoverable().await,
+      ClientToBridgeBluetoothMsg::Pair(PairBluetooth { mac }) => self.pair(mac).await,
+      ClientToBridgeBluetoothMsg::Forget(ForgetBluetooth { mac }) => self.forget(mac).await,
+      ClientToBridgeBluetoothMsg::EnablePan(EnablePan { mac }) => self.enable_pan(mac).await,
+      ClientToBridgeBluetoothMsg::DisablePan(DisablePan { mac }) => self.disable_pan(mac).await,
+      ClientToBridgeBluetoothMsg::SetAlias(SetBluetoothAlias { name }) => self.set_alias(name).await,
     }
   }
 
@@ -37,7 +40,7 @@ impl BluetoothHandler {
     Ok(
       self
         .handle
-        .respond_to::<ListBluetoothDevices>(devices.into_iter().collect())
+        .respond_to::<ListBluetoothDevices>(PairedDevicesMap(devices.into_iter().collect()))
         .await?,
     )
   }

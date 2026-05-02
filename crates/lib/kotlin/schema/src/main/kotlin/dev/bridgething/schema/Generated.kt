@@ -129,20 +129,23 @@ data class BridgeThingMeta (
 	val credits: String
 )
 
-@Serializable(with = GatewayMsgMetaSerializer::class)
-sealed class GatewayMsgMeta {
+/// Intent the sender signals for each message. Lets the receiver know
+/// whether to send back a typed response, treat it as a one-way command,
+/// or pair it against a pending request.
+@Serializable(with = MsgMetaSerializer::class)
+sealed class MsgMeta {
 	@Serializable
 	@SerialName("command")
-	object Command: GatewayMsgMeta()
+	object Command: MsgMeta()
 	@Serializable
 	@SerialName("event")
-	object Event: GatewayMsgMeta()
+	object Event: MsgMeta()
 	@Serializable
 	@SerialName("request")
-	object Request: GatewayMsgMeta()
+	object Request: MsgMeta()
 	@Serializable
 	@SerialName("response")
-	data class Response(val data: ResponseMeta): GatewayMsgMeta()
+	data class Response(val data: ResponseMeta): MsgMeta()
 }
 
 @Serializable(with = BridgeToGatewayMsgDataSerializer::class)
@@ -164,7 +167,7 @@ sealed class BridgeToGatewayMsgData {
 	data class Forward(val data: ForwardMessage): BridgeToGatewayMsgData()
 	@Serializable
 	@SerialName("error")
-	data class Error(val data: GatewayError): BridgeToGatewayMsgData()
+	data class Error(val data: WireError): BridgeToGatewayMsgData()
 	/// response, command received and won't have a completion
 	@Serializable
 	@SerialName("ack")
@@ -182,7 +185,7 @@ sealed class BridgeToGatewayMsgData {
 @Serializable
 data class BridgeToGatewayMsg (
 	val id: ByteArray,
-	val meta: GatewayMsgMeta,
+	val meta: MsgMeta,
 	val data: BridgeToGatewayMsgData
 )
 
@@ -247,7 +250,7 @@ sealed class GatewayToBridgeMsgData {
 	data class NowPlayingUpdate(val data: dev.bridgething.schema.NowPlayingUpdate): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("error")
-	data class Error(val data: GatewayError): GatewayToBridgeMsgData()
+	data class Error(val data: WireError): GatewayToBridgeMsgData()
 }
 
 /// gateway -> bridgething
@@ -257,14 +260,14 @@ sealed class GatewayToBridgeMsgData {
 @Serializable
 data class GatewayToBridgeMsg (
 	val id: ByteArray,
-	val meta: GatewayMsgMeta,
+	val meta: MsgMeta,
 	val data: GatewayToBridgeMsgData
 )
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
 /// wire). `artwork_id` is an opaque asset id - webapps pass this value
-/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// to `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace
 /// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
 /// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
 /// Webapps treat the value as opaque.
@@ -360,6 +363,8 @@ data class RepeatSet (
 	val mode: RepeatMode
 )
 
+/// Correlation handle the responder echoes back so the requester's
+/// pending future can resolve.
 @Serializable
 data class ResponseMeta (
 	val requestId: ByteArray
@@ -546,40 +551,6 @@ sealed class ForwardMessage {
 	data class Binary(val data: ByteArray): ForwardMessage()
 }
 
-/// Generated type representing the anonymous struct variant `Malformed` of the `GatewayError` Rust enum
-@Serializable
-data class GatewayErrorMalformedInner (
-	val reason: String
-)
-
-/// Generated type representing the anonymous struct variant `HandlerFailed` of the `GatewayError` Rust enum
-@Serializable
-data class GatewayErrorHandlerFailedInner (
-	val reason: String
-)
-
-/// Protocol-level failure that the bridge ships when a request could not be
-/// reached or dispatched. Carried by `BridgeToGatewayMsgData::Error`.
-/// 
-/// Domain-level errors (predictable, op-specific failures the caller may want
-/// to recover from) live inside the per-op response variant — for example
-/// `BridgeToGatewayWebappMsg::WebappError(WebappError)`.
-@Serializable(with = GatewayErrorSerializer::class)
-sealed class GatewayError {
-	/// The bridge does not implement this request variant.
-	@Serializable
-	@SerialName("unsupported")
-	object Unsupported: GatewayError()
-	/// The bridge could not decode or validate the request payload.
-	@Serializable
-	@SerialName("malformed")
-	data class Malformed(val data: GatewayErrorMalformedInner): GatewayError()
-	/// An unexpected internal error occurred while handling the request.
-	@Serializable
-	@SerialName("handlerFailed")
-	data class HandlerFailed(val data: GatewayErrorHandlerFailedInner): GatewayError()
-}
-
 /// Companion-side asset operations:
 /// - `Push` (event): proactive load into the daemon cache.
 /// - `Clear` (event): drop a previously pushed asset.
@@ -693,13 +664,6 @@ enum class Priority(val string: String) {
 	Bulk("bulk"),
 }
 
-@Serializable(with = ServerPeerEventSerializer::class)
-sealed class ServerPeerEvent {
-	@Serializable
-	@SerialName("snapshot")
-	data class Snapshot(val data: HashMap<String, Peer>): ServerPeerEvent()
-}
-
 /// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum
 @Serializable
 data class WebappErrorUnknownWebappInner (
@@ -732,5 +696,40 @@ sealed class WebappError {
 	@Serializable
 	@SerialName("installFailed")
 	data class InstallFailed(val data: WebappErrorInstallFailedInner): WebappError()
+}
+
+/// Generated type representing the anonymous struct variant `Malformed` of the `WireError` Rust enum
+@Serializable
+data class WireErrorMalformedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `HandlerFailed` of the `WireError` Rust enum
+@Serializable
+data class WireErrorHandlerFailedInner (
+	val reason: String
+)
+
+/// Protocol-level failure the responder ships when a request could not be
+/// reached or dispatched. Carried by the `Error` variant on every
+/// `*MsgData` enum.
+/// 
+/// Domain-level errors (predictable, op-specific failures the caller may
+/// want to recover from) live inside the per-op response variant, not
+/// here.
+@Serializable(with = WireErrorSerializer::class)
+sealed class WireError {
+	/// The receiver does not implement this request variant.
+	@Serializable
+	@SerialName("unsupported")
+	object Unsupported: WireError()
+	/// The receiver could not decode or validate the request payload.
+	@Serializable
+	@SerialName("malformed")
+	data class Malformed(val data: WireErrorMalformedInner): WireError()
+	/// An unexpected internal error occurred while handling the request.
+	@Serializable
+	@SerialName("handlerFailed")
+	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()
 }
 

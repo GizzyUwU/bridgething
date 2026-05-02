@@ -1,43 +1,32 @@
-//! `#[derive(GatewayRequest)]` and `#[derive(BridgeRequest)]` — replace
-//! the macro_rules `impl_*_request!` pair with proc-macro derives keyed
-//! off a single attribute.
+//! `#[derive(WireRequest)]` — emit a `WireRequest` impl for a request
+//! payload type, plus the `From<Self> for <Outbound>` lift and a
+//! cross-direction compile-time validation that the declared response
+//! variant exists, is tagged `#[bridge_response]`, and matches the
+//! declared payload type.
 //!
-//! Usage on a request payload type:
+//! Usage:
 //!
 //! ```ignore
-//! #[derive(..., GatewayRequest)]
-//! #[gateway_request(
-//!     surface = Webapp,
-//!     request_variant = SwitchTo,
-//!     response = WebappActive,
-//!     response_variant = Switched,
-//!     error = WebappError,
-//!     error_variant = WebappError,
+//! #[derive(..., WireRequest)]
+//! #[wire_request(
+//!     direction = ClientToBridge,        // request goes webapp -> daemon
+//!     surface = Asset,                   // outer wire variant on both directions
+//!     request_variant = Get,
+//!     response = AssetGot,
+//!     response_variant = Got,
+//!     // optional: domain error
+//!     // error = AssetNotFound,
+//!     // error_variant = NotFound,
 //! )]
-//! pub struct WebappSwitchTo { pub name: String }
+//! pub struct AssetGet { pub id: String }
 //! ```
 //!
-//! What gets emitted:
-//! 1. `impl GatewayRequest for <Self>` (or `BridgeRequest`) with
-//!    `extract`, `encode_response`, `encode_domain_error`.
-//! 2. `From<Self> for <OuterMsgData>` for the outbound wire wrapping.
-//! 3. A `const _: () = { … }` block referencing the hidden response-
-//!    marker module emitted by `BridgeEnum` on the cross-direction
-//!    inner enum. This block fails to compile if the response variant
-//!    doesn't exist there, isn't tagged `#[bridge_response]`, or
-//!    carries a payload type other than the one declared here. The
-//!    same assertion runs for the (optional) error variant.
-//!
-//! Direction conventions (`GatewayRequest` is companion → daemon, so
-//! its response lives on the daemon → companion direction's inner enum,
-//! and vice versa) are baked into the `Direction` enum below.
-//!
-//! Tuple vs unit request variants are resolved from the `Self` type's
-//! shape: a unit struct (no fields) emits a unit-variant constructor;
-//! anything else emits a tuple-variant constructor that takes the
-//! whole `Self`. With-error vs without-error is decided by whether
-//! the attribute carries `error` / `error_variant` keys; `without` uses
-//! `Infallible` as the domain-error type.
+//! `direction` is one of the four wire-direction prefixes recognized by
+//! `BridgeEnum`. Outbound and inbound wire data types are derived from
+//! the direction — request enters Outbound, response arrives on Inbound.
+//! The Outbound inner enum is `<Direction><Surface>Msg`; the response /
+//! error inner enum lives on the opposite-direction sibling
+//! `<OppositeDirection><Surface>Msg`.
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -45,67 +34,69 @@ use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, Ident, Type, spanned::Spanned};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) enum Direction {
-  /// `GatewayRequest`: companion → daemon. Response on the daemon →
-  /// companion side (`BridgeToGateway*`).
-  Gateway,
-  /// `BridgeRequest`: daemon → companion. Response on the companion
-  /// → daemon side (`GatewayToBridge*`).
-  Bridge,
+enum Direction {
+  BridgeToGateway,
+  GatewayToBridge,
+  BridgeToClient,
+  ClientToBridge,
 }
 
 impl Direction {
-  fn trait_ident(self) -> Ident {
-    match self {
-      Self::Gateway => format_ident!("GatewayRequest"),
-      Self::Bridge => format_ident!("BridgeRequest"),
+  fn from_ident(ident: &Ident) -> syn::Result<Self> {
+    let s = ident.to_string();
+    match s.as_str() {
+      "BridgeToGateway" => Ok(Self::BridgeToGateway),
+      "GatewayToBridge" => Ok(Self::GatewayToBridge),
+      "BridgeToClient" => Ok(Self::BridgeToClient),
+      "ClientToBridge" => Ok(Self::ClientToBridge),
+      _ => Err(syn::Error::new(
+        ident.span(),
+        format!(
+          "unknown direction `{s}`; expected one of: \
+           BridgeToGateway, GatewayToBridge, BridgeToClient, ClientToBridge"
+        ),
+      )),
     }
   }
 
-  /// The wire data type the request *enters*: for `GatewayRequest`,
-  /// the companion → daemon `GatewayToBridgeMsgData`; for
-  /// `BridgeRequest`, the daemon → companion `BridgeToGatewayMsgData`.
-  fn outbound_wire(self) -> Ident {
+  fn opposite(self) -> Self {
     match self {
-      Self::Gateway => format_ident!("GatewayToBridgeMsgData"),
-      Self::Bridge => format_ident!("BridgeToGatewayMsgData"),
+      Self::BridgeToGateway => Self::GatewayToBridge,
+      Self::GatewayToBridge => Self::BridgeToGateway,
+      Self::BridgeToClient => Self::ClientToBridge,
+      Self::ClientToBridge => Self::BridgeToClient,
     }
   }
 
-  /// The inner enum holding the *request* variant (the same direction
-  /// as `outbound_wire`), parameterized by surface name.
-  fn outbound_inner(self, surface: &Ident) -> Ident {
+  /// Outer wire data type the request lifts into / the response arrives on.
+  fn outer_wire(self, lib: &TokenStream2) -> TokenStream2 {
     match self {
-      Self::Gateway => format_ident!("GatewayToBridge{}Msg", surface),
-      Self::Bridge => format_ident!("BridgeToGateway{}Msg", surface),
+      Self::BridgeToGateway => quote!(#lib::gateway::BridgeToGatewayMsgData),
+      Self::GatewayToBridge => quote!(#lib::gateway::GatewayToBridgeMsgData),
+      Self::BridgeToClient => quote!(#lib::client::BridgeToClientMsgData),
+      Self::ClientToBridge => quote!(#lib::client::ClientToBridgeMsgData),
     }
   }
 
-  /// The wire data type the response *enters* (opposite of `outbound_wire`).
-  fn response_wire(self) -> Ident {
-    match self {
-      Self::Gateway => format_ident!("BridgeToGatewayMsgData"),
-      Self::Bridge => format_ident!("GatewayToBridgeMsgData"),
-    }
-  }
-
-  /// The inner enum holding the *response* and *error* variants.
-  fn response_inner(self, surface: &Ident) -> Ident {
-    match self {
-      Self::Gateway => format_ident!("BridgeToGateway{}Msg", surface),
-      Self::Bridge => format_ident!("GatewayToBridge{}Msg", surface),
-    }
-  }
-
-  fn attr_name(self) -> &'static str {
-    match self {
-      Self::Gateway => "gateway_request",
-      Self::Bridge => "bridge_request",
-    }
+  /// Inner enum for a given surface ident. `<Direction><Surface>Msg`.
+  fn inner_for(self, lib: &TokenStream2, surface: &Ident) -> TokenStream2 {
+    let prefix = match self {
+      Self::BridgeToGateway => "BridgeToGateway",
+      Self::GatewayToBridge => "GatewayToBridge",
+      Self::BridgeToClient => "BridgeToClient",
+      Self::ClientToBridge => "ClientToBridge",
+    };
+    let module = match self {
+      Self::BridgeToGateway | Self::GatewayToBridge => quote!(gateway),
+      Self::BridgeToClient | Self::ClientToBridge => quote!(client),
+    };
+    let inner = format_ident!("{}{}Msg", prefix, surface);
+    quote!(#lib::#module::#inner)
   }
 }
 
 struct RequestAttr {
+  direction: Direction,
   surface: Ident,
   request_variant: Ident,
   response: Type,
@@ -114,11 +105,12 @@ struct RequestAttr {
   error_variant: Option<Ident>,
 }
 
-fn parse_attr(attrs: &[Attribute], attr_name: &str, parent_span: Span) -> syn::Result<RequestAttr> {
+fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr> {
   for attr in attrs {
-    if !attr.path().is_ident(attr_name) {
+    if !attr.path().is_ident("wire_request") {
       continue;
     }
+    let mut direction: Option<Direction> = None;
     let mut surface: Option<Ident> = None;
     let mut request_variant: Option<Ident> = None;
     let mut response: Option<Type> = None;
@@ -127,7 +119,10 @@ fn parse_attr(attrs: &[Attribute], attr_name: &str, parent_span: Span) -> syn::R
     let mut error_variant: Option<Ident> = None;
 
     attr.parse_nested_meta(|meta| {
-      if meta.path.is_ident("surface") {
+      if meta.path.is_ident("direction") {
+        let id: Ident = meta.value()?.parse()?;
+        direction = Some(Direction::from_ident(&id)?);
+      } else if meta.path.is_ident("surface") {
         surface = Some(meta.value()?.parse()?);
       } else if meta.path.is_ident("request_variant") {
         request_variant = Some(meta.value()?.parse()?);
@@ -140,28 +135,28 @@ fn parse_attr(attrs: &[Attribute], attr_name: &str, parent_span: Span) -> syn::R
       } else if meta.path.is_ident("error_variant") {
         error_variant = Some(meta.value()?.parse()?);
       } else {
-        return Err(meta.error(format!("unsupported {} key", attr_name)));
+        return Err(meta.error("unsupported wire_request key"));
       }
       Ok(())
     })?;
 
-    let surface =
-      surface.ok_or_else(|| syn::Error::new(attr.span(), format!("{} missing `surface = …`", attr_name)))?;
-    let request_variant = request_variant
-      .ok_or_else(|| syn::Error::new(attr.span(), format!("{} missing `request_variant = …`", attr_name)))?;
-    let response =
-      response.ok_or_else(|| syn::Error::new(attr.span(), format!("{} missing `response = …`", attr_name)))?;
-    let response_variant = response_variant
-      .ok_or_else(|| syn::Error::new(attr.span(), format!("{} missing `response_variant = …`", attr_name)))?;
+    let direction = direction.ok_or_else(|| syn::Error::new(attr.span(), "wire_request missing `direction = …`"))?;
+    let surface = surface.ok_or_else(|| syn::Error::new(attr.span(), "wire_request missing `surface = …`"))?;
+    let request_variant =
+      request_variant.ok_or_else(|| syn::Error::new(attr.span(), "wire_request missing `request_variant = …`"))?;
+    let response = response.ok_or_else(|| syn::Error::new(attr.span(), "wire_request missing `response = …`"))?;
+    let response_variant =
+      response_variant.ok_or_else(|| syn::Error::new(attr.span(), "wire_request missing `response_variant = …`"))?;
 
     if error.is_some() != error_variant.is_some() {
       return Err(syn::Error::new(
         attr.span(),
-        format!("{} requires both or neither of `error` and `error_variant`", attr_name),
+        "wire_request requires both or neither of `error` and `error_variant`",
       ));
     }
 
     return Ok(RequestAttr {
+      direction,
       surface,
       request_variant,
       response,
@@ -170,10 +165,7 @@ fn parse_attr(attrs: &[Attribute], attr_name: &str, parent_span: Span) -> syn::R
       error_variant,
     });
   }
-  Err(syn::Error::new(
-    parent_span,
-    format!("missing #[{}(…)] attribute", attr_name),
-  ))
+  Err(syn::Error::new(parent_span, "missing #[wire_request(…)] attribute"))
 }
 
 fn lib_crate_path() -> TokenStream2 {
@@ -198,23 +190,36 @@ fn is_unit_struct(ast: &DeriveInput) -> syn::Result<bool> {
     },
     _ => Err(syn::Error::new(
       ast.span(),
-      "GatewayRequest / BridgeRequest only supports structs (the request payload type)",
+      "WireRequest only supports structs (the request payload type)",
     )),
   }
 }
 
-pub(crate) fn expand(ast: &DeriveInput, direction: Direction) -> syn::Result<TokenStream2> {
-  let attr = parse_attr(&ast.attrs, direction.attr_name(), ast.span())?;
+pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
+  let attr = parse_attr(&ast.attrs, ast.span())?;
   let unit_request = is_unit_struct(ast)?;
 
   let req_ty = &ast.ident;
   let lib = lib_crate_path();
-  let trait_ident = direction.trait_ident();
-  let outbound_wire = direction.outbound_wire();
-  let outbound_inner = direction.outbound_inner(&attr.surface);
-  let response_wire = direction.response_wire();
-  let response_inner = direction.response_inner(&attr.surface);
-  let response_marker_mod = format_ident!("__{}_responses", response_inner);
+  let outbound_wire = attr.direction.outer_wire(&lib);
+  let outbound_inner = attr.direction.inner_for(&lib, &attr.surface);
+  let response_dir = attr.direction.opposite();
+  let response_wire = response_dir.outer_wire(&lib);
+  let response_inner = response_dir.inner_for(&lib, &attr.surface);
+
+  // Inner enum's ident lives at the same module path as `response_inner`;
+  // we derive its plain ident for the response-marker module name.
+  let response_inner_ident = match response_dir {
+    Direction::BridgeToGateway => format_ident!("BridgeToGateway{}Msg", attr.surface),
+    Direction::GatewayToBridge => format_ident!("GatewayToBridge{}Msg", attr.surface),
+    Direction::BridgeToClient => format_ident!("BridgeToClient{}Msg", attr.surface),
+    Direction::ClientToBridge => format_ident!("ClientToBridge{}Msg", attr.surface),
+  };
+  let response_marker_mod = format_ident!("__{}_responses", response_inner_ident);
+  let response_marker_path = match response_dir {
+    Direction::BridgeToGateway | Direction::GatewayToBridge => quote!(#lib::gateway::#response_marker_mod),
+    Direction::BridgeToClient | Direction::ClientToBridge => quote!(#lib::client::#response_marker_mod),
+  };
 
   let request_variant = &attr.request_variant;
   let response_ty = &attr.response;
@@ -223,26 +228,24 @@ pub(crate) fn expand(ast: &DeriveInput, direction: Direction) -> syn::Result<Tok
   // The outer wire data wraps the inner enum as
   // `Self::<Surface>(inner)`; the `surface` ident is also the variant
   // ident on the outer wire data.
-  let outbound_inner_outer = &attr.surface;
+  let surface_variant = &attr.surface;
 
-  // `From<Self> for <outbound_wire>`: how the request wraps into the
-  // outer wire data.
   let from_impl = if unit_request {
     quote! {
-      impl ::core::convert::From<#req_ty> for #lib::gateway::#outbound_wire {
+      impl ::core::convert::From<#req_ty> for #outbound_wire {
         fn from(_: #req_ty) -> Self {
-          #lib::gateway::#outbound_wire::#outbound_inner_outer(
-            #lib::gateway::#outbound_inner::#request_variant
+          #outbound_wire::#surface_variant(
+            #outbound_inner::#request_variant
           )
         }
       }
     }
   } else {
     quote! {
-      impl ::core::convert::From<#req_ty> for #lib::gateway::#outbound_wire {
+      impl ::core::convert::From<#req_ty> for #outbound_wire {
         fn from(payload: #req_ty) -> Self {
-          #lib::gateway::#outbound_wire::#outbound_inner_outer(
-            #lib::gateway::#outbound_inner::#request_variant(payload)
+          #outbound_wire::#surface_variant(
+            #outbound_inner::#request_variant(payload)
           )
         }
       }
@@ -252,18 +255,18 @@ pub(crate) fn expand(ast: &DeriveInput, direction: Direction) -> syn::Result<Tok
   let (domain_error_ty, extract_arms_error, encode_domain_error_body, error_assertion) =
     if let (Some(err_ty), Some(err_variant)) = (&attr.error, &attr.error_variant) {
       let extract = quote! {
-        #lib::gateway::#response_wire::#outbound_inner_outer(
-          #lib::gateway::#response_inner::#err_variant(e),
-        ) => ::core::result::Result::Err(#lib::gateway::RequestError::Domain(e)),
+        #response_wire::#surface_variant(
+          #response_inner::#err_variant(e),
+        ) => ::core::result::Result::Err(#lib::wire::RequestError::Domain(e)),
       };
       let encode = quote! {
-        #lib::gateway::#response_wire::#outbound_inner_outer(
-          #lib::gateway::#response_inner::#err_variant(err),
+        #response_wire::#surface_variant(
+          #response_inner::#err_variant(err),
         )
       };
       let assertion = quote! {
-        let _ = #lib::gateway::#response_marker_mod::#err_variant(
-          ::core::marker::PhantomData::<<#req_ty as #lib::gateway::#trait_ident>::DomainError>,
+        let _ = #response_marker_path::#err_variant(
+          ::core::marker::PhantomData::<<#req_ty as #lib::wire::WireRequest>::DomainError>,
         );
       };
       (quote! { #err_ty }, extract, quote! { #encode }, assertion)
@@ -277,38 +280,40 @@ pub(crate) fn expand(ast: &DeriveInput, direction: Direction) -> syn::Result<Tok
     };
 
   let response_assertion = quote! {
-    let _ = #lib::gateway::#response_marker_mod::#response_variant(
-      ::core::marker::PhantomData::<<#req_ty as #lib::gateway::#trait_ident>::Response>,
+    let _ = #response_marker_path::#response_variant(
+      ::core::marker::PhantomData::<<#req_ty as #lib::wire::WireRequest>::Response>,
     );
   };
 
   let trait_impl = quote! {
-    impl #lib::gateway::#trait_ident for #req_ty {
+    impl #lib::wire::WireRequest for #req_ty {
+      type Outbound = #outbound_wire;
+      type Inbound = #response_wire;
       type Response = #response_ty;
       type DomainError = #domain_error_ty;
 
       fn extract(
-        data: #lib::gateway::#response_wire,
-      ) -> ::core::result::Result<Self::Response, #lib::gateway::RequestError<Self::DomainError>> {
+        data: Self::Inbound,
+      ) -> ::core::result::Result<Self::Response, #lib::wire::RequestError<Self::DomainError>> {
         match data {
-          #lib::gateway::#response_wire::#outbound_inner_outer(
-            #lib::gateway::#response_inner::#response_variant(v),
+          #response_wire::#surface_variant(
+            #response_inner::#response_variant(v),
           ) => ::core::result::Result::Ok(v),
           #extract_arms_error
-          #lib::gateway::#response_wire::Error(e) => {
-            ::core::result::Result::Err(#lib::gateway::RequestError::Protocol(e))
+          #response_wire::Error(e) => {
+            ::core::result::Result::Err(#lib::wire::RequestError::Protocol(e))
           }
-          _ => ::core::result::Result::Err(#lib::gateway::RequestError::ResponseMismatch),
+          _ => ::core::result::Result::Err(#lib::wire::RequestError::ResponseMismatch),
         }
       }
 
-      fn encode_response(v: Self::Response) -> #lib::gateway::#response_wire {
-        #lib::gateway::#response_wire::#outbound_inner_outer(
-          #lib::gateway::#response_inner::#response_variant(v),
+      fn encode_response(v: Self::Response) -> Self::Inbound {
+        #response_wire::#surface_variant(
+          #response_inner::#response_variant(v),
         )
       }
 
-      fn encode_domain_error(err: Self::DomainError) -> #lib::gateway::#response_wire {
+      fn encode_domain_error(err: Self::DomainError) -> Self::Inbound {
         #encode_domain_error_body
       }
     }

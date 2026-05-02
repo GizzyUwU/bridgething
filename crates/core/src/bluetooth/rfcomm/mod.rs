@@ -7,8 +7,9 @@ use bluer::{
 use futures::StreamExt;
 use libbridgething::{
   BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus, Priority,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayMsgMeta, GatewayToBridgeMsg},
+  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg},
   protocol::{BridgeEndec, PrioritizedFrame},
+  wire::MsgMeta,
 };
 use tokio::{
   io::{AsyncWriteExt, ReadHalf, WriteHalf},
@@ -245,7 +246,7 @@ impl RfcommGateway {
       .send(
         BridgeToGatewayMsg {
           id: uuid::Uuid::now_v7(),
-          meta: GatewayMsgMeta::Event,
+          meta: MsgMeta::Event,
           data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
         },
         Priority::Normal,

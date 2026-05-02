@@ -182,6 +182,12 @@ fn push_gateway_surface_class(out: &mut String, s: &Surface) {
 
 fn push_inbound_methods_gateway(out: &mut String, s: &Surface) {
   let Some(e) = &s.inbound else {
+    // No inbound dispatch entry, but we may still have typed inbound
+    // requests (e.g. Asset surface where BridgeToGatewayAssetMsg holds
+    // only request/response variants — no event markers). Emit those.
+    for r in &s.inbound_requests {
+      push_request_handler_method_gateway(out, r);
+    }
     return;
   };
   let leaf_inbound = e.inner_variants.is_empty();
@@ -422,6 +428,9 @@ fn push_device_surface_class(out: &mut String, s: &Surface) {
 
 fn push_inbound_methods_device(out: &mut String, s: &Surface) {
   let Some(e) = &s.inbound else {
+    for r in &s.inbound_requests {
+      push_request_handler_method_device(out, r);
+    }
     return;
   };
   let leaf_inbound = e.inner_variants.is_empty();

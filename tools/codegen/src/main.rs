@@ -50,13 +50,21 @@ fn gen_typescript() -> Result<()> {
   run("bunx", &["prettier", TS_BINDINGS_DIR, "--write", "--log-level", "warn"])?;
 
   println!("    emitting ts dispatch helpers");
-  let plan = build_dispatch_plan()?;
-  dispatch::emit_typescript(&plan).context("emit typescript dispatch")?;
+  let plans = build_dispatch_plans()?;
+  for plan in &plans {
+    match plan.protocol {
+      dispatch::Protocol::Gateway => dispatch::emit_typescript(plan).context("emit gateway typescript dispatch")?,
+      dispatch::Protocol::Client => {
+        dispatch::emit_typescript_client(plan).context("emit client typescript dispatch")?
+      }
+    }
+  }
   run(
     "bunx",
     &[
       "prettier",
       "packages/gateway/typescript/src/dispatch.generated.ts",
+      "packages/client-ts/src/dispatch.generated.ts",
       "--write",
       "--log-level",
       "warn",
@@ -74,7 +82,7 @@ fn gen_swift() -> Result<()> {
   std::fs::write(SWIFT_OUTPUT, patched).context("write swift output")?;
 
   println!("    emitting swift dispatch helpers");
-  let plan = build_dispatch_plan()?;
+  let plan = build_dispatch_plan_for(dispatch::Protocol::Gateway)?;
   dispatch::emit_swift(&plan).context("emit swift dispatch")?;
   Ok(())
 }
@@ -105,20 +113,24 @@ fn gen_kotlin() -> Result<()> {
   std::fs::write(KOTLIN_OUTPUT, patched).context("write kotlin output")?;
 
   println!("    emitting kotlin dispatch helpers");
-  let plan = build_dispatch_plan()?;
+  let plan = build_dispatch_plan_for(dispatch::Protocol::Gateway)?;
   dispatch::emit_kotlin(&plan).context("emit kotlin dispatch")?;
   Ok(())
 }
 
-fn build_dispatch_plan() -> Result<dispatch::Plan> {
+fn build_dispatch_plans() -> Result<Vec<dispatch::Plan>> {
   let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
   println!(
-    "    dispatch inventory: {} marker-tagged types, {} gateway-requests, {} bridge-requests",
+    "    dispatch inventory: {} marker-tagged types, {} typed-request decls",
     inv.markers.len(),
-    inv.gateway_requests.len(),
-    inv.bridge_requests.len(),
+    inv.typed_requests.len(),
   );
-  dispatch::build_plan(&inv).context("dispatch plan")
+  dispatch::build_plans(&inv).context("dispatch plans")
+}
+
+fn build_dispatch_plan_for(protocol: dispatch::Protocol) -> Result<dispatch::Plan> {
+  let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  dispatch::build_plan_for(&inv, protocol).context("dispatch plan")
 }
 
 fn patch_swift(input: &str) -> String {

@@ -11,7 +11,8 @@ use authority::*;
 use chrome::*;
 use libbridgething::{
   DeviceType, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus,
-  gateway::{GatewayMsgMeta, GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  wire::MsgMeta,
 };
 use webapp::*;
 
@@ -49,7 +50,7 @@ impl GatewayHandler {
     // request (`gateway_man.request::<R>()`). Consume those here
     // before normal dispatch so the requester's awaiting future
     // resolves. If no pending request matches, fall through.
-    if let GatewayMsgMeta::Response(meta_resp) = &meta
+    if let MsgMeta::Response(meta_resp) = &meta
       && self
         .bluetooth
         .gateway_man

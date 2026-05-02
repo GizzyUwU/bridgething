@@ -17,7 +17,7 @@
 //! sending only that attribute) and gives the Android companion the
 //! freedom to push partial updates without a full snapshot every time.
 
-use bridgething_macros::GatewayEvent;
+use bridgething_macros::WireEvent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
@@ -41,7 +41,8 @@ pub enum RepeatMode {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS, GatewayEvent)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
+#[wire(GatewayToBridge)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NowPlayingUpdate {
@@ -60,7 +61,7 @@ impl NowPlayingUpdate {
 /// Per-track attributes that vary per song. `persistent_id` is a stable
 /// per-platform identifier (iAP2 sends u64; we hex-encode it on the
 /// wire). `artwork_id` is an opaque asset id - webapps pass this value
-/// to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
+/// to `ClientToBridgeAssetMsg::Get` to retrieve the bytes. The id namespace
 /// is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
 /// companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
 /// Webapps treat the value as opaque.

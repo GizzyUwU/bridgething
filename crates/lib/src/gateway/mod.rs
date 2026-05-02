@@ -4,40 +4,16 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-mod error;
 mod from;
-mod marker;
-mod request;
 mod to;
 
-pub use error::*;
 pub use from::*;
-pub use marker::*;
-pub use request::*;
 pub use to::*;
 
-use crate::{BridgeThingMeta, ForwardMessage, GatewayMeta, NowPlayingUpdate};
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct ResponseMeta {
-  #[ts(type = "Uint8Array")]
-  #[typeshare(serialized_as = "Vec<u8>")]
-  pub request_id: Uuid,
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum GatewayMsgMeta {
-  Command,
-  Event,
-  Request,
-  Response(ResponseMeta),
-}
+use crate::{
+  BridgeThingMeta, ForwardMessage, GatewayMeta, NowPlayingUpdate,
+  wire::{MsgMeta, WireError},
+};
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
@@ -50,7 +26,7 @@ pub struct GatewayToBridgeMsg {
   #[ts(type = "Uint8Array")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
-  pub meta: GatewayMsgMeta,
+  pub meta: MsgMeta,
   pub data: GatewayToBridgeMsgData,
 }
 
@@ -73,7 +49,7 @@ pub enum GatewayToBridgeMsgData {
   #[from]
   NowPlayingUpdate(NowPlayingUpdate),
   #[from]
-  Error(GatewayError),
+  Error(WireError),
 }
 
 /// bridgething -> gateway
@@ -87,7 +63,7 @@ pub struct BridgeToGatewayMsg {
   #[ts(type = "Uint8Array")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
-  pub meta: GatewayMsgMeta,
+  pub meta: MsgMeta,
   pub data: BridgeToGatewayMsgData,
 }
 
@@ -109,7 +85,7 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   Forward(ForwardMessage),
   #[from]
-  Error(GatewayError),
+  Error(WireError),
   /// response, command received and won't have a completion
   Ack,
   /// response, command has been completed

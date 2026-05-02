@@ -42,7 +42,7 @@ pub fn emit_kotlin(plan: &Plan) -> Result<()> {
   out.push_str("import kotlin.time.Duration\n");
   out.push_str("import kotlin.time.Duration.Companion.seconds\n\n");
 
-  if !plan.gateway_requests.is_empty() || !plan.bridge_requests.is_empty() {
+  if !plan.outbound_requests.is_empty() || !plan.inbound_requests.is_empty() {
     out.push_str(&kotlin_request_result_class());
   }
 
@@ -64,7 +64,7 @@ pub fn emit_kotlin(plan: &Plan) -> Result<()> {
   }
   out.push_str("/** Returns a per-device proxy with `deviceId` baked into every method and Flow. */\npublic fun BridgethingGateway.device(deviceId: String): BridgethingGatewayDevice = BridgethingGatewayDevice(this, deviceId)\n\n");
 
-  let bridge_request_types: BTreeSet<String> = plan.bridge_requests.iter().map(|r| r.request.clone()).collect();
+  let bridge_request_types: BTreeSet<String> = plan.inbound_requests.iter().map(|r| r.request.clone()).collect();
   let _ = bridge_request_types;
 
   for s in &surfaces {

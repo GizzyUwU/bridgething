@@ -4,12 +4,6 @@ export type Album = { id: string; name: string };
 
 export type Artist = { id: string; name: string };
 
-export type AssetRetention =
-  | { type: 'lru' }
-  | { type: 'pinned' }
-  | { type: 'ttl'; data: TtlRetention }
-  | { type: 'persistent' };
-
 export type BridgeThingMeta = {
   bridgethingVersion: string;
   libbridgethingVersion: string;
@@ -32,11 +26,19 @@ export type BridgeThingMeta = {
   credits: string;
 };
 
-export type CurrentlyActiveApplication = { id: string; name: string };
-
 export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
 
 export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
+
+export type ForwardMessage =
+  | { encoding: 'text'; data: string }
+  | { encoding: 'json'; data: unknown }
+  | { encoding: 'binary'; data: Uint8Array };
+
+export type ForwardMessage =
+  | { encoding: 'text'; data: string }
+  | { encoding: 'json'; data: unknown }
+  | { encoding: 'binary'; data: Uint8Array };
 
 export type ForwardMessage =
   | { encoding: 'text'; data: string }
@@ -52,28 +54,14 @@ export type GatewayMeta = {
   osName: string;
 };
 
-export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8Array };
-
-/**
- * Per-track attributes that vary per song. `persistent_id` is a stable
- * per-platform identifier (iAP2 sends u64; we hex-encode it on the
- * wire). `artwork_id` is an opaque asset id - webapps pass this value
- * to `ClientAssetCommand::Get` to retrieve the bytes. The id namespace
- * is producer-defined: iAP2 emits `iap2/art/<persistent_hex>/<n>`, the
- * companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
- * Webapps treat the value as opaque.
- */
-export type MediaItemUpdate = {
-  persistentId: string | null;
-  title: string | null;
-  album: string | null;
-  artist: string | null;
-  liked: boolean | null;
-  artworkId: string | null;
-  durationMs: number | null;
+export type GatewayMeta = {
+  adapterVersion: string;
+  libVersion: string;
+  libbridgethingVersion: string;
+  appName: string;
+  appVersion: string;
+  osName: string;
 };
-
-export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null; playback: PlaybackUpdate | null };
 
 export type Peer = { device: Device; paired: boolean; iap2: PeerIap2Status; companion: PeerCompanionStatus };
 
@@ -81,20 +69,7 @@ export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { typ
 
 export type PeerIap2Status = 'none' | 'linkUp' | 'authenticated' | 'identified';
 
-export type PhoneCallDirection = 'Incoming' | 'Outgoing';
-
-export type PhoneCallStatus =
-  | 'Disconnected'
-  | 'Sending'
-  | 'Ringing'
-  | 'Connecting'
-  | 'Active'
-  | 'Held'
-  | 'Disconnecting';
-
 export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
-
-export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
 
 export type PlaybackRestrictions = {
   can_repeat_context: boolean;
@@ -109,22 +84,14 @@ export type PlaybackRestrictions = {
 };
 
 /**
- * Per-playback-session attributes that vary regardless of track:
- * playing/paused, position, shuffle/repeat, and the iOS bundle
- * identifier of the app currently driving playback (e.g.
- * `"com.spotify.client"`). `app_bundle` is null on the Android path
- * since it isn't a meaningful surface there.
+ * `repeat` is a typed enum (Off/All/One) shared with
+ * the canonical `PlaybackOptions` shape webapps already render and
+ * with the outbound `SetRepeat` interaction command. iOS, Android,
+ * Spotify, and Apple Music all expose three repeat states; the
+ * underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
+ * translate to/from this enum.
  */
-export type PlaybackUpdate = {
-  playing: boolean | null;
-  positionMs: number | null;
-  shuffle: boolean | null;
-  repeat: RepeatMode | null;
-  appBundle: string | null;
-  appDisplayName: string | null;
-};
-
-export type Priority = 'normal' | 'bulk';
+export type RepeatMode = 'off' | 'all' | 'one';
 
 /**
  * `repeat` is a typed enum (Off/All/One) shared with

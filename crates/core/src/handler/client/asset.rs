@@ -1,8 +1,11 @@
 use libbridgething::{
   AssetRetention,
-  client::ClientAssetCommand,
-  gateway::{AssetRequest, RequestError},
-  server::{AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, ServerAssetEvent},
+  client::{
+    AssetGet, AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, BridgeToClientAssetMsg,
+    ClientToBridgeAssetMsgRequest,
+  },
+  gateway::AssetRequest,
+  wire::RequestError,
 };
 use tokio_util::bytes::Bytes;
 use uuid::Uuid;
@@ -19,9 +22,9 @@ impl AssetHandler {
     Self { handle }
   }
 
-  pub async fn handle(&self, msg: ClientAssetCommand) -> HandlerResult {
+  pub async fn handle(&self, msg: ClientToBridgeAssetMsgRequest) -> HandlerResult {
     match msg {
-      ClientAssetCommand::Get { id, request_id } => self.handle_get(id, request_id).await,
+      ClientToBridgeAssetMsgRequest::Get(AssetGet { id, request_id }) => self.handle_get(id, request_id).await,
     }
   }
 
@@ -29,7 +32,7 @@ impl AssetHandler {
     if let Some(asset) = self.handle.state.assets.get(&id).await? {
       return self
         .handle
-        .respond(ServerAssetEvent::Got(WireAssetGot {
+        .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
           request_id,
           id,
           bytes: asset.bytes.to_vec(),
@@ -42,7 +45,7 @@ impl AssetHandler {
     if !self.handle.state.gateway_status().await.connected {
       return self
         .handle
-        .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
+        .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
         .await
         .map_err(Into::into);
     }
@@ -71,7 +74,7 @@ impl AssetHandler {
         }
         self
           .handle
-          .respond(ServerAssetEvent::Got(WireAssetGot {
+          .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
             request_id,
             id: got.id,
             bytes: got.bytes,
@@ -84,7 +87,10 @@ impl AssetHandler {
         tracing::debug!(id = %nf.id, "companion reported asset not found");
         self
           .handle
-          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id: nf.id }))
+          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound {
+            request_id,
+            id: nf.id,
+          }))
           .await
           .map_err(Into::into)
       }
@@ -92,7 +98,7 @@ impl AssetHandler {
         tracing::warn!(?err, %id, "asset request failed at protocol level");
         self
           .handle
-          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
+          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
           .await
           .map_err(Into::into)
       }
@@ -100,7 +106,7 @@ impl AssetHandler {
         tracing::error!(%id, "asset response did not match expected shape");
         self
           .handle
-          .respond(ServerAssetEvent::NotFound(WireAssetNotFound { request_id, id }))
+          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
           .await
           .map_err(Into::into)
       }

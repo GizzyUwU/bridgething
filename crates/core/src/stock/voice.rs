@@ -1,4 +1,4 @@
-use libbridgething::client::ClientVoiceCommand;
+use libbridgething::client::{ClientToBridgeVoiceMsgCommand, MicMute, MicUnmute};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,32 +80,32 @@ pub struct StockVoiceErrorPayload {
   domain: String,
 }
 
-impl From<ClientVoiceCommand> for StockVoiceRecv {
-  fn from(data: ClientVoiceCommand) -> Self {
+impl From<ClientToBridgeVoiceMsgCommand> for StockVoiceRecv {
+  fn from(data: ClientToBridgeVoiceMsgCommand) -> Self {
     match data {
-      ClientVoiceCommand::Cancel => StockVoiceRecv::Cancel,
-      ClientVoiceCommand::PushToTalk => StockVoiceRecv::PushToTalk,
-      ClientVoiceCommand::MuteMic { preserve } => StockVoiceRecv::MuteMic {
+      ClientToBridgeVoiceMsgCommand::Cancel => StockVoiceRecv::Cancel,
+      ClientToBridgeVoiceMsgCommand::PushToTalk => StockVoiceRecv::PushToTalk,
+      ClientToBridgeVoiceMsgCommand::MuteMic(MicMute { preserve }) => StockVoiceRecv::MuteMic {
         attributes: MuteStatusAttributes { preserve },
       },
-      ClientVoiceCommand::UnmuteMic { preserve } => StockVoiceRecv::UnmuteMic {
+      ClientToBridgeVoiceMsgCommand::UnmuteMic(MicUnmute { preserve }) => StockVoiceRecv::UnmuteMic {
         attributes: MuteStatusAttributes { preserve },
       },
     }
   }
 }
 
-impl From<StockVoiceRecv> for ClientVoiceCommand {
+impl From<StockVoiceRecv> for ClientToBridgeVoiceMsgCommand {
   fn from(data: StockVoiceRecv) -> Self {
     match data {
-      StockVoiceRecv::Cancel => ClientVoiceCommand::Cancel,
-      StockVoiceRecv::PushToTalk => ClientVoiceCommand::PushToTalk,
-      StockVoiceRecv::MuteMic { attributes } => ClientVoiceCommand::MuteMic {
+      StockVoiceRecv::Cancel => ClientToBridgeVoiceMsgCommand::Cancel,
+      StockVoiceRecv::PushToTalk => ClientToBridgeVoiceMsgCommand::PushToTalk,
+      StockVoiceRecv::MuteMic { attributes } => ClientToBridgeVoiceMsgCommand::MuteMic(MicMute {
         preserve: attributes.preserve,
-      },
-      StockVoiceRecv::UnmuteMic { attributes } => ClientVoiceCommand::UnmuteMic {
+      }),
+      StockVoiceRecv::UnmuteMic { attributes } => ClientToBridgeVoiceMsgCommand::UnmuteMic(MicUnmute {
         preserve: attributes.preserve,
-      },
+      }),
     }
   }
 }
