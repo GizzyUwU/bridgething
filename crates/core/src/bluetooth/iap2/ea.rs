@@ -31,7 +31,7 @@ use tokio_util::{
 
 use super::super::BluetoothResult;
 use crate::{
-  bluetooth::{BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage},
+  bluetooth::{BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, peer_owners::PeerOwners},
   state::State,
 };
 
@@ -106,10 +106,15 @@ pub struct Iap2EaGateway {
   conn_close_tx: mpsc::Sender<Key>,
   conn_close_rx: mpsc::Receiver<Key>,
   conns: HashMap<Key, StreamConn>,
+  peer_owners: PeerOwners,
 }
 
 impl Iap2EaGateway {
-  pub fn init(state: State, bluetooth_tx: mpsc::Sender<BluetoothEvent>) -> (Self, Iap2EaGatewayHandle) {
+  pub fn init(
+    state: State,
+    bluetooth_tx: mpsc::Sender<BluetoothEvent>,
+    peer_owners: PeerOwners,
+  ) -> (Self, Iap2EaGatewayHandle) {
     let (send_tx, send_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
     let (open_tx, open_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
     let (closed_tx, closed_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
@@ -125,6 +130,7 @@ impl Iap2EaGateway {
       conn_close_tx,
       conn_close_rx,
       conns: HashMap::new(),
+      peer_owners,
     };
     (gateway, handle)
   }
@@ -196,6 +202,7 @@ impl Iap2EaGateway {
     };
     self.send_to_stream(key, version, Priority::Normal).await;
 
+    self.peer_owners.register(address, GatewayType::Iap2Ea);
     let _ = self
       .state
       .peers
@@ -247,6 +254,7 @@ impl Iap2EaGateway {
     tracing::info!(address = %key.0, stream_id = key.1, "iap2 ea gateway: stream torn down");
     let still_open_for_address = self.conns.keys().any(|(a, _)| *a == key.0);
     if !still_open_for_address {
+      self.peer_owners.unregister(key.0, GatewayType::Iap2Ea);
       let _ = self.state.peers.set_companion(key.0, PeerCompanionStatus::None).await;
     }
   }

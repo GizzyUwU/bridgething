@@ -38,8 +38,9 @@ sd-notify = { version = "0.5.0", optional = true }
 # chrome feature
 headless_chrome = { version = "1.0.21", optional = true }
 
-# serve feature
-warp = { version = "0.4", optional = true }
+# swupdate feature
+bridgething-swupdate-sys = { version = "0.1.0", path = "../swupdate-sys", optional = true }
+
 
 # dependencies
 tokio-tungstenite = "0.29.0"
@@ -58,7 +59,8 @@ sea-orm = { version = "1.1.20", default-features = false, features = ["sqlx-sqli
 sea-orm-migration = { version = "1.1.20", default-features = false, features = ["sqlx-sqlite", "runtime-tokio-rustls", "with-uuid"] }
 bytes = "1.11.1"
 lru = "0.18.0"
-
+sha2 = "0.11.0"
+hex = "0.4.3"
 
 [features]
 default = ["superbird"]
@@ -66,7 +68,8 @@ als = []
 mic = []
 chrome = ["dep:headless_chrome"]
 systemd = ["dep:sd-notify"]
-superbird = ["als", "mic", "systemd", "chrome"]
+swupdate = ["dep:bridgething-swupdate-sys"]
+superbird = ["als", "mic", "systemd", "chrome", "swupdate"]
 # dev features
 no-persist = []
 

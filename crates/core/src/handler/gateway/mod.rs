@@ -4,6 +4,7 @@ use handle::*;
 mod asset;
 mod authority;
 mod chrome;
+mod system;
 mod webapp;
 
 use asset::*;
@@ -14,22 +15,25 @@ use libbridgething::{
   gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
   wire::MsgMeta,
 };
+use system::*;
 use webapp::*;
 
 use super::HandlerResult;
 use crate::{
   bluetooth::{BluetoothMan, InboundGatewayMessage},
+  ota::OtaOrchestrator,
   state::State,
 };
 
 pub struct GatewayHandler {
   state: State,
   bluetooth: BluetoothMan,
+  ota: OtaOrchestrator,
 }
 
 impl GatewayHandler {
-  pub fn new(state: State, bluetooth: BluetoothMan) -> Self {
-    Self { state, bluetooth }
+  pub fn new(state: State, bluetooth: BluetoothMan, ota: OtaOrchestrator) -> Self {
+    Self { state, bluetooth, ota }
   }
 
   pub async fn handle(&self, data: InboundGatewayMessage) -> HandlerResult {
@@ -90,6 +94,12 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
         if let Some(cmd) = chrome_msg.into_command() {
           tokio::spawn(async move { ChromeHandler::new(handle).handle(cmd).await });
+        }
+      }
+      GatewayToBridgeMsgData::System(system_msg) => {
+        if let Some(cmd) = system_msg.into_command() {
+          let ota = self.ota.clone();
+          tokio::spawn(async move { SystemHandler::new(handle, ota).handle(cmd).await });
         }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {

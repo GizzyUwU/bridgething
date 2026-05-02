@@ -81,3 +81,11 @@ pub fn runtime_dir() -> PathBuf {
 pub fn restart_marker_path() -> PathBuf {
   runtime_dir().join("started")
 }
+
+/// Workdir for the OTA orchestrator. Holds the staged `.swu` between
+/// the verifying and writing phases. Lives under runtime so it doesn't
+/// survive reboots - the asset cache and companion are the durable
+/// store; the workdir is purely scratch for the in-progress install.
+pub fn ota_workdir() -> PathBuf {
+  runtime_dir().join("ota")
+}

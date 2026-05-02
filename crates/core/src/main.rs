@@ -11,6 +11,7 @@ mod chrome;
 mod db;
 
 mod handler;
+mod ota;
 mod paths;
 mod peer;
 mod player;
@@ -25,6 +26,7 @@ use authority::AuthorityRegistry;
 use bluetooth::BluetoothManager;
 use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler};
+use ota::OtaOrchestrator;
 use player::Player;
 use state::AppState;
 use systemd::Notify;
@@ -72,8 +74,15 @@ async fn main() {
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 
+  let (ota, _ota_handle) = OtaOrchestrator::spawn(
+    state.assets.clone(),
+    bluetooth.clone(),
+    paths::ota_workdir(),
+    std::sync::Arc::new(trigger_reboot),
+  );
+
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
-  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone());
+  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota.clone());
 
   notifier.ready(true, Some("ready to accept connections..."));
 
@@ -111,6 +120,25 @@ async fn main() {
   server.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");
+}
+
+/// Triggers a reboot when the OTA orchestrator finishes its `Reboot`
+/// phase. In release builds shells out to `sudo reboot`; in debug
+/// builds it logs and does nothing so dev hosts don't actually
+/// reboot during testing. Sweep to systemd D-Bus tracked separately
+/// alongside the existing `client::system::reboot` callsite.
+fn trigger_reboot() {
+  #[cfg(not(debug_assertions))]
+  {
+    let status = std::process::Command::new("sh").arg("-c").arg("sudo reboot").status();
+    match status {
+      Ok(s) if s.success() => {}
+      Ok(s) => tracing::error!("ota reboot returned non-zero: {s:?}"),
+      Err(err) => tracing::error!("ota reboot failed to spawn: {err:?}"),
+    }
+  }
+  #[cfg(debug_assertions)]
+  tracing::warn!("ota reboot requested in debug build - no-op (would reboot in release)");
 }
 
 /// Marks the volatile-runtime path that signals "bridgething has run

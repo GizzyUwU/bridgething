@@ -1,0 +1,4 @@
+[submodule "crates/swupdate-sys/vendor/swupdate"]
+	path = crates/swupdate-sys/vendor/swupdate
+	url = https://github.com/sbabic/swupdate.git
+	shallow = true

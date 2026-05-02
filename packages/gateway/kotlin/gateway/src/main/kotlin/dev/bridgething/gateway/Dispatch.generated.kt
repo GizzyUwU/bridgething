@@ -51,6 +51,62 @@ public class VersionSurface(private val gateway: BridgethingGateway) {
 
 }
 
+/** Cross-peer methods for the `System` wire surface. */
+public class SystemSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `System::OtaProgress` messages. */
+  public val otaProgress: Flow<Pair<String, OtaProgress>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaProgress ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `System::OtaError` messages. */
+  public val otaError: Flow<Pair<String, OtaError>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaError ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `System::ApplyUpdate` to every connected peer (broadcast). */
+  public suspend fun applyUpdate(payload: ApplyUpdate, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Command,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.ApplyUpdate(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `System::CancelUpdate` to every connected peer (broadcast). */
+  public suspend fun cancelUpdate(priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Command,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
 /** Cross-peer methods for the `Transport` wire surface. */
 public class TransportSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `Transport::Play` messages. */
@@ -426,6 +482,53 @@ public class VersionSurfaceForDevice(
 
 }
 
+/** Per-peer methods for the `System` wire surface (deviceId is baked in). */
+public class SystemSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `System::OtaProgress` from this peer. */
+  public val otaProgress: Flow<OtaProgress> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaProgress ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `System::OtaError` from this peer. */
+  public val otaError: Flow<OtaError> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaError ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `System::ApplyUpdate` to this peer. */
+  public suspend fun applyUpdate(payload: ApplyUpdate, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Command,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.ApplyUpdate(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `System::CancelUpdate` to this peer. */
+  public suspend fun cancelUpdate(priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Command,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
 /** Per-peer methods for the `Transport` wire surface (deviceId is baked in). */
 public class TransportSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -777,6 +880,8 @@ public class BridgethingGatewayDevice(
 ) {
   /** Per-peer methods for the `Version` wire surface. */
   public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `System` wire surface. */
+  public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Transport` wire surface. */
   public val transport: TransportSurfaceForDevice get() = TransportSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
@@ -796,6 +901,10 @@ public class BridgethingGatewayDevice(
 /** Methods scoped to the `Version` wire surface. */
 public val BridgethingGateway.version: VersionSurface
   get() = VersionSurface(this)
+
+/** Methods scoped to the `System` wire surface. */
+public val BridgethingGateway.system: SystemSurface
+  get() = SystemSurface(this)
 
 /** Methods scoped to the `Transport` wire surface. */
 public val BridgethingGateway.transport: TransportSurface

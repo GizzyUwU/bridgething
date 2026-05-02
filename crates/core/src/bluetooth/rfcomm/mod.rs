@@ -21,7 +21,7 @@ use tokio_util::{
   codec::{Encoder, FramedRead},
 };
 
-use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx};
+use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx, peer_owners::PeerOwners};
 use crate::{
   bluetooth::{GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker},
   state::State,
@@ -142,6 +142,7 @@ pub struct RfcommGateway {
 
   recv_tx: GatewayRecvTx,
   send_rx: GatewaySendRx,
+  peer_owners: PeerOwners,
 }
 
 impl RfcommGateway {
@@ -150,6 +151,7 @@ impl RfcommGateway {
     state: State,
     recv_tx: GatewayRecvTx,
     send_rx: GatewaySendRx,
+    peer_owners: PeerOwners,
   ) -> BluetoothResult<Self> {
     tracing::debug!("creating rfcomm gateway profile");
     let profile = Profile {
@@ -175,6 +177,7 @@ impl RfcommGateway {
 
       recv_tx,
       send_rx,
+      peer_owners,
     })
   }
 
@@ -217,6 +220,7 @@ impl RfcommGateway {
             ConnectionMessage::Close => {
               tracing::debug!("rfcomm connection closed: {:?}", address);
               self.connections.remove(&address);
+              self.peer_owners.unregister(address, GatewayType::Rfcomm);
               let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
             },
             ConnectionMessage::Msg(msg) => {
@@ -254,6 +258,7 @@ impl RfcommGateway {
       .await?;
 
     self.connections.insert(address, connection);
+    self.peer_owners.register(address, GatewayType::Rfcomm);
     let _ = self
       .state
       .peers

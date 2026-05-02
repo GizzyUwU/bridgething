@@ -1,0 +1,22 @@
+[package]
+name = "bridgething-swupdate-sys"
+description = "Raw bindgen-generated FFI bindings for libswupdate's network_ipc + progress_ipc surfaces. Dynamic-linked against libswupdate.so at runtime."
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+license = "LGPL-2.1-or-later"
+authors.workspace = true
+homepage.workspace = true
+links = "swupdate"
+
+[lib]
+# No tests in this crate (raw bindgen output only); skip the test
+# harness so dev hosts without libswupdate.so don't fail at link time
+# during `cargo test --workspace`.
+test = false
+doctest = false
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72"

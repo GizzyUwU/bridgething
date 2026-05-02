@@ -18,6 +18,7 @@ use uuid::Uuid;
 // protocol modules
 mod ble;
 pub mod iap2;
+mod network;
 mod profiles;
 mod rfcomm;
 
@@ -27,8 +28,11 @@ mod auth;
 #[cfg(debug_assertions)]
 mod debug;
 mod packer;
+mod peer_owners;
 
+use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
+use peer_owners::PeerOwners;
 use profiles::ProfileMan;
 use rfcomm::RfcommGateway;
 
@@ -155,11 +159,12 @@ impl BluetoothManager {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GatewayType {
   Ble,
   Rfcomm,
   Iap2Ea,
+  Network,
 }
 
 /// Inbound message from a gateway to the daemon. `protocol` records
@@ -258,13 +263,19 @@ pub struct GatewayMan {
   rfcomm: GatewayCon,
   iap2_ea_send_tx: GatewaySendTx,
   iap2_ea_handle: Iap2EaGatewayHandle,
-  _iap2_ea_handle: JoinHandle<()>,
+  network_send_tx: GatewaySendTx,
+  peer_owners: PeerOwners,
   pending: PendingRequests,
+
+  _iap2_ea_handle: JoinHandle<()>,
+  _network_handle: JoinHandle<()>,
 }
 
 impl GatewayMan {
   pub async fn init(adapter: Adapter, session: &Session, state: State, tx: BluetoothTx) -> BluetoothResult<Self> {
     tracing::debug!("initializing bluetooth gateway manager");
+    let peer_owners = PeerOwners::new();
+
     let ble = match GatewayCon::init(&adapter, session, state.clone(), GatewayType::Ble, tx.clone()).await {
       Ok(con) => Some(con),
       Err(err) => {
@@ -275,11 +286,15 @@ impl GatewayMan {
         None
       }
     };
-    let rfcomm = GatewayCon::init(&adapter, session, state.clone(), GatewayType::Rfcomm, tx.clone()).await?;
+    let rfcomm = GatewayCon::init_rfcomm(&adapter, session, state.clone(), tx.clone(), peer_owners.clone()).await?;
 
-    let (iap2_ea, iap2_ea_handle) = Iap2EaGateway::init(state.clone(), tx.clone());
+    let (iap2_ea, iap2_ea_handle) = Iap2EaGateway::init(state.clone(), tx.clone(), peer_owners.clone());
     let iap2_ea_send_tx = iap2_ea.send_tx();
     let _iap2_ea_handle = iap2_ea.spawn();
+
+    let network = NetworkGateway::init(state.clone(), tx.clone(), peer_owners.clone()).await?;
+    let network_send_tx = network.send_tx();
+    let _network_handle = network.spawn();
 
     Ok(Self {
       adapter,
@@ -291,8 +306,12 @@ impl GatewayMan {
       rfcomm,
       iap2_ea_send_tx,
       iap2_ea_handle,
-      _iap2_ea_handle,
+      network_send_tx,
+      peer_owners,
       pending: Arc::new(Mutex::new(HashMap::new())),
+
+      _iap2_ea_handle,
+      _network_handle,
     })
   }
 
@@ -300,24 +319,70 @@ impl GatewayMan {
     self.iap2_ea_handle.clone()
   }
 
-  /// Fan an outbound message out to every gateway. Each gateway
-  /// filters by `data.address` internally and no-ops silently if it
-  /// has no connection for that peer; for `address: None` each
-  /// gateway broadcasts to its own connected peers. At most one
-  /// gateway has a given peer connected at a time, so the fan-out
-  /// does not double-deliver.
   pub async fn send_all(&self, data: OutboundGatewayMessage) {
-    if let Some(ble) = &self.ble {
-      ble.send(data.clone()).await;
-    }
-    self.rfcomm.send(data.clone()).await;
-    if let Err(err) = self.iap2_ea_send_tx.send(data).await {
-      tracing::error!(?err, "failed to enqueue iap2 ea gateway send");
+    let targets = self.resolve_targets(data.address);
+    match targets.len() {
+      0 => tracing::trace!("send_all: no targets for {:?}; dropping", data.address),
+      1 => self.dispatch_to(targets[0], data).await,
+      _ => {
+        let last = *targets.last().expect("non-empty targets");
+        for kind in &targets[..targets.len() - 1] {
+          self.dispatch_to(*kind, data.clone()).await;
+        }
+        self.dispatch_to(last, data).await;
+      }
     }
   }
 
-  /// Broadcast a typed event to every connected companion. Meta is
-  /// `Event` by definition of the trait — caller doesn't choose.
+  fn resolve_targets(&self, address: Option<Address>) -> Vec<GatewayType> {
+    match address {
+      Some(addr) => match self.peer_owners.owner(&addr) {
+        Some(kind) => vec![kind],
+        None => {
+          tracing::trace!(%addr, "send_all: no transport owns address; dropping");
+          Vec::new()
+        }
+      },
+      None => {
+        let active = self.peer_owners.active_kinds();
+        let mut targets = Vec::with_capacity(4);
+        for kind in [GatewayType::Rfcomm, GatewayType::Iap2Ea, GatewayType::Network] {
+          if active.contains(&kind) {
+            targets.push(kind);
+          }
+        }
+        if self.ble.is_some() {
+          targets.push(GatewayType::Ble);
+        }
+        targets
+      }
+    }
+  }
+
+  async fn dispatch_to(&self, kind: GatewayType, data: OutboundGatewayMessage) {
+    match kind {
+      GatewayType::Ble => {
+        if let Some(ble) = &self.ble {
+          ble.send(data).await;
+        } else {
+          tracing::trace!("BLE not initialized; dropping send");
+        }
+      }
+      GatewayType::Rfcomm => self.rfcomm.send(data).await,
+      GatewayType::Iap2Ea => {
+        if let Err(err) = self.iap2_ea_send_tx.send(data).await {
+          tracing::error!(?err, "failed to enqueue iap2 ea gateway send");
+        }
+      }
+      GatewayType::Network => {
+        if let Err(err) = self.network_send_tx.send(data).await {
+          tracing::error!(?err, "failed to enqueue network gateway send");
+        }
+      }
+    }
+  }
+
+  /// Broadcast a typed event to every connected companion.
   pub async fn broadcast<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
     self
       .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
@@ -446,7 +511,7 @@ pub struct GatewayCon {
 impl GatewayCon {
   pub async fn init(
     adapter: &Adapter,
-    session: &Session,
+    _session: &Session,
     state: State,
     gateway_type: GatewayType,
     bluetooth_tx: BluetoothTx,
@@ -457,14 +522,42 @@ impl GatewayCon {
 
     let _handle = match gateway_type {
       GatewayType::Ble => GattServer::init(adapter, state, recv_tx, notify_rx).await?.spawn(),
-      GatewayType::Rfcomm => RfcommGateway::init(session, state, recv_tx, notify_rx).await?.spawn(),
+      GatewayType::Rfcomm => unreachable!("Rfcomm is initialized via init_rfcomm to thread peer_owners"),
       GatewayType::Iap2Ea => unreachable!("Iap2Ea is initialized via Iap2EaGateway, not GatewayCon"),
+      GatewayType::Network => unreachable!("Network is initialized via NetworkGateway, not GatewayCon"),
     };
 
     let _listener = Self::spawn_listener(gateway_type, rx, bluetooth_tx);
 
     Ok(Self {
       gateway_type,
+
+      tx,
+
+      _handle,
+      _listener,
+    })
+  }
+
+  pub async fn init_rfcomm(
+    _adapter: &Adapter,
+    session: &Session,
+    state: State,
+    bluetooth_tx: BluetoothTx,
+    peer_owners: PeerOwners,
+  ) -> BluetoothResult<Self> {
+    tracing::debug!("initializing bluetooth gateway connection handle for Rfcomm");
+    let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
+    let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
+
+    let _handle = RfcommGateway::init(session, state, recv_tx, notify_rx, peer_owners)
+      .await?
+      .spawn();
+
+    let _listener = Self::spawn_listener(GatewayType::Rfcomm, rx, bluetooth_tx);
+
+    Ok(Self {
+      gateway_type: GatewayType::Rfcomm,
 
       tx,
 

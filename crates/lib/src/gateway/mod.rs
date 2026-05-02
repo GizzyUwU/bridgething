@@ -45,6 +45,8 @@ pub enum GatewayToBridgeMsgData {
   #[from]
   Chrome(GatewayToBridgeChromeMsg),
   #[from]
+  System(GatewayToBridgeSystemMsg),
+  #[from]
   Webapp(GatewayToBridgeWebappMsg),
   #[from]
   NowPlayingUpdate(NowPlayingUpdate),
@@ -78,6 +80,8 @@ pub enum BridgeToGatewayMsgData {
   Version(BridgeThingMeta),
   #[from]
   Asset(BridgeToGatewayAssetMsg),
+  #[from]
+  System(BridgeToGatewaySystemMsg),
   #[from]
   Transport(BridgeToGatewayTransportMsg),
   #[from]

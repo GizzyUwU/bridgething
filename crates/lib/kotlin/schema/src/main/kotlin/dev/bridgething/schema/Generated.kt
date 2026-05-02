@@ -13,6 +13,21 @@ data class Album (
 	val name: String
 )
 
+/// Companion ask the daemon to apply a previously-pushed `.swu` from the
+/// asset cache. The companion fetches the manifest from its update server,
+/// downloads the artifact, pushes the bytes via `AssetPush` with retention
+/// `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
+/// 
+/// The daemon verifies size + sha256 against the cached blob before handing
+/// it to swupdate. `manifest_url` is recorded for tracing only.
+@Serializable
+data class ApplyUpdate (
+	val assetId: String,
+	val manifestUrl: String? = null,
+	val expectedSha256: String,
+	val expectedSize: UInt
+)
+
 @Serializable
 data class Artist (
 	val id: String,
@@ -157,6 +172,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("asset")
 	data class Asset(val data: BridgeToGatewayAssetMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("system")
+	data class System(val data: BridgeToGatewaySystemMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("transport")
 	data class Transport(val data: BridgeToGatewayTransportMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -243,6 +261,9 @@ sealed class GatewayToBridgeMsgData {
 	@SerialName("chrome")
 	data class Chrome(val data: GatewayToBridgeChromeMsg): GatewayToBridgeMsgData()
 	@Serializable
+	@SerialName("system")
+	data class System(val data: GatewayToBridgeSystemMsg): GatewayToBridgeMsgData()
+	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: GatewayToBridgeWebappMsg): GatewayToBridgeMsgData()
 	@Serializable
@@ -317,6 +338,69 @@ data class PlaybackUpdate (
 data class NowPlayingUpdate (
 	val mediaItem: MediaItemUpdate? = null,
 	val playback: PlaybackUpdate? = null
+)
+
+/// Terminal error from the OTA orchestrator. After an `OtaError` the
+/// orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+@Serializable
+enum class OtaErrorCode(val string: String) {
+	/// Companion sent `ApplyUpdate` for an `asset_id` not in the daemon cache.
+	@SerialName("assetNotFound")
+	AssetNotFound("assetNotFound"),
+	/// Cached blob's sha256 does not match the manifest's expected hash.
+	@SerialName("hashMismatch")
+	HashMismatch("hashMismatch"),
+	/// Cached blob's byte length does not match the manifest's expected size.
+	@SerialName("sizeMismatch")
+	SizeMismatch("sizeMismatch"),
+	/// `CancelUpdate` arrived during a cancelable phase.
+	@SerialName("cancelled")
+	Cancelled("cancelled"),
+	/// libswupdate rejected the .swu (parse / handler / I/O failure).
+	@SerialName("writeFailed")
+	WriteFailed("writeFailed"),
+	/// Slot-flip / try-counter reset failed after a successful write.
+	@SerialName("confirmFailed")
+	ConfirmFailed("confirmFailed"),
+	/// Anything else (asset cache I/O, internal channel close, etc.).
+	@SerialName("internal")
+	Internal("internal"),
+}
+
+@Serializable
+data class OtaError (
+	val code: OtaErrorCode,
+	val msg: String
+)
+
+/// Stage of the OTA orchestrator. `Downloading` covers the daemon-side
+/// wait for the .swu blob to land in the asset cache (the companion is
+/// the actual downloader); `Verifying` runs the sha256 + size check;
+/// `Writing` streams to libswupdate; `Confirming` flips slot try-counter
+/// state; `Reboot` is the terminal stage emitted just before the daemon
+/// triggers the reboot.
+@Serializable
+enum class OtaPhase(val string: String) {
+	@SerialName("downloading")
+	Downloading("downloading"),
+	@SerialName("verifying")
+	Verifying("verifying"),
+	@SerialName("writing")
+	Writing("writing"),
+	@SerialName("confirming")
+	Confirming("confirming"),
+	@SerialName("reboot")
+	Reboot("reboot"),
+}
+
+/// Per-phase progress tick. `percent` is 0-100 within the current
+/// phase, not the overall flow. `eta_ms` is best-effort remaining time
+/// for the phase when the orchestrator can compute it.
+@Serializable
+data class OtaProgress (
+	val phase: OtaPhase,
+	val percent: UByte,
+	val etaMs: UInt? = null
 )
 
 @Serializable
@@ -461,6 +545,16 @@ sealed class BridgeToGatewayAssetMsg {
 	data class Request(val data: AssetRequest): BridgeToGatewayAssetMsg()
 }
 
+@Serializable(with = BridgeToGatewaySystemMsgSerializer::class)
+sealed class BridgeToGatewaySystemMsg {
+	@Serializable
+	@SerialName("otaProgress")
+	data class OtaProgress(val data: dev.bridgething.schema.OtaProgress): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("otaError")
+	data class OtaError(val data: dev.bridgething.schema.OtaError): BridgeToGatewaySystemMsg()
+}
+
 /// Bridge-side outbound transport command targeting the connected companion.
 /// The companion-side SDK dispatches each verb to its native player
 /// integration (Spotify SDK, Apple Music, MediaSession, etc).
@@ -592,6 +686,16 @@ sealed class GatewayToBridgeChromeMsg {
 	@Serializable
 	@SerialName("navigate")
 	data class Navigate(val data: ChromeNavigate): GatewayToBridgeChromeMsg()
+}
+
+@Serializable(with = GatewayToBridgeSystemMsgSerializer::class)
+sealed class GatewayToBridgeSystemMsg {
+	@Serializable
+	@SerialName("applyUpdate")
+	data class ApplyUpdate(val data: dev.bridgething.schema.ApplyUpdate): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("cancelUpdate")
+	object CancelUpdate: GatewayToBridgeSystemMsg()
 }
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)

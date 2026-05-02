@@ -46,6 +46,74 @@ public struct VersionSurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `System` wire surface.
+public struct SystemSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `System::OtaProgress` messages.
+  public var otaProgress: AsyncStream<(deviceId: String, msg: OtaProgress)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .otaProgress(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::OtaError` messages.
+  public var otaError: AsyncStream<(deviceId: String, msg: OtaError)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .otaError(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `System::ApplyUpdate` to every connected peer (broadcast).
+  public func applyUpdate(_ payload: ApplyUpdate, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.applyUpdate(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `System::CancelUpdate` to every connected peer (broadcast).
+  public func cancelUpdate(priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.cancelUpdate))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Transport` wire surface.
 public struct TransportSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -548,6 +616,61 @@ public struct VersionSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `System` wire surface (deviceId is baked in).
+public struct SystemSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `System::OtaProgress` from this peer.
+  public var otaProgress: AsyncStream<OtaProgress> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .otaProgress(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::OtaError` from this peer.
+  public var otaError: AsyncStream<OtaError> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .otaError(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `System::ApplyUpdate` to this peer.
+  public func applyUpdate(_ payload: ApplyUpdate, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.applyUpdate(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `System::CancelUpdate` to this peer.
+  public func cancelUpdate(priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.cancelUpdate))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Transport` wire surface (deviceId is baked in).
 public struct TransportSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -1002,6 +1125,8 @@ public struct BridgethingGatewayDevice: Sendable {
 
   /// Per-peer methods for the `Version` wire surface.
   public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `System` wire surface.
+  public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Transport` wire surface.
   public var transport: TransportSurfaceForDevice { TransportSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
@@ -1021,6 +1146,8 @@ public struct BridgethingGatewayDevice: Sendable {
 extension BridgethingGateway {
   /// Methods scoped to the `Version` wire surface.
   public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
+  /// Methods scoped to the `System` wire surface.
+  public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
   /// Methods scoped to the `Transport` wire surface.
   public nonisolated var transport: TransportSurface { TransportSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.

@@ -2,6 +2,7 @@
 // Re-generate with `just codegen` (or `just typescript`).
 
 import {
+  type ApplyUpdate,
   type AssetClear,
   type AssetGotReply,
   type AssetNotFoundReply,
@@ -15,6 +16,8 @@ import {
   type GatewayMeta,
   type GatewayToBridgeMsg,
   type NowPlayingUpdate,
+  type OtaError,
+  type OtaProgress,
   type Priority,
   type RepeatSet,
   type SeekToSet,
@@ -35,6 +38,16 @@ export type TypedRequestResult<R, E> =
   | { ok: true; response: R }
   | { ok: false; kind: 'domain'; error: E }
   | { ok: false; kind: 'protocol'; error: GatewayError };
+
+export type SystemInboundHandlers = {
+  otaProgress: (deviceId: string, msg: OtaProgress) => void;
+  otaError: (deviceId: string, msg: OtaError) => void;
+};
+
+export type SystemDeviceInboundHandlers = {
+  otaProgress: (msg: OtaProgress) => void;
+  otaError: (msg: OtaError) => void;
+};
 
 export type TransportInboundHandlers = {
   play: (deviceId: string) => void;
@@ -100,6 +113,97 @@ export class VersionSurface {
           id: newUuidBytes(),
           meta: { kind: 'event' },
           data: { type: 'version', data: payload },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class SystemSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `System::OtaProgress` across all peers. */
+  onOtaProgress(handler: (deviceId: string, msg: OtaProgress) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaProgress') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::OtaError` across all peers. */
+  onOtaError(handler: (deviceId: string, msg: OtaError) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaError') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `System` variants. */
+  subscribe(handlers: SystemInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<SystemInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<SystemInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'otaProgress': {
+          handlers.otaProgress?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'otaError': {
+          handlers.otaError?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `System::ApplyUpdate` to every connected peer (broadcast). */
+  async applyUpdate(payload: ApplyUpdate, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'command' },
+          data: { type: 'system', data: { event: 'applyUpdate', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `System::CancelUpdate` to every connected peer (broadcast). */
+  async cancelUpdate(options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'command' },
+          data: { type: 'system', data: { event: 'cancelUpdate' } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -646,6 +750,93 @@ export class VersionSurfaceForDevice {
   }
 }
 
+export class SystemSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `System::OtaProgress` from this peer. */
+  onOtaProgress(handler: (msg: OtaProgress) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaProgress') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::OtaError` from this peer. */
+  onOtaError(handler: (msg: OtaError) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaError') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `System` variants from this peer. */
+  subscribe(handlers: SystemDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<SystemDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<SystemDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'otaProgress': {
+          handlers.otaProgress?.(inner.data);
+          return;
+        }
+        case 'otaError': {
+          handlers.otaError?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `System::ApplyUpdate` to this peer. */
+  async applyUpdate(payload: ApplyUpdate, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'system', data: { event: 'applyUpdate', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `System::CancelUpdate` to this peer. */
+  async cancelUpdate(options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'system', data: { event: 'cancelUpdate' } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class TransportSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -1161,24 +1352,28 @@ export class WebappSurfaceForDevice {
 }
 
 export type BridgeMessageHandlers = {
+  system: SystemInboundHandlers;
   transport: TransportInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageHandlers = {
+  system?: Partial<SystemInboundHandlers>;
   transport?: Partial<TransportInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type BridgeMessageDeviceHandlers = {
+  system: SystemDeviceInboundHandlers;
   transport: TransportDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageDeviceHandlers = {
+  system?: Partial<SystemDeviceInboundHandlers>;
   transport?: Partial<TransportDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
@@ -1188,6 +1383,8 @@ declare module './index' {
   interface BridgethingGateway {
     /** Methods scoped to the `Version` wire surface. */
     readonly version: VersionSurface;
+    /** Methods scoped to the `System` wire surface. */
+    readonly system: SystemSurface;
     /** Methods scoped to the `Transport` wire surface. */
     readonly transport: TransportSurface;
     /** Methods scoped to the `Forward` wire surface. */
@@ -1247,6 +1444,7 @@ export class AssetRequestHandle {
 
 type DeviceSurfaceCache = {
   version?: VersionSurfaceForDevice;
+  system?: SystemSurfaceForDevice;
   transport?: TransportSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
@@ -1265,6 +1463,9 @@ export class BridgethingGatewayDevice {
 
   get version(): VersionSurfaceForDevice {
     return (this._surfaces.version ??= new VersionSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get system(): SystemSurfaceForDevice {
+    return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
   }
   get transport(): TransportSurfaceForDevice {
     return (this._surfaces.transport ??= new TransportSurfaceForDevice(this._gateway, this.deviceId));
@@ -1299,6 +1500,7 @@ export class BridgethingGatewayDevice {
 
 type GatewaySurfaceCache = {
   version?: VersionSurface;
+  system?: SystemSurface;
   transport?: TransportSurface;
   forward?: ForwardSurface;
   asset?: AssetSurface;
@@ -1329,6 +1531,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): VersionSurface {
       const bucket = bucketFor(this);
       return (bucket.version ??= new VersionSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'system', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): SystemSurface {
+      const bucket = bucketFor(this);
+      return (bucket.system ??= new SystemSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'transport', {
@@ -1420,6 +1630,28 @@ function outerSubscribeGateway(
     if (event.type !== 'message') return;
     const data = event.message.data;
     switch (data.type) {
+      case 'system': {
+        const innerHandlers = handlers.system;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for system');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'otaProgress': {
+            innerHandlers.otaProgress?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'otaError': {
+            innerHandlers.otaError?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'transport': {
         const innerHandlers = handlers.transport;
         if (!innerHandlers) {
@@ -1540,6 +1772,28 @@ function outerSubscribeDevice(
     if (event.deviceId !== deviceId) return;
     const data = event.message.data;
     switch (data.type) {
+      case 'system': {
+        const innerHandlers = handlers.system;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for system');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'otaProgress': {
+            innerHandlers.otaProgress?.(inner.data);
+            return;
+          }
+          case 'otaError': {
+            innerHandlers.otaError?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'transport': {
         const innerHandlers = handlers.transport;
         if (!innerHandlers) {

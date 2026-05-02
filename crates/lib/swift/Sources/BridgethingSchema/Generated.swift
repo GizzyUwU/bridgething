@@ -14,6 +14,27 @@ public struct Album: Codable, Sendable {
 	}
 }
 
+/// Companion ask the daemon to apply a previously-pushed `.swu` from the
+/// asset cache. The companion fetches the manifest from its update server,
+/// downloads the artifact, pushes the bytes via `AssetPush` with retention
+/// `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
+/// 
+/// The daemon verifies size + sha256 against the cached blob before handing
+/// it to swupdate. `manifest_url` is recorded for tracing only.
+public struct ApplyUpdate: Codable, Sendable {
+	public let assetId: String
+	public let manifestUrl: String?
+	public let expectedSha256: String
+	public let expectedSize: UInt32
+
+	public init(assetId: String, manifestUrl: String?, expectedSha256: String, expectedSize: UInt32) {
+		self.assetId = assetId
+		self.manifestUrl = manifestUrl
+		self.expectedSha256 = expectedSha256
+		self.expectedSize = expectedSize
+	}
+}
+
 public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
@@ -281,6 +302,7 @@ public enum MsgMeta: Codable, Sendable {
 public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case version(BridgeThingMeta)
 	case asset(BridgeToGatewayAssetMsg)
+	case system(BridgeToGatewaySystemMsg)
 	case transport(BridgeToGatewayTransportMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
@@ -293,6 +315,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
 			asset,
+			system,
 			transport,
 			webapp,
 			forward,
@@ -317,6 +340,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .asset:
 				if let content = try? container.decode(BridgeToGatewayAssetMsg.self, forKey: .data) {
 					self = .asset(content)
+					return
+				}
+			case .system:
+				if let content = try? container.decode(BridgeToGatewaySystemMsg.self, forKey: .data) {
+					self = .system(content)
 					return
 				}
 			case .transport:
@@ -358,6 +386,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .asset(let content):
 			try container.encode(CodingKeys.asset, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .system(let content):
+			try container.encode(CodingKeys.system, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .transport(let content):
 			try container.encode(CodingKeys.transport, forKey: .type)
@@ -449,6 +480,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case asset(GatewayToBridgeAssetMsg)
 	case authority(GatewayToBridgeAuthorityMsg)
 	case chrome(GatewayToBridgeChromeMsg)
+	case system(GatewayToBridgeSystemMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case nowPlayingUpdate(NowPlayingUpdate)
 	case error(WireError)
@@ -458,6 +490,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			asset,
 			authority,
 			chrome,
+			system,
 			webapp,
 			nowPlayingUpdate,
 			error
@@ -489,6 +522,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			case .chrome:
 				if let content = try? container.decode(GatewayToBridgeChromeMsg.self, forKey: .data) {
 					self = .chrome(content)
+					return
+				}
+			case .system:
+				if let content = try? container.decode(GatewayToBridgeSystemMsg.self, forKey: .data) {
+					self = .system(content)
 					return
 				}
 			case .webapp:
@@ -525,6 +563,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .chrome(let content):
 			try container.encode(CodingKeys.chrome, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .system(let content):
+			try container.encode(CodingKeys.system, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
@@ -624,6 +665,64 @@ public struct NowPlayingUpdate: Codable, Sendable {
 	public init(mediaItem: MediaItemUpdate?, playback: PlaybackUpdate?) {
 		self.mediaItem = mediaItem
 		self.playback = playback
+	}
+}
+
+/// Terminal error from the OTA orchestrator. After an `OtaError` the
+/// orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+public enum OtaErrorCode: String, Codable, Sendable {
+	/// Companion sent `ApplyUpdate` for an `asset_id` not in the daemon cache.
+	case assetNotFound
+	/// Cached blob's sha256 does not match the manifest's expected hash.
+	case hashMismatch
+	/// Cached blob's byte length does not match the manifest's expected size.
+	case sizeMismatch
+	/// `CancelUpdate` arrived during a cancelable phase.
+	case cancelled
+	/// libswupdate rejected the .swu (parse / handler / I/O failure).
+	case writeFailed
+	/// Slot-flip / try-counter reset failed after a successful write.
+	case confirmFailed
+	/// Anything else (asset cache I/O, internal channel close, etc.).
+	case `internal`
+}
+
+public struct OtaError: Codable, Sendable {
+	public let code: OtaErrorCode
+	public let msg: String
+
+	public init(code: OtaErrorCode, msg: String) {
+		self.code = code
+		self.msg = msg
+	}
+}
+
+/// Stage of the OTA orchestrator. `Downloading` covers the daemon-side
+/// wait for the .swu blob to land in the asset cache (the companion is
+/// the actual downloader); `Verifying` runs the sha256 + size check;
+/// `Writing` streams to libswupdate; `Confirming` flips slot try-counter
+/// state; `Reboot` is the terminal stage emitted just before the daemon
+/// triggers the reboot.
+public enum OtaPhase: String, Codable, Sendable {
+	case downloading
+	case verifying
+	case writing
+	case confirming
+	case reboot
+}
+
+/// Per-phase progress tick. `percent` is 0-100 within the current
+/// phase, not the overall flow. `eta_ms` is best-effort remaining time
+/// for the phase when the orchestrator can compute it.
+public struct OtaProgress: Codable, Sendable {
+	public let phase: OtaPhase
+	public let percent: UInt8
+	public let etaMs: UInt32?
+
+	public init(phase: OtaPhase, percent: UInt8, etaMs: UInt32?) {
+		self.phase = phase
+		self.percent = percent
+		self.etaMs = etaMs
 	}
 }
 
@@ -880,6 +979,51 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 		switch self {
 		case .request(let content):
 			try container.encode(CodingKeys.request, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum BridgeToGatewaySystemMsg: Codable, Sendable {
+	case otaProgress(OtaProgress)
+	case otaError(OtaError)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case otaProgress,
+			otaError
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .otaProgress:
+				if let content = try? container.decode(OtaProgress.self, forKey: .data) {
+					self = .otaProgress(content)
+					return
+				}
+			case .otaError:
+				if let content = try? container.decode(OtaError.self, forKey: .data) {
+					self = .otaError(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewaySystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewaySystemMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .otaProgress(let content):
+			try container.encode(CodingKeys.otaProgress, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaError(let content):
+			try container.encode(CodingKeys.otaError, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -1312,6 +1456,48 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 		case .navigate(let content):
 			try container.encode(CodingKeys.navigate, forKey: .event)
 			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeSystemMsg: Codable, Sendable {
+	case applyUpdate(ApplyUpdate)
+	case cancelUpdate
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case applyUpdate,
+			cancelUpdate
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .applyUpdate:
+				if let content = try? container.decode(ApplyUpdate.self, forKey: .data) {
+					self = .applyUpdate(content)
+					return
+				}
+			case .cancelUpdate:
+				self = .cancelUpdate
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeSystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeSystemMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .applyUpdate(let content):
+			try container.encode(CodingKeys.applyUpdate, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .cancelUpdate:
+			try container.encode(CodingKeys.cancelUpdate, forKey: .event)
 		}
 	}
 }

@@ -10,6 +10,17 @@ import type {
 } from './shared';
 import type { MsgMeta, WireError } from './wire';
 
+/**
+ * Companion ask the daemon to apply a previously-pushed `.swu` from the
+ * asset cache. The companion fetches the manifest from its update server,
+ * downloads the artifact, pushes the bytes via `AssetPush` with retention
+ * `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
+ *
+ * The daemon verifies size + sha256 against the cached blob before handing
+ * it to swupdate. `manifest_url` is recorded for tracing only.
+ */
+export type ApplyUpdate = { assetId: string; manifestUrl: string | null; expectedSha256: string; expectedSize: number };
+
 export type AssetClear = { id: string };
 
 /**
@@ -57,12 +68,17 @@ export type BridgeToGatewayMsg = { id: Uint8Array; meta: MsgMeta; data: BridgeTo
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
   | { type: 'asset'; data: BridgeToGatewayAssetMsg }
+  | { type: 'system'; data: BridgeToGatewaySystemMsg }
   | { type: 'transport'; data: BridgeToGatewayTransportMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'error'; data: WireError }
   | { type: 'ack' }
   | { type: 'done' };
+
+export type BridgeToGatewaySystemMsg =
+  | { event: 'otaProgress'; data: OtaProgress }
+  | { event: 'otaError'; data: OtaError };
 
 /**
  * Bridge-side outbound transport command targeting the connected companion.
@@ -146,9 +162,12 @@ export type GatewayToBridgeMsgData =
   | { type: 'asset'; data: GatewayToBridgeAssetMsg }
   | { type: 'authority'; data: GatewayToBridgeAuthorityMsg }
   | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
+  | { type: 'system'; data: GatewayToBridgeSystemMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
   | { type: 'nowPlayingUpdate'; data: NowPlayingUpdate }
   | { type: 'error'; data: WireError };
+
+export type GatewayToBridgeSystemMsg = { event: 'applyUpdate'; data: ApplyUpdate } | { event: 'cancelUpdate' };
 
 export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
@@ -156,6 +175,38 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'switchTo'; data: WebappSwitchTo }
   | { event: 'install'; data: WebappInstall }
   | { event: 'uninstall'; data: WebappUninstall };
+
+export type OtaError = { code: OtaErrorCode; msg: string };
+
+/**
+ * Terminal error from the OTA orchestrator. After an `OtaError` the
+ * orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+ */
+export type OtaErrorCode =
+  | 'assetNotFound'
+  | 'hashMismatch'
+  | 'sizeMismatch'
+  | 'cancelled'
+  | 'writeFailed'
+  | 'confirmFailed'
+  | 'internal';
+
+/**
+ * Stage of the OTA orchestrator. `Downloading` covers the daemon-side
+ * wait for the .swu blob to land in the asset cache (the companion is
+ * the actual downloader); `Verifying` runs the sha256 + size check;
+ * `Writing` streams to libswupdate; `Confirming` flips slot try-counter
+ * state; `Reboot` is the terminal stage emitted just before the daemon
+ * triggers the reboot.
+ */
+export type OtaPhase = 'downloading' | 'verifying' | 'writing' | 'confirming' | 'reboot';
+
+/**
+ * Per-phase progress tick. `percent` is 0-100 within the current
+ * phase, not the overall flow. `eta_ms` is best-effort remaining time
+ * for the phase when the orchestrator can compute it.
+ */
+export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
 
 export type RepeatSet = { mode: RepeatMode };
 
