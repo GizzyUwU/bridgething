@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{AssetRetention, gateway::AssetRequest, impl_bridge_request};
+use crate::AssetRetention;
 
 #[typeshare]
 #[serde_with::serde_as]
@@ -75,21 +75,14 @@ pub struct AssetNotFoundReply {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
 pub enum GatewayToBridgeAssetMsg {
+  #[bridge_event]
   Push(AssetPush),
+  #[bridge_event]
   Clear(AssetClear),
   #[bridge_response]
   Got(AssetGotReply),
   #[bridge_response]
   NotFound(AssetNotFoundReply),
-}
-
-impl_bridge_request! {
-  request: AssetRequest,
-  surface: Asset,
-  request_variant: Request(_),
-  response: AssetGotReply,
-  response_variant: Got(_),
-  error: AssetNotFoundReply,
-  error_variant: NotFound(_),
 }

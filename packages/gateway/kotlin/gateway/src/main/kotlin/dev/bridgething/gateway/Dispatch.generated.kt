@@ -51,55 +51,6 @@ public class VersionSurface(private val gateway: BridgethingGateway) {
 
 }
 
-/** Cross-peer methods for the `Asset` wire surface. */
-public class AssetSurface(private val gateway: BridgethingGateway) {
-  /** Send `Asset::Push` to every connected peer (broadcast). */
-  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Asset::Clear` to every connected peer (broadcast). */
-  public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Stream of typed inbound `AssetRequest` requests. */
-  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayAssetMsg.Request ?: return@mapNotNull null
-      val handle = AssetRequestHandle(gateway, it.deviceId, it.message.id)
-      handle to inner.data
-    }
-
-}
-
 /** Cross-peer methods for the `Transport` wire surface. */
 public class TransportSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `Transport::Play` messages. */
@@ -243,33 +194,51 @@ public class ForwardSurface(private val gateway: BridgethingGateway) {
 
 }
 
-/** Cross-peer methods for the `Error` wire surface. */
-public class ErrorSurface(private val gateway: BridgethingGateway) {
-  /** Cross-peer stream of `Error::Unsupported` messages. */
-  public val unsupported: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.Unsupported) return@mapNotNull null
-      it.deviceId
+/** Cross-peer methods for the `Asset` wire surface. */
+public class AssetSurface(private val gateway: BridgethingGateway) {
+  /** Send `Asset::Push` to every connected peer (broadcast). */
+  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
     }
+  }
 
-  /** Cross-peer stream of `Error::Malformed` messages. */
-  public val malformed: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.Malformed) return@mapNotNull null
-      it.deviceId
+  /** Send `Asset::Clear` to every connected peer (broadcast). */
+  public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
     }
+  }
 
-  /** Cross-peer stream of `Error::HandlerFailed` messages. */
-  public val handlerFailed: Flow<String> = gateway.events
+  /** Stream of typed inbound `AssetRequest` requests. */
+  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.HandlerFailed) return@mapNotNull null
-      it.deviceId
+      val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAssetMsg.Request ?: return@mapNotNull null
+      val handle = AssetRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
     }
 
 }
@@ -457,45 +426,6 @@ public class VersionSurfaceForDevice(
 
 }
 
-/** Per-peer methods for the `Asset` wire surface (deviceId is baked in). */
-public class AssetSurfaceForDevice(
-  private val gateway: BridgethingGateway,
-  public val deviceId: String,
-) {
-  /** Send `Asset::Push` to this peer. */
-  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Asset::Clear` to this peer. */
-  public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Stream of typed inbound `AssetRequest` requests. */
-  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayAssetMsg.Request ?: return@mapNotNull null
-      val handle = AssetRequestHandle(gateway, it.deviceId, it.message.id)
-      handle to inner.data
-    }
-
-}
-
 /** Per-peer methods for the `Transport` wire surface (deviceId is baked in). */
 public class TransportSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -660,39 +590,41 @@ public class ForwardSurfaceForDevice(
 
 }
 
-/** Per-peer methods for the `Error` wire surface (deviceId is baked in). */
-public class ErrorSurfaceForDevice(
+/** Per-peer methods for the `Asset` wire surface (deviceId is baked in). */
+public class AssetSurfaceForDevice(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
-  /** Stream of `Error::Unsupported` from this peer. */
-  public val unsupported: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.Unsupported) return@mapNotNull null
-      Unit
-    }
+  /** Send `Asset::Push` to this peer. */
+  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
 
-  /** Stream of `Error::Malformed` from this peer. */
-  public val malformed: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.Malformed) return@mapNotNull null
-      Unit
-    }
+  /** Send `Asset::Clear` to this peer. */
+  public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
 
-  /** Stream of `Error::HandlerFailed` from this peer. */
-  public val handlerFailed: Flow<Unit> = gateway.events
+  /** Stream of typed inbound `AssetRequest` requests. */
+  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Error ?: return@mapNotNull null
-      if (outer.data !is GatewayError.HandlerFailed) return@mapNotNull null
-      Unit
+      val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAssetMsg.Request ?: return@mapNotNull null
+      val handle = AssetRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
     }
 
 }
@@ -845,14 +777,12 @@ public class BridgethingGatewayDevice(
 ) {
   /** Per-peer methods for the `Version` wire surface. */
   public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `Asset` wire surface. */
-  public val asset: AssetSurfaceForDevice get() = AssetSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Transport` wire surface. */
   public val transport: TransportSurfaceForDevice get() = TransportSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
   public val forward: ForwardSurfaceForDevice get() = ForwardSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `Error` wire surface. */
-  public val error: ErrorSurfaceForDevice get() = ErrorSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Asset` wire surface. */
+  public val asset: AssetSurfaceForDevice get() = AssetSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Authority` wire surface. */
   public val authority: AuthoritySurfaceForDevice get() = AuthoritySurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Chrome` wire surface. */
@@ -867,10 +797,6 @@ public class BridgethingGatewayDevice(
 public val BridgethingGateway.version: VersionSurface
   get() = VersionSurface(this)
 
-/** Methods scoped to the `Asset` wire surface. */
-public val BridgethingGateway.asset: AssetSurface
-  get() = AssetSurface(this)
-
 /** Methods scoped to the `Transport` wire surface. */
 public val BridgethingGateway.transport: TransportSurface
   get() = TransportSurface(this)
@@ -879,9 +805,9 @@ public val BridgethingGateway.transport: TransportSurface
 public val BridgethingGateway.forward: ForwardSurface
   get() = ForwardSurface(this)
 
-/** Methods scoped to the `Error` wire surface. */
-public val BridgethingGateway.error: ErrorSurface
-  get() = ErrorSurface(this)
+/** Methods scoped to the `Asset` wire surface. */
+public val BridgethingGateway.asset: AssetSurface
+  get() = AssetSurface(this)
 
 /** Methods scoped to the `Authority` wire surface. */
 public val BridgethingGateway.authority: AuthoritySurface

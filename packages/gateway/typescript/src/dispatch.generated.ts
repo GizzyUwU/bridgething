@@ -78,18 +78,6 @@ export type ForwardDeviceInboundHandlers = {
   binary: (msg: Uint8Array) => void;
 };
 
-export type ErrorInboundHandlers = {
-  unsupported: (deviceId: string) => void;
-  malformed: (deviceId: string) => void;
-  handlerFailed: (deviceId: string) => void;
-};
-
-export type ErrorDeviceInboundHandlers = {
-  unsupported: () => void;
-  malformed: () => void;
-  handlerFailed: () => void;
-};
-
 export class VersionSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
@@ -112,60 +100,6 @@ export class VersionSurface {
           id: newUuidBytes(),
           meta: { kind: 'event' },
           data: { type: 'version', data: payload },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-}
-
-export class AssetSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Typed inbound `AssetRequest` request: handler is given a typed handle for the response. */
-  onRequest(handler: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const message = event.message;
-      if (message.meta.kind !== 'request') return;
-      const data = message.data;
-      if (data.type !== 'asset') return;
-      const inner = data.data;
-      if (inner.event !== 'request') return;
-      const handle = new AssetRequestHandle(this._gateway, event.deviceId, message.id);
-      const result = handler(handle, inner.data);
-      if (result && typeof result.then === 'function') {
-        result.catch((err: unknown) => {
-          this._gateway.logger.error('onRequest handler threw:', err);
-        });
-      }
-    });
-  }
-
-  /** Send `Asset::Push` to every connected peer (broadcast). */
-  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'asset', data: { event: 'push', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Asset::Clear` to every connected peer (broadcast). */
-  async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'asset', data: { event: 'clear', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -471,80 +405,37 @@ export class ForwardSurface {
   }
 }
 
-export class ErrorSurface {
+export class AssetSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
-  /** Subscribe to `Error::Unsupported` across all peers. */
-  onUnsupported(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'unsupported') return;
-      handler(event.deviceId);
-    });
+  /** Send `Asset::Push` to every connected peer (broadcast). */
+  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'asset', data: { event: 'push', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
   }
 
-  /** Subscribe to `Error::Malformed` across all peers. */
-  onMalformed(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'malformed') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Error::HandlerFailed` across all peers. */
-  onHandlerFailed(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'handlerFailed') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Exhaustive subscribe over all inbound `Error` variants. */
-  subscribe(handlers: ErrorInboundHandlers): () => void {
-    return this._subscribe(handlers, false);
-  }
-
-  /** Same as `subscribe` but every handler is optional. */
-  subscribePartial(handlers: Partial<ErrorInboundHandlers>): () => void {
-    return this._subscribe(handlers, true);
-  }
-
-  private _subscribe(handlers: Partial<ErrorInboundHandlers>, partial: boolean): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      switch (inner.type) {
-        case 'unsupported': {
-          handlers.unsupported?.(event.deviceId);
-          return;
-        }
-        case 'malformed': {
-          handlers.malformed?.(event.deviceId);
-          return;
-        }
-        case 'handlerFailed': {
-          handlers.handlerFailed?.(event.deviceId);
-          return;
-        }
-        default: {
-          if (!partial) this._gateway.logger.warn('Error: no handler for inner', inner);
-          return;
-        }
-      }
-    });
+  /** Send `Asset::Clear` to every connected peer (broadcast). */
+  async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'asset', data: { event: 'clear', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
   }
 }
 
@@ -730,54 +621,6 @@ export class VersionSurfaceForDevice {
       id: newUuidBytes(),
       meta: { kind: 'event' },
       data: { type: 'version', data: payload },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-}
-
-export class AssetSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Typed inbound `AssetRequest` request from this peer: handler is given a typed handle for the response. */
-  onRequest(handler: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const message = event.message;
-      if (message.meta.kind !== 'request') return;
-      const data = message.data;
-      if (data.type !== 'asset') return;
-      const inner = data.data;
-      if (inner.event !== 'request') return;
-      const handle = new AssetRequestHandle(this._gateway, event.deviceId, message.id);
-      const result = handler(handle, inner.data);
-      if (result && typeof result.then === 'function') {
-        result.catch((err: unknown) => {
-          this._gateway.logger.error('onRequest handler threw:', err);
-        });
-      }
-    });
-  }
-
-  /** Send `Asset::Push` to this peer. */
-  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'asset', data: { event: 'push', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Asset::Clear` to this peer. */
-  async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'asset', data: { event: 'clear', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -1104,87 +947,30 @@ export class ForwardSurfaceForDevice {
   }
 }
 
-export class ErrorSurfaceForDevice {
+export class AssetSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
   ) {}
 
-  /** Subscribe to `Error::Unsupported` from this peer. */
-  onUnsupported(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'unsupported') return;
-      handler();
-    });
+  /** Send `Asset::Push` to this peer. */
+  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'asset', data: { event: 'push', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
   }
 
-  /** Subscribe to `Error::Malformed` from this peer. */
-  onMalformed(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'malformed') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Error::HandlerFailed` from this peer. */
-  onHandlerFailed(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      if (inner.type !== 'handlerFailed') return;
-      handler();
-    });
-  }
-
-  /** Exhaustive subscribe over all inbound `Error` variants from this peer. */
-  subscribe(handlers: ErrorDeviceInboundHandlers): () => void {
-    return this._subscribe(handlers, false);
-  }
-
-  /** Same as `subscribe` but every handler is optional. */
-  subscribePartial(handlers: Partial<ErrorDeviceInboundHandlers>): () => void {
-    return this._subscribe(handlers, true);
-  }
-
-  private _subscribe(handlers: Partial<ErrorDeviceInboundHandlers>, partial: boolean): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'error') return;
-      const inner = data.data;
-      switch (inner.type) {
-        case 'unsupported': {
-          handlers.unsupported?.();
-          return;
-        }
-        case 'malformed': {
-          handlers.malformed?.();
-          return;
-        }
-        case 'handlerFailed': {
-          handlers.handlerFailed?.();
-          return;
-        }
-        default: {
-          if (!partial) this._gateway.logger.warn('Error: no handler for inner', inner);
-          return;
-        }
-      }
-    });
+  /** Send `Asset::Clear` to this peer. */
+  async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'asset', data: { event: 'clear', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
   }
 }
 
@@ -1334,45 +1120,39 @@ export class WebappSurfaceForDevice {
 }
 
 export type BridgeMessageHandlers = {
-  asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   transport: TransportInboundHandlers;
   forward: ForwardInboundHandlers;
-  error: ErrorInboundHandlers;
+  asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageHandlers = {
-  asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   transport?: Partial<TransportInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
-  error?: Partial<ErrorInboundHandlers>;
+  asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type BridgeMessageDeviceHandlers = {
-  asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   transport: TransportDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
-  error: ErrorDeviceInboundHandlers;
+  asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageDeviceHandlers = {
-  asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   transport?: Partial<TransportDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
-  error?: Partial<ErrorDeviceInboundHandlers>;
+  asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 declare module './index' {
   interface BridgethingGateway {
     /** Methods scoped to the `Version` wire surface. */
     readonly version: VersionSurface;
-    /** Methods scoped to the `Asset` wire surface. */
-    readonly asset: AssetSurface;
     /** Methods scoped to the `Transport` wire surface. */
     readonly transport: TransportSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
-    /** Methods scoped to the `Error` wire surface. */
-    readonly error: ErrorSurface;
+    /** Methods scoped to the `Asset` wire surface. */
+    readonly asset: AssetSurface;
     /** Methods scoped to the `Authority` wire surface. */
     readonly authority: AuthoritySurface;
     /** Methods scoped to the `Chrome` wire surface. */
@@ -1426,10 +1206,9 @@ export class AssetRequestHandle {
 
 type DeviceSurfaceCache = {
   version?: VersionSurfaceForDevice;
-  asset?: AssetSurfaceForDevice;
   transport?: TransportSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
-  error?: ErrorSurfaceForDevice;
+  asset?: AssetSurfaceForDevice;
   authority?: AuthoritySurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
   nowPlayingUpdate?: NowPlayingUpdateSurfaceForDevice;
@@ -1446,17 +1225,14 @@ export class BridgethingGatewayDevice {
   get version(): VersionSurfaceForDevice {
     return (this._surfaces.version ??= new VersionSurfaceForDevice(this._gateway, this.deviceId));
   }
-  get asset(): AssetSurfaceForDevice {
-    return (this._surfaces.asset ??= new AssetSurfaceForDevice(this._gateway, this.deviceId));
-  }
   get transport(): TransportSurfaceForDevice {
     return (this._surfaces.transport ??= new TransportSurfaceForDevice(this._gateway, this.deviceId));
   }
   get forward(): ForwardSurfaceForDevice {
     return (this._surfaces.forward ??= new ForwardSurfaceForDevice(this._gateway, this.deviceId));
   }
-  get error(): ErrorSurfaceForDevice {
-    return (this._surfaces.error ??= new ErrorSurfaceForDevice(this._gateway, this.deviceId));
+  get asset(): AssetSurfaceForDevice {
+    return (this._surfaces.asset ??= new AssetSurfaceForDevice(this._gateway, this.deviceId));
   }
   get authority(): AuthoritySurfaceForDevice {
     return (this._surfaces.authority ??= new AuthoritySurfaceForDevice(this._gateway, this.deviceId));
@@ -1482,10 +1258,9 @@ export class BridgethingGatewayDevice {
 
 type GatewaySurfaceCache = {
   version?: VersionSurface;
-  asset?: AssetSurface;
   transport?: TransportSurface;
   forward?: ForwardSurface;
-  error?: ErrorSurface;
+  asset?: AssetSurface;
   authority?: AuthoritySurface;
   chrome?: ChromeSurface;
   nowPlayingUpdate?: NowPlayingUpdateSurface;
@@ -1515,14 +1290,6 @@ export function applyDispatch(): void {
       return (bucket.version ??= new VersionSurface(this));
     },
   });
-  Object.defineProperty(BridgethingGateway.prototype, 'asset', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): AssetSurface {
-      const bucket = bucketFor(this);
-      return (bucket.asset ??= new AssetSurface(this));
-    },
-  });
   Object.defineProperty(BridgethingGateway.prototype, 'transport', {
     configurable: true,
     enumerable: true,
@@ -1539,12 +1306,12 @@ export function applyDispatch(): void {
       return (bucket.forward ??= new ForwardSurface(this));
     },
   });
-  Object.defineProperty(BridgethingGateway.prototype, 'error', {
+  Object.defineProperty(BridgethingGateway.prototype, 'asset', {
     configurable: true,
     enumerable: true,
-    get(this: BridgethingGateway): ErrorSurface {
+    get(this: BridgethingGateway): AssetSurface {
       const bucket = bucketFor(this);
-      return (bucket.error ??= new ErrorSurface(this));
+      return (bucket.asset ??= new AssetSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'authority', {
@@ -1612,19 +1379,6 @@ function outerSubscribeGateway(
     if (event.type !== 'message') return;
     const data = event.message.data;
     switch (data.type) {
-      case 'asset': {
-        if (event.message.meta.kind !== 'request') return;
-        const handler = handlers.asset;
-        if (!handler) {
-          if (!partial) g.logger.warn('subscribe: no handler for asset');
-          return;
-        }
-        const handle = new AssetRequestHandle(g, event.deviceId, event.message.id);
-        const result = handler(handle, data.data.data);
-        if (result && typeof result.then === 'function')
-          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
-        return;
-      }
       case 'transport': {
         const innerHandlers = handlers.transport;
         if (!innerHandlers) {
@@ -1713,31 +1467,18 @@ function outerSubscribeGateway(
           }
         }
       }
-      case 'error': {
-        const innerHandlers = handlers.error;
-        if (!innerHandlers) {
-          if (!partial) g.logger.warn('subscribe: no handler for error');
+      case 'asset': {
+        if (event.message.meta.kind !== 'request') return;
+        const handler = handlers.asset;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for asset');
           return;
         }
-        const inner = data.data;
-        switch (inner.type) {
-          case 'unsupported': {
-            innerHandlers.unsupported?.(event.deviceId);
-            return;
-          }
-          case 'malformed': {
-            innerHandlers.malformed?.(event.deviceId);
-            return;
-          }
-          case 'handlerFailed': {
-            innerHandlers.handlerFailed?.(event.deviceId);
-            return;
-          }
-          default: {
-            if (!partial) g.logger.warn('Error: no handler for inner', inner);
-            return;
-          }
-        }
+        const handle = new AssetRequestHandle(g, event.deviceId, event.message.id);
+        const result = handler(handle, data.data.data);
+        if (result && typeof result.then === 'function')
+          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+        return;
       }
       default: {
         if (!partial) g.logger.warn('subscribe: no handler for unknown wire variant', data);
@@ -1758,19 +1499,6 @@ function outerSubscribeDevice(
     if (event.deviceId !== deviceId) return;
     const data = event.message.data;
     switch (data.type) {
-      case 'asset': {
-        if (event.message.meta.kind !== 'request') return;
-        const handler = handlers.asset;
-        if (!handler) {
-          if (!partial) g.logger.warn('subscribe: no handler for asset');
-          return;
-        }
-        const handle = new AssetRequestHandle(g, event.deviceId, event.message.id);
-        const result = handler(handle, data.data.data);
-        if (result && typeof result.then === 'function')
-          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
-        return;
-      }
       case 'transport': {
         const innerHandlers = handlers.transport;
         if (!innerHandlers) {
@@ -1859,31 +1587,18 @@ function outerSubscribeDevice(
           }
         }
       }
-      case 'error': {
-        const innerHandlers = handlers.error;
-        if (!innerHandlers) {
-          if (!partial) g.logger.warn('subscribe: no handler for error');
+      case 'asset': {
+        if (event.message.meta.kind !== 'request') return;
+        const handler = handlers.asset;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for asset');
           return;
         }
-        const inner = data.data;
-        switch (inner.type) {
-          case 'unsupported': {
-            innerHandlers.unsupported?.();
-            return;
-          }
-          case 'malformed': {
-            innerHandlers.malformed?.();
-            return;
-          }
-          case 'handlerFailed': {
-            innerHandlers.handlerFailed?.();
-            return;
-          }
-          default: {
-            if (!partial) g.logger.warn('Error: no handler for inner', inner);
-            return;
-          }
-        }
+        const handle = new AssetRequestHandle(g, event.deviceId, event.message.id);
+        const result = handler(handle, data.data.data);
+        if (result && typeof result.then === 'function')
+          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+        return;
       }
       default: {
         if (!partial) g.logger.warn('subscribe: no handler for unknown wire variant', data);

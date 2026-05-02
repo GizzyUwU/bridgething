@@ -46,58 +46,6 @@ public struct VersionSurface: Sendable {
 
 }
 
-/// Cross-peer methods for the `Asset` wire surface.
-public struct AssetSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          guard case .message(let deviceId, let message) = event else { continue }
-          guard case .request = message.meta else { continue }
-          guard case .asset(let outer) = message.data else { continue }
-          guard case .request(let payload) = outer else { continue }
-          let handle = AssetRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
-          continuation.yield((handle: handle, req: payload))
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send `Asset::Push` to every connected peer (broadcast).
-  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.push(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Asset::Clear` to every connected peer (broadcast).
-  public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.clear(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-}
-
 /// Cross-peer methods for the `Transport` wire surface.
 public struct TransportSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -365,20 +313,21 @@ public struct ForwardSurface: Sendable {
 
 }
 
-/// Cross-peer methods for the `Error` wire surface.
-public struct ErrorSurface: Sendable {
+/// Cross-peer methods for the `Asset` wire surface.
+public struct AssetSurface: Sendable {
   public let gateway: BridgethingGateway
 
-  /// Cross-peer stream of `Error::Unsupported` messages.
-  public var unsupported: AsyncStream<String> {
+  /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .error(let outer) = message.data,
-             case .unsupported = outer {
-            continuation.yield(deviceId)
-          }
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .asset(let outer) = message.data else { continue }
+          guard case .request(let payload) = outer else { continue }
+          let handle = AssetRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
       }
@@ -386,37 +335,31 @@ public struct ErrorSurface: Sendable {
     }
   }
 
-  /// Cross-peer stream of `Error::Malformed` messages.
-  public var malformed: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .error(let outer) = message.data,
-             case .malformed = outer {
-            continuation.yield(deviceId)
-          }
+  /// Send `Asset::Push` to every connected peer (broadcast).
+  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.push(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
-        continuation.finish()
       }
-      continuation.onTermination = { _ in task.cancel() }
+      try await group.waitForAll()
     }
   }
 
-  /// Cross-peer stream of `Error::HandlerFailed` messages.
-  public var handlerFailed: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .error(let outer) = message.data,
-             case .handlerFailed = outer {
-            continuation.yield(deviceId)
-          }
+  /// Send `Asset::Clear` to every connected peer (broadcast).
+  public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.clear(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
-        continuation.finish()
       }
-      continuation.onTermination = { _ in task.cancel() }
+      try await group.waitForAll()
     }
   }
 
@@ -600,44 +543,6 @@ public struct VersionSurfaceForDevice: Sendable {
   /// Send a `Version` event to this peer.
   public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-}
-
-/// Per-peer methods for the `Asset` wire surface (deviceId is baked in).
-public struct AssetSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          guard case .message(let deviceId, let message) = event else { continue }
-          guard deviceId == self.deviceId else { continue }
-          guard case .request = message.meta else { continue }
-          guard case .asset(let outer) = message.data else { continue }
-          guard case .request(let payload) = outer else { continue }
-          let handle = AssetRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
-          continuation.yield((handle: handle, req: payload))
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send `Asset::Push` to this peer.
-  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.push(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Asset::Clear` to this peer.
-  public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.clear(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -927,22 +832,23 @@ public struct ForwardSurfaceForDevice: Sendable {
 
 }
 
-/// Per-peer methods for the `Error` wire surface (deviceId is baked in).
-public struct ErrorSurfaceForDevice: Sendable {
+/// Per-peer methods for the `Asset` wire surface (deviceId is baked in).
+public struct AssetSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
   public let deviceId: String
 
-  /// Stream of `Error::Unsupported` from this peer.
-  public var unsupported: AsyncStream<Void> {
+  /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
     AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
+      let task = Task { [gateway] in
         for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .error(let outer) = message.data,
-             case .unsupported = outer {
-            continuation.yield(())
-          }
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .asset(let outer) = message.data else { continue }
+          guard case .request(let payload) = outer else { continue }
+          let handle = AssetRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
       }
@@ -950,40 +856,16 @@ public struct ErrorSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of `Error::Malformed` from this peer.
-  public var malformed: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .error(let outer) = message.data,
-             case .malformed = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
+  /// Send `Asset::Push` to this peer.
+  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.push(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
-  /// Stream of `Error::HandlerFailed` from this peer.
-  public var handlerFailed: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .error(let outer) = message.data,
-             case .handlerFailed = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
+  /// Send `Asset::Clear` to this peer.
+  public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.clear(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
 }
@@ -1120,14 +1002,12 @@ public struct BridgethingGatewayDevice: Sendable {
 
   /// Per-peer methods for the `Version` wire surface.
   public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Asset` wire surface.
-  public var asset: AssetSurfaceForDevice { AssetSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Transport` wire surface.
   public var transport: TransportSurfaceForDevice { TransportSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
   public var forward: ForwardSurfaceForDevice { ForwardSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Error` wire surface.
-  public var error: ErrorSurfaceForDevice { ErrorSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Asset` wire surface.
+  public var asset: AssetSurfaceForDevice { AssetSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Authority` wire surface.
   public var authority: AuthoritySurfaceForDevice { AuthoritySurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Chrome` wire surface.
@@ -1141,14 +1021,12 @@ public struct BridgethingGatewayDevice: Sendable {
 extension BridgethingGateway {
   /// Methods scoped to the `Version` wire surface.
   public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
-  /// Methods scoped to the `Asset` wire surface.
-  public nonisolated var asset: AssetSurface { AssetSurface(gateway: self) }
   /// Methods scoped to the `Transport` wire surface.
   public nonisolated var transport: TransportSurface { TransportSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
   public nonisolated var forward: ForwardSurface { ForwardSurface(gateway: self) }
-  /// Methods scoped to the `Error` wire surface.
-  public nonisolated var error: ErrorSurface { ErrorSurface(gateway: self) }
+  /// Methods scoped to the `Asset` wire surface.
+  public nonisolated var asset: AssetSurface { AssetSurface(gateway: self) }
   /// Methods scoped to the `Authority` wire surface.
   public nonisolated var authority: AuthoritySurface { AuthoritySurface(gateway: self) }
   /// Methods scoped to the `Chrome` wire surface.

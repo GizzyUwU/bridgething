@@ -1,3 +1,4 @@
+use bridgething_macros::BridgeEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -51,20 +52,33 @@ pub struct SkipToIndexSet {
 /// the alternate path when authority is held by iAP2.
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[bridge_enum(into = crate::gateway::BridgeToGatewayMsgData)]
 pub enum BridgeToGatewayTransportMsg {
+  #[bridge_command]
   Play,
+  #[bridge_command]
   Pause,
+  #[bridge_command]
   PlayPause,
+  #[bridge_command]
   Next,
+  #[bridge_command]
   Prev,
+  #[bridge_command]
   VolumeUp,
+  #[bridge_command]
   VolumeDown,
+  #[bridge_command]
   MuteToggle,
+  #[bridge_command]
   Shuffle(ShuffleSet),
+  #[bridge_command]
   Repeat(RepeatSet),
+  #[bridge_command]
   SeekTo(SeekToSet),
+  #[bridge_command]
   SkipToIndex(SkipToIndexSet),
 }

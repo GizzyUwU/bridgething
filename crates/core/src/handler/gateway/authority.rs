@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgeAuthorityMsg;
+use libbridgething::gateway::GatewayToBridgeAuthorityMsgEvent;
 
 use super::{HandlerResult, MsgHandle};
 
@@ -12,13 +12,13 @@ impl AuthorityHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: GatewayToBridgeAuthorityMsg) -> HandlerResult {
+  pub async fn handle(&mut self, msg: GatewayToBridgeAuthorityMsgEvent) -> HandlerResult {
     match msg {
-      GatewayToBridgeAuthorityMsg::Claim(claim) => {
+      GatewayToBridgeAuthorityMsgEvent::Claim(claim) => {
         tracing::debug!(scope = ?claim.scope, "({:?}) companion claims authority", &self.handle.address);
         self.handle.state.authority.claim(claim.scope);
       }
-      GatewayToBridgeAuthorityMsg::Release(release) => {
+      GatewayToBridgeAuthorityMsgEvent::Release(release) => {
         tracing::debug!(scope = ?release.scope, "({:?}) companion releases authority", &self.handle.address);
         self.handle.state.authority.release(release.scope);
       }

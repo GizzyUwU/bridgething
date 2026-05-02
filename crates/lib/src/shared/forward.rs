@@ -1,3 +1,4 @@
+use bridgething_macros::BridgeEvent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
@@ -5,7 +6,7 @@ use typeshare::typeshare;
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEvent)]
 #[serde(
   tag = "encoding",
   content = "data",

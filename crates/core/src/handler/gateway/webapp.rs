@@ -1,5 +1,5 @@
 use libbridgething::gateway::{
-  GatewayToBridgeWebappMsg, GetActiveWebapp, ListWebapps, WebappActive, WebappError, WebappInstall, WebappList,
+  GatewayToBridgeWebappMsgRequest, GetActiveWebapp, ListWebapps, WebappActive, WebappError, WebappInstall, WebappList,
   WebappSwitchTo, WebappUninstall,
 };
 
@@ -18,15 +18,15 @@ impl WebappHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: GatewayToBridgeWebappMsg) -> HandlerResult {
+  pub async fn handle(&mut self, msg: GatewayToBridgeWebappMsgRequest) -> HandlerResult {
     tracing::debug!("({:?}) handling webapp message", &self.handle.address);
 
     match msg {
-      GatewayToBridgeWebappMsg::List => self.list().await,
-      GatewayToBridgeWebappMsg::GetActive => self.get_active().await,
-      GatewayToBridgeWebappMsg::SwitchTo(req) => self.switch_to(req).await,
-      GatewayToBridgeWebappMsg::Install(req) => self.install(req).await,
-      GatewayToBridgeWebappMsg::Uninstall(req) => self.uninstall(req).await,
+      GatewayToBridgeWebappMsgRequest::List => self.list().await,
+      GatewayToBridgeWebappMsgRequest::GetActive => self.get_active().await,
+      GatewayToBridgeWebappMsgRequest::SwitchTo(req) => self.switch_to(req).await,
+      GatewayToBridgeWebappMsgRequest::Install(req) => self.install(req).await,
+      GatewayToBridgeWebappMsgRequest::Uninstall(req) => self.uninstall(req).await,
     }
   }
 

@@ -17,6 +17,7 @@
 //! sending only that attribute) and gives the Android companion the
 //! freedom to push partial updates without a full snapshot every time.
 
+use bridgething_macros::GatewayEvent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
@@ -40,7 +41,7 @@ pub enum RepeatMode {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS, GatewayEvent)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NowPlayingUpdate {

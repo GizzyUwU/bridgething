@@ -1,12 +1,22 @@
 //! Walks `crates/lib/src/` and builds an `Inventory` of the wire
 //! protocol's structural pieces: top-level enums, inner enums, marker
-//! impls, and typed-request macro invocations. The plan layer consumes
-//! this to produce the per-language emit plan.
+//! trait impls (inferred from `#[derive(BridgeEnum)]` per-variant tags
+//! plus standalone `#[derive(BridgeEvent/...)]` derives), and typed-
+//! request declarations (read from `#[gateway_request(...)]` /
+//! `#[bridge_request(...)]` attributes paired with their derives).
+//! The plan layer consumes this to produce the per-language emit plan.
+//!
+//! Codegen used to walk hand-written `impl Trait for Type {}` blocks in
+//! `crates/lib/src/gateway/marker.rs` and regex-parse `impl_*_request!`
+//! macro tokens. Both have been replaced by proc-macro derives, so this
+//! file now reads attributes via `syn` directly. The shape of `Inventory`
+//! is unchanged — the plan layer is decoupled from how the inventory is
+//! discovered.
 
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use syn::{Fields, GenericArgument, Item, ItemEnum, ItemImpl, Meta, PathArguments, Type};
+use syn::{Attribute, Fields, GenericArgument, Item, ItemEnum, ItemStruct, Meta, PathArguments, Type, Variant};
 
 pub const BRIDGE_TO_GATEWAY: &str = "BridgeToGatewayMsgData";
 pub const GATEWAY_TO_BRIDGE: &str = "GatewayToBridgeMsgData";
@@ -113,9 +123,9 @@ pub struct Inventory {
   pub bridge_requests: Vec<TypedRequest>,
 }
 
-/// A single `impl_gateway_request!` or `impl_bridge_request!` invocation,
-/// captured in structured form. Codegen reads these to emit typed
-/// query methods and typed-handle inbound dispatch.
+/// A single typed-request declaration, captured in structured form.
+/// Codegen reads these to emit typed query methods and typed-handle
+/// inbound dispatch in each per-language SDK.
 #[derive(Debug, Clone)]
 pub struct TypedRequest {
   pub request: String,
@@ -188,31 +198,41 @@ fn walk_items(
     match item {
       Item::Enum(en) => {
         let def = collect_enum(en);
-        if def.name == BRIDGE_TO_GATEWAY || def.name == GATEWAY_TO_BRIDGE {
-          wire_enums.insert(def.name.clone(), def);
+        let name = def.name.clone();
+        if name == BRIDGE_TO_GATEWAY || name == GATEWAY_TO_BRIDGE {
+          wire_enums.insert(name.clone(), def);
         } else {
-          enums.insert(def.name.clone(), def);
+          enums.insert(name.clone(), def);
         }
-      }
-      Item::Impl(im) => {
-        if let Some((kind, target)) = parse_marker_impl(im) {
-          markers.entry(target).or_default().push(kind);
+        // Standalone marker derives can appear on enums too
+        // (e.g. `ForwardMessage`).
+        for kind in standalone_marker_derives(&en.attrs) {
+          markers.entry(name.clone()).or_default().push(kind);
         }
-      }
-      Item::Macro(m) => {
-        let path = m
-          .mac
-          .path
-          .segments
-          .last()
-          .map(|s| s.ident.to_string())
-          .unwrap_or_default();
-        if path == "impl_gateway_request" {
-          if let Some(req) = parse_typed_request(&m.mac.tokens.to_string()) {
-            gateway_requests.push(req);
+        // BridgeEnum-derived enums infer their parent-level marker from
+        // per-variant `#[bridge_*]` tags. Direction comes from the parent
+        // ident prefix.
+        if has_derive(&en.attrs, "BridgeEnum") {
+          let variants: Vec<&Variant> = en.variants.iter().collect();
+          for kind in infer_bridge_enum_markers(&name, &variants) {
+            markers.entry(name.clone()).or_default().push(kind);
           }
-        } else if path == "impl_bridge_request"
-          && let Some(req) = parse_typed_request(&m.mac.tokens.to_string())
+        }
+      }
+      Item::Struct(s) => {
+        // Structs only contribute markers (top-level outer-wire variant
+        // payloads like `BridgeThingMeta`) and typed-request declarations.
+        let name = s.ident.to_string();
+        for kind in standalone_marker_derives(&s.attrs) {
+          markers.entry(name.clone()).or_default().push(kind);
+        }
+        if has_derive(&s.attrs, "GatewayRequest")
+          && let Some(req) = parse_request_attr(s, "gateway_request")
+        {
+          gateway_requests.push(req);
+        }
+        if has_derive(&s.attrs, "BridgeRequest")
+          && let Some(req) = parse_request_attr(s, "bridge_request")
         {
           bridge_requests.push(req);
         }
@@ -227,56 +247,150 @@ fn walk_items(
   }
 }
 
-/// Parse a structured `impl_*_request!` macro body into a `TypedRequest`.
-/// Format produced by the macro signature in `crates/lib/src/gateway/request.rs`:
+/// Returns the markers declared via standalone derives on this item:
+/// `BridgeEvent`, `GatewayEvent`, `BridgeCommand`, `GatewayCommand`.
+/// `BridgeUnicast` / `GatewayUnicast` are still hand-written impls today
+/// (no current users); they don't go through this path.
+fn standalone_marker_derives(attrs: &[Attribute]) -> Vec<MarkerKind> {
+  let mut out = Vec::new();
+  for attr in attrs {
+    if !attr.path().is_ident("derive") {
+      continue;
+    }
+    let _ = attr.parse_nested_meta(|meta| {
+      if let Some(seg) = meta.path.segments.last()
+        && let Some(kind) = MarkerKind::from_path(&seg.ident.to_string())
+      {
+        out.push(kind);
+      }
+      Ok(())
+    });
+  }
+  out
+}
+
+fn has_derive(attrs: &[Attribute], name: &str) -> bool {
+  for attr in attrs {
+    if !attr.path().is_ident("derive") {
+      continue;
+    }
+    let mut found = false;
+    let _ = attr.parse_nested_meta(|meta| {
+      if let Some(seg) = meta.path.segments.last()
+        && seg.ident == name
+      {
+        found = true;
+      }
+      Ok(())
+    });
+    if found {
+      return true;
+    }
+  }
+  false
+}
+
+/// For an enum with `#[derive(BridgeEnum)]`, infer the parent-level
+/// marker traits from the per-variant `#[bridge_*]` tags. A variant
+/// tagged `#[bridge_event]` contributes the direction's Event marker;
+/// `#[bridge_command]` contributes Command. Request and Response tags
+/// don't contribute parent-level markers (typed requests route through
+/// `BridgeRequest`/`GatewayRequest` traits on the request payload type;
+/// responses go through `respond_to` and don't need a marker).
+fn infer_bridge_enum_markers(parent_name: &str, variants: &[&Variant]) -> Vec<MarkerKind> {
+  let direction_is_bridge_to_gateway = parent_name.starts_with("BridgeToGateway");
+  let direction_is_gateway_to_bridge = parent_name.starts_with("GatewayToBridge");
+  if !direction_is_bridge_to_gateway && !direction_is_gateway_to_bridge {
+    return Vec::new();
+  }
+  let mut has_event = false;
+  let mut has_command = false;
+  for v in variants {
+    for attr in &v.attrs {
+      if attr.path().is_ident("bridge_event") {
+        has_event = true;
+      } else if attr.path().is_ident("bridge_command") {
+        has_command = true;
+      }
+    }
+  }
+  let mut out = Vec::new();
+  if has_event {
+    out.push(if direction_is_bridge_to_gateway {
+      MarkerKind::BridgeEvent
+    } else {
+      MarkerKind::GatewayEvent
+    });
+  }
+  if has_command {
+    out.push(if direction_is_bridge_to_gateway {
+      MarkerKind::BridgeCommand
+    } else {
+      MarkerKind::GatewayCommand
+    });
+  }
+  out
+}
+
+/// Parse a `#[gateway_request(...)]` / `#[bridge_request(...)]` attribute
+/// off a struct decorated with the matching derive. Format:
 ///
 /// ```text
-/// request: <Type>,
-/// surface: <Ident>,
-/// request_variant: <Ident> | <Ident>(_),
-/// response: <Type>,
-/// response_variant: <Ident>(_),
-/// [error: <Type>,
-///  error_variant: <Ident>(_),]
+/// surface = <Ident>,
+/// request_variant = <Ident>,
+/// response = <TypePath>,
+/// response_variant = <Ident>,
+/// [error = <TypePath>,
+///  error_variant = <Ident>,]
 /// ```
-fn parse_typed_request(body: &str) -> Option<TypedRequest> {
-  let request = extract_field(body, "request")?;
-  let surface = extract_field(body, "surface")?;
-  let (request_variant, request_takes_payload) = extract_variant_with_kind(body, "request_variant")?;
-  let response = extract_field(body, "response")?;
-  let (response_variant, _) = extract_variant_with_kind(body, "response_variant")?;
-  let error = extract_field(body, "error");
-  let error_variant = extract_variant_with_kind(body, "error_variant").map(|(v, _)| v);
+///
+/// `request_takes_payload` is determined from the struct's shape:
+/// `Fields::Unit` → unit-variant; anything else → tuple-variant.
+fn parse_request_attr(s: &ItemStruct, attr_name: &str) -> Option<TypedRequest> {
+  let attr = s.attrs.iter().find(|a| a.path().is_ident(attr_name))?;
+  let mut surface: Option<String> = None;
+  let mut request_variant: Option<String> = None;
+  let mut response: Option<String> = None;
+  let mut response_variant: Option<String> = None;
+  let mut error: Option<String> = None;
+  let mut error_variant: Option<String> = None;
+
+  let _ = attr.parse_nested_meta(|meta| {
+    if meta.path.is_ident("surface") {
+      let v: syn::Path = meta.value()?.parse()?;
+      surface = v.segments.last().map(|s| s.ident.to_string());
+    } else if meta.path.is_ident("request_variant") {
+      let v: syn::Ident = meta.value()?.parse()?;
+      request_variant = Some(v.to_string());
+    } else if meta.path.is_ident("response") {
+      let v: syn::Path = meta.value()?.parse()?;
+      response = v.segments.last().map(|s| s.ident.to_string());
+    } else if meta.path.is_ident("response_variant") {
+      let v: syn::Ident = meta.value()?.parse()?;
+      response_variant = Some(v.to_string());
+    } else if meta.path.is_ident("error") {
+      let v: syn::Path = meta.value()?.parse()?;
+      error = v.segments.last().map(|s| s.ident.to_string());
+    } else if meta.path.is_ident("error_variant") {
+      let v: syn::Ident = meta.value()?.parse()?;
+      error_variant = Some(v.to_string());
+    } else {
+      return Err(meta.error("unknown key"));
+    }
+    Ok(())
+  });
+
+  let request_takes_payload = !matches!(s.fields, Fields::Unit);
   Some(TypedRequest {
-    request,
-    surface,
-    request_variant,
+    request: s.ident.to_string(),
+    surface: surface?,
+    request_variant: request_variant?,
     request_takes_payload,
-    response,
-    response_variant,
+    response: response?,
+    response_variant: response_variant?,
     error,
     error_variant,
   })
-}
-
-fn extract_field(body: &str, name: &str) -> Option<String> {
-  let pattern = regex::Regex::new(&format!(r"\b{}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)", regex::escape(name))).ok()?;
-  pattern.captures(body).map(|c| c[1].to_string())
-}
-
-/// Extract a `<name>: <Variant>` or `<name>: <Variant>(_)` capture and
-/// report whether parens were present (true = tuple/payload variant,
-/// false = unit variant).
-fn extract_variant_with_kind(body: &str, name: &str) -> Option<(String, bool)> {
-  let pattern = regex::Regex::new(&format!(
-    r"\b{}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)(\s*\(\s*_\s*\))?",
-    regex::escape(name)
-  ))
-  .ok()?;
-  let cap = pattern.captures(body)?;
-  let variant = cap.get(1)?.as_str().to_string();
-  let takes_payload = cap.get(2).is_some();
-  Some((variant, takes_payload))
 }
 
 fn collect_enum(en: &ItemEnum) -> EnumDef {
@@ -348,15 +462,4 @@ fn payload_type(ty: &Type) -> PayloadType {
     return PayloadType::StringScalar;
   }
   PayloadType::Named(name)
-}
-
-fn parse_marker_impl(im: &ItemImpl) -> Option<(MarkerKind, String)> {
-  let (_, trait_path, _) = im.trait_.as_ref()?;
-  let trait_name = trait_path.segments.last()?.ident.to_string();
-  let kind = MarkerKind::from_path(&trait_name)?;
-  let target = match im.self_ty.as_ref() {
-    Type::Path(p) => p.path.segments.last()?.ident.to_string(),
-    _ => return None,
-  };
-  Some((kind, target))
 }

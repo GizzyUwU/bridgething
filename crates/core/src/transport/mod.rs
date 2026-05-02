@@ -25,7 +25,9 @@
 use bridgething_iap2::HidCommand;
 use libbridgething::{
   RepeatMode,
-  gateway::{BridgeToGatewayTransportMsg, CompanionAuthorityScope, RepeatSet, SeekToSet, ShuffleSet, SkipToIndexSet},
+  gateway::{
+    BridgeToGatewayTransportMsgCommand, CompanionAuthorityScope, RepeatSet, SeekToSet, ShuffleSet, SkipToIndexSet,
+  },
 };
 
 use crate::{
@@ -74,13 +76,13 @@ impl TransportController {
 
   pub async fn play(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("play", BridgeToGatewayTransportMsg::Play, hid_bit::PLAY_PAUSE)
+      .dispatch_simple("play", BridgeToGatewayTransportMsgCommand::Play, hid_bit::PLAY_PAUSE)
       .await
   }
 
   pub async fn pause(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("pause", BridgeToGatewayTransportMsg::Pause, hid_bit::PLAY_PAUSE)
+      .dispatch_simple("pause", BridgeToGatewayTransportMsgCommand::Pause, hid_bit::PLAY_PAUSE)
       .await
   }
 
@@ -88,7 +90,7 @@ impl TransportController {
     self
       .dispatch_simple(
         "play_pause",
-        BridgeToGatewayTransportMsg::PlayPause,
+        BridgeToGatewayTransportMsgCommand::PlayPause,
         hid_bit::PLAY_PAUSE,
       )
       .await
@@ -96,19 +98,23 @@ impl TransportController {
 
   pub async fn next(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("next", BridgeToGatewayTransportMsg::Next, hid_bit::NEXT)
+      .dispatch_simple("next", BridgeToGatewayTransportMsgCommand::Next, hid_bit::NEXT)
       .await
   }
 
   pub async fn prev(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("prev", BridgeToGatewayTransportMsg::Prev, hid_bit::PREV)
+      .dispatch_simple("prev", BridgeToGatewayTransportMsgCommand::Prev, hid_bit::PREV)
       .await
   }
 
   pub async fn volume_up(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("volume_up", BridgeToGatewayTransportMsg::VolumeUp, hid_bit::VOLUME_UP)
+      .dispatch_simple(
+        "volume_up",
+        BridgeToGatewayTransportMsgCommand::VolumeUp,
+        hid_bit::VOLUME_UP,
+      )
       .await
   }
 
@@ -116,7 +122,7 @@ impl TransportController {
     self
       .dispatch_simple(
         "volume_down",
-        BridgeToGatewayTransportMsg::VolumeDown,
+        BridgeToGatewayTransportMsgCommand::VolumeDown,
         hid_bit::VOLUME_DOWN,
       )
       .await
@@ -124,7 +130,11 @@ impl TransportController {
 
   pub async fn mute_toggle(&self) -> TransportResult<()> {
     self
-      .dispatch_simple("mute_toggle", BridgeToGatewayTransportMsg::MuteToggle, hid_bit::MUTE)
+      .dispatch_simple(
+        "mute_toggle",
+        BridgeToGatewayTransportMsgCommand::MuteToggle,
+        hid_bit::MUTE,
+      )
       .await
   }
 
@@ -132,7 +142,7 @@ impl TransportController {
     if self.companion_owns_playback() {
       tracing::debug!("transport set_shuffle({on}): routing to companion");
       return self
-        .send_companion(BridgeToGatewayTransportMsg::Shuffle(ShuffleSet { on }))
+        .send_companion(BridgeToGatewayTransportMsgCommand::Shuffle(ShuffleSet { on }))
         .await;
     }
     let snapshot = self.player.iap2_playback_snapshot().await;
@@ -156,7 +166,7 @@ impl TransportController {
     if self.companion_owns_playback() {
       tracing::debug!("transport set_repeat({mode:?}): routing to companion");
       return self
-        .send_companion(BridgeToGatewayTransportMsg::Repeat(RepeatSet { mode }))
+        .send_companion(BridgeToGatewayTransportMsgCommand::Repeat(RepeatSet { mode }))
         .await;
     }
     let snapshot = self.player.iap2_playback_snapshot().await;
@@ -186,7 +196,7 @@ impl TransportController {
     if self.companion_owns_playback() {
       tracing::debug!("transport seek_to({position_ms}): routing to companion");
       return self
-        .send_companion(BridgeToGatewayTransportMsg::SeekTo(SeekToSet { position_ms }))
+        .send_companion(BridgeToGatewayTransportMsgCommand::SeekTo(SeekToSet { position_ms }))
         .await;
     }
     tracing::warn!("transport seek_to({position_ms}): no iAP2 HID equivalent; ignoring");
@@ -197,7 +207,9 @@ impl TransportController {
     if self.companion_owns_playback() {
       tracing::debug!("transport skip_to_index({index}): routing to companion");
       return self
-        .send_companion(BridgeToGatewayTransportMsg::SkipToIndex(SkipToIndexSet { index }))
+        .send_companion(BridgeToGatewayTransportMsgCommand::SkipToIndex(SkipToIndexSet {
+          index,
+        }))
         .await;
     }
     tracing::warn!("transport skip_to_index({index}): no iAP2 HID equivalent; ignoring");
@@ -216,7 +228,7 @@ impl TransportController {
   async fn dispatch_simple(
     &self,
     verb: &str,
-    companion_msg: BridgeToGatewayTransportMsg,
+    companion_msg: BridgeToGatewayTransportMsgCommand,
     hid_mask: u8,
   ) -> TransportResult<()> {
     if self.companion_owns_playback() {
@@ -227,7 +239,7 @@ impl TransportController {
     self.send_iap2(HidCommand::Pulse(hid_mask)).await
   }
 
-  async fn send_companion(&self, msg: BridgeToGatewayTransportMsg) -> TransportResult<()> {
+  async fn send_companion(&self, msg: BridgeToGatewayTransportMsgCommand) -> TransportResult<()> {
     self.bluetooth.gateway_man.broadcast_command(msg).await;
     Ok(())
   }

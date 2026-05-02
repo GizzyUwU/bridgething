@@ -1,4 +1,4 @@
-use libbridgething::gateway::{BridgeToGatewayMsgData, ChromeNavigate, GatewayToBridgeChromeMsg};
+use libbridgething::gateway::{BridgeToGatewayMsgData, ChromeNavigate, GatewayToBridgeChromeMsgCommand};
 
 use super::{HandlerResult, MsgHandle};
 use crate::chrome::ChromeCommand;
@@ -13,11 +13,11 @@ impl ChromeHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: GatewayToBridgeChromeMsg) -> HandlerResult {
+  pub async fn handle(&mut self, msg: GatewayToBridgeChromeMsgCommand) -> HandlerResult {
     tracing::debug!("({:?}) handling chrome message", &self.handle.address);
 
     match msg {
-      GatewayToBridgeChromeMsg::Navigate(ChromeNavigate { url }) => self.navigate(url).await,
+      GatewayToBridgeChromeMsgCommand::Navigate(ChromeNavigate { url }) => self.navigate(url).await,
     }
   }
 

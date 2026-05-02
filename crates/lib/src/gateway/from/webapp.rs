@@ -1,19 +1,42 @@
+use bridgething_macros::{BridgeEnum, GatewayRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{
-  WebappInfo,
-  gateway::{WebappActive, WebappError, WebappList},
-  impl_gateway_request,
-};
+/// Marker struct for the `List` request — pairs with `BridgeToGatewayWebappMsg::Webapps`.
+#[derive(Debug, Clone, Copy, Default, GatewayRequest)]
+#[gateway_request(
+  surface = Webapp,
+  request_variant = List,
+  response = crate::gateway::WebappList,
+  response_variant = Webapps,
+)]
+pub struct ListWebapps;
+
+/// Marker struct for the `GetActive` request — pairs with `BridgeToGatewayWebappMsg::Active`.
+#[derive(Debug, Clone, Copy, Default, GatewayRequest)]
+#[gateway_request(
+  surface = Webapp,
+  request_variant = GetActive,
+  response = crate::gateway::WebappActive,
+  response_variant = Active,
+)]
+pub struct GetActiveWebapp;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[gateway_request(
+  surface = Webapp,
+  request_variant = SwitchTo,
+  response = crate::gateway::WebappActive,
+  response_variant = Switched,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
 pub struct WebappSwitchTo {
   pub name: String,
 }
@@ -21,9 +44,17 @@ pub struct WebappSwitchTo {
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[gateway_request(
+  surface = Webapp,
+  request_variant = Install,
+  response = crate::WebappInfo,
+  response_variant = Installed,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
 pub struct WebappInstall {
   pub name: String,
   /// zip archive whose top-level entries become the bundle contents.
@@ -36,83 +67,43 @@ pub struct WebappInstall {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayRequest)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[gateway_request(
+  surface = Webapp,
+  request_variant = Uninstall,
+  response = crate::gateway::WebappActive,
+  response_variant = Uninstalled,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
 pub struct WebappUninstall {
   pub name: String,
 }
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
 pub enum GatewayToBridgeWebappMsg {
   /// request: bridge replies with `Webapps`
+  #[bridge_request]
   List,
   /// request: bridge replies with `Active`
+  #[bridge_request]
   GetActive,
   /// command: switch the kiosk to the named webapp; bridge replies with `Switched`
+  #[bridge_request]
   SwitchTo(WebappSwitchTo),
   /// command: extract the supplied zip into the installed root under `name`;
   /// bridge replies with `Installed`
+  #[bridge_request]
   Install(WebappInstall),
   /// command: remove the named installed webapp; bridge replies with `Uninstalled`
   /// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
+  #[bridge_request]
   Uninstall(WebappUninstall),
-}
-
-/// Marker struct for the `List` request — pairs with `BridgeToGatewayWebappMsg::Webapps`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ListWebapps;
-
-/// Marker struct for the `GetActive` request — pairs with `BridgeToGatewayWebappMsg::Active`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GetActiveWebapp;
-
-impl_gateway_request! {
-  request: ListWebapps,
-  surface: Webapp,
-  request_variant: List,
-  response: WebappList,
-  response_variant: Webapps(_),
-}
-
-impl_gateway_request! {
-  request: GetActiveWebapp,
-  surface: Webapp,
-  request_variant: GetActive,
-  response: WebappActive,
-  response_variant: Active(_),
-}
-
-impl_gateway_request! {
-  request: WebappSwitchTo,
-  surface: Webapp,
-  request_variant: SwitchTo(_),
-  response: WebappActive,
-  response_variant: Switched(_),
-  error: WebappError,
-  error_variant: WebappError(_),
-}
-
-impl_gateway_request! {
-  request: WebappInstall,
-  surface: Webapp,
-  request_variant: Install(_),
-  response: WebappInfo,
-  response_variant: Installed(_),
-  error: WebappError,
-  error_variant: WebappError(_),
-}
-
-impl_gateway_request! {
-  request: WebappUninstall,
-  surface: Webapp,
-  request_variant: Uninstall(_),
-  response: WebappActive,
-  response_variant: Uninstalled(_),
-  error: WebappError,
-  error_variant: WebappError(_),
 }

@@ -1,3 +1,4 @@
+use bridgething_macros::{BridgeEvent, GatewayEvent};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
@@ -5,7 +6,7 @@ use typeshare::typeshare;
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEvent)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct BridgeThingMeta {
@@ -37,7 +38,7 @@ impl BridgeThingMeta {
 }
 
 #[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, GatewayEvent)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct GatewayMeta {

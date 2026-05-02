@@ -1,3 +1,4 @@
+use bridgething_macros::BridgeEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -46,10 +47,13 @@ pub struct AuthorityRelease {
 /// "stop preferring my data for this scope" signal. Stale claims fall
 /// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
 #[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
+#[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
 pub enum GatewayToBridgeAuthorityMsg {
+  #[bridge_event]
   Claim(AuthorityClaim),
+  #[bridge_event]
   Release(AuthorityRelease),
 }

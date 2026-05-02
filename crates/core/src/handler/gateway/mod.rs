@@ -11,7 +11,7 @@ use authority::*;
 use chrome::*;
 use libbridgething::{
   DeviceType, GatewayMeta, NowPlayingUpdate, PeerCompanionStatus,
-  gateway::{GatewayMsgMeta, GatewayToBridgeMsg, GatewayToBridgeMsgData, is_response_variant},
+  gateway::{GatewayMsgMeta, GatewayToBridgeMsg, GatewayToBridgeMsgData},
 };
 use webapp::*;
 
@@ -58,41 +58,43 @@ impl GatewayHandler {
       return Ok(());
     }
 
-    // Stray response shape that didn't match any pending request:
-    // timed-out, late reply, or a non-SDK companion sending the
-    // response form without response-meta. The per-surface dispatchers
-    // are event-only by contract; let them stay event-only by filtering
-    // these out here for every `impl_bridge_request!`-declared surface
-    // at once.
-    if is_response_variant(&data) {
-      tracing::warn!(
-        ?meta,
-        ?data,
-        "({:?}) stray response-shape arrival with no matching pending request; dropping",
-        address,
-      );
-      return Ok(());
-    }
-
     let handle = MsgHandle::new(self, id, meta, address);
 
     match data {
       GatewayToBridgeMsgData::Version(data) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
-      GatewayToBridgeMsgData::Asset(asset_msg) => {
-        if let Some(event) = asset_msg.into_event() {
+      GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg.into_event() {
+        Some(event) => {
           tokio::spawn(async move { AssetHandler::new(handle).handle(event).await });
         }
-      }
+        None => {
+          // Stray response-shape arrival on the Asset surface: a
+          // timed-out reply, a late reply, or a non-SDK companion
+          // sending the response form without Response meta. The
+          // pending-request match earlier consumed legitimate replies;
+          // anything reaching here is a stray and gets warn-logged
+          // and dropped.
+          tracing::warn!(
+            "({:?}) stray response-shape arrival on Asset surface with no matching pending request; dropping",
+            handle.address,
+          );
+        }
+      },
       GatewayToBridgeMsgData::Authority(auth_msg) => {
-        tokio::spawn(async move { AuthorityHandler::new(handle).handle(auth_msg).await });
+        if let Some(event) = auth_msg.into_event() {
+          tokio::spawn(async move { AuthorityHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
-        tokio::spawn(async move { ChromeHandler::new(handle).handle(chrome_msg).await });
+        if let Some(cmd) = chrome_msg.into_command() {
+          tokio::spawn(async move { ChromeHandler::new(handle).handle(cmd).await });
+        }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {
-        tokio::spawn(async move { WebappHandler::new(handle).handle(webapp_msg).await });
+        if let Some(req) = webapp_msg.into_request() {
+          tokio::spawn(async move { WebappHandler::new(handle).handle(req).await });
+        }
       }
       GatewayToBridgeMsgData::NowPlayingUpdate(update) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_now_playing(update).await });
