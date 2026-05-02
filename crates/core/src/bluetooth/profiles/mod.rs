@@ -2,13 +2,10 @@ use std::sync::Arc;
 
 use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
-use message::{connection_messages_stock, disconnection_messages_stock};
 use tokio::sync::RwLock;
 
 use super::{BluetoothResult, BluetoothTx};
-use crate::state::State;
-
-mod message;
+use crate::{state::State, stock::StockSetupSend};
 
 pub type ProfileMan = Arc<ProfileManager>;
 
@@ -143,7 +140,6 @@ impl ProfileManager {
             self.state.handle_disconnect().await?;
 
             let _ = self.state.peers.remove(mac).await;
-            disconnection_messages_stock(&self.state).await?;
           }
 
           Ok(())
@@ -154,18 +150,6 @@ impl ProfileManager {
         }
       }
     }
-  }
-
-  pub async fn handle_connection(&self, new_device: bool) -> BluetoothResult<()> {
-    let Some(device) = &self.profile_state.read().await.device else {
-      return Ok(());
-    };
-
-    let Some(state_device) = self.state.get_device(&device.address().to_string()).await? else {
-      return Ok(());
-    };
-
-    connection_messages_stock(&self.state, new_device, &state_device).await
   }
 
   pub async fn upsert_paired_device(
@@ -187,7 +171,6 @@ impl ProfileManager {
       default: true,
     };
 
-    let already_active = self.state.peers.get(&mac).await.is_some_and(|p| p.paired);
     let new_device = self.state.get_device(&mac_str).await?.is_none();
     if new_device {
       self.state.add_device(device.clone()).await?;
@@ -203,8 +186,14 @@ impl ProfileManager {
     let _ = self.state.peers.upsert(mac, device.clone()).await;
     let _ = self.state.peers.set_paired(mac, true).await;
 
-    if !already_active {
-      connection_messages_stock(&self.state, new_device, &device).await?;
+    if new_device {
+      self
+        .state
+        .client_man
+        .broadcast_stock(StockSetupSend::Status {
+          payload: "finished".to_string(),
+        })
+        .await?;
     }
 
     Ok(device)

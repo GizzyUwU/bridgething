@@ -68,7 +68,7 @@ impl AppState {
     let asset_pending = AssetCache::init(db.clone()).await?;
     let (assets, _asset_cache_handle) = asset_pending.spawn();
 
-    let peers = PeerTracker::new(client_man.clone(), authority.clone());
+    let peers = PeerTracker::new(client_man.clone(), player.clone(), authority.clone());
 
     Ok(Arc::new(Self {
       client_man,

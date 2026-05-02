@@ -136,7 +136,7 @@ impl ClientHandler {
       // switch to legacy compatibility mode
       RecvMsgData::ChangeMode(mode) => {
         if mode == ClientMode::Stock {
-          self.bluetooth.profile_man.handle_connection(false).await?;
+          self.state.peers.resync_stock_connection().await?;
         };
       }
 

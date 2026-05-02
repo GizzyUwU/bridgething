@@ -33,6 +33,8 @@ use tokio::sync::RwLock;
 use crate::{
   authority::AuthorityRegistry,
   http::{ClientMan, WSError},
+  player::Player,
+  stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
 pub type PeerResult<T> = Result<T, Vec<WSError>>;
@@ -41,14 +43,16 @@ pub type PeerResult<T> = Result<T, Vec<WSError>>;
 pub struct PeerTracker {
   inner: RwLock<HashMap<Address, Peer>>,
   client_man: ClientMan,
+  player: Player,
   authority: AuthorityRegistry,
 }
 
 impl PeerTracker {
-  pub fn new(client_man: ClientMan, authority: AuthorityRegistry) -> Self {
+  pub fn new(client_man: ClientMan, player: Player, authority: AuthorityRegistry) -> Self {
     Self {
       inner: RwLock::new(HashMap::new()),
       client_man,
+      player,
       authority,
     }
   }
@@ -184,8 +188,8 @@ impl PeerTracker {
     }
 
     if diff.useful_link_transitioned_up {
-      if let Some(device) = diff.useful_device.as_ref()
-        && let Err(errs) = self
+      if let Some(device) = diff.useful_device.as_ref() {
+        if let Err(errs) = self
           .client_man
           .broadcast(
             BridgeToClientBluetoothMsg::ConnectedDevice(WireConnectedDevice {
@@ -195,8 +199,15 @@ impl PeerTracker {
             MsgMeta::Event,
           )
           .await
-      {
-        errors.extend(errs);
+        {
+          errors.extend(errs);
+        }
+        if let Err(errs) = broadcast_stock_connection(&self.client_man, device).await {
+          errors.extend(errs);
+        }
+        if let Err(err) = self.player.send_state().await {
+          tracing::warn!(?err, "failed to send player state after useful link came up");
+        }
       }
       if let Err(errs) = self
         .client_man
@@ -208,16 +219,20 @@ impl PeerTracker {
       {
         errors.extend(errs);
       }
-    } else if diff.useful_link_transitioned_down
-      && let Err(errs) = self
+    } else if diff.useful_link_transitioned_down {
+      if let Err(errs) = self
         .client_man
         .broadcast(
           BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: false }),
           MsgMeta::Event,
         )
         .await
-    {
-      errors.extend(errs);
+      {
+        errors.extend(errs);
+      }
+      if let Err(errs) = broadcast_stock_disconnection(&self.client_man).await {
+        errors.extend(errs);
+      }
     }
 
     if diff.companion_lost {
@@ -225,6 +240,25 @@ impl PeerTracker {
     }
 
     if errors.is_empty() { Ok(()) } else { Err(errors) }
+  }
+
+  /// Replays the stock connection broadcasts for the currently-useful peer,
+  /// if any. Used when a stock webapp connects fresh and needs to be told
+  /// the phone is already there - the regular useful_link transitions
+  /// happened before this webapp opened its socket.
+  pub async fn resync_stock_connection(&self) -> PeerResult<()> {
+    let device = {
+      let peers = self.inner.read().await;
+      peers.values().find(|p| p.has_useful_link()).map(|p| p.device.clone())
+    };
+    let Some(device) = device else {
+      return Ok(());
+    };
+    broadcast_stock_connection(&self.client_man, &device).await?;
+    if let Err(err) = self.player.send_state().await {
+      tracing::warn!(?err, "failed to send player state during stock resync");
+    }
+    Ok(())
   }
 }
 
