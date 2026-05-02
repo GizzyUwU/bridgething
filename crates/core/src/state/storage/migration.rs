@@ -1,0 +1,86 @@
+use sea_orm_migration::prelude::*;
+
+pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+  vec![Box::new(M0002CreateState)]
+}
+
+struct M0002CreateState;
+
+impl MigrationName for M0002CreateState {
+  fn name(&self) -> &str {
+    "m0002_create_state"
+  }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for M0002CreateState {
+  async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .create_table(
+        Table::create()
+          .table(Meta::Table)
+          .if_not_exists()
+          .col(ColumnDef::new(Meta::Key).text().not_null().primary_key())
+          .col(ColumnDef::new(Meta::Value).text().not_null())
+          .to_owned(),
+      )
+      .await?;
+
+    manager
+      .create_table(
+        Table::create()
+          .table(KvStorage::Table)
+          .if_not_exists()
+          .col(ColumnDef::new(KvStorage::Key).text().not_null().primary_key())
+          .col(ColumnDef::new(KvStorage::Value).text().not_null())
+          .to_owned(),
+      )
+      .await?;
+
+    manager
+      .create_table(
+        Table::create()
+          .table(Devices::Table)
+          .if_not_exists()
+          .col(ColumnDef::new(Devices::Mac).text().not_null().primary_key())
+          .col(ColumnDef::new(Devices::Name).text().not_null())
+          .col(ColumnDef::new(Devices::DeviceType).text().not_null())
+          .col(ColumnDef::new(Devices::IsDefault).boolean().not_null().default(false))
+          .to_owned(),
+      )
+      .await
+  }
+
+  async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .drop_table(Table::drop().table(Devices::Table).to_owned())
+      .await?;
+    manager
+      .drop_table(Table::drop().table(KvStorage::Table).to_owned())
+      .await?;
+    manager.drop_table(Table::drop().table(Meta::Table).to_owned()).await
+  }
+}
+
+#[derive(DeriveIden)]
+enum Meta {
+  Table,
+  Key,
+  Value,
+}
+
+#[derive(DeriveIden)]
+enum KvStorage {
+  Table,
+  Key,
+  Value,
+}
+
+#[derive(DeriveIden)]
+enum Devices {
+  Table,
+  Mac,
+  Name,
+  DeviceType,
+  IsDefault,
+}

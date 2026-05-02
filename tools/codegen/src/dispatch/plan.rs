@@ -408,9 +408,3 @@ fn is_unicast(variant: &WireVariant, direction: Direction, inv: &Inventory) -> b
   };
   set.has(MarkerKind::Unicast, direction)
 }
-
-// Stub so older callers compile.
-#[allow(dead_code)]
-pub fn build_plan(inv: &Inventory) -> Result<Plan> {
-  build_plan_for(inv, Protocol::Gateway)
-}

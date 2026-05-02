@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use libbridgething::{
   Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, RepeatMode, Track,
-  client::{
-    BridgeToClientInteractionMsg, BridgeToClientPlayerMsg, ClientLegacyStockCommand,
-    ClientToBridgeInteractionMsgCommand,
-  },
+  client::{BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeInteractionMsgCommand},
   stock::StockSetPreset,
 };
 use serde::{Deserialize, Serialize};
@@ -445,21 +442,6 @@ impl StockInterAppSend {
   }
 }
 
-impl From<BridgeToClientInteractionMsg> for StockInterAppSendPayload {
-  fn from(payload: BridgeToClientInteractionMsg) -> Self {
-    todo!()
-  }
-}
-
-impl StockInterAppSend {
-  pub fn from_interaction_send(send: BridgeToClientInteractionMsg, msg_id: Option<usize>) -> Self {
-    Self {
-      msg_id,
-      data: send.into(),
-    }
-  }
-}
-
 impl RecvMsgData {
   /// this method WILL panic. don't be a dumbass.
   pub fn from_stock_inter_app_possible_recv(recv: PossibleRecvMsg) -> Self {
@@ -553,8 +535,12 @@ impl RecvMsgData {
 #[cfg(test)]
 mod test {
   use libbridgething::{
-    ClientCommand, ClientToBridgeMsgData,
-    client::{ClientLegacyStockCommand, ClientMsgMeta, ClientToBridgeInteractionMsg},
+    RepeatMode,
+    client::{
+      ClientLegacyStockCommand, ClientToBridgeInteractionMsg, ClientToBridgeMsg, ClientToBridgeMsgData, PhoneCallImage,
+      PhoneCallMessage, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
+    },
+    wire::MsgMeta,
   };
   use uuid::Uuid;
 
@@ -703,9 +689,9 @@ mod test {
 
   #[test]
   fn ser_recv_get_image() {
-    let ser = serde_json::to_string(&PossibleRecvMsg::Modern(ClientCommand {
+    let ser = serde_json::to_string(&PossibleRecvMsg::Modern(ClientToBridgeMsg {
       id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-      meta: ClientMsgMeta::Request,
+      meta: MsgMeta::Request,
       data: ClientToBridgeMsgData::LegacyStock(ClientLegacyStockCommand::GetImage {
         id: "image_id".to_string(),
       }),
@@ -715,74 +701,74 @@ mod test {
 
     assert_eq!(
       ser,
-      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"request"},"type":"legacyStock","action":"getImage","args":{"id":"image_id"}}"#
+      r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"request"},"data":{"type":"legacyStock","data":{"action":"getImage","args":{"id":"image_id"}}}}"#
     );
   }
 
   #[test]
   fn de_recv_phone_call_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"phoneCallImage","args":{"phoneNumber":"1234567890"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"phoneCallImage","data":{"phoneNumber":"1234567890"}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallImage {
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallImage(PhoneCallImage {
           phone_number: "1234567890".to_string()
-        })
+        }))
       })
     );
   }
 
   #[test]
   fn de_recv_phone_call_message() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"phoneCallMessage","args":{"phoneNumber":"1234567890","message":"Hello"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"phoneCallMessage","data":{"phoneNumber":"1234567890","message":"Hello"}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallMessage {
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallMessage(PhoneCallMessage {
           phone_number: "1234567890".to_string(),
           message: "Hello".to_string()
-        })
+        }))
       })
     );
   }
 
   #[test]
   fn de_recv_skip_to_index() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipToIndex","args":{"index":5}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"skipToIndex","data":{"index":5}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SkipToIndex { index: 5 })
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SkipToIndex(SkipToIndex { index: 5 }))
       })
     );
   }
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"skipPrev"}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"skipPrev"}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
+        meta: MsgMeta::Command,
         data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SkipPrev)
       })
     );
@@ -790,50 +776,52 @@ mod test {
 
   #[test]
   fn de_recv_seek_to() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"seekTo","args":{"positionMs":120}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"seekTo","data":{"positionMs":120}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SeekTo { position_ms: 120 })
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SeekTo(SeekTo { position_ms: 120 }))
       })
     );
   }
 
   #[test]
   fn de_recv_set_shuffle() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setShuffle","args":{"shuffle":true}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"setShuffle","data":{"shuffle":true}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetShuffle { shuffle: true })
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetShuffle(SetShuffle {
+          shuffle: true
+        }))
       })
     );
   }
 
   #[test]
   fn de_recv_set_repeat() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"type":"interaction","action":"setRepeat","args":{"repeatMode":"all"}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"setRepeat","data":{"repeatMode":"all"}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
     assert_eq!(
       de,
-      PossibleRecvMsg::Modern(ClientCommand {
+      PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: ClientMsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetRepeat {
-          repeat_mode: libbridgething::RepeatMode::All
-        })
+        meta: MsgMeta::Command,
+        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetRepeat(SetRepeat {
+          repeat_mode: RepeatMode::All
+        }))
       })
     );
   }

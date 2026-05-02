@@ -37,7 +37,7 @@ impl WebappHandler {
   }
 
   async fn get_active(&self) -> HandlerResult {
-    let name = self.handle.state.active_webapp().await;
+    let name = self.handle.state.active_webapp().await?;
     self.handle.respond_to::<GetActiveWebapp>(WebappActive { name }).await;
     Ok(())
   }
@@ -94,7 +94,7 @@ impl WebappHandler {
       );
     }
 
-    let mut active = self.handle.state.active_webapp().await;
+    let mut active = self.handle.state.active_webapp().await?;
     if active == name && self.handle.state.webapps.resolve(&active).is_none() {
       let fallback = "stock".to_string();
       tracing::info!("active webapp {} was uninstalled; falling back to {}", name, fallback);

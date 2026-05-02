@@ -57,16 +57,6 @@ impl PeerTracker {
     self.inner.read().await.get(mac).cloned()
   }
 
-  pub async fn snapshot(&self) -> HashMap<String, Peer> {
-    self
-      .inner
-      .read()
-      .await
-      .iter()
-      .map(|(addr, peer)| (addr.to_string(), peer.clone()))
-      .collect()
-  }
-
   pub async fn first_connected_gateway(&self) -> GatewayStatus {
     let peers = self.inner.read().await;
     for peer in peers.values() {
@@ -230,12 +220,6 @@ impl PeerTracker {
       errors.extend(errs);
     }
 
-    if diff.companion_changed {
-      let _status = derive_gateway_status(&diff.snapshot);
-      // GatewayStatus is now request-only (webapp asks via system.gatewayStatusRequest);
-      // there is no event-shape variant on the wire so we don't broadcast on changes.
-    }
-
     if diff.companion_lost {
       self.authority.drop_all();
     }
@@ -251,7 +235,6 @@ struct Diff {
   useful_link_transitioned_up: bool,
   useful_link_transitioned_down: bool,
   useful_device: Option<Device>,
-  companion_changed: bool,
   companion_lost: bool,
 }
 
@@ -270,9 +253,6 @@ impl Diff {
       .any(|p| p.has_useful_link());
     let any_useful_before = other_useful || was_useful_self;
     let any_useful_now = other_useful || is_useful_self;
-
-    let prior_companion = prior.as_ref().map(|p| std::mem::discriminant(&p.companion));
-    let current_companion = current.as_ref().map(|p| std::mem::discriminant(&p.companion));
 
     let was_companion_connected = matches!(
       prior.as_ref().map(|p| &p.companion),
@@ -300,26 +280,7 @@ impl Diff {
       } else {
         None
       },
-      companion_changed: prior_companion != current_companion,
       companion_lost,
     }
   }
-}
-
-fn derive_gateway_status(snapshot: &HashMap<String, Peer>) -> GatewayStatus {
-  for peer in snapshot.values() {
-    if let PeerCompanionStatus::Connected(meta) = &peer.companion {
-      return GatewayStatus {
-        address: peer.device.mac.clone(),
-        connected: true,
-        adapter_version: meta.adapter_version.clone(),
-        lib_version: meta.lib_version.clone(),
-        libbridgething_version: meta.libbridgething_version.clone(),
-        app_name: meta.app_name.clone(),
-        app_version: meta.app_version.clone(),
-        os_name: meta.os_name.clone(),
-      };
-    }
-  }
-  GatewayStatus::default()
 }

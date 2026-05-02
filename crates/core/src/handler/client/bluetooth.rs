@@ -34,7 +34,7 @@ impl BluetoothHandler {
   async fn list(&self) -> HandlerResult {
     tracing::debug!("({}) sending list of paired devices", &self.handle.from);
 
-    let devices = self.handle.state.get_devices().await;
+    let devices = self.handle.state.get_devices().await?;
     tracing::trace!("({}) devices: {:?}", &self.handle.from, &devices);
 
     Ok(

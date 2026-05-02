@@ -60,9 +60,9 @@ impl ProfileManager {
     Ok(())
   }
 
-  pub async fn reset(&self) -> bluer::Result<()> {
+  pub async fn reset(&self) -> BluetoothResult<()> {
     tracing::debug!("forgetting all devices");
-    for mac in self.state.get_devices().await.keys() {
+    for mac in self.state.get_devices().await?.keys() {
       self.forget(mac).await?;
     }
 
@@ -161,11 +161,11 @@ impl ProfileManager {
       return Ok(());
     };
 
-    let Some(state_device) = &self.state.get_device(&device.address().to_string()).await else {
+    let Some(state_device) = self.state.get_device(&device.address().to_string()).await? else {
       return Ok(());
     };
 
-    connection_messages_stock(&self.state, new_device, state_device).await
+    connection_messages_stock(&self.state, new_device, &state_device).await
   }
 
   pub async fn upsert_paired_device(
@@ -188,7 +188,7 @@ impl ProfileManager {
     };
 
     let already_active = self.state.peers.get(&mac).await.is_some_and(|p| p.paired);
-    let new_device = self.state.get_device(&mac_str).await.is_none();
+    let new_device = self.state.get_device(&mac_str).await?.is_none();
     if new_device {
       self.state.add_device(device.clone()).await?;
       self.set_discoverable(false).await?;

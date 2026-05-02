@@ -26,10 +26,10 @@ impl StorageHandler {
   async fn get(&self, key: String) -> HandlerResult {
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
     #[cfg(debug_assertions)]
-    let mut value = self.handle.state.get_storage_key(&key).await;
+    let mut value = self.handle.state.get_storage_key(&key).await?;
 
     #[cfg(not(debug_assertions))]
-    let value = self.handle.state.get_storage_key(&key).await;
+    let value = self.handle.state.get_storage_key(&key).await?;
 
     // handle for stock firmware
     if &key == "onboarding_status" {
@@ -38,7 +38,7 @@ impl StorageHandler {
         &self.handle.from
       );
 
-      let payload = if self.handle.state.last_device().await.is_some() {
+      let payload = if self.handle.state.last_device().await?.is_some() {
         "finished"
       } else {
         ""

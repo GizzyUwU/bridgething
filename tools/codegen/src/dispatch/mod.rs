@@ -26,7 +26,7 @@ pub mod typescript_client;
 
 pub use inventory::{Protocol, inventory};
 pub use kotlin::emit_kotlin;
-pub use plan::{Plan, build_plan, build_plan_for, build_plans};
+pub use plan::{Plan, build_plan_for, build_plans};
 pub use swift::emit_swift;
 pub use typescript::emit_typescript;
 pub use typescript_client::emit_typescript_client;

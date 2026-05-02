@@ -1,8 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use libbridgething::{Device, client::GatewayStatus};
-use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, task::JoinHandle};
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, Set, TransactionTrait};
+use tokio::task::JoinHandle;
 
 use crate::{
   asset::{AssetCache, AssetError},
@@ -14,55 +14,19 @@ use crate::{
 };
 
 pub mod meta;
+pub mod storage;
 mod webapps;
 
+use storage::{
+  device::{Column as DeviceColumn, Entity as DeviceEntity, Model as DeviceModel},
+  kv_storage::{Column as KvColumn, Entity as KvEntity},
+  meta::{Column as MetaColumn, Entity as MetaEntity, KEY_ACTIVE_WEBAPP, KEY_LAST_DEVICE},
+};
 pub use webapps::WebappRegistry;
 
 pub type State = Arc<AppState>;
 
-fn default_active_webapp() -> String {
-  "stock".to_string()
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PersistentAppState {
-  // TODO: only say that device is "connected" if it is connected to avrcp profile
-  #[serde(default)]
-  pub last_device: Option<String>,
-  #[serde(default)]
-  pub devices: HashMap<String, Device>,
-  #[serde(default)]
-  pub storage: HashMap<String, String>,
-  #[serde(default = "default_active_webapp")]
-  pub active_webapp: String,
-}
-
-impl Default for PersistentAppState {
-  fn default() -> Self {
-    Self {
-      last_device: None,
-      devices: HashMap::new(),
-      storage: HashMap::new(),
-      active_webapp: default_active_webapp(),
-    }
-  }
-}
-
-impl PersistentAppState {
-  pub async fn restore_or_default(path: &PathBuf) -> Self {
-    if path.exists() && path.is_file() && !cfg!(feature = "no-persist") {
-      if let Ok(persist_state) = AppState::read_persist(path).await {
-        persist_state
-      } else {
-        tracing::warn!("state file is corrupt!! this is probably not good.");
-        PersistentAppState::default()
-      }
-    } else {
-      tracing::debug!("no saved state - initializing default state");
-      PersistentAppState::default()
-    }
-  }
-}
+const DEFAULT_ACTIVE_WEBAPP: &str = "stock";
 
 #[derive(Debug)]
 pub struct AppState {
@@ -75,8 +39,7 @@ pub struct AppState {
   pub authority: AuthorityRegistry,
   pub peers: PeerTracker,
 
-  persist_path: PathBuf,
-  persist: RwLock<PersistentAppState>,
+  db: DatabaseConnection,
   _asset_cache_handle: JoinHandle<()>,
 }
 
@@ -95,23 +58,14 @@ impl AppState {
       tokio::fs::create_dir_all(&state_dir).await?;
     }
 
-    let persist_path = state_dir.join("state.bin");
-    let mut persist = PersistentAppState::restore_or_default(&persist_path).await;
+    let db = open_state_db(&state_dir).await?;
 
     let webapps = WebappRegistry::init().await?;
     tracing::debug!("webapp registry initialized");
 
-    if webapps.resolve(&persist.active_webapp).is_none() {
-      tracing::warn!(
-        "active webapp '{}' not present on disk; falling back to '{}'",
-        &persist.active_webapp,
-        default_active_webapp()
-      );
-      persist.active_webapp = default_active_webapp();
-    }
+    enforce_active_webapp_exists(&db, &webapps).await?;
 
-    let asset_db_path = state_dir.join("bridgething.db");
-    let asset_pending = AssetCache::init(asset_db_path).await?;
+    let asset_pending = AssetCache::init(db.clone()).await?;
     let (assets, _asset_cache_handle) = asset_pending.spawn();
 
     let peers = PeerTracker::new(client_man.clone(), authority.clone());
@@ -126,19 +80,21 @@ impl AppState {
       authority,
       peers,
 
-      persist_path,
-      persist: RwLock::new(persist),
+      db,
       _asset_cache_handle,
     }))
   }
 
-  pub async fn active_webapp(&self) -> String {
-    self.persist.read().await.active_webapp.clone()
+  pub async fn active_webapp(&self) -> StateResult<String> {
+    Ok(
+      read_meta(&self.db, KEY_ACTIVE_WEBAPP)
+        .await?
+        .unwrap_or_else(|| DEFAULT_ACTIVE_WEBAPP.to_string()),
+    )
   }
 
   pub async fn set_active_webapp(&self, name: String) -> StateResult<()> {
-    self.persist.write().await.active_webapp = name;
-    self.save_persist().await?;
+    write_meta(&self.db, KEY_ACTIVE_WEBAPP, &name).await?;
     Ok(())
   }
 
@@ -146,118 +102,153 @@ impl AppState {
     self.peers.first_connected_gateway().await
   }
 
-  pub async fn get_devices(&self) -> HashMap<String, Device> {
-    // cloning here so that the lock is not held open
-    self.persist.read().await.devices.clone()
+  pub async fn get_devices(&self) -> StateResult<HashMap<String, Device>> {
+    let rows = DeviceEntity::find().all(&self.db).await?;
+    Ok(rows.iter().map(|m| (m.mac.clone(), Device::from(m))).collect())
   }
 
-  pub async fn get_device(&self, mac: &str) -> Option<Device> {
-    // cloning here so that the lock is not held open
-    self.persist.read().await.devices.get(mac).cloned()
+  pub async fn get_device(&self, mac: &str) -> StateResult<Option<Device>> {
+    Ok(
+      DeviceEntity::find_by_id(mac.to_string())
+        .one(&self.db)
+        .await?
+        .as_ref()
+        .map(Device::from),
+    )
   }
 
   pub async fn add_device(&self, device: Device) -> StateResult<()> {
-    self.persist.write().await.devices.insert(device.mac.clone(), device);
-    self.save_persist().await?;
-
+    let model = DeviceModel::from_wire(&device).into_active_model();
+    DeviceEntity::insert(model)
+      .on_conflict(
+        sea_orm::sea_query::OnConflict::column(DeviceColumn::Mac)
+          .update_columns([DeviceColumn::Name, DeviceColumn::DeviceType, DeviceColumn::IsDefault])
+          .to_owned(),
+      )
+      .exec(&self.db)
+      .await?;
     Ok(())
   }
 
   pub async fn remove_device(&self, mac: String) -> StateResult<()> {
-    let mut app = self.persist.write().await;
-    if app.devices.remove(&mac).is_some() {
-      self.save_persist().await?;
+    let tx = self.db.begin().await?;
+    DeviceEntity::delete_by_id(mac.clone()).exec(&tx).await?;
+    let last = MetaEntity::find_by_id(KEY_LAST_DEVICE.to_string()).one(&tx).await?;
+    if last.map(|m| m.value) == Some(mac) {
+      MetaEntity::delete_by_id(KEY_LAST_DEVICE.to_string()).exec(&tx).await?;
     }
-
-    let mut persist = self.persist.write().await;
-    if persist.last_device == Some(mac) {
-      persist.last_device = None;
-    }
-
-    // if let Some(current) = &self.connected_device {
-    //   if current.to_string() == mac {
-    //     self.connected_device = None;
-    //   }
-    // }
-
+    tx.commit().await?;
     Ok(())
   }
 
   pub async fn handle_disconnect(&self) -> StateResult<()> {
-    // TODO: handle player delete
-
     Ok(())
   }
 
-  pub async fn last_device(&self) -> Option<String> {
-    // cloning here so that the lock is not held open
-    self.persist.read().await.last_device.clone()
+  pub async fn last_device(&self) -> StateResult<Option<String>> {
+    read_meta(&self.db, KEY_LAST_DEVICE).await.map_err(Into::into)
   }
 
   pub async fn set_last_device(&self, mac: String) -> StateResult<()> {
-    self.persist.write().await.last_device = Some(mac);
-    self.save_persist().await?;
-
+    write_meta(&self.db, KEY_LAST_DEVICE, &mac).await?;
     Ok(())
   }
 
-  pub async fn get_storage_key(&self, key: &str) -> Option<String> {
-    // cloning here so that the lock is not held open
-    self.persist.read().await.storage.get(key).cloned()
+  pub async fn get_storage_key(&self, key: &str) -> StateResult<Option<String>> {
+    Ok(
+      KvEntity::find_by_id(key.to_string())
+        .one(&self.db)
+        .await?
+        .map(|m| m.value),
+    )
   }
 
   pub async fn set_storage_key(&self, key: String, value: String) -> StateResult<()> {
-    self.persist.write().await.storage.insert(key, value);
-    self.save_persist().await?;
-
+    let model = storage::kv_storage::ActiveModel {
+      key: Set(key),
+      value: Set(value),
+    };
+    KvEntity::insert(model)
+      .on_conflict(
+        sea_orm::sea_query::OnConflict::column(KvColumn::Key)
+          .update_column(KvColumn::Value)
+          .to_owned(),
+      )
+      .exec(&self.db)
+      .await?;
     Ok(())
   }
 
   pub async fn del_storage_key(&self, key: &str) -> StateResult<()> {
-    self.persist.write().await.storage.remove(key);
-    self.save_persist().await?;
-
-    Ok(())
-  }
-
-  async fn read_persist(path: &PathBuf) -> StateResult<PersistentAppState> {
-    let data = tokio::fs::read(path).await?;
-    let state: PersistentAppState = bincode::deserialize(&data)?;
-    tracing::trace!("persisted state: {:?}", &state);
-
-    Ok(state)
-  }
-
-  #[cfg(not(feature = "no-persist"))]
-  async fn save_persist(&self) -> StateResult<()> {
-    let data = bincode::serialize(&*self.persist.read().await)?;
-    tokio::fs::write(&self.persist_path, data).await?;
-
-    Ok(())
-  }
-
-  #[cfg(feature = "no-persist")]
-  async fn save_persist(&self) -> StateResult<()> {
-    tracing::trace!("debug mode: not saving application state.");
+    KvEntity::delete_by_id(key.to_string()).exec(&self.db).await?;
     Ok(())
   }
 
   pub async fn reset(&self) -> StateResult<()> {
-    if self.persist_path.exists() {
-      tokio::fs::remove_file(&self.persist_path).await?
-    }
-
+    let tx = self.db.begin().await?;
+    DeviceEntity::delete_many().exec(&tx).await?;
+    KvEntity::delete_many().exec(&tx).await?;
+    MetaEntity::delete_many().exec(&tx).await?;
+    tx.commit().await?;
     Ok(())
   }
+}
+
+#[cfg(not(feature = "no-persist"))]
+async fn open_state_db(state_dir: &std::path::Path) -> Result<DatabaseConnection, StateError> {
+  let path = state_dir.join("bridgething.db");
+  Ok(crate::db::open(Some(&path)).await?)
+}
+
+#[cfg(feature = "no-persist")]
+async fn open_state_db(_state_dir: &std::path::Path) -> Result<DatabaseConnection, StateError> {
+  tracing::trace!("debug mode: in-memory state database");
+  Ok(crate::db::open(None).await?)
+}
+
+async fn enforce_active_webapp_exists(db: &DatabaseConnection, webapps: &WebappRegistry) -> Result<(), StateError> {
+  let current = read_meta(db, KEY_ACTIVE_WEBAPP)
+    .await?
+    .unwrap_or_else(|| DEFAULT_ACTIVE_WEBAPP.to_string());
+  if webapps.resolve(&current).is_some() {
+    return Ok(());
+  }
+  tracing::warn!(
+    "active webapp '{}' not present on disk; falling back to '{}'",
+    current,
+    DEFAULT_ACTIVE_WEBAPP
+  );
+  write_meta(db, KEY_ACTIVE_WEBAPP, DEFAULT_ACTIVE_WEBAPP).await?;
+  Ok(())
+}
+
+async fn read_meta(db: &DatabaseConnection, key: &str) -> Result<Option<String>, DbErr> {
+  Ok(MetaEntity::find_by_id(key.to_string()).one(db).await?.map(|m| m.value))
+}
+
+async fn write_meta(db: &DatabaseConnection, key: &str, value: &str) -> Result<(), DbErr> {
+  let model = storage::meta::ActiveModel {
+    key: Set(key.to_string()),
+    value: Set(value.to_string()),
+  };
+  MetaEntity::insert(model)
+    .on_conflict(
+      sea_orm::sea_query::OnConflict::column(MetaColumn::Key)
+        .update_column(MetaColumn::Value)
+        .to_owned(),
+    )
+    .exec(db)
+    .await?;
+  Ok(())
 }
 
 pub type StateResult<T> = Result<T, StateError>;
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
-  #[error("failed to bind to port: {0}")]
+  #[error("io error: {0}")]
   Io(#[from] tokio::io::Error),
-  #[error("bincode deserialization error: {0}")]
-  Deserialize(#[from] bincode::Error),
+  #[error("database error: {0}")]
+  Db(#[from] DbErr),
   #[error("invalid path: {0}")]
   InvalidPath(String),
   #[error(transparent)]

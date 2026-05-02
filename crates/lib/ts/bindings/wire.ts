@@ -12,24 +12,21 @@ export type MsgMeta =
   | { kind: 'response'; data: ResponseMeta };
 
 /**
- * Intent the sender signals for each message. Lets the receiver know
- * whether to send back a typed response, treat it as a one-way command,
- * or pair it against a pending request.
- */
-export type MsgMeta =
-  | { kind: 'command' }
-  | { kind: 'event' }
-  | { kind: 'request' }
-  | { kind: 'response'; data: ResponseMeta };
-
-/**
  * Correlation handle the responder echoes back so the requester's
  * pending future can resolve.
  */
 export type ResponseMeta = { requestId: Uint8Array };
 
 /**
- * Correlation handle the responder echoes back so the requester's
- * pending future can resolve.
+ * Protocol-level failure the responder ships when a request could not be
+ * reached or dispatched. Carried by the `Error` variant on every
+ * `*MsgData` enum.
+ *
+ * Domain-level errors (predictable, op-specific failures the caller may
+ * want to recover from) live inside the per-op response variant, not
+ * here.
  */
-export type ResponseMeta = { requestId: Uint8Array };
+export type WireError =
+  | { type: 'unsupported' }
+  | { type: 'malformed'; data: { reason: string } }
+  | { type: 'handlerFailed'; data: { reason: string } };

@@ -5,9 +5,12 @@ const ENV_WEBAPPS_DIR: &str = "BRIDGETHING_WEBAPPS_DIR";
 const ENV_RO_WEBAPPS_DIR: &str = "BRIDGETHING_RO_WEBAPPS_DIR";
 const ENV_RUNTIME_DIR: &str = "BRIDGETHING_RUNTIME_DIR";
 
+#[cfg(not(debug_assertions))]
 const PROD_STATE_DIR: &str = "/var/lib/bridgething/state";
+#[cfg(not(debug_assertions))]
 const PROD_WEBAPPS_DIR: &str = "/var/bridgething/webapps";
 const PROD_RO_WEBAPPS_DIR: &str = "/usr/share/bridgething/webapps";
+#[cfg(not(debug_assertions))]
 const PROD_RUNTIME_DIR: &str = "/run/bridgething";
 
 pub fn state_dir() -> PathBuf {

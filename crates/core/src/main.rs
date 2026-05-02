@@ -8,6 +8,7 @@ mod systemd;
 mod asset;
 mod authority;
 mod chrome;
+mod db;
 
 mod handler;
 mod paths;

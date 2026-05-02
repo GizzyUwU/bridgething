@@ -460,8 +460,7 @@ mod tests {
   use super::*;
 
   async fn fresh() -> AssetActor {
-    let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
-    super::super::storage::open_db_for_tests(&db).await.unwrap();
+    let db = crate::db::open(None).await.unwrap();
     let (events_tx, _) = broadcast::channel(16);
     let (_cmd_tx, cmd_rx) = mpsc::channel(16);
     AssetActor::new(db, cmd_rx, events_tx).bootstrap().await.unwrap()

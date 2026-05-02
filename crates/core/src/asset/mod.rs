@@ -21,11 +21,11 @@
 mod actor;
 pub mod storage;
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 pub use actor::AssetCacheEvent;
 use libbridgething::AssetRetention;
-use sea_orm::DbErr;
+use sea_orm::{DatabaseConnection, DbErr};
 use tokio::{
   sync::{broadcast, mpsc, oneshot},
   task::JoinHandle,
@@ -74,13 +74,11 @@ struct AssetCacheInner {
 }
 
 impl AssetCache {
-  /// Open the database, run migrations, and prepare the cache. The
-  /// returned [`AssetCachePending`] holds the actor task; call
-  /// [`AssetCachePending::spawn`] when the daemon is ready to begin
-  /// serving cache traffic.
-  pub async fn init(db_path: PathBuf) -> Result<AssetCachePending, AssetError> {
-    let db = storage::open_db(&db_path).await?;
-
+  /// Prepare the cache against a pre-opened, already-migrated database
+  /// connection. The returned [`AssetCachePending`] holds the actor
+  /// task; call [`AssetCachePending::spawn`] when the daemon is ready
+  /// to begin serving cache traffic.
+  pub async fn init(db: DatabaseConnection) -> Result<AssetCachePending, AssetError> {
     let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_MAILBOX_CAPACITY);
     let (events_tx, _) = broadcast::channel(EVENT_BROADCAST_CAPACITY);
 

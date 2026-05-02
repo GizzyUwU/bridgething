@@ -1,12 +1,7 @@
 use sea_orm_migration::prelude::*;
 
-pub struct Migrator;
-
-#[async_trait::async_trait]
-impl MigratorTrait for Migrator {
-  fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-    vec![Box::new(M0001CreateAssets)]
-  }
+pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+  vec![Box::new(M0001CreateAssets)]
 }
 
 struct M0001CreateAssets;

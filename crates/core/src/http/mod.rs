@@ -174,7 +174,13 @@ async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx)
 /// back to the configured default if the persisted active app no longer
 /// resolves (e.g. it was uninstalled while the daemon was down).
 async fn resolve_active_webapp(state: &BridgeThingState) -> Option<PathBuf> {
-  let name = state.active_webapp().await;
+  let name = match state.active_webapp().await {
+    Ok(n) => n,
+    Err(err) => {
+      tracing::warn!(?err, "failed to read active webapp; treating as no active webapp");
+      return None;
+    }
+  };
   state.webapps.resolve(&name)
 }
 
