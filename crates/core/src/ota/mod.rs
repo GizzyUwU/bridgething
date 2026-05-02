@@ -381,9 +381,11 @@ mod tests {
   }
 
   /// Drain progress events until we see the predicate match or hit a timeout.
-  async fn wait_for(events: &mut mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
-                    deadline: Duration,
-                    pred: impl Fn(&BridgeToGatewaySystemMsgEvent) -> bool) -> BridgeToGatewaySystemMsgEvent {
+  async fn wait_for(
+    events: &mut mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
+    deadline: Duration,
+    pred: impl Fn(&BridgeToGatewaySystemMsgEvent) -> bool,
+  ) -> BridgeToGatewaySystemMsgEvent {
     timeout(deadline, async {
       loop {
         let ev = events.recv().await.expect("event channel closed");
@@ -391,7 +393,9 @@ mod tests {
           return ev;
         }
       }
-    }).await.expect("timed out waiting for matching event")
+    })
+    .await
+    .expect("timed out waiting for matching event")
   }
 
   #[tokio::test]
@@ -424,10 +428,7 @@ mod tests {
       )
     })
     .await;
-    assert!(matches!(
-      reboot_event,
-      BridgeToGatewaySystemMsgEvent::OtaProgress(_)
-    ));
+    assert!(matches!(reboot_event, BridgeToGatewaySystemMsgEvent::OtaProgress(_)));
     // The reboot thunk runs after the Reboot event is sent; give the spawn a tick to land.
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 1);
@@ -460,7 +461,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::SizeMismatch);
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
   }
@@ -492,7 +495,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::HashMismatch);
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
   }
@@ -532,10 +537,7 @@ mod tests {
       )
     })
     .await;
-    assert!(matches!(
-      reboot_event,
-      BridgeToGatewaySystemMsgEvent::OtaProgress(_)
-    ));
+    assert!(matches!(reboot_event, BridgeToGatewaySystemMsgEvent::OtaProgress(_)));
   }
 
   #[tokio::test]
@@ -552,9 +554,11 @@ mod tests {
       })
       .await;
     // Drain Downloading 0 so we know the run is parked in await_asset.
-    let _ = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
-      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Downloading))
-    })
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(2),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Downloading)),
+    )
     .await;
 
     h.ota.cancel().await;
@@ -563,7 +567,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::Cancelled);
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
   }
@@ -594,9 +600,11 @@ mod tests {
     // Wait until we see the first Writing progress tick from the stub
     // backend; that proves the orchestrator is past Verifying and is
     // inside the cancelable Writing phase.
-    let _ = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
-      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing))
-    })
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Writing)),
+    )
     .await;
 
     h.ota.cancel().await;
@@ -605,7 +613,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::Cancelled);
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
   }
@@ -623,9 +633,11 @@ mod tests {
         expected_size: size,
       })
       .await;
-    let _ = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
-      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Downloading))
-    })
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(2),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Downloading)),
+    )
     .await;
 
     h.ota
@@ -641,7 +653,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::Internal);
   }
 
@@ -674,7 +688,9 @@ mod tests {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
     })
     .await;
-    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else { unreachable!() };
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
     assert_eq!(e.code, OtaErrorCode::AssetNotFound);
   }
 }
