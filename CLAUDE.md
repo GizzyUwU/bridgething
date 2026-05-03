@@ -124,8 +124,7 @@ modern webapp wants to access from its TypeScript code, that goes in
 
 `crates/lib/src/shared/` is for types used by both directions of a wire
 protocol (gateway↔bridge, client↔server) AND used by more than one
-protocol or surface. Examples that belong: `Track`, `Album`, `Device`,
-`ForwardMessage`, `WebappInfo`.
+protocol or surface. Examples that belong: `Track`, `Album`, `Device`, `WebappInfo`.
 
 If a type is only used in one direction or only by one protocol, it
 goes in that direction's module. Don't promote to `shared/` for tidiness.
@@ -197,6 +196,9 @@ Rules:
   build-phase. Avoid `Vec<u8>` clones for in-flight payloads:
   retransmit queues hold `Bytes` (refcount-only clone), CSM builders
   write into a single `BytesMut` then freeze.
+- **Don't heap clone** unless absolutely necessary. Consider other
+  alternatives first, or make sure the clones are gated by connected
+  gateway/client reality and not fanned out unnecessarily.
 - **Tracing density matches `RfcommGateway`'s.** Every state transition
   at `debug!`, every frame at `trace!`, every successful handshake /
   connection-up at `info!`, every error path at `warn!` or `error!`.
@@ -209,26 +211,6 @@ The Car Thing has 512 MB of RAM shared with chromium and the kiosk web
 app. Heap clones, unbounded queues, and mutex contention all cost real
 frames. The actor-with-bounded-mpsc shape is what keeps the hot paths
 cheap.
-
-## Naming gotchas
-
-- "client" is overloaded. In bridgething's wire protocol it means _the
-  on-device webapp talking to the daemon over local websocket_. In any
-  other context "client" is ambiguous. When writing comments or docs,
-  prefer "webapp" or "on-device client" if there's any chance of
-  confusion.
-- `lib::server::ServerEvent` is a wire type (bridge → webapp event).
-  `core::http::Server` is the actual axum HTTP+WS server
-  (`crates/core/src/http/`, ports 8890/8891). Comments and docs should not
-  say "the server" without qualifying which one.
-- `lib::gateway` ↔ `core::handler::gateway` is a 1:1 mapping: every
-  bridge↔gateway wire variant in lib has a handler in core. When adding
-  a wire variant, add the handler in the same change.
-- `lib::client` ↔ `core::handler::client` is the same 1:1 mapping for
-  the local websocket protocol. Runtime types that wrap lib's wire enum
-  (`RecvMsgData`, `PossibleRecvMsg`, `ClientMode`, etc.) live in
-  `crates/core/src/handler/client/msg.rs` and are re-exported from
-  `core::handler::client`.
 
 ## Workspace ergonomics
 
@@ -245,3 +227,5 @@ cheap.
   Swift / Kotlin.
 - No emdashes or endashes.
 - NEVER #[allow(dead_code)]. Period. It's a useful metric.
+- Comments in core/ should be MINIMAL and only for gotchas (of which
+  there should not be many, because it usually means bad code).
