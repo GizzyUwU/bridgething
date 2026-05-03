@@ -7,6 +7,7 @@ mod systemd;
 
 mod asset;
 mod authority;
+mod capabilities;
 mod chrome;
 mod db;
 
@@ -25,6 +26,7 @@ mod monitoring;
 
 use authority::AuthorityRegistry;
 use bluetooth::BluetoothManager;
+use capabilities::CapabilitiesRegistry;
 use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler};
 use ota::OtaOrchestrator;
@@ -45,6 +47,7 @@ async fn main() {
 
   let (client_man, mut client_listener) = net::create_client_manager();
   let authority = AuthorityRegistry::new();
+  let capabilities = CapabilitiesRegistry::new(client_man.clone(), authority.clone());
   let player = Player::new(client_man.clone(), authority.clone());
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
@@ -54,7 +57,7 @@ async fn main() {
     tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
   }
 
-  let state = AppState::init(client_man.clone(), meta, player, chrome, authority)
+  let state = AppState::init(client_man.clone(), meta, player, chrome, authority, capabilities)
     .await
     .expect("failed to initialize state!!");
 

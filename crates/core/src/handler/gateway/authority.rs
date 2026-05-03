@@ -16,11 +16,15 @@ impl AuthorityHandler {
     match msg {
       GatewayToBridgeAuthorityMsgEvent::Claim(claim) => {
         tracing::debug!(scope = ?claim.scope, "({:?}) companion claims authority", &self.handle.address);
-        self.handle.state.authority.claim(claim.scope);
+        if let Err(err) = self.handle.state.capabilities.claim_authority(claim.scope).await {
+          tracing::warn!(?err, "failed to publish authority claim");
+        }
       }
       GatewayToBridgeAuthorityMsgEvent::Release(release) => {
         tracing::debug!(scope = ?release.scope, "({:?}) companion releases authority", &self.handle.address);
-        self.handle.state.authority.release(release.scope);
+        if let Err(err) = self.handle.state.capabilities.release_authority(release.scope).await {
+          tracing::warn!(?err, "failed to publish authority release");
+        }
       }
     }
     Ok(())

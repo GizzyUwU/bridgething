@@ -31,7 +31,7 @@ use libbridgething::{
 use tokio::sync::RwLock;
 
 use crate::{
-  authority::AuthorityRegistry,
+  capabilities::CapabilitiesRegistry,
   net::{ClientMan, WSError},
   player::Player,
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
@@ -44,16 +44,16 @@ pub struct PeerTracker {
   inner: RwLock<HashMap<Address, Peer>>,
   client_man: ClientMan,
   player: Player,
-  authority: AuthorityRegistry,
+  capabilities: CapabilitiesRegistry,
 }
 
 impl PeerTracker {
-  pub fn new(client_man: ClientMan, player: Player, authority: AuthorityRegistry) -> Self {
+  pub fn new(client_man: ClientMan, player: Player, capabilities: CapabilitiesRegistry) -> Self {
     Self {
       inner: RwLock::new(HashMap::new()),
       client_man,
       player,
-      authority,
+      capabilities,
     }
   }
 
@@ -75,7 +75,7 @@ impl PeerTracker {
       let prior = peers.get(&mac).cloned();
       let entry = peers.entry(mac).or_insert_with(|| Peer::new(device.clone()));
       entry.device = device;
-      Diff::compute(prior, Some(entry.clone()), &peers)
+      Diff::compute(mac, prior, Some(entry.clone()), &peers)
     };
     self.broadcast_diff(diff).await
   }
@@ -88,7 +88,7 @@ impl PeerTracker {
       };
       let prior = peer.clone();
       peer.paired = paired;
-      Diff::compute(Some(prior), Some(peer.clone()), &peers)
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
     };
     self.broadcast_diff(diff).await
   }
@@ -101,7 +101,7 @@ impl PeerTracker {
       };
       let prior = peer.clone();
       peer.iap2 = iap2;
-      Diff::compute(Some(prior), Some(peer.clone()), &peers)
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
     };
     self.broadcast_diff(diff).await
   }
@@ -114,7 +114,7 @@ impl PeerTracker {
       };
       let prior = peer.clone();
       peer.companion = companion;
-      Diff::compute(Some(prior), Some(peer.clone()), &peers)
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
     };
     self.broadcast_diff(diff).await
   }
@@ -126,7 +126,7 @@ impl PeerTracker {
       if prior.is_none() {
         return Ok(());
       }
-      Diff::compute(prior, None, &peers)
+      Diff::compute(mac, prior, None, &peers)
     };
     self.broadcast_diff(diff).await
   }
@@ -224,8 +224,10 @@ impl PeerTracker {
       }
     }
 
-    if diff.companion_lost {
-      self.authority.drop_all();
+    if let Some(addr) = diff.companion_lost
+      && let Err(err) = self.capabilities.clear_companion(addr).await
+    {
+      tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
     }
 
     if errors.is_empty() { Ok(()) } else { Err(errors) }
@@ -258,11 +260,11 @@ struct Diff {
   useful_link_transitioned_up: bool,
   useful_link_transitioned_down: bool,
   useful_device: Option<Device>,
-  companion_lost: bool,
+  companion_lost: Option<Address>,
 }
 
 impl Diff {
-  fn compute(prior: Option<Peer>, current: Option<Peer>, peers: &HashMap<Address, Peer>) -> Self {
+  fn compute(mac: Address, prior: Option<Peer>, current: Option<Peer>, peers: &HashMap<Address, Peer>) -> Self {
     let identity_mac = current.as_ref().or(prior.as_ref()).map(|p| p.device.mac.clone());
 
     let was_paired = prior.as_ref().is_some_and(|p| p.paired);
@@ -285,7 +287,11 @@ impl Diff {
       current.as_ref().map(|p| &p.companion),
       Some(PeerCompanionStatus::Connected(_))
     );
-    let companion_lost = was_companion_connected && !is_companion_connected;
+    let companion_lost = if was_companion_connected && !is_companion_connected {
+      Some(mac)
+    } else {
+      None
+    };
 
     let snapshot = peers
       .iter()

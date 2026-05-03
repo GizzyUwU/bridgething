@@ -14,9 +14,8 @@ impl CapabilitiesHandler {
   pub async fn handle(self, msg: GatewayToBridgeCapabilitiesMsgEvent) -> HandlerResult {
     match msg {
       GatewayToBridgeCapabilitiesMsgEvent::Announce(caps) => {
-        let info = caps.gateway;
         if let Some(mac) = self.handle.address {
-          let device_type = device_type_from_os(&info.os_name);
+          let device_type = device_type_from_os(&caps.gateway.os_name);
           if let Err(err) = self
             .handle
             .bluetooth
@@ -30,8 +29,11 @@ impl CapabilitiesHandler {
             .handle
             .state
             .peers
-            .set_companion(mac, PeerCompanionStatus::Connected(info))
+            .set_companion(mac, PeerCompanionStatus::Connected(caps.gateway.clone()))
             .await;
+          if let Err(err) = self.handle.state.capabilities.set_announce(mac, caps).await {
+            tracing::warn!(?err, "failed to publish capabilities snapshot");
+          }
         }
         Ok(())
       }

@@ -59,6 +59,15 @@ impl AuthorityRegistry {
       .map(|claimed_at| claimed_at.elapsed() < STALE_TIMEOUT)
       .unwrap_or(false)
   }
+
+  pub fn live_scopes(&self) -> Vec<CompanionAuthorityScope> {
+    let guard = self.inner.scopes.read().expect("authority lock poisoned");
+    guard
+      .iter()
+      .filter(|(_, claimed_at)| claimed_at.elapsed() < STALE_TIMEOUT)
+      .map(|(scope, _)| *scope)
+      .collect()
+  }
 }
 
 #[cfg(test)]

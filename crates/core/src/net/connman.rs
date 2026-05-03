@@ -25,9 +25,7 @@ use crate::{
   stock::StockSendMsg,
 };
 
-/// Default timeout for daemon-initiated typed client requests. Long
-/// enough for the webapp's render path, short enough that the requesting
-/// daemon code doesn't hang when the webapp goes away.
+/// default timeout for daemon-initiated typed client requests
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
@@ -327,16 +325,11 @@ impl ClientManager {
     } else {
       tracing::debug!("new modern connection from {address}");
     }
-    let _ = state;
 
     let synthesize_change_mode = data.mode == ClientMode::Stock;
+    let send_capabilities_snapshot = data.mode == ClientMode::Modern;
     self.connections.insert(address, data);
 
-    // Stock-port connections start in Stock mode without the upgrade
-    // path that fires ChangeMode in `connection.rs::handle_text`,
-    // so they never trigger the handler that broadcasts current
-    // bond/connection state. Synthesize one here, after insertion,
-    // so the broadcast that follows reaches the new connection.
     if synthesize_change_mode {
       let msg = RecvMsg {
         id: uuid::Uuid::now_v7(),
@@ -347,6 +340,13 @@ impl ClientManager {
       if let Err(err) = self.tx.send(msg).await {
         tracing::error!("failed to fire synthetic ChangeMode for {address}: {:?}", err);
       }
+    }
+
+    if send_capabilities_snapshot && let Err(err) = state.capabilities.send_snapshot_to(address).await {
+      tracing::warn!(
+        ?err,
+        "failed to seed capabilities snapshot for new modern client {address}"
+      );
     }
 
     Ok(())

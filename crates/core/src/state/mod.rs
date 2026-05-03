@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 use crate::{
   asset::{AssetCache, AssetError},
   authority::AuthorityRegistry,
+  capabilities::CapabilitiesRegistry,
   chrome,
   net::ClientMan,
   paths,
@@ -39,6 +40,7 @@ pub struct AppState {
   pub assets: AssetCache,
   pub transfers: ChunkedTransfer,
   pub authority: AuthorityRegistry,
+  pub capabilities: CapabilitiesRegistry,
   pub peers: PeerTracker,
 
   db: DatabaseConnection,
@@ -53,6 +55,7 @@ impl AppState {
     player: crate::player::Player,
     chrome: chrome::Chrome,
     authority: AuthorityRegistry,
+    capabilities: CapabilitiesRegistry,
   ) -> Result<State, StateError> {
     tracing::info!("initializing state");
     let state_dir = paths::state_dir();
@@ -74,7 +77,7 @@ impl AppState {
     let transfer_pending = ChunkedTransfer::init(paths::transfers_dir()).await?;
     let (transfers, _transfer_handle) = transfer_pending.spawn();
 
-    let peers = PeerTracker::new(client_man.clone(), player.clone(), authority.clone());
+    let peers = PeerTracker::new(client_man.clone(), player.clone(), capabilities.clone());
 
     Ok(Arc::new(Self {
       client_man,
@@ -85,6 +88,7 @@ impl AppState {
       assets,
       transfers,
       authority,
+      capabilities,
       peers,
 
       db,
