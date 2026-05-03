@@ -1,7 +1,7 @@
 use bluer::Address;
 use libbridgething::{
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsgData},
-  wire::{MsgMeta, ResponseMeta, WireRequest},
+  wire::{MsgMeta, ResponseMeta, WireError, WireRequest},
 };
 use uuid::Uuid;
 
@@ -64,8 +64,6 @@ impl MsgHandle {
       .await
   }
 
-  /// Ship a typed success response. The request type fixes the wire variant
-  /// so the handler can't accidentally encode the wrong shape.
   pub async fn respond_to<R>(&self, response: R::Response)
   where
     R: WireRequest<Inbound = BridgeToGatewayMsgData, Outbound = GatewayToBridgeMsgData>,
@@ -73,7 +71,6 @@ impl MsgHandle {
     self.respond(R::encode_response(response)).await
   }
 
-  /// Ship a typed domain error response paired with this request type.
   pub async fn respond_err<R>(&self, err: R::DomainError)
   where
     R: WireRequest<Inbound = BridgeToGatewayMsgData, Outbound = GatewayToBridgeMsgData>,
@@ -83,5 +80,19 @@ impl MsgHandle {
 
   pub async fn send_info(&self, data: impl Into<BridgeToGatewayMsgData>) {
     self.send(Uuid::now_v7(), data, MsgMeta::Event).await
+  }
+
+  /// Mark a verb as recognized-but-not-yet-built. Logs at the
+  /// `bridgething::unimplemented` tracing target and ships a
+  /// `WireError::Unimplemented` response on the wire so any awaiting
+  /// caller resolves immediately. Greppable as `.unimplemented(` for a
+  /// source-level inventory of holes.
+  pub async fn unimplemented(&self, verb: &str) {
+    tracing::warn!(
+      target: "bridgething::unimplemented",
+      "({:?}) {verb}",
+      &self.address,
+    );
+    self.respond(WireError::Unimplemented).await;
   }
 }

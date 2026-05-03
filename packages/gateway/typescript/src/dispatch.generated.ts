@@ -14,10 +14,46 @@ import {
   type AssetRequest,
   type AuthorityClaim,
   type AuthorityRelease,
+  type BrowseReply,
   type ChromeNavigate,
+  type Earcon,
+  type FavoriteChanged,
+  type FavoritesListReply,
+  type FavoritesSet,
+  type FavoritesToggle,
+  type GatewayCapabilities,
   type GatewayError,
-  type GatewayMeta,
   type GatewayToBridgeMsg,
+  type GeoErrorReply,
+  type GeoGetOnce,
+  type GeoGetOnceReply,
+  type GeoWatch,
+  type LibraryBrowseRequest,
+  type LibraryErrorReply,
+  type LibraryFavoritesListRequest,
+  type LibraryRecommendationsRequest,
+  type LibrarySearchRequest,
+  type NetFetchErrorReply,
+  type NetFetchReply,
+  type NetFetchRequestMsg,
+  type NetFetchStreamBegin,
+  type NetFetchStreamChunk,
+  type NetFetchStreamEnd,
+  type NetWsClose,
+  type NetWsClosed,
+  type NetWsErrorEvent,
+  type NetWsErrorReply,
+  type NetWsMessage,
+  type NetWsOpen,
+  type NetWsOpenReply,
+  type NetWsOpened,
+  type NetWsSend,
+  type Notification,
+  type NotificationInvoke,
+  type NotificationRemoved,
+  type NotificationsErrorReply,
+  type NotificationsListReply,
+  type NotificationsListRequest,
   type NowPlayingUpdate,
   type OtaAbandon,
   type OtaBegin,
@@ -26,11 +62,32 @@ import {
   type OtaChunk,
   type OtaError,
   type OtaProgress,
+  type PhoneCall,
+  type PhoneCallAction,
+  type PhoneCallEnded,
+  type PhoneStateReply,
+  type PlayUri,
+  type PlayerState,
+  type Position,
   type Priority,
-  type RepeatSet,
-  type SeekToSet,
-  type ShuffleSet,
-  type SkipToIndexSet,
+  type QueueSnapshot,
+  type QueueUri,
+  type RecommendationsReply,
+  type SearchReply,
+  type SeekTo,
+  type SetCrossfade,
+  type SetMute,
+  type SetRepeat,
+  type SetShuffle,
+  type SetSpeed,
+  type SetVolume,
+  type SkipToIndex,
+  type TimeInfo,
+  type Tts,
+  type TtsCancel,
+  type TtsEnded,
+  type TtsStarted,
+  type VolumeChanged,
   type WebappActive,
   type WebappError,
   type WebappInfo,
@@ -47,6 +104,140 @@ export type TypedRequestResult<R, E> =
   | { ok: false; kind: 'domain'; error: E }
   | { ok: false; kind: 'protocol'; error: GatewayError };
 
+export type AudioInboundHandlers = {
+  volumeUp: (deviceId: string) => void;
+  volumeDown: (deviceId: string) => void;
+  setVolume: (deviceId: string, msg: SetVolume) => void;
+  muteToggle: (deviceId: string) => void;
+  setMute: (deviceId: string, msg: SetMute) => void;
+  tts: (deviceId: string, msg: Tts) => void;
+  ttsCancel: (deviceId: string, msg: TtsCancel) => void;
+  ttsCancelAll: (deviceId: string) => void;
+  earcon: (deviceId: string, msg: Earcon) => void;
+};
+
+export type AudioDeviceInboundHandlers = {
+  volumeUp: () => void;
+  volumeDown: () => void;
+  setVolume: (msg: SetVolume) => void;
+  muteToggle: () => void;
+  setMute: (msg: SetMute) => void;
+  tts: (msg: Tts) => void;
+  ttsCancel: (msg: TtsCancel) => void;
+  ttsCancelAll: () => void;
+  earcon: (msg: Earcon) => void;
+};
+
+export type GeoInboundHandlers = {
+  watch: (deviceId: string, msg: GeoWatch) => void;
+  unwatch: (deviceId: string) => void;
+  getOnce: (handle: GeoGetOnceHandle, req: GeoGetOnce) => Promise<void> | void;
+};
+
+export type GeoDeviceInboundHandlers = {
+  watch: (msg: GeoWatch) => void;
+  unwatch: () => void;
+  getOnce: (handle: GeoGetOnceHandle, req: GeoGetOnce) => Promise<void> | void;
+};
+
+export type LibraryInboundHandlers = {
+  favoritesToggle: (deviceId: string, msg: FavoritesToggle) => void;
+  favoritesSet: (deviceId: string, msg: FavoritesSet) => void;
+  browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
+  search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
+  recommendations: (
+    handle: LibraryRecommendationsRequestHandle,
+    req: LibraryRecommendationsRequest,
+  ) => Promise<void> | void;
+  favoritesList: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void;
+};
+
+export type LibraryDeviceInboundHandlers = {
+  favoritesToggle: (msg: FavoritesToggle) => void;
+  favoritesSet: (msg: FavoritesSet) => void;
+  browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
+  search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
+  recommendations: (
+    handle: LibraryRecommendationsRequestHandle,
+    req: LibraryRecommendationsRequest,
+  ) => Promise<void> | void;
+  favoritesList: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void;
+};
+
+export type NetInboundHandlers = {
+  wsClose: (deviceId: string, msg: NetWsClose) => void;
+  wsSend: (deviceId: string, msg: NetWsSend) => void;
+  fetch: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void;
+  wsOpen: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void;
+};
+
+export type NetDeviceInboundHandlers = {
+  wsClose: (msg: NetWsClose) => void;
+  wsSend: (msg: NetWsSend) => void;
+  fetch: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void;
+  wsOpen: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void;
+};
+
+export type NotificationsInboundHandlers = {
+  invokePositive: (deviceId: string, msg: NotificationInvoke) => void;
+  invokeNegative: (deviceId: string, msg: NotificationInvoke) => void;
+  list: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void;
+};
+
+export type NotificationsDeviceInboundHandlers = {
+  invokePositive: (msg: NotificationInvoke) => void;
+  invokeNegative: (msg: NotificationInvoke) => void;
+  list: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void;
+};
+
+export type PhoneInboundHandlers = {
+  answer: (deviceId: string, msg: PhoneCallAction) => void;
+  decline: (deviceId: string, msg: PhoneCallAction) => void;
+  end: (deviceId: string, msg: PhoneCallAction) => void;
+  hold: (deviceId: string, msg: PhoneCallAction) => void;
+  unhold: (deviceId: string, msg: PhoneCallAction) => void;
+  stateGet: (handle: PhoneStateGetHandle) => Promise<void> | void;
+};
+
+export type PhoneDeviceInboundHandlers = {
+  answer: (msg: PhoneCallAction) => void;
+  decline: (msg: PhoneCallAction) => void;
+  end: (msg: PhoneCallAction) => void;
+  hold: (msg: PhoneCallAction) => void;
+  unhold: (msg: PhoneCallAction) => void;
+  stateGet: (handle: PhoneStateGetHandle) => Promise<void> | void;
+};
+
+export type PlayerInboundHandlers = {
+  play: (deviceId: string, msg: PlayUri) => void;
+  queue: (deviceId: string, msg: QueueUri) => void;
+  pause: (deviceId: string) => void;
+  resume: (deviceId: string) => void;
+  skipNext: (deviceId: string) => void;
+  skipPrev: (deviceId: string) => void;
+  skipToIndex: (deviceId: string, msg: SkipToIndex) => void;
+  seekTo: (deviceId: string, msg: SeekTo) => void;
+  setShuffle: (deviceId: string, msg: SetShuffle) => void;
+  setRepeat: (deviceId: string, msg: SetRepeat) => void;
+  setSpeed: (deviceId: string, msg: SetSpeed) => void;
+  setCrossfade: (deviceId: string, msg: SetCrossfade) => void;
+};
+
+export type PlayerDeviceInboundHandlers = {
+  play: (msg: PlayUri) => void;
+  queue: (msg: QueueUri) => void;
+  pause: () => void;
+  resume: () => void;
+  skipNext: () => void;
+  skipPrev: () => void;
+  skipToIndex: (msg: SkipToIndex) => void;
+  seekTo: (msg: SeekTo) => void;
+  setShuffle: (msg: SetShuffle) => void;
+  setRepeat: (msg: SetRepeat) => void;
+  setSpeed: (msg: SetSpeed) => void;
+  setCrossfade: (msg: SetCrossfade) => void;
+};
+
 export type SystemInboundHandlers = {
   otaProgress: (deviceId: string, msg: OtaProgress) => void;
   otaError: (deviceId: string, msg: OtaError) => void;
@@ -61,36 +252,6 @@ export type SystemDeviceInboundHandlers = {
   otaBeginRejected: (msg: OtaBeginRejected) => void;
 };
 
-export type TransportInboundHandlers = {
-  play: (deviceId: string) => void;
-  pause: (deviceId: string) => void;
-  playPause: (deviceId: string) => void;
-  next: (deviceId: string) => void;
-  prev: (deviceId: string) => void;
-  volumeUp: (deviceId: string) => void;
-  volumeDown: (deviceId: string) => void;
-  muteToggle: (deviceId: string) => void;
-  shuffle: (deviceId: string, msg: ShuffleSet) => void;
-  repeat: (deviceId: string, msg: RepeatSet) => void;
-  seekTo: (deviceId: string, msg: SeekToSet) => void;
-  skipToIndex: (deviceId: string, msg: SkipToIndexSet) => void;
-};
-
-export type TransportDeviceInboundHandlers = {
-  play: () => void;
-  pause: () => void;
-  playPause: () => void;
-  next: () => void;
-  prev: () => void;
-  volumeUp: () => void;
-  volumeDown: () => void;
-  muteToggle: () => void;
-  shuffle: (msg: ShuffleSet) => void;
-  repeat: (msg: RepeatSet) => void;
-  seekTo: (msg: SeekToSet) => void;
-  skipToIndex: (msg: SkipToIndexSet) => void;
-};
-
 export type ForwardInboundHandlers = {
   text: (deviceId: string, msg: string) => void;
   json: (deviceId: string, msg: unknown) => void;
@@ -102,6 +263,1399 @@ export type ForwardDeviceInboundHandlers = {
   json: (msg: unknown) => void;
   binary: (msg: Uint8Array) => void;
 };
+
+export class AudioSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Audio::VolumeUp` across all peers. */
+  onVolumeUp(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'volumeUp') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Audio::VolumeDown` across all peers. */
+  onVolumeDown(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'volumeDown') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Audio::SetVolume` across all peers. */
+  onSetVolume(handler: (deviceId: string, msg: SetVolume) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'setVolume') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::MuteToggle` across all peers. */
+  onMuteToggle(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'muteToggle') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Audio::SetMute` across all peers. */
+  onSetMute(handler: (deviceId: string, msg: SetMute) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'setMute') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::Tts` across all peers. */
+  onTts(handler: (deviceId: string, msg: Tts) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'tts') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::TtsCancel` across all peers. */
+  onTtsCancel(handler: (deviceId: string, msg: TtsCancel) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsCancel') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::TtsCancelAll` across all peers. */
+  onTtsCancelAll(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsCancelAll') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Audio::Earcon` across all peers. */
+  onEarcon(handler: (deviceId: string, msg: Earcon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'earcon') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Audio` variants. */
+  subscribe(handlers: AudioInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<AudioInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<AudioInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'volumeUp': {
+          handlers.volumeUp?.(event.deviceId);
+          return;
+        }
+        case 'volumeDown': {
+          handlers.volumeDown?.(event.deviceId);
+          return;
+        }
+        case 'setVolume': {
+          handlers.setVolume?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'muteToggle': {
+          handlers.muteToggle?.(event.deviceId);
+          return;
+        }
+        case 'setMute': {
+          handlers.setMute?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'tts': {
+          handlers.tts?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'ttsCancel': {
+          handlers.ttsCancel?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'ttsCancelAll': {
+          handlers.ttsCancelAll?.(event.deviceId);
+          return;
+        }
+        case 'earcon': {
+          handlers.earcon?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Audio: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Audio::TtsStarted` to every connected peer (broadcast). */
+  async ttsStarted(payload: TtsStarted, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'audio', data: { event: 'ttsStarted', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Audio::TtsEnded` to every connected peer (broadcast). */
+  async ttsEnded(payload: TtsEnded, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'audio', data: { event: 'ttsEnded', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Audio::VolumeChanged` to every connected peer (broadcast). */
+  async volumeChanged(payload: VolumeChanged, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'audio', data: { event: 'volumeChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class GeoSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Geo::Watch` across all peers. */
+  onWatch(handler: (deviceId: string, msg: GeoWatch) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'watch') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Geo::Unwatch` across all peers. */
+  onUnwatch(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'unwatch') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Typed inbound `GeoGetOnce` request: handler is given a typed handle for the response. */
+  onGetOnce(handler: (handle: GeoGetOnceHandle, req: GeoGetOnce) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'getOnce') return;
+      const handle = new GeoGetOnceHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onGetOnce handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Geo` variants. */
+  subscribe(handlers: GeoInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<GeoInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<GeoInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'watch': {
+          handlers.watch?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'unwatch': {
+          handlers.unwatch?.(event.deviceId);
+          return;
+        }
+        case 'getOnce': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.getOnce;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Geo: no handler for inner', 'getOnce');
+            return;
+          }
+          const handle = new GeoGetOnceHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Geo: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Geo::Position` to every connected peer (broadcast). */
+  async position(payload: Position, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'geo', data: { event: 'position', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class LibrarySurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Library::FavoritesToggle` across all peers. */
+  onFavoritesToggle(handler: (deviceId: string, msg: FavoritesToggle) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesToggle') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::FavoritesSet` across all peers. */
+  onFavoritesSet(handler: (deviceId: string, msg: FavoritesSet) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesSet') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `LibraryBrowseRequest` request: handler is given a typed handle for the response. */
+  onBrowse(
+    handler: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'browse') return;
+      const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onBrowse handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibrarySearchRequest` request: handler is given a typed handle for the response. */
+  onSearch(
+    handler: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'search') return;
+      const handle = new LibrarySearchRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onSearch handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibraryRecommendationsRequest` request: handler is given a typed handle for the response. */
+  onRecommendations(
+    handler: (handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'recommendations') return;
+      const handle = new LibraryRecommendationsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onRecommendations handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibraryFavoritesListRequest` request: handler is given a typed handle for the response. */
+  onFavoritesList(
+    handler: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesList') return;
+      const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFavoritesList handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Library` variants. */
+  subscribe(handlers: LibraryInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<LibraryInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<LibraryInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'favoritesToggle': {
+          handlers.favoritesToggle?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'favoritesSet': {
+          handlers.favoritesSet?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'browse': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.browse;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'browse');
+            return;
+          }
+          const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'search': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.search;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'search');
+            return;
+          }
+          const handle = new LibrarySearchRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'recommendations': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.recommendations;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'recommendations');
+            return;
+          }
+          const handle = new LibraryRecommendationsRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'favoritesList': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.favoritesList;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'favoritesList');
+            return;
+          }
+          const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Library: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Library::FavoriteChanged` to every connected peer (broadcast). */
+  async favoriteChanged(payload: FavoriteChanged, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'library', data: { event: 'favoriteChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class NetSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Net::WsClose` across all peers. */
+  onWsClose(handler: (deviceId: string, msg: NetWsClose) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsClose') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsSend` across all peers. */
+  onWsSend(handler: (deviceId: string, msg: NetWsSend) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsSend') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `NetFetchRequestMsg` request: handler is given a typed handle for the response. */
+  onFetch(handler: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetch') return;
+      const handle = new NetFetchRequestMsgHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFetch handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `NetWsOpen` request: handler is given a typed handle for the response. */
+  onWsOpen(handler: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsOpen') return;
+      const handle = new NetWsOpenHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onWsOpen handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Net` variants. */
+  subscribe(handlers: NetInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NetInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NetInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'wsClose': {
+          handlers.wsClose?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'wsSend': {
+          handlers.wsSend?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'fetch': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.fetch;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Net: no handler for inner', 'fetch');
+            return;
+          }
+          const handle = new NetFetchRequestMsgHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'wsOpen': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.wsOpen;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Net: no handler for inner', 'wsOpen');
+            return;
+          }
+          const handle = new NetWsOpenHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Net: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Net::FetchStreamBegin` to every connected peer (broadcast). */
+  async fetchStreamBegin(payload: NetFetchStreamBegin, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'fetchStreamBegin', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::FetchStreamChunk` to every connected peer (broadcast). */
+  async fetchStreamChunk(payload: NetFetchStreamChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'fetchStreamChunk', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::FetchStreamEnd` to every connected peer (broadcast). */
+  async fetchStreamEnd(payload: NetFetchStreamEnd, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'fetchStreamEnd', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::WsOpened` to every connected peer (broadcast). */
+  async wsOpened(payload: NetWsOpened, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'wsOpened', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::WsMessage` to every connected peer (broadcast). */
+  async wsMessage(payload: NetWsMessage, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'wsMessage', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::WsClosed` to every connected peer (broadcast). */
+  async wsClosed(payload: NetWsClosed, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'wsClosed', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::WsErrorEvent` to every connected peer (broadcast). */
+  async wsErrorEvent(payload: NetWsErrorEvent, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class NotificationsSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Notifications::InvokePositive` across all peers. */
+  onInvokePositive(handler: (deviceId: string, msg: NotificationInvoke) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'invokePositive') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::InvokeNegative` across all peers. */
+  onInvokeNegative(handler: (deviceId: string, msg: NotificationInvoke) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'invokeNegative') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `NotificationsListRequest` request: handler is given a typed handle for the response. */
+  onList(
+    handler: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'list') return;
+      const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onList handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Notifications` variants. */
+  subscribe(handlers: NotificationsInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NotificationsInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NotificationsInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'invokePositive': {
+          handlers.invokePositive?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'invokeNegative': {
+          handlers.invokeNegative?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'list': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.list;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', 'list');
+            return;
+          }
+          const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Notifications::Posted` to every connected peer (broadcast). */
+  async posted(payload: Notification, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'notifications', data: { event: 'posted', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Notifications::Updated` to every connected peer (broadcast). */
+  async updated(payload: Notification, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'notifications', data: { event: 'updated', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Notifications::Removed` to every connected peer (broadcast). */
+  async removed(payload: NotificationRemoved, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'notifications', data: { event: 'removed', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class PhoneSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Phone::Answer` across all peers. */
+  onAnswer(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'answer') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Decline` across all peers. */
+  onDecline(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'decline') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::End` across all peers. */
+  onEnd(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'end') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Hold` across all peers. */
+  onHold(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'hold') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Unhold` across all peers. */
+  onUnhold(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'unhold') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `PhoneStateGet` request: handler is given a typed handle for the response. */
+  onStateGet(handler: (handle: PhoneStateGetHandle) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'stateGet') return;
+      const handle = new PhoneStateGetHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onStateGet handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Phone` variants. */
+  subscribe(handlers: PhoneInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PhoneInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PhoneInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'answer': {
+          handlers.answer?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'decline': {
+          handlers.decline?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'end': {
+          handlers.end?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'hold': {
+          handlers.hold?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'unhold': {
+          handlers.unhold?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'stateGet': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.stateGet;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Phone: no handler for inner', 'stateGet');
+            return;
+          }
+          const handle = new PhoneStateGetHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Phone: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Phone::Snapshot` to every connected peer (broadcast). */
+  async snapshot(payload: PhoneStateReply, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'snapshot', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Phone::CallStarted` to every connected peer (broadcast). */
+  async callStarted(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'callStarted', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Phone::CallUpdated` to every connected peer (broadcast). */
+  async callUpdated(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'callUpdated', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Phone::CallEnded` to every connected peer (broadcast). */
+  async callEnded(payload: PhoneCallEnded, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'callEnded', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class PlayerSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Player::Play` across all peers. */
+  onPlay(handler: (deviceId: string, msg: PlayUri) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'play') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::Queue` across all peers. */
+  onQueue(handler: (deviceId: string, msg: QueueUri) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'queue') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::Pause` across all peers. */
+  onPause(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'pause') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Player::Resume` across all peers. */
+  onResume(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'resume') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Player::SkipNext` across all peers. */
+  onSkipNext(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipNext') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Player::SkipPrev` across all peers. */
+  onSkipPrev(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipPrev') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Player::SkipToIndex` across all peers. */
+  onSkipToIndex(handler: (deviceId: string, msg: SkipToIndex) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipToIndex') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SeekTo` across all peers. */
+  onSeekTo(handler: (deviceId: string, msg: SeekTo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'seekTo') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetShuffle` across all peers. */
+  onSetShuffle(handler: (deviceId: string, msg: SetShuffle) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setShuffle') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetRepeat` across all peers. */
+  onSetRepeat(handler: (deviceId: string, msg: SetRepeat) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setRepeat') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetSpeed` across all peers. */
+  onSetSpeed(handler: (deviceId: string, msg: SetSpeed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setSpeed') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetCrossfade` across all peers. */
+  onSetCrossfade(handler: (deviceId: string, msg: SetCrossfade) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setCrossfade') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Player` variants. */
+  subscribe(handlers: PlayerInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PlayerInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PlayerInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'play': {
+          handlers.play?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'queue': {
+          handlers.queue?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'pause': {
+          handlers.pause?.(event.deviceId);
+          return;
+        }
+        case 'resume': {
+          handlers.resume?.(event.deviceId);
+          return;
+        }
+        case 'skipNext': {
+          handlers.skipNext?.(event.deviceId);
+          return;
+        }
+        case 'skipPrev': {
+          handlers.skipPrev?.(event.deviceId);
+          return;
+        }
+        case 'skipToIndex': {
+          handlers.skipToIndex?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'seekTo': {
+          handlers.seekTo?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'setShuffle': {
+          handlers.setShuffle?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'setRepeat': {
+          handlers.setRepeat?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'setSpeed': {
+          handlers.setSpeed?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'setCrossfade': {
+          handlers.setCrossfade?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Player::Snapshot` to every connected peer (broadcast). */
+  async snapshot(payload: PlayerState, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'snapshot', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Player::Delta` to every connected peer (broadcast). */
+  async delta(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'delta', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Player::QueueChanged` to every connected peer (broadcast). */
+  async queueChanged(payload: QueueSnapshot, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'queueChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
 
 export class SystemSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
@@ -259,227 +1813,6 @@ export class SystemSurface {
   }
 }
 
-export class TransportSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Subscribe to `Transport::Play` across all peers. */
-  onPlay(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'play') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::Pause` across all peers. */
-  onPause(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'pause') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::PlayPause` across all peers. */
-  onPlayPause(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'playPause') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::Next` across all peers. */
-  onNext(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'next') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::Prev` across all peers. */
-  onPrev(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'prev') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::VolumeUp` across all peers. */
-  onVolumeUp(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'volumeUp') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::VolumeDown` across all peers. */
-  onVolumeDown(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'volumeDown') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::MuteToggle` across all peers. */
-  onMuteToggle(handler: (deviceId: string) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'muteToggle') return;
-      handler(event.deviceId);
-    });
-  }
-
-  /** Subscribe to `Transport::Shuffle` across all peers. */
-  onShuffle(handler: (deviceId: string, msg: ShuffleSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'shuffle') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::Repeat` across all peers. */
-  onRepeat(handler: (deviceId: string, msg: RepeatSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'repeat') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::SeekTo` across all peers. */
-  onSeekTo(handler: (deviceId: string, msg: SeekToSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'seekTo') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::SkipToIndex` across all peers. */
-  onSkipToIndex(handler: (deviceId: string, msg: SkipToIndexSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'skipToIndex') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
-  /** Exhaustive subscribe over all inbound `Transport` variants. */
-  subscribe(handlers: TransportInboundHandlers): () => void {
-    return this._subscribe(handlers, false);
-  }
-
-  /** Same as `subscribe` but every handler is optional. */
-  subscribePartial(handlers: Partial<TransportInboundHandlers>): () => void {
-    return this._subscribe(handlers, true);
-  }
-
-  private _subscribe(handlers: Partial<TransportInboundHandlers>, partial: boolean): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      switch (inner.event) {
-        case 'play': {
-          handlers.play?.(event.deviceId);
-          return;
-        }
-        case 'pause': {
-          handlers.pause?.(event.deviceId);
-          return;
-        }
-        case 'playPause': {
-          handlers.playPause?.(event.deviceId);
-          return;
-        }
-        case 'next': {
-          handlers.next?.(event.deviceId);
-          return;
-        }
-        case 'prev': {
-          handlers.prev?.(event.deviceId);
-          return;
-        }
-        case 'volumeUp': {
-          handlers.volumeUp?.(event.deviceId);
-          return;
-        }
-        case 'volumeDown': {
-          handlers.volumeDown?.(event.deviceId);
-          return;
-        }
-        case 'muteToggle': {
-          handlers.muteToggle?.(event.deviceId);
-          return;
-        }
-        case 'shuffle': {
-          handlers.shuffle?.(event.deviceId, inner.data);
-          return;
-        }
-        case 'repeat': {
-          handlers.repeat?.(event.deviceId, inner.data);
-          return;
-        }
-        case 'seekTo': {
-          handlers.seekTo?.(event.deviceId, inner.data);
-          return;
-        }
-        case 'skipToIndex': {
-          handlers.skipToIndex?.(event.deviceId, inner.data);
-          return;
-        }
-        default: {
-          if (!partial) this._gateway.logger.warn('Transport: no handler for inner', inner);
-          return;
-        }
-      }
-    });
-  }
-}
-
 export class ForwardSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
@@ -554,25 +1887,6 @@ export class ForwardSurface {
         }
       }
     });
-  }
-}
-
-export class VersionSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Send a `Version` event to every connected peer (broadcast). */
-  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'version', data: payload },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
   }
 }
 
@@ -712,6 +2026,25 @@ export class AuthoritySurface {
   }
 }
 
+export class CapabilitiesSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Send `Capabilities::Announce` to every connected peer (broadcast). */
+  async announce(payload: GatewayCapabilities, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'capabilities', data: { event: 'announce', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
 export class ChromeSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
@@ -731,18 +2064,18 @@ export class ChromeSurface {
   }
 }
 
-export class NowPlayingUpdateSurface {
+export class TimeSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
-  /** Send a `NowPlayingUpdate` event to every connected peer (broadcast). */
-  async send(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
+  /** Send `Time::Snapshot` to every connected peer (broadcast). */
+  async snapshot(payload: TimeInfo, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
           id: newUuidBytes(),
           meta: { kind: 'event' },
-          data: { type: 'nowPlayingUpdate', data: payload },
+          data: { type: 'time', data: { event: 'snapshot', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -834,6 +2167,1360 @@ export class WebappSurface {
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class AudioSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Audio::VolumeUp` from this peer. */
+  onVolumeUp(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'volumeUp') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Audio::VolumeDown` from this peer. */
+  onVolumeDown(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'volumeDown') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Audio::SetVolume` from this peer. */
+  onSetVolume(handler: (msg: SetVolume) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'setVolume') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::MuteToggle` from this peer. */
+  onMuteToggle(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'muteToggle') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Audio::SetMute` from this peer. */
+  onSetMute(handler: (msg: SetMute) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'setMute') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::Tts` from this peer. */
+  onTts(handler: (msg: Tts) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'tts') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::TtsCancel` from this peer. */
+  onTtsCancel(handler: (msg: TtsCancel) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsCancel') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::TtsCancelAll` from this peer. */
+  onTtsCancelAll(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsCancelAll') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Audio::Earcon` from this peer. */
+  onEarcon(handler: (msg: Earcon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'earcon') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Audio` variants from this peer. */
+  subscribe(handlers: AudioDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<AudioDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<AudioDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'volumeUp': {
+          handlers.volumeUp?.();
+          return;
+        }
+        case 'volumeDown': {
+          handlers.volumeDown?.();
+          return;
+        }
+        case 'setVolume': {
+          handlers.setVolume?.(inner.data);
+          return;
+        }
+        case 'muteToggle': {
+          handlers.muteToggle?.();
+          return;
+        }
+        case 'setMute': {
+          handlers.setMute?.(inner.data);
+          return;
+        }
+        case 'tts': {
+          handlers.tts?.(inner.data);
+          return;
+        }
+        case 'ttsCancel': {
+          handlers.ttsCancel?.(inner.data);
+          return;
+        }
+        case 'ttsCancelAll': {
+          handlers.ttsCancelAll?.();
+          return;
+        }
+        case 'earcon': {
+          handlers.earcon?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Audio: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Audio::TtsStarted` to this peer. */
+  async ttsStarted(payload: TtsStarted, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'audio', data: { event: 'ttsStarted', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Audio::TtsEnded` to this peer. */
+  async ttsEnded(payload: TtsEnded, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'audio', data: { event: 'ttsEnded', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Audio::VolumeChanged` to this peer. */
+  async volumeChanged(payload: VolumeChanged, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'audio', data: { event: 'volumeChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class GeoSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Geo::Watch` from this peer. */
+  onWatch(handler: (msg: GeoWatch) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'watch') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Geo::Unwatch` from this peer. */
+  onUnwatch(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'unwatch') return;
+      handler();
+    });
+  }
+
+  /** Typed inbound `GeoGetOnce` request from this peer: handler is given a typed handle for the response. */
+  onGetOnce(handler: (handle: GeoGetOnceHandle, req: GeoGetOnce) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'getOnce') return;
+      const handle = new GeoGetOnceHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onGetOnce handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Geo` variants from this peer. */
+  subscribe(handlers: GeoDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<GeoDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<GeoDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'watch': {
+          handlers.watch?.(inner.data);
+          return;
+        }
+        case 'unwatch': {
+          handlers.unwatch?.();
+          return;
+        }
+        case 'getOnce': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.getOnce;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Geo: no handler for inner', 'getOnce');
+            return;
+          }
+          const handle = new GeoGetOnceHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Geo: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Geo::Position` to this peer. */
+  async position(payload: Position, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'geo', data: { event: 'position', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class LibrarySurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Library::FavoritesToggle` from this peer. */
+  onFavoritesToggle(handler: (msg: FavoritesToggle) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesToggle') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::FavoritesSet` from this peer. */
+  onFavoritesSet(handler: (msg: FavoritesSet) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesSet') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `LibraryBrowseRequest` request from this peer: handler is given a typed handle for the response. */
+  onBrowse(
+    handler: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'browse') return;
+      const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onBrowse handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibrarySearchRequest` request from this peer: handler is given a typed handle for the response. */
+  onSearch(
+    handler: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'search') return;
+      const handle = new LibrarySearchRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onSearch handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibraryRecommendationsRequest` request from this peer: handler is given a typed handle for the response. */
+  onRecommendations(
+    handler: (handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'recommendations') return;
+      const handle = new LibraryRecommendationsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onRecommendations handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `LibraryFavoritesListRequest` request from this peer: handler is given a typed handle for the response. */
+  onFavoritesList(
+    handler: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesList') return;
+      const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFavoritesList handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Library` variants from this peer. */
+  subscribe(handlers: LibraryDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<LibraryDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<LibraryDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'favoritesToggle': {
+          handlers.favoritesToggle?.(inner.data);
+          return;
+        }
+        case 'favoritesSet': {
+          handlers.favoritesSet?.(inner.data);
+          return;
+        }
+        case 'browse': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.browse;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'browse');
+            return;
+          }
+          const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'search': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.search;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'search');
+            return;
+          }
+          const handle = new LibrarySearchRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'recommendations': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.recommendations;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'recommendations');
+            return;
+          }
+          const handle = new LibraryRecommendationsRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'favoritesList': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.favoritesList;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'favoritesList');
+            return;
+          }
+          const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Library: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Library::FavoriteChanged` to this peer. */
+  async favoriteChanged(payload: FavoriteChanged, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'library', data: { event: 'favoriteChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class NetSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Net::WsClose` from this peer. */
+  onWsClose(handler: (msg: NetWsClose) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsClose') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsSend` from this peer. */
+  onWsSend(handler: (msg: NetWsSend) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsSend') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `NetFetchRequestMsg` request from this peer: handler is given a typed handle for the response. */
+  onFetch(handler: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetch') return;
+      const handle = new NetFetchRequestMsgHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFetch handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Typed inbound `NetWsOpen` request from this peer: handler is given a typed handle for the response. */
+  onWsOpen(handler: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsOpen') return;
+      const handle = new NetWsOpenHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onWsOpen handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Net` variants from this peer. */
+  subscribe(handlers: NetDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NetDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NetDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'wsClose': {
+          handlers.wsClose?.(inner.data);
+          return;
+        }
+        case 'wsSend': {
+          handlers.wsSend?.(inner.data);
+          return;
+        }
+        case 'fetch': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.fetch;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Net: no handler for inner', 'fetch');
+            return;
+          }
+          const handle = new NetFetchRequestMsgHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'wsOpen': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.wsOpen;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Net: no handler for inner', 'wsOpen');
+            return;
+          }
+          const handle = new NetWsOpenHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Net: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Net::FetchStreamBegin` to this peer. */
+  async fetchStreamBegin(payload: NetFetchStreamBegin, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'fetchStreamBegin', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::FetchStreamChunk` to this peer. */
+  async fetchStreamChunk(payload: NetFetchStreamChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'fetchStreamChunk', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::FetchStreamEnd` to this peer. */
+  async fetchStreamEnd(payload: NetFetchStreamEnd, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'fetchStreamEnd', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::WsOpened` to this peer. */
+  async wsOpened(payload: NetWsOpened, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'wsOpened', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::WsMessage` to this peer. */
+  async wsMessage(payload: NetWsMessage, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'wsMessage', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::WsClosed` to this peer. */
+  async wsClosed(payload: NetWsClosed, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'wsClosed', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::WsErrorEvent` to this peer. */
+  async wsErrorEvent(payload: NetWsErrorEvent, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class NotificationsSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Notifications::InvokePositive` from this peer. */
+  onInvokePositive(handler: (msg: NotificationInvoke) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'invokePositive') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::InvokeNegative` from this peer. */
+  onInvokeNegative(handler: (msg: NotificationInvoke) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'invokeNegative') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `NotificationsListRequest` request from this peer: handler is given a typed handle for the response. */
+  onList(
+    handler: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'list') return;
+      const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onList handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Notifications` variants from this peer. */
+  subscribe(handlers: NotificationsDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NotificationsDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NotificationsDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'invokePositive': {
+          handlers.invokePositive?.(inner.data);
+          return;
+        }
+        case 'invokeNegative': {
+          handlers.invokeNegative?.(inner.data);
+          return;
+        }
+        case 'list': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.list;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', 'list');
+            return;
+          }
+          const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Notifications::Posted` to this peer. */
+  async posted(payload: Notification, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'notifications', data: { event: 'posted', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Notifications::Updated` to this peer. */
+  async updated(payload: Notification, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'notifications', data: { event: 'updated', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Notifications::Removed` to this peer. */
+  async removed(payload: NotificationRemoved, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'notifications', data: { event: 'removed', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class PhoneSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Phone::Answer` from this peer. */
+  onAnswer(handler: (msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'answer') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Decline` from this peer. */
+  onDecline(handler: (msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'decline') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::End` from this peer. */
+  onEnd(handler: (msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'end') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Hold` from this peer. */
+  onHold(handler: (msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'hold') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Unhold` from this peer. */
+  onUnhold(handler: (msg: PhoneCallAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'unhold') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `PhoneStateGet` request from this peer: handler is given a typed handle for the response. */
+  onStateGet(handler: (handle: PhoneStateGetHandle) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'stateGet') return;
+      const handle = new PhoneStateGetHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onStateGet handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Phone` variants from this peer. */
+  subscribe(handlers: PhoneDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PhoneDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PhoneDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'answer': {
+          handlers.answer?.(inner.data);
+          return;
+        }
+        case 'decline': {
+          handlers.decline?.(inner.data);
+          return;
+        }
+        case 'end': {
+          handlers.end?.(inner.data);
+          return;
+        }
+        case 'hold': {
+          handlers.hold?.(inner.data);
+          return;
+        }
+        case 'unhold': {
+          handlers.unhold?.(inner.data);
+          return;
+        }
+        case 'stateGet': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.stateGet;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Phone: no handler for inner', 'stateGet');
+            return;
+          }
+          const handle = new PhoneStateGetHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Phone: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Phone::Snapshot` to this peer. */
+  async snapshot(payload: PhoneStateReply, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'snapshot', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Phone::CallStarted` to this peer. */
+  async callStarted(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'callStarted', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Phone::CallUpdated` to this peer. */
+  async callUpdated(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'callUpdated', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Phone::CallEnded` to this peer. */
+  async callEnded(payload: PhoneCallEnded, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'callEnded', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class PlayerSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Player::Play` from this peer. */
+  onPlay(handler: (msg: PlayUri) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'play') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::Queue` from this peer. */
+  onQueue(handler: (msg: QueueUri) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'queue') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::Pause` from this peer. */
+  onPause(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'pause') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Player::Resume` from this peer. */
+  onResume(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'resume') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Player::SkipNext` from this peer. */
+  onSkipNext(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipNext') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Player::SkipPrev` from this peer. */
+  onSkipPrev(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipPrev') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Player::SkipToIndex` from this peer. */
+  onSkipToIndex(handler: (msg: SkipToIndex) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'skipToIndex') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SeekTo` from this peer. */
+  onSeekTo(handler: (msg: SeekTo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'seekTo') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetShuffle` from this peer. */
+  onSetShuffle(handler: (msg: SetShuffle) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setShuffle') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetRepeat` from this peer. */
+  onSetRepeat(handler: (msg: SetRepeat) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setRepeat') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetSpeed` from this peer. */
+  onSetSpeed(handler: (msg: SetSpeed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setSpeed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::SetCrossfade` from this peer. */
+  onSetCrossfade(handler: (msg: SetCrossfade) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'setCrossfade') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Player` variants from this peer. */
+  subscribe(handlers: PlayerDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PlayerDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PlayerDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'play': {
+          handlers.play?.(inner.data);
+          return;
+        }
+        case 'queue': {
+          handlers.queue?.(inner.data);
+          return;
+        }
+        case 'pause': {
+          handlers.pause?.();
+          return;
+        }
+        case 'resume': {
+          handlers.resume?.();
+          return;
+        }
+        case 'skipNext': {
+          handlers.skipNext?.();
+          return;
+        }
+        case 'skipPrev': {
+          handlers.skipPrev?.();
+          return;
+        }
+        case 'skipToIndex': {
+          handlers.skipToIndex?.(inner.data);
+          return;
+        }
+        case 'seekTo': {
+          handlers.seekTo?.(inner.data);
+          return;
+        }
+        case 'setShuffle': {
+          handlers.setShuffle?.(inner.data);
+          return;
+        }
+        case 'setRepeat': {
+          handlers.setRepeat?.(inner.data);
+          return;
+        }
+        case 'setSpeed': {
+          handlers.setSpeed?.(inner.data);
+          return;
+        }
+        case 'setCrossfade': {
+          handlers.setCrossfade?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Player::Snapshot` to this peer. */
+  async snapshot(payload: PlayerState, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'snapshot', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Player::Delta` to this peer. */
+  async delta(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'delta', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Player::QueueChanged` to this peer. */
+  async queueChanged(payload: QueueSnapshot, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'queueChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
   }
 }
 
@@ -985,243 +3672,6 @@ export class SystemSurfaceForDevice {
   }
 }
 
-export class TransportSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Subscribe to `Transport::Play` from this peer. */
-  onPlay(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'play') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::Pause` from this peer. */
-  onPause(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'pause') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::PlayPause` from this peer. */
-  onPlayPause(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'playPause') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::Next` from this peer. */
-  onNext(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'next') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::Prev` from this peer. */
-  onPrev(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'prev') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::VolumeUp` from this peer. */
-  onVolumeUp(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'volumeUp') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::VolumeDown` from this peer. */
-  onVolumeDown(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'volumeDown') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::MuteToggle` from this peer. */
-  onMuteToggle(handler: () => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'muteToggle') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Transport::Shuffle` from this peer. */
-  onShuffle(handler: (msg: ShuffleSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'shuffle') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::Repeat` from this peer. */
-  onRepeat(handler: (msg: RepeatSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'repeat') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::SeekTo` from this peer. */
-  onSeekTo(handler: (msg: SeekToSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'seekTo') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Transport::SkipToIndex` from this peer. */
-  onSkipToIndex(handler: (msg: SkipToIndexSet) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      if (inner.event !== 'skipToIndex') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Exhaustive subscribe over all inbound `Transport` variants from this peer. */
-  subscribe(handlers: TransportDeviceInboundHandlers): () => void {
-    return this._subscribe(handlers, false);
-  }
-
-  /** Same as `subscribe` but every handler is optional. */
-  subscribePartial(handlers: Partial<TransportDeviceInboundHandlers>): () => void {
-    return this._subscribe(handlers, true);
-  }
-
-  private _subscribe(handlers: Partial<TransportDeviceInboundHandlers>, partial: boolean): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'transport') return;
-      const inner = data.data;
-      switch (inner.event) {
-        case 'play': {
-          handlers.play?.();
-          return;
-        }
-        case 'pause': {
-          handlers.pause?.();
-          return;
-        }
-        case 'playPause': {
-          handlers.playPause?.();
-          return;
-        }
-        case 'next': {
-          handlers.next?.();
-          return;
-        }
-        case 'prev': {
-          handlers.prev?.();
-          return;
-        }
-        case 'volumeUp': {
-          handlers.volumeUp?.();
-          return;
-        }
-        case 'volumeDown': {
-          handlers.volumeDown?.();
-          return;
-        }
-        case 'muteToggle': {
-          handlers.muteToggle?.();
-          return;
-        }
-        case 'shuffle': {
-          handlers.shuffle?.(inner.data);
-          return;
-        }
-        case 'repeat': {
-          handlers.repeat?.(inner.data);
-          return;
-        }
-        case 'seekTo': {
-          handlers.seekTo?.(inner.data);
-          return;
-        }
-        case 'skipToIndex': {
-          handlers.skipToIndex?.(inner.data);
-          return;
-        }
-        default: {
-          if (!partial) this._gateway.logger.warn('Transport: no handler for inner', inner);
-          return;
-        }
-      }
-    });
-  }
-}
-
 export class ForwardSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -1303,23 +3753,6 @@ export class ForwardSurfaceForDevice {
         }
       }
     });
-  }
-}
-
-export class VersionSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Send a `Version` event to this peer. */
-  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'version', data: payload },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
   }
 }
 
@@ -1435,6 +3868,23 @@ export class AuthoritySurfaceForDevice {
   }
 }
 
+export class CapabilitiesSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Send `Capabilities::Announce` to this peer. */
+  async announce(payload: GatewayCapabilities, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'capabilities', data: { event: 'announce', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class ChromeSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -1452,18 +3902,18 @@ export class ChromeSurfaceForDevice {
   }
 }
 
-export class NowPlayingUpdateSurfaceForDevice {
+export class TimeSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
   ) {}
 
-  /** Send a `NowPlayingUpdate` event to this peer. */
-  async send(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
+  /** Send `Time::Snapshot` to this peer. */
+  async snapshot(payload: TimeInfo, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'event' },
-      data: { type: 'nowPlayingUpdate', data: payload },
+      data: { type: 'time', data: { event: 'snapshot', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -1554,51 +4004,87 @@ export class WebappSurfaceForDevice {
 }
 
 export type BridgeMessageHandlers = {
+  audio: AudioInboundHandlers;
+  geo: GeoInboundHandlers;
+  library: LibraryInboundHandlers;
+  net: NetInboundHandlers;
+  notifications: NotificationsInboundHandlers;
+  phone: PhoneInboundHandlers;
+  player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
-  transport: TransportInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageHandlers = {
+  audio?: Partial<AudioInboundHandlers>;
+  geo?: Partial<GeoInboundHandlers>;
+  library?: Partial<LibraryInboundHandlers>;
+  net?: Partial<NetInboundHandlers>;
+  notifications?: Partial<NotificationsInboundHandlers>;
+  phone?: Partial<PhoneInboundHandlers>;
+  player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
-  transport?: Partial<TransportInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type BridgeMessageDeviceHandlers = {
+  audio: AudioDeviceInboundHandlers;
+  geo: GeoDeviceInboundHandlers;
+  library: LibraryDeviceInboundHandlers;
+  net: NetDeviceInboundHandlers;
+  notifications: NotificationsDeviceInboundHandlers;
+  phone: PhoneDeviceInboundHandlers;
+  player: PlayerDeviceInboundHandlers;
   system: SystemDeviceInboundHandlers;
-  transport: TransportDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageDeviceHandlers = {
+  audio?: Partial<AudioDeviceInboundHandlers>;
+  geo?: Partial<GeoDeviceInboundHandlers>;
+  library?: Partial<LibraryDeviceInboundHandlers>;
+  net?: Partial<NetDeviceInboundHandlers>;
+  notifications?: Partial<NotificationsDeviceInboundHandlers>;
+  phone?: Partial<PhoneDeviceInboundHandlers>;
+  player?: Partial<PlayerDeviceInboundHandlers>;
   system?: Partial<SystemDeviceInboundHandlers>;
-  transport?: Partial<TransportDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
 
 declare module './index' {
   interface BridgethingGateway {
+    /** Methods scoped to the `Audio` wire surface. */
+    readonly audio: AudioSurface;
+    /** Methods scoped to the `Geo` wire surface. */
+    readonly geo: GeoSurface;
+    /** Methods scoped to the `Library` wire surface. */
+    readonly library: LibrarySurface;
+    /** Methods scoped to the `Net` wire surface. */
+    readonly net: NetSurface;
+    /** Methods scoped to the `Notifications` wire surface. */
+    readonly notifications: NotificationsSurface;
+    /** Methods scoped to the `Phone` wire surface. */
+    readonly phone: PhoneSurface;
+    /** Methods scoped to the `Player` wire surface. */
+    readonly player: PlayerSurface;
     /** Methods scoped to the `System` wire surface. */
     readonly system: SystemSurface;
-    /** Methods scoped to the `Transport` wire surface. */
-    readonly transport: TransportSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
-    /** Methods scoped to the `Version` wire surface. */
-    readonly version: VersionSurface;
     /** Methods scoped to the `Asset` wire surface. */
     readonly asset: AssetSurface;
     /** Methods scoped to the `Authority` wire surface. */
     readonly authority: AuthoritySurface;
+    /** Methods scoped to the `Capabilities` wire surface. */
+    readonly capabilities: CapabilitiesSurface;
     /** Methods scoped to the `Chrome` wire surface. */
     readonly chrome: ChromeSurface;
-    /** Methods scoped to the `NowPlayingUpdate` wire surface. */
-    readonly nowPlayingUpdate: NowPlayingUpdateSurface;
+    /** Methods scoped to the `Time` wire surface. */
+    readonly time: TimeSurface;
     /** Methods scoped to the `Webapp` wire surface. */
     readonly webapp: WebappSurface;
     /** Returns a per-device proxy with `deviceId` baked into every method and listener. */
@@ -1606,6 +4092,312 @@ declare module './index' {
     /** Exhaustive subscribe across every inbound wire surface (cross-peer). */
     subscribe(handlers: BridgeMessageHandlers): () => void;
     subscribePartial(handlers: PartialBridgeMessageHandlers): () => void;
+  }
+}
+
+export class GeoGetOnceHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: GeoGetOnceReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'geo', data: { event: 'getOnceReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: GeoErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'geo', data: { event: 'errorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LibraryBrowseRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: BrowseReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'browseReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LibrarySearchRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: SearchReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'searchReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LibraryRecommendationsRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: RecommendationsReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'recommendationsReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LibraryFavoritesListRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: FavoritesListReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'favoritesListReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class NetFetchRequestMsgHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: NetFetchReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'net', data: { event: 'fetchReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: NetFetchErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'net', data: { event: 'fetchErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class NetWsOpenHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: NetWsOpenReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'net', data: { event: 'wsOpenReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: NetWsErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'net', data: { event: 'wsErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class NotificationsListRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: NotificationsListReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'notifications', data: { event: 'listReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: NotificationsErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'notifications', data: { event: 'errorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class PhoneStateGetHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: PhoneStateReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'phone', data: { event: 'stateReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
   }
 }
 
@@ -1645,14 +4437,20 @@ export class AssetRequestHandle {
 }
 
 type DeviceSurfaceCache = {
+  audio?: AudioSurfaceForDevice;
+  geo?: GeoSurfaceForDevice;
+  library?: LibrarySurfaceForDevice;
+  net?: NetSurfaceForDevice;
+  notifications?: NotificationsSurfaceForDevice;
+  phone?: PhoneSurfaceForDevice;
+  player?: PlayerSurfaceForDevice;
   system?: SystemSurfaceForDevice;
-  transport?: TransportSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
-  version?: VersionSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
   authority?: AuthoritySurfaceForDevice;
+  capabilities?: CapabilitiesSurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
-  nowPlayingUpdate?: NowPlayingUpdateSurfaceForDevice;
+  time?: TimeSurfaceForDevice;
   webapp?: WebappSurfaceForDevice;
 };
 
@@ -1663,17 +4461,32 @@ export class BridgethingGatewayDevice {
     public readonly deviceId: string,
   ) {}
 
+  get audio(): AudioSurfaceForDevice {
+    return (this._surfaces.audio ??= new AudioSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get geo(): GeoSurfaceForDevice {
+    return (this._surfaces.geo ??= new GeoSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get library(): LibrarySurfaceForDevice {
+    return (this._surfaces.library ??= new LibrarySurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get net(): NetSurfaceForDevice {
+    return (this._surfaces.net ??= new NetSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get notifications(): NotificationsSurfaceForDevice {
+    return (this._surfaces.notifications ??= new NotificationsSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get phone(): PhoneSurfaceForDevice {
+    return (this._surfaces.phone ??= new PhoneSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get player(): PlayerSurfaceForDevice {
+    return (this._surfaces.player ??= new PlayerSurfaceForDevice(this._gateway, this.deviceId));
+  }
   get system(): SystemSurfaceForDevice {
     return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
   }
-  get transport(): TransportSurfaceForDevice {
-    return (this._surfaces.transport ??= new TransportSurfaceForDevice(this._gateway, this.deviceId));
-  }
   get forward(): ForwardSurfaceForDevice {
     return (this._surfaces.forward ??= new ForwardSurfaceForDevice(this._gateway, this.deviceId));
-  }
-  get version(): VersionSurfaceForDevice {
-    return (this._surfaces.version ??= new VersionSurfaceForDevice(this._gateway, this.deviceId));
   }
   get asset(): AssetSurfaceForDevice {
     return (this._surfaces.asset ??= new AssetSurfaceForDevice(this._gateway, this.deviceId));
@@ -1681,11 +4494,14 @@ export class BridgethingGatewayDevice {
   get authority(): AuthoritySurfaceForDevice {
     return (this._surfaces.authority ??= new AuthoritySurfaceForDevice(this._gateway, this.deviceId));
   }
+  get capabilities(): CapabilitiesSurfaceForDevice {
+    return (this._surfaces.capabilities ??= new CapabilitiesSurfaceForDevice(this._gateway, this.deviceId));
+  }
   get chrome(): ChromeSurfaceForDevice {
     return (this._surfaces.chrome ??= new ChromeSurfaceForDevice(this._gateway, this.deviceId));
   }
-  get nowPlayingUpdate(): NowPlayingUpdateSurfaceForDevice {
-    return (this._surfaces.nowPlayingUpdate ??= new NowPlayingUpdateSurfaceForDevice(this._gateway, this.deviceId));
+  get time(): TimeSurfaceForDevice {
+    return (this._surfaces.time ??= new TimeSurfaceForDevice(this._gateway, this.deviceId));
   }
   get webapp(): WebappSurfaceForDevice {
     return (this._surfaces.webapp ??= new WebappSurfaceForDevice(this._gateway, this.deviceId));
@@ -1701,14 +4517,20 @@ export class BridgethingGatewayDevice {
 }
 
 type GatewaySurfaceCache = {
+  audio?: AudioSurface;
+  geo?: GeoSurface;
+  library?: LibrarySurface;
+  net?: NetSurface;
+  notifications?: NotificationsSurface;
+  phone?: PhoneSurface;
+  player?: PlayerSurface;
   system?: SystemSurface;
-  transport?: TransportSurface;
   forward?: ForwardSurface;
-  version?: VersionSurface;
   asset?: AssetSurface;
   authority?: AuthoritySurface;
+  capabilities?: CapabilitiesSurface;
   chrome?: ChromeSurface;
-  nowPlayingUpdate?: NowPlayingUpdateSurface;
+  time?: TimeSurface;
   webapp?: WebappSurface;
 };
 
@@ -1727,6 +4549,62 @@ export function applyDispatch(): void {
     return bucket;
   }
 
+  Object.defineProperty(BridgethingGateway.prototype, 'audio', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): AudioSurface {
+      const bucket = bucketFor(this);
+      return (bucket.audio ??= new AudioSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'geo', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): GeoSurface {
+      const bucket = bucketFor(this);
+      return (bucket.geo ??= new GeoSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'library', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): LibrarySurface {
+      const bucket = bucketFor(this);
+      return (bucket.library ??= new LibrarySurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'net', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): NetSurface {
+      const bucket = bucketFor(this);
+      return (bucket.net ??= new NetSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'notifications', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): NotificationsSurface {
+      const bucket = bucketFor(this);
+      return (bucket.notifications ??= new NotificationsSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'phone', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): PhoneSurface {
+      const bucket = bucketFor(this);
+      return (bucket.phone ??= new PhoneSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'player', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): PlayerSurface {
+      const bucket = bucketFor(this);
+      return (bucket.player ??= new PlayerSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingGateway.prototype, 'system', {
     configurable: true,
     enumerable: true,
@@ -1735,28 +4613,12 @@ export function applyDispatch(): void {
       return (bucket.system ??= new SystemSurface(this));
     },
   });
-  Object.defineProperty(BridgethingGateway.prototype, 'transport', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): TransportSurface {
-      const bucket = bucketFor(this);
-      return (bucket.transport ??= new TransportSurface(this));
-    },
-  });
   Object.defineProperty(BridgethingGateway.prototype, 'forward', {
     configurable: true,
     enumerable: true,
     get(this: BridgethingGateway): ForwardSurface {
       const bucket = bucketFor(this);
       return (bucket.forward ??= new ForwardSurface(this));
-    },
-  });
-  Object.defineProperty(BridgethingGateway.prototype, 'version', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): VersionSurface {
-      const bucket = bucketFor(this);
-      return (bucket.version ??= new VersionSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'asset', {
@@ -1775,6 +4637,14 @@ export function applyDispatch(): void {
       return (bucket.authority ??= new AuthoritySurface(this));
     },
   });
+  Object.defineProperty(BridgethingGateway.prototype, 'capabilities', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): CapabilitiesSurface {
+      const bucket = bucketFor(this);
+      return (bucket.capabilities ??= new CapabilitiesSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingGateway.prototype, 'chrome', {
     configurable: true,
     enumerable: true,
@@ -1783,12 +4653,12 @@ export function applyDispatch(): void {
       return (bucket.chrome ??= new ChromeSurface(this));
     },
   });
-  Object.defineProperty(BridgethingGateway.prototype, 'nowPlayingUpdate', {
+  Object.defineProperty(BridgethingGateway.prototype, 'time', {
     configurable: true,
     enumerable: true,
-    get(this: BridgethingGateway): NowPlayingUpdateSurface {
+    get(this: BridgethingGateway): TimeSurface {
       const bucket = bucketFor(this);
-      return (bucket.nowPlayingUpdate ??= new NowPlayingUpdateSurface(this));
+      return (bucket.time ??= new TimeSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'webapp', {
@@ -1832,6 +4702,357 @@ function outerSubscribeGateway(
     if (event.type !== 'message') return;
     const data = event.message.data;
     switch (data.type) {
+      case 'audio': {
+        const innerHandlers = handlers.audio;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for audio');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'volumeUp': {
+            innerHandlers.volumeUp?.(event.deviceId);
+            return;
+          }
+          case 'volumeDown': {
+            innerHandlers.volumeDown?.(event.deviceId);
+            return;
+          }
+          case 'setVolume': {
+            innerHandlers.setVolume?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'muteToggle': {
+            innerHandlers.muteToggle?.(event.deviceId);
+            return;
+          }
+          case 'setMute': {
+            innerHandlers.setMute?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'tts': {
+            innerHandlers.tts?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'ttsCancel': {
+            innerHandlers.ttsCancel?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'ttsCancelAll': {
+            innerHandlers.ttsCancelAll?.(event.deviceId);
+            return;
+          }
+          case 'earcon': {
+            innerHandlers.earcon?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Audio: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'geo': {
+        const innerHandlers = handlers.geo;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for geo');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'watch': {
+            innerHandlers.watch?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'unwatch': {
+            innerHandlers.unwatch?.(event.deviceId);
+            return;
+          }
+          case 'getOnce': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.getOnce;
+            if (!handler) {
+              if (!partial) g.logger.warn('Geo: no handler for inner', 'getOnce');
+              return;
+            }
+            const handle = new GeoGetOnceHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Geo: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'library': {
+        const innerHandlers = handlers.library;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for library');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'favoritesToggle': {
+            innerHandlers.favoritesToggle?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'favoritesSet': {
+            innerHandlers.favoritesSet?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'browse': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.browse;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'browse');
+              return;
+            }
+            const handle = new LibraryBrowseRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'search': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.search;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'search');
+              return;
+            }
+            const handle = new LibrarySearchRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'recommendations': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.recommendations;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'recommendations');
+              return;
+            }
+            const handle = new LibraryRecommendationsRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'favoritesList': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.favoritesList;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'favoritesList');
+              return;
+            }
+            const handle = new LibraryFavoritesListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Library: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'net': {
+        const innerHandlers = handlers.net;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for net');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'wsClose': {
+            innerHandlers.wsClose?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'wsSend': {
+            innerHandlers.wsSend?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'fetch': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.fetch;
+            if (!handler) {
+              if (!partial) g.logger.warn('Net: no handler for inner', 'fetch');
+              return;
+            }
+            const handle = new NetFetchRequestMsgHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'wsOpen': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.wsOpen;
+            if (!handler) {
+              if (!partial) g.logger.warn('Net: no handler for inner', 'wsOpen');
+              return;
+            }
+            const handle = new NetWsOpenHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Net: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'notifications': {
+        const innerHandlers = handlers.notifications;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for notifications');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'invokePositive': {
+            innerHandlers.invokePositive?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'invokeNegative': {
+            innerHandlers.invokeNegative?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'list': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.list;
+            if (!handler) {
+              if (!partial) g.logger.warn('Notifications: no handler for inner', 'list');
+              return;
+            }
+            const handle = new NotificationsListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'phone': {
+        const innerHandlers = handlers.phone;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for phone');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'answer': {
+            innerHandlers.answer?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'decline': {
+            innerHandlers.decline?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'end': {
+            innerHandlers.end?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'hold': {
+            innerHandlers.hold?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'unhold': {
+            innerHandlers.unhold?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'stateGet': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.stateGet;
+            if (!handler) {
+              if (!partial) g.logger.warn('Phone: no handler for inner', 'stateGet');
+              return;
+            }
+            const handle = new PhoneStateGetHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Phone: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'player': {
+        const innerHandlers = handlers.player;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for player');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'play': {
+            innerHandlers.play?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'queue': {
+            innerHandlers.queue?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'pause': {
+            innerHandlers.pause?.(event.deviceId);
+            return;
+          }
+          case 'resume': {
+            innerHandlers.resume?.(event.deviceId);
+            return;
+          }
+          case 'skipNext': {
+            innerHandlers.skipNext?.(event.deviceId);
+            return;
+          }
+          case 'skipPrev': {
+            innerHandlers.skipPrev?.(event.deviceId);
+            return;
+          }
+          case 'skipToIndex': {
+            innerHandlers.skipToIndex?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'seekTo': {
+            innerHandlers.seekTo?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'setShuffle': {
+            innerHandlers.setShuffle?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'setRepeat': {
+            innerHandlers.setRepeat?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'setSpeed': {
+            innerHandlers.setSpeed?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'setCrossfade': {
+            innerHandlers.setCrossfade?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Player: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'system': {
         const innerHandlers = handlers.system;
         if (!innerHandlers) {
@@ -1858,68 +5079,6 @@ function outerSubscribeGateway(
           }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
-            return;
-          }
-        }
-      }
-      case 'transport': {
-        const innerHandlers = handlers.transport;
-        if (!innerHandlers) {
-          if (!partial) g.logger.warn('subscribe: no handler for transport');
-          return;
-        }
-        const inner = data.data;
-        switch (inner.event) {
-          case 'play': {
-            innerHandlers.play?.(event.deviceId);
-            return;
-          }
-          case 'pause': {
-            innerHandlers.pause?.(event.deviceId);
-            return;
-          }
-          case 'playPause': {
-            innerHandlers.playPause?.(event.deviceId);
-            return;
-          }
-          case 'next': {
-            innerHandlers.next?.(event.deviceId);
-            return;
-          }
-          case 'prev': {
-            innerHandlers.prev?.(event.deviceId);
-            return;
-          }
-          case 'volumeUp': {
-            innerHandlers.volumeUp?.(event.deviceId);
-            return;
-          }
-          case 'volumeDown': {
-            innerHandlers.volumeDown?.(event.deviceId);
-            return;
-          }
-          case 'muteToggle': {
-            innerHandlers.muteToggle?.(event.deviceId);
-            return;
-          }
-          case 'shuffle': {
-            innerHandlers.shuffle?.(event.deviceId, inner.data);
-            return;
-          }
-          case 'repeat': {
-            innerHandlers.repeat?.(event.deviceId, inner.data);
-            return;
-          }
-          case 'seekTo': {
-            innerHandlers.seekTo?.(event.deviceId, inner.data);
-            return;
-          }
-          case 'skipToIndex': {
-            innerHandlers.skipToIndex?.(event.deviceId, inner.data);
-            return;
-          }
-          default: {
-            if (!partial) g.logger.warn('Transport: no handler for inner', inner);
             return;
           }
         }
@@ -1982,6 +5141,357 @@ function outerSubscribeDevice(
     if (event.deviceId !== deviceId) return;
     const data = event.message.data;
     switch (data.type) {
+      case 'audio': {
+        const innerHandlers = handlers.audio;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for audio');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'volumeUp': {
+            innerHandlers.volumeUp?.();
+            return;
+          }
+          case 'volumeDown': {
+            innerHandlers.volumeDown?.();
+            return;
+          }
+          case 'setVolume': {
+            innerHandlers.setVolume?.(inner.data);
+            return;
+          }
+          case 'muteToggle': {
+            innerHandlers.muteToggle?.();
+            return;
+          }
+          case 'setMute': {
+            innerHandlers.setMute?.(inner.data);
+            return;
+          }
+          case 'tts': {
+            innerHandlers.tts?.(inner.data);
+            return;
+          }
+          case 'ttsCancel': {
+            innerHandlers.ttsCancel?.(inner.data);
+            return;
+          }
+          case 'ttsCancelAll': {
+            innerHandlers.ttsCancelAll?.();
+            return;
+          }
+          case 'earcon': {
+            innerHandlers.earcon?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Audio: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'geo': {
+        const innerHandlers = handlers.geo;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for geo');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'watch': {
+            innerHandlers.watch?.(inner.data);
+            return;
+          }
+          case 'unwatch': {
+            innerHandlers.unwatch?.();
+            return;
+          }
+          case 'getOnce': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.getOnce;
+            if (!handler) {
+              if (!partial) g.logger.warn('Geo: no handler for inner', 'getOnce');
+              return;
+            }
+            const handle = new GeoGetOnceHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Geo: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'library': {
+        const innerHandlers = handlers.library;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for library');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'favoritesToggle': {
+            innerHandlers.favoritesToggle?.(inner.data);
+            return;
+          }
+          case 'favoritesSet': {
+            innerHandlers.favoritesSet?.(inner.data);
+            return;
+          }
+          case 'browse': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.browse;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'browse');
+              return;
+            }
+            const handle = new LibraryBrowseRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'search': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.search;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'search');
+              return;
+            }
+            const handle = new LibrarySearchRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'recommendations': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.recommendations;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'recommendations');
+              return;
+            }
+            const handle = new LibraryRecommendationsRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'favoritesList': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.favoritesList;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'favoritesList');
+              return;
+            }
+            const handle = new LibraryFavoritesListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Library: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'net': {
+        const innerHandlers = handlers.net;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for net');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'wsClose': {
+            innerHandlers.wsClose?.(inner.data);
+            return;
+          }
+          case 'wsSend': {
+            innerHandlers.wsSend?.(inner.data);
+            return;
+          }
+          case 'fetch': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.fetch;
+            if (!handler) {
+              if (!partial) g.logger.warn('Net: no handler for inner', 'fetch');
+              return;
+            }
+            const handle = new NetFetchRequestMsgHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'wsOpen': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.wsOpen;
+            if (!handler) {
+              if (!partial) g.logger.warn('Net: no handler for inner', 'wsOpen');
+              return;
+            }
+            const handle = new NetWsOpenHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Net: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'notifications': {
+        const innerHandlers = handlers.notifications;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for notifications');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'invokePositive': {
+            innerHandlers.invokePositive?.(inner.data);
+            return;
+          }
+          case 'invokeNegative': {
+            innerHandlers.invokeNegative?.(inner.data);
+            return;
+          }
+          case 'list': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.list;
+            if (!handler) {
+              if (!partial) g.logger.warn('Notifications: no handler for inner', 'list');
+              return;
+            }
+            const handle = new NotificationsListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'phone': {
+        const innerHandlers = handlers.phone;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for phone');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'answer': {
+            innerHandlers.answer?.(inner.data);
+            return;
+          }
+          case 'decline': {
+            innerHandlers.decline?.(inner.data);
+            return;
+          }
+          case 'end': {
+            innerHandlers.end?.(inner.data);
+            return;
+          }
+          case 'hold': {
+            innerHandlers.hold?.(inner.data);
+            return;
+          }
+          case 'unhold': {
+            innerHandlers.unhold?.(inner.data);
+            return;
+          }
+          case 'stateGet': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.stateGet;
+            if (!handler) {
+              if (!partial) g.logger.warn('Phone: no handler for inner', 'stateGet');
+              return;
+            }
+            const handle = new PhoneStateGetHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Phone: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'player': {
+        const innerHandlers = handlers.player;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for player');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'play': {
+            innerHandlers.play?.(inner.data);
+            return;
+          }
+          case 'queue': {
+            innerHandlers.queue?.(inner.data);
+            return;
+          }
+          case 'pause': {
+            innerHandlers.pause?.();
+            return;
+          }
+          case 'resume': {
+            innerHandlers.resume?.();
+            return;
+          }
+          case 'skipNext': {
+            innerHandlers.skipNext?.();
+            return;
+          }
+          case 'skipPrev': {
+            innerHandlers.skipPrev?.();
+            return;
+          }
+          case 'skipToIndex': {
+            innerHandlers.skipToIndex?.(inner.data);
+            return;
+          }
+          case 'seekTo': {
+            innerHandlers.seekTo?.(inner.data);
+            return;
+          }
+          case 'setShuffle': {
+            innerHandlers.setShuffle?.(inner.data);
+            return;
+          }
+          case 'setRepeat': {
+            innerHandlers.setRepeat?.(inner.data);
+            return;
+          }
+          case 'setSpeed': {
+            innerHandlers.setSpeed?.(inner.data);
+            return;
+          }
+          case 'setCrossfade': {
+            innerHandlers.setCrossfade?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Player: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'system': {
         const innerHandlers = handlers.system;
         if (!innerHandlers) {
@@ -2008,68 +5518,6 @@ function outerSubscribeDevice(
           }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
-            return;
-          }
-        }
-      }
-      case 'transport': {
-        const innerHandlers = handlers.transport;
-        if (!innerHandlers) {
-          if (!partial) g.logger.warn('subscribe: no handler for transport');
-          return;
-        }
-        const inner = data.data;
-        switch (inner.event) {
-          case 'play': {
-            innerHandlers.play?.();
-            return;
-          }
-          case 'pause': {
-            innerHandlers.pause?.();
-            return;
-          }
-          case 'playPause': {
-            innerHandlers.playPause?.();
-            return;
-          }
-          case 'next': {
-            innerHandlers.next?.();
-            return;
-          }
-          case 'prev': {
-            innerHandlers.prev?.();
-            return;
-          }
-          case 'volumeUp': {
-            innerHandlers.volumeUp?.();
-            return;
-          }
-          case 'volumeDown': {
-            innerHandlers.volumeDown?.();
-            return;
-          }
-          case 'muteToggle': {
-            innerHandlers.muteToggle?.();
-            return;
-          }
-          case 'shuffle': {
-            innerHandlers.shuffle?.(inner.data);
-            return;
-          }
-          case 'repeat': {
-            innerHandlers.repeat?.(inner.data);
-            return;
-          }
-          case 'seekTo': {
-            innerHandlers.seekTo?.(inner.data);
-            return;
-          }
-          case 'skipToIndex': {
-            innerHandlers.skipToIndex?.(inner.data);
-            return;
-          }
-          default: {
-            if (!partial) g.logger.warn('Transport: no handler for inner', inner);
             return;
           }
         }

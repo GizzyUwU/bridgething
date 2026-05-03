@@ -96,19 +96,33 @@ pub struct Surface {
 
 impl Surface {
   /// Inner variants of the inbound-side payload that should be exposed
-  /// as event-shape callbacks. Excludes inner variants whose payload is
-  /// a typed inbound request — those are handled via the handle pattern.
+  /// as event-shape callbacks. Excludes inner variants that map to a
+  /// typed inbound request — those are handled via the request-handle
+  /// pattern. Filters by both payload type (the struct case) and
+  /// variant name (the no-payload-marker case, e.g.
+  /// `pub enum X { #[bridge_request] StateGet }` with marker struct
+  /// `XStateGet`).
   pub fn inbound_event_variants(&self) -> Vec<&InnerVariantPlan> {
     let bridge_request_payloads: BTreeSet<&str> = self.inbound_requests.iter().map(|r| r.request.as_str()).collect();
+    let bridge_request_variants: BTreeSet<String> = self
+      .inbound_requests
+      .iter()
+      .map(|r| r.request_variant_pascal())
+      .collect();
     self
       .inbound
       .as_ref()
       .map(|e| {
         e.inner_variants
           .iter()
-          .filter(|iv| match &iv.payload {
-            Some(PayloadType::Named(n)) => !bridge_request_payloads.contains(n.as_str()),
-            _ => true,
+          .filter(|iv| {
+            if bridge_request_variants.contains(&iv.variant) {
+              return false;
+            }
+            match &iv.payload {
+              Some(PayloadType::Named(n)) => !bridge_request_payloads.contains(n.as_str()),
+              _ => true,
+            }
           })
           .collect()
       })

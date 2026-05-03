@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use futures::{SinkExt, StreamExt};
 use libbridgething::{
-  GatewayMeta, Priority,
-  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  GatewayCapabilities, GatewayInfo, Priority,
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeCapabilitiesMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData},
   protocol::{GatewayEndec, PrioritizedFrame},
   wire::MsgMeta,
 };
@@ -88,27 +88,32 @@ impl Connection {
     })
   }
 
-  /// Sends a placeholder `GatewayMeta` after open. The daemon's
-  /// `TopLevelHandler::handle_version` expects this to upsert the peer
-  /// into the PeerTracker.
+  /// Sends a placeholder `GatewayCapabilities::Announce` after open. The
+  /// daemon's capabilities handler upserts the peer into the PeerTracker
+  /// from the embedded `GatewayInfo`.
   pub async fn announce_version(&self) -> Result<()> {
-    let meta = GatewayMeta {
-      adapter_version: "host-gateway".into(),
-      lib_version: env!("CARGO_PKG_VERSION").into(),
-      libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
-      app_name: "host-gateway".into(),
-      app_version: env!("CARGO_PKG_VERSION").into(),
-      os_name: "linux".into(),
+    let caps = GatewayCapabilities {
+      gateway: GatewayInfo {
+        address: String::new(),
+        name: "host-gateway".into(),
+        os_name: "linux".into(),
+        app_name: "host-gateway".into(),
+        app_version: env!("CARGO_PKG_VERSION").into(),
+        adapter_version: "host-gateway".into(),
+        lib_version: env!("CARGO_PKG_VERSION").into(),
+        libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
+      },
+      ..Default::default()
     };
     self
       .outbound_tx
       .send(OutboundFrame::normal(GatewayToBridgeMsg {
         id: uuid::Uuid::now_v7(),
         meta: MsgMeta::Event,
-        data: GatewayToBridgeMsgData::Version(meta),
+        data: GatewayToBridgeMsgData::Capabilities(GatewayToBridgeCapabilitiesMsg::Announce(caps)),
       }))
       .await
-      .map_err(|_| anyhow!("connection writer closed before version send"))?;
+      .map_err(|_| anyhow!("connection writer closed before announce send"))?;
     Ok(())
   }
 }

@@ -17,17 +17,13 @@
 //! sending only that attribute) and gives the Android companion the
 //! freedom to push partial updates without a full snapshot every time.
 
-use bridgething_macros::WireEvent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-/// `repeat` is a typed enum (Off/All/One) shared with
-/// the canonical `PlaybackOptions` shape webapps already render and
-/// with the outbound `SetRepeat` interaction command. iOS, Android,
-/// Spotify, and Apple Music all expose three repeat states; the
-/// underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
-/// translate to/from this enum.
+/// `repeat` is a typed enum (Off/All/One) shared across the player
+/// surface and the iAP2 NowPlaying CSM / MediaSession backends, which
+/// all expose three repeat states.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
@@ -39,10 +35,14 @@ pub enum RepeatMode {
   One,
 }
 
+/// Delta event the companion or iAP2 stream emits whenever a player
+/// attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
+/// (the only delta-shaped event in the protocol). Every field is
+/// optional: producers populate only what they have fresh information
+/// about, and the daemon merges into stable internal state.
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
-#[wire(GatewayToBridge)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NowPlayingUpdate {

@@ -1,0 +1,33 @@
+use bridgething_macros::BridgeEnum;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::{BrightnessState, HardwareState};
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct AmbientLightUpdate {
+  pub brightness: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct HardwareStateReply {
+  pub state: HardwareState,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[bridge_enum(into = crate::client::BridgeToClientMsgData)]
+pub enum BridgeToClientHardwareMsg {
+  #[bridge_event]
+  AmbientLightUpdate(AmbientLightUpdate),
+  #[bridge_event]
+  BrightnessChanged(BrightnessState),
+  #[bridge_response]
+  StateReply(HardwareStateReply),
+}

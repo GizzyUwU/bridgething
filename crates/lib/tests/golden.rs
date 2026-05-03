@@ -199,14 +199,34 @@ fn bridge_meta() -> BridgeThingMeta {
   }
 }
 
-fn gateway_meta() -> GatewayMeta {
-  GatewayMeta {
-    adapter_version: "1.0.0".into(),
-    lib_version: "1.0.0".into(),
-    libbridgething_version: "v0.1.0".into(),
-    app_name: "bridgething-mobile".into(),
-    app_version: "1.0.0".into(),
-    os_name: "iOS".into(),
+fn gateway_capabilities() -> GatewayCapabilities {
+  GatewayCapabilities {
+    gateway: GatewayInfo {
+      address: "00:11:22:33:44:55".into(),
+      name: "Joey's iPhone".into(),
+      os_name: "iOS".into(),
+      app_name: "bridgething-mobile".into(),
+      app_version: "1.0.0".into(),
+      adapter_version: "1.0.0".into(),
+      lib_version: "1.0.0".into(),
+      libbridgething_version: "v0.1.0".into(),
+    },
+    uri_schemes: vec!["spotify".into()],
+    network: NetworkInfo {
+      kind: NetworkKind::Wifi,
+      metered: false,
+    },
+    available: SurfaceAvailability {
+      geo: false,
+      notifications: false,
+      net_fetch: true,
+      net_ws: true,
+      audio_tts: false,
+    },
+    audio: AudioCapabilities {
+      earcons: vec![],
+      voices: vec![],
+    },
   }
 }
 
@@ -413,12 +433,12 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/version-event",
-    "phone announcing its gateway version",
+    "gateway_to_bridge/capabilities-announce-event",
+    "phone announcing its gateway capabilities at session-up",
     GatewayToBridgeMsg {
       id: id(),
       meta: GatewayMsgMeta::Event,
-      data: GatewayToBridgeMsgData::Version(gateway_meta()),
+      data: GatewayToBridgeMsgData::Capabilities(GatewayToBridgeCapabilitiesMsg::Announce(gateway_capabilities())),
     },
   ));
 
@@ -686,7 +706,7 @@ fn priority_round_trips_through_codec_on_both_lanes() {
   let gateway_msg = GatewayToBridgeMsg {
     id: id(),
     meta: GatewayMsgMeta::Event,
-    data: GatewayToBridgeMsgData::Version(gateway_meta()),
+    data: GatewayToBridgeMsgData::Capabilities(GatewayToBridgeCapabilitiesMsg::Announce(gateway_capabilities())),
   };
 
   for priority in [Priority::Normal, Priority::Bulk] {

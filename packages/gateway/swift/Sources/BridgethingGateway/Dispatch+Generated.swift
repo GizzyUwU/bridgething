@@ -10,6 +10,1096 @@ public enum RequestResult<R: Sendable, E: Sendable>: Sendable {
   case protocolError(GatewayError)
 }
 
+/// Cross-peer methods for the `Audio` wire surface.
+public struct AudioSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Audio::VolumeUp` messages.
+  public var volumeUp: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .volumeUp = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::VolumeDown` messages.
+  public var volumeDown: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .volumeDown = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::SetVolume` messages.
+  public var setVolume: AsyncStream<(deviceId: String, msg: SetVolume)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .setVolume(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::MuteToggle` messages.
+  public var muteToggle: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .muteToggle = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::SetMute` messages.
+  public var setMute: AsyncStream<(deviceId: String, msg: SetMute)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .setMute(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::Tts` messages.
+  public var tts: AsyncStream<(deviceId: String, msg: Tts)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .tts(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::TtsCancel` messages.
+  public var ttsCancel: AsyncStream<(deviceId: String, msg: TtsCancel)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .ttsCancel(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::TtsCancelAll` messages.
+  public var ttsCancelAll: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .ttsCancelAll = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Audio::Earcon` messages.
+  public var earcon: AsyncStream<(deviceId: String, msg: Earcon)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .audio(let outer) = message.data,
+             case .earcon(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Audio::TtsStarted` to every connected peer (broadcast).
+  public func ttsStarted(_ payload: TtsStarted, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.ttsStarted(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Audio::TtsEnded` to every connected peer (broadcast).
+  public func ttsEnded(_ payload: TtsEnded, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.ttsEnded(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Audio::VolumeChanged` to every connected peer (broadcast).
+  public func volumeChanged(_ payload: VolumeChanged, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.volumeChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Geo` wire surface.
+public struct GeoSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Geo::Watch` messages.
+  public var watch: AsyncStream<(deviceId: String, msg: GeoWatch)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .geo(let outer) = message.data,
+             case .watch(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Geo::Unwatch` messages.
+  public var unwatch: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .geo(let outer) = message.data,
+             case .unwatch = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `GeoGetOnce` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .geo(let outer) = message.data else { continue }
+          guard case .getOnce(let payload) = outer else { continue }
+          let handle = GeoGetOnceHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Geo::Position` to every connected peer (broadcast).
+  public func position(_ payload: Position, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .geo(.position(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Library` wire surface.
+public struct LibrarySurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Library::FavoritesToggle` messages.
+  public var favoritesToggle: AsyncStream<(deviceId: String, msg: FavoritesToggle)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .library(let outer) = message.data,
+             case .favoritesToggle(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Library::FavoritesSet` messages.
+  public var favoritesSet: AsyncStream<(deviceId: String, msg: FavoritesSet)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .library(let outer) = message.data,
+             case .favoritesSet(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .browse(let payload) = outer else { continue }
+          let handle = LibraryBrowseRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibrarySearchRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .search(let payload) = outer else { continue }
+          let handle = LibrarySearchRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryRecommendationsRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .recommendations(let payload) = outer else { continue }
+          let handle = LibraryRecommendationsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryFavoritesListRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .favoritesList(let payload) = outer else { continue }
+          let handle = LibraryFavoritesListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Library::FavoriteChanged` to every connected peer (broadcast).
+  public func favoriteChanged(_ payload: FavoriteChanged, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .library(.favoriteChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Net` wire surface.
+public struct NetSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Net::WsClose` messages.
+  public var wsClose: AsyncStream<(deviceId: String, msg: NetWsClose)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .net(let outer) = message.data,
+             case .wsClose(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Net::WsSend` messages.
+  public var wsSend: AsyncStream<(deviceId: String, msg: NetWsSend)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .net(let outer) = message.data,
+             case .wsSend(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .net(let outer) = message.data else { continue }
+          guard case .fetch(let payload) = outer else { continue }
+          let handle = NetFetchRequestMsgHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NetWsOpen` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .net(let outer) = message.data else { continue }
+          guard case .wsOpen(let payload) = outer else { continue }
+          let handle = NetWsOpenHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Net::FetchStreamBegin` to every connected peer (broadcast).
+  public func fetchStreamBegin(_ payload: NetFetchStreamBegin, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamBegin(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::FetchStreamChunk` to every connected peer (broadcast).
+  public func fetchStreamChunk(_ payload: NetFetchStreamChunk, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamChunk(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::FetchStreamEnd` to every connected peer (broadcast).
+  public func fetchStreamEnd(_ payload: NetFetchStreamEnd, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamEnd(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::WsOpened` to every connected peer (broadcast).
+  public func wsOpened(_ payload: NetWsOpened, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsOpened(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::WsMessage` to every connected peer (broadcast).
+  public func wsMessage(_ payload: NetWsMessage, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsMessage(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::WsClosed` to every connected peer (broadcast).
+  public func wsClosed(_ payload: NetWsClosed, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsClosed(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::WsErrorEvent` to every connected peer (broadcast).
+  public func wsErrorEvent(_ payload: NetWsErrorEvent, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsErrorEvent(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Notifications` wire surface.
+public struct NotificationsSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Notifications::InvokePositive` messages.
+  public var invokePositive: AsyncStream<(deviceId: String, msg: NotificationInvoke)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .notifications(let outer) = message.data,
+             case .invokePositive(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Notifications::InvokeNegative` messages.
+  public var invokeNegative: AsyncStream<(deviceId: String, msg: NotificationInvoke)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .notifications(let outer) = message.data,
+             case .invokeNegative(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .notifications(let outer) = message.data else { continue }
+          guard case .list(let payload) = outer else { continue }
+          let handle = NotificationsListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Notifications::Posted` to every connected peer (broadcast).
+  public func posted(_ payload: Notification, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.posted(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Notifications::Updated` to every connected peer (broadcast).
+  public func updated(_ payload: Notification, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.updated(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Notifications::Removed` to every connected peer (broadcast).
+  public func removed(_ payload: NotificationRemoved, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.removed(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Phone` wire surface.
+public struct PhoneSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Phone::Answer` messages.
+  public var answer: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .answer(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Decline` messages.
+  public var decline: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .decline(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::End` messages.
+  public var end: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .end(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Hold` messages.
+  public var hold: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .hold(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Unhold` messages.
+  public var unhold: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .unhold(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
+  public var requests: AsyncStream<PhoneStateGetHandle> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .phone(let outer) = message.data else { continue }
+          guard case .stateGet = outer else { continue }
+          let handle = PhoneStateGetHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield(handle)
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Phone::Snapshot` to every connected peer (broadcast).
+  public func snapshot(_ payload: PhoneStateReply, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.snapshot(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Phone::CallStarted` to every connected peer (broadcast).
+  public func callStarted(_ payload: PhoneCall, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callStarted(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Phone::CallUpdated` to every connected peer (broadcast).
+  public func callUpdated(_ payload: PhoneCall, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callUpdated(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Phone::CallEnded` to every connected peer (broadcast).
+  public func callEnded(_ payload: PhoneCallEnded, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callEnded(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Player` wire surface.
+public struct PlayerSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Player::Play` messages.
+  public var play: AsyncStream<(deviceId: String, msg: PlayUri)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .play(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::Queue` messages.
+  public var queue: AsyncStream<(deviceId: String, msg: QueueUri)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .queue(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::Pause` messages.
+  public var pause: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .pause = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::Resume` messages.
+  public var resume: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .resume = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SkipNext` messages.
+  public var skipNext: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .skipNext = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SkipPrev` messages.
+  public var skipPrev: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .skipPrev = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SkipToIndex` messages.
+  public var skipToIndex: AsyncStream<(deviceId: String, msg: SkipToIndex)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .skipToIndex(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SeekTo` messages.
+  public var seekTo: AsyncStream<(deviceId: String, msg: SeekTo)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .seekTo(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SetShuffle` messages.
+  public var setShuffle: AsyncStream<(deviceId: String, msg: SetShuffle)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .setShuffle(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SetRepeat` messages.
+  public var setRepeat: AsyncStream<(deviceId: String, msg: SetRepeat)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .setRepeat(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SetSpeed` messages.
+  public var setSpeed: AsyncStream<(deviceId: String, msg: SetSpeed)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .setSpeed(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::SetCrossfade` messages.
+  public var setCrossfade: AsyncStream<(deviceId: String, msg: SetCrossfade)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .setCrossfade(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Player::Snapshot` to every connected peer (broadcast).
+  public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.snapshot(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Player::Delta` to every connected peer (broadcast).
+  public func delta(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.delta(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Player::QueueChanged` to every connected peer (broadcast).
+  public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.queueChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `System` wire surface.
 public struct SystemSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -141,216 +1231,6 @@ public struct SystemSurface: Sendable {
 
 }
 
-/// Cross-peer methods for the `Transport` wire surface.
-public struct TransportSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Cross-peer stream of `Transport::Play` messages.
-  public var play: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .play = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::Pause` messages.
-  public var pause: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .pause = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::PlayPause` messages.
-  public var playPause: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .playPause = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::Next` messages.
-  public var next: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .next = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::Prev` messages.
-  public var prev: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .prev = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::VolumeUp` messages.
-  public var volumeUp: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .volumeUp = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::VolumeDown` messages.
-  public var volumeDown: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .volumeDown = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::MuteToggle` messages.
-  public var muteToggle: AsyncStream<String> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .muteToggle = outer {
-            continuation.yield(deviceId)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::Shuffle` messages.
-  public var shuffle: AsyncStream<(deviceId: String, msg: ShuffleSet)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .shuffle(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::Repeat` messages.
-  public var `repeat`: AsyncStream<(deviceId: String, msg: RepeatSet)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .`repeat`(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::SeekTo` messages.
-  public var seekTo: AsyncStream<(deviceId: String, msg: SeekToSet)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .seekTo(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Cross-peer stream of `Transport::SkipToIndex` messages.
-  public var skipToIndex: AsyncStream<(deviceId: String, msg: SkipToIndexSet)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .transport(let outer) = message.data,
-             case .skipToIndex(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-}
-
 /// Cross-peer methods for the `Forward` wire surface.
 public struct ForwardSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -403,26 +1283,6 @@ public struct ForwardSurface: Sendable {
         continuation.finish()
       }
       continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-}
-
-/// Cross-peer methods for the `Version` wire surface.
-public struct VersionSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Send a `Version` event to every connected peer (broadcast).
-  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
     }
   }
 
@@ -557,6 +1417,26 @@ public struct AuthoritySurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `Capabilities` wire surface.
+public struct CapabilitiesSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Send `Capabilities::Announce` to every connected peer (broadcast).
+  public func announce(_ payload: GatewayCapabilities, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .capabilities(.announce(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Chrome` wire surface.
 public struct ChromeSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -577,17 +1457,17 @@ public struct ChromeSurface: Sendable {
 
 }
 
-/// Cross-peer methods for the `NowPlayingUpdate` wire surface.
-public struct NowPlayingUpdateSurface: Sendable {
+/// Cross-peer methods for the `Time` wire surface.
+public struct TimeSurface: Sendable {
   public let gateway: BridgethingGateway
 
-  /// Send a `NowPlayingUpdate` event to every connected peer (broadcast).
-  public func send(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
+  /// Send `Time::Snapshot` to every connected peer (broadcast).
+  public func snapshot(_ payload: TimeInfo, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
     try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
       for deviceId in ids {
         group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .nowPlayingUpdate(payload))
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .time(.snapshot(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -672,6 +1552,970 @@ public struct WebappSurface: Sendable {
     case .error(let err): return .protocolError(err)
     default: return .protocolError(.unsupported)
     }
+  }
+
+}
+
+/// Per-peer methods for the `Audio` wire surface (deviceId is baked in).
+public struct AudioSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Audio::VolumeUp` from this peer.
+  public var volumeUp: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .volumeUp = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::VolumeDown` from this peer.
+  public var volumeDown: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .volumeDown = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::SetVolume` from this peer.
+  public var setVolume: AsyncStream<SetVolume> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .setVolume(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::MuteToggle` from this peer.
+  public var muteToggle: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .muteToggle = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::SetMute` from this peer.
+  public var setMute: AsyncStream<SetMute> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .setMute(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::Tts` from this peer.
+  public var tts: AsyncStream<Tts> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .tts(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::TtsCancel` from this peer.
+  public var ttsCancel: AsyncStream<TtsCancel> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .ttsCancel(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::TtsCancelAll` from this peer.
+  public var ttsCancelAll: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .ttsCancelAll = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Audio::Earcon` from this peer.
+  public var earcon: AsyncStream<Earcon> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .audio(let outer) = message.data,
+             case .earcon(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Audio::TtsStarted` to this peer.
+  public func ttsStarted(_ payload: TtsStarted, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.ttsStarted(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Audio::TtsEnded` to this peer.
+  public func ttsEnded(_ payload: TtsEnded, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.ttsEnded(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Audio::VolumeChanged` to this peer.
+  public func volumeChanged(_ payload: VolumeChanged, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .audio(.volumeChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Geo` wire surface (deviceId is baked in).
+public struct GeoSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Geo::Watch` from this peer.
+  public var watch: AsyncStream<GeoWatch> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .geo(let outer) = message.data,
+             case .watch(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Geo::Unwatch` from this peer.
+  public var unwatch: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .geo(let outer) = message.data,
+             case .unwatch = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `GeoGetOnce` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .geo(let outer) = message.data else { continue }
+          guard case .getOnce(let payload) = outer else { continue }
+          let handle = GeoGetOnceHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Geo::Position` to this peer.
+  public func position(_ payload: Position, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .geo(.position(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Library` wire surface (deviceId is baked in).
+public struct LibrarySurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Library::FavoritesToggle` from this peer.
+  public var favoritesToggle: AsyncStream<FavoritesToggle> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .library(let outer) = message.data,
+             case .favoritesToggle(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Library::FavoritesSet` from this peer.
+  public var favoritesSet: AsyncStream<FavoritesSet> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .library(let outer) = message.data,
+             case .favoritesSet(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .browse(let payload) = outer else { continue }
+          let handle = LibraryBrowseRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibrarySearchRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .search(let payload) = outer else { continue }
+          let handle = LibrarySearchRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryRecommendationsRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .recommendations(let payload) = outer else { continue }
+          let handle = LibraryRecommendationsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryFavoritesListRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .favoritesList(let payload) = outer else { continue }
+          let handle = LibraryFavoritesListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Library::FavoriteChanged` to this peer.
+  public func favoriteChanged(_ payload: FavoriteChanged, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .library(.favoriteChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Net` wire surface (deviceId is baked in).
+public struct NetSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Net::WsClose` from this peer.
+  public var wsClose: AsyncStream<NetWsClose> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .net(let outer) = message.data,
+             case .wsClose(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Net::WsSend` from this peer.
+  public var wsSend: AsyncStream<NetWsSend> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .net(let outer) = message.data,
+             case .wsSend(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .net(let outer) = message.data else { continue }
+          guard case .fetch(let payload) = outer else { continue }
+          let handle = NetFetchRequestMsgHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NetWsOpen` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .net(let outer) = message.data else { continue }
+          guard case .wsOpen(let payload) = outer else { continue }
+          let handle = NetWsOpenHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Net::FetchStreamBegin` to this peer.
+  public func fetchStreamBegin(_ payload: NetFetchStreamBegin, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamBegin(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::FetchStreamChunk` to this peer.
+  public func fetchStreamChunk(_ payload: NetFetchStreamChunk, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamChunk(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::FetchStreamEnd` to this peer.
+  public func fetchStreamEnd(_ payload: NetFetchStreamEnd, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamEnd(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::WsOpened` to this peer.
+  public func wsOpened(_ payload: NetWsOpened, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsOpened(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::WsMessage` to this peer.
+  public func wsMessage(_ payload: NetWsMessage, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsMessage(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::WsClosed` to this peer.
+  public func wsClosed(_ payload: NetWsClosed, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsClosed(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::WsErrorEvent` to this peer.
+  public func wsErrorEvent(_ payload: NetWsErrorEvent, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsErrorEvent(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Notifications` wire surface (deviceId is baked in).
+public struct NotificationsSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Notifications::InvokePositive` from this peer.
+  public var invokePositive: AsyncStream<NotificationInvoke> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .notifications(let outer) = message.data,
+             case .invokePositive(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Notifications::InvokeNegative` from this peer.
+  public var invokeNegative: AsyncStream<NotificationInvoke> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .notifications(let outer) = message.data,
+             case .invokeNegative(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .notifications(let outer) = message.data else { continue }
+          guard case .list(let payload) = outer else { continue }
+          let handle = NotificationsListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Notifications::Posted` to this peer.
+  public func posted(_ payload: Notification, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.posted(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Notifications::Updated` to this peer.
+  public func updated(_ payload: Notification, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.updated(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Notifications::Removed` to this peer.
+  public func removed(_ payload: NotificationRemoved, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.removed(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Phone` wire surface (deviceId is baked in).
+public struct PhoneSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Phone::Answer` from this peer.
+  public var answer: AsyncStream<PhoneCallAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .answer(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Decline` from this peer.
+  public var decline: AsyncStream<PhoneCallAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .decline(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::End` from this peer.
+  public var end: AsyncStream<PhoneCallAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .end(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Hold` from this peer.
+  public var hold: AsyncStream<PhoneCallAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .hold(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Unhold` from this peer.
+  public var unhold: AsyncStream<PhoneCallAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .unhold(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
+  public var requests: AsyncStream<PhoneStateGetHandle> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .phone(let outer) = message.data else { continue }
+          guard case .stateGet = outer else { continue }
+          let handle = PhoneStateGetHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield(handle)
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Phone::Snapshot` to this peer.
+  public func snapshot(_ payload: PhoneStateReply, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.snapshot(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Phone::CallStarted` to this peer.
+  public func callStarted(_ payload: PhoneCall, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callStarted(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Phone::CallUpdated` to this peer.
+  public func callUpdated(_ payload: PhoneCall, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callUpdated(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Phone::CallEnded` to this peer.
+  public func callEnded(_ payload: PhoneCallEnded, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.callEnded(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Player` wire surface (deviceId is baked in).
+public struct PlayerSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Player::Play` from this peer.
+  public var play: AsyncStream<PlayUri> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .play(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::Queue` from this peer.
+  public var queue: AsyncStream<QueueUri> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .queue(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::Pause` from this peer.
+  public var pause: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .pause = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::Resume` from this peer.
+  public var resume: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .resume = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SkipNext` from this peer.
+  public var skipNext: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .skipNext = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SkipPrev` from this peer.
+  public var skipPrev: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .skipPrev = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SkipToIndex` from this peer.
+  public var skipToIndex: AsyncStream<SkipToIndex> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .skipToIndex(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SeekTo` from this peer.
+  public var seekTo: AsyncStream<SeekTo> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .seekTo(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SetShuffle` from this peer.
+  public var setShuffle: AsyncStream<SetShuffle> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .setShuffle(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SetRepeat` from this peer.
+  public var setRepeat: AsyncStream<SetRepeat> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .setRepeat(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SetSpeed` from this peer.
+  public var setSpeed: AsyncStream<SetSpeed> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .setSpeed(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::SetCrossfade` from this peer.
+  public var setCrossfade: AsyncStream<SetCrossfade> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .setCrossfade(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Player::Snapshot` to this peer.
+  public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.snapshot(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Player::Delta` to this peer.
+  public func delta(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.delta(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Player::QueueChanged` to this peer.
+  public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .player(.queueChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
 }
@@ -788,229 +2632,6 @@ public struct SystemSurfaceForDevice: Sendable {
 
 }
 
-/// Per-peer methods for the `Transport` wire surface (deviceId is baked in).
-public struct TransportSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Stream of `Transport::Play` from this peer.
-  public var play: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .play = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::Pause` from this peer.
-  public var pause: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .pause = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::PlayPause` from this peer.
-  public var playPause: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .playPause = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::Next` from this peer.
-  public var next: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .next = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::Prev` from this peer.
-  public var prev: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .prev = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::VolumeUp` from this peer.
-  public var volumeUp: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .volumeUp = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::VolumeDown` from this peer.
-  public var volumeDown: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .volumeDown = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::MuteToggle` from this peer.
-  public var muteToggle: AsyncStream<Void> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .muteToggle = outer {
-            continuation.yield(())
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::Shuffle` from this peer.
-  public var shuffle: AsyncStream<ShuffleSet> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .shuffle(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::Repeat` from this peer.
-  public var `repeat`: AsyncStream<RepeatSet> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .`repeat`(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::SeekTo` from this peer.
-  public var seekTo: AsyncStream<SeekToSet> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .seekTo(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Stream of `Transport::SkipToIndex` from this peer.
-  public var skipToIndex: AsyncStream<SkipToIndexSet> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .transport(let outer) = message.data,
-             case .skipToIndex(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-}
-
 /// Per-peer methods for the `Forward` wire surface (deviceId is baked in).
 public struct ForwardSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -1068,19 +2689,6 @@ public struct ForwardSurfaceForDevice: Sendable {
       }
       continuation.onTermination = { _ in task.cancel() }
     }
-  }
-
-}
-
-/// Per-peer methods for the `Version` wire surface (deviceId is baked in).
-public struct VersionSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Send a `Version` event to this peer.
-  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
 }
@@ -1169,6 +2777,19 @@ public struct AuthoritySurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Capabilities` wire surface (deviceId is baked in).
+public struct CapabilitiesSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Send `Capabilities::Announce` to this peer.
+  public func announce(_ payload: GatewayCapabilities, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .capabilities(.announce(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Chrome` wire surface (deviceId is baked in).
 public struct ChromeSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -1182,14 +2803,14 @@ public struct ChromeSurfaceForDevice: Sendable {
 
 }
 
-/// Per-peer methods for the `NowPlayingUpdate` wire surface (deviceId is baked in).
-public struct NowPlayingUpdateSurfaceForDevice: Sendable {
+/// Per-peer methods for the `Time` wire surface (deviceId is baked in).
+public struct TimeSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
   public let deviceId: String
 
-  /// Send a `NowPlayingUpdate` event to this peer.
-  public func send(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .nowPlayingUpdate(payload))
+  /// Send `Time::Snapshot` to this peer.
+  public func snapshot(_ payload: TimeInfo, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .time(.snapshot(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -1280,48 +2901,414 @@ public struct BridgethingGatewayDevice: Sendable {
   public let gateway: BridgethingGateway
   public let deviceId: String
 
+  /// Per-peer methods for the `Audio` wire surface.
+  public var audio: AudioSurfaceForDevice { AudioSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Geo` wire surface.
+  public var geo: GeoSurfaceForDevice { GeoSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Library` wire surface.
+  public var library: LibrarySurfaceForDevice { LibrarySurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Net` wire surface.
+  public var net: NetSurfaceForDevice { NetSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Notifications` wire surface.
+  public var notifications: NotificationsSurfaceForDevice { NotificationsSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Phone` wire surface.
+  public var phone: PhoneSurfaceForDevice { PhoneSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Player` wire surface.
+  public var player: PlayerSurfaceForDevice { PlayerSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `System` wire surface.
   public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Transport` wire surface.
-  public var transport: TransportSurfaceForDevice { TransportSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
   public var forward: ForwardSurfaceForDevice { ForwardSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Version` wire surface.
-  public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Asset` wire surface.
   public var asset: AssetSurfaceForDevice { AssetSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Authority` wire surface.
   public var authority: AuthoritySurfaceForDevice { AuthoritySurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Capabilities` wire surface.
+  public var capabilities: CapabilitiesSurfaceForDevice { CapabilitiesSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Chrome` wire surface.
   public var chrome: ChromeSurfaceForDevice { ChromeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `NowPlayingUpdate` wire surface.
-  public var nowPlayingUpdate: NowPlayingUpdateSurfaceForDevice { NowPlayingUpdateSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Time` wire surface.
+  public var time: TimeSurfaceForDevice { TimeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Webapp` wire surface.
   public var webapp: WebappSurfaceForDevice { WebappSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
 }
 
 extension BridgethingGateway {
+  /// Methods scoped to the `Audio` wire surface.
+  public nonisolated var audio: AudioSurface { AudioSurface(gateway: self) }
+  /// Methods scoped to the `Geo` wire surface.
+  public nonisolated var geo: GeoSurface { GeoSurface(gateway: self) }
+  /// Methods scoped to the `Library` wire surface.
+  public nonisolated var library: LibrarySurface { LibrarySurface(gateway: self) }
+  /// Methods scoped to the `Net` wire surface.
+  public nonisolated var net: NetSurface { NetSurface(gateway: self) }
+  /// Methods scoped to the `Notifications` wire surface.
+  public nonisolated var notifications: NotificationsSurface { NotificationsSurface(gateway: self) }
+  /// Methods scoped to the `Phone` wire surface.
+  public nonisolated var phone: PhoneSurface { PhoneSurface(gateway: self) }
+  /// Methods scoped to the `Player` wire surface.
+  public nonisolated var player: PlayerSurface { PlayerSurface(gateway: self) }
   /// Methods scoped to the `System` wire surface.
   public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
-  /// Methods scoped to the `Transport` wire surface.
-  public nonisolated var transport: TransportSurface { TransportSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
   public nonisolated var forward: ForwardSurface { ForwardSurface(gateway: self) }
-  /// Methods scoped to the `Version` wire surface.
-  public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
   /// Methods scoped to the `Asset` wire surface.
   public nonisolated var asset: AssetSurface { AssetSurface(gateway: self) }
   /// Methods scoped to the `Authority` wire surface.
   public nonisolated var authority: AuthoritySurface { AuthoritySurface(gateway: self) }
+  /// Methods scoped to the `Capabilities` wire surface.
+  public nonisolated var capabilities: CapabilitiesSurface { CapabilitiesSurface(gateway: self) }
   /// Methods scoped to the `Chrome` wire surface.
   public nonisolated var chrome: ChromeSurface { ChromeSurface(gateway: self) }
-  /// Methods scoped to the `NowPlayingUpdate` wire surface.
-  public nonisolated var nowPlayingUpdate: NowPlayingUpdateSurface { NowPlayingUpdateSurface(gateway: self) }
+  /// Methods scoped to the `Time` wire surface.
+  public nonisolated var time: TimeSurface { TimeSurface(gateway: self) }
   /// Methods scoped to the `Webapp` wire surface.
   public nonisolated var webapp: WebappSurface { WebappSurface(gateway: self) }
   /// Returns a per-device proxy with `deviceId` baked into every method and stream.
   public nonisolated func device(_ deviceId: String) -> BridgethingGatewayDevice {
     BridgethingGatewayDevice(gateway: self, deviceId: deviceId)
+  }
+}
+
+public final class GeoGetOnceHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: GeoGetOnceReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .geo(.getOnceReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: GeoErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .geo(.errorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibraryBrowseRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: BrowseReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.browseReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibrarySearchRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: SearchReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.searchReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: RecommendationsReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.recommendationsReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: FavoritesListReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.favoritesListReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class NetFetchRequestMsgHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: NetFetchReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .net(.fetchReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: NetFetchErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .net(.fetchErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class NetWsOpenHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: NetWsOpenReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .net(.wsOpenReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: NetWsErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .net(.wsErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class NotificationsListRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: NotificationsListReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .notifications(.listReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: NotificationsErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .notifications(.errorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class PhoneStateGetHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: PhoneStateReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .phone(.stateReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
   }
 }
 

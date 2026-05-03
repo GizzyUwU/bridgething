@@ -1,6 +1,4 @@
-use libbridgething::client::{
-  ClientToBridgeSystemMsg, PhoneCallAccept, PhoneCallEnd, RequestGatewayStatus, RequestVersion,
-};
+use libbridgething::client::{ClientToBridgeSystemMsg, RequestVersion};
 
 use super::{HandlerResult, MsgHandle};
 use crate::systemd::power;
@@ -19,17 +17,17 @@ impl SystemHandler {
 
     match msg {
       ClientToBridgeSystemMsg::VersionRequest => self.version_request().await,
-      ClientToBridgeSystemMsg::GatewayStatusRequest => self.gateway_status_request().await,
+      ClientToBridgeSystemMsg::DiagnosticsGet => Ok(self.handle.unimplemented("system.diagnosticsGet").await?),
+      ClientToBridgeSystemMsg::LogsTail(_) => Ok(self.handle.unimplemented("system.logsTail").await?),
+      ClientToBridgeSystemMsg::LogsSubscribe(_) => Ok(self.handle.unimplemented("system.logsSubscribe").await?),
+      ClientToBridgeSystemMsg::LogsUnsubscribe(_) => Ok(self.handle.unimplemented("system.logsUnsubscribe").await?),
       ClientToBridgeSystemMsg::Reboot => self.reboot().await,
       ClientToBridgeSystemMsg::PowerOff => self.power_off().await,
       ClientToBridgeSystemMsg::FactoryReset => self.factory_reset().await,
-      ClientToBridgeSystemMsg::PhoneCallAccept(PhoneCallAccept { call_id }) => self.phone_call_accept(call_id).await,
-      ClientToBridgeSystemMsg::PhoneCallEnd(PhoneCallEnd { call_id }) => self.phone_call_end(call_id).await,
     }
   }
 
   async fn version_request(&self) -> HandlerResult {
-    tracing::debug!("({}) handling version request", &self.handle.from);
     Ok(
       self
         .handle
@@ -38,18 +36,7 @@ impl SystemHandler {
     )
   }
 
-  async fn gateway_status_request(&self) -> HandlerResult {
-    tracing::debug!("({}) handling gateway status request", &self.handle.from);
-    Ok(
-      self
-        .handle
-        .respond_to::<RequestGatewayStatus>(self.handle.state.gateway_status().await)
-        .await?,
-    )
-  }
-
   async fn reboot(&self) -> HandlerResult {
-    tracing::debug!("({}) handling reboot request", &self.handle.from);
     if let Err(err) = power::reboot().await {
       tracing::error!("reboot failed: {err}");
     }
@@ -57,7 +44,6 @@ impl SystemHandler {
   }
 
   async fn power_off(&self) -> HandlerResult {
-    tracing::debug!("({}) handling power off request", &self.handle.from);
     if let Err(err) = power::power_off().await {
       tracing::error!("power_off failed: {err}");
     }
@@ -65,8 +51,6 @@ impl SystemHandler {
   }
 
   async fn factory_reset(&mut self) -> HandlerResult {
-    tracing::debug!("({}) handling factory reset request", &self.handle.from);
-
     if let Err(err) = self.handle.bluetooth.profile_man.reset().await {
       tracing::error!("error resetting bluetooth devices: {:?}", err);
     }
@@ -77,18 +61,6 @@ impl SystemHandler {
 
     self.reboot().await?;
 
-    Ok(())
-  }
-
-  async fn phone_call_accept(&self, call_id: String) -> HandlerResult {
-    tracing::debug!("({}) accepting phone call with id {}", &self.handle.from, call_id);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn phone_call_end(&self, call_id: String) -> HandlerResult {
-    tracing::debug!("({}) ending phone call with id {}", &self.handle.from, call_id);
-    // Ok(self.handle.respond().await?)
     Ok(())
   }
 }

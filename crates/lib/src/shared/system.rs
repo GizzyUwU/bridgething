@@ -5,6 +5,10 @@ use typeshare::typeshare;
 
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Bridge-side identity announce. Daemon sends one of these to every
+/// gateway on connect (companion needs to know what daemon it's talking
+/// to so it can opt out of unsupported surfaces). The companion's mirror
+/// is `GatewayCapabilities::Announce` over in `shared::capabilities`.
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
 #[wire(BridgeToGateway)]
@@ -36,39 +40,4 @@ impl BridgeThingMeta {
   pub fn libbridgething_version() -> String {
     format!("v{}", LIBBRIDGETHING_VERSION)
   }
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
-#[wire(GatewayToBridge)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
-pub struct GatewayMeta {
-  pub adapter_version: String,
-  pub lib_version: String,
-  pub libbridgething_version: String,
-  pub app_name: String,
-  pub app_version: String,
-  pub os_name: String,
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "shared.ts")]
-pub enum PhoneCallStatus {
-  Disconnected,
-  Sending,
-  Ringing,
-  Connecting,
-  Active,
-  Held,
-  Disconnecting,
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[ts(export, export_to = "shared.ts")]
-pub enum PhoneCallDirection {
-  Incoming,
-  Outgoing,
 }

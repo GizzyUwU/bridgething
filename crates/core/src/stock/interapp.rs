@@ -1,8 +1,16 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  Album, Artist, CurrentlyActiveApplication, PlaybackOptions, PlaybackRestrictions, RepeatMode, Track,
-  client::{BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeInteractionMsgCommand},
+  Album, Artist, CurrentlyActiveApplication, ItemKind, ItemRef, MediaItem, PlaybackOptions, PlaybackRestrictions,
+  PlaybackState, PlayerOptions as WirePlayerOptions, PlayerState as WirePlayerState, QueueItem, QueuePosition,
+  RepeatMode, Track,
+  client::{
+    BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg,
+    ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, Earcon as ClientEarcon, FavoritesSet as ClientFavoritesSet,
+    PhoneCallAction, PlayUri as ClientPlayUri, PlayerQueueReply, PlayerStateReply, QueueUri as ClientQueueUri,
+    SeekTo as ClientSeekTo, SetRepeat as ClientSetRepeat, SetShuffle as ClientSetShuffle, SetSpeed as ClientSetSpeed,
+    SkipToIndex as ClientSkipToIndex,
+  },
   stock::StockSetPreset,
 };
 use serde::{Deserialize, Serialize};
@@ -296,36 +304,99 @@ pub struct ChildMeta {
 impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
   fn from(data: BridgeToClientPlayerMsg) -> Self {
     match data {
-      BridgeToClientPlayerMsg::PlayerIdle => Self::IdlePlayerState {
-        context_uri: "".to_string(),
-        is_paused: false,
-        is_paused_bool: false,
-        playback_position: 0,
-        playback_options: StockPlaybackOptions::default(),
-        playback_restrictions: PlaybackRestrictions::default(),
-        playback_speed: 0.0,
+      BridgeToClientPlayerMsg::Snapshot(reply) | BridgeToClientPlayerMsg::StateReply(reply) => {
+        player_state_to_stock(reply)
+      }
+      BridgeToClientPlayerMsg::QueueChanged(reply) | BridgeToClientPlayerMsg::QueueReply(reply) => {
+        player_queue_to_stock(reply)
+      }
+      BridgeToClientPlayerMsg::Delta(_) | BridgeToClientPlayerMsg::ErrorReply(_) => Self::Ack {},
+    }
+  }
+}
+
+fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayload {
+  let WirePlayerState {
+    track,
+    playback,
+    options,
+    ..
+  } = reply.state;
+  let is_paused = !matches!(playback.state, PlaybackState::Playing);
+  StockInterAppSendPayload::SpotifyPlayerState {
+    context_uri: track.as_ref().and_then(|t| t.uri.clone()).unwrap_or_default(),
+    context_title: "BridgeThing".to_string(),
+    is_paused,
+    is_paused_bool: is_paused,
+    playback_options: StockPlaybackOptions {
+      repeat: match playback.repeat {
+        RepeatMode::Off => 0,
+        RepeatMode::One => 1,
+        RepeatMode::All => 2,
       },
-      BridgeToClientPlayerMsg::PlayerState(state) => Self::SpotifyPlayerState {
-        context_uri: state.context_id,
-        context_title: state.context_title,
-        is_paused: state.is_paused,
-        is_paused_bool: state.is_paused,
-        playback_options: state.playback_options.into(),
-        playback_position: state.playback_position,
-        playback_restrictions: state.playback_restrictions,
-        playback_speed: state.playback_speed,
-        track: state.track.into(),
-      },
-      BridgeToClientPlayerMsg::Queue(queue) => Self::PlayerQueue {
-        next: queue.next.into_iter().map(|a| a.into()).collect(),
-        current: queue.current.into(),
-        previous: queue.previous.into_iter().map(|a| a.into()).collect(),
-      },
-      BridgeToClientPlayerMsg::Image(image) => Self::Image {
-        height: image.height,
-        width: image.width,
-        image_data: image.data,
-      },
+      shuffle: playback.shuffle,
+    },
+    playback_position: playback.position_ms as usize,
+    playback_restrictions: PlaybackRestrictions::default(),
+    playback_speed: f64::from(player_speed_or_default(&options)),
+    track: media_item_to_stock_track(track.unwrap_or_default()),
+  }
+}
+
+fn player_queue_to_stock(reply: PlayerQueueReply) -> StockInterAppSendPayload {
+  StockInterAppSendPayload::PlayerQueue {
+    next: reply.items.into_iter().map(queue_item_to_stock).collect(),
+    current: StockQueueTrack::default(),
+    previous: vec![],
+  }
+}
+
+fn player_speed_or_default(options: &WirePlayerOptions) -> f32 {
+  if options.speed.is_finite() && options.speed > 0.0 {
+    options.speed
+  } else {
+    1.0
+  }
+}
+
+fn media_item_to_stock_track(item: MediaItem) -> StockTrack {
+  let id = item.persistent_id.unwrap_or_default();
+  StockTrack {
+    name: item.title.unwrap_or_default(),
+    album: Album::from(item.album.unwrap_or_default()).into(),
+    artist: Artist::from(item.artist.clone().unwrap_or_default()).into(),
+    artists: vec![Artist::from(item.artist.unwrap_or_default()).into()],
+    duration_ms: item.duration_ms.unwrap_or(0) as usize,
+    image_id: item.artwork_id.unwrap_or_default(),
+    is_episode: false,
+    is_podcast: false,
+    saved: item.liked.unwrap_or(false),
+    uid: id.clone(),
+    uri: id,
+  }
+}
+
+fn queue_item_to_stock(item: QueueItem) -> StockQueueTrack {
+  let artists: Vec<StockArtist> = item.artist.into_iter().map(|name| Artist::from(name).into()).collect();
+  StockQueueTrack {
+    uid: item.persistent_id.clone().unwrap_or_else(|| item.uri.clone()),
+    uri: item.uri,
+    name: item.title.unwrap_or_default(),
+    artists,
+    image_uri: item.artwork_id.unwrap_or_default(),
+    provider: "context".to_string(),
+  }
+}
+
+impl Default for StockQueueTrack {
+  fn default() -> Self {
+    Self {
+      uid: String::new(),
+      uri: String::new(),
+      name: String::new(),
+      artists: Vec::new(),
+      image_uri: String::new(),
+      provider: "context".to_string(),
     }
   }
 }
@@ -445,89 +516,164 @@ impl StockInterAppSend {
 impl RecvMsgData {
   /// this method WILL panic. don't be a dumbass.
   pub fn from_stock_inter_app_possible_recv(recv: PossibleRecvMsg) -> Self {
-    let PossibleRecvMsg::StockInterApp { ref data, .. } = recv else {
-      panic!("YOU CAN ONY CALL THIS WITH STOCK INTER APP RECV DATA");
-    };
-
-    // fully unsupported
-    match data {
-      StockInterAppRecv::GetChildrenOfItem { .. }
-      | StockInterAppRecv::GetHome { .. }
-      | StockInterAppRecv::GetPodcast { .. }
-      | StockInterAppRecv::GetPresets { .. }
-      | StockInterAppRecv::GetSaved { .. }
-      | StockInterAppRecv::GetTips { .. }
-      | StockInterAppRecv::GetTts { .. }
-      | StockInterAppRecv::PlayPodcastTrailer { .. }
-      | StockInterAppRecv::QueueUri { .. }
-      | StockInterAppRecv::SetPodcastPlaybackSpeed { .. }
-      | StockInterAppRecv::SetPreset { .. }
-      | StockInterAppRecv::SetSaved { .. }
-      | StockInterAppRecv::SummonDj
-      | StockInterAppRecv::PlayUri { .. } => return RecvMsgData::Unsupported(recv),
-      _ => {}
-    }
-
     let PossibleRecvMsg::StockInterApp { data, .. } = recv else {
       panic!("YOU CAN ONY CALL THIS WITH STOCK INTER APP RECV DATA");
     };
 
     match data {
+      // ---- modern Player surface ----
+      StockInterAppRecv::PlayUri { uri, .. } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context: None }))
+      }
+      StockInterAppRecv::PlayPodcastTrailer { uri } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context: None }))
+      }
+      StockInterAppRecv::QueueUri { uri } => RecvMsgData::Player(ClientToBridgePlayerMsg::Queue(ClientQueueUri {
+        uri,
+        position: QueuePosition::Append,
+      })),
+      StockInterAppRecv::Pause {} => RecvMsgData::Player(ClientToBridgePlayerMsg::Pause),
+      StockInterAppRecv::Resume {} => RecvMsgData::Player(ClientToBridgePlayerMsg::Resume),
+      StockInterAppRecv::SkipNext {} => RecvMsgData::Player(ClientToBridgePlayerMsg::SkipNext),
+      StockInterAppRecv::SkipPrev { allow_seeking: _ } => RecvMsgData::Player(ClientToBridgePlayerMsg::SkipPrev),
+      StockInterAppRecv::SkipToIndex { index } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::SkipToIndex(ClientSkipToIndex {
+          index: u32::try_from(index).unwrap_or(u32::MAX),
+        }))
+      }
+      StockInterAppRecv::SeekTo { position } => RecvMsgData::Player(ClientToBridgePlayerMsg::SeekTo(ClientSeekTo {
+        position_ms: u32::try_from(position).unwrap_or(u32::MAX),
+      })),
+      StockInterAppRecv::SetShuffle { shuffle } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::SetShuffle(ClientSetShuffle { on: shuffle }))
+      }
+      StockInterAppRecv::SetRepeat { repeat_mode } => {
+        let mode = if repeat_mode { RepeatMode::All } else { RepeatMode::Off };
+        RecvMsgData::Player(ClientToBridgePlayerMsg::SetRepeat(ClientSetRepeat { mode }))
+      }
+      // Stock encodes podcast playback speed as a percentage integer
+      // (50, 75, 100, 125, 150, 200); modern Player uses an absolute
+      // multiplier (1.0 = normal). Divide.
+      StockInterAppRecv::SetPodcastPlaybackSpeed { playback_speed } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::SetSpeed(ClientSetSpeed {
+          speed: playback_speed as f32 / 100.0,
+        }))
+      }
+
+      // ---- modern Audio surface ----
+      StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::VolumeUp),
+      StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::VolumeDown),
+      StockInterAppRecv::Earcon { earcon } => {
+        RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::Earcon(ClientEarcon { name: earcon }))
+      }
+
+      // ---- modern Phone surface ----
+      // Stock doesn't carry a call_id; the phone surface uses an empty
+      // string as a sentinel for "the active call".
+      StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Phone(ClientToBridgePhoneMsg::Answer(PhoneCallAction {
+        call_id: String::new(),
+      })),
+      StockInterAppRecv::PhoneDecline {} => RecvMsgData::Phone(ClientToBridgePhoneMsg::Decline(PhoneCallAction {
+        call_id: String::new(),
+      })),
+
+      // ---- modern Library surface ----
+      StockInterAppRecv::SetSaved { uri, id, saved } => match uri.or(id) {
+        Some(uri) => RecvMsgData::Library(ClientToBridgeLibraryMsg::FavoritesSet(ClientFavoritesSet {
+          item: ItemRef {
+            uri,
+            kind: ItemKind::Track,
+            persistent_id: None,
+          },
+          liked: saved,
+        })),
+        None => RecvMsgData::Hole,
+      },
+
+      // ---- legacy stock-only verbs (no modern equivalent yet) ----
       StockInterAppRecv::GetImage { id } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetImage { id }),
       StockInterAppRecv::GetThumbnailImage { id } => {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetThumbnailImage { id })
       }
       StockInterAppRecv::GetNextTracks {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetNextTracks),
-      StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::PhoneAnswer),
-      StockInterAppRecv::PhoneDecline {} => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::PhoneDecline),
-      StockInterAppRecv::PhoneCallImage { phone_number } => RecvMsgData::Interaction(
-        ClientToBridgeInteractionMsgCommand::PhoneCallImage(libbridgething::client::PhoneCallImage { phone_number }),
-      ),
-      StockInterAppRecv::PhoneCallMessage { phone_number, message } => {
-        RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::PhoneCallMessage(
-          libbridgething::client::PhoneCallMessage { phone_number, message },
-        ))
+      StockInterAppRecv::GetPermissions {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions),
+      StockInterAppRecv::GetChildrenOfItem {
+        parent_id,
+        limit,
+        offset,
+      } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetChildren {
+        parent_id,
+        limit,
+        offset,
+      }),
+      StockInterAppRecv::GetHome { limit, limit_overrides } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetHome { limit, limit_overrides })
       }
-      StockInterAppRecv::IncreaseVolume {} => {
-        RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::IncreaseVolume)
+      StockInterAppRecv::GetPodcast { uri, limit, offset } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPodcast { uri, limit, offset })
       }
-      StockInterAppRecv::DecreaseVolume {} => {
-        RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::DecreaseVolume)
+      StockInterAppRecv::GetSaved { id } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetSaved { id }),
+      StockInterAppRecv::GetPresets {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPresets),
+      StockInterAppRecv::SetPreset { presets } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifySetPreset { presets })
       }
-      StockInterAppRecv::SkipToIndex { index } => RecvMsgData::Interaction(
-        ClientToBridgeInteractionMsgCommand::SkipToIndex(libbridgething::client::SkipToIndex {
-          index: u32::try_from(index).unwrap_or(u32::MAX),
-        }),
-      ),
-      StockInterAppRecv::SkipNext {} => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::SkipNext),
-      StockInterAppRecv::SkipPrev { allow_seeking: _ } => {
-        RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::SkipPrev)
-      }
-      StockInterAppRecv::SeekTo { position } => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::SeekTo(
-        libbridgething::client::SeekTo {
-          position_ms: u32::try_from(position).unwrap_or(u32::MAX),
-        },
-      )),
-      StockInterAppRecv::Pause {} => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::Pause),
-      StockInterAppRecv::Resume {} => RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::Resume),
-      StockInterAppRecv::SetShuffle { shuffle } => RecvMsgData::Interaction(
-        ClientToBridgeInteractionMsgCommand::SetShuffle(libbridgething::client::SetShuffle { shuffle }),
-      ),
-      StockInterAppRecv::SetRepeat { repeat_mode } => {
-        let mode = if repeat_mode {
-          libbridgething::RepeatMode::All
-        } else {
-          libbridgething::RepeatMode::Off
-        };
-        RecvMsgData::Interaction(ClientToBridgeInteractionMsgCommand::SetRepeat(
-          libbridgething::client::SetRepeat { repeat_mode: mode },
-        ))
-      }
-      StockInterAppRecv::GetPermissions { .. } => {
-        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions)
-      }
+      StockInterAppRecv::GetTips {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTips),
+      StockInterAppRecv::GetTts { file } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTts { file }),
+      StockInterAppRecv::SummonDj => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifySummonDj),
 
-      _ => RecvMsgData::Hole,
+      // ---- pure stock-side concerns the daemon swallows ----
+      // The daemon doesn't display caller-id images on its own (no
+      // speakers, and the stock dispatcher already handed the asset to
+      // the webapp via GetImage). Same for arbitrary SMS — Phone
+      // surface has no message-send verb in v1.
+      StockInterAppRecv::PhoneCallImage { .. } | StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
+
+      // Instrumentation, logs, crash reports, search/recommendations
+      // shapes the daemon ignores (or returns a canned response from
+      // the legacy-stock dispatcher elsewhere).
+      StockInterAppRecv::CrashReport(_)
+      | StockInterAppRecv::LogMessage(_)
+      | StockInterAppRecv::PitstopLog(_)
+      | StockInterAppRecv::RequestLog(_)
+      | StockInterAppRecv::SendUbiInteraction(_)
+      | StockInterAppRecv::SendUbiImpression(_)
+      | StockInterAppRecv::SendUbiBatch(_) => RecvMsgData::Hole,
+
+      // One-shot reads of player/state surfaced via the stock wire
+      // protocol. The §4 stock-translation rewire wires these to
+      // synthesised stock responses derived from the cached PlayerState
+      // / Capabilities; until then the daemon swallows them.
+      StockInterAppRecv::GetCapabilities {}
+      | StockInterAppRecv::GetCurrentContext {}
+      | StockInterAppRecv::GetCurrentTrack {}
+      | StockInterAppRecv::GetSessionState {}
+      | StockInterAppRecv::GetPlayerState {}
+      | StockInterAppRecv::GetTrackElapsed {}
+      | StockInterAppRecv::GetShuffle {}
+      | StockInterAppRecv::GetRepeat {}
+      | StockInterAppRecv::GetPlaybackSpeed {}
+      | StockInterAppRecv::GetCrossfadeState {}
+      | StockInterAppRecv::GetPodcastPlaybackSpeed {}
+      | StockInterAppRecv::GetAvailablePodcastPlaybackSpeeds {}
+      | StockInterAppRecv::GetRootItem {}
+      | StockInterAppRecv::GetRating {}
+      | StockInterAppRecv::GetItemForURI {}
+      | StockInterAppRecv::GetRecommendedContentForType {}
+      | StockInterAppRecv::SearchQuery
+      | StockInterAppRecv::Graph
+      | StockInterAppRecv::SetRating
+      | StockInterAppRecv::StartRadio => RecvMsgData::Hole,
+
+      // Deprecated verbs kept on the enum for round-trip parsing of
+      // older stock builds; the daemon never actions them.
+      StockInterAppRecv::_PlayItem
+      | StockInterAppRecv::_PlayUri
+      | StockInterAppRecv::_SeekToPosition
+      | StockInterAppRecv::_SetPlaybackSpeed
+      | StockInterAppRecv::_SetRepeat
+      | StockInterAppRecv::_SetShuffle
+      | StockInterAppRecv::_SkipNext
+      | StockInterAppRecv::_SkipPrevious => RecvMsgData::Hole,
     }
   }
 }
@@ -537,15 +683,16 @@ mod test {
   use libbridgething::{
     RepeatMode,
     client::{
-      ClientLegacyStockCommand, ClientToBridgeInteractionMsg, ClientToBridgeMsg, ClientToBridgeMsgData, PhoneCallImage,
-      PhoneCallMessage, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
+      ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg, ClientToBridgeMsg,
+      ClientToBridgeMsgData, ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, FavoritesSet, PhoneCallAction,
+      PlayUri as ClientPlayUri, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
     },
     wire::MsgMeta,
   };
   use uuid::Uuid;
 
   use super::StockInterAppRecv;
-  use crate::handler::client::PossibleRecvMsg;
+  use crate::handler::client::{PossibleRecvMsg, RecvMsgData};
 
   #[test]
   fn ser_stock_recv() {
@@ -706,45 +853,8 @@ mod test {
   }
 
   #[test]
-  fn de_recv_phone_call_image() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"phoneCallImage","data":{"phoneNumber":"1234567890"}}}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientToBridgeMsg {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallImage(PhoneCallImage {
-          phone_number: "1234567890".to_string()
-        }))
-      })
-    );
-  }
-
-  #[test]
-  fn de_recv_phone_call_message() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"phoneCallMessage","data":{"phoneNumber":"1234567890","message":"Hello"}}}}"#;
-    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
-    println!("{:?}", de);
-
-    assert_eq!(
-      de,
-      PossibleRecvMsg::Modern(ClientToBridgeMsg {
-        id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
-        meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::PhoneCallMessage(PhoneCallMessage {
-          phone_number: "1234567890".to_string(),
-          message: "Hello".to_string()
-        }))
-      })
-    );
-  }
-
-  #[test]
   fn de_recv_skip_to_index() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"skipToIndex","data":{"index":5}}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"skipToIndex","data":{"index":5}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -753,14 +863,14 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SkipToIndex(SkipToIndex { index: 5 }))
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SkipToIndex(SkipToIndex { index: 5 }))
       })
     );
   }
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"skipPrev"}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"skipPrev"}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -769,14 +879,14 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SkipPrev)
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SkipPrev)
       })
     );
   }
 
   #[test]
   fn de_recv_seek_to() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"seekTo","data":{"positionMs":120}}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"seekTo","data":{"positionMs":120}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -785,14 +895,14 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SeekTo(SeekTo { position_ms: 120 }))
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SeekTo(SeekTo { position_ms: 120 }))
       })
     );
   }
 
   #[test]
   fn de_recv_set_shuffle() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"setShuffle","data":{"shuffle":true}}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"setShuffle","data":{"on":true}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -801,16 +911,14 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetShuffle(SetShuffle {
-          shuffle: true
-        }))
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SetShuffle(SetShuffle { on: true }))
       })
     );
   }
 
   #[test]
   fn de_recv_set_repeat() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"interaction","data":{"event":"setRepeat","data":{"repeatMode":"all"}}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"setRepeat","data":{"mode":"all"}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -819,10 +927,119 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Interaction(ClientToBridgeInteractionMsg::SetRepeat(SetRepeat {
-          repeat_mode: RepeatMode::All
-        }))
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SetRepeat(SetRepeat { mode: RepeatMode::All }))
       })
     );
+  }
+
+  #[test]
+  fn translate_phone_call_image_to_hole() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 1,
+      data: StockInterAppRecv::PhoneCallImage {
+        phone_number: "1234567890".into(),
+      },
+      user_action: false,
+    };
+    assert!(matches!(
+      RecvMsgData::from_stock_inter_app_possible_recv(recv),
+      RecvMsgData::Hole
+    ));
+  }
+
+  #[test]
+  fn translate_phone_call_message_to_hole() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 2,
+      data: StockInterAppRecv::PhoneCallMessage {
+        phone_number: "1234567890".into(),
+        message: "Hello".into(),
+      },
+      user_action: false,
+    };
+    assert!(matches!(
+      RecvMsgData::from_stock_inter_app_possible_recv(recv),
+      RecvMsgData::Hole
+    ));
+  }
+
+  #[test]
+  fn translate_play_uri_to_player_play() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 3,
+      data: StockInterAppRecv::PlayUri {
+        uri: "spotify:track:abc".into(),
+        feature_identifier: "test".into(),
+        interaction_id: None,
+        skip_to_uri: None,
+        skip_to_uid: None,
+      },
+      user_action: true,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context })) = translated else {
+      panic!("expected Player::Play, got {translated:?}");
+    };
+    assert_eq!(uri, "spotify:track:abc");
+    assert!(context.is_none());
+  }
+
+  #[test]
+  fn translate_volume_up_to_audio_volume_up() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 4,
+      data: StockInterAppRecv::IncreaseVolume {},
+      user_action: true,
+    };
+    assert!(matches!(
+      RecvMsgData::from_stock_inter_app_possible_recv(recv),
+      RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::VolumeUp)
+    ));
+  }
+
+  #[test]
+  fn translate_phone_answer_to_phone_answer() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 5,
+      data: StockInterAppRecv::PhoneAnswer {},
+      user_action: true,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::Phone(ClientToBridgePhoneMsg::Answer(PhoneCallAction { call_id })) = translated else {
+      panic!("expected Phone::Answer, got {translated:?}");
+    };
+    assert_eq!(call_id, "");
+  }
+
+  #[test]
+  fn translate_set_saved_to_library_favorites_set() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 6,
+      data: StockInterAppRecv::SetSaved {
+        id: None,
+        uri: Some("spotify:track:xyz".into()),
+        saved: true,
+      },
+      user_action: true,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::Library(ClientToBridgeLibraryMsg::FavoritesSet(FavoritesSet { item, liked })) = translated else {
+      panic!("expected Library::FavoritesSet, got {translated:?}");
+    };
+    assert_eq!(item.uri, "spotify:track:xyz");
+    assert!(liked);
+  }
+
+  #[test]
+  fn translate_permissions_to_legacy_stock() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 7,
+      data: StockInterAppRecv::GetPermissions {},
+      user_action: false,
+    };
+    assert!(matches!(
+      RecvMsgData::from_stock_inter_app_possible_recv(recv),
+      RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions)
+    ));
   }
 }

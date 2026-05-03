@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use libbridgething::{Device, client::GatewayStatus};
+use libbridgething::{Device, GatewayInfo};
 use sea_orm::{DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, Set, TransactionTrait};
 use tokio::task::JoinHandle;
 
@@ -106,7 +106,7 @@ impl AppState {
     Ok(())
   }
 
-  pub async fn gateway_status(&self) -> GatewayStatus {
+  pub async fn gateway_info(&self) -> Option<GatewayInfo> {
     self.peers.first_connected_gateway().await
   }
 

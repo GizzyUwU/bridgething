@@ -1,21 +1,41 @@
 mod asset;
+mod authority;
 mod bluetooth;
+mod capabilities;
+mod diagnostics;
 mod forward;
+mod geo;
+mod hardware;
+mod library;
+mod net;
+mod notifications;
 mod now_playing;
 mod peer;
+mod phone;
 mod player;
 mod priority;
 mod system;
+mod time;
 mod webapp;
 
 pub use asset::*;
+pub use authority::*;
 pub use bluetooth::*;
+pub use capabilities::*;
+pub use diagnostics::*;
 pub use forward::*;
+pub use geo::*;
+pub use hardware::*;
+pub use library::*;
+pub use net::*;
+pub use notifications::*;
 pub use now_playing::*;
 pub use peer::*;
+pub use phone::*;
 pub use player::*;
 pub use priority::*;
 pub use system::*;
+pub use time::*;
 pub use webapp::*;
 
 pub fn to_slug(value: &str) -> String {

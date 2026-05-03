@@ -1,6 +1,6 @@
 use libbridgething::{
   PhoneCallDirection, PhoneCallStatus,
-  client::{ClientToBridgeSystemMsg, PhoneCallAccept, PhoneCallEnd},
+  client::{ClientToBridgePhoneMsg, ClientToBridgeSystemMsg, PhoneCallAction},
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,12 +30,12 @@ impl From<StockDeviceRecv> for RecvMsgData {
       StockDeviceRecv::PowerOff => RecvMsgData::System(ClientToBridgeSystemMsg::PowerOff),
       StockDeviceRecv::FactoryReset => RecvMsgData::System(ClientToBridgeSystemMsg::FactoryReset),
       StockDeviceRecv::PhoneCallAnswer { attributes } => {
-        RecvMsgData::System(ClientToBridgeSystemMsg::PhoneCallAccept(PhoneCallAccept {
+        RecvMsgData::Phone(ClientToBridgePhoneMsg::Answer(PhoneCallAction {
           call_id: attributes.call_id,
         }))
       }
       StockDeviceRecv::PhoneCallEnd { attributes } => {
-        RecvMsgData::System(ClientToBridgeSystemMsg::PhoneCallEnd(PhoneCallEnd {
+        RecvMsgData::Phone(ClientToBridgePhoneMsg::End(PhoneCallAction {
           call_id: attributes.call_id,
         }))
       }

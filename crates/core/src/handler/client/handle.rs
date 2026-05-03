@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use libbridgething::{
   client::BridgeToClientMsgData,
-  wire::{MsgMeta, ResponseMeta, WireRequest},
+  wire::{MsgMeta, ResponseMeta, WireError, WireRequest},
 };
 use uuid::Uuid;
 
@@ -91,5 +91,19 @@ impl MsgHandle {
 
   pub async fn send_stock(&self, data: impl Into<StockSendMsg>) -> WSResult<()> {
     self.state.client_man.send_stock(self.from, data).await
+  }
+
+  /// Mark a verb as recognized-but-not-yet-built. Logs at the
+  /// `bridgething::unimplemented` tracing target and ships a
+  /// `WireError::Unimplemented` response on the wire so any awaiting
+  /// caller resolves immediately. Greppable as `.unimplemented(` for a
+  /// source-level inventory of holes.
+  pub async fn unimplemented(&self, verb: &str) -> WSResult<()> {
+    tracing::warn!(
+      target: "bridgething::unimplemented",
+      "({}) {verb}",
+      &self.from,
+    );
+    self.respond(WireError::Unimplemented).await
   }
 }

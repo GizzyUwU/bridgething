@@ -2,8 +2,8 @@ use base64::Engine as _;
 use libbridgething::{
   BridgeThingMeta,
   client::{
-    AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientMsg, BridgeToClientMsgData, BridgeToClientSystemMsg,
-    OtaPowerOff, OtaReboot, PhoneCallInfo,
+    AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientHardwareMsg, BridgeToClientMsg, BridgeToClientMsgData,
+    BridgeToClientSystemMsg,
   },
   transitive_from,
 };
@@ -103,7 +103,11 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     BridgeToClientMsgData::Store(data) => StockSendMsg::Storage(data.into()),
     BridgeToClientMsgData::System(data) => data.into(),
     BridgeToClientMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(stock_msg_id, data.into())),
-    BridgeToClientMsgData::Interaction(_) => StockSendMsg::Unsupported,
+    BridgeToClientMsgData::Hardware(BridgeToClientHardwareMsg::AmbientLightUpdate(AmbientLightUpdate {
+      brightness,
+    })) => StockSendMsg::Hardware(StockHardwareSend::AmbientLightUpdate {
+      payload: brightness as usize,
+    }),
     BridgeToClientMsgData::Forward(_) => {
       tracing::warn!("forward message is not supported in stock app!!");
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
@@ -112,7 +116,6 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
       tracing::warn!("typed error response is not supported in stock app: {:?}", err);
       StockSendMsg::Unsupported
     }
-    BridgeToClientMsgData::Peer(_) => StockSendMsg::Unsupported,
     BridgeToClientMsgData::Asset(data) => match data {
       BridgeToClientAssetMsg::Got(got) => {
         let image_data = base64::engine::general_purpose::STANDARD.encode(&got.bytes);
@@ -132,6 +135,19 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
+    // Surfaces with no stock equivalent. §4 stock translation rewire will
+    // wire mappings where they exist.
+    BridgeToClientMsgData::Audio(_)
+    | BridgeToClientMsgData::Capabilities(_)
+    | BridgeToClientMsgData::Geo(_)
+    | BridgeToClientMsgData::Hardware(_)
+    | BridgeToClientMsgData::Library(_)
+    | BridgeToClientMsgData::Net(_)
+    | BridgeToClientMsgData::Notifications(_)
+    | BridgeToClientMsgData::Peer(_)
+    | BridgeToClientMsgData::Phone(_)
+    | BridgeToClientMsgData::Time(_)
+    | BridgeToClientMsgData::Webapp(_) => StockSendMsg::Unsupported,
   }
 }
 
@@ -163,36 +179,10 @@ impl From<BridgeToClientSystemMsg> for StockSendMsg {
           credits,
         })
       }
-
-      BridgeToClientSystemMsg::GatewayStatus(_) => StockSendMsg::Unsupported,
-
-      BridgeToClientSystemMsg::OtaReboot(OtaReboot { delay_ms }) => {
-        StockSendMsg::Hardware(StockHardwareSend::OtaReboot {
-          delay_ms: delay_ms.to_string(),
-        })
-      }
-      BridgeToClientSystemMsg::OtaPowerOff(OtaPowerOff { delay_ms }) => {
-        StockSendMsg::Hardware(StockHardwareSend::OtaPowerOff {
-          delay_ms: delay_ms.to_string(),
-        })
-      }
-      BridgeToClientSystemMsg::AmbientLightUpdate(AmbientLightUpdate { brightness }) => {
-        StockSendMsg::Hardware(StockHardwareSend::AmbientLightUpdate { payload: brightness })
-      }
-
-      BridgeToClientSystemMsg::PhoneCallInfo(PhoneCallInfo {
-        remote_id,
-        display_name,
-        status,
-        call_dir,
-        call_id,
-      }) => StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
-        remote_id,
-        display_name,
-        status,
-        call_dir,
-        call_id,
-      }),
+      BridgeToClientSystemMsg::DiagnosticsReply(_)
+      | BridgeToClientSystemMsg::LogsTailReply(_)
+      | BridgeToClientSystemMsg::LogsSubscribeReply(_)
+      | BridgeToClientSystemMsg::LogEntry(_) => StockSendMsg::Unsupported,
     }
   }
 }

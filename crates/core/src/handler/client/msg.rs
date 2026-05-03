@@ -3,9 +3,12 @@ use std::net::SocketAddr;
 use libbridgething::{
   ForwardMessage,
   client::{
-    BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsgRequest, ClientToBridgeBluetoothMsg,
-    ClientToBridgeInteractionMsgCommand, ClientToBridgeMsg, ClientToBridgeMsgData, ClientToBridgeStoreMsgRequest,
-    ClientToBridgeSystemMsg, ClientToBridgeVoiceMsgCommand,
+    BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsgRequest, ClientToBridgeAudioMsgCommand,
+    ClientToBridgeBluetoothMsg, ClientToBridgeCapabilitiesMsgRequest, ClientToBridgeGeoMsg, ClientToBridgeHardwareMsg,
+    ClientToBridgeLibraryMsg, ClientToBridgeMsg, ClientToBridgeMsgData, ClientToBridgeNetMsg,
+    ClientToBridgeNotificationsMsg, ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, ClientToBridgeStoreMsgRequest,
+    ClientToBridgeSystemMsg, ClientToBridgeTimeMsgRequest, ClientToBridgeVoiceMsgCommand,
+    ClientToBridgeWebappMsgRequest,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -37,20 +40,27 @@ pub struct RecvMsg {
 #[derive(Debug)]
 pub enum RecvMsgData {
   Asset(ClientToBridgeAssetMsgRequest),
+  Audio(ClientToBridgeAudioMsgCommand),
   Bluetooth(ClientToBridgeBluetoothMsg),
+  Capabilities(ClientToBridgeCapabilitiesMsgRequest),
+  Geo(ClientToBridgeGeoMsg),
+  Hardware(ClientToBridgeHardwareMsg),
+  Library(ClientToBridgeLibraryMsg),
+  Net(ClientToBridgeNetMsg),
+  Notifications(ClientToBridgeNotificationsMsg),
+  Phone(ClientToBridgePhoneMsg),
+  Player(ClientToBridgePlayerMsg),
   Store(ClientToBridgeStoreMsgRequest),
   System(ClientToBridgeSystemMsg),
+  Time(ClientToBridgeTimeMsgRequest),
   Voice(ClientToBridgeVoiceMsgCommand),
-  Interaction(ClientToBridgeInteractionMsgCommand),
+  Webapp(ClientToBridgeWebappMsgRequest),
   Forward(ForwardMessage),
 
   // stock compatibility
   LegacyStock(ClientLegacyStockCommand),
 
-  // typed-request response: the connection layer extracts these from
-  // any modern inbound message with `MsgMeta::Response { request_id }`
-  // and the listener routes them to `ClientManager::complete_pending`
-  // before normal handler dispatch.
+  // typed-request response
   Response {
     request_id: Uuid,
     data: ClientToBridgeMsgData,
@@ -75,18 +85,37 @@ impl From<ClientToBridgeMsg> for RecvMsgData {
         Some(req) => Self::Asset(req),
         None => Self::Hole,
       },
+      ClientToBridgeMsgData::Audio(inner) => match inner.into_command() {
+        Some(cmd) => Self::Audio(cmd),
+        None => Self::Hole,
+      },
       ClientToBridgeMsgData::Bluetooth(inner) => Self::Bluetooth(inner),
+      ClientToBridgeMsgData::Capabilities(inner) => match inner.into_request() {
+        Some(req) => Self::Capabilities(req),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::Geo(inner) => Self::Geo(inner),
+      ClientToBridgeMsgData::Hardware(inner) => Self::Hardware(inner),
+      ClientToBridgeMsgData::Library(inner) => Self::Library(inner),
+      ClientToBridgeMsgData::Net(inner) => Self::Net(inner),
+      ClientToBridgeMsgData::Notifications(inner) => Self::Notifications(inner),
+      ClientToBridgeMsgData::Phone(inner) => Self::Phone(inner),
+      ClientToBridgeMsgData::Player(inner) => Self::Player(inner),
       ClientToBridgeMsgData::Store(inner) => match inner.into_request() {
         Some(req) => Self::Store(req),
         None => Self::Hole,
       },
       ClientToBridgeMsgData::System(inner) => Self::System(inner),
+      ClientToBridgeMsgData::Time(inner) => match inner.into_request() {
+        Some(req) => Self::Time(req),
+        None => Self::Hole,
+      },
       ClientToBridgeMsgData::Voice(inner) => match inner.into_command() {
         Some(cmd) => Self::Voice(cmd),
         None => Self::Hole,
       },
-      ClientToBridgeMsgData::Interaction(inner) => match inner.into_command() {
-        Some(cmd) => Self::Interaction(cmd),
+      ClientToBridgeMsgData::Webapp(inner) => match inner.into_request() {
+        Some(req) => Self::Webapp(req),
         None => Self::Hole,
       },
       ClientToBridgeMsgData::Forward(data) => Self::Forward(data),
@@ -95,7 +124,7 @@ impl From<ClientToBridgeMsg> for RecvMsgData {
   }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum PossibleRecvMsg {
   Modern(ClientToBridgeMsg),

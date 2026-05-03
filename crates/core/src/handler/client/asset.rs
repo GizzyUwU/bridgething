@@ -42,7 +42,7 @@ impl AssetHandler {
         .map_err(Into::into);
     }
 
-    if !self.handle.state.gateway_status().await.connected {
+    if self.handle.state.gateway_info().await.is_none() {
       return self
         .handle
         .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))

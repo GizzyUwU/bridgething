@@ -56,11 +56,18 @@ pub enum MsgMeta {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "wire.ts")]
 pub enum WireError {
-  /// The receiver does not implement this request variant.
+  /// Receiver does not recognize this request variant. Used by the codec
+  /// layer's auto-nack on a typed-decode failure (the variant the sender
+  /// names is not in the receiver's enum) and by handlers that explicitly
+  /// reject something they cannot map.
   Unsupported,
-  /// The receiver could not decode or validate the request payload.
+  /// Receiver recognizes the variant but the backend is not yet wired.
+  /// Distinct from `Unsupported` so SDK consumers can tell "you have the
+  /// wrong daemon version" from "this surface ships in a future slice".
+  Unimplemented,
+  /// Receiver could not decode or validate the request payload.
   Malformed { reason: String },
-  /// An unexpected internal error occurred while handling the request.
+  /// Unexpected internal error while handling the request.
   HandlerFailed { reason: String },
 }
 

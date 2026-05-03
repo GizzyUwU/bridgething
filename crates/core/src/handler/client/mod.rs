@@ -1,19 +1,39 @@
 mod asset;
+mod audio;
 mod bluetooth;
-mod interaction;
+mod capabilities;
+mod geo;
+mod hardware;
+mod library;
+mod net;
+mod notifications;
+mod phone;
+mod player;
 mod stock;
 mod store;
 mod system;
+mod time;
 mod voice;
+mod webapp;
 
 use asset::*;
+use audio::*;
 use bluetooth::*;
-use interaction::*;
+use capabilities::*;
+use geo::*;
+use hardware::*;
 use libbridgething::{ForwardMessage, wire::WireError};
+use library::*;
+use net::*;
+use notifications::*;
+use phone::*;
+use player::*;
 use stock::*;
 use store::*;
 use system::*;
+use time::*;
 use voice::*;
+use webapp::*;
 
 mod handle;
 pub use handle::*;
@@ -26,29 +46,6 @@ use crate::{
   bluetooth::BluetoothMan, handler::HandlerError, net::WSError, state::State, stock::StockInterAppSend,
   transport::TransportController,
 };
-
-/// Run a handler future on a fresh task; if it errors, log it AND surface it
-/// to the requesting webapp as a typed protocol-level Error so the caller
-/// isn't left wondering why their request never came back. Domain errors
-/// (when handlers add them later) take a different path through
-/// `MsgHandle::respond_err`. This catches the residual `?` propagation.
-fn dispatch<F, Fut>(handle: MsgHandle, work: F)
-where
-  F: FnOnce(MsgHandle) -> Fut + Send + 'static,
-  Fut: std::future::Future<Output = HandlerResult> + Send + 'static,
-{
-  let err_handle = handle.clone();
-  tokio::spawn(async move {
-    if let Err(e) = work(handle).await {
-      tracing::error!("({:?}) handler failed: {:?}", err_handle.from, e);
-      let _ = err_handle
-        .respond(WireError::HandlerFailed {
-          reason: format!("{e:?}"),
-        })
-        .await;
-    }
-  });
-}
 
 pub struct ClientHandler {
   state: State,
@@ -72,11 +69,46 @@ impl ClientHandler {
       RecvMsgData::Asset(msg) => {
         dispatch(handle, move |h| async move { AssetHandler::new(h).handle(msg).await });
       }
+      RecvMsgData::Audio(msg) => {
+        dispatch(handle, move |h| async move { AudioHandler::new(h).handle(msg).await });
+      }
       RecvMsgData::Bluetooth(msg) => {
         dispatch(
           handle,
           move |h| async move { BluetoothHandler::new(h).handle(msg).await },
         );
+      }
+      RecvMsgData::Capabilities(msg) => {
+        dispatch(
+          handle,
+          move |h| async move { CapabilitiesHandler::new(h).handle(msg).await },
+        );
+      }
+      RecvMsgData::Geo(msg) => {
+        dispatch(handle, move |h| async move { GeoHandler::new(h).handle(msg).await });
+      }
+      RecvMsgData::Hardware(msg) => {
+        dispatch(
+          handle,
+          move |h| async move { HardwareHandler::new(h).handle(msg).await },
+        );
+      }
+      RecvMsgData::Library(msg) => {
+        dispatch(handle, move |h| async move { LibraryHandler::new(h).handle(msg).await });
+      }
+      RecvMsgData::Net(msg) => {
+        dispatch(handle, move |h| async move { NetHandler::new(h).handle(msg).await });
+      }
+      RecvMsgData::Notifications(msg) => {
+        dispatch(handle, move |h| async move {
+          NotificationsHandler::new(h).handle(msg).await
+        });
+      }
+      RecvMsgData::Phone(msg) => {
+        dispatch(handle, move |h| async move { PhoneHandler::new(h).handle(msg).await });
+      }
+      RecvMsgData::Player(msg) => {
+        dispatch(handle, move |h| async move { PlayerHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Store(msg) => {
         dispatch(handle, move |h| async move { StorageHandler::new(h).handle(msg).await });
@@ -84,14 +116,14 @@ impl ClientHandler {
       RecvMsgData::System(msg) => {
         dispatch(handle, move |h| async move { SystemHandler::new(h).handle(msg).await });
       }
+      RecvMsgData::Time(msg) => {
+        dispatch(handle, move |h| async move { TimeHandler::new(h).handle(msg).await });
+      }
       RecvMsgData::Voice(msg) => {
         dispatch(handle, move |h| async move { VoiceHandler::new(h).handle(msg).await });
       }
-      RecvMsgData::Interaction(msg) => {
-        dispatch(
-          handle,
-          move |h| async move { InteractionHandler::new(h).handle(msg).await },
-        );
+      RecvMsgData::Webapp(msg) => {
+        dispatch(handle, move |h| async move { WebappHandler::new(h).handle(msg).await });
       }
       RecvMsgData::Forward(msg) => {
         dispatch(handle, move |h| async move {
@@ -107,9 +139,9 @@ impl ClientHandler {
         );
       }
 
-      // Response-meta inbound messages are intercepted by `ClientListener::recv`
+      // response-meta inbound messages are intercepted by `ClientListener::recv`
       // and routed to `ClientManager::complete_pending` before they reach the
-      // handler. Anything that arrives here is a bug — the listener leaked one.
+      // handler. anything that arrives here is a bug.
       RecvMsgData::Response { request_id, .. } => {
         tracing::error!(
           "({}) Response-meta message {request_id} reached the handler — listener interception is broken",
@@ -174,4 +206,22 @@ impl TopLevelHandler {
 
     Ok(())
   }
+}
+
+fn dispatch<F, Fut>(handle: MsgHandle, work: F)
+where
+  F: FnOnce(MsgHandle) -> Fut + Send + 'static,
+  Fut: std::future::Future<Output = HandlerResult> + Send + 'static,
+{
+  let err_handle = handle.clone();
+  tokio::spawn(async move {
+    if let Err(e) = work(handle).await {
+      tracing::error!("({:?}) handler failed: {:?}", err_handle.from, e);
+      let _ = err_handle
+        .respond(WireError::HandlerFailed {
+          reason: format!("{e:?}"),
+        })
+        .await;
+    }
+  });
 }

@@ -10,6 +10,18 @@ export type AssetRetention =
   | { type: 'ttl'; data: TtlRetention }
   | { type: 'persistent' };
 
+/**
+ * What the gateway-side audio backend supports. `earcons` are short
+ * named sounds the companion can play; `voices` are TTS voices.
+ */
+export type AudioCapabilities = { earcons: Array<string>; voices: Array<VoiceDescriptor> };
+
+/**
+ * Bridge-side identity announce. Daemon sends one of these to every
+ * gateway on connect (companion needs to know what daemon it's talking
+ * to so it can opt out of unsupported surfaces). The companion's mirror
+ * is `GatewayCapabilities::Announce` over in `shared::capabilities`.
+ */
 export type BridgeThingMeta = {
   bridgethingVersion: string;
   libbridgethingVersion: string;
@@ -32,27 +44,240 @@ export type BridgeThingMeta = {
   credits: string;
 };
 
+export type BrightnessMode = 'auto' | 'manual';
+
+/**
+ * Backlight state. `level` is the user-set value (only respected in
+ * `Manual`); `effective_level` is what's actually on the panel — equal
+ * to `level` in `Manual`, ALS-derived in `Auto`.
+ */
+export type BrightnessState = { mode: BrightnessMode; level: number; effectiveLevel: number };
+
+/**
+ * One row in a `BrowseResult`: either a folder (drilldown) or a leaf
+ * item the user can play / queue / favorite.
+ */
+export type BrowseEntry = { type: 'folder'; data: BrowseFolder } | { type: 'item'; data: LibraryItem };
+
+/**
+ * A drilldown node. `node_id` is opaque and gateway-defined; webapps
+ * pass it back as the next `browse({ node_id })` to descend.
+ */
+export type BrowseFolder = { nodeId: string; title: string; subtitle: string | null; artworkId: string | null };
+
+/**
+ * Page of browse results. `next_page_token` is the opaque cursor a
+ * webapp passes back as `browse({ page_token: ... })` to fetch the
+ * next page; `None` means this is the last page.
+ */
+export type BrowseResult = { entries: Array<BrowseEntry>; nextPageToken: string | null };
+
+/**
+ * Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
+ * platform-defined reason (network, busy, etc.).
+ */
+export type CallEndReason =
+  | { type: 'local' }
+  | { type: 'remote' }
+  | { type: 'missed' }
+  | { type: 'failed'; data: { reason: string } };
+
+/**
+ * What the daemon advertises to webapps. `gateway: None` means no
+ * companion is connected; webapps that depend on companion-routed
+ * surfaces (Library, Net, Notifications, etc.) should branch on this.
+ * `authority` is the live set of scopes the companion currently claims.
+ */
+export type Capabilities = {
+  gateway: GatewayInfo | null;
+  available: SurfaceAvailability;
+  authority: Array<CompanionAuthorityScope>;
+  uriSchemes: Array<string>;
+  network: NetworkInfo;
+  audio: AudioCapabilities;
+};
+
+/**
+ * One axis the companion can declare authority over. Each scope has a
+ * fallback source the daemon merges with when no claim is active or
+ * the claim has gone stale (see daemon-side merge in `core::player`).
+ * Unknown scopes arriving at an older daemon are stored opaquely and
+ * ignored.
+ */
+export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback';
+
 export type CurrentlyActiveApplication = { id: string; name: string };
 
 export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
 
 export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
 
+/**
+ * Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.
+ * `soc_temp_c` may be `None` on builds where the SoC thermal probe is
+ * not exposed by the kernel.
+ */
+export type Diagnostics = {
+  diskUsedBytes: number;
+  diskFreeBytes: number;
+  memUsedBytes: number;
+  memAvailBytes: number;
+  uptimeS: number;
+  socTempC: number | null;
+  loadAvg: [number, number, number];
+  daemonVersion: string;
+  kernelVersion: string;
+  bootId: string;
+};
+
+/**
+ * Why a notification went away. `Acted` covers both positive and
+ * negative invokes; gateways that distinguish dismiss-vs-acted may
+ * surface both as `Acted`.
+ */
+export type DismissReason = 'userDismissed' | 'acted' | 'remoteDismissed';
+
+/**
+ * Page of the user's favorited / liked / saved library items. Mixed-kind
+ * because most platforms expose one "Saved" surface across kinds.
+ */
+export type FavoritesPage = { items: Array<LibraryItem>; nextPageToken: string | null };
+
 export type ForwardMessage =
   | { encoding: 'text'; data: string }
   | { encoding: 'json'; data: unknown }
   | { encoding: 'binary'; data: Uint8Array };
 
-export type GatewayMeta = {
+/**
+ * What a connected companion advertises about itself. Sent on every
+ * session-up via `GatewayToBridgeCapabilitiesMsg::Announce`, and re-sent
+ * on any change. The daemon caches the latest snapshot per peer and
+ * derives the webapp-facing `Capabilities` from it.
+ */
+export type GatewayCapabilities = {
+  gateway: GatewayInfo;
+  uriSchemes: Array<string>;
+  network: NetworkInfo;
+  available: SurfaceAvailability;
+  audio: AudioCapabilities;
+};
+
+/**
+ * Identity payload describing the companion peer the daemon is talking
+ * to. Replaces the old `GatewayMeta` and the old `GatewayStatus` bits.
+ * Address is the BT MAC the companion advertises; on transports without
+ * a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
+ * is the synthetic address as a string.
+ */
+export type GatewayInfo = {
+  address: string;
+  name: string;
+  osName: string;
+  appName: string;
+  appVersion: string;
   adapterVersion: string;
   libVersion: string;
   libbridgethingVersion: string;
-  appName: string;
-  appVersion: string;
-  osName: string;
 };
 
+/**
+ * Subscriber's accuracy preference. `Coarse` opts into the lower-power
+ * city-block-grade fix on platforms that distinguish (iOS reduced
+ * accuracy, Android `PRIORITY_BALANCED_POWER_ACCURACY`). The daemon
+ * aggregates across subscribers and forwards the most-demanding to the
+ * companion.
+ */
+export type GeoAccuracy = 'coarse' | 'fine';
+
+export type GeoError = 'permissionDenied' | 'unavailable' | 'unknownToken';
+
+export type HardwareError = 'levelOutOfRange' | 'modeMismatch';
+
+/**
+ * Snapshot of the device's hardware-controlled surfaces. Sent on
+ * `hardware.state.get` and re-broadcast on any change.
+ */
+export type HardwareState = { brightness: BrightnessState; ambientLight: number };
+
+/**
+ * One header on an HTTP request or response. Key order is preserved
+ * across serialize/deserialize.
+ */
+export type HttpHeader = { name: string; value: string };
+
+export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
+
 export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8Array };
+
+/**
+ * Coarse type tag a webapp uses to filter or branch. Mirrors the variant
+ * names of `LibraryItem`; kept separate so search/recommendations can
+ * constrain by kind without having to construct a sample item.
+ */
+export type ItemKind = 'track' | 'album' | 'playlist' | 'podcastEpisode' | 'show' | 'artist' | 'station';
+
+/**
+ * Stable URI + kind a webapp passes back to act on a library item
+ * (e.g. `player.play({ uri })`, `library.favorites.toggle({ item })`).
+ * `persistent_id` is the platform-stable id when the gateway has one;
+ * webapps treat it as opaque.
+ */
+export type ItemRef = { uri: string; kind: ItemKind; persistentId: string | null };
+
+export type LibraryError =
+  | { type: 'notFound'; data: { uri: string } }
+  | { type: 'notSupported'; data: { reason: string } }
+  | { type: 'unauthorized' };
+
+/**
+ * One playable / browsable item from the library. Lean per-variant
+ * payload — gateways translate platform-specific extras down to these
+ * fields, rare per-platform fields just don't surface. Forward-compat:
+ * adding new variants or fields is an additive change webapps can
+ * branch on.
+ */
+export type LibraryItem =
+  | { type: 'track'; data: Track }
+  | { type: 'album'; data: Album }
+  | { type: 'playlist'; data: Playlist }
+  | { type: 'podcastEpisode'; data: PodcastEpisode }
+  | { type: 'show'; data: Show }
+  | { type: 'artist'; data: Artist }
+  | { type: 'station'; data: Station };
+
+/**
+ * One log record. `ts_unix_s` is unix-epoch seconds. `target` is the
+ * tracing target / unit name; `message` is the rendered single-line
+ * body. Pre-filtered at subscription time so wire-bloating trace
+ * events don't reach webapps.
+ */
+export type LogEntry = { tsUnixS: number; level: LogLevel; target: string; message: string };
+
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * What stream of log records a subscription pulls from. `Daemon` is the
+ * bridgething tracing subscriber; `System` is the `journald` view; `All`
+ * merges both in arrival order.
+ */
+export type LogSource = 'daemon' | 'system' | 'all';
+
+/**
+ * Currently-playing track, populated to the extent the gateway/iAP2
+ * stream has surfaced. All fields are optional because each one arrives
+ * as a separate ANCS-style attribute fetch on iAP2; the daemon
+ * accumulates and the snapshot reflects whatever's known so far.
+ */
+export type MediaItem = {
+  uri: string | null;
+  persistentId: string | null;
+  title: string | null;
+  album: string | null;
+  artist: string | null;
+  liked: boolean | null;
+  artworkId: string | null;
+  durationMs: number | null;
+};
 
 /**
  * Per-track attributes that vary per song. `persistent_id` is a stable
@@ -73,24 +298,199 @@ export type MediaItemUpdate = {
   durationMs: number | null;
 };
 
+export type NetError =
+  | { type: 'requestFailed'; data: { reason: string } }
+  | { type: 'timeout' }
+  | { type: 'unavailable' }
+  | { type: 'noGateway' };
+
+/**
+ * Outbound HTTP request. `body` is inline; webapps pushing large bodies
+ * should chunk-stream via `AssetCache` and pass an asset id in a future
+ * extension. `timeout_ms` defaults to gateway choice when None.
+ */
+export type NetFetchRequest = {
+  url: string;
+  method: HttpMethod;
+  headers: Array<HttpHeader>;
+  body?: Uint8Array | null;
+  timeoutMs: number | null;
+  redirect: RedirectPolicy;
+};
+
+/**
+ * Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
+ * otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
+ */
+export type NetFetchResponse = { status: number; headers: Array<HttpHeader>; body: Uint8Array };
+
+/**
+ * First frame of a streamed response. `total_size` is `Content-Length`
+ * when the gateway has it; otherwise `None` and the consumer accumulates
+ * chunks until `End`.
+ */
+export type NetFetchStreamBegin = {
+  requestId: Uint8Array;
+  status: number;
+  headers: Array<HttpHeader>;
+  totalSize: number | null;
+};
+
+/**
+ * One body chunk of a streamed response. Chunks arrive in order;
+ * `offset` is the byte position of `bytes[0]` within the full body.
+ */
+export type NetFetchStreamChunk = { requestId: Uint8Array; offset: number; bytes: Uint8Array };
+
+/**
+ * Terminates a stream. After `End` no further chunks for `request_id`
+ * are valid.
+ */
+export type NetFetchStreamEnd = { requestId: Uint8Array };
+
+/**
+ * What kind of network the companion's host is currently using. `metered`
+ * is the OS-reported metered flag; webapps should treat it as a hint
+ * (e.g. defer non-essential fetches) rather than a hard ban.
+ */
+export type NetworkInfo = { kind: NetworkKind; metered: boolean };
+
+export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
+
+/**
+ * One notification surfaced from the connected companion's notification
+ * center. `id` is companion-stable for the lifetime of the notification
+ * — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+ * `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
+ * optional because ANCS treats them as separate attribute fetches.
+ */
+export type Notification = {
+  id: string;
+  app: NotificationApp;
+  category: NotificationCategory;
+  title: string | null;
+  subtitle: string | null;
+  message: string | null;
+  timestampUnixS: number | null;
+  flags: NotificationFlags;
+  positiveAction: NotificationAction | null;
+  negativeAction: NotificationAction | null;
+};
+
+/**
+ * One ANCS-style action slot. `label` is the gateway-localized prompt
+ * the webapp renders on the action button.
+ */
+export type NotificationAction = { label: string };
+
+/**
+ * Originating app metadata. `bundle_id` is platform-stable
+ * (`com.apple.MobileSMS`, `com.spotify.client`, etc.); `display_name`
+ * and `icon_asset_id` are best-effort and may be missing on Android
+ * gateways that don't surface them cheaply.
+ */
+export type NotificationApp = { bundleId: string; displayName: string | null; iconAssetId: string | null };
+
+export type NotificationCategory =
+  | 'other'
+  | 'incomingCall'
+  | 'missedCall'
+  | 'voicemail'
+  | 'social'
+  | 'schedule'
+  | 'email'
+  | 'news'
+  | 'healthAndFitness'
+  | 'businessAndFinance'
+  | 'location'
+  | 'entertainment';
+
+export type NotificationError =
+  | { type: 'notFound'; data: { id: string } }
+  | { type: 'noActionAvailable' }
+  | { type: 'actionRejected'; data: { reason: string } };
+
+/**
+ * ANCS-shaped flags. `silent` mirrors the iOS "do not surface
+ * audibly" hint, `important` is the high-importance flag, and
+ * `pre_existing` is true for notifications that arrived before the
+ * daemon connected (replayed by the companion on first sync).
+ */
+export type NotificationFlags = { silent: boolean; important: boolean; preExisting: boolean };
+
+/**
+ * Page of notifications returned from `notifications.list`. Gateways
+ * page large notification centers; webapps drive pagination via
+ * `next_page_token`.
+ */
+export type NotificationsPage = { items: Array<Notification>; nextPageToken: string | null };
+
+/**
+ * Delta event the companion or iAP2 stream emits whenever a player
+ * attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
+ * (the only delta-shaped event in the protocol). Every field is
+ * optional: producers populate only what they have fresh information
+ * about, and the daemon merges into stable internal state.
+ */
 export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null; playback: PlaybackUpdate | null };
 
 export type Peer = { device: Device; paired: boolean; iap2: PeerIap2Status; companion: PeerCompanionStatus };
 
-export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { type: 'connected'; data: GatewayMeta };
+export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { type: 'connected'; data: GatewayInfo };
 
 export type PeerIap2Status = 'none' | 'linkUp' | 'authenticated' | 'identified';
 
-export type PhoneCallDirection = 'Incoming' | 'Outgoing';
+/**
+ * One telephony call. `call_id` is companion-stable for the call's
+ * lifetime; webapps pass it back to `answer`/`decline`/`end`/`hold`.
+ * `remote_id` is the raw E.164 (or platform raw); `display_name` is the
+ * gateway's resolved contact name when available.
+ */
+export type PhoneCall = {
+  callId: string;
+  remoteId: string;
+  displayName: string;
+  status: PhoneCallStatus;
+  direction: PhoneCallDirection;
+  startedAtUnixS: number | null;
+};
+
+export type PhoneCallDirection = 'incoming' | 'outgoing';
 
 export type PhoneCallStatus =
-  | 'Disconnected'
-  | 'Sending'
-  | 'Ringing'
-  | 'Connecting'
-  | 'Active'
-  | 'Held'
-  | 'Disconnecting';
+  | 'disconnected'
+  | 'sending'
+  | 'ringing'
+  | 'connecting'
+  | 'active'
+  | 'held'
+  | 'disconnecting';
+
+export type PhoneError =
+  | { type: 'callNotFound'; data: { call_id: string } }
+  | { type: 'actionRejected'; data: { reason: string } };
+
+/**
+ * Snapshot of every active call known to the gateway. Multi-call is
+ * possible (call-waiting, conference) — webapps rendering only one
+ * active call typically pick the first non-Held entry.
+ */
+export type PhoneState = { activeCalls: Array<PhoneCall> };
+
+/**
+ * Optional context for `play({ uri })`. `context_uri` is the album /
+ * playlist / show URI the track is being played from; gateways with
+ * playlist support honor it for skip-next semantics. `position` is the
+ * 0-based index inside the context.
+ */
+export type PlayContext = { contextUri: string; position: number | null };
+
+/**
+ * Per-session playback snapshot: where in the song we are, what mode is
+ * engaged. `position_ms` is the live playhead at snapshot time; webapps
+ * extrapolate forward locally while `state == Playing`.
+ */
+export type Playback = { state: PlaybackState; positionMs: number; shuffle: boolean; repeat: RepeatMode };
 
 export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
 
@@ -109,6 +509,13 @@ export type PlaybackRestrictions = {
 };
 
 /**
+ * Three-state playback. `Stopped` is the no-track-loaded resting state;
+ * `Paused` is "track is loaded, position is held"; `Playing` is the
+ * progressing state.
+ */
+export type PlaybackState = 'stopped' | 'paused' | 'playing';
+
+/**
  * Per-playback-session attributes that vary regardless of track:
  * playing/paused, position, shuffle/repeat, and the iOS bundle
  * identifier of the app currently driving playback (e.g.
@@ -124,17 +531,167 @@ export type PlaybackUpdate = {
   appDisplayName: string | null;
 };
 
+export type PlayerError =
+  | { type: 'schemeUnclaimed'; data: { scheme: string } }
+  | { type: 'playFailed'; data: { reason: string } }
+  | { type: 'noGateway' }
+  | { type: 'notInQueue'; data: { index: number } };
+
+/**
+ * User-tunable knobs that are not "currently playing" state.
+ * `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
+ * distinguishes "user explicitly set zero" from "feature unsupported by
+ * gateway".
+ */
+export type PlayerOptions = { speed: number; crossfade_ms: number | null };
+
+/**
+ * Full player snapshot the daemon broadcasts to webapps. Initial value
+ * arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
+ * subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
+ * merges into the cached snapshot.
+ */
+export type PlayerState = {
+  track: MediaItem | null;
+  playback: Playback;
+  queue: Array<QueueItem>;
+  options: PlayerOptions;
+};
+
+/**
+ * Lean cross-platform shape for a playlist. `uri` is what `player.play`
+ * would route on; `track_count` is best-effort (some sources don't expose
+ * it cheaply); `owner_name` is whatever the source surfaces (Spotify
+ * owner, Apple Music curator, etc.).
+ */
+export type Playlist = {
+  uri: string;
+  name: string;
+  ownerName: string | null;
+  trackCount: number | null;
+  artworkId: string | null;
+};
+
+/**
+ * One episode of a podcast. `show_name` mirrors what the gateway exposes
+ * at episode-level so a webapp can render show + episode without a
+ * separate fetch. `published_at_ms` is best-effort; not every gateway
+ * surfaces it.
+ */
+export type PodcastEpisode = {
+  uri: string;
+  name: string;
+  showName: string | null;
+  durationMs: number | null;
+  publishedAtUnixS: number | null;
+  artworkId: string | null;
+};
+
+/**
+ * One position fix from the gateway. `accuracy_m` is the 1-sigma
+ * horizontal radius. `speed_mps` and `heading_deg` are populated when
+ * the underlying source provides them (CLLocation on iOS does for moving
+ * fixes; Android's FusedLocationProvider similar). `ts_ms` is the
+ * gateway-provided fix timestamp, not the wire-arrival time.
+ */
+export type Position = {
+  lat: number;
+  lon: number;
+  altM: number | null;
+  accuracyM: number;
+  speedMps: number | null;
+  headingDeg: number | null;
+  tsUnixS: number;
+};
+
 export type Priority = 'normal' | 'bulk';
 
 /**
- * `repeat` is a typed enum (Off/All/One) shared with
- * the canonical `PlaybackOptions` shape webapps already render and
- * with the outbound `SetRepeat` interaction command. iOS, Android,
- * Spotify, and Apple Music all expose three repeat states; the
- * underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
- * translate to/from this enum.
+ * One row in the player queue. Lean cross-platform shape — gateways
+ * that have richer per-track data still surface what fields they have.
+ * `uri` is required because every queued item must be addressable for
+ * `skipToIndex`. `persistent_id` is the platform-stable id when
+ * available; webapps treat it as opaque.
+ */
+export type QueueItem = {
+  uri: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  artworkId: string | null;
+  durationMs: number | null;
+  persistentId: string | null;
+};
+
+/**
+ * Where in the queue a `queue({ uri })` should land. `Append` (default)
+ * goes at the end; `Next` is play-next; `Index` is an explicit position.
+ */
+export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'index'; data: number };
+
+/**
+ * Page of recommendation results. Gateway decides how seed + kind
+ * interact (Spotify uses radio-style seeding, Apple Music uses curated
+ * rails) — the daemon doesn't prescribe.
+ */
+export type RecommendationsResult = { items: Array<LibraryItem>; nextPageToken: string | null };
+
+export type RedirectPolicy = 'follow' | 'manual' | 'error';
+
+/**
+ * `repeat` is a typed enum (Off/All/One) shared across the player
+ * surface and the iAP2 NowPlaying CSM / MediaSession backends, which
+ * all expose three repeat states.
  */
 export type RepeatMode = 'off' | 'all' | 'one';
+
+/**
+ * Page of search results. `kinds` is the constrained kinds the search
+ * honored (echoed back so webapps can detect ignored constraints); items
+ * are ranked best-first.
+ */
+export type SearchResult = { items: Array<LibraryItem>; kinds: Array<ItemKind>; nextPageToken: string | null };
+
+/**
+ * One podcast show (parent of `PodcastEpisode`). `episode_count` is
+ * best-effort.
+ */
+export type Show = {
+  uri: string;
+  name: string;
+  publisher: string | null;
+  episodeCount: number | null;
+  artworkId: string | null;
+};
+
+/**
+ * Algorithmic / radio station. `seed` is the URI the station was seeded
+ * from when known (artist, track, etc.).
+ */
+export type Station = { uri: string; name: string; seed: string | null; artworkId: string | null };
+
+/**
+ * Bool feature flags the daemon exposes to webapps. Each is true when the
+ * surface has both a backing implementation and (where applicable) a
+ * connected companion claiming to provide it. False = the surface will
+ * respond `Unsupported` or `Unimplemented` to verbs.
+ */
+export type SurfaceAvailability = {
+  geo: boolean;
+  notifications: boolean;
+  netFetch: boolean;
+  netWs: boolean;
+  audioTts: boolean;
+};
+
+/**
+ * Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
+ * (`America/Denver`, `Europe/London`); `locale` is BCP-47;
+ * `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
+ * seconds — webapps reading time should use the device clock if any
+ * but use this as the trust anchor on first arrival.
+ */
+export type TimeInfo = { tzIana: string; locale: string; wallClockUnixS: number | null };
 
 export type Track = {
   id: string;
@@ -149,6 +706,12 @@ export type Track = {
 
 export type TtlRetention = { seconds: number };
 
+/**
+ * One TTS voice the companion's audio backend can speak as. `id` is
+ * platform-opaque (Apple/Android voice id); `locale` is BCP-47.
+ */
+export type VoiceDescriptor = { id: string; name: string; locale: string };
+
 export type WebappInfo = { name: string; source: WebappSource; version: string | null; description: string | null };
 
 /**
@@ -157,3 +720,15 @@ export type WebappInfo = { name: string; source: WebappSource; version: string |
  * partition and shadow built-ins of the same name.
  */
 export type WebappSource = 'builtin' | 'installed';
+
+export type WsError =
+  | { type: 'connectFailed'; data: { reason: string } }
+  | { type: 'backpressure' }
+  | { type: 'frameTooLarge' }
+  | { type: 'gatewayDisconnected' }
+  | { type: 'protocolError'; data: { reason: string } };
+
+/**
+ * One WS frame. The daemon does not split or merge frames.
+ */
+export type WsFrame = { type: 'text'; data: string } | { type: 'binary'; data: Uint8Array };

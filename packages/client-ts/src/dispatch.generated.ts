@@ -14,37 +14,111 @@ import {
   type BluetoothStatus,
   type Box,
   type BridgeThingMeta,
+  type BrightnessState,
+  type CapabilitiesSnapshot,
   type ClientToBridgeMsg,
   type ConnectBluetooth,
   type ConnectedDevice,
+  type DiagnosticsReply,
   type DisablePan,
+  type DisplaySetLevel,
+  type DisplaySetMode,
+  type Earcon,
   type EnablePan,
+  type FavoriteChanged,
+  type FavoritesSet,
+  type FavoritesToggle,
   type ForgetBluetooth,
-  type GatewayStatus,
+  type GeoErrorReply,
+  type GeoGetOnce,
+  type GeoGetOnceReply,
+  type GeoUnwatch,
+  type GeoWatch,
+  type GeoWatchReply,
+  type HardwareStateReply,
   type KVDelete,
   type KVGet,
   type KVPut,
+  type LibraryBrowse,
+  type LibraryBrowseReply,
+  type LibraryErrorReply,
+  type LibraryFavoritesList,
+  type LibraryFavoritesListReply,
+  type LibraryRecommendations,
+  type LibraryRecommendationsReply,
+  type LibrarySearch,
+  type LibrarySearchReply,
+  type LogEntry,
+  type LogsSubscribe,
+  type LogsSubscribeReply,
+  type LogsTail,
+  type LogsTailReply,
+  type LogsUnsubscribe,
   type MicMute,
   type MicUnmute,
-  type OtaPowerOff,
-  type OtaReboot,
+  type NetFetch,
+  type NetFetchErrorReply,
+  type NetFetchReply,
+  type NetFetchStreamBegin,
+  type NetFetchStreamChunk,
+  type NetFetchStreamEnd,
+  type NetWsClose,
+  type NetWsClosed,
+  type NetWsErrorEvent,
+  type NetWsErrorReply,
+  type NetWsMessage,
+  type NetWsOpen,
+  type NetWsOpenReply,
+  type NetWsOpened,
+  type NetWsSend,
+  type Notification,
+  type NotificationInvoke,
+  type NotificationRemoved,
+  type NotificationsErrorReply,
+  type NotificationsList,
+  type NotificationsListReply,
+  type NowPlayingUpdate,
   type PairBluetooth,
   type PairedDevicesMap,
   type PeerSnapshotMap,
-  type PhoneCallAccept,
-  type PhoneCallEnd,
-  type PhoneCallImage,
-  type PhoneCallInfo,
-  type PhoneCallMessage,
-  type PlayerImage,
-  type PlayerQueue,
-  type PlayerState,
+  type PhoneCall,
+  type PhoneCallAction,
+  type PhoneCallEnded,
+  type PhoneErrorReply,
+  type PhoneStateReply,
+  type PlayUri,
+  type PlayerErrorReply,
+  type PlayerQueueReply,
+  type PlayerStateReply,
+  type Position,
+  type QueueUri,
   type SeekTo,
   type SetBluetoothAlias,
+  type SetCrossfade,
+  type SetMute,
   type SetRepeat,
   type SetShuffle,
+  type SetSpeed,
+  type SetVolume,
   type SkipToIndex,
   type StorageResponse,
+  type TimeSnapshot,
+  type Tts,
+  type TtsCancel,
+  type TtsEnded,
+  type TtsStarted,
+  type VolumeChanged,
+  type WebappActivate,
+  type WebappActiveChanged,
+  type WebappActiveReply,
+  type WebappCurrentReply,
+  type WebappErrorReply,
+  type WebappInstall,
+  type WebappInstallProgress,
+  type WebappInstalledReply,
+  type WebappListReply,
+  type WebappUninstall,
+  type WebappUninstalled,
   type WireError,
   newUuidBytes,
 } from '@bridgething/lib';
@@ -62,6 +136,12 @@ export type AssetInboundHandlers = {
   cleared: (msg: AssetCleared) => void;
 };
 
+export type AudioInboundHandlers = {
+  ttsStarted: (msg: TtsStarted) => void;
+  ttsEnded: (msg: TtsEnded) => void;
+  volumeChanged: (msg: VolumeChanged) => void;
+};
+
 export type BluetoothInboundHandlers = {
   status: (msg: BluetoothStatus) => void;
   connectedDevice: (msg: ConnectedDevice) => void;
@@ -71,20 +151,96 @@ export type BluetoothInboundHandlers = {
   pairedDevices: (msg: PairedDevicesMap) => void;
 };
 
-export type SystemInboundHandlers = {
-  version: (msg: Box) => void;
-  gatewayStatus: (msg: GatewayStatus) => void;
-  otaReboot: (msg: OtaReboot) => void;
-  otaPowerOff: (msg: OtaPowerOff) => void;
+export type CapabilitiesInboundHandlers = {
+  update: (msg: CapabilitiesSnapshot) => void;
+  snapshot: (msg: CapabilitiesSnapshot) => void;
+};
+
+export type GeoInboundHandlers = {
+  position: (msg: Position) => void;
+  watchReply: (msg: GeoWatchReply) => void;
+  getOnceReply: (msg: GeoGetOnceReply) => void;
+  errorReply: (msg: GeoErrorReply) => void;
+};
+
+export type HardwareInboundHandlers = {
   ambientLightUpdate: (msg: AmbientLightUpdate) => void;
-  phoneCallInfo: (msg: PhoneCallInfo) => void;
+  brightnessChanged: (msg: BrightnessState) => void;
+  stateReply: (msg: HardwareStateReply) => void;
+};
+
+export type LibraryInboundHandlers = {
+  browseReply: (msg: LibraryBrowseReply) => void;
+  searchReply: (msg: LibrarySearchReply) => void;
+  recommendationsReply: (msg: LibraryRecommendationsReply) => void;
+  favoritesListReply: (msg: LibraryFavoritesListReply) => void;
+  libraryErrorReply: (msg: LibraryErrorReply) => void;
+  favoriteChanged: (msg: FavoriteChanged) => void;
+};
+
+export type NetInboundHandlers = {
+  fetchReply: (msg: NetFetchReply) => void;
+  fetchErrorReply: (msg: NetFetchErrorReply) => void;
+  fetchStreamBegin: (msg: NetFetchStreamBegin) => void;
+  fetchStreamChunk: (msg: NetFetchStreamChunk) => void;
+  fetchStreamEnd: (msg: NetFetchStreamEnd) => void;
+  wsOpenReply: (msg: NetWsOpenReply) => void;
+  wsErrorReply: (msg: NetWsErrorReply) => void;
+  wsOpened: (msg: NetWsOpened) => void;
+  wsMessage: (msg: NetWsMessage) => void;
+  wsClosed: (msg: NetWsClosed) => void;
+  wsErrorEvent: (msg: NetWsErrorEvent) => void;
+};
+
+export type NotificationsInboundHandlers = {
+  listReply: (msg: NotificationsListReply) => void;
+  errorReply: (msg: NotificationsErrorReply) => void;
+  posted: (msg: Notification) => void;
+  updated: (msg: Notification) => void;
+  removed: (msg: NotificationRemoved) => void;
+};
+
+export type PhoneInboundHandlers = {
+  callStarted: (msg: PhoneCall) => void;
+  callUpdated: (msg: PhoneCall) => void;
+  callEnded: (msg: PhoneCallEnded) => void;
+  stateReply: (msg: PhoneStateReply) => void;
+  errorReply: (msg: PhoneErrorReply) => void;
 };
 
 export type PlayerInboundHandlers = {
-  playerIdle: () => void;
-  playerState: (msg: PlayerState) => void;
-  queue: (msg: PlayerQueue) => void;
-  image: (msg: PlayerImage) => void;
+  snapshot: (msg: PlayerStateReply) => void;
+  delta: (msg: NowPlayingUpdate) => void;
+  queueChanged: (msg: PlayerQueueReply) => void;
+  stateReply: (msg: PlayerStateReply) => void;
+  queueReply: (msg: PlayerQueueReply) => void;
+  errorReply: (msg: PlayerErrorReply) => void;
+};
+
+export type SystemInboundHandlers = {
+  version: (msg: Box) => void;
+  diagnosticsReply: (msg: DiagnosticsReply) => void;
+  logsTailReply: (msg: LogsTailReply) => void;
+  logsSubscribeReply: (msg: LogsSubscribeReply) => void;
+  logEntry: (msg: LogEntry) => void;
+};
+
+export type TimeInboundHandlers = {
+  changed: (msg: TimeSnapshot) => void;
+  snapshot: (msg: TimeSnapshot) => void;
+};
+
+export type WebappInboundHandlers = {
+  listReply: (msg: WebappListReply) => void;
+  currentReply: (msg: WebappCurrentReply) => void;
+  activeReply: (msg: WebappActiveReply) => void;
+  uninstalledReply: (msg: WebappActiveReply) => void;
+  installedReply: (msg: WebappInstalledReply) => void;
+  errorReply: (msg: WebappErrorReply) => void;
+  activeChanged: (msg: WebappActiveChanged) => void;
+  webappInstalled: (msg: WebappInstalledReply) => void;
+  installProgress: (msg: WebappInstallProgress) => void;
+  webappUninstalled: (msg: WebappUninstalled) => void;
 };
 
 export type ForwardInboundHandlers = {
@@ -197,6 +353,173 @@ export class AssetSurface {
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class AudioSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Audio::TtsStarted` from the daemon. */
+  onTtsStarted(handler: (msg: TtsStarted) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsStarted') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::TtsEnded` from the daemon. */
+  onTtsEnded(handler: (msg: TtsEnded) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'ttsEnded') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Audio::VolumeChanged` from the daemon. */
+  onVolumeChanged(handler: (msg: VolumeChanged) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      if (inner.event !== 'volumeChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Audio` variants. */
+  subscribe(handlers: AudioInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<AudioInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<AudioInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'audio') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'ttsStarted': {
+          handlers.ttsStarted?.(inner.data);
+          return;
+        }
+        case 'ttsEnded': {
+          handlers.ttsEnded?.(inner.data);
+          return;
+        }
+        case 'volumeChanged': {
+          handlers.volumeChanged?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Audio: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Audio::VolumeUp` to the daemon. */
+  async volumeUp(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'volumeUp' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::VolumeDown` to the daemon. */
+  async volumeDown(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'volumeDown' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::SetVolume` to the daemon. */
+  async setVolume(payload: SetVolume): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'setVolume', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::MuteToggle` to the daemon. */
+  async muteToggle(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'muteToggle' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::SetMute` to the daemon. */
+  async setMute(payload: SetMute): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'setMute', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::Tts` to the daemon. */
+  async tts(payload: Tts): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'tts', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::TtsCancel` to the daemon. */
+  async ttsCancel(payload: TtsCancel): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'ttsCancel', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::TtsCancelAll` to the daemon. */
+  async ttsCancelAll(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'ttsCancelAll' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Audio::Earcon` to the daemon. */
+  async earcon(payload: Earcon): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'audio', data: { event: 'earcon', data: payload } },
+    };
+    await this._client.send(msg);
   }
 }
 
@@ -428,6 +751,1404 @@ export class BluetoothSurface {
   }
 }
 
+export class CapabilitiesSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Capabilities::Update` from the daemon. */
+  onUpdate(handler: (msg: CapabilitiesSnapshot) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'capabilities') return;
+      const inner = data.data;
+      if (inner.event !== 'update') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Capabilities::Snapshot` from the daemon. */
+  onSnapshot(handler: (msg: CapabilitiesSnapshot) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'capabilities') return;
+      const inner = data.data;
+      if (inner.event !== 'snapshot') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Capabilities` variants. */
+  subscribe(handlers: CapabilitiesInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<CapabilitiesInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<CapabilitiesInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'capabilities') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'update': {
+          handlers.update?.(inner.data);
+          return;
+        }
+        case 'snapshot': {
+          handlers.snapshot?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Capabilities: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async get(options?: { timeoutMs?: number }): Promise<TypedRequestResult<CapabilitiesSnapshot, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'capabilities', data: { event: 'get' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'capabilities') {
+      const inner = d.data;
+      if (inner.event === 'snapshot') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class GeoSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Geo::Position` from the daemon. */
+  onPosition(handler: (msg: Position) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'position') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Geo::WatchReply` from the daemon. */
+  onWatchReply(handler: (msg: GeoWatchReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'watchReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Geo::GetOnceReply` from the daemon. */
+  onGetOnceReply(handler: (msg: GeoGetOnceReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'getOnceReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Geo::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: GeoErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      if (inner.event !== 'errorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Geo` variants. */
+  subscribe(handlers: GeoInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<GeoInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<GeoInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'geo') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'position': {
+          handlers.position?.(inner.data);
+          return;
+        }
+        case 'watchReply': {
+          handlers.watchReply?.(inner.data);
+          return;
+        }
+        case 'getOnceReply': {
+          handlers.getOnceReply?.(inner.data);
+          return;
+        }
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Geo: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Geo::Unwatch` to the daemon. */
+  async unwatch(payload: GeoUnwatch): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'geo', data: { event: 'unwatch', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async watch(
+    req: GeoWatch,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<GeoWatchReply, GeoErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'geo', data: { event: 'watch', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'geo') {
+      const inner = d.data;
+      if (inner.event === 'watchReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async getOnce(
+    req: GeoGetOnce,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<GeoGetOnceReply, GeoErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'geo', data: { event: 'getOnce', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'geo') {
+      const inner = d.data;
+      if (inner.event === 'getOnceReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class HardwareSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Hardware::AmbientLightUpdate` from the daemon. */
+  onAmbientLightUpdate(handler: (msg: AmbientLightUpdate) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'hardware') return;
+      const inner = data.data;
+      if (inner.event !== 'ambientLightUpdate') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Hardware::BrightnessChanged` from the daemon. */
+  onBrightnessChanged(handler: (msg: BrightnessState) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'hardware') return;
+      const inner = data.data;
+      if (inner.event !== 'brightnessChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Hardware::StateReply` from the daemon. */
+  onStateReply(handler: (msg: HardwareStateReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'hardware') return;
+      const inner = data.data;
+      if (inner.event !== 'stateReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Hardware` variants. */
+  subscribe(handlers: HardwareInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<HardwareInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<HardwareInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'hardware') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'ambientLightUpdate': {
+          handlers.ambientLightUpdate?.(inner.data);
+          return;
+        }
+        case 'brightnessChanged': {
+          handlers.brightnessChanged?.(inner.data);
+          return;
+        }
+        case 'stateReply': {
+          handlers.stateReply?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Hardware: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Hardware::DisplaySetMode` to the daemon. */
+  async displaySetMode(payload: DisplaySetMode): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'hardware', data: { event: 'displaySetMode', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Hardware::DisplaySetLevel` to the daemon. */
+  async displaySetLevel(payload: DisplaySetLevel): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'hardware', data: { event: 'displaySetLevel', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async stateGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<HardwareStateReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'hardware', data: { event: 'stateGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'hardware') {
+      const inner = d.data;
+      if (inner.event === 'stateReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class LibrarySurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Library::BrowseReply` from the daemon. */
+  onBrowseReply(handler: (msg: LibraryBrowseReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'browseReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::SearchReply` from the daemon. */
+  onSearchReply(handler: (msg: LibrarySearchReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'searchReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::RecommendationsReply` from the daemon. */
+  onRecommendationsReply(handler: (msg: LibraryRecommendationsReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'recommendationsReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::FavoritesListReply` from the daemon. */
+  onFavoritesListReply(handler: (msg: LibraryFavoritesListReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesListReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::LibraryErrorReply` from the daemon. */
+  onLibraryErrorReply(handler: (msg: LibraryErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'libraryErrorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Library::FavoriteChanged` from the daemon. */
+  onFavoriteChanged(handler: (msg: FavoriteChanged) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoriteChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Library` variants. */
+  subscribe(handlers: LibraryInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<LibraryInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<LibraryInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'browseReply': {
+          handlers.browseReply?.(inner.data);
+          return;
+        }
+        case 'searchReply': {
+          handlers.searchReply?.(inner.data);
+          return;
+        }
+        case 'recommendationsReply': {
+          handlers.recommendationsReply?.(inner.data);
+          return;
+        }
+        case 'favoritesListReply': {
+          handlers.favoritesListReply?.(inner.data);
+          return;
+        }
+        case 'libraryErrorReply': {
+          handlers.libraryErrorReply?.(inner.data);
+          return;
+        }
+        case 'favoriteChanged': {
+          handlers.favoriteChanged?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Library: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Library::FavoritesToggle` to the daemon. */
+  async favoritesToggle(payload: FavoritesToggle): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'library', data: { event: 'favoritesToggle', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Library::FavoritesSet` to the daemon. */
+  async favoritesSet(payload: FavoritesSet): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'library', data: { event: 'favoritesSet', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async browse(
+    req: LibraryBrowse,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibraryBrowseReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'browse', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'browseReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async search(
+    req: LibrarySearch,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibrarySearchReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'search', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'searchReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async recommendations(
+    req: LibraryRecommendations,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibraryRecommendationsReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'recommendations', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'recommendationsReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async favoritesList(
+    req: LibraryFavoritesList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibraryFavoritesListReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'favoritesList', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'favoritesListReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class NetSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Net::FetchReply` from the daemon. */
+  onFetchReply(handler: (msg: NetFetchReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetchReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::FetchErrorReply` from the daemon. */
+  onFetchErrorReply(handler: (msg: NetFetchErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetchErrorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::FetchStreamBegin` from the daemon. */
+  onFetchStreamBegin(handler: (msg: NetFetchStreamBegin) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetchStreamBegin') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::FetchStreamChunk` from the daemon. */
+  onFetchStreamChunk(handler: (msg: NetFetchStreamChunk) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetchStreamChunk') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::FetchStreamEnd` from the daemon. */
+  onFetchStreamEnd(handler: (msg: NetFetchStreamEnd) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'fetchStreamEnd') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsOpenReply` from the daemon. */
+  onWsOpenReply(handler: (msg: NetWsOpenReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsOpenReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsErrorReply` from the daemon. */
+  onWsErrorReply(handler: (msg: NetWsErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsErrorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsOpened` from the daemon. */
+  onWsOpened(handler: (msg: NetWsOpened) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsOpened') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsMessage` from the daemon. */
+  onWsMessage(handler: (msg: NetWsMessage) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsMessage') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsClosed` from the daemon. */
+  onWsClosed(handler: (msg: NetWsClosed) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsClosed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::WsErrorEvent` from the daemon. */
+  onWsErrorEvent(handler: (msg: NetWsErrorEvent) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'wsErrorEvent') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Net` variants. */
+  subscribe(handlers: NetInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NetInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NetInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'fetchReply': {
+          handlers.fetchReply?.(inner.data);
+          return;
+        }
+        case 'fetchErrorReply': {
+          handlers.fetchErrorReply?.(inner.data);
+          return;
+        }
+        case 'fetchStreamBegin': {
+          handlers.fetchStreamBegin?.(inner.data);
+          return;
+        }
+        case 'fetchStreamChunk': {
+          handlers.fetchStreamChunk?.(inner.data);
+          return;
+        }
+        case 'fetchStreamEnd': {
+          handlers.fetchStreamEnd?.(inner.data);
+          return;
+        }
+        case 'wsOpenReply': {
+          handlers.wsOpenReply?.(inner.data);
+          return;
+        }
+        case 'wsErrorReply': {
+          handlers.wsErrorReply?.(inner.data);
+          return;
+        }
+        case 'wsOpened': {
+          handlers.wsOpened?.(inner.data);
+          return;
+        }
+        case 'wsMessage': {
+          handlers.wsMessage?.(inner.data);
+          return;
+        }
+        case 'wsClosed': {
+          handlers.wsClosed?.(inner.data);
+          return;
+        }
+        case 'wsErrorEvent': {
+          handlers.wsErrorEvent?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Net: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Net::WsClose` to the daemon. */
+  async wsClose(payload: NetWsClose): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'net', data: { event: 'wsClose', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Net::WsSend` to the daemon. */
+  async wsSend(payload: NetWsSend): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'net', data: { event: 'wsSend', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async fetch(
+    req: NetFetch,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<NetFetchReply, NetFetchErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'net', data: { event: 'fetch', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'net') {
+      const inner = d.data;
+      if (inner.event === 'fetchReply') return { ok: true, response: inner.data };
+      if (inner.event === 'fetchErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async wsOpen(
+    req: NetWsOpen,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<NetWsOpenReply, NetWsErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'net', data: { event: 'wsOpen', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'net') {
+      const inner = d.data;
+      if (inner.event === 'wsOpenReply') return { ok: true, response: inner.data };
+      if (inner.event === 'wsErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class NotificationsSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Notifications::ListReply` from the daemon. */
+  onListReply(handler: (msg: NotificationsListReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'listReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: NotificationsErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'errorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::Posted` from the daemon. */
+  onPosted(handler: (msg: Notification) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'posted') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::Updated` from the daemon. */
+  onUpdated(handler: (msg: Notification) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'updated') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Notifications::Removed` from the daemon. */
+  onRemoved(handler: (msg: NotificationRemoved) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'removed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Notifications` variants. */
+  subscribe(handlers: NotificationsInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<NotificationsInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<NotificationsInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'listReply': {
+          handlers.listReply?.(inner.data);
+          return;
+        }
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
+          return;
+        }
+        case 'posted': {
+          handlers.posted?.(inner.data);
+          return;
+        }
+        case 'updated': {
+          handlers.updated?.(inner.data);
+          return;
+        }
+        case 'removed': {
+          handlers.removed?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Notifications: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Notifications::InvokePositive` to the daemon. */
+  async invokePositive(payload: NotificationInvoke): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'notifications', data: { event: 'invokePositive', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Notifications::InvokeNegative` to the daemon. */
+  async invokeNegative(payload: NotificationInvoke): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'notifications', data: { event: 'invokeNegative', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async list(
+    req: NotificationsList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<NotificationsListReply, NotificationsErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'notifications', data: { event: 'list', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'notifications') {
+      const inner = d.data;
+      if (inner.event === 'listReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class PeerSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Peer::Snapshot` from the daemon. */
+  onSnapshot(handler: (msg: PeerSnapshotMap) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'peer') return;
+      const inner = data.data;
+      if (inner.event !== 'snapshot') return;
+      handler(inner.data);
+    });
+  }
+}
+
+export class PhoneSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Phone::CallStarted` from the daemon. */
+  onCallStarted(handler: (msg: PhoneCall) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'callStarted') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::CallUpdated` from the daemon. */
+  onCallUpdated(handler: (msg: PhoneCall) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'callUpdated') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::CallEnded` from the daemon. */
+  onCallEnded(handler: (msg: PhoneCallEnded) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'callEnded') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::StateReply` from the daemon. */
+  onStateReply(handler: (msg: PhoneStateReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'stateReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: PhoneErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'errorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Phone` variants. */
+  subscribe(handlers: PhoneInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PhoneInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PhoneInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'callStarted': {
+          handlers.callStarted?.(inner.data);
+          return;
+        }
+        case 'callUpdated': {
+          handlers.callUpdated?.(inner.data);
+          return;
+        }
+        case 'callEnded': {
+          handlers.callEnded?.(inner.data);
+          return;
+        }
+        case 'stateReply': {
+          handlers.stateReply?.(inner.data);
+          return;
+        }
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Phone: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Phone::Answer` to the daemon. */
+  async answer(payload: PhoneCallAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'answer', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Decline` to the daemon. */
+  async decline(payload: PhoneCallAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'decline', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::End` to the daemon. */
+  async end(payload: PhoneCallAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'end', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Hold` to the daemon. */
+  async hold(payload: PhoneCallAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'hold', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Unhold` to the daemon. */
+  async unhold(payload: PhoneCallAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'unhold', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async stateGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<PhoneStateReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'phone', data: { event: 'stateGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'phone') {
+      const inner = d.data;
+      if (inner.event === 'stateReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class PlayerSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Player::Snapshot` from the daemon. */
+  onSnapshot(handler: (msg: PlayerStateReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'snapshot') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::Delta` from the daemon. */
+  onDelta(handler: (msg: NowPlayingUpdate) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'delta') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::QueueChanged` from the daemon. */
+  onQueueChanged(handler: (msg: PlayerQueueReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'queueChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::StateReply` from the daemon. */
+  onStateReply(handler: (msg: PlayerStateReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'stateReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::QueueReply` from the daemon. */
+  onQueueReply(handler: (msg: PlayerQueueReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'queueReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Player::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: PlayerErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'errorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Player` variants. */
+  subscribe(handlers: PlayerInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<PlayerInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<PlayerInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'snapshot': {
+          handlers.snapshot?.(inner.data);
+          return;
+        }
+        case 'delta': {
+          handlers.delta?.(inner.data);
+          return;
+        }
+        case 'queueChanged': {
+          handlers.queueChanged?.(inner.data);
+          return;
+        }
+        case 'stateReply': {
+          handlers.stateReply?.(inner.data);
+          return;
+        }
+        case 'queueReply': {
+          handlers.queueReply?.(inner.data);
+          return;
+        }
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Player: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Player::Play` to the daemon. */
+  async play(payload: PlayUri): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'play', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::Queue` to the daemon. */
+  async queue(payload: QueueUri): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'queue', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::Pause` to the daemon. */
+  async pause(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'pause' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::Resume` to the daemon. */
+  async resume(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'resume' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SkipNext` to the daemon. */
+  async skipNext(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'skipNext' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SkipPrev` to the daemon. */
+  async skipPrev(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'skipPrev' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SkipToIndex` to the daemon. */
+  async skipToIndex(payload: SkipToIndex): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'skipToIndex', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SeekTo` to the daemon. */
+  async seekTo(payload: SeekTo): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'seekTo', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SetShuffle` to the daemon. */
+  async setShuffle(payload: SetShuffle): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'setShuffle', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SetRepeat` to the daemon. */
+  async setRepeat(payload: SetRepeat): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'setRepeat', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SetSpeed` to the daemon. */
+  async setSpeed(payload: SetSpeed): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'setSpeed', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Player::SetCrossfade` to the daemon. */
+  async setCrossfade(payload: SetCrossfade): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'setCrossfade', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async stateGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<PlayerStateReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'player', data: { event: 'stateGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'player') {
+      const inner = d.data;
+      if (inner.event === 'stateReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async queueGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<PlayerQueueReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'player', data: { event: 'queueGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'player') {
+      const inner = d.data;
+      if (inner.event === 'queueReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
 export class SystemSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
@@ -443,62 +2164,50 @@ export class SystemSurface {
     });
   }
 
-  /** Subscribe to `System::GatewayStatus` from the daemon. */
-  onGatewayStatus(handler: (msg: GatewayStatus) => void): () => void {
+  /** Subscribe to `System::DiagnosticsReply` from the daemon. */
+  onDiagnosticsReply(handler: (msg: DiagnosticsReply) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'system') return;
       const inner = data.data;
-      if (inner.event !== 'gatewayStatus') return;
+      if (inner.event !== 'diagnosticsReply') return;
       handler(inner.data);
     });
   }
 
-  /** Subscribe to `System::OtaReboot` from the daemon. */
-  onOtaReboot(handler: (msg: OtaReboot) => void): () => void {
+  /** Subscribe to `System::LogsTailReply` from the daemon. */
+  onLogsTailReply(handler: (msg: LogsTailReply) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'system') return;
       const inner = data.data;
-      if (inner.event !== 'otaReboot') return;
+      if (inner.event !== 'logsTailReply') return;
       handler(inner.data);
     });
   }
 
-  /** Subscribe to `System::OtaPowerOff` from the daemon. */
-  onOtaPowerOff(handler: (msg: OtaPowerOff) => void): () => void {
+  /** Subscribe to `System::LogsSubscribeReply` from the daemon. */
+  onLogsSubscribeReply(handler: (msg: LogsSubscribeReply) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'system') return;
       const inner = data.data;
-      if (inner.event !== 'otaPowerOff') return;
+      if (inner.event !== 'logsSubscribeReply') return;
       handler(inner.data);
     });
   }
 
-  /** Subscribe to `System::AmbientLightUpdate` from the daemon. */
-  onAmbientLightUpdate(handler: (msg: AmbientLightUpdate) => void): () => void {
+  /** Subscribe to `System::LogEntry` from the daemon. */
+  onLogEntry(handler: (msg: LogEntry) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'system') return;
       const inner = data.data;
-      if (inner.event !== 'ambientLightUpdate') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `System::PhoneCallInfo` from the daemon. */
-  onPhoneCallInfo(handler: (msg: PhoneCallInfo) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'system') return;
-      const inner = data.data;
-      if (inner.event !== 'phoneCallInfo') return;
+      if (inner.event !== 'logEntry') return;
       handler(inner.data);
     });
   }
@@ -524,24 +2233,20 @@ export class SystemSurface {
           handlers.version?.(inner.data);
           return;
         }
-        case 'gatewayStatus': {
-          handlers.gatewayStatus?.(inner.data);
+        case 'diagnosticsReply': {
+          handlers.diagnosticsReply?.(inner.data);
           return;
         }
-        case 'otaReboot': {
-          handlers.otaReboot?.(inner.data);
+        case 'logsTailReply': {
+          handlers.logsTailReply?.(inner.data);
           return;
         }
-        case 'otaPowerOff': {
-          handlers.otaPowerOff?.(inner.data);
+        case 'logsSubscribeReply': {
+          handlers.logsSubscribeReply?.(inner.data);
           return;
         }
-        case 'ambientLightUpdate': {
-          handlers.ambientLightUpdate?.(inner.data);
-          return;
-        }
-        case 'phoneCallInfo': {
-          handlers.phoneCallInfo?.(inner.data);
+        case 'logEntry': {
+          handlers.logEntry?.(inner.data);
           return;
         }
         default: {
@@ -550,6 +2255,16 @@ export class SystemSurface {
         }
       }
     });
+  }
+
+  /** Send `System::LogsUnsubscribe` to the daemon. */
+  async logsUnsubscribe(payload: LogsUnsubscribe): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'system', data: { event: 'logsUnsubscribe', data: payload } },
+    };
+    await this._client.send(msg);
   }
 
   /** Send `System::Reboot` to the daemon. */
@@ -582,26 +2297,6 @@ export class SystemSurface {
     await this._client.send(msg);
   }
 
-  /** Send `System::PhoneCallAccept` to the daemon. */
-  async phoneCallAccept(payload: PhoneCallAccept): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'system', data: { event: 'phoneCallAccept', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `System::PhoneCallEnd` to the daemon. */
-  async phoneCallEnd(payload: PhoneCallEnd): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'system', data: { event: 'phoneCallEnd', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
   /** Typed request to the daemon: webapp sends, daemon responds. */
   async versionRequest(options?: { timeoutMs?: number }): Promise<TypedRequestResult<BridgeThingMeta, never>> {
     const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'versionRequest' } };
@@ -616,125 +2311,385 @@ export class SystemSurface {
   }
 
   /** Typed request to the daemon: webapp sends, daemon responds. */
-  async gatewayStatusRequest(options?: { timeoutMs?: number }): Promise<TypedRequestResult<GatewayStatus, never>> {
-    const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'gatewayStatusRequest' } };
+  async diagnosticsGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<DiagnosticsReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'diagnosticsGet' } };
     const response = await this._client.request(wireData, options?.timeoutMs);
     const d = response.data;
     if (d.type === 'system') {
       const inner = d.data;
-      if (inner.event === 'gatewayStatus') return { ok: true, response: inner.data };
+      if (inner.event === 'diagnosticsReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async logsTail(req: LogsTail, options?: { timeoutMs?: number }): Promise<TypedRequestResult<LogsTailReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'logsTail', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsTailReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async logsSubscribe(
+    req: LogsSubscribe,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LogsSubscribeReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'logsSubscribe', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsSubscribeReply') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
-export class PlayerSurface {
+export class TimeSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
-  /** Subscribe to `Player::PlayerIdle` from the daemon. */
-  onPlayerIdle(handler: () => void): () => void {
+  /** Subscribe to `Time::Changed` from the daemon. */
+  onChanged(handler: (msg: TimeSnapshot) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
-      if (data.type !== 'player') return;
+      if (data.type !== 'time') return;
       const inner = data.data;
-      if (inner.event !== 'playerIdle') return;
-      handler();
-    });
-  }
-
-  /** Subscribe to `Player::PlayerState` from the daemon. */
-  onPlayerState(handler: (msg: PlayerState) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'player') return;
-      const inner = data.data;
-      if (inner.event !== 'playerState') return;
+      if (inner.event !== 'changed') return;
       handler(inner.data);
     });
   }
 
-  /** Subscribe to `Player::Queue` from the daemon. */
-  onQueue(handler: (msg: PlayerQueue) => void): () => void {
+  /** Subscribe to `Time::Snapshot` from the daemon. */
+  onSnapshot(handler: (msg: TimeSnapshot) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
-      if (data.type !== 'player') return;
+      if (data.type !== 'time') return;
       const inner = data.data;
-      if (inner.event !== 'queue') return;
+      if (inner.event !== 'snapshot') return;
       handler(inner.data);
     });
   }
 
-  /** Subscribe to `Player::Image` from the daemon. */
-  onImage(handler: (msg: PlayerImage) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'player') return;
-      const inner = data.data;
-      if (inner.event !== 'image') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Exhaustive subscribe over all inbound `Player` variants. */
-  subscribe(handlers: PlayerInboundHandlers): () => void {
+  /** Exhaustive subscribe over all inbound `Time` variants. */
+  subscribe(handlers: TimeInboundHandlers): () => void {
     return this._subscribe(handlers, false);
   }
 
   /** Same as `subscribe` but every handler is optional. */
-  subscribePartial(handlers: Partial<PlayerInboundHandlers>): () => void {
+  subscribePartial(handlers: Partial<TimeInboundHandlers>): () => void {
     return this._subscribe(handlers, true);
   }
 
-  private _subscribe(handlers: Partial<PlayerInboundHandlers>, partial: boolean): () => void {
+  private _subscribe(handlers: Partial<TimeInboundHandlers>, partial: boolean): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
-      if (data.type !== 'player') return;
+      if (data.type !== 'time') return;
       const inner = data.data;
       switch (inner.event) {
-        case 'playerIdle': {
-          handlers.playerIdle?.();
+        case 'changed': {
+          handlers.changed?.(inner.data);
           return;
         }
-        case 'playerState': {
-          handlers.playerState?.(inner.data);
-          return;
-        }
-        case 'queue': {
-          handlers.queue?.(inner.data);
-          return;
-        }
-        case 'image': {
-          handlers.image?.(inner.data);
+        case 'snapshot': {
+          handlers.snapshot?.(inner.data);
           return;
         }
         default: {
-          if (!partial) this._client.logger.warn('Player: no handler for inner', inner);
+          if (!partial) this._client.logger.warn('Time: no handler for inner', inner);
           return;
         }
       }
     });
   }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async get(options?: { timeoutMs?: number }): Promise<TypedRequestResult<TimeSnapshot, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'time', data: { event: 'get' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'time') {
+      const inner = d.data;
+      if (inner.event === 'snapshot') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
 }
 
-export class PeerSurface {
+export class WebappSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
-  /** Subscribe to `Peer::Snapshot` from the daemon. */
-  onSnapshot(handler: (msg: PeerSnapshotMap) => void): () => void {
+  /** Subscribe to `Webapp::ListReply` from the daemon. */
+  onListReply(handler: (msg: WebappListReply) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
-      if (data.type !== 'peer') return;
+      if (data.type !== 'webapp') return;
       const inner = data.data;
-      if (inner.event !== 'snapshot') return;
+      if (inner.event !== 'listReply') return;
       handler(inner.data);
     });
+  }
+
+  /** Subscribe to `Webapp::CurrentReply` from the daemon. */
+  onCurrentReply(handler: (msg: WebappCurrentReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'currentReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ActiveReply` from the daemon. */
+  onActiveReply(handler: (msg: WebappActiveReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'activeReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::UninstalledReply` from the daemon. */
+  onUninstalledReply(handler: (msg: WebappActiveReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'uninstalledReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::InstalledReply` from the daemon. */
+  onInstalledReply(handler: (msg: WebappInstalledReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'installedReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ErrorReply` from the daemon. */
+  onErrorReply(handler: (msg: WebappErrorReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'errorReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ActiveChanged` from the daemon. */
+  onActiveChanged(handler: (msg: WebappActiveChanged) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'activeChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappInstalled` from the daemon. */
+  onWebappInstalled(handler: (msg: WebappInstalledReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappInstalled') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::InstallProgress` from the daemon. */
+  onInstallProgress(handler: (msg: WebappInstallProgress) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'installProgress') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappUninstalled` from the daemon. */
+  onWebappUninstalled(handler: (msg: WebappUninstalled) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappUninstalled') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Webapp` variants. */
+  subscribe(handlers: WebappInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<WebappInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<WebappInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'listReply': {
+          handlers.listReply?.(inner.data);
+          return;
+        }
+        case 'currentReply': {
+          handlers.currentReply?.(inner.data);
+          return;
+        }
+        case 'activeReply': {
+          handlers.activeReply?.(inner.data);
+          return;
+        }
+        case 'uninstalledReply': {
+          handlers.uninstalledReply?.(inner.data);
+          return;
+        }
+        case 'installedReply': {
+          handlers.installedReply?.(inner.data);
+          return;
+        }
+        case 'errorReply': {
+          handlers.errorReply?.(inner.data);
+          return;
+        }
+        case 'activeChanged': {
+          handlers.activeChanged?.(inner.data);
+          return;
+        }
+        case 'webappInstalled': {
+          handlers.webappInstalled?.(inner.data);
+          return;
+        }
+        case 'installProgress': {
+          handlers.installProgress?.(inner.data);
+          return;
+        }
+        case 'webappUninstalled': {
+          handlers.webappUninstalled?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Webapp: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async list(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappListReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'list' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'listReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async current(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappCurrentReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'current' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'currentReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async activate(
+    req: WebappActivate,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActiveReply, WebappErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'activate', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'activeReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async uninstall(
+    req: WebappUninstall,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActiveReply, WebappErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'uninstalledReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async install(
+    req: WebappInstall,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappInstalledReply, WebappErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'install', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'installedReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -889,160 +2844,6 @@ export class VoiceSurface {
   }
 }
 
-export class InteractionSurface {
-  constructor(private readonly _client: BridgethingClient) {}
-
-  /** Send `Interaction::PhoneAnswer` to the daemon. */
-  async phoneAnswer(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'phoneAnswer' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::PhoneDecline` to the daemon. */
-  async phoneDecline(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'phoneDecline' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::PhoneCallImage` to the daemon. */
-  async phoneCallImage(payload: PhoneCallImage): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'phoneCallImage', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::PhoneCallMessage` to the daemon. */
-  async phoneCallMessage(payload: PhoneCallMessage): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'phoneCallMessage', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::IncreaseVolume` to the daemon. */
-  async increaseVolume(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'increaseVolume' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::DecreaseVolume` to the daemon. */
-  async decreaseVolume(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'decreaseVolume' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::MuteToggle` to the daemon. */
-  async muteToggle(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'muteToggle' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SkipToIndex` to the daemon. */
-  async skipToIndex(payload: SkipToIndex): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'skipToIndex', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SkipNext` to the daemon. */
-  async skipNext(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'skipNext' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SkipPrev` to the daemon. */
-  async skipPrev(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'skipPrev' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SeekTo` to the daemon. */
-  async seekTo(payload: SeekTo): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'seekTo', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::Pause` to the daemon. */
-  async pause(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'pause' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::Resume` to the daemon. */
-  async resume(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'resume' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SetShuffle` to the daemon. */
-  async setShuffle(payload: SetShuffle): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'setShuffle', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Interaction::SetRepeat` to the daemon. */
-  async setRepeat(payload: SetRepeat): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'interaction', data: { event: 'setRepeat', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-}
-
 export class StoreSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
@@ -1088,19 +2889,39 @@ export class StoreSurface {
 
 export type ClientMessageHandlers = {
   asset: AssetInboundHandlers;
+  audio: AudioInboundHandlers;
   bluetooth: BluetoothInboundHandlers;
-  system: SystemInboundHandlers;
-  player: PlayerInboundHandlers;
+  capabilities: CapabilitiesInboundHandlers;
+  geo: GeoInboundHandlers;
+  hardware: HardwareInboundHandlers;
+  library: LibraryInboundHandlers;
+  net: NetInboundHandlers;
+  notifications: NotificationsInboundHandlers;
   peer: PeerInboundHandlers;
+  phone: PhoneInboundHandlers;
+  player: PlayerInboundHandlers;
+  system: SystemInboundHandlers;
+  time: TimeInboundHandlers;
+  webapp: WebappInboundHandlers;
   forward: ForwardInboundHandlers;
 };
 
 export type PartialClientMessageHandlers = {
   asset?: Partial<AssetInboundHandlers>;
+  audio?: Partial<AudioInboundHandlers>;
   bluetooth?: Partial<BluetoothInboundHandlers>;
-  system?: Partial<SystemInboundHandlers>;
-  player?: Partial<PlayerInboundHandlers>;
+  capabilities?: Partial<CapabilitiesInboundHandlers>;
+  geo?: Partial<GeoInboundHandlers>;
+  hardware?: Partial<HardwareInboundHandlers>;
+  library?: Partial<LibraryInboundHandlers>;
+  net?: Partial<NetInboundHandlers>;
+  notifications?: Partial<NotificationsInboundHandlers>;
   peer?: Partial<PeerInboundHandlers>;
+  phone?: Partial<PhoneInboundHandlers>;
+  player?: Partial<PlayerInboundHandlers>;
+  system?: Partial<SystemInboundHandlers>;
+  time?: Partial<TimeInboundHandlers>;
+  webapp?: Partial<WebappInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
 };
 
@@ -1108,20 +2929,38 @@ declare module './index' {
   interface BridgethingClient {
     /** Methods scoped to the `Asset` wire surface. */
     readonly asset: AssetSurface;
+    /** Methods scoped to the `Audio` wire surface. */
+    readonly audio: AudioSurface;
     /** Methods scoped to the `Bluetooth` wire surface. */
     readonly bluetooth: BluetoothSurface;
-    /** Methods scoped to the `System` wire surface. */
-    readonly system: SystemSurface;
-    /** Methods scoped to the `Player` wire surface. */
-    readonly player: PlayerSurface;
+    /** Methods scoped to the `Capabilities` wire surface. */
+    readonly capabilities: CapabilitiesSurface;
+    /** Methods scoped to the `Geo` wire surface. */
+    readonly geo: GeoSurface;
+    /** Methods scoped to the `Hardware` wire surface. */
+    readonly hardware: HardwareSurface;
+    /** Methods scoped to the `Library` wire surface. */
+    readonly library: LibrarySurface;
+    /** Methods scoped to the `Net` wire surface. */
+    readonly net: NetSurface;
+    /** Methods scoped to the `Notifications` wire surface. */
+    readonly notifications: NotificationsSurface;
     /** Methods scoped to the `Peer` wire surface. */
     readonly peer: PeerSurface;
+    /** Methods scoped to the `Phone` wire surface. */
+    readonly phone: PhoneSurface;
+    /** Methods scoped to the `Player` wire surface. */
+    readonly player: PlayerSurface;
+    /** Methods scoped to the `System` wire surface. */
+    readonly system: SystemSurface;
+    /** Methods scoped to the `Time` wire surface. */
+    readonly time: TimeSurface;
+    /** Methods scoped to the `Webapp` wire surface. */
+    readonly webapp: WebappSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
     /** Methods scoped to the `Voice` wire surface. */
     readonly voice: VoiceSurface;
-    /** Methods scoped to the `Interaction` wire surface. */
-    readonly interaction: InteractionSurface;
     /** Methods scoped to the `Store` wire surface. */
     readonly store: StoreSurface;
     /** Exhaustive subscribe across every inbound wire surface. */
@@ -1132,13 +2971,22 @@ declare module './index' {
 
 type ClientSurfaceCache = {
   asset?: AssetSurface;
+  audio?: AudioSurface;
   bluetooth?: BluetoothSurface;
-  system?: SystemSurface;
-  player?: PlayerSurface;
+  capabilities?: CapabilitiesSurface;
+  geo?: GeoSurface;
+  hardware?: HardwareSurface;
+  library?: LibrarySurface;
+  net?: NetSurface;
+  notifications?: NotificationsSurface;
   peer?: PeerSurface;
+  phone?: PhoneSurface;
+  player?: PlayerSurface;
+  system?: SystemSurface;
+  time?: TimeSurface;
+  webapp?: WebappSurface;
   forward?: ForwardSurface;
   voice?: VoiceSurface;
-  interaction?: InteractionSurface;
   store?: StoreSurface;
 };
 
@@ -1165,6 +3013,14 @@ export function applyDispatch(): void {
       return (bucket.asset ??= new AssetSurface(this));
     },
   });
+  Object.defineProperty(BridgethingClient.prototype, 'audio', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): AudioSurface {
+      const bucket = bucketFor(this);
+      return (bucket.audio ??= new AudioSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingClient.prototype, 'bluetooth', {
     configurable: true,
     enumerable: true,
@@ -1173,12 +3029,68 @@ export function applyDispatch(): void {
       return (bucket.bluetooth ??= new BluetoothSurface(this));
     },
   });
-  Object.defineProperty(BridgethingClient.prototype, 'system', {
+  Object.defineProperty(BridgethingClient.prototype, 'capabilities', {
     configurable: true,
     enumerable: true,
-    get(this: BridgethingClient): SystemSurface {
+    get(this: BridgethingClient): CapabilitiesSurface {
       const bucket = bucketFor(this);
-      return (bucket.system ??= new SystemSurface(this));
+      return (bucket.capabilities ??= new CapabilitiesSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'geo', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): GeoSurface {
+      const bucket = bucketFor(this);
+      return (bucket.geo ??= new GeoSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'hardware', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): HardwareSurface {
+      const bucket = bucketFor(this);
+      return (bucket.hardware ??= new HardwareSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'library', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): LibrarySurface {
+      const bucket = bucketFor(this);
+      return (bucket.library ??= new LibrarySurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'net', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): NetSurface {
+      const bucket = bucketFor(this);
+      return (bucket.net ??= new NetSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'notifications', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): NotificationsSurface {
+      const bucket = bucketFor(this);
+      return (bucket.notifications ??= new NotificationsSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'peer', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): PeerSurface {
+      const bucket = bucketFor(this);
+      return (bucket.peer ??= new PeerSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'phone', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): PhoneSurface {
+      const bucket = bucketFor(this);
+      return (bucket.phone ??= new PhoneSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'player', {
@@ -1189,12 +3101,28 @@ export function applyDispatch(): void {
       return (bucket.player ??= new PlayerSurface(this));
     },
   });
-  Object.defineProperty(BridgethingClient.prototype, 'peer', {
+  Object.defineProperty(BridgethingClient.prototype, 'system', {
     configurable: true,
     enumerable: true,
-    get(this: BridgethingClient): PeerSurface {
+    get(this: BridgethingClient): SystemSurface {
       const bucket = bucketFor(this);
-      return (bucket.peer ??= new PeerSurface(this));
+      return (bucket.system ??= new SystemSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'time', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): TimeSurface {
+      const bucket = bucketFor(this);
+      return (bucket.time ??= new TimeSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'webapp', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): WebappSurface {
+      const bucket = bucketFor(this);
+      return (bucket.webapp ??= new WebappSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'forward', {
@@ -1211,14 +3139,6 @@ export function applyDispatch(): void {
     get(this: BridgethingClient): VoiceSurface {
       const bucket = bucketFor(this);
       return (bucket.voice ??= new VoiceSurface(this));
-    },
-  });
-  Object.defineProperty(BridgethingClient.prototype, 'interaction', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingClient): InteractionSurface {
-      const bucket = bucketFor(this);
-      return (bucket.interaction ??= new InteractionSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'store', {
@@ -1273,6 +3193,32 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
         }
       }
+      case 'audio': {
+        const innerHandlers = handlers.audio;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for audio');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'ttsStarted': {
+            innerHandlers.ttsStarted?.(inner.data);
+            return;
+          }
+          case 'ttsEnded': {
+            innerHandlers.ttsEnded?.(inner.data);
+            return;
+          }
+          case 'volumeChanged': {
+            innerHandlers.volumeChanged?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Audio: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'bluetooth': {
         const innerHandlers = handlers.bluetooth;
         if (!innerHandlers) {
@@ -1311,70 +3257,210 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
         }
       }
-      case 'system': {
-        const innerHandlers = handlers.system;
+      case 'capabilities': {
+        const innerHandlers = handlers.capabilities;
         if (!innerHandlers) {
-          if (!partial) c.logger.warn('subscribe: no handler for system');
+          if (!partial) c.logger.warn('subscribe: no handler for capabilities');
           return;
         }
         const inner = data.data;
         switch (inner.event) {
-          case 'version': {
-            innerHandlers.version?.(inner.data);
+          case 'update': {
+            innerHandlers.update?.(inner.data);
             return;
           }
-          case 'gatewayStatus': {
-            innerHandlers.gatewayStatus?.(inner.data);
-            return;
-          }
-          case 'otaReboot': {
-            innerHandlers.otaReboot?.(inner.data);
-            return;
-          }
-          case 'otaPowerOff': {
-            innerHandlers.otaPowerOff?.(inner.data);
-            return;
-          }
-          case 'ambientLightUpdate': {
-            innerHandlers.ambientLightUpdate?.(inner.data);
-            return;
-          }
-          case 'phoneCallInfo': {
-            innerHandlers.phoneCallInfo?.(inner.data);
+          case 'snapshot': {
+            innerHandlers.snapshot?.(inner.data);
             return;
           }
           default: {
-            if (!partial) c.logger.warn('System: no handler for inner', inner);
+            if (!partial) c.logger.warn('Capabilities: no handler for inner', inner);
             return;
           }
         }
       }
-      case 'player': {
-        const innerHandlers = handlers.player;
+      case 'geo': {
+        const innerHandlers = handlers.geo;
         if (!innerHandlers) {
-          if (!partial) c.logger.warn('subscribe: no handler for player');
+          if (!partial) c.logger.warn('subscribe: no handler for geo');
           return;
         }
         const inner = data.data;
         switch (inner.event) {
-          case 'playerIdle': {
-            innerHandlers.playerIdle?.();
+          case 'position': {
+            innerHandlers.position?.(inner.data);
             return;
           }
-          case 'playerState': {
-            innerHandlers.playerState?.(inner.data);
+          case 'watchReply': {
+            innerHandlers.watchReply?.(inner.data);
             return;
           }
-          case 'queue': {
-            innerHandlers.queue?.(inner.data);
+          case 'getOnceReply': {
+            innerHandlers.getOnceReply?.(inner.data);
             return;
           }
-          case 'image': {
-            innerHandlers.image?.(inner.data);
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
             return;
           }
           default: {
-            if (!partial) c.logger.warn('Player: no handler for inner', inner);
+            if (!partial) c.logger.warn('Geo: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'hardware': {
+        const innerHandlers = handlers.hardware;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for hardware');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'ambientLightUpdate': {
+            innerHandlers.ambientLightUpdate?.(inner.data);
+            return;
+          }
+          case 'brightnessChanged': {
+            innerHandlers.brightnessChanged?.(inner.data);
+            return;
+          }
+          case 'stateReply': {
+            innerHandlers.stateReply?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Hardware: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'library': {
+        const innerHandlers = handlers.library;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for library');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'browseReply': {
+            innerHandlers.browseReply?.(inner.data);
+            return;
+          }
+          case 'searchReply': {
+            innerHandlers.searchReply?.(inner.data);
+            return;
+          }
+          case 'recommendationsReply': {
+            innerHandlers.recommendationsReply?.(inner.data);
+            return;
+          }
+          case 'favoritesListReply': {
+            innerHandlers.favoritesListReply?.(inner.data);
+            return;
+          }
+          case 'libraryErrorReply': {
+            innerHandlers.libraryErrorReply?.(inner.data);
+            return;
+          }
+          case 'favoriteChanged': {
+            innerHandlers.favoriteChanged?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Library: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'net': {
+        const innerHandlers = handlers.net;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for net');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'fetchReply': {
+            innerHandlers.fetchReply?.(inner.data);
+            return;
+          }
+          case 'fetchErrorReply': {
+            innerHandlers.fetchErrorReply?.(inner.data);
+            return;
+          }
+          case 'fetchStreamBegin': {
+            innerHandlers.fetchStreamBegin?.(inner.data);
+            return;
+          }
+          case 'fetchStreamChunk': {
+            innerHandlers.fetchStreamChunk?.(inner.data);
+            return;
+          }
+          case 'fetchStreamEnd': {
+            innerHandlers.fetchStreamEnd?.(inner.data);
+            return;
+          }
+          case 'wsOpenReply': {
+            innerHandlers.wsOpenReply?.(inner.data);
+            return;
+          }
+          case 'wsErrorReply': {
+            innerHandlers.wsErrorReply?.(inner.data);
+            return;
+          }
+          case 'wsOpened': {
+            innerHandlers.wsOpened?.(inner.data);
+            return;
+          }
+          case 'wsMessage': {
+            innerHandlers.wsMessage?.(inner.data);
+            return;
+          }
+          case 'wsClosed': {
+            innerHandlers.wsClosed?.(inner.data);
+            return;
+          }
+          case 'wsErrorEvent': {
+            innerHandlers.wsErrorEvent?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Net: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'notifications': {
+        const innerHandlers = handlers.notifications;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for notifications');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'listReply': {
+            innerHandlers.listReply?.(inner.data);
+            return;
+          }
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
+            return;
+          }
+          case 'posted': {
+            innerHandlers.posted?.(inner.data);
+            return;
+          }
+          case 'updated': {
+            innerHandlers.updated?.(inner.data);
+            return;
+          }
+          case 'removed': {
+            innerHandlers.removed?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Notifications: no handler for inner', inner);
             return;
           }
         }
@@ -1393,6 +3479,188 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           default: {
             if (!partial) c.logger.warn('Peer: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'phone': {
+        const innerHandlers = handlers.phone;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for phone');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'callStarted': {
+            innerHandlers.callStarted?.(inner.data);
+            return;
+          }
+          case 'callUpdated': {
+            innerHandlers.callUpdated?.(inner.data);
+            return;
+          }
+          case 'callEnded': {
+            innerHandlers.callEnded?.(inner.data);
+            return;
+          }
+          case 'stateReply': {
+            innerHandlers.stateReply?.(inner.data);
+            return;
+          }
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Phone: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'player': {
+        const innerHandlers = handlers.player;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for player');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'snapshot': {
+            innerHandlers.snapshot?.(inner.data);
+            return;
+          }
+          case 'delta': {
+            innerHandlers.delta?.(inner.data);
+            return;
+          }
+          case 'queueChanged': {
+            innerHandlers.queueChanged?.(inner.data);
+            return;
+          }
+          case 'stateReply': {
+            innerHandlers.stateReply?.(inner.data);
+            return;
+          }
+          case 'queueReply': {
+            innerHandlers.queueReply?.(inner.data);
+            return;
+          }
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Player: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'system': {
+        const innerHandlers = handlers.system;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for system');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'version': {
+            innerHandlers.version?.(inner.data);
+            return;
+          }
+          case 'diagnosticsReply': {
+            innerHandlers.diagnosticsReply?.(inner.data);
+            return;
+          }
+          case 'logsTailReply': {
+            innerHandlers.logsTailReply?.(inner.data);
+            return;
+          }
+          case 'logsSubscribeReply': {
+            innerHandlers.logsSubscribeReply?.(inner.data);
+            return;
+          }
+          case 'logEntry': {
+            innerHandlers.logEntry?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'time': {
+        const innerHandlers = handlers.time;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for time');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'changed': {
+            innerHandlers.changed?.(inner.data);
+            return;
+          }
+          case 'snapshot': {
+            innerHandlers.snapshot?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Time: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'webapp': {
+        const innerHandlers = handlers.webapp;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for webapp');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'listReply': {
+            innerHandlers.listReply?.(inner.data);
+            return;
+          }
+          case 'currentReply': {
+            innerHandlers.currentReply?.(inner.data);
+            return;
+          }
+          case 'activeReply': {
+            innerHandlers.activeReply?.(inner.data);
+            return;
+          }
+          case 'uninstalledReply': {
+            innerHandlers.uninstalledReply?.(inner.data);
+            return;
+          }
+          case 'installedReply': {
+            innerHandlers.installedReply?.(inner.data);
+            return;
+          }
+          case 'errorReply': {
+            innerHandlers.errorReply?.(inner.data);
+            return;
+          }
+          case 'activeChanged': {
+            innerHandlers.activeChanged?.(inner.data);
+            return;
+          }
+          case 'webappInstalled': {
+            innerHandlers.webappInstalled?.(inner.data);
+            return;
+          }
+          case 'installProgress': {
+            innerHandlers.installProgress?.(inner.data);
+            return;
+          }
+          case 'webappUninstalled': {
+            innerHandlers.webappUninstalled?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Webapp: no handler for inner', inner);
             return;
           }
         }

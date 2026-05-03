@@ -21,10 +21,10 @@ use std::collections::HashMap;
 
 use bluer::Address;
 use libbridgething::{
-  Device, Peer, PeerCompanionStatus, PeerIap2Status,
+  Device, GatewayInfo, Peer, PeerCompanionStatus, PeerIap2Status,
   client::{
     BluetoothPairingResult, BluetoothStatus, BridgeToClientBluetoothMsg, BridgeToClientPeerMsg,
-    ConnectedDevice as WireConnectedDevice, GatewayStatus, PairedDevicesMap, PeerSnapshotMap,
+    ConnectedDevice as WireConnectedDevice, PairedDevicesMap, PeerSnapshotMap,
   },
   wire::MsgMeta,
 };
@@ -61,23 +61,12 @@ impl PeerTracker {
     self.inner.read().await.get(mac).cloned()
   }
 
-  pub async fn first_connected_gateway(&self) -> GatewayStatus {
+  pub async fn first_connected_gateway(&self) -> Option<GatewayInfo> {
     let peers = self.inner.read().await;
-    for peer in peers.values() {
-      if let PeerCompanionStatus::Connected(meta) = &peer.companion {
-        return GatewayStatus {
-          address: peer.device.mac.clone(),
-          connected: true,
-          adapter_version: meta.adapter_version.clone(),
-          lib_version: meta.lib_version.clone(),
-          libbridgething_version: meta.libbridgething_version.clone(),
-          app_name: meta.app_name.clone(),
-          app_version: meta.app_version.clone(),
-          os_name: meta.os_name.clone(),
-        };
-      }
-    }
-    GatewayStatus::default()
+    peers.values().find_map(|peer| match &peer.companion {
+      PeerCompanionStatus::Connected(info) => Some(info.clone()),
+      _ => None,
+    })
   }
 
   pub async fn upsert(&self, mac: Address, device: Device) -> PeerResult<()> {

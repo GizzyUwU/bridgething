@@ -28,5 +28,6 @@ export type ResponseMeta = { requestId: Uint8Array };
  */
 export type WireError =
   | { type: 'unsupported' }
+  | { type: 'unimplemented' }
   | { type: 'malformed'; data: { reason: string } }
   | { type: 'handlerFailed'; data: { reason: string } };

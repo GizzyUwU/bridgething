@@ -1,0 +1,78 @@
+use bridgething_macros::{BridgeEnum, WireRequest};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use uuid::Uuid;
+
+use crate::{HttpHeader, NetFetchRequest, WsFrame};
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Net,
+  request_variant = Fetch,
+  response = crate::client::NetFetchReply,
+  response_variant = FetchReply,
+  error = crate::client::NetFetchErrorReply,
+  error_variant = FetchErrorReply,
+)]
+pub struct NetFetch {
+  pub request: NetFetchRequest,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Net,
+  request_variant = WsOpen,
+  response = crate::client::NetWsOpenReply,
+  response_variant = WsOpenReply,
+  error = crate::client::NetWsErrorReply,
+  error_variant = WsErrorReply,
+)]
+pub struct NetWsOpen {
+  pub url: String,
+  pub protocols: Option<Vec<String>>,
+  pub headers: Option<Vec<HttpHeader>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct NetWsClose {
+  #[ts(type = "string")]
+  pub connection_id: Uuid,
+  pub code: Option<u16>,
+  pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct NetWsSend {
+  #[ts(type = "string")]
+  pub connection_id: Uuid,
+  pub frame: WsFrame,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
+pub enum ClientToBridgeNetMsg {
+  #[bridge_request]
+  Fetch(NetFetch),
+  #[bridge_request]
+  WsOpen(NetWsOpen),
+  #[bridge_command]
+  WsClose(NetWsClose),
+  #[bridge_command]
+  WsSend(NetWsSend),
+}

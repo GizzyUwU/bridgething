@@ -12,7 +12,7 @@ pub use from::*;
 pub use to::*;
 
 use crate::{
-  BridgeThingMeta, ForwardMessage, GatewayMeta, NowPlayingUpdate,
+  BridgeThingMeta, ForwardMessage,
   wire::{MsgMeta, WireError},
 };
 
@@ -21,7 +21,7 @@ use crate::{
 ///
 /// these messages will pass over bluetooth.
 #[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
   #[ts(type = "Uint8Array")]
@@ -33,24 +33,38 @@ pub struct GatewayToBridgeMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeOuterEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
   #[from]
-  Version(GatewayMeta),
-  #[from]
   Asset(GatewayToBridgeAssetMsg),
+  #[from]
+  Audio(GatewayToBridgeAudioMsg),
   #[from]
   Authority(GatewayToBridgeAuthorityMsg),
   #[from]
+  Capabilities(GatewayToBridgeCapabilitiesMsg),
+  #[from]
   Chrome(GatewayToBridgeChromeMsg),
+  #[from]
+  Geo(GatewayToBridgeGeoMsg),
+  #[from]
+  Library(GatewayToBridgeLibraryMsg),
+  #[from]
+  Net(GatewayToBridgeNetMsg),
+  #[from]
+  Notifications(GatewayToBridgeNotificationsMsg),
+  #[from]
+  Phone(GatewayToBridgePhoneMsg),
+  #[from]
+  Player(GatewayToBridgePlayerMsg),
   #[from]
   System(GatewayToBridgeSystemMsg),
   #[from]
-  Webapp(GatewayToBridgeWebappMsg),
+  Time(GatewayToBridgeTimeMsg),
   #[from]
-  NowPlayingUpdate(NowPlayingUpdate),
+  Webapp(GatewayToBridgeWebappMsg),
   #[from]
   Error(WireError),
 }
@@ -60,7 +74,7 @@ pub enum GatewayToBridgeMsgData {
 ///
 /// these messages will pass over bluetooth.
 #[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
   #[ts(type = "Uint8Array")]
@@ -72,7 +86,7 @@ pub struct BridgeToGatewayMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeOuterEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum BridgeToGatewayMsgData {
@@ -81,9 +95,21 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   Asset(BridgeToGatewayAssetMsg),
   #[from]
-  System(BridgeToGatewaySystemMsg),
+  Audio(BridgeToGatewayAudioMsg),
   #[from]
-  Transport(BridgeToGatewayTransportMsg),
+  Geo(BridgeToGatewayGeoMsg),
+  #[from]
+  Library(BridgeToGatewayLibraryMsg),
+  #[from]
+  Net(BridgeToGatewayNetMsg),
+  #[from]
+  Notifications(BridgeToGatewayNotificationsMsg),
+  #[from]
+  Phone(BridgeToGatewayPhoneMsg),
+  #[from]
+  Player(BridgeToGatewayPlayerMsg),
+  #[from]
+  System(BridgeToGatewaySystemMsg),
   #[from]
   Webapp(BridgeToGatewayWebappMsg),
   #[from]

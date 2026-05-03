@@ -22,6 +22,813 @@ public sealed class RequestResult<out R, out E> {
   public data class ProtocolErr(val error: GatewayError): RequestResult<Nothing, Nothing>()
 }
 
+/** Cross-peer methods for the `Audio` wire surface. */
+public class AudioSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Audio::VolumeUp` messages. */
+  public val volumeUp: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.VolumeUp) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Audio::VolumeDown` messages. */
+  public val volumeDown: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.VolumeDown) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Audio::SetVolume` messages. */
+  public val setVolume: Flow<Pair<String, SetVolume>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.SetVolume ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Audio::MuteToggle` messages. */
+  public val muteToggle: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.MuteToggle) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Audio::SetMute` messages. */
+  public val setMute: Flow<Pair<String, SetMute>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.SetMute ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Audio::Tts` messages. */
+  public val tts: Flow<Pair<String, Tts>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.Tts ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Audio::TtsCancel` messages. */
+  public val ttsCancel: Flow<Pair<String, TtsCancel>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.TtsCancel ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Audio::TtsCancelAll` messages. */
+  public val ttsCancelAll: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.TtsCancelAll) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Audio::Earcon` messages. */
+  public val earcon: Flow<Pair<String, Earcon>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.Earcon ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Audio::TtsStarted` to every connected peer (broadcast). */
+  public suspend fun ttsStarted(payload: TtsStarted, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsStarted(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Audio::TtsEnded` to every connected peer (broadcast). */
+  public suspend fun ttsEnded(payload: TtsEnded, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsEnded(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Audio::VolumeChanged` to every connected peer (broadcast). */
+  public suspend fun volumeChanged(payload: VolumeChanged, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.VolumeChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
+/** Cross-peer methods for the `Geo` wire surface. */
+public class GeoSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Geo::Watch` messages. */
+  public val watch: Flow<Pair<String, GeoWatch>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayGeoMsg.Watch ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Geo::Unwatch` messages. */
+  public val unwatch: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayGeoMsg.Unwatch) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Send `Geo::Position` to every connected peer (broadcast). */
+  public suspend fun position(payload: Position, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `GeoGetOnce` requests. */
+  public val requests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayGeoMsg.GetOnce ?: return@mapNotNull null
+      val handle = GeoGetOnceHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Cross-peer methods for the `Library` wire surface. */
+public class LibrarySurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Library::FavoritesToggle` messages. */
+  public val favoritesToggle: Flow<Pair<String, FavoritesToggle>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesToggle ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Library::FavoritesSet` messages. */
+  public val favoritesSet: Flow<Pair<String, FavoritesSet>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesSet ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Library::FavoriteChanged` to every connected peer (broadcast). */
+  public suspend fun favoriteChanged(payload: FavoriteChanged, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoriteChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `LibraryBrowseRequest` requests. */
+  public val requests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Browse ?: return@mapNotNull null
+      val handle = LibraryBrowseRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibrarySearchRequest` requests. */
+  public val requests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Search ?: return@mapNotNull null
+      val handle = LibrarySearchRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
+  public val requests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Recommendations ?: return@mapNotNull null
+      val handle = LibraryRecommendationsRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
+  public val requests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesList ?: return@mapNotNull null
+      val handle = LibraryFavoritesListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Cross-peer methods for the `Net` wire surface. */
+public class NetSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Net::WsClose` messages. */
+  public val wsClose: Flow<Pair<String, NetWsClose>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsClose ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Net::WsSend` messages. */
+  public val wsSend: Flow<Pair<String, NetWsSend>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsSend ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Net::FetchStreamBegin` to every connected peer (broadcast). */
+  public suspend fun fetchStreamBegin(payload: NetFetchStreamBegin, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamBegin(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::FetchStreamChunk` to every connected peer (broadcast). */
+  public suspend fun fetchStreamChunk(payload: NetFetchStreamChunk, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamChunk(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::FetchStreamEnd` to every connected peer (broadcast). */
+  public suspend fun fetchStreamEnd(payload: NetFetchStreamEnd, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamEnd(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::WsOpened` to every connected peer (broadcast). */
+  public suspend fun wsOpened(payload: NetWsOpened, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpened(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::WsMessage` to every connected peer (broadcast). */
+  public suspend fun wsMessage(payload: NetWsMessage, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsMessage(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::WsClosed` to every connected peer (broadcast). */
+  public suspend fun wsClosed(payload: NetWsClosed, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsClosed(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::WsErrorEvent` to every connected peer (broadcast). */
+  public suspend fun wsErrorEvent(payload: NetWsErrorEvent, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `NetFetchRequestMsg` requests. */
+  public val requests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.Fetch ?: return@mapNotNull null
+      val handle = NetFetchRequestMsgHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `NetWsOpen` requests. */
+  public val requests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsOpen ?: return@mapNotNull null
+      val handle = NetWsOpenHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Cross-peer methods for the `Notifications` wire surface. */
+public class NotificationsSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Notifications::InvokePositive` messages. */
+  public val invokePositive: Flow<Pair<String, NotificationInvoke>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.InvokePositive ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Notifications::InvokeNegative` messages. */
+  public val invokeNegative: Flow<Pair<String, NotificationInvoke>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.InvokeNegative ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Notifications::Posted` to every connected peer (broadcast). */
+  public suspend fun posted(payload: Notification, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Posted(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Notifications::Updated` to every connected peer (broadcast). */
+  public suspend fun updated(payload: Notification, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Updated(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Notifications::Removed` to every connected peer (broadcast). */
+  public suspend fun removed(payload: NotificationRemoved, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Removed(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `NotificationsListRequest` requests. */
+  public val requests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.List ?: return@mapNotNull null
+      val handle = NotificationsListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Cross-peer methods for the `Phone` wire surface. */
+public class PhoneSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Phone::Answer` messages. */
+  public val answer: Flow<Pair<String, PhoneCallAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Answer ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::Decline` messages. */
+  public val decline: Flow<Pair<String, PhoneCallAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Decline ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::End` messages. */
+  public val end: Flow<Pair<String, PhoneCallAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.End ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::Hold` messages. */
+  public val hold: Flow<Pair<String, PhoneCallAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Hold ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::Unhold` messages. */
+  public val unhold: Flow<Pair<String, PhoneCallAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Unhold ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Phone::Snapshot` to every connected peer (broadcast). */
+  public suspend fun snapshot(payload: PhoneStateReply, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Phone::CallStarted` to every connected peer (broadcast). */
+  public suspend fun callStarted(payload: PhoneCall, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallStarted(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Phone::CallUpdated` to every connected peer (broadcast). */
+  public suspend fun callUpdated(payload: PhoneCall, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallUpdated(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Phone::CallEnded` to every connected peer (broadcast). */
+  public suspend fun callEnded(payload: PhoneCallEnded, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallEnded(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `PhoneStateGet` requests. */
+  public val requests: Flow<PhoneStateGetHandle> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.StateGet ?: return@mapNotNull null
+      val handle = PhoneStateGetHandle(gateway, it.deviceId, it.message.id)
+      handle
+    }
+
+}
+
+/** Cross-peer methods for the `Player` wire surface. */
+public class PlayerSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Player::Play` messages. */
+  public val play: Flow<Pair<String, PlayUri>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Play ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::Queue` messages. */
+  public val queue: Flow<Pair<String, QueueUri>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Queue ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::Pause` messages. */
+  public val pause: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.Pause) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Player::Resume` messages. */
+  public val resume: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.Resume) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Player::SkipNext` messages. */
+  public val skipNext: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.SkipNext) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Player::SkipPrev` messages. */
+  public val skipPrev: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.SkipPrev) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Player::SkipToIndex` messages. */
+  public val skipToIndex: Flow<Pair<String, SkipToIndex>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SkipToIndex ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::SeekTo` messages. */
+  public val seekTo: Flow<Pair<String, SeekTo>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SeekTo ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::SetShuffle` messages. */
+  public val setShuffle: Flow<Pair<String, SetShuffle>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetShuffle ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::SetRepeat` messages. */
+  public val setRepeat: Flow<Pair<String, SetRepeat>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetRepeat ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::SetSpeed` messages. */
+  public val setSpeed: Flow<Pair<String, SetSpeed>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetSpeed ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::SetCrossfade` messages. */
+  public val setCrossfade: Flow<Pair<String, SetCrossfade>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetCrossfade ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Player::Snapshot` to every connected peer (broadcast). */
+  public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Snapshot(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Player::Delta` to every connected peer (broadcast). */
+  public suspend fun delta(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Player::QueueChanged` to every connected peer (broadcast). */
+  public suspend fun queueChanged(payload: QueueSnapshot, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
 /** Cross-peer methods for the `System` wire surface. */
 public class SystemSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `System::OtaProgress` messages. */
@@ -128,118 +935,6 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
 
 }
 
-/** Cross-peer methods for the `Transport` wire surface. */
-public class TransportSurface(private val gateway: BridgethingGateway) {
-  /** Cross-peer stream of `Transport::Play` messages. */
-  public val play: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Play) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::Pause` messages. */
-  public val pause: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Pause) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::PlayPause` messages. */
-  public val playPause: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.PlayPause) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::Next` messages. */
-  public val next: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Next) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::Prev` messages. */
-  public val prev: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Prev) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::VolumeUp` messages. */
-  public val volumeUp: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.VolumeUp) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::VolumeDown` messages. */
-  public val volumeDown: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.VolumeDown) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::MuteToggle` messages. */
-  public val muteToggle: Flow<String> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.MuteToggle) return@mapNotNull null
-      it.deviceId
-    }
-
-  /** Cross-peer stream of `Transport::Shuffle` messages. */
-  public val shuffle: Flow<Pair<String, ShuffleSet>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.Shuffle ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
-  /** Cross-peer stream of `Transport::Repeat` messages. */
-  public val repeat: Flow<Pair<String, RepeatSet>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.Repeat ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
-  /** Cross-peer stream of `Transport::SeekTo` messages. */
-  public val seekTo: Flow<Pair<String, SeekToSet>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.SeekTo ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
-  /** Cross-peer stream of `Transport::SkipToIndex` messages. */
-  public val skipToIndex: Flow<Pair<String, SkipToIndexSet>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.SkipToIndex ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
-}
-
 /** Cross-peer methods for the `Forward` wire surface. */
 public class ForwardSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `Forward::Text` messages. */
@@ -268,27 +963,6 @@ public class ForwardSurface(private val gateway: BridgethingGateway) {
       val inner = outer.data as? ForwardMessage.Binary ?: return@mapNotNull null
       it.deviceId to inner.data
     }
-
-}
-
-/** Cross-peer methods for the `Version` wire surface. */
-public class VersionSurface(private val gateway: BridgethingGateway) {
-  /** Send a `Version` event to every connected peer (broadcast). */
-  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Version(payload),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
 
 }
 
@@ -428,6 +1102,27 @@ public class AuthoritySurface(private val gateway: BridgethingGateway) {
 
 }
 
+/** Cross-peer methods for the `Capabilities` wire surface. */
+public class CapabilitiesSurface(private val gateway: BridgethingGateway) {
+  /** Send `Capabilities::Announce` to every connected peer (broadcast). */
+  public suspend fun announce(payload: GatewayCapabilities, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Capabilities(GatewayToBridgeCapabilitiesMsg.Announce(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
 /** Cross-peer methods for the `Chrome` wire surface. */
 public class ChromeSurface(private val gateway: BridgethingGateway) {
   /** Send `Chrome::Navigate` to every connected peer (broadcast). */
@@ -449,10 +1144,10 @@ public class ChromeSurface(private val gateway: BridgethingGateway) {
 
 }
 
-/** Cross-peer methods for the `NowPlayingUpdate` wire surface. */
-public class NowPlayingUpdateSurface(private val gateway: BridgethingGateway) {
-  /** Send a `NowPlayingUpdate` event to every connected peer (broadcast). */
-  public suspend fun send(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
+/** Cross-peer methods for the `Time` wire surface. */
+public class TimeSurface(private val gateway: BridgethingGateway) {
+  /** Send `Time::Snapshot` to every connected peer (broadcast). */
+  public suspend fun snapshot(payload: TimeInfo, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
     coroutineScope {
       ids.map { deviceId ->
@@ -460,7 +1155,7 @@ public class NowPlayingUpdateSurface(private val gateway: BridgethingGateway) {
           val msg = GatewayToBridgeMsg(
             id = UUID.randomUUID().toBytes(),
             meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.NowPlayingUpdate(payload),
+            data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -543,6 +1238,723 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
       else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
     }
+  }
+
+}
+
+/** Per-peer methods for the `Audio` wire surface (deviceId is baked in). */
+public class AudioSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Audio::VolumeUp` from this peer. */
+  public val volumeUp: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.VolumeUp) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Audio::VolumeDown` from this peer. */
+  public val volumeDown: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.VolumeDown) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Audio::SetVolume` from this peer. */
+  public val setVolume: Flow<SetVolume> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.SetVolume ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Audio::MuteToggle` from this peer. */
+  public val muteToggle: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.MuteToggle) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Audio::SetMute` from this peer. */
+  public val setMute: Flow<SetMute> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.SetMute ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Audio::Tts` from this peer. */
+  public val tts: Flow<Tts> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.Tts ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Audio::TtsCancel` from this peer. */
+  public val ttsCancel: Flow<TtsCancel> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.TtsCancel ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Audio::TtsCancelAll` from this peer. */
+  public val ttsCancelAll: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayAudioMsg.TtsCancelAll) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Audio::Earcon` from this peer. */
+  public val earcon: Flow<Earcon> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Audio ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayAudioMsg.Earcon ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Audio::TtsStarted` to this peer. */
+  public suspend fun ttsStarted(payload: TtsStarted, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsStarted(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Audio::TtsEnded` to this peer. */
+  public suspend fun ttsEnded(payload: TtsEnded, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsEnded(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Audio::VolumeChanged` to this peer. */
+  public suspend fun volumeChanged(payload: VolumeChanged, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.VolumeChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
+/** Per-peer methods for the `Geo` wire surface (deviceId is baked in). */
+public class GeoSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Geo::Watch` from this peer. */
+  public val watch: Flow<GeoWatch> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayGeoMsg.Watch ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Geo::Unwatch` from this peer. */
+  public val unwatch: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayGeoMsg.Unwatch) return@mapNotNull null
+      Unit
+    }
+
+  /** Send `Geo::Position` to this peer. */
+  public suspend fun position(payload: Position, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `GeoGetOnce` requests. */
+  public val requests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayGeoMsg.GetOnce ?: return@mapNotNull null
+      val handle = GeoGetOnceHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Per-peer methods for the `Library` wire surface (deviceId is baked in). */
+public class LibrarySurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Library::FavoritesToggle` from this peer. */
+  public val favoritesToggle: Flow<FavoritesToggle> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesToggle ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Library::FavoritesSet` from this peer. */
+  public val favoritesSet: Flow<FavoritesSet> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesSet ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Library::FavoriteChanged` to this peer. */
+  public suspend fun favoriteChanged(payload: FavoriteChanged, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoriteChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `LibraryBrowseRequest` requests. */
+  public val requests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Browse ?: return@mapNotNull null
+      val handle = LibraryBrowseRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibrarySearchRequest` requests. */
+  public val requests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Search ?: return@mapNotNull null
+      val handle = LibrarySearchRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
+  public val requests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.Recommendations ?: return@mapNotNull null
+      val handle = LibraryRecommendationsRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
+  public val requests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesList ?: return@mapNotNull null
+      val handle = LibraryFavoritesListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Per-peer methods for the `Net` wire surface (deviceId is baked in). */
+public class NetSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Net::WsClose` from this peer. */
+  public val wsClose: Flow<NetWsClose> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsClose ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Net::WsSend` from this peer. */
+  public val wsSend: Flow<NetWsSend> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsSend ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Net::FetchStreamBegin` to this peer. */
+  public suspend fun fetchStreamBegin(payload: NetFetchStreamBegin, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamBegin(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::FetchStreamChunk` to this peer. */
+  public suspend fun fetchStreamChunk(payload: NetFetchStreamChunk, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamChunk(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::FetchStreamEnd` to this peer. */
+  public suspend fun fetchStreamEnd(payload: NetFetchStreamEnd, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamEnd(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::WsOpened` to this peer. */
+  public suspend fun wsOpened(payload: NetWsOpened, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpened(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::WsMessage` to this peer. */
+  public suspend fun wsMessage(payload: NetWsMessage, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsMessage(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::WsClosed` to this peer. */
+  public suspend fun wsClosed(payload: NetWsClosed, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsClosed(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::WsErrorEvent` to this peer. */
+  public suspend fun wsErrorEvent(payload: NetWsErrorEvent, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `NetFetchRequestMsg` requests. */
+  public val requests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.Fetch ?: return@mapNotNull null
+      val handle = NetFetchRequestMsgHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `NetWsOpen` requests. */
+  public val requests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.WsOpen ?: return@mapNotNull null
+      val handle = NetWsOpenHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Per-peer methods for the `Notifications` wire surface (deviceId is baked in). */
+public class NotificationsSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Notifications::InvokePositive` from this peer. */
+  public val invokePositive: Flow<NotificationInvoke> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.InvokePositive ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Notifications::InvokeNegative` from this peer. */
+  public val invokeNegative: Flow<NotificationInvoke> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.InvokeNegative ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Notifications::Posted` to this peer. */
+  public suspend fun posted(payload: Notification, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Posted(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Notifications::Updated` to this peer. */
+  public suspend fun updated(payload: Notification, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Updated(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Notifications::Removed` to this peer. */
+  public suspend fun removed(payload: NotificationRemoved, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Removed(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `NotificationsListRequest` requests. */
+  public val requests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.List ?: return@mapNotNull null
+      val handle = NotificationsListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+}
+
+/** Per-peer methods for the `Phone` wire surface (deviceId is baked in). */
+public class PhoneSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Phone::Answer` from this peer. */
+  public val answer: Flow<PhoneCallAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Answer ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::Decline` from this peer. */
+  public val decline: Flow<PhoneCallAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Decline ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::End` from this peer. */
+  public val end: Flow<PhoneCallAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.End ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::Hold` from this peer. */
+  public val hold: Flow<PhoneCallAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Hold ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::Unhold` from this peer. */
+  public val unhold: Flow<PhoneCallAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Unhold ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Phone::Snapshot` to this peer. */
+  public suspend fun snapshot(payload: PhoneStateReply, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Phone::CallStarted` to this peer. */
+  public suspend fun callStarted(payload: PhoneCall, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallStarted(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Phone::CallUpdated` to this peer. */
+  public suspend fun callUpdated(payload: PhoneCall, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallUpdated(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Phone::CallEnded` to this peer. */
+  public suspend fun callEnded(payload: PhoneCallEnded, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallEnded(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `PhoneStateGet` requests. */
+  public val requests: Flow<PhoneStateGetHandle> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.StateGet ?: return@mapNotNull null
+      val handle = PhoneStateGetHandle(gateway, it.deviceId, it.message.id)
+      handle
+    }
+
+}
+
+/** Per-peer methods for the `Player` wire surface (deviceId is baked in). */
+public class PlayerSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Player::Play` from this peer. */
+  public val play: Flow<PlayUri> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Play ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::Queue` from this peer. */
+  public val queue: Flow<QueueUri> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Queue ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::Pause` from this peer. */
+  public val pause: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.Pause) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Player::Resume` from this peer. */
+  public val resume: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.Resume) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Player::SkipNext` from this peer. */
+  public val skipNext: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.SkipNext) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Player::SkipPrev` from this peer. */
+  public val skipPrev: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPlayerMsg.SkipPrev) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Player::SkipToIndex` from this peer. */
+  public val skipToIndex: Flow<SkipToIndex> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SkipToIndex ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::SeekTo` from this peer. */
+  public val seekTo: Flow<SeekTo> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SeekTo ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::SetShuffle` from this peer. */
+  public val setShuffle: Flow<SetShuffle> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetShuffle ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::SetRepeat` from this peer. */
+  public val setRepeat: Flow<SetRepeat> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetRepeat ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::SetSpeed` from this peer. */
+  public val setSpeed: Flow<SetSpeed> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetSpeed ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::SetCrossfade` from this peer. */
+  public val setCrossfade: Flow<SetCrossfade> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.SetCrossfade ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Player::Snapshot` to this peer. */
+  public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Snapshot(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Player::Delta` to this peer. */
+  public suspend fun delta(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Player::QueueChanged` to this peer. */
+  public suspend fun queueChanged(payload: QueueSnapshot, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
   }
 
 }
@@ -639,133 +2051,6 @@ public class SystemSurfaceForDevice(
 
 }
 
-/** Per-peer methods for the `Transport` wire surface (deviceId is baked in). */
-public class TransportSurfaceForDevice(
-  private val gateway: BridgethingGateway,
-  public val deviceId: String,
-) {
-  /** Stream of `Transport::Play` from this peer. */
-  public val play: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Play) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::Pause` from this peer. */
-  public val pause: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Pause) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::PlayPause` from this peer. */
-  public val playPause: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.PlayPause) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::Next` from this peer. */
-  public val next: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Next) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::Prev` from this peer. */
-  public val prev: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.Prev) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::VolumeUp` from this peer. */
-  public val volumeUp: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.VolumeUp) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::VolumeDown` from this peer. */
-  public val volumeDown: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.VolumeDown) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::MuteToggle` from this peer. */
-  public val muteToggle: Flow<Unit> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      if (outer.data !is BridgeToGatewayTransportMsg.MuteToggle) return@mapNotNull null
-      Unit
-    }
-
-  /** Stream of `Transport::Shuffle` from this peer. */
-  public val shuffle: Flow<ShuffleSet> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.Shuffle ?: return@mapNotNull null
-      inner.data
-    }
-
-  /** Stream of `Transport::Repeat` from this peer. */
-  public val repeat: Flow<RepeatSet> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.Repeat ?: return@mapNotNull null
-      inner.data
-    }
-
-  /** Stream of `Transport::SeekTo` from this peer. */
-  public val seekTo: Flow<SeekToSet> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.SeekTo ?: return@mapNotNull null
-      inner.data
-    }
-
-  /** Stream of `Transport::SkipToIndex` from this peer. */
-  public val skipToIndex: Flow<SkipToIndexSet> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Transport ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayTransportMsg.SkipToIndex ?: return@mapNotNull null
-      inner.data
-    }
-
-}
-
 /** Per-peer methods for the `Forward` wire surface (deviceId is baked in). */
 public class ForwardSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -800,23 +2085,6 @@ public class ForwardSurfaceForDevice(
       val inner = outer.data as? ForwardMessage.Binary ?: return@mapNotNull null
       inner.data
     }
-
-}
-
-/** Per-peer methods for the `Version` wire surface (deviceId is baked in). */
-public class VersionSurfaceForDevice(
-  private val gateway: BridgethingGateway,
-  public val deviceId: String,
-) {
-  /** Send a `Version` event to this peer. */
-  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Version(payload),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
 
 }
 
@@ -921,6 +2189,23 @@ public class AuthoritySurfaceForDevice(
 
 }
 
+/** Per-peer methods for the `Capabilities` wire surface (deviceId is baked in). */
+public class CapabilitiesSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Send `Capabilities::Announce` to this peer. */
+  public suspend fun announce(payload: GatewayCapabilities, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Capabilities(GatewayToBridgeCapabilitiesMsg.Announce(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
 /** Per-peer methods for the `Chrome` wire surface (deviceId is baked in). */
 public class ChromeSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -938,17 +2223,17 @@ public class ChromeSurfaceForDevice(
 
 }
 
-/** Per-peer methods for the `NowPlayingUpdate` wire surface (deviceId is baked in). */
-public class NowPlayingUpdateSurfaceForDevice(
+/** Per-peer methods for the `Time` wire surface (deviceId is baked in). */
+public class TimeSurfaceForDevice(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
-  /** Send a `NowPlayingUpdate` event to this peer. */
-  public suspend fun send(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
+  /** Send `Time::Snapshot` to this peer. */
+  public suspend fun snapshot(payload: TimeInfo, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.NowPlayingUpdate(payload),
+      data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -1040,41 +2325,73 @@ public class BridgethingGatewayDevice(
   public val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
+  /** Per-peer methods for the `Audio` wire surface. */
+  public val audio: AudioSurfaceForDevice get() = AudioSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Geo` wire surface. */
+  public val geo: GeoSurfaceForDevice get() = GeoSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Library` wire surface. */
+  public val library: LibrarySurfaceForDevice get() = LibrarySurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Net` wire surface. */
+  public val net: NetSurfaceForDevice get() = NetSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Notifications` wire surface. */
+  public val notifications: NotificationsSurfaceForDevice get() = NotificationsSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Phone` wire surface. */
+  public val phone: PhoneSurfaceForDevice get() = PhoneSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Player` wire surface. */
+  public val player: PlayerSurfaceForDevice get() = PlayerSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `System` wire surface. */
   public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `Transport` wire surface. */
-  public val transport: TransportSurfaceForDevice get() = TransportSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
   public val forward: ForwardSurfaceForDevice get() = ForwardSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `Version` wire surface. */
-  public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Asset` wire surface. */
   public val asset: AssetSurfaceForDevice get() = AssetSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Authority` wire surface. */
   public val authority: AuthoritySurfaceForDevice get() = AuthoritySurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Capabilities` wire surface. */
+  public val capabilities: CapabilitiesSurfaceForDevice get() = CapabilitiesSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Chrome` wire surface. */
   public val chrome: ChromeSurfaceForDevice get() = ChromeSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `NowPlayingUpdate` wire surface. */
-  public val nowPlayingUpdate: NowPlayingUpdateSurfaceForDevice get() = NowPlayingUpdateSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Time` wire surface. */
+  public val time: TimeSurfaceForDevice get() = TimeSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Webapp` wire surface. */
   public val webapp: WebappSurfaceForDevice get() = WebappSurfaceForDevice(gateway, deviceId)
 }
+
+/** Methods scoped to the `Audio` wire surface. */
+public val BridgethingGateway.audio: AudioSurface
+  get() = AudioSurface(this)
+
+/** Methods scoped to the `Geo` wire surface. */
+public val BridgethingGateway.geo: GeoSurface
+  get() = GeoSurface(this)
+
+/** Methods scoped to the `Library` wire surface. */
+public val BridgethingGateway.library: LibrarySurface
+  get() = LibrarySurface(this)
+
+/** Methods scoped to the `Net` wire surface. */
+public val BridgethingGateway.net: NetSurface
+  get() = NetSurface(this)
+
+/** Methods scoped to the `Notifications` wire surface. */
+public val BridgethingGateway.notifications: NotificationsSurface
+  get() = NotificationsSurface(this)
+
+/** Methods scoped to the `Phone` wire surface. */
+public val BridgethingGateway.phone: PhoneSurface
+  get() = PhoneSurface(this)
+
+/** Methods scoped to the `Player` wire surface. */
+public val BridgethingGateway.player: PlayerSurface
+  get() = PlayerSurface(this)
 
 /** Methods scoped to the `System` wire surface. */
 public val BridgethingGateway.system: SystemSurface
   get() = SystemSurface(this)
 
-/** Methods scoped to the `Transport` wire surface. */
-public val BridgethingGateway.transport: TransportSurface
-  get() = TransportSurface(this)
-
 /** Methods scoped to the `Forward` wire surface. */
 public val BridgethingGateway.forward: ForwardSurface
   get() = ForwardSurface(this)
-
-/** Methods scoped to the `Version` wire surface. */
-public val BridgethingGateway.version: VersionSurface
-  get() = VersionSurface(this)
 
 /** Methods scoped to the `Asset` wire surface. */
 public val BridgethingGateway.asset: AssetSurface
@@ -1084,13 +2401,17 @@ public val BridgethingGateway.asset: AssetSurface
 public val BridgethingGateway.authority: AuthoritySurface
   get() = AuthoritySurface(this)
 
+/** Methods scoped to the `Capabilities` wire surface. */
+public val BridgethingGateway.capabilities: CapabilitiesSurface
+  get() = CapabilitiesSurface(this)
+
 /** Methods scoped to the `Chrome` wire surface. */
 public val BridgethingGateway.chrome: ChromeSurface
   get() = ChromeSurface(this)
 
-/** Methods scoped to the `NowPlayingUpdate` wire surface. */
-public val BridgethingGateway.nowPlayingUpdate: NowPlayingUpdateSurface
-  get() = NowPlayingUpdateSurface(this)
+/** Methods scoped to the `Time` wire surface. */
+public val BridgethingGateway.time: TimeSurface
+  get() = TimeSurface(this)
 
 /** Methods scoped to the `Webapp` wire surface. */
 public val BridgethingGateway.webapp: WebappSurface
@@ -1098,6 +2419,294 @@ public val BridgethingGateway.webapp: WebappSurface
 
 /** Returns a per-device proxy with `deviceId` baked into every method and Flow. */
 public fun BridgethingGateway.device(deviceId: String): BridgethingGatewayDevice = BridgethingGatewayDevice(this, deviceId)
+
+public class GeoGetOnceHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: GeoGetOnceReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.GetOnceReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: GeoErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.ErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibraryBrowseRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: BrowseReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.BrowseReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibrarySearchRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: SearchReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.SearchReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibraryRecommendationsRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: RecommendationsReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.RecommendationsReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibraryFavoritesListRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: FavoritesListReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesListReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class NetFetchRequestMsgHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: NetFetchReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: NetFetchErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class NetWsOpenHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: NetWsOpenReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpenReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: NetWsErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class NotificationsListRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: NotificationsListReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ListReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: NotificationsErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class PhoneStateGetHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: PhoneStateReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.StateReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
 
 public class AssetRequestHandle internal constructor(
   private val gateway: BridgethingGateway,

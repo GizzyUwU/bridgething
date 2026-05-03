@@ -1,8 +1,7 @@
 use libbridgething::{
-  Device, MediaItemUpdate, NowPlayingUpdate, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackUpdate,
-  Track,
-  client::{BridgeToClientPlayerMsg, PlayerQueue, PlayerState as WirePlayerState},
-  gateway::CompanionAuthorityScope,
+  CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
+  PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, Track,
+  client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
   wire::MsgMeta,
 };
 
@@ -28,7 +27,6 @@ pub struct PlayerState {
   client_man: ClientMan,
   authority: AuthorityRegistry,
 
-  pub device: Option<Device>,
   pub playing: bool,
 
   pub context_title: String,
@@ -38,11 +36,8 @@ pub struct PlayerState {
   pub playback_speed: f64,
 
   pub track: Option<Track>,
-  pub queue: Option<PlaybackQueue>,
 
-  pub volume: u8,
   pub options: PlaybackOptions,
-  pub restrictions: PlaybackRestrictions,
 
   iap2_metadata: MediaItemUpdate,
   iap2_playback: PlaybackUpdate,
@@ -56,7 +51,6 @@ impl PlayerState {
       client_man,
       authority,
 
-      device: None,
       playing: false,
 
       context_title: "BridgeThing".to_string(),
@@ -66,11 +60,8 @@ impl PlayerState {
       playback_speed: 1.0,
 
       track: None,
-      queue: None,
 
-      volume: 100,
       options: PlaybackOptions::default(),
-      restrictions: PlaybackRestrictions::default(),
 
       iap2_metadata: MediaItemUpdate::default(),
       iap2_playback: PlaybackUpdate::default(),
@@ -240,27 +231,43 @@ impl PlayerState {
   }
 
   pub fn to_send_state(&self) -> BridgeToClientPlayerMsg {
-    BridgeToClientPlayerMsg::PlayerState(WirePlayerState {
-      context_id: self
-        .context_id
-        .clone()
-        .unwrap_or("bridgething:context:fake".to_string()),
-      context_title: self.context_title.clone(),
-      is_paused: !self.playing,
-      playback_options: self.options.clone(),
-      playback_position: self.position_ms,
-      playback_restrictions: self.restrictions.clone(),
-      playback_speed: self.playback_speed,
-      track: self.track.clone().unwrap_or_default(),
+    BridgeToClientPlayerMsg::Snapshot(PlayerStateReply {
+      state: WirePlayerState {
+        track: self.track.as_ref().map(track_to_media_item),
+        playback: Playback {
+          state: if self.playing {
+            PlaybackState::Playing
+          } else {
+            PlaybackState::Paused
+          },
+          position_ms: u32::try_from(self.position_ms).unwrap_or(u32::MAX),
+          shuffle: self.options.shuffle,
+          repeat: self.options.repeat,
+        },
+        queue: vec![],
+        options: PlayerOptions {
+          speed: self.playback_speed as f32,
+          crossfade_ms: None,
+        },
+      },
     })
   }
 
   pub fn to_send_queue(&self) -> BridgeToClientPlayerMsg {
-    BridgeToClientPlayerMsg::Queue(PlayerQueue {
-      current: self.track.clone().unwrap_or_default(),
-      previous: vec![],
-      next: vec![],
-    })
+    BridgeToClientPlayerMsg::QueueChanged(PlayerQueueReply { items: vec![] })
+  }
+}
+
+fn track_to_media_item(track: &Track) -> MediaItem {
+  MediaItem {
+    uri: None,
+    persistent_id: Some(track.id.clone()),
+    title: Some(track.name.clone()),
+    album: Some(track.album.name.clone()),
+    artist: Some(track.artist.name.clone()),
+    liked: Some(track.saved),
+    artwork_id: Some(track.image_id.clone()),
+    duration_ms: Some(track.duration_ms),
   }
 }
 

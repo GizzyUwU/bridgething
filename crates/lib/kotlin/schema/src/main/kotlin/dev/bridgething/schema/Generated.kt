@@ -129,11 +129,28 @@ data class AssetRequest (
 	val requestId: ByteArray
 )
 
-/// Surfaces the companion can declare authority over. Each scope has a
-/// scope-defined fallback source the daemon merges with when no claim is
-/// active or the claim has gone stale (see daemon-side merge in
-/// `core::player`). New scopes are forward-compat: an unknown scope
-/// arriving at an older daemon is stored opaquely and ignored.
+/// One TTS voice the companion's audio backend can speak as. `id` is
+/// platform-opaque (Apple/Android voice id); `locale` is BCP-47.
+@Serializable
+data class VoiceDescriptor (
+	val id: String,
+	val name: String,
+	val locale: String
+)
+
+/// What the gateway-side audio backend supports. `earcons` are short
+/// named sounds the companion can play; `voices` are TTS voices.
+@Serializable
+data class AudioCapabilities (
+	val earcons: List<String>,
+	val voices: List<VoiceDescriptor>
+)
+
+/// One axis the companion can declare authority over. Each scope has a
+/// fallback source the daemon merges with when no claim is active or
+/// the claim has gone stale (see daemon-side merge in `core::player`).
+/// Unknown scopes arriving at an older daemon are stored opaquely and
+/// ignored.
 @Serializable
 enum class CompanionAuthorityScope(val string: String) {
 	/// Track metadata: title, album, artist, persistent_id, artwork_id,
@@ -160,6 +177,10 @@ data class AuthorityRelease (
 	val scope: CompanionAuthorityScope
 )
 
+/// Bridge-side identity announce. Daemon sends one of these to every
+/// gateway on connect (companion needs to know what daemon it's talking
+/// to so it can opt out of unsupported surfaces). The companion's mirror
+/// is `GatewayCapabilities::Announce` over in `shared::capabilities`.
 @Serializable
 data class BridgeThingMeta (
 	val bridgethingVersion: String,
@@ -211,11 +232,29 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("asset")
 	data class Asset(val data: BridgeToGatewayAssetMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("audio")
+	data class Audio(val data: BridgeToGatewayAudioMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("geo")
+	data class Geo(val data: BridgeToGatewayGeoMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("library")
+	data class Library(val data: BridgeToGatewayLibraryMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("net")
+	data class Net(val data: BridgeToGatewayNetMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("notifications")
+	data class Notifications(val data: BridgeToGatewayNotificationsMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("phone")
+	data class Phone(val data: BridgeToGatewayPhoneMsg): BridgeToGatewayMsgData()
+	@Serializable
+	@SerialName("player")
+	data class Player(val data: BridgeToGatewayPlayerMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("system")
 	data class System(val data: BridgeToGatewaySystemMsg): BridgeToGatewayMsgData()
-	@Serializable
-	@SerialName("transport")
-	data class Transport(val data: BridgeToGatewayTransportMsg): BridgeToGatewayMsgData()
 	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: BridgeToGatewayWebappMsg): BridgeToGatewayMsgData()
@@ -247,6 +286,127 @@ data class BridgeToGatewayMsg (
 )
 
 @Serializable
+enum class BrightnessMode(val string: String) {
+	/// Daemon drives backlight from the on-board ALS.
+	@SerialName("auto")
+	Auto("auto"),
+	/// Webapp drives backlight directly via `setLevel`.
+	@SerialName("manual")
+	Manual("manual"),
+}
+
+/// Backlight state. `level` is the user-set value (only respected in
+/// `Manual`); `effective_level` is what's actually on the panel — equal
+/// to `level` in `Manual`, ALS-derived in `Auto`.
+@Serializable
+data class BrightnessState (
+	val mode: BrightnessMode,
+	val level: Float,
+	val effectiveLevel: Float
+)
+
+/// A drilldown node. `node_id` is opaque and gateway-defined; webapps
+/// pass it back as the next `browse({ node_id })` to descend.
+@Serializable
+data class BrowseFolder (
+	val nodeId: String,
+	val title: String,
+	val subtitle: String? = null,
+	val artworkId: String? = null
+)
+
+/// One row in a `BrowseResult`: either a folder (drilldown) or a leaf
+/// item the user can play / queue / favorite.
+@Serializable(with = BrowseEntrySerializer::class)
+sealed class BrowseEntry {
+	@Serializable
+	@SerialName("folder")
+	data class Folder(val data: BrowseFolder): BrowseEntry()
+	@Serializable
+	@SerialName("item")
+	data class Item(val data: LibraryItem): BrowseEntry()
+}
+
+/// Page of browse results. `next_page_token` is the opaque cursor a
+/// webapp passes back as `browse({ page_token: ... })` to fetch the
+/// next page; `None` means this is the last page.
+@Serializable
+data class BrowseResult (
+	val entries: List<BrowseEntry>,
+	val nextPageToken: String? = null
+)
+
+@Serializable
+data class BrowseReply (
+	val result: BrowseResult
+)
+
+/// Identity payload describing the companion peer the daemon is talking
+/// to. Replaces the old `GatewayMeta` and the old `GatewayStatus` bits.
+/// Address is the BT MAC the companion advertises; on transports without
+/// a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
+/// is the synthetic address as a string.
+@Serializable
+data class GatewayInfo (
+	val address: String,
+	val name: String,
+	val osName: String,
+	val appName: String,
+	val appVersion: String,
+	val adapterVersion: String,
+	val libVersion: String,
+	val libbridgethingVersion: String
+)
+
+/// Bool feature flags the daemon exposes to webapps. Each is true when the
+/// surface has both a backing implementation and (where applicable) a
+/// connected companion claiming to provide it. False = the surface will
+/// respond `Unsupported` or `Unimplemented` to verbs.
+@Serializable
+data class SurfaceAvailability (
+	val geo: Boolean,
+	val notifications: Boolean,
+	val netFetch: Boolean,
+	val netWs: Boolean,
+	val audioTts: Boolean
+)
+
+@Serializable
+enum class NetworkKind(val string: String) {
+	@SerialName("unknown")
+	Unknown("unknown"),
+	@SerialName("wifi")
+	Wifi("wifi"),
+	@SerialName("cellular")
+	Cellular("cellular"),
+	@SerialName("ethernet")
+	Ethernet("ethernet"),
+}
+
+/// What kind of network the companion's host is currently using. `metered`
+/// is the OS-reported metered flag; webapps should treat it as a hint
+/// (e.g. defer non-essential fetches) rather than a hard ban.
+@Serializable
+data class NetworkInfo (
+	val kind: NetworkKind,
+	val metered: Boolean
+)
+
+/// What the daemon advertises to webapps. `gateway: None` means no
+/// companion is connected; webapps that depend on companion-routed
+/// surfaces (Library, Net, Notifications, etc.) should branch on this.
+/// `authority` is the live set of scopes the companion currently claims.
+@Serializable
+data class Capabilities (
+	val gateway: GatewayInfo? = null,
+	val available: SurfaceAvailability,
+	val authority: List<CompanionAuthorityScope>,
+	val uriSchemes: List<String>,
+	val network: NetworkInfo,
+	val audio: AudioCapabilities
+)
+
+@Serializable
 data class ChromeNavigate (
 	val url: String
 )
@@ -275,39 +435,182 @@ data class Device (
 	val default: Boolean
 )
 
+/// Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.
+/// `soc_temp_c` may be `None` on builds where the SoC thermal probe is
+/// not exposed by the kernel.
 @Serializable
-data class GatewayMeta (
-	val adapterVersion: String,
-	val libVersion: String,
-	val libbridgethingVersion: String,
-	val appName: String,
-	val appVersion: String,
-	val osName: String
+data class Diagnostics (
+	val diskUsedBytes: UInt,
+	val diskFreeBytes: UInt,
+	val memUsedBytes: UInt,
+	val memAvailBytes: UInt,
+	val uptimeS: UInt,
+	val socTempC: Float? = null,
+	val loadAvg: List<Float>,
+	val daemonVersion: String,
+	val kernelVersion: String,
+	val bootId: String
+)
+
+/// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
+/// surface as `AudioError::EarconNotFound`.
+@Serializable
+data class Earcon (
+	val name: String
+)
+
+/// Fired when the favorited / liked status of an item changes —
+/// regardless of whether it was driven by the daemon (FavoritesToggle/Set
+/// command) or by the user mutating it on the gateway-side app directly.
+@Serializable
+data class FavoriteChanged (
+	val uri: String,
+	val liked: Boolean
+)
+
+/// One playable / browsable item from the library. Lean per-variant
+/// payload — gateways translate platform-specific extras down to these
+/// fields, rare per-platform fields just don't surface. Forward-compat:
+/// adding new variants or fields is an additive change webapps can
+/// branch on.
+@Serializable(with = LibraryItemSerializer::class)
+sealed class LibraryItem {
+	@Serializable
+	@SerialName("track")
+	data class Track(val data: dev.bridgething.schema.Track): LibraryItem()
+	@Serializable
+	@SerialName("album")
+	data class Album(val data: dev.bridgething.schema.Album): LibraryItem()
+	@Serializable
+	@SerialName("playlist")
+	data class Playlist(val data: dev.bridgething.schema.Playlist): LibraryItem()
+	@Serializable
+	@SerialName("podcastEpisode")
+	data class PodcastEpisode(val data: dev.bridgething.schema.PodcastEpisode): LibraryItem()
+	@Serializable
+	@SerialName("show")
+	data class Show(val data: dev.bridgething.schema.Show): LibraryItem()
+	@Serializable
+	@SerialName("artist")
+	data class Artist(val data: dev.bridgething.schema.Artist): LibraryItem()
+	@Serializable
+	@SerialName("station")
+	data class Station(val data: dev.bridgething.schema.Station): LibraryItem()
+}
+
+/// Page of the user's favorited / liked / saved library items. Mixed-kind
+/// because most platforms expose one "Saved" surface across kinds.
+@Serializable
+data class FavoritesPage (
+	val items: List<LibraryItem>,
+	val nextPageToken: String? = null
+)
+
+@Serializable
+data class FavoritesListReply (
+	val page: FavoritesPage
+)
+
+/// Coarse type tag a webapp uses to filter or branch. Mirrors the variant
+/// names of `LibraryItem`; kept separate so search/recommendations can
+/// constrain by kind without having to construct a sample item.
+@Serializable
+enum class ItemKind(val string: String) {
+	@SerialName("track")
+	Track("track"),
+	@SerialName("album")
+	Album("album"),
+	@SerialName("playlist")
+	Playlist("playlist"),
+	@SerialName("podcastEpisode")
+	PodcastEpisode("podcastEpisode"),
+	@SerialName("show")
+	Show("show"),
+	@SerialName("artist")
+	Artist("artist"),
+	@SerialName("station")
+	Station("station"),
+}
+
+/// Stable URI + kind a webapp passes back to act on a library item
+/// (e.g. `player.play({ uri })`, `library.favorites.toggle({ item })`).
+/// `persistent_id` is the platform-stable id when the gateway has one;
+/// webapps treat it as opaque.
+@Serializable
+data class ItemRef (
+	val uri: String,
+	val kind: ItemKind,
+	val persistentId: String? = null
+)
+
+@Serializable
+data class FavoritesSet (
+	val item: ItemRef,
+	val liked: Boolean
+)
+
+@Serializable
+data class FavoritesToggle (
+	val item: ItemRef
+)
+
+/// What a connected companion advertises about itself. Sent on every
+/// session-up via `GatewayToBridgeCapabilitiesMsg::Announce`, and re-sent
+/// on any change. The daemon caches the latest snapshot per peer and
+/// derives the webapp-facing `Capabilities` from it.
+@Serializable
+data class GatewayCapabilities (
+	val gateway: GatewayInfo,
+	val uriSchemes: List<String>,
+	val network: NetworkInfo,
+	val available: SurfaceAvailability,
+	val audio: AudioCapabilities
 )
 
 @Serializable(with = GatewayToBridgeMsgDataSerializer::class)
 sealed class GatewayToBridgeMsgData {
 	@Serializable
-	@SerialName("version")
-	data class Version(val data: GatewayMeta): GatewayToBridgeMsgData()
-	@Serializable
 	@SerialName("asset")
 	data class Asset(val data: GatewayToBridgeAssetMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("audio")
+	data class Audio(val data: GatewayToBridgeAudioMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("authority")
 	data class Authority(val data: GatewayToBridgeAuthorityMsg): GatewayToBridgeMsgData()
 	@Serializable
+	@SerialName("capabilities")
+	data class Capabilities(val data: GatewayToBridgeCapabilitiesMsg): GatewayToBridgeMsgData()
+	@Serializable
 	@SerialName("chrome")
 	data class Chrome(val data: GatewayToBridgeChromeMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("geo")
+	data class Geo(val data: GatewayToBridgeGeoMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("library")
+	data class Library(val data: GatewayToBridgeLibraryMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("net")
+	data class Net(val data: GatewayToBridgeNetMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("notifications")
+	data class Notifications(val data: GatewayToBridgeNotificationsMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("phone")
+	data class Phone(val data: GatewayToBridgePhoneMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("player")
+	data class Player(val data: GatewayToBridgePlayerMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("system")
 	data class System(val data: GatewayToBridgeSystemMsg): GatewayToBridgeMsgData()
 	@Serializable
+	@SerialName("time")
+	data class Time(val data: GatewayToBridgeTimeMsg): GatewayToBridgeMsgData()
+	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: GatewayToBridgeWebappMsg): GatewayToBridgeMsgData()
-	@Serializable
-	@SerialName("nowPlayingUpdate")
-	data class NowPlayingUpdate(val data: dev.bridgething.schema.NowPlayingUpdate): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("error")
 	data class Error(val data: WireError): GatewayToBridgeMsgData()
@@ -322,6 +625,193 @@ data class GatewayToBridgeMsg (
 	val id: ByteArray,
 	val meta: MsgMeta,
 	val data: GatewayToBridgeMsgData
+)
+
+@Serializable
+enum class GeoError(val string: String) {
+	/// The user denied location to the companion app, or the OS gate
+	/// refuses (e.g. iOS Always/WhenInUse not granted).
+	@SerialName("permissionDenied")
+	PermissionDenied("permissionDenied"),
+	/// Companion is connected but cannot produce a fix (no GPS, airplane
+	/// mode, indoors with no fallback).
+	@SerialName("unavailable")
+	Unavailable("unavailable"),
+	/// The supplied subscription token is unknown to the daemon.
+	@SerialName("unknownToken")
+	UnknownToken("unknownToken"),
+}
+
+@Serializable
+data class GeoErrorReply (
+	val error: GeoError
+)
+
+/// Subscriber's accuracy preference. `Coarse` opts into the lower-power
+/// city-block-grade fix on platforms that distinguish (iOS reduced
+/// accuracy, Android `PRIORITY_BALANCED_POWER_ACCURACY`). The daemon
+/// aggregates across subscribers and forwards the most-demanding to the
+/// companion.
+@Serializable
+enum class GeoAccuracy(val string: String) {
+	@SerialName("coarse")
+	Coarse("coarse"),
+	@SerialName("fine")
+	Fine("fine"),
+}
+
+@Serializable
+data class GeoGetOnce (
+	val accuracy: GeoAccuracy
+)
+
+/// One position fix from the gateway. `accuracy_m` is the 1-sigma
+/// horizontal radius. `speed_mps` and `heading_deg` are populated when
+/// the underlying source provides them (CLLocation on iOS does for moving
+/// fixes; Android's FusedLocationProvider similar). `ts_ms` is the
+/// gateway-provided fix timestamp, not the wire-arrival time.
+@Serializable
+data class Position (
+	val lat: Double,
+	val lon: Double,
+	val altM: Float? = null,
+	val accuracyM: Float,
+	val speedMps: Float? = null,
+	val headingDeg: Float? = null,
+	val tsUnixS: UInt
+)
+
+@Serializable
+data class GeoGetOnceReply (
+	val position: Position
+)
+
+/// Bridge → companion watch forward. The daemon aggregates webapp
+/// watches and re-issues this with the most-demanding accuracy +
+/// fastest interval. `min_interval_ms = 0` lets the gateway pick.
+@Serializable
+data class GeoWatch (
+	val accuracy: GeoAccuracy,
+	val minIntervalMs: UInt
+)
+
+/// Snapshot of the device's hardware-controlled surfaces. Sent on
+/// `hardware.state.get` and re-broadcast on any change.
+@Serializable
+data class HardwareState (
+	val brightness: BrightnessState,
+	val ambientLight: UInt
+)
+
+/// One header on an HTTP request or response. Key order is preserved
+/// across serialize/deserialize.
+@Serializable
+data class HttpHeader (
+	val name: String,
+	val value: String
+)
+
+@Serializable
+data class LibraryBrowseRequest (
+	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
+	val nodeId: String? = null,
+	val pageToken: String? = null
+)
+
+/// Generated type representing the anonymous struct variant `NotFound` of the `LibraryError` Rust enum
+@Serializable
+data class LibraryErrorNotFoundInner (
+	val uri: String
+)
+
+/// Generated type representing the anonymous struct variant `NotSupported` of the `LibraryError` Rust enum
+@Serializable
+data class LibraryErrorNotSupportedInner (
+	val reason: String
+)
+
+@Serializable(with = LibraryErrorSerializer::class)
+sealed class LibraryError {
+	/// The named uri or node id does not exist in the gateway's library.
+	@Serializable
+	@SerialName("notFound")
+	data class NotFound(val data: LibraryErrorNotFoundInner): LibraryError()
+	/// The operation isn't supported by the underlying source (e.g. a
+	/// platform that exposes browse but not recommendations).
+	@Serializable
+	@SerialName("notSupported")
+	data class NotSupported(val data: LibraryErrorNotSupportedInner): LibraryError()
+	/// User account / OAuth scope does not permit the operation.
+	@Serializable
+	@SerialName("unauthorized")
+	object Unauthorized: LibraryError()
+}
+
+@Serializable
+data class LibraryErrorReply (
+	val error: LibraryError
+)
+
+@Serializable
+data class LibraryFavoritesListRequest (
+	val pageToken: String? = null
+)
+
+@Serializable
+data class LibraryRecommendationsRequest (
+	val seed: ItemRef? = null,
+	val kind: ItemKind? = null,
+	val limit: UInt? = null,
+	val pageToken: String? = null
+)
+
+@Serializable
+data class LibrarySearchRequest (
+	val query: String,
+	val kinds: List<ItemKind>? = null,
+	val pageToken: String? = null
+)
+
+@Serializable
+enum class LogLevel(val string: String) {
+	@SerialName("trace")
+	Trace("trace"),
+	@SerialName("debug")
+	Debug("debug"),
+	@SerialName("info")
+	Info("info"),
+	@SerialName("warn")
+	Warn("warn"),
+	@SerialName("error")
+	Error("error"),
+}
+
+/// One log record. `ts_unix_s` is unix-epoch seconds. `target` is the
+/// tracing target / unit name; `message` is the rendered single-line
+/// body. Pre-filtered at subscription time so wire-bloating trace
+/// events don't reach webapps.
+@Serializable
+data class LogEntry (
+	val tsUnixS: UInt,
+	val level: LogLevel,
+	val target: String,
+	val message: String
+)
+
+/// Currently-playing track, populated to the extent the gateway/iAP2
+/// stream has surfaced. All fields are optional because each one arrives
+/// as a separate ANCS-style attribute fetch on iAP2; the daemon
+/// accumulates and the snapshot reflects whatever's known so far.
+@Serializable
+data class MediaItem (
+	val uri: String? = null,
+	val persistentId: String? = null,
+	val title: String? = null,
+	val album: String? = null,
+	val artist: String? = null,
+	val liked: Boolean? = null,
+	val artworkId: String? = null,
+	val durationMs: UInt? = null
 )
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
@@ -342,12 +832,387 @@ data class MediaItemUpdate (
 	val durationMs: UInt? = null
 )
 
-/// `repeat` is a typed enum (Off/All/One) shared with
-/// the canonical `PlaybackOptions` shape webapps already render and
-/// with the outbound `SetRepeat` interaction command. iOS, Android,
-/// Spotify, and Apple Music all expose three repeat states; the
-/// underlying transports (iAP2 NowPlaying CSM, MediaSession, etc.)
-/// translate to/from this enum.
+/// Generated type representing the anonymous struct variant `RequestFailed` of the `NetError` Rust enum
+@Serializable
+data class NetErrorRequestFailedInner (
+	val reason: String
+)
+
+@Serializable(with = NetErrorSerializer::class)
+sealed class NetError {
+	/// Gateway-side request failed before headers were received (DNS, TLS,
+	/// connect refused, transport hiccup).
+	@Serializable
+	@SerialName("requestFailed")
+	data class RequestFailed(val data: NetErrorRequestFailedInner): NetError()
+	/// `timeout_ms` elapsed before headers were received.
+	@Serializable
+	@SerialName("timeout")
+	object Timeout: NetError()
+	/// Gateway is connected but the Net surface is unavailable
+	/// (`SurfaceAvailability::net_fetch` is false).
+	@Serializable
+	@SerialName("unavailable")
+	object Unavailable: NetError()
+	/// The companion is not connected.
+	@Serializable
+	@SerialName("noGateway")
+	object NoGateway: NetError()
+}
+
+@Serializable
+data class NetFetchErrorReply (
+	val error: NetError
+)
+
+/// Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
+/// otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
+@Serializable
+data class NetFetchResponse (
+	val status: UShort,
+	val headers: List<HttpHeader>,
+	val body: ByteArray
+)
+
+@Serializable
+data class NetFetchReply (
+	val response: NetFetchResponse
+)
+
+@Serializable
+enum class HttpMethod(val string: String) {
+	@SerialName("GET")
+	Get("GET"),
+	@SerialName("HEAD")
+	Head("HEAD"),
+	@SerialName("POST")
+	Post("POST"),
+	@SerialName("PUT")
+	Put("PUT"),
+	@SerialName("PATCH")
+	Patch("PATCH"),
+	@SerialName("DELETE")
+	Delete("DELETE"),
+	@SerialName("OPTIONS")
+	Options("OPTIONS"),
+}
+
+@Serializable
+enum class RedirectPolicy(val string: String) {
+	/// Follow up to a gateway-defined cap (typically 5).
+	@SerialName("follow")
+	Follow("follow"),
+	/// Surface the redirect status to the caller; do not follow.
+	@SerialName("manual")
+	Manual("manual"),
+	/// Treat any 3xx as an error.
+	@SerialName("error")
+	Error("error"),
+}
+
+/// Outbound HTTP request. `body` is inline; webapps pushing large bodies
+/// should chunk-stream via `AssetCache` and pass an asset id in a future
+/// extension. `timeout_ms` defaults to gateway choice when None.
+@Serializable
+data class NetFetchRequest (
+	val url: String,
+	val method: HttpMethod,
+	val headers: List<HttpHeader>,
+	val body: ByteArray? = null,
+	val timeoutMs: UInt? = null,
+	val redirect: RedirectPolicy
+)
+
+@Serializable
+data class NetFetchRequestMsg (
+	val request: NetFetchRequest
+)
+
+/// First frame of a streamed response. `total_size` is `Content-Length`
+/// when the gateway has it; otherwise `None` and the consumer accumulates
+/// chunks until `End`.
+@Serializable
+data class NetFetchStreamBegin (
+	val requestId: ByteArray,
+	val status: UShort,
+	val headers: List<HttpHeader>,
+	val totalSize: UInt? = null
+)
+
+/// One body chunk of a streamed response. Chunks arrive in order;
+/// `offset` is the byte position of `bytes[0]` within the full body.
+@Serializable
+data class NetFetchStreamChunk (
+	val requestId: ByteArray,
+	val offset: UInt,
+	val bytes: ByteArray
+)
+
+/// Terminates a stream. After `End` no further chunks for `request_id`
+/// are valid.
+@Serializable
+data class NetFetchStreamEnd (
+	val requestId: ByteArray
+)
+
+@Serializable
+data class NetWsClose (
+	val connectionId: ByteArray,
+	val code: UShort? = null,
+	val reason: String? = null
+)
+
+@Serializable
+data class NetWsClosed (
+	val connectionId: ByteArray,
+	val code: UShort,
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `ConnectFailed` of the `WsError` Rust enum
+@Serializable
+data class WsErrorConnectFailedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `ProtocolError` of the `WsError` Rust enum
+@Serializable
+data class WsErrorProtocolErrorInner (
+	val reason: String
+)
+
+@Serializable(with = WsErrorSerializer::class)
+sealed class WsError {
+	/// Gateway-side connect failed (DNS, TLS, refused).
+	@Serializable
+	@SerialName("connectFailed")
+	data class ConnectFailed(val data: WsErrorConnectFailedInner): WsError()
+	/// Per-connection backpressure cap (64 frames or 1 MB) hit.
+	@Serializable
+	@SerialName("backpressure")
+	object Backpressure: WsError()
+	/// Frame exceeded the per-connection 16 KB cap.
+	@Serializable
+	@SerialName("frameTooLarge")
+	object FrameTooLarge: WsError()
+	/// The companion went away while the WS was open.
+	@Serializable
+	@SerialName("gatewayDisconnected")
+	object GatewayDisconnected: WsError()
+	/// Server-side WS protocol violation surfaced by the underlying lib.
+	@Serializable
+	@SerialName("protocolError")
+	data class ProtocolError(val data: WsErrorProtocolErrorInner): WsError()
+}
+
+@Serializable
+data class NetWsErrorEvent (
+	val connectionId: ByteArray,
+	val error: WsError
+)
+
+@Serializable
+data class NetWsErrorReply (
+	val error: WsError
+)
+
+/// One WS frame. The daemon does not split or merge frames.
+@Serializable(with = WsFrameSerializer::class)
+sealed class WsFrame {
+	@Serializable
+	@SerialName("text")
+	data class Text(val data: String): WsFrame()
+	@Serializable
+	@SerialName("binary")
+	data class Binary(val data: ByteArray): WsFrame()
+}
+
+@Serializable
+data class NetWsMessage (
+	val connectionId: ByteArray,
+	val frame: WsFrame
+)
+
+@Serializable
+data class NetWsOpen (
+	val url: String,
+	val protocols: List<String>? = null,
+	val headers: List<HttpHeader>? = null
+)
+
+@Serializable
+data class NetWsOpenReply (
+	val connectionId: ByteArray,
+	val acceptedProtocol: String? = null
+)
+
+@Serializable
+data class NetWsOpened (
+	val connectionId: ByteArray,
+	val acceptedProtocol: String? = null
+)
+
+@Serializable
+data class NetWsSend (
+	val connectionId: ByteArray,
+	val frame: WsFrame
+)
+
+/// Originating app metadata. `bundle_id` is platform-stable
+/// (`com.apple.MobileSMS`, `com.spotify.client`, etc.); `display_name`
+/// and `icon_asset_id` are best-effort and may be missing on Android
+/// gateways that don't surface them cheaply.
+@Serializable
+data class NotificationApp (
+	val bundleId: String,
+	val displayName: String? = null,
+	val iconAssetId: String? = null
+)
+
+@Serializable
+enum class NotificationCategory(val string: String) {
+	@SerialName("other")
+	Other("other"),
+	@SerialName("incomingCall")
+	IncomingCall("incomingCall"),
+	@SerialName("missedCall")
+	MissedCall("missedCall"),
+	@SerialName("voicemail")
+	Voicemail("voicemail"),
+	@SerialName("social")
+	Social("social"),
+	@SerialName("schedule")
+	Schedule("schedule"),
+	@SerialName("email")
+	Email("email"),
+	@SerialName("news")
+	News("news"),
+	@SerialName("healthAndFitness")
+	HealthAndFitness("healthAndFitness"),
+	@SerialName("businessAndFinance")
+	BusinessAndFinance("businessAndFinance"),
+	@SerialName("location")
+	Location("location"),
+	@SerialName("entertainment")
+	Entertainment("entertainment"),
+}
+
+/// ANCS-shaped flags. `silent` mirrors the iOS "do not surface
+/// audibly" hint, `important` is the high-importance flag, and
+/// `pre_existing` is true for notifications that arrived before the
+/// daemon connected (replayed by the companion on first sync).
+@Serializable
+data class NotificationFlags (
+	val silent: Boolean,
+	val important: Boolean,
+	val preExisting: Boolean
+)
+
+/// One ANCS-style action slot. `label` is the gateway-localized prompt
+/// the webapp renders on the action button.
+@Serializable
+data class NotificationAction (
+	val label: String
+)
+
+/// One notification surfaced from the connected companion's notification
+/// center. `id` is companion-stable for the lifetime of the notification
+/// — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+/// `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
+/// optional because ANCS treats them as separate attribute fetches.
+@Serializable
+data class Notification (
+	val id: String,
+	val app: NotificationApp,
+	val category: NotificationCategory,
+	val title: String? = null,
+	val subtitle: String? = null,
+	val message: String? = null,
+	val timestampUnixS: UInt? = null,
+	val flags: NotificationFlags,
+	val positiveAction: NotificationAction? = null,
+	val negativeAction: NotificationAction? = null
+)
+
+@Serializable
+data class NotificationInvoke (
+	val id: String
+)
+
+/// Why a notification went away. `Acted` covers both positive and
+/// negative invokes; gateways that distinguish dismiss-vs-acted may
+/// surface both as `Acted`.
+@Serializable
+enum class DismissReason(val string: String) {
+	@SerialName("userDismissed")
+	UserDismissed("userDismissed"),
+	@SerialName("acted")
+	Acted("acted"),
+	@SerialName("remoteDismissed")
+	RemoteDismissed("remoteDismissed"),
+}
+
+@Serializable
+data class NotificationRemoved (
+	val id: String,
+	val reason: DismissReason
+)
+
+/// Generated type representing the anonymous struct variant `NotFound` of the `NotificationError` Rust enum
+@Serializable
+data class NotificationErrorNotFoundInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `NotificationError` Rust enum
+@Serializable
+data class NotificationErrorActionRejectedInner (
+	val reason: String
+)
+
+@Serializable(with = NotificationErrorSerializer::class)
+sealed class NotificationError {
+	/// The named notification id does not exist (likely already dismissed).
+	@Serializable
+	@SerialName("notFound")
+	data class NotFound(val data: NotificationErrorNotFoundInner): NotificationError()
+	/// The notification has no action slot in the requested polarity.
+	@Serializable
+	@SerialName("noActionAvailable")
+	object NoActionAvailable: NotificationError()
+	/// The companion or platform refused the action.
+	@Serializable
+	@SerialName("actionRejected")
+	data class ActionRejected(val data: NotificationErrorActionRejectedInner): NotificationError()
+}
+
+@Serializable
+data class NotificationsErrorReply (
+	val error: NotificationError
+)
+
+/// Page of notifications returned from `notifications.list`. Gateways
+/// page large notification centers; webapps drive pagination via
+/// `next_page_token`.
+@Serializable
+data class NotificationsPage (
+	val items: List<Notification>,
+	val nextPageToken: String? = null
+)
+
+@Serializable
+data class NotificationsListReply (
+	val page: NotificationsPage
+)
+
+@Serializable
+data class NotificationsListRequest (
+	val pageToken: String? = null
+)
+
+/// `repeat` is a typed enum (Off/All/One) shared across the player
+/// surface and the iAP2 NowPlaying CSM / MediaSession backends, which
+/// all expose three repeat states.
 @Serializable
 enum class RepeatMode(val string: String) {
 	@SerialName("off")
@@ -373,6 +1238,11 @@ data class PlaybackUpdate (
 	val appDisplayName: String? = null
 )
 
+/// Delta event the companion or iAP2 stream emits whenever a player
+/// attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
+/// (the only delta-shaped event in the protocol). Every field is
+/// optional: producers populate only what they have fresh information
+/// about, and the daemon merges into stable internal state.
 @Serializable
 data class NowPlayingUpdate (
 	val mediaItem: MediaItemUpdate? = null,
@@ -524,7 +1394,7 @@ sealed class PeerCompanionStatus {
 	object Pending: PeerCompanionStatus()
 	@Serializable
 	@SerialName("connected")
-	data class Connected(val data: GatewayMeta): PeerCompanionStatus()
+	data class Connected(val data: GatewayInfo): PeerCompanionStatus()
 }
 
 @Serializable
@@ -536,14 +1406,253 @@ data class Peer (
 )
 
 @Serializable
+enum class PhoneCallStatus(val string: String) {
+	@SerialName("disconnected")
+	Disconnected("disconnected"),
+	@SerialName("sending")
+	Sending("sending"),
+	@SerialName("ringing")
+	Ringing("ringing"),
+	@SerialName("connecting")
+	Connecting("connecting"),
+	@SerialName("active")
+	Active("active"),
+	@SerialName("held")
+	Held("held"),
+	@SerialName("disconnecting")
+	Disconnecting("disconnecting"),
+}
+
+@Serializable
+enum class PhoneCallDirection(val string: String) {
+	@SerialName("incoming")
+	Incoming("incoming"),
+	@SerialName("outgoing")
+	Outgoing("outgoing"),
+}
+
+/// One telephony call. `call_id` is companion-stable for the call's
+/// lifetime; webapps pass it back to `answer`/`decline`/`end`/`hold`.
+/// `remote_id` is the raw E.164 (or platform raw); `display_name` is the
+/// gateway's resolved contact name when available.
+@Serializable
+data class PhoneCall (
+	val callId: String,
+	val remoteId: String,
+	val displayName: String,
+	val status: PhoneCallStatus,
+	val direction: PhoneCallDirection,
+	val startedAtUnixS: UInt? = null
+)
+
+@Serializable
+data class PhoneCallAction (
+	val callId: String
+)
+
+/// Generated type representing the anonymous struct variant `Failed` of the `CallEndReason` Rust enum
+@Serializable
+data class CallEndReasonFailedInner (
+	val reason: String
+)
+
+/// Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
+/// platform-defined reason (network, busy, etc.).
+@Serializable(with = CallEndReasonSerializer::class)
+sealed class CallEndReason {
+	@Serializable
+	@SerialName("local")
+	object Local: CallEndReason()
+	@Serializable
+	@SerialName("remote")
+	object Remote: CallEndReason()
+	@Serializable
+	@SerialName("missed")
+	object Missed: CallEndReason()
+	@Serializable
+	@SerialName("failed")
+	data class Failed(val data: CallEndReasonFailedInner): CallEndReason()
+}
+
+@Serializable
+data class PhoneCallEnded (
+	val callId: String,
+	val reason: CallEndReason
+)
+
+/// Snapshot of every active call known to the gateway. Multi-call is
+/// possible (call-waiting, conference) — webapps rendering only one
+/// active call typically pick the first non-Held entry.
+@Serializable
+data class PhoneState (
+	val activeCalls: List<PhoneCall>
+)
+
+/// Typed reply payload for `PhoneStateGet` and the unsolicited
+/// announce-time snapshot the companion proactively pushes per the
+/// announce-on-connect rule.
+@Serializable
+data class PhoneStateReply (
+	val state: PhoneState
+)
+
+/// Optional context for `play({ uri })`. `context_uri` is the album /
+/// playlist / show URI the track is being played from; gateways with
+/// playlist support honor it for skip-next semantics. `position` is the
+/// 0-based index inside the context.
+@Serializable
+data class PlayContext (
+	val contextUri: String,
+	val position: UInt? = null
+)
+
+/// Play a URI on the gateway. `context` lets the gateway honor playlist
+/// / album semantics for skip-next when both sides understand the
+/// scheme. The daemon parses the scheme and only forwards if a
+/// connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
+@Serializable
+data class PlayUri (
+	val uri: String,
+	val context: PlayContext? = null
+)
+
+/// Three-state playback. `Stopped` is the no-track-loaded resting state;
+/// `Paused` is "track is loaded, position is held"; `Playing` is the
+/// progressing state.
+@Serializable
+enum class PlaybackState(val string: String) {
+	@SerialName("stopped")
+	Stopped("stopped"),
+	@SerialName("paused")
+	Paused("paused"),
+	@SerialName("playing")
+	Playing("playing"),
+}
+
+/// Per-session playback snapshot: where in the song we are, what mode is
+/// engaged. `position_ms` is the live playhead at snapshot time; webapps
+/// extrapolate forward locally while `state == Playing`.
+@Serializable
+data class Playback (
+	val state: PlaybackState,
+	val positionMs: UInt,
+	val shuffle: Boolean,
+	val repeat: RepeatMode
+)
+
+@Serializable
 data class PlaybackOptions (
 	val repeat: RepeatMode,
 	val shuffle: Boolean
 )
 
+/// User-tunable knobs that are not "currently playing" state.
+/// `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
+/// distinguishes "user explicitly set zero" from "feature unsupported by
+/// gateway".
 @Serializable
-data class RepeatSet (
-	val mode: RepeatMode
+data class PlayerOptions (
+	val speed: Float,
+	val crossfade_ms: UInt? = null
+)
+
+/// One row in the player queue. Lean cross-platform shape — gateways
+/// that have richer per-track data still surface what fields they have.
+/// `uri` is required because every queued item must be addressable for
+/// `skipToIndex`. `persistent_id` is the platform-stable id when
+/// available; webapps treat it as opaque.
+@Serializable
+data class QueueItem (
+	val uri: String,
+	val title: String? = null,
+	val artist: String? = null,
+	val album: String? = null,
+	val artworkId: String? = null,
+	val durationMs: UInt? = null,
+	val persistentId: String? = null
+)
+
+/// Full player snapshot the daemon broadcasts to webapps. Initial value
+/// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
+/// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
+/// merges into the cached snapshot.
+@Serializable
+data class PlayerState (
+	val track: MediaItem? = null,
+	val playback: Playback,
+	val queue: List<QueueItem>,
+	val options: PlayerOptions
+)
+
+/// Lean cross-platform shape for a playlist. `uri` is what `player.play`
+/// would route on; `track_count` is best-effort (some sources don't expose
+/// it cheaply); `owner_name` is whatever the source surfaces (Spotify
+/// owner, Apple Music curator, etc.).
+@Serializable
+data class Playlist (
+	val uri: String,
+	val name: String,
+	val ownerName: String? = null,
+	val trackCount: UInt? = null,
+	val artworkId: String? = null
+)
+
+/// One episode of a podcast. `show_name` mirrors what the gateway exposes
+/// at episode-level so a webapp can render show + episode without a
+/// separate fetch. `published_at_ms` is best-effort; not every gateway
+/// surfaces it.
+@Serializable
+data class PodcastEpisode (
+	val uri: String,
+	val name: String,
+	val showName: String? = null,
+	val durationMs: UInt? = null,
+	val publishedAtUnixS: UInt? = null,
+	val artworkId: String? = null
+)
+
+/// Snapshot of the player queue as the companion sees it. Sent on
+/// queue mutations the gateway can detect (user reorder, queue clear,
+/// gapless prefetch landing). The daemon overwrites its cached queue
+/// from this and re-broadcasts to webapps.
+@Serializable
+data class QueueSnapshot (
+	val items: List<QueueItem>
+)
+
+/// Where in the queue a `queue({ uri })` should land. `Append` (default)
+/// goes at the end; `Next` is play-next; `Index` is an explicit position.
+@Serializable(with = QueuePositionSerializer::class)
+sealed class QueuePosition {
+	@Serializable
+	@SerialName("append")
+	object Append: QueuePosition()
+	@Serializable
+	@SerialName("next")
+	object Next: QueuePosition()
+	@Serializable
+	@SerialName("index")
+	data class Index(val data: UInt): QueuePosition()
+}
+
+@Serializable
+data class QueueUri (
+	val uri: String,
+	val position: QueuePosition
+)
+
+/// Page of recommendation results. Gateway decides how seed + kind
+/// interact (Spotify uses radio-style seeding, Apple Music uses curated
+/// rails) — the daemon doesn't prescribe.
+@Serializable
+data class RecommendationsResult (
+	val items: List<LibraryItem>,
+	val nextPageToken: String? = null
+)
+
+@Serializable
+data class RecommendationsReply (
+	val result: RecommendationsResult
 )
 
 /// Correlation handle the responder echoes back so the requester's
@@ -553,19 +1662,96 @@ data class ResponseMeta (
 	val requestId: ByteArray
 )
 
+/// Page of search results. `kinds` is the constrained kinds the search
+/// honored (echoed back so webapps can detect ignored constraints); items
+/// are ranked best-first.
 @Serializable
-data class SeekToSet (
+data class SearchResult (
+	val items: List<LibraryItem>,
+	val kinds: List<ItemKind>,
+	val nextPageToken: String? = null
+)
+
+@Serializable
+data class SearchReply (
+	val result: SearchResult
+)
+
+@Serializable
+data class SeekTo (
 	val positionMs: UInt
 )
 
+/// `duration_ms = None` turns crossfade off; `Some(0)` is also off but
+/// distinguishes intent.
 @Serializable
-data class ShuffleSet (
-	val on: Boolean
+data class SetCrossfade (
+	val durationMs: UInt? = null
 )
 
 @Serializable
-data class SkipToIndexSet (
+data class SetMute (
+	val muted: Boolean
+)
+
+@Serializable
+data class SetRepeat (
+	val mode: RepeatMode
+)
+
+@Serializable
+data class SetShuffle (
+	val on: Boolean
+)
+
+/// Set absolute playback rate. `1.0` is normal speed; gateways with
+/// limited speed support clamp to their nearest supported value.
+@Serializable
+data class SetSpeed (
+	val speed: Float
+)
+
+@Serializable
+data class SetVolume (
+	val level: Float
+)
+
+/// One podcast show (parent of `PodcastEpisode`). `episode_count` is
+/// best-effort.
+@Serializable
+data class Show (
+	val uri: String,
+	val name: String,
+	val publisher: String? = null,
+	val episodeCount: UInt? = null,
+	val artworkId: String? = null
+)
+
+@Serializable
+data class SkipToIndex (
 	val index: UInt
+)
+
+/// Algorithmic / radio station. `seed` is the URI the station was seeded
+/// from when known (artist, track, etc.).
+@Serializable
+data class Station (
+	val uri: String,
+	val name: String,
+	val seed: String? = null,
+	val artworkId: String? = null
+)
+
+/// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
+/// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
+/// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
+/// seconds — webapps reading time should use the device clock if any
+/// but use this as the trust anchor on first arrival.
+@Serializable
+data class TimeInfo (
+	val tzIana: String,
+	val locale: String,
+	val wallClockUnixS: UInt? = null
 )
 
 @Serializable
@@ -583,6 +1769,47 @@ data class Track (
 @Serializable
 data class TtlRetention (
 	val seconds: UInt
+)
+
+/// Fire-and-forget TTS request. `id` is webapp-assigned (no request
+/// round-trip) and used for cancellation + matching back-to-back
+/// `TtsStarted`/`TtsEnded` events. `voice` selects from
+/// `AudioCapabilities.voices`; `None` uses the gateway's default.
+@Serializable
+data class Tts (
+	val id: ByteArray,
+	val text: String,
+	val voice: String? = null
+)
+
+@Serializable
+data class TtsCancel (
+	val id: ByteArray
+)
+
+/// Fired when the TTS request finished. `completed` is true when the
+/// full text was spoken; false when preempted, cancelled, or the
+/// companion dropped it.
+@Serializable
+data class TtsEnded (
+	val id: ByteArray,
+	val completed: Boolean
+)
+
+/// Fired when the companion has begun speaking the TTS request with this
+/// id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
+/// before speech started); webapps should treat both as best-effort.
+@Serializable
+data class TtsStarted (
+	val id: ByteArray
+)
+
+/// Volume / mute snapshot. Fired on any change to either; webapps treat
+/// `level` as the canonical value.
+@Serializable
+data class VolumeChanged (
+	val level: Float,
+	val muted: Boolean
 )
 
 @Serializable
@@ -645,6 +1872,168 @@ sealed class BridgeToGatewayAssetMsg {
 	data class PushBeginRejected(val data: AssetPushBeginRejected): BridgeToGatewayAssetMsg()
 }
 
+@Serializable(with = BridgeToGatewayAudioMsgSerializer::class)
+sealed class BridgeToGatewayAudioMsg {
+	@Serializable
+	@SerialName("volumeUp")
+	object VolumeUp: BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("volumeDown")
+	object VolumeDown: BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("setVolume")
+	data class SetVolume(val data: dev.bridgething.schema.SetVolume): BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("muteToggle")
+	object MuteToggle: BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("setMute")
+	data class SetMute(val data: dev.bridgething.schema.SetMute): BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("tts")
+	data class Tts(val data: dev.bridgething.schema.Tts): BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("ttsCancel")
+	data class TtsCancel(val data: dev.bridgething.schema.TtsCancel): BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("ttsCancelAll")
+	object TtsCancelAll: BridgeToGatewayAudioMsg()
+	@Serializable
+	@SerialName("earcon")
+	data class Earcon(val data: dev.bridgething.schema.Earcon): BridgeToGatewayAudioMsg()
+}
+
+@Serializable(with = BridgeToGatewayGeoMsgSerializer::class)
+sealed class BridgeToGatewayGeoMsg {
+	@Serializable
+	@SerialName("watch")
+	data class Watch(val data: GeoWatch): BridgeToGatewayGeoMsg()
+	@Serializable
+	@SerialName("unwatch")
+	object Unwatch: BridgeToGatewayGeoMsg()
+	@Serializable
+	@SerialName("getOnce")
+	data class GetOnce(val data: GeoGetOnce): BridgeToGatewayGeoMsg()
+}
+
+@Serializable(with = BridgeToGatewayLibraryMsgSerializer::class)
+sealed class BridgeToGatewayLibraryMsg {
+	@Serializable
+	@SerialName("browse")
+	data class Browse(val data: LibraryBrowseRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("search")
+	data class Search(val data: LibrarySearchRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("recommendations")
+	data class Recommendations(val data: LibraryRecommendationsRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("favoritesList")
+	data class FavoritesList(val data: LibraryFavoritesListRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("favoritesToggle")
+	data class FavoritesToggle(val data: dev.bridgething.schema.FavoritesToggle): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("favoritesSet")
+	data class FavoritesSet(val data: dev.bridgething.schema.FavoritesSet): BridgeToGatewayLibraryMsg()
+}
+
+@Serializable(with = BridgeToGatewayNetMsgSerializer::class)
+sealed class BridgeToGatewayNetMsg {
+	@Serializable
+	@SerialName("fetch")
+	data class Fetch(val data: NetFetchRequestMsg): BridgeToGatewayNetMsg()
+	@Serializable
+	@SerialName("wsOpen")
+	data class WsOpen(val data: NetWsOpen): BridgeToGatewayNetMsg()
+	@Serializable
+	@SerialName("wsClose")
+	data class WsClose(val data: NetWsClose): BridgeToGatewayNetMsg()
+	@Serializable
+	@SerialName("wsSend")
+	data class WsSend(val data: NetWsSend): BridgeToGatewayNetMsg()
+}
+
+@Serializable(with = BridgeToGatewayNotificationsMsgSerializer::class)
+sealed class BridgeToGatewayNotificationsMsg {
+	@Serializable
+	@SerialName("list")
+	data class List(val data: NotificationsListRequest): BridgeToGatewayNotificationsMsg()
+	@Serializable
+	@SerialName("invokePositive")
+	data class InvokePositive(val data: NotificationInvoke): BridgeToGatewayNotificationsMsg()
+	@Serializable
+	@SerialName("invokeNegative")
+	data class InvokeNegative(val data: NotificationInvoke): BridgeToGatewayNotificationsMsg()
+}
+
+@Serializable(with = BridgeToGatewayPhoneMsgSerializer::class)
+sealed class BridgeToGatewayPhoneMsg {
+	@Serializable
+	@SerialName("answer")
+	data class Answer(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("decline")
+	data class Decline(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("end")
+	data class End(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("hold")
+	data class Hold(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("unhold")
+	data class Unhold(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("stateGet")
+	object StateGet: BridgeToGatewayPhoneMsg()
+}
+
+/// Bridge → gateway player verbs. The companion-side SDK dispatches each
+/// to its native player integration (Spotify SDK, Apple Music SDK,
+/// MediaSession). Routing for `Play(uri)` is gated on
+/// `Capabilities.uri_schemes` — daemon never forwards a URI no
+/// connected gateway claims.
+@Serializable(with = BridgeToGatewayPlayerMsgSerializer::class)
+sealed class BridgeToGatewayPlayerMsg {
+	@Serializable
+	@SerialName("play")
+	data class Play(val data: PlayUri): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("queue")
+	data class Queue(val data: QueueUri): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("pause")
+	object Pause: BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("resume")
+	object Resume: BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("skipNext")
+	object SkipNext: BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("skipPrev")
+	object SkipPrev: BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("skipToIndex")
+	data class SkipToIndex(val data: dev.bridgething.schema.SkipToIndex): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("seekTo")
+	data class SeekTo(val data: dev.bridgething.schema.SeekTo): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("setShuffle")
+	data class SetShuffle(val data: dev.bridgething.schema.SetShuffle): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("setRepeat")
+	data class SetRepeat(val data: dev.bridgething.schema.SetRepeat): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("setSpeed")
+	data class SetSpeed(val data: dev.bridgething.schema.SetSpeed): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("setCrossfade")
+	data class SetCrossfade(val data: dev.bridgething.schema.SetCrossfade): BridgeToGatewayPlayerMsg()
+}
+
 @Serializable(with = BridgeToGatewaySystemMsgSerializer::class)
 sealed class BridgeToGatewaySystemMsg {
 	@Serializable
@@ -659,54 +2048,6 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("otaBeginRejected")
 	data class OtaBeginRejected(val data: dev.bridgething.schema.OtaBeginRejected): BridgeToGatewaySystemMsg()
-}
-
-/// Bridge-side outbound transport command targeting the connected companion.
-/// The companion-side SDK dispatches each verb to its native player
-/// integration (Spotify SDK, Apple Music, MediaSession, etc).
-/// 
-/// Routing decision lives in `core::transport::TransportController`; this
-/// surface only carries the typed verb. The controller emits Transport when
-/// the companion has claimed `NowPlayingPlayback` authority; iAP2 HID is
-/// the alternate path when authority is held by iAP2.
-@Serializable(with = BridgeToGatewayTransportMsgSerializer::class)
-sealed class BridgeToGatewayTransportMsg {
-	@Serializable
-	@SerialName("play")
-	object Play: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("pause")
-	object Pause: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("playPause")
-	object PlayPause: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("next")
-	object Next: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("prev")
-	object Prev: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("volumeUp")
-	object VolumeUp: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("volumeDown")
-	object VolumeDown: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("muteToggle")
-	object MuteToggle: BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("shuffle")
-	data class Shuffle(val data: ShuffleSet): BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("repeat")
-	data class Repeat(val data: RepeatSet): BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("seekTo")
-	data class SeekTo(val data: SeekToSet): BridgeToGatewayTransportMsg()
-	@Serializable
-	@SerialName("skipToIndex")
-	data class SkipToIndex(val data: SkipToIndexSet): BridgeToGatewayTransportMsg()
 }
 
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
@@ -776,6 +2117,19 @@ sealed class GatewayToBridgeAssetMsg {
 	data class NotFound(val data: AssetNotFoundReply): GatewayToBridgeAssetMsg()
 }
 
+@Serializable(with = GatewayToBridgeAudioMsgSerializer::class)
+sealed class GatewayToBridgeAudioMsg {
+	@Serializable
+	@SerialName("ttsStarted")
+	data class TtsStarted(val data: dev.bridgething.schema.TtsStarted): GatewayToBridgeAudioMsg()
+	@Serializable
+	@SerialName("ttsEnded")
+	data class TtsEnded(val data: dev.bridgething.schema.TtsEnded): GatewayToBridgeAudioMsg()
+	@Serializable
+	@SerialName("volumeChanged")
+	data class VolumeChanged(val data: dev.bridgething.schema.VolumeChanged): GatewayToBridgeAudioMsg()
+}
+
 /// Companion declares per-scope authority. `Claim` is idempotent and may
 /// be re-issued to refresh the freshness timestamp. `Release` is the
 /// "stop preferring my data for this scope" signal. Stale claims fall
@@ -790,11 +2144,152 @@ sealed class GatewayToBridgeAuthorityMsg {
 	data class Release(val data: AuthorityRelease): GatewayToBridgeAuthorityMsg()
 }
 
+/// Companion-driven capabilities surface. The companion sends `Announce`
+/// immediately on session-up (before any other surface activity) and
+/// re-sends on any change. The daemon's PeerTracker flips
+/// `companion_active` on receipt and seeds initial snapshots for every
+/// surface where the companion is claiming authority.
+@Serializable(with = GatewayToBridgeCapabilitiesMsgSerializer::class)
+sealed class GatewayToBridgeCapabilitiesMsg {
+	@Serializable
+	@SerialName("announce")
+	data class Announce(val data: GatewayCapabilities): GatewayToBridgeCapabilitiesMsg()
+}
+
 @Serializable(with = GatewayToBridgeChromeMsgSerializer::class)
 sealed class GatewayToBridgeChromeMsg {
 	@Serializable
 	@SerialName("navigate")
 	data class Navigate(val data: ChromeNavigate): GatewayToBridgeChromeMsg()
+}
+
+@Serializable(with = GatewayToBridgeGeoMsgSerializer::class)
+sealed class GatewayToBridgeGeoMsg {
+	@Serializable
+	@SerialName("position")
+	data class Position(val data: dev.bridgething.schema.Position): GatewayToBridgeGeoMsg()
+	@Serializable
+	@SerialName("getOnceReply")
+	data class GetOnceReply(val data: GeoGetOnceReply): GatewayToBridgeGeoMsg()
+	@Serializable
+	@SerialName("errorReply")
+	data class ErrorReply(val data: GeoErrorReply): GatewayToBridgeGeoMsg()
+}
+
+@Serializable(with = GatewayToBridgeLibraryMsgSerializer::class)
+sealed class GatewayToBridgeLibraryMsg {
+	@Serializable
+	@SerialName("browseReply")
+	data class BrowseReply(val data: dev.bridgething.schema.BrowseReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("searchReply")
+	data class SearchReply(val data: dev.bridgething.schema.SearchReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("recommendationsReply")
+	data class RecommendationsReply(val data: dev.bridgething.schema.RecommendationsReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("favoritesListReply")
+	data class FavoritesListReply(val data: dev.bridgething.schema.FavoritesListReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("libraryErrorReply")
+	data class LibraryErrorReply(val data: dev.bridgething.schema.LibraryErrorReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("favoriteChanged")
+	data class FavoriteChanged(val data: dev.bridgething.schema.FavoriteChanged): GatewayToBridgeLibraryMsg()
+}
+
+@Serializable(with = GatewayToBridgeNetMsgSerializer::class)
+sealed class GatewayToBridgeNetMsg {
+	@Serializable
+	@SerialName("fetchReply")
+	data class FetchReply(val data: NetFetchReply): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("fetchErrorReply")
+	data class FetchErrorReply(val data: NetFetchErrorReply): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("fetchStreamBegin")
+	data class FetchStreamBegin(val data: NetFetchStreamBegin): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("fetchStreamChunk")
+	data class FetchStreamChunk(val data: NetFetchStreamChunk): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("fetchStreamEnd")
+	data class FetchStreamEnd(val data: NetFetchStreamEnd): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsOpenReply")
+	data class WsOpenReply(val data: NetWsOpenReply): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsErrorReply")
+	data class WsErrorReply(val data: NetWsErrorReply): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsOpened")
+	data class WsOpened(val data: NetWsOpened): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsMessage")
+	data class WsMessage(val data: NetWsMessage): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsClosed")
+	data class WsClosed(val data: NetWsClosed): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("wsErrorEvent")
+	data class WsErrorEvent(val data: NetWsErrorEvent): GatewayToBridgeNetMsg()
+}
+
+@Serializable(with = GatewayToBridgeNotificationsMsgSerializer::class)
+sealed class GatewayToBridgeNotificationsMsg {
+	@Serializable
+	@SerialName("listReply")
+	data class ListReply(val data: NotificationsListReply): GatewayToBridgeNotificationsMsg()
+	@Serializable
+	@SerialName("errorReply")
+	data class ErrorReply(val data: NotificationsErrorReply): GatewayToBridgeNotificationsMsg()
+	@Serializable
+	@SerialName("posted")
+	data class Posted(val data: Notification): GatewayToBridgeNotificationsMsg()
+	@Serializable
+	@SerialName("updated")
+	data class Updated(val data: Notification): GatewayToBridgeNotificationsMsg()
+	@Serializable
+	@SerialName("removed")
+	data class Removed(val data: NotificationRemoved): GatewayToBridgeNotificationsMsg()
+}
+
+@Serializable(with = GatewayToBridgePhoneMsgSerializer::class)
+sealed class GatewayToBridgePhoneMsg {
+	@Serializable
+	@SerialName("snapshot")
+	data class Snapshot(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
+	@Serializable
+	@SerialName("callStarted")
+	data class CallStarted(val data: PhoneCall): GatewayToBridgePhoneMsg()
+	@Serializable
+	@SerialName("callUpdated")
+	data class CallUpdated(val data: PhoneCall): GatewayToBridgePhoneMsg()
+	@Serializable
+	@SerialName("callEnded")
+	data class CallEnded(val data: PhoneCallEnded): GatewayToBridgePhoneMsg()
+	@Serializable
+	@SerialName("stateReply")
+	data class StateReply(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
+}
+
+/// Gateway → bridge player events. `Snapshot` is the initial-state event
+/// fired at announce when the companion claims player authority;
+/// `Delta` is the ongoing partial-update stream (the only delta-shaped
+/// event in the wire protocol — every other surface uses snapshots).
+/// `QueueChanged` fires when the queue mutates without a track change
+/// (companion-side reorder, prefetch).
+@Serializable(with = GatewayToBridgePlayerMsgSerializer::class)
+sealed class GatewayToBridgePlayerMsg {
+	@Serializable
+	@SerialName("snapshot")
+	data class Snapshot(val data: PlayerState): GatewayToBridgePlayerMsg()
+	@Serializable
+	@SerialName("delta")
+	data class Delta(val data: NowPlayingUpdate): GatewayToBridgePlayerMsg()
+	@Serializable
+	@SerialName("queueChanged")
+	data class QueueChanged(val data: QueueSnapshot): GatewayToBridgePlayerMsg()
 }
 
 @Serializable(with = GatewayToBridgeSystemMsgSerializer::class)
@@ -811,6 +2306,17 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("cancelUpdate")
 	object CancelUpdate: GatewayToBridgeSystemMsg()
+}
+
+/// Companion-driven time surface. Companion sends `Snapshot` at announce
+/// (announce-on-connect rule for any surface where companion claims
+/// authority — Time always seeds) and again on tz / locale / clock-skew
+/// changes.
+@Serializable(with = GatewayToBridgeTimeMsgSerializer::class)
+sealed class GatewayToBridgeTimeMsg {
+	@Serializable
+	@SerialName("snapshot")
+	data class Snapshot(val data: TimeInfo): GatewayToBridgeTimeMsg()
 }
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)
@@ -839,6 +2345,17 @@ sealed class GatewayToBridgeWebappMsg {
 	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()
 }
 
+@Serializable
+enum class HardwareError(val string: String) {
+	/// The supplied level is outside `[0.0, 1.0]`.
+	@SerialName("levelOutOfRange")
+	LevelOutOfRange("levelOutOfRange"),
+	/// `setLevel` was called while in `Auto` mode — ignored, switch to
+	/// `Manual` first.
+	@SerialName("modeMismatch")
+	ModeMismatch("modeMismatch"),
+}
+
 @Serializable(with = ImageSerializer::class)
 sealed class Image {
 	@Serializable
@@ -849,30 +2366,81 @@ sealed class Image {
 	data class Bytes(val data: ByteArray): Image()
 }
 
+/// What stream of log records a subscription pulls from. `Daemon` is the
+/// bridgething tracing subscriber; `System` is the `journald` view; `All`
+/// merges both in arrival order.
 @Serializable
-enum class PhoneCallDirection(val string: String) {
-	@SerialName("Incoming")
-	Incoming("Incoming"),
-	@SerialName("Outgoing")
-	Outgoing("Outgoing"),
+enum class LogSource(val string: String) {
+	@SerialName("daemon")
+	Daemon("daemon"),
+	@SerialName("system")
+	System("system"),
+	@SerialName("all")
+	All("all"),
 }
 
+/// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
 @Serializable
-enum class PhoneCallStatus(val string: String) {
-	@SerialName("Disconnected")
-	Disconnected("Disconnected"),
-	@SerialName("Sending")
-	Sending("Sending"),
-	@SerialName("Ringing")
-	Ringing("Ringing"),
-	@SerialName("Connecting")
-	Connecting("Connecting"),
-	@SerialName("Active")
-	Active("Active"),
-	@SerialName("Held")
-	Held("Held"),
-	@SerialName("Disconnecting")
-	Disconnecting("Disconnecting"),
+data class PhoneErrorCallNotFoundInner (
+	val call_id: String
+)
+
+/// Generated type representing the anonymous struct variant `ActionRejected` of the `PhoneError` Rust enum
+@Serializable
+data class PhoneErrorActionRejectedInner (
+	val reason: String
+)
+
+@Serializable(with = PhoneErrorSerializer::class)
+sealed class PhoneError {
+	/// The supplied `call_id` is not in the daemon's active set.
+	@Serializable
+	@SerialName("callNotFound")
+	data class CallNotFound(val data: PhoneErrorCallNotFoundInner): PhoneError()
+	/// The companion or platform refused the action (e.g. answer while no
+	/// ringing call exists, end on a remote-controlled conference leg).
+	@Serializable
+	@SerialName("actionRejected")
+	data class ActionRejected(val data: PhoneErrorActionRejectedInner): PhoneError()
+}
+
+/// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorSchemeUnclaimedInner (
+	val scheme: String
+)
+
+/// Generated type representing the anonymous struct variant `PlayFailed` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorPlayFailedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `NotInQueue` of the `PlayerError` Rust enum
+@Serializable
+data class PlayerErrorNotInQueueInner (
+	val index: UInt
+)
+
+@Serializable(with = PlayerErrorSerializer::class)
+sealed class PlayerError {
+	/// `play({uri})` was called with a scheme no connected gateway claims.
+	/// Returned synchronously by the daemon without round-tripping.
+	@Serializable
+	@SerialName("schemeUnclaimed")
+	data class SchemeUnclaimed(val data: PlayerErrorSchemeUnclaimedInner): PlayerError()
+	/// Gateway acknowledged the verb but couldn't fulfill it.
+	@Serializable
+	@SerialName("playFailed")
+	data class PlayFailed(val data: PlayerErrorPlayFailedInner): PlayerError()
+	/// No companion is connected.
+	@Serializable
+	@SerialName("noGateway")
+	object NoGateway: PlayerError()
+	/// `skipToIndex` referenced a queue index that doesn't exist.
+	@Serializable
+	@SerialName("notInQueue")
+	data class NotInQueue(val data: PlayerErrorNotInQueueInner): PlayerError()
 }
 
 @Serializable
@@ -938,15 +2506,24 @@ data class WireErrorHandlerFailedInner (
 /// here.
 @Serializable(with = WireErrorSerializer::class)
 sealed class WireError {
-	/// The receiver does not implement this request variant.
+	/// Receiver does not recognize this request variant. Used by the codec
+	/// layer's auto-nack on a typed-decode failure (the variant the sender
+	/// names is not in the receiver's enum) and by handlers that explicitly
+	/// reject something they cannot map.
 	@Serializable
 	@SerialName("unsupported")
 	object Unsupported: WireError()
-	/// The receiver could not decode or validate the request payload.
+	/// Receiver recognizes the variant but the backend is not yet wired.
+	/// Distinct from `Unsupported` so SDK consumers can tell "you have the
+	/// wrong daemon version" from "this surface ships in a future slice".
+	@Serializable
+	@SerialName("unimplemented")
+	object Unimplemented: WireError()
+	/// Receiver could not decode or validate the request payload.
 	@Serializable
 	@SerialName("malformed")
 	data class Malformed(val data: WireErrorMalformedInner): WireError()
-	/// An unexpected internal error occurred while handling the request.
+	/// Unexpected internal error while handling the request.
 	@Serializable
 	@SerialName("handlerFailed")
 	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()

@@ -185,3 +185,153 @@ pub struct PlaybackQueue {
   pub current: Track,
   pub previous: Vec<Track>,
 }
+
+/// Three-state playback. `Stopped` is the no-track-loaded resting state;
+/// `Paused` is "track is loaded, position is held"; `Playing` is the
+/// progressing state.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum PlaybackState {
+  #[default]
+  Stopped,
+  Paused,
+  Playing,
+}
+
+/// Per-session playback snapshot: where in the song we are, what mode is
+/// engaged. `position_ms` is the live playhead at snapshot time; webapps
+/// extrapolate forward locally while `state == Playing`.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct Playback {
+  pub state: PlaybackState,
+  pub position_ms: u32,
+  pub shuffle: bool,
+  pub repeat: RepeatMode,
+}
+
+/// User-tunable knobs that are not "currently playing" state.
+/// `crossfade_ms = None` is "crossfade off"; `Some(0)` is also off but
+/// distinguishes "user explicitly set zero" from "feature unsupported by
+/// gateway".
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlayerOptions {
+  pub speed: f32,
+  pub crossfade_ms: Option<u32>,
+}
+
+impl Default for PlayerOptions {
+  fn default() -> Self {
+    Self {
+      speed: 1.0,
+      crossfade_ms: None,
+    }
+  }
+}
+
+/// Optional context for `play({ uri })`. `context_uri` is the album /
+/// playlist / show URI the track is being played from; gateways with
+/// playlist support honor it for skip-next semantics. `position` is the
+/// 0-based index inside the context.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlayContext {
+  pub context_uri: String,
+  pub position: Option<u32>,
+}
+
+/// Where in the queue a `queue({ uri })` should land. `Append` (default)
+/// goes at the end; `Next` is play-next; `Index` is an explicit position.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum QueuePosition {
+  #[default]
+  Append,
+  Next,
+  Index(u32),
+}
+
+/// One row in the player queue. Lean cross-platform shape — gateways
+/// that have richer per-track data still surface what fields they have.
+/// `uri` is required because every queued item must be addressable for
+/// `skipToIndex`. `persistent_id` is the platform-stable id when
+/// available; webapps treat it as opaque.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct QueueItem {
+  pub uri: String,
+  pub title: Option<String>,
+  pub artist: Option<String>,
+  pub album: Option<String>,
+  pub artwork_id: Option<String>,
+  pub duration_ms: Option<u32>,
+  pub persistent_id: Option<String>,
+}
+
+/// Full player snapshot the daemon broadcasts to webapps. Initial value
+/// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
+/// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
+/// merges into the cached snapshot.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlayerState {
+  pub track: Option<MediaItem>,
+  pub playback: Playback,
+  pub queue: Vec<QueueItem>,
+  pub options: PlayerOptions,
+}
+
+/// Currently-playing track, populated to the extent the gateway/iAP2
+/// stream has surfaced. All fields are optional because each one arrives
+/// as a separate ANCS-style attribute fetch on iAP2; the daemon
+/// accumulates and the snapshot reflects whatever's known so far.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct MediaItem {
+  pub uri: Option<String>,
+  pub persistent_id: Option<String>,
+  pub title: Option<String>,
+  pub album: Option<String>,
+  pub artist: Option<String>,
+  pub liked: Option<bool>,
+  pub artwork_id: Option<String>,
+  pub duration_ms: Option<u32>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum PlayerError {
+  /// `play({uri})` was called with a scheme no connected gateway claims.
+  /// Returned synchronously by the daemon without round-tripping.
+  SchemeUnclaimed { scheme: String },
+  /// Gateway acknowledged the verb but couldn't fulfill it.
+  PlayFailed { reason: String },
+  /// No companion is connected.
+  NoGateway,
+  /// `skipToIndex` referenced a queue index that doesn't exist.
+  NotInQueue { index: u32 },
+}

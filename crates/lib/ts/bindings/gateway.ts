@@ -2,11 +2,43 @@
 import type {
   AssetRetention,
   BridgeThingMeta,
+  BrowseResult,
+  CallEndReason,
+  CompanionAuthorityScope,
+  DismissReason,
+  FavoritesPage,
   ForwardMessage,
-  GatewayMeta,
+  GatewayCapabilities,
+  GeoAccuracy,
+  GeoError,
+  HttpHeader,
+  ItemKind,
+  ItemRef,
+  LibraryError,
+  NetError,
+  NetFetchRequest,
+  NetFetchResponse,
+  NetFetchStreamBegin,
+  NetFetchStreamChunk,
+  NetFetchStreamEnd,
+  Notification,
+  NotificationError,
+  NotificationsPage,
   NowPlayingUpdate,
+  PhoneCall,
+  PhoneState,
+  PlayContext,
+  PlayerState,
+  Position,
+  QueueItem,
+  QueuePosition,
+  RecommendationsResult,
   RepeatMode,
+  SearchResult,
+  TimeInfo,
   WebappInfo,
+  WsError,
+  WsFrame,
 } from './shared';
 import type { MsgMeta, WireError } from './wire';
 
@@ -92,6 +124,30 @@ export type BridgeToGatewayAssetMsg =
   | { event: 'pushBeginAck'; data: AssetPushBeginAck }
   | { event: 'pushBeginRejected'; data: AssetPushBeginRejected };
 
+export type BridgeToGatewayAudioMsg =
+  | { event: 'volumeUp' }
+  | { event: 'volumeDown' }
+  | { event: 'setVolume'; data: SetVolume }
+  | { event: 'muteToggle' }
+  | { event: 'setMute'; data: SetMute }
+  | { event: 'tts'; data: Tts }
+  | { event: 'ttsCancel'; data: TtsCancel }
+  | { event: 'ttsCancelAll' }
+  | { event: 'earcon'; data: Earcon };
+
+export type BridgeToGatewayGeoMsg =
+  | { event: 'watch'; data: GeoWatch }
+  | { event: 'unwatch' }
+  | { event: 'getOnce'; data: GeoGetOnce };
+
+export type BridgeToGatewayLibraryMsg =
+  | { event: 'browse'; data: LibraryBrowseRequest }
+  | { event: 'search'; data: LibrarySearchRequest }
+  | { event: 'recommendations'; data: LibraryRecommendationsRequest }
+  | { event: 'favoritesList'; data: LibraryFavoritesListRequest }
+  | { event: 'favoritesToggle'; data: FavoritesToggle }
+  | { event: 'favoritesSet'; data: FavoritesSet };
+
 /**
  * bridgething -> gateway
  * messages from bridgething to the gateway (mobile or desktop app).
@@ -103,43 +159,65 @@ export type BridgeToGatewayMsg = { id: Uint8Array; meta: MsgMeta; data: BridgeTo
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
   | { type: 'asset'; data: BridgeToGatewayAssetMsg }
+  | { type: 'audio'; data: BridgeToGatewayAudioMsg }
+  | { type: 'geo'; data: BridgeToGatewayGeoMsg }
+  | { type: 'library'; data: BridgeToGatewayLibraryMsg }
+  | { type: 'net'; data: BridgeToGatewayNetMsg }
+  | { type: 'notifications'; data: BridgeToGatewayNotificationsMsg }
+  | { type: 'phone'; data: BridgeToGatewayPhoneMsg }
+  | { type: 'player'; data: BridgeToGatewayPlayerMsg }
   | { type: 'system'; data: BridgeToGatewaySystemMsg }
-  | { type: 'transport'; data: BridgeToGatewayTransportMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'error'; data: WireError }
   | { type: 'ack' }
   | { type: 'done' };
 
+export type BridgeToGatewayNetMsg =
+  | { event: 'fetch'; data: NetFetchRequestMsg }
+  | { event: 'wsOpen'; data: NetWsOpen }
+  | { event: 'wsClose'; data: NetWsClose }
+  | { event: 'wsSend'; data: NetWsSend };
+
+export type BridgeToGatewayNotificationsMsg =
+  | { event: 'list'; data: NotificationsListRequest }
+  | { event: 'invokePositive'; data: NotificationInvoke }
+  | { event: 'invokeNegative'; data: NotificationInvoke };
+
+export type BridgeToGatewayPhoneMsg =
+  | { event: 'answer'; data: PhoneCallAction }
+  | { event: 'decline'; data: PhoneCallAction }
+  | { event: 'end'; data: PhoneCallAction }
+  | { event: 'hold'; data: PhoneCallAction }
+  | { event: 'unhold'; data: PhoneCallAction }
+  | { event: 'stateGet' };
+
+/**
+ * Bridge → gateway player verbs. The companion-side SDK dispatches each
+ * to its native player integration (Spotify SDK, Apple Music SDK,
+ * MediaSession). Routing for `Play(uri)` is gated on
+ * `Capabilities.uri_schemes` — daemon never forwards a URI no
+ * connected gateway claims.
+ */
+export type BridgeToGatewayPlayerMsg =
+  | { event: 'play'; data: PlayUri }
+  | { event: 'queue'; data: QueueUri }
+  | { event: 'pause' }
+  | { event: 'resume' }
+  | { event: 'skipNext' }
+  | { event: 'skipPrev' }
+  | { event: 'skipToIndex'; data: SkipToIndex }
+  | { event: 'seekTo'; data: SeekTo }
+  | { event: 'setShuffle'; data: SetShuffle }
+  | { event: 'setRepeat'; data: SetRepeat }
+  | { event: 'setSpeed'; data: SetSpeed }
+  | { event: 'setCrossfade'; data: SetCrossfade };
+
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
   | { event: 'otaError'; data: OtaError }
   | { event: 'otaBeginAck'; data: OtaBeginAck }
   | { event: 'otaBeginRejected'; data: OtaBeginRejected };
-
-/**
- * Bridge-side outbound transport command targeting the connected companion.
- * The companion-side SDK dispatches each verb to its native player
- * integration (Spotify SDK, Apple Music, MediaSession, etc).
- *
- * Routing decision lives in `core::transport::TransportController`; this
- * surface only carries the typed verb. The controller emits Transport when
- * the companion has claimed `NowPlayingPlayback` authority; iAP2 HID is
- * the alternate path when authority is held by iAP2.
- */
-export type BridgeToGatewayTransportMsg =
-  | { event: 'play' }
-  | { event: 'pause' }
-  | { event: 'playPause' }
-  | { event: 'next' }
-  | { event: 'prev' }
-  | { event: 'volumeUp' }
-  | { event: 'volumeDown' }
-  | { event: 'muteToggle' }
-  | { event: 'shuffle'; data: ShuffleSet }
-  | { event: 'repeat'; data: RepeatSet }
-  | { event: 'seekTo'; data: SeekToSet }
-  | { event: 'skipToIndex'; data: SkipToIndexSet };
 
 export type BridgeToGatewayWebappMsg =
   | { event: 'webapps'; data: WebappList }
@@ -149,16 +227,28 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'uninstalled'; data: WebappActive }
   | { event: 'webappError'; data: WebappError };
 
+export type BrowseReply = { result: BrowseResult };
+
 export type ChromeNavigate = { url: string };
 
 /**
- * Surfaces the companion can declare authority over. Each scope has a
- * scope-defined fallback source the daemon merges with when no claim is
- * active or the claim has gone stale (see daemon-side merge in
- * `core::player`). New scopes are forward-compat: an unknown scope
- * arriving at an older daemon is stored opaquely and ignored.
+ * Play a named earcon from `AudioCapabilities.earcons`. Unknown names
+ * surface as `AudioError::EarconNotFound`.
  */
-export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback';
+export type Earcon = { name: string };
+
+/**
+ * Fired when the favorited / liked status of an item changes —
+ * regardless of whether it was driven by the daemon (FavoritesToggle/Set
+ * command) or by the user mutating it on the gateway-side app directly.
+ */
+export type FavoriteChanged = { uri: string; liked: boolean };
+
+export type FavoritesListReply = { page: FavoritesPage };
+
+export type FavoritesSet = { item: ItemRef; liked: boolean };
+
+export type FavoritesToggle = { item: ItemRef };
 
 export type GatewayToBridgeAssetMsg =
   | { event: 'push'; data: AssetPush }
@@ -168,6 +258,11 @@ export type GatewayToBridgeAssetMsg =
   | { event: 'pushAbandon'; data: AssetPushAbandon }
   | { event: 'got'; data: AssetGotReply }
   | { event: 'notFound'; data: AssetNotFoundReply };
+
+export type GatewayToBridgeAudioMsg =
+  | { event: 'ttsStarted'; data: TtsStarted }
+  | { event: 'ttsEnded'; data: TtsEnded }
+  | { event: 'volumeChanged'; data: VolumeChanged };
 
 /**
  * Companion declares per-scope authority. `Claim` is idempotent and may
@@ -179,7 +274,29 @@ export type GatewayToBridgeAuthorityMsg =
   | { event: 'claim'; data: AuthorityClaim }
   | { event: 'release'; data: AuthorityRelease };
 
+/**
+ * Companion-driven capabilities surface. The companion sends `Announce`
+ * immediately on session-up (before any other surface activity) and
+ * re-sends on any change. The daemon's PeerTracker flips
+ * `companion_active` on receipt and seeds initial snapshots for every
+ * surface where the companion is claiming authority.
+ */
+export type GatewayToBridgeCapabilitiesMsg = { event: 'announce'; data: GatewayCapabilities };
+
 export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: ChromeNavigate };
+
+export type GatewayToBridgeGeoMsg =
+  | { event: 'position'; data: Position }
+  | { event: 'getOnceReply'; data: GeoGetOnceReply }
+  | { event: 'errorReply'; data: GeoErrorReply };
+
+export type GatewayToBridgeLibraryMsg =
+  | { event: 'browseReply'; data: BrowseReply }
+  | { event: 'searchReply'; data: SearchReply }
+  | { event: 'recommendationsReply'; data: RecommendationsReply }
+  | { event: 'favoritesListReply'; data: FavoritesListReply }
+  | { event: 'libraryErrorReply'; data: LibraryErrorReply }
+  | { event: 'favoriteChanged'; data: FavoriteChanged };
 
 /**
  * gateway -> bridgething
@@ -190,14 +307,61 @@ export type GatewayToBridgeChromeMsg = { event: 'navigate'; data: ChromeNavigate
 export type GatewayToBridgeMsg = { id: Uint8Array; meta: MsgMeta; data: GatewayToBridgeMsgData };
 
 export type GatewayToBridgeMsgData =
-  | { type: 'version'; data: GatewayMeta }
   | { type: 'asset'; data: GatewayToBridgeAssetMsg }
+  | { type: 'audio'; data: GatewayToBridgeAudioMsg }
   | { type: 'authority'; data: GatewayToBridgeAuthorityMsg }
+  | { type: 'capabilities'; data: GatewayToBridgeCapabilitiesMsg }
   | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
+  | { type: 'geo'; data: GatewayToBridgeGeoMsg }
+  | { type: 'library'; data: GatewayToBridgeLibraryMsg }
+  | { type: 'net'; data: GatewayToBridgeNetMsg }
+  | { type: 'notifications'; data: GatewayToBridgeNotificationsMsg }
+  | { type: 'phone'; data: GatewayToBridgePhoneMsg }
+  | { type: 'player'; data: GatewayToBridgePlayerMsg }
   | { type: 'system'; data: GatewayToBridgeSystemMsg }
+  | { type: 'time'; data: GatewayToBridgeTimeMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
-  | { type: 'nowPlayingUpdate'; data: NowPlayingUpdate }
   | { type: 'error'; data: WireError };
+
+export type GatewayToBridgeNetMsg =
+  | { event: 'fetchReply'; data: NetFetchReply }
+  | { event: 'fetchErrorReply'; data: NetFetchErrorReply }
+  | { event: 'fetchStreamBegin'; data: NetFetchStreamBegin }
+  | { event: 'fetchStreamChunk'; data: NetFetchStreamChunk }
+  | { event: 'fetchStreamEnd'; data: NetFetchStreamEnd }
+  | { event: 'wsOpenReply'; data: NetWsOpenReply }
+  | { event: 'wsErrorReply'; data: NetWsErrorReply }
+  | { event: 'wsOpened'; data: NetWsOpened }
+  | { event: 'wsMessage'; data: NetWsMessage }
+  | { event: 'wsClosed'; data: NetWsClosed }
+  | { event: 'wsErrorEvent'; data: NetWsErrorEvent };
+
+export type GatewayToBridgeNotificationsMsg =
+  | { event: 'listReply'; data: NotificationsListReply }
+  | { event: 'errorReply'; data: NotificationsErrorReply }
+  | { event: 'posted'; data: Notification }
+  | { event: 'updated'; data: Notification }
+  | { event: 'removed'; data: NotificationRemoved };
+
+export type GatewayToBridgePhoneMsg =
+  | { event: 'snapshot'; data: PhoneStateReply }
+  | { event: 'callStarted'; data: PhoneCall }
+  | { event: 'callUpdated'; data: PhoneCall }
+  | { event: 'callEnded'; data: PhoneCallEnded }
+  | { event: 'stateReply'; data: PhoneStateReply };
+
+/**
+ * Gateway → bridge player events. `Snapshot` is the initial-state event
+ * fired at announce when the companion claims player authority;
+ * `Delta` is the ongoing partial-update stream (the only delta-shaped
+ * event in the wire protocol — every other surface uses snapshots).
+ * `QueueChanged` fires when the queue mutates without a track change
+ * (companion-side reorder, prefetch).
+ */
+export type GatewayToBridgePlayerMsg =
+  | { event: 'snapshot'; data: PlayerState }
+  | { event: 'delta'; data: NowPlayingUpdate }
+  | { event: 'queueChanged'; data: QueueSnapshot };
 
 export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
@@ -205,12 +369,88 @@ export type GatewayToBridgeSystemMsg =
   | { event: 'otaAbandon'; data: OtaAbandon }
   | { event: 'cancelUpdate' };
 
+/**
+ * Companion-driven time surface. Companion sends `Snapshot` at announce
+ * (announce-on-connect rule for any surface where companion claims
+ * authority — Time always seeds) and again on tz / locale / clock-skew
+ * changes.
+ */
+export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
+
 export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
   | { event: 'getActive' }
   | { event: 'switchTo'; data: WebappSwitchTo }
   | { event: 'install'; data: WebappInstall }
   | { event: 'uninstall'; data: WebappUninstall };
+
+export type GeoErrorReply = { error: GeoError };
+
+export type GeoGetOnce = { accuracy: GeoAccuracy };
+
+export type GeoGetOnceReply = { position: Position };
+
+/**
+ * Bridge → companion watch forward. The daemon aggregates webapp
+ * watches and re-issues this with the most-demanding accuracy +
+ * fastest interval. `min_interval_ms = 0` lets the gateway pick.
+ */
+export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
+
+export type LibraryBrowseRequest = {
+  /**
+   * Drilldown node id from a prior `BrowseFolder`. `None` means "root".
+   */
+  nodeId: string | null;
+  pageToken: string | null;
+};
+
+export type LibraryErrorReply = { error: LibraryError };
+
+export type LibraryFavoritesListRequest = { pageToken: string | null };
+
+export type LibraryRecommendationsRequest = {
+  seed: ItemRef | null;
+  kind: ItemKind | null;
+  limit: number | null;
+  pageToken: string | null;
+};
+
+export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; pageToken: string | null };
+
+export type NetFetchErrorReply = { error: NetError };
+
+export type NetFetchReply = { response: NetFetchResponse };
+
+export type NetFetchRequestMsg = { request: NetFetchRequest };
+
+export type NetWsClose = { connectionId: Uint8Array; code: number | null; reason: string | null };
+
+export type NetWsClosed = { connectionId: Uint8Array; code: number; reason: string };
+
+export type NetWsErrorEvent = { connectionId: Uint8Array; error: WsError };
+
+export type NetWsErrorReply = { error: WsError };
+
+export type NetWsMessage = { connectionId: Uint8Array; frame: WsFrame };
+
+export type NetWsOpen = { url: string; protocols: Array<string> | null; headers: Array<HttpHeader> | null };
+
+export type NetWsOpenReply = { connectionId: Uint8Array; acceptedProtocol: string | null };
+
+export type NetWsOpened = { connectionId: Uint8Array; acceptedProtocol: string | null };
+
+export type NetWsSend = { connectionId: Uint8Array; frame: WsFrame };
+
+export type NotificationInvoke = { id: string };
+
+export type NotificationRemoved = { id: string; reason: DismissReason };
+
+export type NotificationsErrorReply = { error: NotificationError };
+
+export type NotificationsListReply = { page: NotificationsPage };
+
+export type NotificationsListRequest = { pageToken: string | null };
 
 /**
  * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
@@ -290,13 +530,92 @@ export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'r
  */
 export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
 
-export type RepeatSet = { mode: RepeatMode };
+export type PhoneCallAction = { callId: string };
 
-export type SeekToSet = { positionMs: number };
+export type PhoneCallEnded = { callId: string; reason: CallEndReason };
 
-export type ShuffleSet = { on: boolean };
+/**
+ * Typed reply payload for `PhoneStateGet` and the unsolicited
+ * announce-time snapshot the companion proactively pushes per the
+ * announce-on-connect rule.
+ */
+export type PhoneStateReply = { state: PhoneState };
 
-export type SkipToIndexSet = { index: number };
+/**
+ * Play a URI on the gateway. `context` lets the gateway honor playlist
+ * / album semantics for skip-next when both sides understand the
+ * scheme. The daemon parses the scheme and only forwards if a
+ * connected gateway claims it; otherwise returns `PlayerError::SchemeUnclaimed`.
+ */
+export type PlayUri = { uri: string; context: PlayContext | null };
+
+/**
+ * Snapshot of the player queue as the companion sees it. Sent on
+ * queue mutations the gateway can detect (user reorder, queue clear,
+ * gapless prefetch landing). The daemon overwrites its cached queue
+ * from this and re-broadcasts to webapps.
+ */
+export type QueueSnapshot = { items: Array<QueueItem> };
+
+export type QueueUri = { uri: string; position: QueuePosition };
+
+export type RecommendationsReply = { result: RecommendationsResult };
+
+export type SearchReply = { result: SearchResult };
+
+export type SeekTo = { positionMs: number };
+
+/**
+ * `duration_ms = None` turns crossfade off; `Some(0)` is also off but
+ * distinguishes intent.
+ */
+export type SetCrossfade = { durationMs: number | null };
+
+export type SetMute = { muted: boolean };
+
+export type SetRepeat = { mode: RepeatMode };
+
+export type SetShuffle = { on: boolean };
+
+/**
+ * Set absolute playback rate. `1.0` is normal speed; gateways with
+ * limited speed support clamp to their nearest supported value.
+ */
+export type SetSpeed = { speed: number };
+
+export type SetVolume = { level: number };
+
+export type SkipToIndex = { index: number };
+
+/**
+ * Fire-and-forget TTS request. `id` is webapp-assigned (no request
+ * round-trip) and used for cancellation + matching back-to-back
+ * `TtsStarted`/`TtsEnded` events. `voice` selects from
+ * `AudioCapabilities.voices`; `None` uses the gateway's default.
+ */
+export type Tts = { id: Uint8Array; text: string; voice: string | null };
+
+export type TtsCancel = { id: Uint8Array };
+
+/**
+ * Fired when the TTS request finished. `completed` is true when the
+ * full text was spoken; false when preempted, cancelled, or the
+ * companion dropped it.
+ */
+export type TtsEnded = { id: Uint8Array; completed: boolean };
+
+/**
+ * Fired when the companion has begun speaking the TTS request with this
+ * id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
+ * before speech started); webapps should treat both as best-effort.
+ */
+export type TtsStarted = { id: Uint8Array };
+
+/**
+ * Volume / mute snapshot. Fired on any change to either; webapps treat
+ * `level` as the canonical value.
+ */
+export type VolumeChanged = { level: number; muted: boolean };
 
 export type WebappActive = { name: string };
 

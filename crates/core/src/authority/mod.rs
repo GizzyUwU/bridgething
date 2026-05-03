@@ -18,7 +18,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use libbridgething::gateway::CompanionAuthorityScope;
+use libbridgething::CompanionAuthorityScope;
 
 pub const STALE_TIMEOUT: Duration = Duration::from_secs(5);
 
