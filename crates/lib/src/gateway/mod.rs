@@ -1,3 +1,4 @@
+use bridgething_macros::BridgeOuterEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -32,7 +33,7 @@ pub struct GatewayToBridgeMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum GatewayToBridgeMsgData {
@@ -71,13 +72,12 @@ pub struct BridgeToGatewayMsg {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-#[allow(clippy::large_enum_variant)]
 pub enum BridgeToGatewayMsgData {
   #[from]
-  Version(BridgeThingMeta),
+  Version(Box<BridgeThingMeta>),
   #[from]
   Asset(BridgeToGatewayAssetMsg),
   #[from]

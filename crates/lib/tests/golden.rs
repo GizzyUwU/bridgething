@@ -225,7 +225,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Event,
-      data: BridgeToGatewayMsgData::Version(bridge_meta()),
+      data: bridge_meta().into(),
     },
   ));
 

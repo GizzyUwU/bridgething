@@ -1,9 +1,6 @@
 use std::path::PathBuf;
 
-use libbridgething::{
-  BridgeThingMeta,
-  client::{BridgeToClientMsgData, BridgeToClientSystemMsg},
-};
+use libbridgething::{BridgeThingMeta, client::BridgeToClientMsgData, gateway::BridgeToGatewayMsgData};
 use serde::{Deserialize, Serialize};
 
 const BRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -58,7 +55,13 @@ impl SuperbirdMeta {
 
 impl From<SuperbirdMeta> for BridgeToClientMsgData {
   fn from(meta: SuperbirdMeta) -> Self {
-    BridgeToClientMsgData::System(BridgeToClientSystemMsg::Version(meta.into()))
+    BridgeThingMeta::from(meta).into()
+  }
+}
+
+impl From<SuperbirdMeta> for BridgeToGatewayMsgData {
+  fn from(meta: SuperbirdMeta) -> Self {
+    BridgeThingMeta::from(meta).into()
   }
 }
 

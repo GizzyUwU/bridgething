@@ -163,7 +163,7 @@ impl ClientManager {
       .iter()
       .map(|c| {
         let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None);
-        c.tx.try_send(msg).map_err(WSError::MessageTrySend)
+        c.tx.try_send(msg).map_err(WSError::from)
       })
       .collect();
 
@@ -293,7 +293,7 @@ impl ClientManager {
 
         c.tx
           .try_send(PossibleSendMsg::Stock(msg.clone()))
-          .map_err(WSError::MessageTrySend)
+          .map_err(WSError::from)
       })
       .collect();
 

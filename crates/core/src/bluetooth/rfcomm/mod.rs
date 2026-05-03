@@ -7,8 +7,8 @@ use bluer::{
 use futures::StreamExt;
 use libbridgething::{
   BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus, Priority,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg},
-  protocol::{BridgeEndec, PrioritizedFrame},
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
+  protocol::{BridgeEndec, encode_bridge_frame},
   wire::MsgMeta,
 };
 use tokio::{
@@ -18,7 +18,7 @@ use tokio::{
 };
 use tokio_util::{
   bytes::{Bytes, BytesMut},
-  codec::{Encoder, FramedRead},
+  codec::FramedRead,
 };
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx, peer_owners::PeerOwners};
@@ -36,15 +36,14 @@ const RFCOMM_BATCH_BYTES: usize = 4 * 1024;
 const LANE_CAPACITY: usize = 16;
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 enum ConnectionMessage {
-  Msg(GatewayToBridgeMsg),
+  Msg(Box<GatewayToBridgeMsg>),
   Close,
 }
 
 impl From<GatewayToBridgeMsg> for ConnectionMessage {
   fn from(msg: GatewayToBridgeMsg) -> Self {
-    Self::Msg(msg)
+    Self::Msg(Box::new(msg))
   }
 }
 
@@ -80,10 +79,10 @@ impl Connection {
     }
   }
 
-  async fn send(&self, msg: BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
+  async fn send(&self, msg: &BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
     tracing::trace!("({}) sending rfcomm message ({:?}): {:?}", self.address, priority, msg);
     let mut buf = BytesMut::new();
-    BridgeEndec::default().encode(PrioritizedFrame { priority, msg }, &mut buf)?;
+    encode_bridge_frame(priority, msg, &mut buf)?;
     let bytes = buf.freeze();
     let lane = match priority {
       Priority::Normal => &self.normal_tx,
@@ -200,7 +199,7 @@ impl RfcommGateway {
           let OutboundGatewayMessage { address, priority, msg } = data;
           if let Some(address) = address {
             if let Some(conn) = self.connections.get(&address) {
-              if let Err(e) = conn.send(msg, priority).await {
+              if let Err(e) = conn.send(&msg, priority).await {
                 tracing::error!("failed to send rfcomm frame: {:?}", e);
               }
             } else {
@@ -208,7 +207,7 @@ impl RfcommGateway {
             }
           } else {
             for conn in self.connections.values() {
-              if let Err(e) = conn.send(msg.clone(), priority).await {
+              if let Err(e) = conn.send(&msg, priority).await {
                 tracing::error!("failed to send rfcomm frame: {:?}", e);
               }
             }
@@ -224,7 +223,7 @@ impl RfcommGateway {
               let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
             },
             ConnectionMessage::Msg(msg) => {
-              if let Err(e) = self.recv_tx.send(InboundGatewayMessage::new(Some(address), GatewayType::Rfcomm, msg)).await {
+              if let Err(e) = self.recv_tx.send(InboundGatewayMessage::new(Some(address), GatewayType::Rfcomm, *msg)).await {
                 tracing::error!("failed to send rfcomm message to gateway: {:?}", e);
               }
             }
@@ -246,16 +245,12 @@ impl RfcommGateway {
     tracing::debug!("rfcomm accepted connection from: {address}");
 
     let connection = Connection::new(address, stream, self.conn_tx.clone());
-    connection
-      .send(
-        BridgeToGatewayMsg {
-          id: uuid::Uuid::now_v7(),
-          meta: MsgMeta::Event,
-          data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
-        },
-        Priority::Normal,
-      )
-      .await?;
+    let version = BridgeToGatewayMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: MsgMeta::Event,
+      data: self.state.meta.clone().into(),
+    };
+    connection.send(&version, Priority::Normal).await?;
 
     self.connections.insert(address, connection);
     self.peer_owners.register(address, GatewayType::Rfcomm);

@@ -210,13 +210,25 @@ pub enum WSError {
   #[error("requested client to send to is not connected to the server!!")]
   NotConnected,
   #[error("could not send a message to requested client: {0}")]
-  MessageSend(#[from] tokio::sync::mpsc::error::SendError<PossibleSendMsg>),
+  MessageSend(Box<tokio::sync::mpsc::error::SendError<PossibleSendMsg>>),
   #[error("could not send a message to requested client: {0}")]
-  MessageTrySend(#[from] tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>),
+  MessageTrySend(Box<tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>>),
   #[error("channel from connections to server struct has been dropped!!! this is bad.")]
   ChannelClosed,
   #[error("failed to broadcast to all devices. check the logs for more info.")]
   BroadcastFailed,
+}
+
+impl From<tokio::sync::mpsc::error::SendError<PossibleSendMsg>> for WSError {
+  fn from(err: tokio::sync::mpsc::error::SendError<PossibleSendMsg>) -> Self {
+    Self::MessageSend(Box::new(err))
+  }
+}
+
+impl From<tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>> for WSError {
+  fn from(err: tokio::sync::mpsc::error::TrySendError<PossibleSendMsg>) -> Self {
+    Self::MessageTrySend(Box::new(err))
+  }
 }
 
 /// Generate `From<Vec<WSError>> for $err` that logs each broadcast failure

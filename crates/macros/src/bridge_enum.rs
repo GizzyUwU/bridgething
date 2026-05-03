@@ -36,23 +36,82 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, Ident, Path, Type, Variant, Visibility, spanned::Spanned};
 
-/// Returns a token stream referencing `ty` from inside an inner
-/// submodule. Absolute paths (`crate::`, `::`, `self::`, `super::`)
-/// pass through unchanged; relative paths get a `super::` prefix.
-fn qualify_payload_type(ty: &Type) -> TokenStream2 {
-  if let Type::Path(p) = ty {
-    let absolute = p.path.leading_colon.is_some()
-      || p
-        .path
-        .segments
-        .first()
-        .map(|s| s.ident == "crate" || s.ident == "self" || s.ident == "super")
-        .unwrap_or(false);
-    if absolute {
-      return quote!(#ty);
-    }
+/// If `ty` is a `Box<T>` (or a fully-qualified `::std::boxed::Box<T>`)
+/// returns the inner `T`. Used to detect boxed variant payloads so the
+/// macro can emit auto-boxing `From<T>` impls in addition to the
+/// straight `From<Box<T>>` chain.
+pub(crate) fn unwrap_box(ty: &Type) -> Option<&Type> {
+  use syn::{GenericArgument, PathArguments};
+  let Type::Path(tp) = ty else { return None };
+  let last = tp.path.segments.last()?;
+  if last.ident != "Box" {
+    return None;
   }
-  quote!(super::#ty)
+  let PathArguments::AngleBracketed(ab) = &last.arguments else {
+    return None;
+  };
+  if ab.args.len() != 1 {
+    return None;
+  }
+  match ab.args.first()? {
+    GenericArgument::Type(inner) => Some(inner),
+    _ => None,
+  }
+}
+
+/// Returns a token stream referencing `ty` from inside an inner
+/// submodule. Walks the type tree so that `Box<Foo>` becomes
+/// `::std::boxed::Box<super::Foo>` and bare `Foo` becomes `super::Foo`,
+/// while `crate::Foo` / `::Foo` / `self::Foo` / `super::Foo` pass
+/// through unchanged. The marker submodule needs every leaf type to
+/// resolve from inside a `mod __X_responses { ... }` scope.
+fn qualify_payload_type(ty: &Type) -> TokenStream2 {
+  use syn::{GenericArgument, PathArguments};
+
+  let Type::Path(tp) = ty else {
+    return quote!(super::#ty);
+  };
+  let path = &tp.path;
+  let leading = path.leading_colon;
+  let absolute = leading.is_some()
+    || path
+      .segments
+      .first()
+      .map(|s| s.ident == "crate" || s.ident == "self" || s.ident == "super")
+      .unwrap_or(false);
+
+  // A single-segment ident with potential generics. Re-emit with the
+  // ident either super-qualified (for user types) or std-qualified (for
+  // Box, which lives in the prelude and would break under `super::Box`).
+  if !absolute && path.segments.len() == 1 {
+    let seg = path.segments.first().expect("len 1 verified");
+    let ident = &seg.ident;
+
+    // Recurse into generic args so `Box<Foo>` qualifies the inner Foo.
+    let qualified_args = match &seg.arguments {
+      PathArguments::None => quote!(),
+      PathArguments::AngleBracketed(ab) => {
+        let inner: Vec<TokenStream2> = ab
+          .args
+          .iter()
+          .map(|arg| match arg {
+            GenericArgument::Type(t) => qualify_payload_type(t),
+            other => quote!(#other),
+          })
+          .collect();
+        quote!(<#(#inner),*>)
+      }
+      PathArguments::Parenthesized(p) => quote!(#p),
+    };
+
+    return if ident == "Box" {
+      quote!(::std::boxed::Box #qualified_args)
+    } else {
+      quote!(super::#ident #qualified_args)
+    };
+  }
+
+  if absolute { quote!(#ty) } else { quote!(super::#ty) }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -228,6 +287,7 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
   for (&bucket, variants) in &grouped {
     out.extend(emit_sibling_enum(parent, vis, bucket, variants));
     out.extend(emit_from_sibling_for_parent(parent, bucket, variants));
+    out.extend(emit_unbox_from_impls(parent, bucket, variants, into_outer.as_ref()));
 
     if bucket == Bucket::Event || bucket == Bucket::Command {
       let marker_name = match bucket {
@@ -322,6 +382,53 @@ fn emit_from_sibling_for_outer(parent: &Ident, bucket: Bucket, outer: &Path) -> 
   }
 }
 
+/// For each `Variant(Box<T>)` variant, emit `From<T>` impls that
+/// auto-box. The straight `From<Box<T>>` chain is already covered by
+/// `emit_from_sibling_for_parent` — these are the ergonomic
+/// counterparts so callers can write `meta.into()` instead of
+/// `Box::new(meta).into()`. The chain to the outer wire enum is also
+/// emitted when this enum has `#[bridge_enum(into = ...)]`.
+fn emit_unbox_from_impls(parent: &Ident, bucket: Bucket, variants: &[&Variant], outer: Option<&Path>) -> TokenStream2 {
+  let sibling = format_ident!("{}{}", parent, bucket.suffix());
+  let mut out = TokenStream2::new();
+  for v in variants {
+    let Fields::Unnamed(u) = &v.fields else {
+      continue;
+    };
+    let Some(inner) = unwrap_box(&u.unnamed[0].ty) else {
+      continue;
+    };
+    let v_ident = &v.ident;
+    out.extend(quote! {
+      impl ::core::convert::From<#inner> for #sibling {
+        fn from(value: #inner) -> Self {
+          #sibling::#v_ident(::std::boxed::Box::new(value))
+        }
+      }
+
+      impl ::core::convert::From<#inner> for #parent {
+        fn from(value: #inner) -> Self {
+          #parent::#v_ident(::std::boxed::Box::new(value))
+        }
+      }
+    });
+    if let Some(outer) = outer {
+      // Chain T -> Outer via the inner enum's auto-boxing From impl
+      // we just emitted above. The intermediate `parent` annotation is
+      // there so the compiler picks the right From overload.
+      out.extend(quote! {
+        impl ::core::convert::From<#inner> for #outer {
+          fn from(value: #inner) -> Self {
+            let parent: #parent = ::core::convert::From::from(value);
+            ::core::convert::From::from(parent)
+          }
+        }
+      });
+    }
+  }
+  out
+}
+
 fn emit_marker_impl(
   lib_path: &TokenStream2,
   marker: &Ident,
@@ -398,10 +505,10 @@ fn emit_response_marker_module(parent: &Ident, vis: &Visibility, variants: &[&Va
       Fields::Unnamed(u) => {
         let ty = &u.unnamed[0].ty;
         // Reference the payload type from inside the marker submodule.
-        // Relative paths need a `super::` prefix to climb back to the
-        // enum's scope; absolute paths (`crate::`, `::`, `self::`,
-        // `super::`) must NOT be prefixed because `crate` only resolves
-        // at path-start position.
+        // `qualify_payload_type` walks the type tree so user types pick
+        // up a `super::` prefix and `Box<T>` rewrites to
+        // `::std::boxed::Box<super::T>` (Box from prelude can't be
+        // reached as `super::Box`).
         let qualified = qualify_payload_type(ty);
         quote! { pub struct #v_ident(pub ::core::marker::PhantomData<#qualified>); }
       }

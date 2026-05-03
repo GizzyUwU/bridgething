@@ -110,7 +110,7 @@ public struct Codec: Sendable {
   public let defaultCompression: Compression
   public let defaultEncoding: Encoding
 
-  public init(compression: Compression = .gzip, encoding: Encoding = .msgpack) {
+  public init(compression: Compression = .none, encoding: Encoding = .msgpack) {
     defaultCompression = compression
     defaultEncoding = encoding
   }

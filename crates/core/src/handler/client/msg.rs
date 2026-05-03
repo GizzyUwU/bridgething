@@ -1,4 +1,3 @@
-#![allow(clippy::large_enum_variant)]
 use std::net::SocketAddr;
 
 use libbridgething::{

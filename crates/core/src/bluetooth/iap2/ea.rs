@@ -19,14 +19,14 @@ use bluer::Address;
 use bridgething_iap2::session::{EaPriority, EaStreamSender};
 use libbridgething::{
   PeerCompanionStatus, Priority,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData},
-  protocol::{BridgeEndec, PrioritizedFrame},
+  gateway::BridgeToGatewayMsg,
+  protocol::{BridgeEndec, encode_bridge_frame},
   wire::MsgMeta,
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::{
   bytes::{Bytes, BytesMut},
-  codec::{Decoder, Encoder},
+  codec::Decoder,
 };
 
 use super::super::BluetoothResult;
@@ -198,9 +198,9 @@ impl Iap2EaGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
+      data: self.state.meta.clone().into(),
     };
-    self.send_to_stream(key, version, Priority::Normal).await;
+    self.send_to_stream(key, &version, Priority::Normal).await;
 
     self.peer_owners.register(address, GatewayType::Iap2Ea);
     let _ = self
@@ -220,20 +220,20 @@ impl Iap2EaGateway {
         return;
       }
       for key in keys {
-        self.send_to_stream(key, msg.clone(), priority).await;
+        self.send_to_stream(key, &msg, priority).await;
       }
     } else {
       let keys: Vec<Key> = self.conns.keys().copied().collect();
       for key in keys {
-        self.send_to_stream(key, msg.clone(), priority).await;
+        self.send_to_stream(key, &msg, priority).await;
       }
     }
   }
 
-  async fn send_to_stream(&mut self, key: Key, msg: BridgeToGatewayMsg, priority: Priority) {
+  async fn send_to_stream(&mut self, key: Key, msg: &BridgeToGatewayMsg, priority: Priority) {
     let Some(conn) = self.conns.get(&key) else { return };
     let mut buf = BytesMut::new();
-    if let Err(err) = BridgeEndec::default().encode(PrioritizedFrame { priority, msg }, &mut buf) {
+    if let Err(err) = encode_bridge_frame(priority, msg, &mut buf) {
       tracing::error!(stream_id = key.1, ?err, "iap2 ea gateway: encode failed");
       return;
     }

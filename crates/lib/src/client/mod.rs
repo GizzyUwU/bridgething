@@ -1,3 +1,4 @@
+use bridgething_macros::BridgeOuterEnum;
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -28,7 +29,7 @@ pub struct ClientToBridgeMsg {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, derive_more::From)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub enum ClientToBridgeMsgData {
@@ -67,10 +68,9 @@ pub struct BridgeToClientMsg {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, derive_more::From)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeOuterEnum)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
-#[allow(clippy::large_enum_variant)]
 pub enum BridgeToClientMsgData {
   #[from]
   Asset(BridgeToClientAssetMsg),

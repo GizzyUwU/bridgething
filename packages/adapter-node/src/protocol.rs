@@ -35,9 +35,6 @@ impl ProtocolMan {
 
     let rfcomm = match mode {
       AdapterMode::Rfcomm => Self::spawn_rfcomm(&cancel_token, adapter_name, callbacks).await?,
-      AdapterMode::Dual | AdapterMode::Ble => {
-        return Err(crate::Error::NotInitialized);
-      }
     };
 
     Ok(Self { rfcomm, cancel_token })

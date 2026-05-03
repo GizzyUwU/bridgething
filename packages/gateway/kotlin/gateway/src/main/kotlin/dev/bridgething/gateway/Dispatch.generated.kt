@@ -22,35 +22,6 @@ public sealed class RequestResult<out R, out E> {
   public data class ProtocolErr(val error: GatewayError): RequestResult<Nothing, Nothing>()
 }
 
-/** Cross-peer methods for the `Version` wire surface. */
-public class VersionSurface(private val gateway: BridgethingGateway) {
-  /** Stream of `Version` messages, paired with the originating device id. */
-  public val all: Flow<Pair<String, BridgeThingMeta>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val data = it.message.data as? BridgeToGatewayMsgData.Version ?: return@mapNotNull null
-      it.deviceId to data.data
-    }
-
-  /** Send a `Version` event to every connected peer (broadcast). */
-  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Version(payload),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-}
-
 /** Cross-peer methods for the `System` wire surface. */
 public class SystemSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `System::OtaProgress` messages. */
@@ -297,6 +268,27 @@ public class ForwardSurface(private val gateway: BridgethingGateway) {
       val inner = outer.data as? ForwardMessage.Binary ?: return@mapNotNull null
       it.deviceId to inner.data
     }
+
+}
+
+/** Cross-peer methods for the `Version` wire surface. */
+public class VersionSurface(private val gateway: BridgethingGateway) {
+  /** Send a `Version` event to every connected peer (broadcast). */
+  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Version(payload),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
 
 }
 
@@ -551,32 +543,6 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
       else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
     }
-  }
-
-}
-
-/** Per-peer methods for the `Version` wire surface (deviceId is baked in). */
-public class VersionSurfaceForDevice(
-  private val gateway: BridgethingGateway,
-  public val deviceId: String,
-) {
-  /** Stream of `Version` messages from this peer. */
-  public val all: Flow<BridgeThingMeta> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val data = it.message.data as? BridgeToGatewayMsgData.Version ?: return@mapNotNull null
-      data.data
-    }
-
-  /** Send a `Version` event to this peer. */
-  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Version(payload),
-    )
-    gateway.send(deviceId, msg, priority)
   }
 
 }
@@ -837,6 +803,23 @@ public class ForwardSurfaceForDevice(
 
 }
 
+/** Per-peer methods for the `Version` wire surface (deviceId is baked in). */
+public class VersionSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Send a `Version` event to this peer. */
+  public suspend fun send(payload: GatewayMeta, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Version(payload),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
 /** Per-peer methods for the `Asset` wire surface (deviceId is baked in). */
 public class AssetSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -1057,14 +1040,14 @@ public class BridgethingGatewayDevice(
   public val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
-  /** Per-peer methods for the `Version` wire surface. */
-  public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `System` wire surface. */
   public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Transport` wire surface. */
   public val transport: TransportSurfaceForDevice get() = TransportSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
   public val forward: ForwardSurfaceForDevice get() = ForwardSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Version` wire surface. */
+  public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Asset` wire surface. */
   public val asset: AssetSurfaceForDevice get() = AssetSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Authority` wire surface. */
@@ -1077,10 +1060,6 @@ public class BridgethingGatewayDevice(
   public val webapp: WebappSurfaceForDevice get() = WebappSurfaceForDevice(gateway, deviceId)
 }
 
-/** Methods scoped to the `Version` wire surface. */
-public val BridgethingGateway.version: VersionSurface
-  get() = VersionSurface(this)
-
 /** Methods scoped to the `System` wire surface. */
 public val BridgethingGateway.system: SystemSurface
   get() = SystemSurface(this)
@@ -1092,6 +1071,10 @@ public val BridgethingGateway.transport: TransportSurface
 /** Methods scoped to the `Forward` wire surface. */
 public val BridgethingGateway.forward: ForwardSurface
   get() = ForwardSurface(this)
+
+/** Methods scoped to the `Version` wire surface. */
+public val BridgethingGateway.version: VersionSurface
+  get() = VersionSurface(this)
 
 /** Methods scoped to the `Asset` wire surface. */
 public val BridgethingGateway.asset: AssetSurface

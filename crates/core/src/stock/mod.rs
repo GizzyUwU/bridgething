@@ -138,28 +138,31 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
 impl From<BridgeToClientSystemMsg> for StockSendMsg {
   fn from(value: BridgeToClientSystemMsg) -> Self {
     match value {
-      BridgeToClientSystemMsg::Version(BridgeThingMeta {
-        serial_number,
-        os_version,
-        app_version,
-        model_name,
-        fcc_id,
-        ic_id,
-        discord,
-        credits,
-        ..
-      }) => StockSendMsg::Version(StockVersionSend::Status {
-        serial: serial_number,
-        os_version,
-        app_version,
-        fw_version: "BridgeThing".to_string(),
-        model_name,
-        fcc_id,
-        ic_id,
-        country: "ThingLabs".to_string(),
-        discord,
-        credits,
-      }),
+      BridgeToClientSystemMsg::Version(meta) => {
+        let BridgeThingMeta {
+          serial_number,
+          os_version,
+          app_version,
+          model_name,
+          fcc_id,
+          ic_id,
+          discord,
+          credits,
+          ..
+        } = *meta;
+        StockSendMsg::Version(StockVersionSend::Status {
+          serial: serial_number,
+          os_version,
+          app_version,
+          fw_version: "BridgeThing".to_string(),
+          model_name,
+          fcc_id,
+          ic_id,
+          country: "ThingLabs".to_string(),
+          discord,
+          credits,
+        })
+      }
 
       BridgeToClientSystemMsg::GatewayStatus(_) => StockSendMsg::Unsupported,
 

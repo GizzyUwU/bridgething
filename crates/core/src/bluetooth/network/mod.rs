@@ -38,14 +38,13 @@ use futures::{
 };
 use libbridgething::{
   BRIDGETHING_NETWORK_GATEWAY_PORT, PeerCompanionStatus, Priority,
-  gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg},
-  protocol::{BridgeEndec, PrioritizedFrame},
+  gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
+  protocol::{encode_bridge_frame, parse_bridge_frame},
   wire::MsgMeta,
 };
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::{
   bytes::{Bytes, BytesMut},
-  codec::{Decoder, Encoder},
   sync::CancellationToken,
 };
 
@@ -61,12 +60,15 @@ use crate::state::State;
 const NETWORK_BATCH_BYTES: usize = 16 * 1024;
 const LANE_CAPACITY: usize = 16;
 
-/// WebSocket frame + message size cap. Tungstenite defaults to 16 MiB
-/// which trips on a single-frame `AssetPush` of even a small `.swu`
-/// (~17 MB dev variant). A future asset chunker will let us drop this
-/// back; for now the cap is sized for the largest blob a companion is
-/// expected to push (full-image `.swu` ~320 MB) with headroom.
-const WS_MAX_FRAME_BYTES: usize = 512 * 1024 * 1024;
+/// WebSocket frame + message size cap. Companions push large blobs
+/// (.swu OTA payloads, persistent assets) via the chunked surfaces
+/// (`OtaBegin`/`OtaChunk`, `AssetPushBegin`/`AssetPushChunk`), which
+/// stream chunk-at-a-time to disk; single-frame `AssetPush` is capped
+/// at `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` (256 KiB) at the daemon
+/// edge. 1 MiB clears those plus encoding overhead with room to spare,
+/// while keeping any oversized misuse from landing on disk before the
+/// daemon can reject it.
+const WS_MAX_FRAME_BYTES: usize = 1024 * 1024;
 
 /// Reserved BT-MAC prefix for synthetic addresses assigned to network
 /// peers. Locally-administered (high bit set) and outside any real
@@ -81,15 +83,14 @@ fn next_network_address() -> Address {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 enum ConnectionMessage {
-  Msg(GatewayToBridgeMsg),
+  Msg(Box<GatewayToBridgeMsg>),
   Close,
 }
 
 impl From<GatewayToBridgeMsg> for ConnectionMessage {
   fn from(msg: GatewayToBridgeMsg) -> Self {
-    Self::Msg(msg)
+    Self::Msg(Box::new(msg))
   }
 }
 
@@ -137,10 +138,10 @@ impl Connection {
     }
   }
 
-  async fn send(&self, msg: BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
+  async fn send(&self, msg: &BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
     tracing::trace!("({}) sending network message ({:?}): {:?}", self.address, priority, msg);
     let mut buf = BytesMut::new();
-    BridgeEndec::default().encode(PrioritizedFrame { priority, msg }, &mut buf)?;
+    encode_bridge_frame(priority, msg, &mut buf)?;
     let bytes = buf.freeze();
     let lane = match priority {
       Priority::Normal => &self.normal_tx,
@@ -154,8 +155,6 @@ impl Connection {
 }
 
 async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: ConnectionTx) {
-  let mut decoder = BridgeEndec::default();
-  let mut buf = BytesMut::new();
   while let Some(ws_msg) = reader.next().await {
     let ws_msg = match ws_msg {
       Ok(m) => m,
@@ -164,7 +163,7 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
         break;
       }
     };
-    let chunk: Bytes = match ws_msg {
+    let mut chunk: Bytes = match ws_msg {
       ws::Message::Binary(b) => b,
       ws::Message::Text(_) => {
         tracing::warn!("({address}) network gateway received Text frame; expected Binary, dropping");
@@ -173,20 +172,33 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
       ws::Message::Ping(_) | ws::Message::Pong(_) => continue,
       ws::Message::Close(_) => break,
     };
-    buf.extend_from_slice(&chunk);
 
-    loop {
-      match decoder.decode(&mut buf) {
+    // Each WS Binary message is a complete sequence of frames produced
+    // by `OutboundPacker`. We parse directly out of the Bytes view -
+    // body slices stay as zero-copy `Bytes` references into the WS
+    // payload, so a single 64 KiB chunk that arrives via the wire
+    // never lands on the heap a second time before reaching the
+    // ChunkedTransfer write.
+    while !chunk.is_empty() {
+      match parse_bridge_frame(&mut chunk) {
         Ok(Some(frame)) => {
           if let Err(e) = tx.send((address, frame.msg.into())).await {
             tracing::error!("({address}) failed to forward network gateway message: {:?}", e);
             return;
           }
         }
-        Ok(None) => break,
+        Ok(None) => {
+          // A WS message that doesn't carry a whole frame is a
+          // protocol-violation by `OutboundPacker`'s contract. Drop the
+          // connection rather than silently buffering across messages.
+          tracing::warn!(
+            "({address}) network ws message ended mid-frame ({} byte tail); closing",
+            chunk.len()
+          );
+          return;
+        }
         Err(e) => {
           tracing::debug!("({address}) error decoding network frame: {:?}", e);
-          // any subsequent bytes are framing-undefined; drop the connection.
           return;
         }
       }
@@ -328,7 +340,7 @@ impl NetworkGateway {
               let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
             }
             ConnectionMessage::Msg(msg) => {
-              let inbound = InboundGatewayMessage::new(Some(address), GatewayType::Network, msg);
+              let inbound = InboundGatewayMessage::new(Some(address), GatewayType::Network, *msg);
               if let Err(e) = self.bluetooth_tx.send(BluetoothEvent::Gateway(inbound)).await {
                 tracing::error!("failed to forward network gateway message: {:?}", e);
               }
@@ -347,7 +359,7 @@ impl NetworkGateway {
     let OutboundGatewayMessage { address, priority, msg } = data;
     if let Some(address) = address {
       if let Some(conn) = self.connections.get(&address) {
-        if let Err(e) = conn.send(msg, priority).await {
+        if let Err(e) = conn.send(&msg, priority).await {
           tracing::error!("failed to send network frame: {:?}", e);
         }
       } else {
@@ -355,7 +367,7 @@ impl NetworkGateway {
       }
     } else {
       for conn in self.connections.values() {
-        if let Err(e) = conn.send(msg.clone(), priority).await {
+        if let Err(e) = conn.send(&msg, priority).await {
           tracing::error!("failed to send network frame: {:?}", e);
         }
       }
@@ -368,17 +380,12 @@ impl NetworkGateway {
     tracing::info!("network gateway: accepting connection from {remote} as synthetic {address}");
 
     let connection = Connection::new(address, remote, ws, self.conn_tx.clone());
-    if let Err(err) = connection
-      .send(
-        BridgeToGatewayMsg {
-          id: uuid::Uuid::now_v7(),
-          meta: MsgMeta::Event,
-          data: BridgeToGatewayMsgData::Version(self.state.meta.clone().into()),
-        },
-        Priority::Normal,
-      )
-      .await
-    {
+    let version = BridgeToGatewayMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: MsgMeta::Event,
+      data: self.state.meta.clone().into(),
+    };
+    if let Err(err) = connection.send(&version, Priority::Normal).await {
       tracing::warn!("({address}) failed to send initial Version: {err:?}");
     }
 

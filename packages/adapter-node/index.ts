@@ -19,8 +19,8 @@ export type { AdapterMode, AdapterOptions };
  * byte payload into a `Uint8Array`.
  *
  * The Rust side handles BR/EDR + RFCOMM discovery, pairing prompts, and the
- * raw read/write loop. The codec (16-byte header, msgpack-named, gzip)
- * lives one layer up in `@bridgething/gateway`.
+ * raw read/write loop. The codec (16-byte header, msgpack-named, optional
+ * gzip) lives one layer up in `@bridgething/gateway`.
  */
 export class NodeAdapter implements Adapter {
   private readonly native: NativeNodeAdapter;

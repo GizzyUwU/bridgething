@@ -19,13 +19,9 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-flate2 = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# feature-specific cross-platform dependencies (ble)
-btleplug = { version = "0.12.0", features = ["serde"], optional = true }
 
 # feature-specific platform-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -55,7 +51,6 @@ windows = { version = "0.62.2", features = [
 [features]
 default = ["rfcomm"]
 rfcomm = ["windows", "bluer"]
-ble = ["btleplug"]
 
 
 [dependencies.napi]

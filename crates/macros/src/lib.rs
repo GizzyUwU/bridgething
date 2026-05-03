@@ -6,6 +6,10 @@
 //!   inferred from one of four parent-ident prefixes: `BridgeToGateway`,
 //!   `GatewayToBridge`, `BridgeToClient`, `ClientToBridge`. See
 //!   `bridge_enum.rs`.
+//! - `#[derive(BridgeOuterEnum)]` — outer wire data enums; per-variant
+//!   `#[from]` opts in to a `From<T>` impl, with auto-boxing when the
+//!   variant payload is `Box<T>`. Replaces `derive_more::From` for the
+//!   four outer enums. See `outer_enum.rs`.
 //! - `#[derive(WireRequest)]` keyed off `#[wire_request(...)]` —
 //!   typed-request implementation + cross-enum compile-time validation.
 //!   See `request.rs`.
@@ -21,6 +25,7 @@ use syn::{DeriveInput, parse_macro_input};
 mod bridge_enum;
 mod csm;
 mod markers;
+mod outer_enum;
 mod request;
 
 #[proc_macro_derive(Csm, attributes(csm))]
@@ -48,6 +53,15 @@ pub fn derive_bridge_enum(input: TokenStream) -> TokenStream {
 pub fn derive_wire_request(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
   match request::expand(&ast) {
+    Ok(ts) => ts.into(),
+    Err(err) => err.to_compile_error().into(),
+  }
+}
+
+#[proc_macro_derive(BridgeOuterEnum, attributes(from))]
+pub fn derive_bridge_outer_enum(input: TokenStream) -> TokenStream {
+  let ast = parse_macro_input!(input as DeriveInput);
+  match outer_enum::expand(&ast) {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }

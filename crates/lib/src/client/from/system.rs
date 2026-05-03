@@ -11,6 +11,7 @@ use ts_rs::TS;
   request_variant = VersionRequest,
   response = crate::BridgeThingMeta,
   response_variant = Version,
+  boxed_response,
 )]
 pub struct RequestVersion;
 

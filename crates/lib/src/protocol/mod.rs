@@ -37,7 +37,7 @@ impl Default for EndecState {
   fn default() -> Self {
     Self {
       version: VERSION,
-      compression: Compression::Gzip,
+      compression: Compression::None,
       encoding: Encoding::Msgpack,
       priority: Priority::Normal,
       length: 0,

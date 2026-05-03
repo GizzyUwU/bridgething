@@ -102,7 +102,7 @@ public data class FrameHeader(
  * Use [uuidFromBytes] / [uuidToBytes] to translate at field boundaries.
  */
 public class Codec(
-  public val defaultCompression: Compression = Compression.GZIP,
+  public val defaultCompression: Compression = Compression.NONE,
   public val defaultEncoding: Encoding = Encoding.MSGPACK,
 ) {
   private val msgpack = MsgPack.Default

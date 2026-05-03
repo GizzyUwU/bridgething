@@ -1,13 +1,13 @@
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 
-use flate2::{read::GzDecoder, write::GzEncoder};
+use flate2::read::GzDecoder;
 use tokio_util::{
   bytes::{Buf, BufMut, BytesMut},
   codec::{Decoder, Encoder},
 };
 use tracing;
 
-use super::{COMPRESSION_GZIP, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
 use crate::{
   Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
@@ -117,24 +117,18 @@ impl Encoder<PrioritizedFrame<GatewayToBridgeMsg>> for GatewayEndec {
     // rmp-serde to_vec_named keeps field-name metadata in the wire so polyglot
     // decoders (Swift / Kotlin / TS) don't depend on Rust struct field order.
     let packed = rmp_serde::to_vec_named(&item.msg).map_err(EndecError::RmpSerialization)?;
-    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serialized to {} bytes", packed.len());
-
-    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "compressing with gzip");
-    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(&packed)?;
-    let compressed = encoder.finish()?;
-    let len = compressed.len() as u64;
-    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "compressed to {} bytes, priority {:?}", len, item.priority);
+    let len = packed.len() as u64;
+    tracing::trace!(target: "libbridgething::protocol::gateway::encode", "serialized to {len} bytes, priority {:?}", item.priority);
 
     dst.put_u16(MAGIC);
     dst.put_u8(VERSION);
-    dst.put_u8(COMPRESSION_GZIP);
+    dst.put_u8(COMPRESSION_NONE);
     dst.put_u8(ENCODING_MSGPACK);
     dst.put_u8(item.priority.as_byte());
     dst.put_bytes(0, 2); // reserved
     dst.put_u64(len);
 
-    dst.extend_from_slice(&compressed);
+    dst.extend_from_slice(&packed);
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "message encoded successfully");
     Ok(())
   }

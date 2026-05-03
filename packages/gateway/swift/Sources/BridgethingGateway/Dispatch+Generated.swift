@@ -10,42 +10,6 @@ public enum RequestResult<R: Sendable, E: Sendable>: Sendable {
   case protocolError(GatewayError)
 }
 
-/// Cross-peer methods for the `Version` wire surface.
-public struct VersionSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Cross-peer stream of `Version` messages.
-  public var all: AsyncStream<(deviceId: String, msg: BridgeThingMeta)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .version(let payload) = message.data {
-            continuation.yield((deviceId: deviceId, msg: payload))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send a `Version` event to every connected peer (broadcast).
-  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-}
-
 /// Cross-peer methods for the `System` wire surface.
 public struct SystemSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -444,6 +408,26 @@ public struct ForwardSurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `Version` wire surface.
+public struct VersionSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Send a `Version` event to every connected peer (broadcast).
+  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Asset` wire surface.
 public struct AssetSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -688,36 +672,6 @@ public struct WebappSurface: Sendable {
     case .error(let err): return .protocolError(err)
     default: return .protocolError(.unsupported)
     }
-  }
-
-}
-
-/// Per-peer methods for the `Version` wire surface (deviceId is baked in).
-public struct VersionSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Stream of `Version` messages from this peer.
-  public var all: AsyncStream<BridgeThingMeta> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .version(let payload) = message.data {
-            continuation.yield(payload)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send a `Version` event to this peer.
-  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
 }
@@ -1118,6 +1072,19 @@ public struct ForwardSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Version` wire surface (deviceId is baked in).
+public struct VersionSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Send a `Version` event to this peer.
+  public func send(_ payload: GatewayMeta, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .version(payload))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Asset` wire surface (deviceId is baked in).
 public struct AssetSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -1313,14 +1280,14 @@ public struct BridgethingGatewayDevice: Sendable {
   public let gateway: BridgethingGateway
   public let deviceId: String
 
-  /// Per-peer methods for the `Version` wire surface.
-  public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `System` wire surface.
   public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Transport` wire surface.
   public var transport: TransportSurfaceForDevice { TransportSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
   public var forward: ForwardSurfaceForDevice { ForwardSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Version` wire surface.
+  public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Asset` wire surface.
   public var asset: AssetSurfaceForDevice { AssetSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Authority` wire surface.
@@ -1334,14 +1301,14 @@ public struct BridgethingGatewayDevice: Sendable {
 }
 
 extension BridgethingGateway {
-  /// Methods scoped to the `Version` wire surface.
-  public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
   /// Methods scoped to the `System` wire surface.
   public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
   /// Methods scoped to the `Transport` wire surface.
   public nonisolated var transport: TransportSurface { TransportSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
   public nonisolated var forward: ForwardSurface { ForwardSurface(gateway: self) }
+  /// Methods scoped to the `Version` wire surface.
+  public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
   /// Methods scoped to the `Asset` wire surface.
   public nonisolated var asset: AssetSurface { AssetSurface(gateway: self) }
   /// Methods scoped to the `Authority` wire surface.

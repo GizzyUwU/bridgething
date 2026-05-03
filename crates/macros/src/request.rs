@@ -101,8 +101,16 @@ struct RequestAttr {
   request_variant: Ident,
   response: Type,
   response_variant: Ident,
+  /// Set when the response variant on the wire is `Variant(Box<T>)`
+  /// but the user wants `Self::Response = T`. The `extract` arm
+  /// auto-derefs the Box, `encode_response` auto-boxes, and the
+  /// cross-direction marker assertion checks `PhantomData<Box<T>>`.
+  boxed_response: bool,
   error: Option<Type>,
   error_variant: Option<Ident>,
+  /// Same shape as `boxed_response` for the optional domain-error
+  /// variant.
+  boxed_error: bool,
 }
 
 fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr> {
@@ -115,8 +123,10 @@ fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr
     let mut request_variant: Option<Ident> = None;
     let mut response: Option<Type> = None;
     let mut response_variant: Option<Ident> = None;
+    let mut boxed_response = false;
     let mut error: Option<Type> = None;
     let mut error_variant: Option<Ident> = None;
+    let mut boxed_error = false;
 
     attr.parse_nested_meta(|meta| {
       if meta.path.is_ident("direction") {
@@ -130,10 +140,14 @@ fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr
         response = Some(meta.value()?.parse()?);
       } else if meta.path.is_ident("response_variant") {
         response_variant = Some(meta.value()?.parse()?);
+      } else if meta.path.is_ident("boxed_response") {
+        boxed_response = true;
       } else if meta.path.is_ident("error") {
         error = Some(meta.value()?.parse()?);
       } else if meta.path.is_ident("error_variant") {
         error_variant = Some(meta.value()?.parse()?);
+      } else if meta.path.is_ident("boxed_error") {
+        boxed_error = true;
       } else {
         return Err(meta.error("unsupported wire_request key"));
       }
@@ -154,6 +168,12 @@ fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr
         "wire_request requires both or neither of `error` and `error_variant`",
       ));
     }
+    if boxed_error && error.is_none() {
+      return Err(syn::Error::new(
+        attr.span(),
+        "wire_request `boxed_error` requires `error` and `error_variant`",
+      ));
+    }
 
     return Ok(RequestAttr {
       direction,
@@ -161,8 +181,10 @@ fn parse_attr(attrs: &[Attribute], parent_span: Span) -> syn::Result<RequestAttr
       request_variant,
       response,
       response_variant,
+      boxed_response,
       error,
       error_variant,
+      boxed_error,
     });
   }
   Err(syn::Error::new(parent_span, "missing #[wire_request(…)] attribute"))
@@ -252,21 +274,48 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
     }
   };
 
+  let (response_extract_value, response_encode_value, response_assertion_ty) = if attr.boxed_response {
+    (
+      quote! { *v },
+      quote! { ::std::boxed::Box::new(v) },
+      quote! { ::std::boxed::Box<<#req_ty as #lib::wire::WireRequest>::Response> },
+    )
+  } else {
+    (
+      quote! { v },
+      quote! { v },
+      quote! { <#req_ty as #lib::wire::WireRequest>::Response },
+    )
+  };
+
   let (domain_error_ty, extract_arms_error, encode_domain_error_body, error_assertion) =
     if let (Some(err_ty), Some(err_variant)) = (&attr.error, &attr.error_variant) {
+      let (err_extract, err_encode, err_assertion_ty) = if attr.boxed_error {
+        (
+          quote! { *e },
+          quote! { ::std::boxed::Box::new(err) },
+          quote! { ::std::boxed::Box<<#req_ty as #lib::wire::WireRequest>::DomainError> },
+        )
+      } else {
+        (
+          quote! { e },
+          quote! { err },
+          quote! { <#req_ty as #lib::wire::WireRequest>::DomainError },
+        )
+      };
       let extract = quote! {
         #response_wire::#surface_variant(
           #response_inner::#err_variant(e),
-        ) => ::core::result::Result::Err(#lib::wire::RequestError::Domain(e)),
+        ) => ::core::result::Result::Err(#lib::wire::RequestError::Domain(#err_extract)),
       };
       let encode = quote! {
         #response_wire::#surface_variant(
-          #response_inner::#err_variant(err),
+          #response_inner::#err_variant(#err_encode),
         )
       };
       let assertion = quote! {
         let _ = #response_marker_path::#err_variant(
-          ::core::marker::PhantomData::<<#req_ty as #lib::wire::WireRequest>::DomainError>,
+          ::core::marker::PhantomData::<#err_assertion_ty>,
         );
       };
       (quote! { #err_ty }, extract, quote! { #encode }, assertion)
@@ -281,7 +330,7 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
 
   let response_assertion = quote! {
     let _ = #response_marker_path::#response_variant(
-      ::core::marker::PhantomData::<<#req_ty as #lib::wire::WireRequest>::Response>,
+      ::core::marker::PhantomData::<#response_assertion_ty>,
     );
   };
 
@@ -298,7 +347,7 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
         match data {
           #response_wire::#surface_variant(
             #response_inner::#response_variant(v),
-          ) => ::core::result::Result::Ok(v),
+          ) => ::core::result::Result::Ok(#response_extract_value),
           #extract_arms_error
           #response_wire::Error(e) => {
             ::core::result::Result::Err(#lib::wire::RequestError::Protocol(e))
@@ -309,7 +358,7 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
 
       fn encode_response(v: Self::Response) -> Self::Inbound {
         #response_wire::#surface_variant(
-          #response_inner::#response_variant(v),
+          #response_inner::#response_variant(#response_encode_value),
         )
       }
 

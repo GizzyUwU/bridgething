@@ -58,16 +58,17 @@ impl AssetHandler {
 
     match response {
       Ok(got) => {
+        // One Bytes view shared between the cache insert and the wire
+        // send. Bytes::clone() is a refcount bump; the heap-allocation
+        // for the asset bytes happens once, when rmp_serde::from_slice
+        // built `got.bytes`. The wire send below converts that single
+        // allocation back into a Vec via `into()`.
+        let bytes = Bytes::from(got.bytes);
         if let Err(err) = self
           .handle
           .state
           .assets
-          .insert(
-            id.clone(),
-            Bytes::from(got.bytes.clone()),
-            got.mime.clone(),
-            AssetRetention::Lru,
-          )
+          .insert(id.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
           .await
         {
           tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
@@ -77,7 +78,7 @@ impl AssetHandler {
           .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
             request_id,
             id: got.id,
-            bytes: got.bytes,
+            bytes: bytes.into(),
             mime: got.mime,
           }))
           .await

@@ -104,7 +104,7 @@ export class Codec {
   readonly encoding: Encoding;
 
   constructor(options: CodecOptions = {}) {
-    this.compression = options.compression ?? Compression.Gzip;
+    this.compression = options.compression ?? Compression.None;
     this.encoding = options.encoding ?? Encoding.Msgpack;
   }
 

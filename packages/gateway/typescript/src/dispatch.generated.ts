@@ -14,7 +14,6 @@ import {
   type AssetRequest,
   type AuthorityClaim,
   type AuthorityRelease,
-  type BridgeThingMeta,
   type ChromeNavigate,
   type GatewayError,
   type GatewayMeta,
@@ -103,35 +102,6 @@ export type ForwardDeviceInboundHandlers = {
   json: (msg: unknown) => void;
   binary: (msg: Uint8Array) => void;
 };
-
-export class VersionSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Subscribe to `Version` messages across all peers. */
-  on(handler: (deviceId: string, msg: BridgeThingMeta) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'version') return;
-      handler(event.deviceId, data.data);
-    });
-  }
-
-  /** Send a `Version` event to every connected peer (broadcast). */
-  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'version', data: payload },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-}
 
 export class SystemSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
@@ -587,6 +557,25 @@ export class ForwardSurface {
   }
 }
 
+export class VersionSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Send a `Version` event to every connected peer (broadcast). */
+  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'version', data: payload },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
 export class AssetSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
@@ -845,34 +834,6 @@ export class WebappSurface {
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-}
-
-export class VersionSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Subscribe to `Version` messages from this peer. */
-  on(handler: (msg: BridgeThingMeta) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'version') return;
-      handler(data.data);
-    });
-  }
-
-  /** Send a `Version` event to this peer. */
-  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'version', data: payload },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
   }
 }
 
@@ -1345,6 +1306,23 @@ export class ForwardSurfaceForDevice {
   }
 }
 
+export class VersionSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Send a `Version` event to this peer. */
+  async send(payload: GatewayMeta, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'version', data: payload },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class AssetSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -1605,14 +1583,14 @@ export type PartialBridgeMessageDeviceHandlers = {
 
 declare module './index' {
   interface BridgethingGateway {
-    /** Methods scoped to the `Version` wire surface. */
-    readonly version: VersionSurface;
     /** Methods scoped to the `System` wire surface. */
     readonly system: SystemSurface;
     /** Methods scoped to the `Transport` wire surface. */
     readonly transport: TransportSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
+    /** Methods scoped to the `Version` wire surface. */
+    readonly version: VersionSurface;
     /** Methods scoped to the `Asset` wire surface. */
     readonly asset: AssetSurface;
     /** Methods scoped to the `Authority` wire surface. */
@@ -1667,10 +1645,10 @@ export class AssetRequestHandle {
 }
 
 type DeviceSurfaceCache = {
-  version?: VersionSurfaceForDevice;
   system?: SystemSurfaceForDevice;
   transport?: TransportSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
+  version?: VersionSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
   authority?: AuthoritySurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
@@ -1685,9 +1663,6 @@ export class BridgethingGatewayDevice {
     public readonly deviceId: string,
   ) {}
 
-  get version(): VersionSurfaceForDevice {
-    return (this._surfaces.version ??= new VersionSurfaceForDevice(this._gateway, this.deviceId));
-  }
   get system(): SystemSurfaceForDevice {
     return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
   }
@@ -1696,6 +1671,9 @@ export class BridgethingGatewayDevice {
   }
   get forward(): ForwardSurfaceForDevice {
     return (this._surfaces.forward ??= new ForwardSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get version(): VersionSurfaceForDevice {
+    return (this._surfaces.version ??= new VersionSurfaceForDevice(this._gateway, this.deviceId));
   }
   get asset(): AssetSurfaceForDevice {
     return (this._surfaces.asset ??= new AssetSurfaceForDevice(this._gateway, this.deviceId));
@@ -1723,10 +1701,10 @@ export class BridgethingGatewayDevice {
 }
 
 type GatewaySurfaceCache = {
-  version?: VersionSurface;
   system?: SystemSurface;
   transport?: TransportSurface;
   forward?: ForwardSurface;
+  version?: VersionSurface;
   asset?: AssetSurface;
   authority?: AuthoritySurface;
   chrome?: ChromeSurface;
@@ -1749,14 +1727,6 @@ export function applyDispatch(): void {
     return bucket;
   }
 
-  Object.defineProperty(BridgethingGateway.prototype, 'version', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): VersionSurface {
-      const bucket = bucketFor(this);
-      return (bucket.version ??= new VersionSurface(this));
-    },
-  });
   Object.defineProperty(BridgethingGateway.prototype, 'system', {
     configurable: true,
     enumerable: true,
@@ -1779,6 +1749,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): ForwardSurface {
       const bucket = bucketFor(this);
       return (bucket.forward ??= new ForwardSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'version', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): VersionSurface {
+      const bucket = bucketFor(this);
+      return (bucket.version ??= new VersionSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'asset', {

@@ -1,17 +1,76 @@
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 
-use flate2::{read::GzDecoder, write::GzEncoder};
+use flate2::read::GzDecoder;
 use tokio_util::{
-  bytes::{Buf, BufMut, BytesMut},
+  bytes::{Buf, BufMut, Bytes, BytesMut},
   codec::{Decoder, Encoder},
 };
 
-use super::{COMPRESSION_GZIP, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
 use crate::{
   Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
   protocol::{Compression, Encoding, PrioritizedFrame, mbps},
 };
+
+/// Bytes-based decoder for one or more concatenated bridge frames.
+///
+/// Use this when each transport message is already a complete sequence
+/// of frames (e.g. a WebSocket Binary frame produced by `OutboundPacker`)
+/// and cross-message buffering isn't needed. Operates on a `Bytes` view,
+/// peeling complete frames via zero-copy `split_to`. The body slice is
+/// a `Bytes` view of the same allocation; msgpack decode reads it via
+/// `from_slice` without an intermediate copy.
+///
+/// Returns `Ok(None)` when `src` doesn't yet hold a complete frame
+/// (caller stitches with subsequent reads if applicable). Returns
+/// `Err(EndecError::InvalidMagic)` / `UnsupportedVersion` and clears
+/// `src` on framing errors so the caller can drop the connection.
+pub fn parse_bridge_frame(src: &mut Bytes) -> Result<Option<PrioritizedFrame<GatewayToBridgeMsg>>, EndecError> {
+  if src.len() < HEADER_LEN {
+    return Ok(None);
+  }
+
+  let header = &src[..HEADER_LEN];
+  let magic = u16::from_be_bytes([header[0], header[1]]);
+  if magic != MAGIC {
+    src.clear();
+    return Err(EndecError::InvalidMagic);
+  }
+  let version = header[2];
+  if version != VERSION {
+    src.clear();
+    return Err(EndecError::UnsupportedVersion(version));
+  }
+  let compression: Compression = header[3].into();
+  let encoding: Encoding = header[4].into();
+  let priority = Priority::from_byte(header[5]);
+  let length = u64::from_be_bytes(header[8..16].try_into().expect("16-byte slice")) as usize;
+
+  if src.len() < HEADER_LEN + length {
+    return Ok(None);
+  }
+
+  src.advance(HEADER_LEN);
+  let body = src.split_to(length);
+
+  let msg: GatewayToBridgeMsg = if compression == Compression::Gzip {
+    let mut decoder = GzDecoder::new(Cursor::new(&body[..]));
+    let mut buf = Vec::new();
+    decoder.read_to_end(&mut buf)?;
+    match encoding {
+      Encoding::Msgpack => rmp_serde::from_slice(&buf).map_err(EndecError::RmpDeserialization)?,
+      Encoding::Json => serde_json::from_slice(&buf).map_err(EndecError::Json)?,
+    }
+  } else {
+    match encoding {
+      Encoding::Msgpack => rmp_serde::from_slice(&body).map_err(EndecError::RmpDeserialization)?,
+      Encoding::Json => serde_json::from_slice(&body).map_err(EndecError::Json)?,
+    }
+  };
+
+  Ok(Some(PrioritizedFrame { priority, msg }))
+}
 
 #[derive(Debug, Default)]
 pub struct BridgeEndec {
@@ -104,7 +163,7 @@ impl Encoder<BridgeToGatewayMsg> for BridgeEndec {
   type Error = EndecError;
 
   fn encode(&mut self, item: BridgeToGatewayMsg, dst: &mut BytesMut) -> Result<(), Self::Error> {
-    self.encode(PrioritizedFrame::normal(item), dst)
+    encode_bridge_frame(Priority::Normal, &item, dst)
   }
 }
 
@@ -112,29 +171,30 @@ impl Encoder<PrioritizedFrame<BridgeToGatewayMsg>> for BridgeEndec {
   type Error = EndecError;
 
   fn encode(&mut self, item: PrioritizedFrame<BridgeToGatewayMsg>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serializing message");
-    // rmp-serde to_vec_named keeps field-name metadata in the wire so polyglot
-    // decoders (Swift / Kotlin / TS) don't depend on Rust struct field order.
-    let packed = rmp_serde::to_vec_named(&item.msg).map_err(EndecError::RmpSerialization)?;
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serialized to {} bytes", packed.len());
-
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "compressing with gzip");
-    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(&packed)?;
-    let compressed = encoder.finish()?;
-    let len = compressed.len() as u64;
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "compressed to {} bytes, priority {:?}", len, item.priority);
-
-    dst.put_u16(MAGIC);
-    dst.put_u8(VERSION);
-    dst.put_u8(COMPRESSION_GZIP);
-    dst.put_u8(ENCODING_MSGPACK);
-    dst.put_u8(item.priority.as_byte());
-    dst.put_bytes(0, 2); // reserved
-    dst.put_u64(len);
-
-    dst.extend_from_slice(&compressed);
-    tracing::trace!(target: "libbridgething::protocol::bridge::encode", "message encoded successfully");
-    Ok(())
+    encode_bridge_frame(item.priority, &item.msg, dst)
   }
+}
+
+/// Borrow-based encoder. The `Encoder` impls go through this so callers
+/// holding a `&Arc<BridgeToGatewayMsg>` (the broadcast / fan-out path)
+/// can reuse one allocation across every target without cloning the
+/// wire payload.
+pub fn encode_bridge_frame(priority: Priority, msg: &BridgeToGatewayMsg, dst: &mut BytesMut) -> Result<(), EndecError> {
+  tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serializing message");
+  // rmp-serde to_vec_named keeps field-name metadata in the wire so polyglot
+  // decoders (Swift / Kotlin / TS) don't depend on Rust struct field order.
+  let packed = rmp_serde::to_vec_named(msg).map_err(EndecError::RmpSerialization)?;
+  let len = packed.len() as u64;
+  tracing::trace!(target: "libbridgething::protocol::bridge::encode", "serialized to {len} bytes, priority {priority:?}");
+
+  dst.put_u16(MAGIC);
+  dst.put_u8(VERSION);
+  dst.put_u8(COMPRESSION_NONE);
+  dst.put_u8(ENCODING_MSGPACK);
+  dst.put_u8(priority.as_byte());
+  dst.put_bytes(0, 2); // reserved
+  dst.put_u64(len);
+
+  dst.extend_from_slice(&packed);
+  Ok(())
 }

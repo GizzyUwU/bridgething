@@ -10,8 +10,6 @@ mod bdaddr;
 mod monitoring;
 mod protocol;
 
-#[cfg(feature = "ble")]
-mod ble;
 #[cfg(feature = "rfcomm")]
 mod rfcomm;
 
@@ -100,9 +98,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
   #[error(transparent)]
   NApi(#[from] napi::Error),
-  #[cfg(feature = "ble")]
-  #[error(transparent)]
-  Btleplug(#[from] btleplug::Error),
   #[error("adapter not started")]
   NotInitialized,
   #[error("adapter already started")]
@@ -111,8 +106,6 @@ pub enum Error {
   NoBluetoothAdapters,
   #[error("adapter not found")]
   BluetoothAdapterNotFound,
-  #[error("could not find bridgething characteristic on device")]
-  NoCharacteristic,
   #[error("error communicating with the bluetooth thread")]
   Communication(#[from] tokio::sync::mpsc::error::SendError<JsMessage>),
   #[error("error communicating with the bluetooth thread")]

@@ -12,6 +12,7 @@ import {
   type BluetoothPairingResult,
   type BluetoothPin,
   type BluetoothStatus,
+  type Box,
   type BridgeThingMeta,
   type ClientToBridgeMsg,
   type ConnectBluetooth,
@@ -71,7 +72,7 @@ export type BluetoothInboundHandlers = {
 };
 
 export type SystemInboundHandlers = {
-  version: (msg: BridgeThingMeta) => void;
+  version: (msg: Box) => void;
   gatewayStatus: (msg: GatewayStatus) => void;
   otaReboot: (msg: OtaReboot) => void;
   otaPowerOff: (msg: OtaPowerOff) => void;
@@ -431,7 +432,7 @@ export class SystemSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
   /** Subscribe to `System::Version` from the daemon. */
-  onVersion(handler: (msg: BridgeThingMeta) => void): () => void {
+  onVersion(handler: (msg: Box) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;

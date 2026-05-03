@@ -59,10 +59,9 @@ pub struct PhoneCallInfo {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
-#[allow(clippy::large_enum_variant)]
 pub enum BridgeToClientSystemMsg {
   #[bridge_response]
-  Version(BridgeThingMeta),
+  Version(Box<BridgeThingMeta>),
   #[bridge_response]
   GatewayStatus(GatewayStatus),
   #[bridge_event]

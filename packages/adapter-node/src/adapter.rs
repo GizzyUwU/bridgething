@@ -7,8 +7,6 @@ use crate::{Callbacks, Error, Event, JsMessage, Result, monitoring, protocol::Pr
 #[napi(string_enum)]
 #[derive(Debug, Clone, Copy)]
 pub enum AdapterMode {
-  Dual,
-  Ble,
   Rfcomm,
 }
 
