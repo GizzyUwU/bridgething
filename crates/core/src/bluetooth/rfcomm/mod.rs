@@ -8,7 +8,7 @@ use futures::StreamExt;
 use libbridgething::{
   BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{BridgeEndec, encode_bridge_frame},
+  protocol::{BridgeEndec, EnvelopeProbe, encode_bridge_frame},
   wire::MsgMeta,
 };
 use tokio::{
@@ -23,7 +23,9 @@ use tokio_util::{
 
 use super::{BluetoothResult, GatewayRecvTx, GatewaySendRx, peer_owners::PeerOwners};
 use crate::{
-  bluetooth::{GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker},
+  bluetooth::{
+    GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode,
+  },
   state::State,
 };
 
@@ -38,6 +40,7 @@ const LANE_CAPACITY: usize = 16;
 #[derive(Debug)]
 enum ConnectionMessage {
   Msg(Box<GatewayToBridgeMsg>),
+  DecodeFailed(EnvelopeProbe),
   Close,
 }
 
@@ -101,6 +104,22 @@ async fn reader_task(address: Address, mut reader: FramedRead<ReadHalf<Stream>, 
       Ok(frame) => {
         if let Err(e) = tx.send((address, frame.msg.into())).await {
           tracing::error!("({address}) failed to forward gateway message: {:?}", e);
+        }
+      }
+      Err(e) if e.is_recoverable() => {
+        if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = e {
+          tracing::warn!(
+            target: "bridgething::rfcomm::decode",
+            "({address}) typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
+            probe.data_type, probe.data_event, probe.meta_kind, probe.id,
+          );
+          if tx
+            .send((address, ConnectionMessage::DecodeFailed(probe)))
+            .await
+            .is_err()
+          {
+            tracing::debug!("({address}) rfcomm dispatcher gone; dropping decode-failed");
+          }
         }
       }
       Err(e) => {
@@ -225,6 +244,15 @@ impl RfcommGateway {
             ConnectionMessage::Msg(msg) => {
               if let Err(e) = self.recv_tx.send(InboundGatewayMessage::new(Some(address), GatewayType::Rfcomm, *msg)).await {
                 tracing::error!("failed to send rfcomm message to gateway: {:?}", e);
+              }
+            }
+            ConnectionMessage::DecodeFailed(probe) => {
+              if let Some(nack) = auto_nack_for_failed_decode(&probe) {
+                if let Some(conn) = self.connections.get(&address) {
+                  if let Err(e) = conn.send(&nack, Priority::Normal).await {
+                    tracing::error!("({address}) failed to send auto-nack: {:?}", e);
+                  }
+                }
               }
             }
           }

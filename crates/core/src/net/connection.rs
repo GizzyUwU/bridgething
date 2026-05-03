@@ -9,8 +9,9 @@ use futures::{
   stream::{SplitSink, SplitStream},
 };
 use libbridgething::{
-  client::{ClientToBridgeMsg, ClientToBridgeMsgData},
-  wire::MsgMeta,
+  client::{BridgeToClientMsg, BridgeToClientMsgData, ClientToBridgeMsg, ClientToBridgeMsgData},
+  protocol::try_probe_envelope_json,
+  wire::{MsgMeta, ResponseMeta, WireError},
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -109,11 +110,24 @@ impl Connection {
     tracing::trace!("(incoming: {}) new message: {}", &self.address, text.as_str());
     let msg = match serde_json::from_str::<PossibleRecvMsg>(text.as_str()) {
       Ok(msg) => msg,
-      error => {
-        return tracing::warn!(
-          "({}) failed to deserialize incoming message!! message: {text}; error: {error:?}",
-          &self.address
+      Err(error) => {
+        let probe = try_probe_envelope_json(text.as_bytes());
+        tracing::warn!(
+          target: "bridgething::ws::decode",
+          "({}) typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
+          &self.address, probe.data_type, probe.data_event, probe.meta_kind, probe.id,
         );
+        if probe.is_request()
+          && let Some(request_id) = probe.id
+        {
+          let nack = BridgeToClientMsg {
+            id: Uuid::now_v7(),
+            meta: MsgMeta::Response(ResponseMeta { request_id }),
+            data: BridgeToClientMsgData::Error(WireError::Unsupported),
+          };
+          self.send(PossibleSendMsg::Modern(nack)).await;
+        }
+        return;
       }
     };
 

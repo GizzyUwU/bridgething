@@ -50,7 +50,7 @@ use tokio_util::{
 
 use super::{
   BluetoothEvent, BluetoothResult, BluetoothTx, GatewaySendTx, GatewayType, InboundGatewayMessage,
-  OutboundGatewayMessage, OutboundPacker, peer_owners::PeerOwners,
+  OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode, peer_owners::PeerOwners,
 };
 use crate::state::State;
 
@@ -85,6 +85,7 @@ fn next_network_address() -> Address {
 #[derive(Debug)]
 enum ConnectionMessage {
   Msg(Box<GatewayToBridgeMsg>),
+  DecodeFailed(libbridgething::protocol::EnvelopeProbe),
   Close,
 }
 
@@ -196,6 +197,23 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
             chunk.len()
           );
           return;
+        }
+        Err(e) if e.is_recoverable() => {
+          if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = e {
+            tracing::warn!(
+              target: "bridgething::network::decode",
+              "({address}) typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
+              probe.data_type, probe.data_event, probe.meta_kind, probe.id,
+            );
+            if tx
+              .send((address, ConnectionMessage::DecodeFailed(probe)))
+              .await
+              .is_err()
+            {
+              tracing::debug!("({address}) network dispatcher gone; dropping decode-failed");
+              return;
+            }
+          }
         }
         Err(e) => {
           tracing::debug!("({address}) error decoding network frame: {:?}", e);
@@ -343,6 +361,15 @@ impl NetworkGateway {
               let inbound = InboundGatewayMessage::new(Some(address), GatewayType::Network, *msg);
               if let Err(e) = self.bluetooth_tx.send(BluetoothEvent::Gateway(inbound)).await {
                 tracing::error!("failed to forward network gateway message: {:?}", e);
+              }
+            }
+            ConnectionMessage::DecodeFailed(probe) => {
+              if let Some(nack) = auto_nack_for_failed_decode(&probe) {
+                if let Some(conn) = self.connections.get(&address) {
+                  if let Err(e) = conn.send(&nack, Priority::Normal).await {
+                    tracing::error!("({address}) failed to send auto-nack: {:?}", e);
+                  }
+                }
               }
             }
           }

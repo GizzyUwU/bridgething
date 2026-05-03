@@ -3,10 +3,12 @@ use std::time::{Duration, Instant};
 mod bridge;
 mod frame;
 mod gateway;
+mod probe;
 
 pub use bridge::*;
 pub use frame::*;
 pub use gateway::*;
+pub use probe::*;
 
 use crate::Priority;
 
@@ -96,10 +98,28 @@ pub enum EndecError {
   UnsupportedVersion(u8),
   #[error("serialization error: {0}")]
   RmpSerialization(#[from] rmp_serde::encode::Error),
-  #[error("deserialization error: {0}")]
-  RmpDeserialization(#[from] rmp_serde::decode::Error),
-  #[error("ser/de error: {0}")]
-  Json(#[from] serde_json::Error),
+  #[error("typed decode failed (recoverable): {error}")]
+  TypedDecode {
+    error: TypedDecodeError,
+    probe: EnvelopeProbe,
+  },
   #[error(transparent)]
   Io(#[from] std::io::Error),
+}
+
+impl EndecError {
+  /// True for errors that affect a single message and leave the byte
+  /// stream in sync. Callers may log + continue rather than dropping
+  /// the connection.
+  pub fn is_recoverable(&self) -> bool {
+    matches!(self, EndecError::TypedDecode { .. })
+  }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TypedDecodeError {
+  #[error("rmp deserialization: {0}")]
+  Rmp(#[from] rmp_serde::decode::Error),
+  #[error("json deserialization: {0}")]
+  Json(#[from] serde_json::Error),
 }

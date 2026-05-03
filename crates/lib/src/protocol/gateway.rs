@@ -7,11 +7,11 @@ use tokio_util::{
 };
 use tracing;
 
-use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, TypedDecodeError, VERSION};
 use crate::{
   Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{Compression, Encoding, PrioritizedFrame, mbps},
+  protocol::{Compression, Encoding, PrioritizedFrame, mbps, try_probe_envelope_json, try_probe_envelope_msgpack},
 };
 
 #[derive(Debug, Default)]
@@ -83,11 +83,6 @@ impl Decoder for GatewayEndec {
     };
 
     tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "deserializing message with {} bytes", payload.len());
-    let msg: BridgeToGatewayMsg = match state.encoding {
-      Encoding::Msgpack => rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?,
-      Encoding::Json => serde_json::from_slice(&payload).map_err(EndecError::Json)?,
-    };
-    tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "successfully decoded message");
 
     if state.packet != 0 {
       let elapsed_time = state.message_start.elapsed();
@@ -96,7 +91,31 @@ impl Decoder for GatewayEndec {
     }
 
     let priority = state.priority;
+    let encoding = state.encoding;
     self.state = None;
+
+    let msg: BridgeToGatewayMsg = match encoding {
+      Encoding::Msgpack => match rmp_serde::from_slice(&payload) {
+        Ok(m) => m,
+        Err(err) => {
+          return Err(EndecError::TypedDecode {
+            error: TypedDecodeError::Rmp(err),
+            probe: try_probe_envelope_msgpack(&payload),
+          });
+        }
+      },
+      Encoding::Json => match serde_json::from_slice(&payload) {
+        Ok(m) => m,
+        Err(err) => {
+          return Err(EndecError::TypedDecode {
+            error: TypedDecodeError::Json(err),
+            probe: try_probe_envelope_json(&payload),
+          });
+        }
+      },
+    };
+    tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "successfully decoded message");
+
     Ok(Some(PrioritizedFrame { priority, msg }))
   }
 }

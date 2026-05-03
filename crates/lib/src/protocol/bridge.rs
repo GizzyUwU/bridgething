@@ -6,11 +6,11 @@ use tokio_util::{
   codec::{Decoder, Encoder},
 };
 
-use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, VERSION};
+use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, TypedDecodeError, VERSION};
 use crate::{
   Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
-  protocol::{Compression, Encoding, PrioritizedFrame, mbps},
+  protocol::{Compression, Encoding, PrioritizedFrame, mbps, try_probe_envelope_json, try_probe_envelope_msgpack},
 };
 
 /// Bytes-based decoder for one or more concatenated bridge frames.
@@ -54,19 +54,34 @@ pub fn parse_bridge_frame(src: &mut Bytes) -> Result<Option<PrioritizedFrame<Gat
   src.advance(HEADER_LEN);
   let body = src.split_to(length);
 
-  let msg: GatewayToBridgeMsg = if compression == Compression::Gzip {
+  let payload = if compression == Compression::Gzip {
     let mut decoder = GzDecoder::new(Cursor::new(&body[..]));
     let mut buf = Vec::new();
     decoder.read_to_end(&mut buf)?;
-    match encoding {
-      Encoding::Msgpack => rmp_serde::from_slice(&buf).map_err(EndecError::RmpDeserialization)?,
-      Encoding::Json => serde_json::from_slice(&buf).map_err(EndecError::Json)?,
-    }
+    buf
   } else {
-    match encoding {
-      Encoding::Msgpack => rmp_serde::from_slice(&body).map_err(EndecError::RmpDeserialization)?,
-      Encoding::Json => serde_json::from_slice(&body).map_err(EndecError::Json)?,
-    }
+    body.to_vec()
+  };
+
+  let msg: GatewayToBridgeMsg = match encoding {
+    Encoding::Msgpack => match rmp_serde::from_slice(&payload) {
+      Ok(m) => m,
+      Err(err) => {
+        return Err(EndecError::TypedDecode {
+          error: TypedDecodeError::Rmp(err),
+          probe: try_probe_envelope_msgpack(&payload),
+        });
+      }
+    },
+    Encoding::Json => match serde_json::from_slice(&payload) {
+      Ok(m) => m,
+      Err(err) => {
+        return Err(EndecError::TypedDecode {
+          error: TypedDecodeError::Json(err),
+          probe: try_probe_envelope_json(&payload),
+        });
+      }
+    },
   };
 
   Ok(Some(PrioritizedFrame { priority, msg }))
@@ -141,11 +156,6 @@ impl Decoder for BridgeEndec {
     };
 
     tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "deserializing message with {} bytes", payload.len());
-    let msg: GatewayToBridgeMsg = match state.encoding {
-      Encoding::Msgpack => rmp_serde::from_slice(&payload).map_err(EndecError::RmpDeserialization)?,
-      Encoding::Json => serde_json::from_slice(&payload).map_err(EndecError::Json)?,
-    };
-    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "successfully decoded message");
 
     if state.packet != 0 {
       let elapsed_time = state.message_start.elapsed();
@@ -154,7 +164,34 @@ impl Decoder for BridgeEndec {
     }
 
     let priority = state.priority;
+    let encoding = state.encoding;
+    // Reset before typed decode: a failed decode leaves the byte stream
+    // in sync (body bytes already consumed via advance + split_to), so
+    // the next decode call must parse a fresh header.
     self.state = None;
+
+    let msg: GatewayToBridgeMsg = match encoding {
+      Encoding::Msgpack => match rmp_serde::from_slice(&payload) {
+        Ok(m) => m,
+        Err(err) => {
+          return Err(EndecError::TypedDecode {
+            error: TypedDecodeError::Rmp(err),
+            probe: try_probe_envelope_msgpack(&payload),
+          });
+        }
+      },
+      Encoding::Json => match serde_json::from_slice(&payload) {
+        Ok(m) => m,
+        Err(err) => {
+          return Err(EndecError::TypedDecode {
+            error: TypedDecodeError::Json(err),
+            probe: try_probe_envelope_json(&payload),
+          });
+        }
+      },
+    };
+    tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "successfully decoded message");
+
     Ok(Some(PrioritizedFrame { priority, msg }))
   }
 }

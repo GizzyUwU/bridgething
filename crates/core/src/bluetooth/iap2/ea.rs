@@ -31,7 +31,10 @@ use tokio_util::{
 
 use super::super::BluetoothResult;
 use crate::{
-  bluetooth::{BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, peer_owners::PeerOwners},
+  bluetooth::{
+    BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, auto_nack_for_failed_decode,
+    peer_owners::PeerOwners,
+  },
   state::State,
 };
 
@@ -186,6 +189,7 @@ impl Iap2EaGateway {
       self.bluetooth_tx.clone(),
       self.conn_close_tx.clone(),
       key,
+      outbound.clone(),
     ));
     self.conns.insert(
       key,
@@ -266,6 +270,7 @@ async fn reader_task(
   bluetooth_tx: mpsc::Sender<BluetoothEvent>,
   conn_close_tx: mpsc::Sender<Key>,
   key: Key,
+  outbound: EaStreamSender,
 ) {
   let mut buf = BytesMut::new();
   let mut codec = BridgeEndec::default();
@@ -285,6 +290,24 @@ async fn reader_task(
           }
         }
         Ok(None) => break,
+        Err(err) if err.is_recoverable() => {
+          if let libbridgething::protocol::EndecError::TypedDecode { error, probe } = err {
+            tracing::warn!(
+              target: "bridgething::iap2_ea::decode",
+              %address, stream_id = key.1,
+              "typed decode failed: surface={:?} event={:?} kind={:?} id={:?}: {error}",
+              probe.data_type, probe.data_event, probe.meta_kind, probe.id,
+            );
+            if let Some(nack) = auto_nack_for_failed_decode(&probe) {
+              let mut nack_buf = BytesMut::new();
+              if let Err(e) = encode_bridge_frame(Priority::Normal, &nack, &mut nack_buf) {
+                tracing::error!(%address, ?e, "iap2 ea gateway: encode auto-nack failed");
+              } else if let Err(e) = outbound.send(EaPriority::Normal, nack_buf.freeze()).await {
+                tracing::warn!(%address, ?e, "iap2 ea gateway: auto-nack send failed");
+              }
+            }
+          }
+        }
         Err(err) => {
           tracing::debug!(%address, ?err, "iap2 ea gateway: decode error; tearing down stream");
           let _ = conn_close_tx.send(key).await;

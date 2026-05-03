@@ -9,7 +9,8 @@ use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle}
 use libbridgething::{
   Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
-  wire::{MsgMeta, RequestError, WireCommand, WireError, WireEvent, WireRequest},
+  protocol::EnvelopeProbe,
+  wire::{MsgMeta, RequestError, ResponseMeta, WireCommand, WireError, WireEvent, WireRequest},
 };
 use tokio::{sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
@@ -246,6 +247,24 @@ pub type GatewaySendRx = tokio::sync::mpsc::Receiver<OutboundGatewayMessage>;
 /// enough for the companion's encode + transport, short enough that
 /// the requesting webapp doesn't hang.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Build an `Unsupported` response for a request whose typed decode
+/// failed. Returns `None` for non-request frames (events / commands /
+/// responses are fire-and-forget; the sender doesn't have a pending
+/// future to resolve). Used by every gateway transport's recv loop so
+/// the companion's pending request doesn't have to wait for the 10s
+/// request timeout.
+pub fn auto_nack_for_failed_decode(probe: &EnvelopeProbe) -> Option<BridgeToGatewayMsg> {
+  if !probe.is_request() {
+    return None;
+  }
+  let request_id = probe.id?;
+  Some(BridgeToGatewayMsg {
+    id: Uuid::now_v7(),
+    meta: MsgMeta::Response(ResponseMeta { request_id }),
+    data: BridgeToGatewayMsgData::Error(WireError::Unsupported),
+  })
+}
 
 /// Pending-request map: in-flight `request_id`s the daemon is waiting
 /// to correlate against incoming `Response`-meta messages. The
