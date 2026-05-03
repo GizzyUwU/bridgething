@@ -267,16 +267,14 @@ fn progress_reader(tx: mpsc::Sender<sys::progress_msg>) {
 }
 
 fn translate(msg: &sys::progress_msg) -> (OtaPhase, u8, Option<u32>) {
-  let phase = match msg.status {
-    sys::RECOVERY_STATUS_DOWNLOAD => OtaPhase::Downloading,
-    sys::RECOVERY_STATUS_DONE => OtaPhase::Confirming,
-    sys::RECOVERY_STATUS_SUCCESS => OtaPhase::Reboot,
-    // START / RUN / PROGRESS / SUBPROCESS / IDLE / FAILURE all map to Writing
-    // for progress-display purposes; FAILURE is handled separately by the caller.
-    _ => OtaPhase::Writing,
-  };
+  // libswupdate's full lifecycle (DOWNLOAD / START / RUN / PROGRESS /
+  // SUBPROCESS / IDLE / DONE / SUCCESS / FAILURE) runs entirely inside
+  // the orchestrator's Writing phase. Confirming and Reboot are emitted
+  // by the orchestrator after install_swu returns, so this translator
+  // never reaches into those phases - it only forwards percent within
+  // Writing. FAILURE is handled separately by the caller.
   let percent = (msg.cur_percent.min(100)) as u8;
-  (phase, percent, None)
+  (OtaPhase::Writing, percent, None)
 }
 
 fn info_str(msg: &sys::progress_msg) -> String {
