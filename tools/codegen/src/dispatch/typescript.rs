@@ -307,18 +307,18 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     return;
   };
   let leaf_outbound = e.inner_variants.is_empty();
-  let category_meta = e.category.meta_kind();
+  let entry_meta = e.category.meta_kind();
   if leaf_outbound && e.outer_payload.is_some() {
     let payload_ts = e.outer_payload.as_ref().map(|p| p.ts()).unwrap();
     let device_arg = if e.unicast { "deviceId: string, " } else { "" };
     let body = if e.unicast {
       format!(
-        "    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._gateway.send(deviceId, msg, options);",
+        "    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{entry_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._gateway.send(deviceId, msg, options);",
         e.outer_disc
       )
     } else {
       format!(
-        "    const ids = this._gateway.connectedDeviceIds;\n    await Promise.all(ids.map(deviceId => {{\n      const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: payload }} }};\n      return this._gateway.send(deviceId, msg, options);\n    }}));",
+        "    const ids = this._gateway.connectedDeviceIds;\n    await Promise.all(ids.map(deviceId => {{\n      const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{entry_meta}' }}, data: {{ type: '{}', data: payload }} }};\n      return this._gateway.send(deviceId, msg, options);\n    }}));",
         e.outer_disc
       )
     };
@@ -353,14 +353,15 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
       (false, true) => format!("{device_arg}, options?: {{ priority?: Priority }}"),
       (false, false) => format!("{device_arg}, {payload_param}, options?: {{ priority?: Priority }}"),
     };
+    let variant_meta = iv.category.map(|c| c.meta_kind()).unwrap_or(entry_meta);
     let body = if e.unicast {
       format!(
-        "    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._gateway.send(deviceId, msg, options);",
+        "    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{variant_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._gateway.send(deviceId, msg, options);",
         e.outer_disc
       )
     } else {
       format!(
-        "    const ids = this._gateway.connectedDeviceIds;\n    await Promise.all(ids.map(deviceId => {{\n      const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n      return this._gateway.send(deviceId, msg, options);\n    }}));",
+        "    const ids = this._gateway.connectedDeviceIds;\n    await Promise.all(ids.map(deviceId => {{\n      const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{variant_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n      return this._gateway.send(deviceId, msg, options);\n    }}));",
         e.outer_disc
       )
     };
@@ -538,11 +539,11 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
     return;
   };
   let leaf_outbound = e.inner_variants.is_empty();
-  let category_meta = e.category.meta_kind();
+  let entry_meta = e.category.meta_kind();
   if leaf_outbound && e.outer_payload.is_some() {
     let payload_ts = e.outer_payload.as_ref().map(|p| p.ts()).unwrap();
     out.push_str(&format!(
-      "  /** Send a `{}` event to this peer. */\n  async send(payload: {payload_ts}, options?: {{ priority?: Priority }}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._gateway.send(this.deviceId, msg, options);\n  }}\n\n",
+      "  /** Send a `{}` event to this peer. */\n  async send(payload: {payload_ts}, options?: {{ priority?: Priority }}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{entry_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._gateway.send(this.deviceId, msg, options);\n  }}\n\n",
       s.name, e.outer_disc
     ));
     return;
@@ -561,8 +562,9 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
       Some(_) => format!("{{ {inner_tag}: '{}', data: payload }}", iv.disc),
       None => format!("{{ {inner_tag}: '{}' }}", iv.disc),
     };
+    let variant_meta = iv.category.map(|c| c.meta_kind()).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /** Send `{}::{}` to this peer. */\n  async {method}({arg_list}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{category_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._gateway.send(this.deviceId, msg, options);\n  }}\n\n",
+      "  /** Send `{}::{}` to this peer. */\n  async {method}({arg_list}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{variant_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._gateway.send(this.deviceId, msg, options);\n  }}\n\n",
       s.name, iv.variant, e.outer_disc
     ));
   }

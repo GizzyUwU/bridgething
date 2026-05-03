@@ -11,7 +11,14 @@
 //! side; mid-FAILURE the orchestrator surfaces `Cancelled` to the
 //! caller and the failed slot retains its prior contents.
 
-use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::{
+  ffi::CString,
+  io::Read,
+  os::raw::{c_char, c_int, c_uint, c_void},
+  path::{Path, PathBuf},
+  sync::Once,
+  time::{Duration, Instant},
+};
 
 use bridgething_swupdate_sys as sys;
 use libbridgething::gateway::OtaPhase;
@@ -20,7 +27,7 @@ use tokio::{
   task,
 };
 
-use super::Error;
+use super::{Error, Selector};
 
 /// Bytes per chunk handed to `ipc_send_data`. libswupdate streams
 /// these straight to its installer subprocess; smaller chunks give
@@ -28,24 +35,75 @@ use super::Error;
 /// IPC overhead.
 const CHUNK_SIZE: usize = 64 * 1024;
 
-pub async fn install_swu<F>(bytes: &[u8], progress: &F, cancel_rx: &mut watch::Receiver<bool>) -> Result<(), Error>
+/// Minimum interval between progress callback invocations within a
+/// single phase. libswupdate emits a progress message per zchunk
+/// finish (~10k for a 300 MB delta install), each of which would
+/// otherwise turn into a gzipped wire frame on the gateway. We
+/// dedupe identical (phase, percent) pairs and time-throttle the
+/// rest at this interval; phase transitions and terminal events
+/// always pass through unfiltered.
+const PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Default ctrl + progress socket paths swupdate listens on. These
+/// match the meta-swupdate recipe defaults (`SWUPDATE_SOCKET_CTRL_PATH`
+/// + `SWUPDATE_SOCKET_PROGRESS_PATH`). libswupdate's `get_ctrl_socket`
+/// otherwise resolves the ctrl path against `$RUNTIME_DIRECTORY`,
+/// which under our daemon's systemd unit points at /run/bridgething/
+/// (wrong namespace) - so we override the globals here, before the
+/// first IPC call, instead of leaning on the env var.
+const SWUPDATE_CTRL_SOCKET: &str = "/tmp/sockinstctrl";
+const SWUPDATE_PROGRESS_SOCKET: &str = "/tmp/swupdateprog";
+
+// SOCKET_CTRL_PATH is a public-linkage global in libswupdate's
+// network_ipc.c but isn't declared in any installed header. The
+// `swupdate-client` utility writes to it the same way.
+unsafe extern "C" {
+  static mut SOCKET_CTRL_PATH: *mut c_char;
+}
+
+/// Pin libswupdate's ctrl + progress socket paths to swupdate's
+/// listeners, once per process. Runs before any IPC call.
+fn ensure_socket_paths() {
+  static ONCE: Once = Once::new();
+  ONCE.call_once(|| {
+    let ctrl = CString::new(SWUPDATE_CTRL_SOCKET).expect("ctrl path has no NUL");
+    let prog = CString::new(SWUPDATE_PROGRESS_SOCKET).expect("progress path has no NUL");
+    unsafe {
+      SOCKET_CTRL_PATH = ctrl.into_raw();
+      sys::SOCKET_PROGRESS_PATH = prog.into_raw();
+    }
+  });
+}
+
+pub async fn install_swu<F>(
+  swu_path: &Path,
+  selector: &Selector,
+  progress: &F,
+  cancel_rx: &mut watch::Receiver<bool>,
+) -> Result<(), Error>
 where
   F: Fn(OtaPhase, u8, Option<u32>) + Send + Sync,
 {
+  ensure_socket_paths();
   let (prog_tx, mut prog_rx) = mpsc::channel::<sys::progress_msg>(32);
   let _progress_handle = task::spawn_blocking(move || progress_reader(prog_tx));
 
-  let owned = bytes.to_vec();
-  let send_handle = task::spawn_blocking(move || install_blocking(owned));
+  let path = swu_path.to_path_buf();
+  let selector = selector.clone();
+  let send_handle = task::spawn_blocking(move || install_blocking(path, selector));
 
   let mut send_handle = Some(send_handle);
   let mut send_done = false;
+  let mut last_emit: Option<(OtaPhase, u8, Instant)> = None;
 
   loop {
     tokio::select! {
       Some(msg) = prog_rx.recv() => {
         let (phase, percent, eta) = translate(&msg);
-        progress(phase, percent, eta);
+        let terminal = matches!(msg.status, sys::RECOVERY_STATUS_SUCCESS | sys::RECOVERY_STATUS_FAILURE);
+        if should_emit(&mut last_emit, phase, percent, terminal) {
+          progress(phase, percent, eta);
+        }
         match msg.status {
           sys::RECOVERY_STATUS_SUCCESS => {
             tracing::info!("libswupdate reported SUCCESS");
@@ -95,7 +153,46 @@ async fn wait_send(
   h.await
 }
 
-fn install_blocking(bytes: Vec<u8>) -> Result<(), Error> {
+/// Returns true if a libswupdate progress tick should be forwarded
+/// to the orchestrator. Phase transitions and terminal events always
+/// pass; identical (phase, percent) pairs are deduped; everything
+/// else is throttled to one event per `PROGRESS_MIN_INTERVAL`.
+fn should_emit(last: &mut Option<(OtaPhase, u8, Instant)>, phase: OtaPhase, percent: u8, terminal: bool) -> bool {
+  let now = Instant::now();
+  let (phase_changed, dup, intervaled) = match last {
+    Some((p, pct, t)) => (
+      *p != phase,
+      *p == phase && *pct == percent,
+      now.duration_since(*t) < PROGRESS_MIN_INTERVAL,
+    ),
+    None => (true, false, false),
+  };
+  if !terminal && !phase_changed && (dup || intervaled) {
+    return false;
+  }
+  *last = Some((phase, percent, now));
+  true
+}
+
+fn write_cstr_field(field: &mut [c_char], value: &str) -> Result<(), Error> {
+  let bytes = value.as_bytes();
+  if bytes.len() + 1 > field.len() {
+    return Err(Error::Ipc(format!(
+      "selector field {value:?} too long for swupdate_request slot ({} bytes)",
+      field.len()
+    )));
+  }
+  for (dst, src) in field.iter_mut().zip(bytes.iter().copied().chain(std::iter::repeat(0))) {
+    *dst = src as c_char;
+  }
+  Ok(())
+}
+
+fn install_blocking(swu_path: PathBuf, selector: Selector) -> Result<(), Error> {
+  let mut file = std::fs::File::open(&swu_path)?;
+  let total_len = file.metadata()?.len();
+  let mut buf = vec![0u8; CHUNK_SIZE];
+
   // SAFETY: every libswupdate IPC call below is documented blocking-but-safe;
   // `req` lives on this stack frame for the entire `ipc_inst_start_ext`
   // call and is not retained by the library beyond that.
@@ -105,6 +202,8 @@ fn install_blocking(bytes: Vec<u8>) -> Result<(), Error> {
     req.apiversion = sys::SWUPDATE_API_VERSION;
     req.source = sys::sourcetype_SOURCE_LOCAL;
     req.dry_run = sys::run_type_RUN_INSTALL;
+    write_cstr_field(&mut req.software_set, &selector.software_set)?;
+    write_cstr_field(&mut req.running_mode, &selector.running_mode)?;
 
     let fd = sys::ipc_inst_start_ext(
       &mut req as *mut _ as *mut c_void,
@@ -114,19 +213,24 @@ fn install_blocking(bytes: Vec<u8>) -> Result<(), Error> {
       return Err(Error::Ipc(format!("ipc_inst_start_ext returned {fd}")));
     }
 
-    let mut written = 0usize;
-    while written < bytes.len() {
-      let len = (bytes.len() - written).min(CHUNK_SIZE);
-      let chunk_ptr = bytes.as_ptr().add(written) as *mut c_char;
-      let r = sys::ipc_send_data(fd, chunk_ptr, len as c_int);
+    let mut sent = 0u64;
+    loop {
+      let n = match file.read(&mut buf) {
+        Ok(0) => break,
+        Ok(n) => n,
+        Err(err) => {
+          sys::ipc_end(fd);
+          return Err(Error::Io(err));
+        }
+      };
+      let r = sys::ipc_send_data(fd, buf.as_ptr() as *mut c_char, n as c_int);
       if r < 0 {
         sys::ipc_end(fd);
         return Err(Error::Ipc(format!(
-          "ipc_send_data returned {r} after {written}/{}",
-          bytes.len()
+          "ipc_send_data returned {r} after {sent}/{total_len}"
         )));
       }
-      written += len;
+      sent += n as u64;
     }
 
     sys::ipc_end(fd);

@@ -84,13 +84,61 @@ public struct SystemSurface: Sendable {
     }
   }
 
-  /// Send `System::ApplyUpdate` to every connected peer (broadcast).
-  public func applyUpdate(_ payload: ApplyUpdate, priority: Priority = .normal) async throws {
+  /// Cross-peer stream of `System::OtaBeginAck` messages.
+  public var otaBeginAck: AsyncStream<(deviceId: String, msg: OtaBeginAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .otaBeginAck(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::OtaBeginRejected` messages.
+  public var otaBeginRejected: AsyncStream<(deviceId: String, msg: OtaBeginRejected)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .otaBeginRejected(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `System::OtaChunk` to every connected peer (broadcast).
+  public func otaChunk(_ payload: OtaChunk, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
     try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
       for deviceId in ids {
         group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.applyUpdate(payload)))
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .system(.otaChunk(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `System::OtaAbandon` to every connected peer (broadcast).
+  public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.otaAbandon(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -109,6 +157,21 @@ public struct SystemSurface: Sendable {
         }
       }
       try await group.waitForAll()
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func otaBegin(deviceId: String, _ req: OtaBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<OtaBeginAck, OtaBeginRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.otaBegin(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .otaBeginAck(let value): return .ok(value)
+      case .otaBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
     }
   }
 
@@ -431,6 +494,49 @@ public struct AssetSurface: Sendable {
     }
   }
 
+  /// Send `Asset::PushChunk` to every connected peer (broadcast).
+  public func pushChunk(_ payload: AssetPushChunk, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.pushChunk(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Asset::PushAbandon` to every connected peer (broadcast).
+  public func pushAbandon(_ payload: AssetPushAbandon, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .asset(.pushAbandon(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func pushBegin(deviceId: String, _ req: AssetPushBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .asset(.pushBegin(req)), timeout: timeout)
+    switch response.data {
+    case .asset(let inner):
+      switch inner {
+      case .pushBeginAck(let value): return .ok(value)
+      case .pushBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `Authority` wire surface.
@@ -657,9 +763,51 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
-  /// Send `System::ApplyUpdate` to this peer.
-  public func applyUpdate(_ payload: ApplyUpdate, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.applyUpdate(payload)))
+  /// Stream of `System::OtaBeginAck` from this peer.
+  public var otaBeginAck: AsyncStream<OtaBeginAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .otaBeginAck(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::OtaBeginRejected` from this peer.
+  public var otaBeginRejected: AsyncStream<OtaBeginRejected> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .otaBeginRejected(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `System::OtaChunk` to this peer.
+  public func otaChunk(_ payload: OtaChunk, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .system(.otaChunk(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `System::OtaAbandon` to this peer.
+  public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.otaAbandon(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -667,6 +815,21 @@ public struct SystemSurfaceForDevice: Sendable {
   public func cancelUpdate(priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .system(.cancelUpdate))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func otaBegin(_ req: OtaBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<OtaBeginAck, OtaBeginRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.otaBegin(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .otaBeginAck(let value): return .ok(value)
+      case .otaBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
   }
 
 }
@@ -989,6 +1152,33 @@ public struct AssetSurfaceForDevice: Sendable {
   public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.clear(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Asset::PushChunk` to this peer.
+  public func pushChunk(_ payload: AssetPushChunk, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .asset(.pushChunk(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Asset::PushAbandon` to this peer.
+  public func pushAbandon(_ payload: AssetPushAbandon, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .asset(.pushAbandon(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func pushBegin(_ req: AssetPushBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .asset(.pushBegin(req)), timeout: timeout)
+    switch response.data {
+    case .asset(let inner):
+      switch inner {
+      case .pushBeginAck(let value): return .ok(value)
+      case .pushBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
   }
 
 }

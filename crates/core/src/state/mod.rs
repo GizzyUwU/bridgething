@@ -11,6 +11,7 @@ use crate::{
   net::ClientMan,
   paths,
   peer::PeerTracker,
+  transfer::{ChunkedTransfer, TransferError},
 };
 
 pub mod meta;
@@ -36,11 +37,13 @@ pub struct AppState {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
+  pub transfers: ChunkedTransfer,
   pub authority: AuthorityRegistry,
   pub peers: PeerTracker,
 
   db: DatabaseConnection,
   _asset_cache_handle: JoinHandle<()>,
+  _transfer_handle: JoinHandle<()>,
 }
 
 impl AppState {
@@ -65,8 +68,11 @@ impl AppState {
 
     enforce_active_webapp_exists(&db, &webapps).await?;
 
-    let asset_pending = AssetCache::init(db.clone()).await?;
+    let asset_pending = AssetCache::init(db.clone(), paths::assets_blobs_dir()).await?;
     let (assets, _asset_cache_handle) = asset_pending.spawn();
+
+    let transfer_pending = ChunkedTransfer::init(paths::transfers_dir()).await?;
+    let (transfers, _transfer_handle) = transfer_pending.spawn();
 
     let peers = PeerTracker::new(client_man.clone(), player.clone(), authority.clone());
 
@@ -77,11 +83,13 @@ impl AppState {
       chrome,
       webapps,
       assets,
+      transfers,
       authority,
       peers,
 
       db,
       _asset_cache_handle,
+      _transfer_handle,
     }))
   }
 
@@ -253,4 +261,6 @@ pub enum StateError {
   InvalidPath(String),
   #[error(transparent)]
   Asset(#[from] AssetError),
+  #[error(transparent)]
+  Transfer(#[from] TransferError),
 }

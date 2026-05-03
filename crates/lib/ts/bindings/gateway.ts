@@ -10,27 +10,13 @@ import type {
 } from './shared';
 import type { MsgMeta, WireError } from './wire';
 
-/**
- * Companion ask the daemon to apply a previously-pushed `.swu` from the
- * asset cache. The companion fetches the manifest from its update server,
- * downloads the artifact, pushes the bytes via `AssetPush` with retention
- * `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
- *
- * The daemon verifies size + sha256 against the cached blob before handing
- * it to swupdate. `manifest_url` is recorded for tracing only.
- */
-export type ApplyUpdate = { assetId: string; manifestUrl: string | null; expectedSha256: string; expectedSize: number };
-
 export type AssetClear = { id: string };
 
 /**
  * Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
- * without the retention hint — the daemon picks retention for assets
+ * without the retention hint - the daemon picks retention for assets
  * it asked for, since the lifecycle is request-scoped rather than
  * companion-managed.
- *
- * Distinct from `server::AssetGot` (webapp protocol, uses payload-id
- * correlation rather than meta correlation).
  */
 export type AssetGotReply = { id: string; bytes: Uint8Array; mime: string | null };
 
@@ -40,7 +26,60 @@ export type AssetGotReply = { id: string; bytes: Uint8Array; mime: string | null
  */
 export type AssetNotFoundReply = { id: string };
 
+/**
+ * Single-frame asset push for small, latency-critical, memory-resident
+ * assets (album art). Daemon-side checks: `bytes.len()` must be
+ * <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+ * `Persistent`. Larger payloads or persistent retention require the
+ * chunked `PushBegin`/`PushChunk` flow.
+ */
 export type AssetPush = { id: string; bytes: Uint8Array; mime: string | null; retention: AssetRetention };
+
+/**
+ * Drop the daemon-side partial for `id`. The companion's escape hatch
+ * when it wants to clean up a push it can no longer complete.
+ */
+export type AssetPushAbandon = { id: string };
+
+/**
+ * Open or resume a chunked asset push. Daemon responds with
+ * `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
+ * `AssetPushChunk` should start at, 0 for fresh pushes) or
+ * `AssetPushBeginRejected { reason }` (conflicting in-flight id with
+ * mismatched size/sha, budget exhausted, etc.).
+ *
+ * Required for any push with `retention = Persistent` and for any push
+ * larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
+ */
+export type AssetPushBegin = {
+  id: string;
+  expectedSize: number;
+  expectedSha256: string | null;
+  mime: string | null;
+  retention: AssetRetention;
+};
+
+/**
+ * Successful response to `AssetPushBegin`. `resume_from_offset` is the
+ * byte offset the next `AssetPushChunk` should start at: 0 for fresh
+ * pushes, or the daemon's recovered partial length for a resume.
+ */
+export type AssetPushBeginAck = { resumeFromOffset: number };
+
+/**
+ * Domain-error response to `AssetPushBegin`: the daemon refuses to
+ * start or resume this push (conflicting in-flight id, budget
+ * exhausted, oversized, etc.).
+ */
+export type AssetPushBeginRejected = { reason: string };
+
+/**
+ * Streaming chunk of an asset push opened by `AssetPushBegin`.
+ * `offset` must equal the daemon's current `received` for this id.
+ * `last:true` triggers post-stream verify (size + optional sha256)
+ * and commit to the asset cache.
+ */
+export type AssetPushChunk = { id: string; offset: number; bytes: Uint8Array; last: boolean };
 
 export type AssetRequest = { id: string; requestId: Uint8Array };
 
@@ -48,14 +87,10 @@ export type AuthorityClaim = { scope: CompanionAuthorityScope };
 
 export type AuthorityRelease = { scope: CompanionAuthorityScope };
 
-/**
- * Bridge-side asset operations. Daemon emits `Request` when a webapp asks
- * for an asset id that isn't in cache and a companion is connected; the
- * companion fulfils via `GatewayToBridgeAssetMsg::Push` carrying the same
- * id. v1 does not support bridge-initiated `Clear` - companions own the
- * retention lifecycle of anything they pushed.
- */
-export type BridgeToGatewayAssetMsg = { event: 'request'; data: AssetRequest };
+export type BridgeToGatewayAssetMsg =
+  | { event: 'request'; data: AssetRequest }
+  | { event: 'pushBeginAck'; data: AssetPushBeginAck }
+  | { event: 'pushBeginRejected'; data: AssetPushBeginRejected };
 
 /**
  * bridgething -> gateway
@@ -78,7 +113,9 @@ export type BridgeToGatewayMsgData =
 
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
-  | { event: 'otaError'; data: OtaError };
+  | { event: 'otaError'; data: OtaError }
+  | { event: 'otaBeginAck'; data: OtaBeginAck }
+  | { event: 'otaBeginRejected'; data: OtaBeginRejected };
 
 /**
  * Bridge-side outbound transport command targeting the connected companion.
@@ -123,17 +160,12 @@ export type ChromeNavigate = { url: string };
  */
 export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback';
 
-/**
- * Companion-side asset operations:
- * - `Push` (event): proactive load into the daemon cache.
- * - `Clear` (event): drop a previously pushed asset.
- * - `Got` (response): typed reply to a daemon `AssetRequest`.
- * - `NotFound` (response): typed domain error for `AssetRequest` when
- *   the companion does not have the asset.
- */
 export type GatewayToBridgeAssetMsg =
   | { event: 'push'; data: AssetPush }
   | { event: 'clear'; data: AssetClear }
+  | { event: 'pushBegin'; data: AssetPushBegin }
+  | { event: 'pushChunk'; data: AssetPushChunk }
+  | { event: 'pushAbandon'; data: AssetPushAbandon }
   | { event: 'got'; data: AssetGotReply }
   | { event: 'notFound'; data: AssetNotFoundReply };
 
@@ -167,7 +199,11 @@ export type GatewayToBridgeMsgData =
   | { type: 'nowPlayingUpdate'; data: NowPlayingUpdate }
   | { type: 'error'; data: WireError };
 
-export type GatewayToBridgeSystemMsg = { event: 'applyUpdate'; data: ApplyUpdate } | { event: 'cancelUpdate' };
+export type GatewayToBridgeSystemMsg =
+  | { event: 'otaBegin'; data: OtaBegin }
+  | { event: 'otaChunk'; data: OtaChunk }
+  | { event: 'otaAbandon'; data: OtaAbandon }
+  | { event: 'cancelUpdate' };
 
 export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
@@ -176,14 +212,60 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'install'; data: WebappInstall }
   | { event: 'uninstall'; data: WebappUninstall };
 
+/**
+ * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
+ * keeps the partial for resume; `OtaAbandon` is the explicit clean-up
+ * when the companion no longer wants to retry this artifact.
+ */
+export type OtaAbandon = { updateId: string };
+
+/**
+ * Companion-initiated OTA: opens or resumes a streaming push of a
+ * `.swu` artifact identified by its sha256. The daemon responds with
+ * `OtaBeginAck { resume_from_offset }` (the byte offset the next
+ * `OtaChunk` should start at, 0 for fresh pushes) or
+ * `OtaBeginRejected { reason }` (already-running OTA, conflicting
+ * in-flight update_id with mismatched size/sha, or budget exhausted).
+ *
+ * `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
+ * so resume across daemon restarts and retries-after-failure both work
+ * without companion-side state to track.
+ */
+export type OtaBegin = { updateId: string; manifestUrl: string | null; expectedSha256: string; expectedSize: number };
+
+/**
+ * Successful response to `OtaBegin`. `resume_from_offset` is the byte
+ * offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+ * the daemon's recovered partial length for a resume.
+ */
+export type OtaBeginAck = { resumeFromOffset: number };
+
+/**
+ * Domain-error response to `OtaBegin`: the daemon refuses to start
+ * or resume this push (already-running OTA, conflicting in-flight
+ * update_id with mismatched size/sha, budget exhausted).
+ */
+export type OtaBeginRejected = { reason: string };
+
+/**
+ * Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
+ * equal the daemon's current `received` for the transfer (chunks are
+ * strictly in-order; the companion learns the resume offset from
+ * `OtaBeginAck`). `last:true` triggers post-stream verify (size +
+ * sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
+ * phase progress events.
+ */
+export type OtaChunk = { updateId: string; offset: number; bytes: Uint8Array; last: boolean };
+
 export type OtaError = { code: OtaErrorCode; msg: string };
 
 /**
  * Terminal error from the OTA orchestrator. After an `OtaError` the
- * orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+ * orchestrator is back to idle and a fresh `OtaBegin` may be sent.
  */
 export type OtaErrorCode =
-  | 'assetNotFound'
+  | 'unknownUpdate'
+  | 'offsetMismatch'
   | 'hashMismatch'
   | 'sizeMismatch'
   | 'cancelled'
@@ -192,14 +274,14 @@ export type OtaErrorCode =
   | 'internal';
 
 /**
- * Stage of the OTA orchestrator. `Downloading` covers the daemon-side
- * wait for the .swu blob to land in the asset cache (the companion is
- * the actual downloader); `Verifying` runs the sha256 + size check;
- * `Writing` streams to libswupdate; `Confirming` flips slot try-counter
- * state; `Reboot` is the terminal stage emitted just before the daemon
+ * Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
+ * push of the `.swu` from companion to daemon-disk; `Verifying` runs
+ * the post-stream sha256 + size check; `Writing` streams the on-disk
+ * `.swu` to libswupdate; `Confirming` flips slot try-counter state;
+ * `Reboot` is the terminal stage emitted just before the daemon
  * triggers the reboot.
  */
-export type OtaPhase = 'downloading' | 'verifying' | 'writing' | 'confirming' | 'reboot';
+export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
 
 /**
  * Per-phase progress tick. `percent` is 0-100 within the current

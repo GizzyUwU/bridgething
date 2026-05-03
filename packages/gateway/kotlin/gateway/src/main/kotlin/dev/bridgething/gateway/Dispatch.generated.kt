@@ -71,8 +71,43 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Send `System::ApplyUpdate` to every connected peer (broadcast). */
-  public suspend fun applyUpdate(payload: ApplyUpdate, priority: Priority = Priority.Normal) {
+  /** Cross-peer stream of `System::OtaBeginAck` messages. */
+  public val otaBeginAck: Flow<Pair<String, OtaBeginAck>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaBeginAck ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `System::OtaBeginRejected` messages. */
+  public val otaBeginRejected: Flow<Pair<String, OtaBeginRejected>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaBeginRejected ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `System::OtaChunk` to every connected peer (broadcast). */
+  public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `System::OtaAbandon` to every connected peer (broadcast). */
+  public suspend fun otaAbandon(payload: OtaAbandon, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
     coroutineScope {
       ids.map { deviceId ->
@@ -80,7 +115,7 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
           val msg = GatewayToBridgeMsg(
             id = UUID.randomUUID().toBytes(),
             meta = GatewayMsgMeta.Command,
-            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.ApplyUpdate(payload)),
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -102,6 +137,21 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
           gateway.send(deviceId, msg, priority)
         }
       }.awaitAll()
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun otaBegin(deviceId: String, req: OtaBegin, timeout: Duration = 30.seconds): RequestResult<OtaBeginAck, OtaBeginRejected> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaBegin(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.OtaBeginAck -> RequestResult.Ok(inner.data)
+        is BridgeToGatewaySystemMsg.OtaBeginRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
     }
   }
 
@@ -283,6 +333,55 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
           gateway.send(deviceId, msg, priority)
         }
       }.awaitAll()
+    }
+  }
+
+  /** Send `Asset::PushChunk` to every connected peer (broadcast). */
+  public suspend fun pushChunk(payload: AssetPushChunk, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Asset::PushAbandon` to every connected peer (broadcast). */
+  public suspend fun pushAbandon(payload: AssetPushAbandon, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Command,
+            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun pushBegin(deviceId: String, req: AssetPushBegin, timeout: Duration = 30.seconds): RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
+    val outboundData = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushBegin(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
+        is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
+        is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
     }
   }
 
@@ -507,12 +606,42 @@ public class SystemSurfaceForDevice(
       inner.data
     }
 
-  /** Send `System::ApplyUpdate` to this peer. */
-  public suspend fun applyUpdate(payload: ApplyUpdate, priority: Priority = Priority.Normal) {
+  /** Stream of `System::OtaBeginAck` from this peer. */
+  public val otaBeginAck: Flow<OtaBeginAck> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaBeginAck ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `System::OtaBeginRejected` from this peer. */
+  public val otaBeginRejected: Flow<OtaBeginRejected> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaBeginRejected ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `System::OtaChunk` to this peer. */
+  public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `System::OtaAbandon` to this peer. */
+  public suspend fun otaAbandon(payload: OtaAbandon, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Command,
-      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.ApplyUpdate(payload)),
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -525,6 +654,21 @@ public class SystemSurfaceForDevice(
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
     )
     gateway.send(deviceId, msg, priority)
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun otaBegin(req: OtaBegin, timeout: Duration = 30.seconds): RequestResult<OtaBeginAck, OtaBeginRejected> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaBegin(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.OtaBeginAck -> RequestResult.Ok(inner.data)
+        is BridgeToGatewaySystemMsg.OtaBeginRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+    }
   }
 
 }
@@ -716,6 +860,41 @@ public class AssetSurfaceForDevice(
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
     )
     gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Asset::PushChunk` to this peer. */
+  public suspend fun pushChunk(payload: AssetPushChunk, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Asset::PushAbandon` to this peer. */
+  public suspend fun pushAbandon(payload: AssetPushAbandon, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Command,
+      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun pushBegin(req: AssetPushBegin, timeout: Duration = 30.seconds): RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
+    val outboundData = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushBegin(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
+        is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
+        is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+    }
   }
 
   /** Stream of typed inbound `AssetRequest` requests. */

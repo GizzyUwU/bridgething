@@ -61,6 +61,13 @@ use crate::state::State;
 const NETWORK_BATCH_BYTES: usize = 16 * 1024;
 const LANE_CAPACITY: usize = 16;
 
+/// WebSocket frame + message size cap. Tungstenite defaults to 16 MiB
+/// which trips on a single-frame `AssetPush` of even a small `.swu`
+/// (~17 MB dev variant). A future asset chunker will let us drop this
+/// back; for now the cap is sized for the largest blob a companion is
+/// expected to push (full-image `.swu` ~320 MB) with headroom.
+const WS_MAX_FRAME_BYTES: usize = 512 * 1024 * 1024;
+
 /// Reserved BT-MAC prefix for synthetic addresses assigned to network
 /// peers. Locally-administered (high bit set) and outside any real
 /// OUI, so collision with a paired BlueZ peer is impossible.
@@ -214,11 +221,13 @@ async fn ws_handler(
   AxumState(state): AxumState<AcceptState>,
 ) -> impl IntoResponse {
   tracing::info!("network gateway: incoming ws upgrade from {remote}");
-  ws.on_upgrade(move |socket| async move {
-    if let Err(err) = state.tx.send(ConnectAccepted { remote, ws: socket }).await {
-      tracing::error!("network gateway: failed to enqueue accepted ws: {err:?}");
-    }
-  })
+  ws.max_frame_size(WS_MAX_FRAME_BYTES)
+    .max_message_size(WS_MAX_FRAME_BYTES)
+    .on_upgrade(move |socket| async move {
+      if let Err(err) = state.tx.send(ConnectAccepted { remote, ws: socket }).await {
+        tracing::error!("network gateway: failed to enqueue accepted ws: {err:?}");
+      }
+    })
 }
 
 #[derive(Debug)]

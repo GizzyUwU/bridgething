@@ -14,13 +14,7 @@
 //! release build, and protects dev hosts that happen to run the daemon
 //! as root.
 
-use std::path::Path;
-
-const ON_DEVICE_SENTINEL: &str = "/etc/superbird";
-
-fn is_on_device() -> bool {
-  Path::new(ON_DEVICE_SENTINEL).exists()
-}
+use crate::paths::{ON_DEVICE_SENTINEL, is_on_device};
 
 #[cfg(feature = "systemd")]
 #[zbus::proxy(

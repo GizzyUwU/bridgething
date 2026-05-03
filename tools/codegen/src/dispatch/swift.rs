@@ -182,11 +182,7 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
   let Some(e) = &s.outbound else {
     return;
   };
-  let category_meta = match e.category {
-    EntryCategory::Event => ".event",
-    EntryCategory::Command => ".command",
-    EntryCategory::Skip => ".event",
-  };
+  let entry_meta = swift_meta(e.category);
   let leaf = e.inner_variants.is_empty();
   let outer_camel = swift_ident(&rename_camel(&e.outer_variant));
   if leaf && e.outer_payload.is_some() {
@@ -194,11 +190,11 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     let device_param = if e.unicast { "deviceId: String, " } else { "" };
     let body = if e.unicast {
       format!(
-        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
+        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
       )
     } else {
       format!(
-        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: .{outer_camel}(payload))\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
+        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -223,13 +219,14 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
       None => (String::new(), String::new()),
     };
     let data_expr = format!(".{outer_camel}(.{inner_camel}{inner_arg})");
+    let variant_meta = iv.category.map(swift_meta).unwrap_or(entry_meta);
     let body = if e.unicast {
       format!(
-        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
+        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
       )
     } else {
       format!(
-        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: {data_expr})\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
+        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -347,17 +344,13 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
   let Some(e) = &s.outbound else {
     return;
   };
-  let category_meta = match e.category {
-    EntryCategory::Event => ".event",
-    EntryCategory::Command => ".command",
-    EntryCategory::Skip => ".event",
-  };
+  let entry_meta = swift_meta(e.category);
   let leaf = e.inner_variants.is_empty();
   let outer_camel = swift_ident(&rename_camel(&e.outer_variant));
   if leaf && e.outer_payload.is_some() {
     let payload_swift = e.outer_payload.as_ref().map(|p| p.swift()).unwrap();
     out.push_str(&format!(
-      "  /// Send a `{}` event to this peer.\n  public func send(_ payload: {payload_swift}, priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
+      "  /// Send a `{}` event to this peer.\n  public func send(_ payload: {payload_swift}, priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
       s.name
     ));
     return;
@@ -373,10 +366,19 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
       None => (String::new(), String::new()),
     };
     let data_expr = format!(".{outer_camel}(.{inner_camel}{inner_arg})");
+    let variant_meta = iv.category.map(swift_meta).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /// Send `{}::{}` to this peer.\n  public func {method}({param}priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {category_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
+      "  /// Send `{}::{}` to this peer.\n  public func {method}({param}priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
       s.name, iv.variant
     ));
+  }
+}
+
+fn swift_meta(c: EntryCategory) -> &'static str {
+  match c {
+    EntryCategory::Event => ".event",
+    EntryCategory::Command => ".command",
+    EntryCategory::Skip => ".event",
   }
 }
 

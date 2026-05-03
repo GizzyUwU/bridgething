@@ -16,6 +16,7 @@ mod paths;
 mod peer;
 mod player;
 mod state;
+mod transfer;
 mod transport;
 
 mod stock;
@@ -77,9 +78,8 @@ async fn main() {
   let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
   spawn_ota_event_forwarder(bluetooth.clone(), ota_events_rx);
   let (ota, _ota_handle) = OtaOrchestrator::spawn(
-    state.assets.clone(),
+    state.transfers.clone(),
     ota_events_tx,
-    paths::ota_workdir(),
     std::sync::Arc::new(trigger_reboot),
   );
 

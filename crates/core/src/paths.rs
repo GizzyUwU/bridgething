@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const ENV_STATE_DIR: &str = "BRIDGETHING_STATE_DIR";
 const ENV_WEBAPPS_DIR: &str = "BRIDGETHING_WEBAPPS_DIR";
@@ -54,6 +54,12 @@ pub fn ro_webapps_dir() -> PathBuf {
   PathBuf::from(PROD_RO_WEBAPPS_DIR)
 }
 
+pub const ON_DEVICE_SENTINEL: &str = "/etc/superbird";
+
+pub fn is_on_device() -> bool {
+  Path::new(ON_DEVICE_SENTINEL).exists()
+}
+
 /// Volatile per-boot directory for state that must NOT survive a
 /// reboot (e.g. the chrome-reload-on-restart marker). On the device
 /// this is `/run/bridgething/`, a tmpfs path that the kernel wipes on
@@ -82,10 +88,17 @@ pub fn restart_marker_path() -> PathBuf {
   runtime_dir().join("started")
 }
 
-/// Workdir for the OTA orchestrator. Holds the staged `.swu` between
-/// the verifying and writing phases. Lives under runtime so it doesn't
-/// survive reboots - the asset cache and companion are the durable
-/// store; the workdir is purely scratch for the in-progress install.
-pub fn ota_workdir() -> PathBuf {
-  runtime_dir().join("ota")
+/// Disk root for the chunked transfer primitive (OTA pushes, large
+/// AssetPush bundles). Lives under `state_dir` rather than `runtime`
+/// so partials survive reboots - that's the load-bearing property
+/// behind multi-session OTA resume for full-image (~600 MiB) updates.
+pub fn transfers_dir() -> PathBuf {
+  state_dir().join("transfers")
+}
+
+/// Persistent-asset blob root. AssetCache rows for `Persistent`
+/// retention point at `<assets_blobs_dir>/<id_hash>` rather than
+/// inlining bytes in the sqlite row.
+pub fn assets_blobs_dir() -> PathBuf {
+  state_dir().join("assets")
 }

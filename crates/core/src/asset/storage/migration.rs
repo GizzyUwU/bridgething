@@ -21,7 +21,7 @@ impl MigrationTrait for M0001CreateAssets {
           .table(Assets::Table)
           .if_not_exists()
           .col(ColumnDef::new(Assets::Id).text().not_null().primary_key())
-          .col(ColumnDef::new(Assets::Bytes).blob().not_null())
+          .col(ColumnDef::new(Assets::Path).text().not_null())
           .col(ColumnDef::new(Assets::Mime).text())
           .col(ColumnDef::new(Assets::ByteLen).big_integer().not_null())
           .col(ColumnDef::new(Assets::InsertedAt).big_integer().not_null())
@@ -54,7 +54,7 @@ impl MigrationTrait for M0001CreateAssets {
 enum Assets {
   Table,
   Id,
-  Bytes,
+  Path,
   Mime,
   ByteLen,
   InsertedAt,

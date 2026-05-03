@@ -2,11 +2,15 @@
 // Re-generate with `just codegen` (or `just typescript`).
 
 import {
-  type ApplyUpdate,
   type AssetClear,
   type AssetGotReply,
   type AssetNotFoundReply,
   type AssetPush,
+  type AssetPushAbandon,
+  type AssetPushBegin,
+  type AssetPushBeginAck,
+  type AssetPushBeginRejected,
+  type AssetPushChunk,
   type AssetRequest,
   type AuthorityClaim,
   type AuthorityRelease,
@@ -16,6 +20,11 @@ import {
   type GatewayMeta,
   type GatewayToBridgeMsg,
   type NowPlayingUpdate,
+  type OtaAbandon,
+  type OtaBegin,
+  type OtaBeginAck,
+  type OtaBeginRejected,
+  type OtaChunk,
   type OtaError,
   type OtaProgress,
   type Priority,
@@ -42,11 +51,15 @@ export type TypedRequestResult<R, E> =
 export type SystemInboundHandlers = {
   otaProgress: (deviceId: string, msg: OtaProgress) => void;
   otaError: (deviceId: string, msg: OtaError) => void;
+  otaBeginAck: (deviceId: string, msg: OtaBeginAck) => void;
+  otaBeginRejected: (deviceId: string, msg: OtaBeginRejected) => void;
 };
 
 export type SystemDeviceInboundHandlers = {
   otaProgress: (msg: OtaProgress) => void;
   otaError: (msg: OtaError) => void;
+  otaBeginAck: (msg: OtaBeginAck) => void;
+  otaBeginRejected: (msg: OtaBeginRejected) => void;
 };
 
 export type TransportInboundHandlers = {
@@ -147,6 +160,30 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::OtaBeginAck` across all peers. */
+  onOtaBeginAck(handler: (deviceId: string, msg: OtaBeginAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaBeginAck') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::OtaBeginRejected` across all peers. */
+  onOtaBeginRejected(handler: (deviceId: string, msg: OtaBeginRejected) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaBeginRejected') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants. */
   subscribe(handlers: SystemInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -172,6 +209,14 @@ export class SystemSurface {
           handlers.otaError?.(event.deviceId, inner.data);
           return;
         }
+        case 'otaBeginAck': {
+          handlers.otaBeginAck?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'otaBeginRejected': {
+          handlers.otaBeginRejected?.(event.deviceId, inner.data);
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
           return;
@@ -180,15 +225,30 @@ export class SystemSurface {
     });
   }
 
-  /** Send `System::ApplyUpdate` to every connected peer (broadcast). */
-  async applyUpdate(payload: ApplyUpdate, options?: { priority?: Priority }): Promise<void> {
+  /** Send `System::OtaChunk` to every connected peer (broadcast). */
+  async otaChunk(payload: OtaChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'system', data: { event: 'otaChunk', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `System::OtaAbandon` to every connected peer (broadcast). */
+  async otaAbandon(payload: OtaAbandon, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
           id: newUuidBytes(),
           meta: { kind: 'command' },
-          data: { type: 'system', data: { event: 'applyUpdate', data: payload } },
+          data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -208,6 +268,24 @@ export class SystemSurface {
         return this._gateway.send(deviceId, msg, options);
       }),
     );
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async otaBegin(
+    deviceId: string,
+    req: OtaBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<OtaBeginAck, OtaBeginRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'otaBegin', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'otaBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'otaBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -561,6 +639,54 @@ export class AssetSurface {
       }),
     );
   }
+
+  /** Send `Asset::PushChunk` to every connected peer (broadcast). */
+  async pushChunk(payload: AssetPushChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Asset::PushAbandon` to every connected peer (broadcast). */
+  async pushAbandon(payload: AssetPushAbandon, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'command' },
+          data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async pushBegin(
+    deviceId: string,
+    req: AssetPushBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<AssetPushBeginAck, AssetPushBeginRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'asset', data: { event: 'pushBegin', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'asset') {
+      const inner = d.data;
+      if (inner.event === 'pushBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'pushBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
 }
 
 export class AuthoritySurface {
@@ -782,6 +908,32 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `System::OtaBeginAck` from this peer. */
+  onOtaBeginAck(handler: (msg: OtaBeginAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaBeginAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::OtaBeginRejected` from this peer. */
+  onOtaBeginRejected(handler: (msg: OtaBeginRejected) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaBeginRejected') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants from this peer. */
   subscribe(handlers: SystemDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -808,6 +960,14 @@ export class SystemSurfaceForDevice {
           handlers.otaError?.(inner.data);
           return;
         }
+        case 'otaBeginAck': {
+          handlers.otaBeginAck?.(inner.data);
+          return;
+        }
+        case 'otaBeginRejected': {
+          handlers.otaBeginRejected?.(inner.data);
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
           return;
@@ -816,12 +976,22 @@ export class SystemSurfaceForDevice {
     });
   }
 
-  /** Send `System::ApplyUpdate` to this peer. */
-  async applyUpdate(payload: ApplyUpdate, options?: { priority?: Priority }): Promise<void> {
+  /** Send `System::OtaChunk` to this peer. */
+  async otaChunk(payload: OtaChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'system', data: { event: 'otaChunk', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `System::OtaAbandon` to this peer. */
+  async otaAbandon(payload: OtaAbandon, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'command' },
-      data: { type: 'system', data: { event: 'applyUpdate', data: payload } },
+      data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -834,6 +1004,23 @@ export class SystemSurfaceForDevice {
       data: { type: 'system', data: { event: 'cancelUpdate' } },
     };
     await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async otaBegin(
+    req: OtaBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<OtaBeginAck, OtaBeginRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'otaBegin', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'otaBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'otaBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -1203,6 +1390,43 @@ export class AssetSurfaceForDevice {
       data: { type: 'asset', data: { event: 'clear', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Asset::PushChunk` to this peer. */
+  async pushChunk(payload: AssetPushChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Asset::PushAbandon` to this peer. */
+  async pushAbandon(payload: AssetPushAbandon, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async pushBegin(
+    req: AssetPushBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<AssetPushBeginAck, AssetPushBeginRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'asset', data: { event: 'pushBegin', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'asset') {
+      const inner = d.data;
+      if (inner.event === 'pushBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'pushBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -1646,6 +1870,14 @@ function outerSubscribeGateway(
             innerHandlers.otaError?.(event.deviceId, inner.data);
             return;
           }
+          case 'otaBeginAck': {
+            innerHandlers.otaBeginAck?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'otaBeginRejected': {
+            innerHandlers.otaBeginRejected?.(event.deviceId, inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
             return;
@@ -1786,6 +2018,14 @@ function outerSubscribeDevice(
           }
           case 'otaError': {
             innerHandlers.otaError?.(inner.data);
+            return;
+          }
+          case 'otaBeginAck': {
+            innerHandlers.otaBeginAck?.(inner.data);
+            return;
+          }
+          case 'otaBeginRejected': {
+            innerHandlers.otaBeginRejected?.(inner.data);
             return;
           }
           default: {

@@ -5,8 +5,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
   #[sea_orm(primary_key, auto_increment = false)]
   pub id: String,
-  #[sea_orm(column_type = "Blob")]
-  pub bytes: Vec<u8>,
+  pub path: String,
   pub mime: Option<String>,
   pub byte_len: i64,
   pub inserted_at: i64,

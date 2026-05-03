@@ -62,6 +62,7 @@ fn main() {
     .allowlist_type("progress_connect_ack")
     .allowlist_var("IPC_MAGIC")
     .allowlist_var("SWUPDATE_API_VERSION")
+    .allowlist_var("SOCKET_PROGRESS_PATH")
     .allowlist_var("PROGRESS_API_.*")
     .allowlist_var("PROGRESS_CONNECT_ACK_MAGIC")
     .allowlist_var("PRINFOSIZE")

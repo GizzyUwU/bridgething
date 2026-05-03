@@ -1,10 +1,12 @@
 use std::{
   collections::HashMap,
+  path::{Path, PathBuf},
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use libbridgething::AssetRetention;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set};
+use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::bytes::Bytes;
 
@@ -31,6 +33,13 @@ pub(super) enum Command {
     retention: AssetRetention,
     ack: oneshot::Sender<Result<(), AssetError>>,
   },
+  InsertFromPath {
+    id: String,
+    source: PathBuf,
+    mime: Option<String>,
+    retention: AssetRetention,
+    ack: oneshot::Sender<Result<(), AssetError>>,
+  },
   Get {
     id: String,
     reply: oneshot::Sender<Option<CachedAsset>>,
@@ -41,11 +50,21 @@ pub(super) enum Command {
   },
 }
 
+/// Storage backing for an in-flight cache entry. `Memory` holds the
+/// payload as a refcount-cloneable `Bytes` (covers Lru / Pinned / Ttl).
+/// `PersistentFile` carries only the on-disk path; `Get` reads from
+/// the file each time, so Persistent entries cost ~zero memory until
+/// a consumer asks for them.
+#[derive(Debug)]
+enum EntryStorage {
+  Memory(Bytes),
+  PersistentFile(PathBuf),
+}
+
 #[derive(Debug)]
 struct Entry {
-  bytes: Option<Bytes>,
-  mime: Option<String>,
   retention: AssetRetention,
+  mime: Option<String>,
   byte_len: usize,
   /// Wall-clock unix seconds; persists into the assets table so disk
   /// LRU survives daemon restart.
@@ -55,9 +74,11 @@ struct Entry {
   /// in the same wall-clock second.
   lru_seq: u64,
   ttl_deadline: Option<Instant>,
+  storage: EntryStorage,
 }
 
 pub(super) struct AssetActor {
+  blobs_dir: PathBuf,
   entries: HashMap<String, Entry>,
   memory_byte_total: usize,
   disk_byte_total: usize,
@@ -71,10 +92,12 @@ pub(super) struct AssetActor {
 impl AssetActor {
   pub(super) fn new(
     db: DatabaseConnection,
+    blobs_dir: PathBuf,
     cmd_rx: mpsc::Receiver<Command>,
     events_tx: broadcast::Sender<AssetCacheEvent>,
   ) -> Self {
     Self {
+      blobs_dir,
       entries: HashMap::new(),
       memory_byte_total: 0,
       disk_byte_total: 0,
@@ -90,30 +113,33 @@ impl AssetActor {
     self.lru_clock
   }
 
-  /// Scan persistent storage and populate the in-memory index of
-  /// `(id, byte_len, accessed_at)` so the cache "knows" about persisted
-  /// assets at startup without loading their bytes. First `Get` for
-  /// each lazy-loads from disk.
   pub(super) async fn bootstrap(mut self) -> Result<Self, AssetError> {
+    tokio::fs::create_dir_all(&self.blobs_dir).await.ok();
     let rows = AssetEntity::find()
       .order_by_asc(AssetColumn::AccessedAt)
       .all(&self.db)
       .await?;
 
     for row in rows {
+      let path = PathBuf::from(&row.path);
+      if !path.exists() {
+        tracing::warn!(id = %row.id, path = %row.path, "asset cache: persistent row references missing file; deleting row");
+        let _ = AssetEntity::delete_by_id(row.id.clone()).exec(&self.db).await;
+        continue;
+      }
       let byte_len = row.byte_len.max(0) as usize;
       self.disk_byte_total = self.disk_byte_total.saturating_add(byte_len);
       let lru_seq = self.next_lru_seq();
       self.entries.insert(
         row.id,
         Entry {
-          bytes: None,
-          mime: row.mime,
           retention: AssetRetention::Persistent,
+          mime: row.mime,
           byte_len,
           accessed_at: row.accessed_at,
           lru_seq,
           ttl_deadline: None,
+          storage: EntryStorage::PersistentFile(path),
         },
       );
     }
@@ -153,7 +179,17 @@ impl AssetActor {
         retention,
         ack,
       } => {
-        let result = self.handle_insert(id, bytes, mime, retention).await;
+        let result = self.handle_insert_memory(id, bytes, mime, retention).await;
+        let _ = ack.send(result);
+      }
+      Command::InsertFromPath {
+        id,
+        source,
+        mime,
+        retention,
+        ack,
+      } => {
+        let result = self.handle_insert_from_path(id, source, mime, retention).await;
         let _ = ack.send(result);
       }
       Command::Get { id, reply } => {
@@ -167,17 +203,23 @@ impl AssetActor {
     }
   }
 
-  async fn handle_insert(
+  /// Memory-tier insert: caller hands a `Bytes` and one of
+  /// Lru/Pinned/Ttl. Persistent is rejected here - it must come in
+  /// via `InsertFromPath` so we never accumulate a persistent payload
+  /// in memory just to copy it to disk.
+  async fn handle_insert_memory(
     &mut self,
     id: String,
     bytes: Bytes,
     mime: Option<String>,
     retention: AssetRetention,
   ) -> Result<(), AssetError> {
+    if matches!(retention, AssetRetention::Persistent) {
+      return Err(AssetError::PersistentRequiresChunkedPath);
+    }
     let byte_len = bytes.len();
     let now = unix_now();
 
-    // drop any prior entry first so byte counters are consistent
     self.evict_entry(&id).await;
 
     let ttl_deadline = match retention {
@@ -185,30 +227,90 @@ impl AssetActor {
       _ => None,
     };
 
-    if matches!(retention, AssetRetention::Persistent) {
-      self.persist_write(&id, &bytes, mime.as_deref(), now).await?;
-      self.disk_byte_total = self.disk_byte_total.saturating_add(byte_len);
-    } else {
-      self.memory_byte_total = self.memory_byte_total.saturating_add(byte_len);
-    }
-
+    self.memory_byte_total = self.memory_byte_total.saturating_add(byte_len);
     let lru_seq = self.next_lru_seq();
     self.entries.insert(
       id.clone(),
       Entry {
-        bytes: Some(bytes),
-        mime,
         retention,
+        mime,
         byte_len,
         accessed_at: now,
         lru_seq,
         ttl_deadline,
+        storage: EntryStorage::Memory(bytes),
       },
     );
 
     self.evict_until_under_memory_budget().await;
+    let _ = self.events_tx.send(AssetCacheEvent::Ready { id });
+    Ok(())
+  }
+
+  /// Disk-tier insert: caller hands a path to a finalized file (the
+  /// chunked-transfer partial after `last:true` verify). For
+  /// Persistent retention the file is renamed into `blobs_dir`; for
+  /// memory retentions it's read into a `Bytes` then deleted.
+  async fn handle_insert_from_path(
+    &mut self,
+    id: String,
+    source: PathBuf,
+    mime: Option<String>,
+    retention: AssetRetention,
+  ) -> Result<(), AssetError> {
+    let byte_len = tokio::fs::metadata(&source).await?.len() as usize;
+    let now = unix_now();
+
+    self.evict_entry(&id).await;
+
     if matches!(retention, AssetRetention::Persistent) {
+      let dest = self.blobs_dir.join(safe_blob_name(&id));
+      if let Some(parent) = dest.parent() {
+        tokio::fs::create_dir_all(parent).await.ok();
+      }
+      if dest.exists() {
+        tokio::fs::remove_file(&dest).await.ok();
+      }
+      rename_or_copy(&source, &dest).await?;
+      self.disk_byte_total = self.disk_byte_total.saturating_add(byte_len);
+      self.persist_write(&id, &dest, mime.as_deref(), byte_len, now).await?;
+      let lru_seq = self.next_lru_seq();
+      self.entries.insert(
+        id.clone(),
+        Entry {
+          retention,
+          mime,
+          byte_len,
+          accessed_at: now,
+          lru_seq,
+          ttl_deadline: None,
+          storage: EntryStorage::PersistentFile(dest),
+        },
+      );
       self.evict_until_under_disk_budget().await;
+    } else {
+      let bytes = tokio::fs::read(&source).await?;
+      tokio::fs::remove_file(&source).await.ok();
+      let bytes = Bytes::from(bytes);
+      let ttl_deadline = match retention {
+        AssetRetention::Ttl(t) => Some(Instant::now() + Duration::from_secs(t.seconds.max(1) as u64)),
+        _ => None,
+      };
+      self.memory_byte_total = self.memory_byte_total.saturating_add(byte_len);
+      let lru_seq = self.next_lru_seq();
+      self.entries.insert(
+        id.clone(),
+        Entry {
+          retention,
+          mime,
+          byte_len,
+          accessed_at: now,
+          lru_seq,
+          ttl_deadline,
+          storage: EntryStorage::Memory(bytes),
+        },
+      );
+      self.evict_until_under_memory_budget().await;
     }
 
     let _ = self.events_tx.send(AssetCacheEvent::Ready { id });
@@ -219,60 +321,40 @@ impl AssetActor {
     let now = unix_now();
     let lru_seq = self.next_lru_seq();
 
-    // fast path: entry present with bytes
-    let fast = self.entries.get_mut(&id).and_then(|entry| {
-      let bytes = entry.bytes.clone()?;
+    let (path, mime, retention, is_persistent) = {
+      let entry = self.entries.get_mut(&id)?;
       entry.accessed_at = now;
       entry.lru_seq = lru_seq;
-      Some((bytes, entry.mime.clone(), entry.retention))
-    });
-    if let Some((bytes, mime, retention)) = fast {
-      if matches!(retention, AssetRetention::Persistent) {
-        let _ = self.touch_persist(&id, now).await;
-      }
-      return Some(CachedAsset { bytes, mime, retention });
-    }
-
-    // lazy-load path: persistent index entry without loaded bytes
-    let needs_load = self
-      .entries
-      .get(&id)
-      .map(|e| e.bytes.is_none() && matches!(e.retention, AssetRetention::Persistent))
-      .unwrap_or(false);
-
-    if !needs_load {
-      return None;
-    }
-
-    let row = match AssetEntity::find_by_id(id.clone()).one(&self.db).await {
-      Ok(Some(row)) => row,
-      Ok(None) => {
-        // index drift - drop the stale index entry
-        if let Some(entry) = self.entries.remove(&id) {
-          self.disk_byte_total = self.disk_byte_total.saturating_sub(entry.byte_len);
+      let mime = entry.mime.clone();
+      let retention = entry.retention;
+      match &entry.storage {
+        EntryStorage::Memory(bytes) => {
+          return Some(CachedAsset {
+            bytes: bytes.clone(),
+            mime,
+            retention,
+          });
         }
-        return None;
+        EntryStorage::PersistentFile(p) => (p.clone(), mime, retention, true),
       }
+    };
+
+    let raw = match tokio::fs::read(&path).await {
+      Ok(b) => b,
       Err(err) => {
-        tracing::warn!(?err, id = %id, "asset cache: lazy load failed");
+        tracing::warn!(?err, id = %id, path = %path.display(), "asset cache: persistent file unreadable");
         return None;
       }
     };
 
-    let bytes = Bytes::from(row.bytes);
-    let mime = row.mime;
-    if let Some(entry) = self.entries.get_mut(&id) {
-      entry.bytes = Some(bytes.clone());
-      entry.mime = mime.clone();
-      entry.accessed_at = now;
-      entry.lru_seq = lru_seq;
+    if is_persistent {
+      let _ = self.touch_persist(&id, now).await;
     }
-    let _ = self.touch_persist(&id, now).await;
 
     Some(CachedAsset {
-      bytes,
+      bytes: Bytes::from(raw),
       mime,
-      retention: AssetRetention::Persistent,
+      retention,
     })
   }
 
@@ -291,13 +373,17 @@ impl AssetActor {
     let Some(entry) = self.entries.remove(id) else {
       return false;
     };
-    if matches!(entry.retention, AssetRetention::Persistent) {
-      self.disk_byte_total = self.disk_byte_total.saturating_sub(entry.byte_len);
-      if let Err(err) = AssetEntity::delete_by_id(id.to_string()).exec(&self.db).await {
-        tracing::warn!(?err, id = %id, "asset cache: failed to delete persistent row");
+    match &entry.storage {
+      EntryStorage::Memory(_) => {
+        self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
       }
-    } else if entry.bytes.is_some() {
-      self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
+      EntryStorage::PersistentFile(path) => {
+        self.disk_byte_total = self.disk_byte_total.saturating_sub(entry.byte_len);
+        let _ = tokio::fs::remove_file(path).await;
+        if let Err(err) = AssetEntity::delete_by_id(id.to_string()).exec(&self.db).await {
+          tracing::warn!(?err, id = %id, "asset cache: failed to delete persistent row");
+        }
+      }
     }
     true
   }
@@ -351,16 +437,15 @@ impl AssetActor {
   }
 
   /// Eviction order across memory: oldest `Lru` first, then oldest
-  /// `Ttl`, then oldest `Pinned` (with warn-log emitted at the call
-  /// site). `Persistent` is never memory-evicted; its in-memory copy
-  /// can be dropped lazily but the entry remains.
+  /// `Ttl`, then oldest `Pinned`. `Persistent` is never memory-evicted -
+  /// its bytes aren't in memory to begin with.
   fn pick_memory_victim(&self) -> Option<String> {
     let mut best_lru: Option<(&str, u64)> = None;
     let mut best_ttl: Option<(&str, u64)> = None;
     let mut best_pinned: Option<(&str, u64)> = None;
 
     for (id, entry) in &self.entries {
-      if entry.bytes.is_none() {
+      if !matches!(entry.storage, EntryStorage::Memory(_)) {
         continue;
       }
       match entry.retention {
@@ -387,7 +472,7 @@ impl AssetActor {
     self
       .entries
       .iter()
-      .filter(|(_, e)| matches!(e.retention, AssetRetention::Persistent))
+      .filter(|(_, e)| matches!(e.storage, EntryStorage::PersistentFile(_)))
       .min_by_key(|(_, e)| e.lru_seq)
       .map(|(id, _)| id.clone())
   }
@@ -404,18 +489,27 @@ impl AssetActor {
       .collect();
     for id in expired {
       if let Some(entry) = self.entries.remove(&id) {
-        self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
+        if matches!(entry.storage, EntryStorage::Memory(_)) {
+          self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
+        }
       }
       let _ = self.events_tx.send(AssetCacheEvent::Cleared { id });
     }
   }
 
-  async fn persist_write(&self, id: &str, bytes: &Bytes, mime: Option<&str>, now: i64) -> Result<(), AssetError> {
+  async fn persist_write(
+    &self,
+    id: &str,
+    path: &Path,
+    mime: Option<&str>,
+    byte_len: usize,
+    now: i64,
+  ) -> Result<(), AssetError> {
     let model = AssetActiveModel {
       id: Set(id.to_string()),
-      bytes: Set(bytes.to_vec()),
+      path: Set(path.to_string_lossy().into_owned()),
       mime: Set(mime.map(str::to_string)),
-      byte_len: Set(bytes.len() as i64),
+      byte_len: Set(byte_len as i64),
       inserted_at: Set(now),
       accessed_at: Set(now),
     };
@@ -423,7 +517,7 @@ impl AssetActor {
       .on_conflict(
         sea_orm::sea_query::OnConflict::column(AssetColumn::Id)
           .update_columns([
-            AssetColumn::Bytes,
+            AssetColumn::Path,
             AssetColumn::Mime,
             AssetColumn::ByteLen,
             AssetColumn::InsertedAt,
@@ -446,6 +540,29 @@ impl AssetActor {
   }
 }
 
+/// Stable per-id filename for the on-disk blob. Hash-encoded so any
+/// id (including ones with `/`) is filesystem-safe; sha256 collision
+/// is the only failure mode and we accept that.
+fn safe_blob_name(id: &str) -> String {
+  let mut h = Sha256::new();
+  h.update(id.as_bytes());
+  hex::encode(h.finalize())
+}
+
+/// Try to rename source → dest; fall back to copy+remove for
+/// cross-device cases (e.g. transfers_dir on tmpfs vs blobs_dir on
+/// the data partition - rare but possible).
+async fn rename_or_copy(source: &Path, dest: &Path) -> Result<(), AssetError> {
+  match tokio::fs::rename(source, dest).await {
+    Ok(()) => Ok(()),
+    Err(_) => {
+      tokio::fs::copy(source, dest).await?;
+      tokio::fs::remove_file(source).await.ok();
+      Ok(())
+    }
+  }
+}
+
 fn unix_now() -> i64 {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
@@ -459,17 +576,26 @@ mod tests {
 
   use super::*;
 
+  fn temp_blobs() -> PathBuf {
+    let p = std::env::temp_dir().join(format!("bridgething-asset-test-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+  }
+
   async fn fresh() -> AssetActor {
     let db = crate::db::open(None).await.unwrap();
     let (events_tx, _) = broadcast::channel(16);
     let (_cmd_tx, cmd_rx) = mpsc::channel(16);
-    AssetActor::new(db, cmd_rx, events_tx).bootstrap().await.unwrap()
+    AssetActor::new(db, temp_blobs(), cmd_rx, events_tx)
+      .bootstrap()
+      .await
+      .unwrap()
   }
 
   #[tokio::test]
   async fn lru_insert_and_get_round_trips() {
     let mut a = fresh().await;
-    a.handle_insert(
+    a.handle_insert_memory(
       "a/1".into(),
       Bytes::from_static(b"hello"),
       Some("text/plain".into()),
@@ -485,7 +611,7 @@ mod tests {
   #[tokio::test]
   async fn ttl_expires_on_sweep() {
     let mut a = fresh().await;
-    a.handle_insert(
+    a.handle_insert_memory(
       "t/1".into(),
       Bytes::from_static(b"x"),
       None,
@@ -494,7 +620,6 @@ mod tests {
     .await
     .unwrap();
     assert!(a.handle_get("t/1".into()).await.is_some());
-    // fast-forward by mutating the deadline
     if let Some(e) = a.entries.get_mut("t/1") {
       e.ttl_deadline = Some(Instant::now() - Duration::from_secs(1));
     }
@@ -503,40 +628,51 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn persistent_survives_evict_via_disk() {
-    let mut a = fresh().await;
-    a.handle_insert(
+  async fn persistent_via_insert_from_path_survives_restart() {
+    let blobs = temp_blobs();
+    let db = crate::db::open(None).await.unwrap();
+    let (events_tx, _) = broadcast::channel(16);
+    let (_cmd_tx, cmd_rx) = mpsc::channel(16);
+    let mut a = AssetActor::new(db.clone(), blobs.clone(), cmd_rx, events_tx)
+      .bootstrap()
+      .await
+      .unwrap();
+
+    let source = std::env::temp_dir().join(format!("src-{}", uuid::Uuid::now_v7()));
+    tokio::fs::write(&source, b"persistent-payload").await.unwrap();
+    a.handle_insert_from_path(
       "p/1".into(),
-      Bytes::from_static(b"persistent"),
+      source,
       Some("application/octet-stream".into()),
       AssetRetention::Persistent,
     )
     .await
     .unwrap();
-    // evict from memory map (simulate restart) but keep the db
-    let db = a.db.clone();
     drop(a);
-    let (events_tx, _) = broadcast::channel(16);
-    let (_cmd_tx, cmd_rx) = mpsc::channel(16);
-    let mut a2 = AssetActor::new(db, cmd_rx, events_tx).bootstrap().await.unwrap();
+
+    let (events_tx2, _) = broadcast::channel(16);
+    let (_cmd_tx2, cmd_rx2) = mpsc::channel(16);
+    let mut a2 = AssetActor::new(db, blobs, cmd_rx2, events_tx2)
+      .bootstrap()
+      .await
+      .unwrap();
     let got = a2.handle_get("p/1".into()).await.unwrap();
-    assert_eq!(&got.bytes[..], b"persistent");
+    assert_eq!(&got.bytes[..], b"persistent-payload");
   }
 
   #[tokio::test]
   async fn lru_eviction_under_memory_pressure() {
     let mut a = fresh().await;
     let big = Bytes::from(vec![0u8; MEMORY_BUDGET_BYTES / 2]);
-    a.handle_insert("a".into(), big.clone(), None, AssetRetention::Lru)
+    a.handle_insert_memory("a".into(), big.clone(), None, AssetRetention::Lru)
       .await
       .unwrap();
-    a.handle_insert("b".into(), big.clone(), None, AssetRetention::Lru)
+    a.handle_insert_memory("b".into(), big.clone(), None, AssetRetention::Lru)
       .await
       .unwrap();
-    a.handle_insert("c".into(), big.clone(), None, AssetRetention::Lru)
+    a.handle_insert_memory("c".into(), big.clone(), None, AssetRetention::Lru)
       .await
       .unwrap();
-    // c's insert pushed total over budget; oldest (a) should be evicted
     assert!(a.handle_get("a".into()).await.is_none());
     assert!(a.handle_get("c".into()).await.is_some());
   }
@@ -545,16 +681,31 @@ mod tests {
   async fn pinned_survives_lru_pressure() {
     let mut a = fresh().await;
     let big = Bytes::from(vec![0u8; MEMORY_BUDGET_BYTES / 2]);
-    a.handle_insert("pin".into(), big.clone(), None, AssetRetention::Pinned)
+    a.handle_insert_memory("pin".into(), big.clone(), None, AssetRetention::Pinned)
       .await
       .unwrap();
-    a.handle_insert("a".into(), big.clone(), None, AssetRetention::Lru)
+    a.handle_insert_memory("a".into(), big.clone(), None, AssetRetention::Lru)
       .await
       .unwrap();
-    a.handle_insert("b".into(), big.clone(), None, AssetRetention::Lru)
+    a.handle_insert_memory("b".into(), big.clone(), None, AssetRetention::Lru)
       .await
       .unwrap();
     assert!(a.handle_get("pin".into()).await.is_some());
     assert!(a.handle_get("a".into()).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn insert_memory_with_persistent_retention_rejected() {
+    let mut a = fresh().await;
+    let err = a
+      .handle_insert_memory(
+        "p/x".into(),
+        Bytes::from_static(b"nope"),
+        None,
+        AssetRetention::Persistent,
+      )
+      .await
+      .unwrap_err();
+    assert!(matches!(err, AssetError::PersistentRequiresChunkedPath));
   }
 }

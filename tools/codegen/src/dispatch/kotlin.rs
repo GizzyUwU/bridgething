@@ -154,23 +154,19 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
   let Some(e) = &s.outbound else {
     return;
   };
-  let category_meta = match e.category {
-    EntryCategory::Event => "GatewayMsgMeta.Event",
-    EntryCategory::Command => "GatewayMsgMeta.Command",
-    EntryCategory::Skip => "GatewayMsgMeta.Event",
-  };
+  let entry_meta = kotlin_meta(e.category);
   let leaf = e.inner_variants.is_empty();
   if leaf && e.outer_payload.is_some() {
     let payload_kt = e.outer_payload.as_ref().map(|p| p.kotlin()).unwrap();
     let device_param = if e.unicast { "deviceId: String, " } else { "" };
     let body = if e.unicast {
       format!(
-        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {category_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)",
+        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)",
         e.outer_variant
       )
     } else {
       format!(
-        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {category_meta},\n            data = GatewayToBridgeMsgData.{}(payload),\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}",
+        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {entry_meta},\n            data = GatewayToBridgeMsgData.{}(payload),\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}",
         e.outer_variant
       )
     };
@@ -202,13 +198,14 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
       None => (String::new(), format!("{outer_payload_type}.{}", iv.variant)),
     };
     let data_expr = format!("GatewayToBridgeMsgData.{}({inner_expr})", e.outer_variant);
+    let variant_meta = iv.category.map(kotlin_meta).unwrap_or(entry_meta);
     let body = if e.unicast {
       format!(
-        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {category_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)"
+        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)"
       )
     } else {
       format!(
-        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {category_meta},\n            data = {data_expr},\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}"
+        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {variant_meta},\n            data = {data_expr},\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -368,16 +365,12 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
   let Some(e) = &s.outbound else {
     return;
   };
-  let category_meta = match e.category {
-    EntryCategory::Event => "GatewayMsgMeta.Event",
-    EntryCategory::Command => "GatewayMsgMeta.Command",
-    EntryCategory::Skip => "GatewayMsgMeta.Event",
-  };
+  let entry_meta = kotlin_meta(e.category);
   let leaf = e.inner_variants.is_empty();
   if leaf && e.outer_payload.is_some() {
     let payload_kt = e.outer_payload.as_ref().map(|p| p.kotlin()).unwrap();
     out.push_str(&format!(
-      "  /** Send a `{}` event to this peer. */\n  public suspend fun send(payload: {payload_kt}, priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {category_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
+      "  /** Send a `{}` event to this peer. */\n  public suspend fun send(payload: {payload_kt}, priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
       s.name, e.outer_variant
     ));
     return;
@@ -399,10 +392,19 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
       None => (String::new(), format!("{outer_payload_type}.{}", iv.variant)),
     };
     let data_expr = format!("GatewayToBridgeMsgData.{}({inner_expr})", e.outer_variant);
+    let variant_meta = iv.category.map(kotlin_meta).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /** Send `{}::{}` to this peer. */\n  public suspend fun {method}({param}priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {category_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
+      "  /** Send `{}::{}` to this peer. */\n  public suspend fun {method}({param}priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
       s.name, iv.variant
     ));
+  }
+}
+
+fn kotlin_meta(c: EntryCategory) -> &'static str {
+  match c {
+    EntryCategory::Event => "GatewayMsgMeta.Event",
+    EntryCategory::Command => "GatewayMsgMeta.Command",
+    EntryCategory::Skip => "GatewayMsgMeta.Event",
   }
 }
 

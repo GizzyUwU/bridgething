@@ -119,6 +119,21 @@ pub struct WireVariant {
   /// args and per-language struct shapes that the dispatch layer
   /// doesn't model.
   pub is_struct: bool,
+  /// Per-variant `#[bridge_*]` tag. Lets codegen pick the right wire
+  /// `meta.kind` per variant inside an inner enum that mixes events
+  /// with commands. `None` for outer wire enums (no per-variant tag).
+  pub tag: Option<VariantTag>,
+}
+
+/// Per-variant tag inferred from `#[bridge_event]` / `#[bridge_command]`
+/// / `#[bridge_request]` / `#[bridge_response]` attributes on inner
+/// enum variants. Drives per-variant outbound `meta.kind` selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariantTag {
+  Event,
+  Command,
+  Request,
+  Response,
 }
 
 /// Semantic categorization of a single-tuple variant payload.
@@ -483,6 +498,7 @@ fn collect_enum(en: &ItemEnum) -> EnumDef {
       name: v.ident.to_string(),
       payload: variant_single_payload(&v.fields),
       is_struct: matches!(v.fields, Fields::Named(_)),
+      tag: variant_tag(&v.attrs),
     })
     .collect();
   let tag_field = serde_tag_field(&en.attrs).unwrap_or_else(|| "type".to_string());
@@ -491,6 +507,25 @@ fn collect_enum(en: &ItemEnum) -> EnumDef {
     variants,
     tag_field,
   }
+}
+
+fn variant_tag(attrs: &[Attribute]) -> Option<VariantTag> {
+  for attr in attrs {
+    let path = attr.path();
+    if path.is_ident("bridge_event") {
+      return Some(VariantTag::Event);
+    }
+    if path.is_ident("bridge_command") {
+      return Some(VariantTag::Command);
+    }
+    if path.is_ident("bridge_request") {
+      return Some(VariantTag::Request);
+    }
+    if path.is_ident("bridge_response") {
+      return Some(VariantTag::Response);
+    }
+  }
+  None
 }
 
 fn serde_tag_field(attrs: &[syn::Attribute]) -> Option<String> {

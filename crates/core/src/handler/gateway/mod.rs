@@ -69,11 +69,16 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Version(data) => {
         tokio::spawn(async move { TopLevelHandler::new(handle).handle_version(data).await });
       }
-      GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg.into_event() {
-        Some(event) => {
-          tokio::spawn(async move { AssetHandler::new(handle).handle(event).await });
-        }
-        None => {
+      GatewayToBridgeMsgData::Asset(asset_msg) => {
+        if asset_msg.is_request_variant() {
+          let req = asset_msg.into_request().expect("checked above");
+          tokio::spawn(async move { AssetHandler::new(handle).handle_request(req).await });
+        } else if asset_msg.is_event_variant() {
+          let ev = asset_msg.into_event().expect("checked above");
+          tokio::spawn(async move { AssetHandler::new(handle).handle_event(ev).await });
+        } else if let Some(cmd) = asset_msg.into_command() {
+          tokio::spawn(async move { AssetHandler::new(handle).handle_command(cmd).await });
+        } else {
           // Stray response-shape arrival on the Asset surface: a
           // timed-out reply, a late reply, or a non-SDK companion
           // sending the response form without Response meta. The
@@ -85,7 +90,7 @@ impl GatewayHandler {
             handle.address,
           );
         }
-      },
+      }
       GatewayToBridgeMsgData::Authority(auth_msg) => {
         if let Some(event) = auth_msg.into_event() {
           tokio::spawn(async move { AuthorityHandler::new(handle).handle(event).await });
@@ -97,9 +102,15 @@ impl GatewayHandler {
         }
       }
       GatewayToBridgeMsgData::System(system_msg) => {
-        if let Some(cmd) = system_msg.into_command() {
-          let ota = self.ota.clone();
-          tokio::spawn(async move { SystemHandler::new(handle, ota).handle(cmd).await });
+        let ota = self.ota.clone();
+        if system_msg.is_request_variant() {
+          let req = system_msg.into_request().expect("checked above");
+          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_request(req).await });
+        } else if system_msg.is_event_variant() {
+          let ev = system_msg.into_event().expect("checked above");
+          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_event(ev).await });
+        } else if let Some(cmd) = system_msg.into_command() {
+          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_command(cmd).await });
         }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {

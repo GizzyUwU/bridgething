@@ -21,9 +21,9 @@ struct Cli {
   #[arg(long, default_value = "ws://127.0.0.1:8892/")]
   url: String,
 
-  /// Soft cap on the bytes pushed per asset chunk. Currently informational
-  /// (the daemon-side path uses a single `AssetPush` per blob); kept here
-  /// so future chunked-push paths share a knob.
+  /// Bytes per outbound `OtaChunk`. Each chunk becomes one wire
+  /// message on the Bulk lane. 64 KiB matches libswupdate's IPC chunk
+  /// size and the daemon's ChunkedTransfer write granularity.
   #[arg(long, default_value_t = 64 * 1024)]
   chunk_size: usize,
 
@@ -52,21 +52,17 @@ enum Command {
   /// Connect, exchange Version, then print every inbound frame until
   /// killed. Outbound traffic is just the initial Version reply.
   Connect,
-  /// Push a `.swu` artifact via AssetCache, send `ApplyUpdate`, then
-  /// stream OTA progress events to stdout. Intended as the canonical
-  /// OTA test rig.
+  /// Open `OtaBegin`, stream the `.swu` via `OtaChunk` events on the
+  /// Bulk lane, then watch progress until the daemon hits `Reboot`
+  /// (or fails). The canonical OTA test rig.
   PushUpdate {
     /// Path to the `.swu`. Relative paths resolve against `--fixture`
     /// when set, otherwise CWD.
     swu: PathBuf,
-    /// Optional manifest URL to record in `ApplyUpdate.manifest_url`
+    /// Optional manifest URL to record in `OtaBegin.manifest_url`
     /// (telemetry only - the daemon does not fetch).
     #[arg(long)]
     manifest_url: Option<String>,
-    /// AssetCache id to push under. Defaults to a deterministic hash
-    /// of the file path.
-    #[arg(long)]
-    asset_id: Option<String>,
   },
 }
 
@@ -82,13 +78,9 @@ async fn main() -> anyhow::Result<()> {
 
   match cli.cmd {
     Command::Connect => conn::run_connect(&cli.url, chaos).await,
-    Command::PushUpdate {
-      swu,
-      manifest_url,
-      asset_id,
-    } => {
+    Command::PushUpdate { swu, manifest_url } => {
       let path = resolve_path(cli.fixture.as_deref(), &swu);
-      ota::run_push_update(&cli.url, chaos, cli.chunk_size, path, manifest_url, asset_id).await
+      ota::run_push_update(&cli.url, chaos, cli.chunk_size, path, manifest_url, None).await
     }
   }
 }

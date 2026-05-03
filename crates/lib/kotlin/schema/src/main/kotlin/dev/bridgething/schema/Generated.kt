@@ -13,21 +13,6 @@ data class Album (
 	val name: String
 )
 
-/// Companion ask the daemon to apply a previously-pushed `.swu` from the
-/// asset cache. The companion fetches the manifest from its update server,
-/// downloads the artifact, pushes the bytes via `AssetPush` with retention
-/// `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
-/// 
-/// The daemon verifies size + sha256 against the cached blob before handing
-/// it to swupdate. `manifest_url` is recorded for tracing only.
-@Serializable
-data class ApplyUpdate (
-	val assetId: String,
-	val manifestUrl: String? = null,
-	val expectedSha256: String,
-	val expectedSize: UInt
-)
-
 @Serializable
 data class Artist (
 	val id: String,
@@ -40,12 +25,9 @@ data class AssetClear (
 )
 
 /// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
-/// without the retention hint — the daemon picks retention for assets
+/// without the retention hint - the daemon picks retention for assets
 /// it asked for, since the lifecycle is request-scoped rather than
 /// companion-managed.
-/// 
-/// Distinct from `server::AssetGot` (webapp protocol, uses payload-id
-/// correlation rather than meta correlation).
 @Serializable
 data class AssetGotReply (
 	val id: String,
@@ -76,12 +58,69 @@ sealed class AssetRetention {
 	object Persistent: AssetRetention()
 }
 
+/// Single-frame asset push for small, latency-critical, memory-resident
+/// assets (album art). Daemon-side checks: `bytes.len()` must be
+/// <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+/// `Persistent`. Larger payloads or persistent retention require the
+/// chunked `PushBegin`/`PushChunk` flow.
 @Serializable
 data class AssetPush (
 	val id: String,
 	val bytes: ByteArray,
 	val mime: String? = null,
 	val retention: AssetRetention
+)
+
+/// Drop the daemon-side partial for `id`. The companion's escape hatch
+/// when it wants to clean up a push it can no longer complete.
+@Serializable
+data class AssetPushAbandon (
+	val id: String
+)
+
+/// Open or resume a chunked asset push. Daemon responds with
+/// `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
+/// `AssetPushChunk` should start at, 0 for fresh pushes) or
+/// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
+/// mismatched size/sha, budget exhausted, etc.).
+/// 
+/// Required for any push with `retention = Persistent` and for any push
+/// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
+@Serializable
+data class AssetPushBegin (
+	val id: String,
+	val expectedSize: UInt,
+	val expectedSha256: String? = null,
+	val mime: String? = null,
+	val retention: AssetRetention
+)
+
+/// Successful response to `AssetPushBegin`. `resume_from_offset` is the
+/// byte offset the next `AssetPushChunk` should start at: 0 for fresh
+/// pushes, or the daemon's recovered partial length for a resume.
+@Serializable
+data class AssetPushBeginAck (
+	val resumeFromOffset: UInt
+)
+
+/// Domain-error response to `AssetPushBegin`: the daemon refuses to
+/// start or resume this push (conflicting in-flight id, budget
+/// exhausted, oversized, etc.).
+@Serializable
+data class AssetPushBeginRejected (
+	val reason: String
+)
+
+/// Streaming chunk of an asset push opened by `AssetPushBegin`.
+/// `offset` must equal the daemon's current `received` for this id.
+/// `last:true` triggers post-stream verify (size + optional sha256)
+/// and commit to the asset cache.
+@Serializable
+data class AssetPushChunk (
+	val id: String,
+	val offset: UInt,
+	val bytes: ByteArray,
+	val last: Boolean
 )
 
 @Serializable
@@ -340,17 +379,77 @@ data class NowPlayingUpdate (
 	val playback: PlaybackUpdate? = null
 )
 
+/// Drop the daemon-side partial for `update_id`. After `CancelUpdate`
+/// keeps the partial for resume; `OtaAbandon` is the explicit clean-up
+/// when the companion no longer wants to retry this artifact.
+@Serializable
+data class OtaAbandon (
+	val updateId: String
+)
+
+/// Companion-initiated OTA: opens or resumes a streaming push of a
+/// `.swu` artifact identified by its sha256. The daemon responds with
+/// `OtaBeginAck { resume_from_offset }` (the byte offset the next
+/// `OtaChunk` should start at, 0 for fresh pushes) or
+/// `OtaBeginRejected { reason }` (already-running OTA, conflicting
+/// in-flight update_id with mismatched size/sha, or budget exhausted).
+/// 
+/// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
+/// so resume across daemon restarts and retries-after-failure both work
+/// without companion-side state to track.
+@Serializable
+data class OtaBegin (
+	val updateId: String,
+	val manifestUrl: String? = null,
+	val expectedSha256: String,
+	val expectedSize: UInt
+)
+
+/// Successful response to `OtaBegin`. `resume_from_offset` is the byte
+/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// the daemon's recovered partial length for a resume.
+@Serializable
+data class OtaBeginAck (
+	val resumeFromOffset: UInt
+)
+
+/// Domain-error response to `OtaBegin`: the daemon refuses to start
+/// or resume this push (already-running OTA, conflicting in-flight
+/// update_id with mismatched size/sha, budget exhausted).
+@Serializable
+data class OtaBeginRejected (
+	val reason: String
+)
+
+/// Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
+/// equal the daemon's current `received` for the transfer (chunks are
+/// strictly in-order; the companion learns the resume offset from
+/// `OtaBeginAck`). `last:true` triggers post-stream verify (size +
+/// sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
+/// phase progress events.
+@Serializable
+data class OtaChunk (
+	val updateId: String,
+	val offset: UInt,
+	val bytes: ByteArray,
+	val last: Boolean
+)
+
 /// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
 @Serializable
 enum class OtaErrorCode(val string: String) {
-	/// Companion sent `ApplyUpdate` for an `asset_id` not in the daemon cache.
-	@SerialName("assetNotFound")
-	AssetNotFound("assetNotFound"),
-	/// Cached blob's sha256 does not match the manifest's expected hash.
+	/// Companion sent chunks for an `update_id` that was never begun
+	/// (or was abandoned mid-stream).
+	@SerialName("unknownUpdate")
+	UnknownUpdate("unknownUpdate"),
+	/// `OtaChunk.offset` did not match the daemon's `received`.
+	@SerialName("offsetMismatch")
+	OffsetMismatch("offsetMismatch"),
+	/// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
 	@SerialName("hashMismatch")
 	HashMismatch("hashMismatch"),
-	/// Cached blob's byte length does not match the manifest's expected size.
+	/// Streamed total's byte length did not match `OtaBegin.expected_size`.
 	@SerialName("sizeMismatch")
 	SizeMismatch("sizeMismatch"),
 	/// `CancelUpdate` arrived during a cancelable phase.
@@ -362,7 +461,7 @@ enum class OtaErrorCode(val string: String) {
 	/// Slot-flip / try-counter reset failed after a successful write.
 	@SerialName("confirmFailed")
 	ConfirmFailed("confirmFailed"),
-	/// Anything else (asset cache I/O, internal channel close, etc.).
+	/// Anything else (transfer-cache I/O, internal channel close, etc.).
 	@SerialName("internal")
 	Internal("internal"),
 }
@@ -373,16 +472,16 @@ data class OtaError (
 	val msg: String
 )
 
-/// Stage of the OTA orchestrator. `Downloading` covers the daemon-side
-/// wait for the .swu blob to land in the asset cache (the companion is
-/// the actual downloader); `Verifying` runs the sha256 + size check;
-/// `Writing` streams to libswupdate; `Confirming` flips slot try-counter
-/// state; `Reboot` is the terminal stage emitted just before the daemon
+/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
+/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
+/// the post-stream sha256 + size check; `Writing` streams the on-disk
+/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
+/// `Reboot` is the terminal stage emitted just before the daemon
 /// triggers the reboot.
 @Serializable
 enum class OtaPhase(val string: String) {
-	@SerialName("downloading")
-	Downloading("downloading"),
+	@SerialName("streaming")
+	Streaming("streaming"),
 	@SerialName("verifying")
 	Verifying("verifying"),
 	@SerialName("writing")
@@ -533,16 +632,17 @@ data class WebappUninstall (
 	val name: String
 )
 
-/// Bridge-side asset operations. Daemon emits `Request` when a webapp asks
-/// for an asset id that isn't in cache and a companion is connected; the
-/// companion fulfils via `GatewayToBridgeAssetMsg::Push` carrying the same
-/// id. v1 does not support bridge-initiated `Clear` - companions own the
-/// retention lifecycle of anything they pushed.
 @Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
 sealed class BridgeToGatewayAssetMsg {
 	@Serializable
 	@SerialName("request")
 	data class Request(val data: AssetRequest): BridgeToGatewayAssetMsg()
+	@Serializable
+	@SerialName("pushBeginAck")
+	data class PushBeginAck(val data: AssetPushBeginAck): BridgeToGatewayAssetMsg()
+	@Serializable
+	@SerialName("pushBeginRejected")
+	data class PushBeginRejected(val data: AssetPushBeginRejected): BridgeToGatewayAssetMsg()
 }
 
 @Serializable(with = BridgeToGatewaySystemMsgSerializer::class)
@@ -553,6 +653,12 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("otaError")
 	data class OtaError(val data: dev.bridgething.schema.OtaError): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("otaBeginAck")
+	data class OtaBeginAck(val data: dev.bridgething.schema.OtaBeginAck): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("otaBeginRejected")
+	data class OtaBeginRejected(val data: dev.bridgething.schema.OtaBeginRejected): BridgeToGatewaySystemMsg()
 }
 
 /// Bridge-side outbound transport command targeting the connected companion.
@@ -645,12 +751,6 @@ sealed class ForwardMessage {
 	data class Binary(val data: ByteArray): ForwardMessage()
 }
 
-/// Companion-side asset operations:
-/// - `Push` (event): proactive load into the daemon cache.
-/// - `Clear` (event): drop a previously pushed asset.
-/// - `Got` (response): typed reply to a daemon `AssetRequest`.
-/// - `NotFound` (response): typed domain error for `AssetRequest` when
-/// the companion does not have the asset.
 @Serializable(with = GatewayToBridgeAssetMsgSerializer::class)
 sealed class GatewayToBridgeAssetMsg {
 	@Serializable
@@ -659,6 +759,15 @@ sealed class GatewayToBridgeAssetMsg {
 	@Serializable
 	@SerialName("clear")
 	data class Clear(val data: AssetClear): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("pushBegin")
+	data class PushBegin(val data: AssetPushBegin): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("pushChunk")
+	data class PushChunk(val data: AssetPushChunk): GatewayToBridgeAssetMsg()
+	@Serializable
+	@SerialName("pushAbandon")
+	data class PushAbandon(val data: AssetPushAbandon): GatewayToBridgeAssetMsg()
 	@Serializable
 	@SerialName("got")
 	data class Got(val data: AssetGotReply): GatewayToBridgeAssetMsg()
@@ -691,8 +800,14 @@ sealed class GatewayToBridgeChromeMsg {
 @Serializable(with = GatewayToBridgeSystemMsgSerializer::class)
 sealed class GatewayToBridgeSystemMsg {
 	@Serializable
-	@SerialName("applyUpdate")
-	data class ApplyUpdate(val data: dev.bridgething.schema.ApplyUpdate): GatewayToBridgeSystemMsg()
+	@SerialName("otaBegin")
+	data class OtaBegin(val data: dev.bridgething.schema.OtaBegin): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("otaChunk")
+	data class OtaChunk(val data: dev.bridgething.schema.OtaChunk): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("otaAbandon")
+	data class OtaAbandon(val data: dev.bridgething.schema.OtaAbandon): GatewayToBridgeSystemMsg()
 	@Serializable
 	@SerialName("cancelUpdate")
 	object CancelUpdate: GatewayToBridgeSystemMsg()

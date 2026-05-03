@@ -14,27 +14,6 @@ public struct Album: Codable, Sendable {
 	}
 }
 
-/// Companion ask the daemon to apply a previously-pushed `.swu` from the
-/// asset cache. The companion fetches the manifest from its update server,
-/// downloads the artifact, pushes the bytes via `AssetPush` with retention
-/// `Ttl(2h)`, then sends `ApplyUpdate` referencing the same `asset_id`.
-/// 
-/// The daemon verifies size + sha256 against the cached blob before handing
-/// it to swupdate. `manifest_url` is recorded for tracing only.
-public struct ApplyUpdate: Codable, Sendable {
-	public let assetId: String
-	public let manifestUrl: String?
-	public let expectedSha256: String
-	public let expectedSize: UInt32
-
-	public init(assetId: String, manifestUrl: String?, expectedSha256: String, expectedSize: UInt32) {
-		self.assetId = assetId
-		self.manifestUrl = manifestUrl
-		self.expectedSha256 = expectedSha256
-		self.expectedSize = expectedSize
-	}
-}
-
 public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
@@ -54,12 +33,9 @@ public struct AssetClear: Codable, Sendable {
 }
 
 /// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
-/// without the retention hint — the daemon picks retention for assets
+/// without the retention hint - the daemon picks retention for assets
 /// it asked for, since the lifecycle is request-scoped rather than
 /// companion-managed.
-/// 
-/// Distinct from `server::AssetGot` (webapp protocol, uses payload-id
-/// correlation rather than meta correlation).
 public struct AssetGotReply: Codable, Sendable {
 	public let id: String
 	public let bytes: Data
@@ -138,6 +114,11 @@ public enum AssetRetention: Codable, Sendable {
 	}
 }
 
+/// Single-frame asset push for small, latency-critical, memory-resident
+/// assets (album art). Daemon-side checks: `bytes.len()` must be
+/// <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+/// `Persistent`. Larger payloads or persistent retention require the
+/// chunked `PushBegin`/`PushChunk` flow.
 public struct AssetPush: Codable, Sendable {
 	public let id: String
 	public let bytes: Data
@@ -149,6 +130,80 @@ public struct AssetPush: Codable, Sendable {
 		self.bytes = bytes
 		self.mime = mime
 		self.retention = retention
+	}
+}
+
+/// Drop the daemon-side partial for `id`. The companion's escape hatch
+/// when it wants to clean up a push it can no longer complete.
+public struct AssetPushAbandon: Codable, Sendable {
+	public let id: String
+
+	public init(id: String) {
+		self.id = id
+	}
+}
+
+/// Open or resume a chunked asset push. Daemon responds with
+/// `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
+/// `AssetPushChunk` should start at, 0 for fresh pushes) or
+/// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
+/// mismatched size/sha, budget exhausted, etc.).
+/// 
+/// Required for any push with `retention = Persistent` and for any push
+/// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
+public struct AssetPushBegin: Codable, Sendable {
+	public let id: String
+	public let expectedSize: UInt32
+	public let expectedSha256: String?
+	public let mime: String?
+	public let retention: AssetRetention
+
+	public init(id: String, expectedSize: UInt32, expectedSha256: String?, mime: String?, retention: AssetRetention) {
+		self.id = id
+		self.expectedSize = expectedSize
+		self.expectedSha256 = expectedSha256
+		self.mime = mime
+		self.retention = retention
+	}
+}
+
+/// Successful response to `AssetPushBegin`. `resume_from_offset` is the
+/// byte offset the next `AssetPushChunk` should start at: 0 for fresh
+/// pushes, or the daemon's recovered partial length for a resume.
+public struct AssetPushBeginAck: Codable, Sendable {
+	public let resumeFromOffset: UInt32
+
+	public init(resumeFromOffset: UInt32) {
+		self.resumeFromOffset = resumeFromOffset
+	}
+}
+
+/// Domain-error response to `AssetPushBegin`: the daemon refuses to
+/// start or resume this push (conflicting in-flight id, budget
+/// exhausted, oversized, etc.).
+public struct AssetPushBeginRejected: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Streaming chunk of an asset push opened by `AssetPushBegin`.
+/// `offset` must equal the daemon's current `received` for this id.
+/// `last:true` triggers post-stream verify (size + optional sha256)
+/// and commit to the asset cache.
+public struct AssetPushChunk: Codable, Sendable {
+	public let id: String
+	public let offset: UInt32
+	public let bytes: Data
+	public let last: Bool
+
+	public init(id: String, offset: UInt32, bytes: Data, last: Bool) {
+		self.id = id
+		self.offset = offset
+		self.bytes = bytes
+		self.last = last
 	}
 }
 
@@ -668,14 +723,94 @@ public struct NowPlayingUpdate: Codable, Sendable {
 	}
 }
 
+/// Drop the daemon-side partial for `update_id`. After `CancelUpdate`
+/// keeps the partial for resume; `OtaAbandon` is the explicit clean-up
+/// when the companion no longer wants to retry this artifact.
+public struct OtaAbandon: Codable, Sendable {
+	public let updateId: String
+
+	public init(updateId: String) {
+		self.updateId = updateId
+	}
+}
+
+/// Companion-initiated OTA: opens or resumes a streaming push of a
+/// `.swu` artifact identified by its sha256. The daemon responds with
+/// `OtaBeginAck { resume_from_offset }` (the byte offset the next
+/// `OtaChunk` should start at, 0 for fresh pushes) or
+/// `OtaBeginRejected { reason }` (already-running OTA, conflicting
+/// in-flight update_id with mismatched size/sha, or budget exhausted).
+/// 
+/// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
+/// so resume across daemon restarts and retries-after-failure both work
+/// without companion-side state to track.
+public struct OtaBegin: Codable, Sendable {
+	public let updateId: String
+	public let manifestUrl: String?
+	public let expectedSha256: String
+	public let expectedSize: UInt32
+
+	public init(updateId: String, manifestUrl: String?, expectedSha256: String, expectedSize: UInt32) {
+		self.updateId = updateId
+		self.manifestUrl = manifestUrl
+		self.expectedSha256 = expectedSha256
+		self.expectedSize = expectedSize
+	}
+}
+
+/// Successful response to `OtaBegin`. `resume_from_offset` is the byte
+/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// the daemon's recovered partial length for a resume.
+public struct OtaBeginAck: Codable, Sendable {
+	public let resumeFromOffset: UInt32
+
+	public init(resumeFromOffset: UInt32) {
+		self.resumeFromOffset = resumeFromOffset
+	}
+}
+
+/// Domain-error response to `OtaBegin`: the daemon refuses to start
+/// or resume this push (already-running OTA, conflicting in-flight
+/// update_id with mismatched size/sha, budget exhausted).
+public struct OtaBeginRejected: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
+/// equal the daemon's current `received` for the transfer (chunks are
+/// strictly in-order; the companion learns the resume offset from
+/// `OtaBeginAck`). `last:true` triggers post-stream verify (size +
+/// sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
+/// phase progress events.
+public struct OtaChunk: Codable, Sendable {
+	public let updateId: String
+	public let offset: UInt32
+	public let bytes: Data
+	public let last: Bool
+
+	public init(updateId: String, offset: UInt32, bytes: Data, last: Bool) {
+		self.updateId = updateId
+		self.offset = offset
+		self.bytes = bytes
+		self.last = last
+	}
+}
+
 /// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
 public enum OtaErrorCode: String, Codable, Sendable {
-	/// Companion sent `ApplyUpdate` for an `asset_id` not in the daemon cache.
-	case assetNotFound
-	/// Cached blob's sha256 does not match the manifest's expected hash.
+	/// Companion sent chunks for an `update_id` that was never begun
+	/// (or was abandoned mid-stream).
+	case unknownUpdate
+	/// `OtaChunk.offset` did not match the daemon's `received`.
+	case offsetMismatch
+	/// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
 	case hashMismatch
-	/// Cached blob's byte length does not match the manifest's expected size.
+	/// Streamed total's byte length did not match `OtaBegin.expected_size`.
 	case sizeMismatch
 	/// `CancelUpdate` arrived during a cancelable phase.
 	case cancelled
@@ -683,7 +818,7 @@ public enum OtaErrorCode: String, Codable, Sendable {
 	case writeFailed
 	/// Slot-flip / try-counter reset failed after a successful write.
 	case confirmFailed
-	/// Anything else (asset cache I/O, internal channel close, etc.).
+	/// Anything else (transfer-cache I/O, internal channel close, etc.).
 	case `internal`
 }
 
@@ -697,14 +832,14 @@ public struct OtaError: Codable, Sendable {
 	}
 }
 
-/// Stage of the OTA orchestrator. `Downloading` covers the daemon-side
-/// wait for the .swu blob to land in the asset cache (the companion is
-/// the actual downloader); `Verifying` runs the sha256 + size check;
-/// `Writing` streams to libswupdate; `Confirming` flips slot try-counter
-/// state; `Reboot` is the terminal stage emitted just before the daemon
+/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
+/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
+/// the post-stream sha256 + size check; `Writing` streams the on-disk
+/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
+/// `Reboot` is the terminal stage emitted just before the daemon
 /// triggers the reboot.
 public enum OtaPhase: String, Codable, Sendable {
-	case downloading
+	case streaming
 	case verifying
 	case writing
 	case confirming
@@ -944,16 +1079,15 @@ public struct WebappUninstall: Codable, Sendable {
 	}
 }
 
-/// Bridge-side asset operations. Daemon emits `Request` when a webapp asks
-/// for an asset id that isn't in cache and a companion is connected; the
-/// companion fulfils via `GatewayToBridgeAssetMsg::Push` carrying the same
-/// id. v1 does not support bridge-initiated `Clear` - companions own the
-/// retention lifecycle of anything they pushed.
 public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 	case request(AssetRequest)
+	case pushBeginAck(AssetPushBeginAck)
+	case pushBeginRejected(AssetPushBeginRejected)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case request
+		case request,
+			pushBeginAck,
+			pushBeginRejected
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -969,6 +1103,16 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 					self = .request(content)
 					return
 				}
+			case .pushBeginAck:
+				if let content = try? container.decode(AssetPushBeginAck.self, forKey: .data) {
+					self = .pushBeginAck(content)
+					return
+				}
+			case .pushBeginRejected:
+				if let content = try? container.decode(AssetPushBeginRejected.self, forKey: .data) {
+					self = .pushBeginRejected(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayAssetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayAssetMsg"))
@@ -980,6 +1124,12 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 		case .request(let content):
 			try container.encode(CodingKeys.request, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .pushBeginAck(let content):
+			try container.encode(CodingKeys.pushBeginAck, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .pushBeginRejected(let content):
+			try container.encode(CodingKeys.pushBeginRejected, forKey: .event)
+			try container.encode(content, forKey: .data)
 		}
 	}
 }
@@ -987,10 +1137,14 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case otaProgress(OtaProgress)
 	case otaError(OtaError)
+	case otaBeginAck(OtaBeginAck)
+	case otaBeginRejected(OtaBeginRejected)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
-			otaError
+			otaError,
+			otaBeginAck,
+			otaBeginRejected
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1011,6 +1165,16 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 					self = .otaError(content)
 					return
 				}
+			case .otaBeginAck:
+				if let content = try? container.decode(OtaBeginAck.self, forKey: .data) {
+					self = .otaBeginAck(content)
+					return
+				}
+			case .otaBeginRejected:
+				if let content = try? container.decode(OtaBeginRejected.self, forKey: .data) {
+					self = .otaBeginRejected(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewaySystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewaySystemMsg"))
@@ -1024,6 +1188,12 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .otaError(let content):
 			try container.encode(CodingKeys.otaError, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaBeginAck(let content):
+			try container.encode(CodingKeys.otaBeginAck, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaBeginRejected(let content):
+			try container.encode(CodingKeys.otaBeginRejected, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -1305,21 +1475,21 @@ public enum ForwardMessage: Codable, Sendable {
 	}
 }
 
-/// Companion-side asset operations:
-/// - `Push` (event): proactive load into the daemon cache.
-/// - `Clear` (event): drop a previously pushed asset.
-/// - `Got` (response): typed reply to a daemon `AssetRequest`.
-/// - `NotFound` (response): typed domain error for `AssetRequest` when
-/// the companion does not have the asset.
 public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 	case push(AssetPush)
 	case clear(AssetClear)
+	case pushBegin(AssetPushBegin)
+	case pushChunk(AssetPushChunk)
+	case pushAbandon(AssetPushAbandon)
 	case got(AssetGotReply)
 	case notFound(AssetNotFoundReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case push,
 			clear,
+			pushBegin,
+			pushChunk,
+			pushAbandon,
 			got,
 			notFound
 	}
@@ -1340,6 +1510,21 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 			case .clear:
 				if let content = try? container.decode(AssetClear.self, forKey: .data) {
 					self = .clear(content)
+					return
+				}
+			case .pushBegin:
+				if let content = try? container.decode(AssetPushBegin.self, forKey: .data) {
+					self = .pushBegin(content)
+					return
+				}
+			case .pushChunk:
+				if let content = try? container.decode(AssetPushChunk.self, forKey: .data) {
+					self = .pushChunk(content)
+					return
+				}
+			case .pushAbandon:
+				if let content = try? container.decode(AssetPushAbandon.self, forKey: .data) {
+					self = .pushAbandon(content)
 					return
 				}
 			case .got:
@@ -1365,6 +1550,15 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .clear(let content):
 			try container.encode(CodingKeys.clear, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .pushBegin(let content):
+			try container.encode(CodingKeys.pushBegin, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .pushChunk(let content):
+			try container.encode(CodingKeys.pushChunk, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .pushAbandon(let content):
+			try container.encode(CodingKeys.pushAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .got(let content):
 			try container.encode(CodingKeys.got, forKey: .event)
@@ -1461,11 +1655,15 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 }
 
 public enum GatewayToBridgeSystemMsg: Codable, Sendable {
-	case applyUpdate(ApplyUpdate)
+	case otaBegin(OtaBegin)
+	case otaChunk(OtaChunk)
+	case otaAbandon(OtaAbandon)
 	case cancelUpdate
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case applyUpdate,
+		case otaBegin,
+			otaChunk,
+			otaAbandon,
 			cancelUpdate
 	}
 
@@ -1477,9 +1675,19 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .applyUpdate:
-				if let content = try? container.decode(ApplyUpdate.self, forKey: .data) {
-					self = .applyUpdate(content)
+			case .otaBegin:
+				if let content = try? container.decode(OtaBegin.self, forKey: .data) {
+					self = .otaBegin(content)
+					return
+				}
+			case .otaChunk:
+				if let content = try? container.decode(OtaChunk.self, forKey: .data) {
+					self = .otaChunk(content)
+					return
+				}
+			case .otaAbandon:
+				if let content = try? container.decode(OtaAbandon.self, forKey: .data) {
+					self = .otaAbandon(content)
 					return
 				}
 			case .cancelUpdate:
@@ -1493,8 +1701,14 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .applyUpdate(let content):
-			try container.encode(CodingKeys.applyUpdate, forKey: .event)
+		case .otaBegin(let content):
+			try container.encode(CodingKeys.otaBegin, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaChunk(let content):
+			try container.encode(CodingKeys.otaChunk, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaAbandon(let content):
+			try container.encode(CodingKeys.otaAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .cancelUpdate:
 			try container.encode(CodingKeys.cancelUpdate, forKey: .event)

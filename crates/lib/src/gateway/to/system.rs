@@ -4,18 +4,18 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-/// Stage of the OTA orchestrator. `Downloading` covers the daemon-side
-/// wait for the .swu blob to land in the asset cache (the companion is
-/// the actual downloader); `Verifying` runs the sha256 + size check;
-/// `Writing` streams to libswupdate; `Confirming` flips slot try-counter
-/// state; `Reboot` is the terminal stage emitted just before the daemon
+/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
+/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
+/// the post-stream sha256 + size check; `Writing` streams the on-disk
+/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
+/// `Reboot` is the terminal stage emitted just before the daemon
 /// triggers the reboot.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum OtaPhase {
-  Downloading,
+  Streaming,
   Verifying,
   Writing,
   Confirming,
@@ -37,17 +37,20 @@ pub struct OtaProgress {
 }
 
 /// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `ApplyUpdate` may be sent.
+/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum OtaErrorCode {
-  /// Companion sent `ApplyUpdate` for an `asset_id` not in the daemon cache.
-  AssetNotFound,
-  /// Cached blob's sha256 does not match the manifest's expected hash.
+  /// Companion sent chunks for an `update_id` that was never begun
+  /// (or was abandoned mid-stream).
+  UnknownUpdate,
+  /// `OtaChunk.offset` did not match the daemon's `received`.
+  OffsetMismatch,
+  /// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
   HashMismatch,
-  /// Cached blob's byte length does not match the manifest's expected size.
+  /// Streamed total's byte length did not match `OtaBegin.expected_size`.
   SizeMismatch,
   /// `CancelUpdate` arrived during a cancelable phase.
   Cancelled,
@@ -55,7 +58,7 @@ pub enum OtaErrorCode {
   WriteFailed,
   /// Slot-flip / try-counter reset failed after a successful write.
   ConfirmFailed,
-  /// Anything else (asset cache I/O, internal channel close, etc.).
+  /// Anything else (transfer-cache I/O, internal channel close, etc.).
   Internal,
 }
 
@@ -69,6 +72,30 @@ pub struct OtaError {
   pub msg: String,
 }
 
+/// Successful response to `OtaBegin`. `resume_from_offset` is the byte
+/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// the daemon's recovered partial length for a resume.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaBeginAck {
+  pub resume_from_offset: u32,
+}
+
+/// Domain-error response to `OtaBegin`: the daemon refuses to start
+/// or resume this push (already-running OTA, conflicting in-flight
+/// update_id with mismatched size/sha, budget exhausted).
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaBeginRejected {
+  pub reason: String,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -80,4 +107,8 @@ pub enum BridgeToGatewaySystemMsg {
   OtaProgress(OtaProgress),
   #[bridge_event]
   OtaError(OtaError),
+  #[bridge_response]
+  OtaBeginAck(OtaBeginAck),
+  #[bridge_response]
+  OtaBeginRejected(OtaBeginRejected),
 }

@@ -59,6 +59,10 @@ pub struct InnerVariantPlan {
   /// Outbound codegen skips struct variants — payload would need full
   /// per-field args.
   pub is_struct: bool,
+  /// Per-variant outbound bucket. Inferred from the variant's
+  /// `#[bridge_event]` / `#[bridge_command]` tag. Unset for
+  /// request/response variants and for outer wire enums.
+  pub category: Option<EntryCategory>,
 }
 
 pub struct Plan {
@@ -330,6 +334,7 @@ pub fn build_plan_for(inv: &Inventory, protocol: Protocol) -> Result<Plan> {
 }
 
 fn inner_variant_plans(en: &EnumDef) -> Vec<InnerVariantPlan> {
+  use crate::dispatch::inventory::VariantTag;
   en.variants
     .iter()
     .map(|v| InnerVariantPlan {
@@ -337,6 +342,11 @@ fn inner_variant_plans(en: &EnumDef) -> Vec<InnerVariantPlan> {
       variant: v.name.clone(),
       payload: v.payload.clone(),
       is_struct: v.is_struct,
+      category: match v.tag {
+        Some(VariantTag::Event) => Some(EntryCategory::Event),
+        Some(VariantTag::Command) => Some(EntryCategory::Command),
+        Some(VariantTag::Request) | Some(VariantTag::Response) | None => None,
+      },
     })
     .collect()
 }
