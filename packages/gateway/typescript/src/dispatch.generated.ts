@@ -36,9 +36,8 @@ import {
   type NetFetchErrorReply,
   type NetFetchReply,
   type NetFetchRequestMsg,
-  type NetFetchStreamBegin,
-  type NetFetchStreamChunk,
-  type NetFetchStreamEnd,
+  type NetStreamCancel,
+  type NetStreamOpen,
   type NetWsClose,
   type NetWsClosed,
   type NetWsErrorEvent,
@@ -46,7 +45,6 @@ import {
   type NetWsMessage,
   type NetWsOpen,
   type NetWsOpenReply,
-  type NetWsOpened,
   type NetWsSend,
   type Notification,
   type NotificationInvoke,
@@ -82,6 +80,10 @@ import {
   type SetSpeed,
   type SetVolume,
   type SkipToIndex,
+  type StreamBegin,
+  type StreamChunk,
+  type StreamEnd,
+  type StreamError,
   type TimeInfo,
   type Tts,
   type TtsCancel,
@@ -167,6 +169,8 @@ export type LibraryDeviceInboundHandlers = {
 export type NetInboundHandlers = {
   wsClose: (deviceId: string, msg: NetWsClose) => void;
   wsSend: (deviceId: string, msg: NetWsSend) => void;
+  streamOpen: (deviceId: string, msg: NetStreamOpen) => void;
+  streamCancel: (deviceId: string, msg: NetStreamCancel) => void;
   fetch: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void;
   wsOpen: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void;
 };
@@ -174,6 +178,8 @@ export type NetInboundHandlers = {
 export type NetDeviceInboundHandlers = {
   wsClose: (msg: NetWsClose) => void;
   wsSend: (msg: NetWsSend) => void;
+  streamOpen: (msg: NetStreamOpen) => void;
+  streamCancel: (msg: NetStreamCancel) => void;
   fetch: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void;
   wsOpen: (handle: NetWsOpenHandle, req: NetWsOpen) => Promise<void> | void;
 };
@@ -839,6 +845,30 @@ export class NetSurface {
     });
   }
 
+  /** Subscribe to `Net::StreamOpen` across all peers. */
+  onStreamOpen(handler: (deviceId: string, msg: NetStreamOpen) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamOpen') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::StreamCancel` across all peers. */
+  onStreamCancel(handler: (deviceId: string, msg: NetStreamCancel) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamCancel') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Typed inbound `NetFetchRequestMsg` request: handler is given a typed handle for the response. */
   onFetch(handler: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -904,6 +934,14 @@ export class NetSurface {
           handlers.wsSend?.(event.deviceId, inner.data);
           return;
         }
+        case 'streamOpen': {
+          handlers.streamOpen?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'streamCancel': {
+          handlers.streamCancel?.(event.deviceId, inner.data);
+          return;
+        }
         case 'fetch': {
           if (event.message.meta.kind !== 'request') return;
           const handler = handlers.fetch;
@@ -938,66 +976,6 @@ export class NetSurface {
         }
       }
     });
-  }
-
-  /** Send `Net::FetchStreamBegin` to every connected peer (broadcast). */
-  async fetchStreamBegin(payload: NetFetchStreamBegin, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'net', data: { event: 'fetchStreamBegin', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Net::FetchStreamChunk` to every connected peer (broadcast). */
-  async fetchStreamChunk(payload: NetFetchStreamChunk, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'net', data: { event: 'fetchStreamChunk', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Net::FetchStreamEnd` to every connected peer (broadcast). */
-  async fetchStreamEnd(payload: NetFetchStreamEnd, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'net', data: { event: 'fetchStreamEnd', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Net::WsOpened` to every connected peer (broadcast). */
-  async wsOpened(payload: NetWsOpened, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
-          meta: { kind: 'event' },
-          data: { type: 'net', data: { event: 'wsOpened', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
   }
 
   /** Send `Net::WsMessage` to every connected peer (broadcast). */
@@ -1039,6 +1017,66 @@ export class NetSurface {
           id: newUuidBytes(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::StreamBegin` to every connected peer (broadcast). */
+  async streamBegin(payload: StreamBegin, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'streamBegin', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::StreamChunk` to every connected peer (broadcast). */
+  async streamChunk(payload: StreamChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'streamChunk', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::StreamEnd` to every connected peer (broadcast). */
+  async streamEnd(payload: StreamEnd, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'streamEnd', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Net::StreamError` to every connected peer (broadcast). */
+  async streamError(payload: StreamError, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'net', data: { event: 'streamError', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2755,6 +2793,32 @@ export class NetSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Net::StreamOpen` from this peer. */
+  onStreamOpen(handler: (msg: NetStreamOpen) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamOpen') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::StreamCancel` from this peer. */
+  onStreamCancel(handler: (msg: NetStreamCancel) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamCancel') return;
+      handler(inner.data);
+    });
+  }
+
   /** Typed inbound `NetFetchRequestMsg` request from this peer: handler is given a typed handle for the response. */
   onFetch(handler: (handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -2823,6 +2887,14 @@ export class NetSurfaceForDevice {
           handlers.wsSend?.(inner.data);
           return;
         }
+        case 'streamOpen': {
+          handlers.streamOpen?.(inner.data);
+          return;
+        }
+        case 'streamCancel': {
+          handlers.streamCancel?.(inner.data);
+          return;
+        }
         case 'fetch': {
           if (event.message.meta.kind !== 'request') return;
           const handler = handlers.fetch;
@@ -2859,46 +2931,6 @@ export class NetSurfaceForDevice {
     });
   }
 
-  /** Send `Net::FetchStreamBegin` to this peer. */
-  async fetchStreamBegin(payload: NetFetchStreamBegin, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'net', data: { event: 'fetchStreamBegin', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Net::FetchStreamChunk` to this peer. */
-  async fetchStreamChunk(payload: NetFetchStreamChunk, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'net', data: { event: 'fetchStreamChunk', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Net::FetchStreamEnd` to this peer. */
-  async fetchStreamEnd(payload: NetFetchStreamEnd, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'net', data: { event: 'fetchStreamEnd', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Net::WsOpened` to this peer. */
-  async wsOpened(payload: NetWsOpened, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'event' },
-      data: { type: 'net', data: { event: 'wsOpened', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
   /** Send `Net::WsMessage` to this peer. */
   async wsMessage(payload: NetWsMessage, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
@@ -2925,6 +2957,46 @@ export class NetSurfaceForDevice {
       id: newUuidBytes(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::StreamBegin` to this peer. */
+  async streamBegin(payload: StreamBegin, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'streamBegin', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::StreamChunk` to this peer. */
+  async streamChunk(payload: StreamChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'streamChunk', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::StreamEnd` to this peer. */
+  async streamEnd(payload: StreamEnd, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'streamEnd', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Net::StreamError` to this peer. */
+  async streamError(payload: StreamError, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'net', data: { event: 'streamError', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -4877,6 +4949,14 @@ function outerSubscribeGateway(
             innerHandlers.wsSend?.(event.deviceId, inner.data);
             return;
           }
+          case 'streamOpen': {
+            innerHandlers.streamOpen?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'streamCancel': {
+            innerHandlers.streamCancel?.(event.deviceId, inner.data);
+            return;
+          }
           case 'fetch': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.fetch;
@@ -5314,6 +5394,14 @@ function outerSubscribeDevice(
           }
           case 'wsSend': {
             innerHandlers.wsSend?.(inner.data);
+            return;
+          }
+          case 'streamOpen': {
+            innerHandlers.streamOpen?.(inner.data);
+            return;
+          }
+          case 'streamCancel': {
+            innerHandlers.streamCancel?.(inner.data);
             return;
           }
           case 'fetch': {

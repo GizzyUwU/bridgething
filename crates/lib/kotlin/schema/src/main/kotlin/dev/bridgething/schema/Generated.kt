@@ -840,21 +840,15 @@ data class NetErrorRequestFailedInner (
 
 @Serializable(with = NetErrorSerializer::class)
 sealed class NetError {
-	/// Gateway-side request failed before headers were received (DNS, TLS,
-	/// connect refused, transport hiccup).
 	@Serializable
 	@SerialName("requestFailed")
 	data class RequestFailed(val data: NetErrorRequestFailedInner): NetError()
-	/// `timeout_ms` elapsed before headers were received.
 	@Serializable
 	@SerialName("timeout")
 	object Timeout: NetError()
-	/// Gateway is connected but the Net surface is unavailable
-	/// (`SurfaceAvailability::net_fetch` is false).
 	@Serializable
 	@SerialName("unavailable")
 	object Unavailable: NetError()
-	/// The companion is not connected.
 	@Serializable
 	@SerialName("noGateway")
 	object NoGateway: NetError()
@@ -865,8 +859,6 @@ data class NetFetchErrorReply (
 	val error: NetError
 )
 
-/// Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
-/// otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
 @Serializable
 data class NetFetchResponse (
 	val status: UShort,
@@ -910,9 +902,6 @@ enum class RedirectPolicy(val string: String) {
 	Error("error"),
 }
 
-/// Outbound HTTP request. `body` is inline; webapps pushing large bodies
-/// should chunk-stream via `AssetCache` and pass an asset id in a future
-/// extension. `timeout_ms` defaults to gateway choice when None.
 @Serializable
 data class NetFetchRequest (
 	val url: String,
@@ -928,31 +917,15 @@ data class NetFetchRequestMsg (
 	val request: NetFetchRequest
 )
 
-/// First frame of a streamed response. `total_size` is `Content-Length`
-/// when the gateway has it; otherwise `None` and the consumer accumulates
-/// chunks until `End`.
 @Serializable
-data class NetFetchStreamBegin (
-	val requestId: ByteArray,
-	val status: UShort,
-	val headers: List<HttpHeader>,
-	val totalSize: UInt? = null
+data class NetStreamCancel (
+	val streamId: ByteArray
 )
 
-/// One body chunk of a streamed response. Chunks arrive in order;
-/// `offset` is the byte position of `bytes[0]` within the full body.
 @Serializable
-data class NetFetchStreamChunk (
-	val requestId: ByteArray,
-	val offset: UInt,
-	val bytes: ByteArray
-)
-
-/// Terminates a stream. After `End` no further chunks for `request_id`
-/// are valid.
-@Serializable
-data class NetFetchStreamEnd (
-	val requestId: ByteArray
+data class NetStreamOpen (
+	val streamId: ByteArray,
+	val request: NetFetchRequest
 )
 
 @Serializable
@@ -983,23 +956,15 @@ data class WsErrorProtocolErrorInner (
 
 @Serializable(with = WsErrorSerializer::class)
 sealed class WsError {
-	/// Gateway-side connect failed (DNS, TLS, refused).
 	@Serializable
 	@SerialName("connectFailed")
 	data class ConnectFailed(val data: WsErrorConnectFailedInner): WsError()
-	/// Per-connection backpressure cap (64 frames or 1 MB) hit.
-	@Serializable
-	@SerialName("backpressure")
-	object Backpressure: WsError()
-	/// Frame exceeded the per-connection 16 KB cap.
 	@Serializable
 	@SerialName("frameTooLarge")
 	object FrameTooLarge: WsError()
-	/// The companion went away while the WS was open.
 	@Serializable
 	@SerialName("gatewayDisconnected")
 	object GatewayDisconnected: WsError()
-	/// Server-side WS protocol violation surfaced by the underlying lib.
 	@Serializable
 	@SerialName("protocolError")
 	data class ProtocolError(val data: WsErrorProtocolErrorInner): WsError()
@@ -1016,7 +981,6 @@ data class NetWsErrorReply (
 	val error: WsError
 )
 
-/// One WS frame. The daemon does not split or merge frames.
 @Serializable(with = WsFrameSerializer::class)
 sealed class WsFrame {
 	@Serializable
@@ -1035,6 +999,7 @@ data class NetWsMessage (
 
 @Serializable
 data class NetWsOpen (
+	val connectionId: ByteArray,
 	val url: String,
 	val protocols: List<String>? = null,
 	val headers: List<HttpHeader>? = null
@@ -1042,13 +1007,6 @@ data class NetWsOpen (
 
 @Serializable
 data class NetWsOpenReply (
-	val connectionId: ByteArray,
-	val acceptedProtocol: String? = null
-)
-
-@Serializable
-data class NetWsOpened (
-	val connectionId: ByteArray,
 	val acceptedProtocol: String? = null
 )
 
@@ -1742,6 +1700,43 @@ data class Station (
 	val artworkId: String? = null
 )
 
+/// First event of an open stream. Carries the response status, headers,
+/// and (when known) total payload size so the consumer can preallocate
+/// or display progress. Subsequent `StreamChunk` and `StreamEnd` events
+/// for the same `stream_id` follow.
+@Serializable
+data class StreamBegin (
+	val streamId: ByteArray,
+	val status: UShort,
+	val headers: List<HttpHeader>,
+	val totalSize: UInt? = null
+)
+
+/// One body chunk. Chunks arrive in order; `offset` is the byte
+/// position of `bytes[0]` within the full body.
+@Serializable
+data class StreamChunk (
+	val streamId: ByteArray,
+	val offset: UInt,
+	val bytes: ByteArray
+)
+
+/// Terminates a stream. After `End` no further chunks for `stream_id`
+/// are valid and the daemon clears its routing entry.
+@Serializable
+data class StreamEnd (
+	val streamId: ByteArray
+)
+
+/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// daemon clears its routing entry. The `error` shape is shared with
+/// `fetch` since the failure modes are identical.
+@Serializable
+data class StreamError (
+	val streamId: ByteArray,
+	val error: NetError
+)
+
 /// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
 /// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
 /// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
@@ -1952,6 +1947,12 @@ sealed class BridgeToGatewayNetMsg {
 	@Serializable
 	@SerialName("wsSend")
 	data class WsSend(val data: NetWsSend): BridgeToGatewayNetMsg()
+	@Serializable
+	@SerialName("streamOpen")
+	data class StreamOpen(val data: NetStreamOpen): BridgeToGatewayNetMsg()
+	@Serializable
+	@SerialName("streamCancel")
+	data class StreamCancel(val data: NetStreamCancel): BridgeToGatewayNetMsg()
 }
 
 @Serializable(with = BridgeToGatewayNotificationsMsgSerializer::class)
@@ -2207,23 +2208,11 @@ sealed class GatewayToBridgeNetMsg {
 	@SerialName("fetchErrorReply")
 	data class FetchErrorReply(val data: NetFetchErrorReply): GatewayToBridgeNetMsg()
 	@Serializable
-	@SerialName("fetchStreamBegin")
-	data class FetchStreamBegin(val data: NetFetchStreamBegin): GatewayToBridgeNetMsg()
-	@Serializable
-	@SerialName("fetchStreamChunk")
-	data class FetchStreamChunk(val data: NetFetchStreamChunk): GatewayToBridgeNetMsg()
-	@Serializable
-	@SerialName("fetchStreamEnd")
-	data class FetchStreamEnd(val data: NetFetchStreamEnd): GatewayToBridgeNetMsg()
-	@Serializable
 	@SerialName("wsOpenReply")
 	data class WsOpenReply(val data: NetWsOpenReply): GatewayToBridgeNetMsg()
 	@Serializable
 	@SerialName("wsErrorReply")
 	data class WsErrorReply(val data: NetWsErrorReply): GatewayToBridgeNetMsg()
-	@Serializable
-	@SerialName("wsOpened")
-	data class WsOpened(val data: NetWsOpened): GatewayToBridgeNetMsg()
 	@Serializable
 	@SerialName("wsMessage")
 	data class WsMessage(val data: NetWsMessage): GatewayToBridgeNetMsg()
@@ -2233,6 +2222,18 @@ sealed class GatewayToBridgeNetMsg {
 	@Serializable
 	@SerialName("wsErrorEvent")
 	data class WsErrorEvent(val data: NetWsErrorEvent): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("streamBegin")
+	data class StreamBegin(val data: dev.bridgething.schema.StreamBegin): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("streamChunk")
+	data class StreamChunk(val data: dev.bridgething.schema.StreamChunk): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("streamEnd")
+	data class StreamEnd(val data: dev.bridgething.schema.StreamEnd): GatewayToBridgeNetMsg()
+	@Serializable
+	@SerialName("streamError")
+	data class StreamError(val data: dev.bridgething.schema.StreamError): GatewayToBridgeNetMsg()
 }
 
 @Serializable(with = GatewayToBridgeNotificationsMsgSerializer::class)

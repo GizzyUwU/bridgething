@@ -36,6 +36,8 @@ pub struct NetFetch {
   error_variant = WsErrorReply,
 )]
 pub struct NetWsOpen {
+  #[ts(type = "string")]
+  pub connection_id: Uuid,
   pub url: String,
   pub protocols: Option<Vec<String>>,
   pub headers: Option<Vec<HttpHeader>>,
@@ -61,6 +63,23 @@ pub struct NetWsSend {
   pub frame: WsFrame,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct NetStreamOpen {
+  #[ts(type = "string")]
+  pub stream_id: Uuid,
+  pub request: NetFetchRequest,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct NetStreamCancel {
+  #[ts(type = "string")]
+  pub stream_id: Uuid,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -75,4 +94,8 @@ pub enum ClientToBridgeNetMsg {
   WsClose(NetWsClose),
   #[bridge_command]
   WsSend(NetWsSend),
+  #[bridge_command]
+  StreamOpen(NetStreamOpen),
+  #[bridge_command]
+  StreamCancel(NetStreamCancel),
 }

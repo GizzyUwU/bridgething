@@ -3,9 +3,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::{
-  NetError, NetFetchResponse, NetFetchStreamBegin, NetFetchStreamChunk, NetFetchStreamEnd, WsError, WsFrame,
-};
+use crate::{NetError, NetFetchResponse, StreamBegin, StreamChunk, StreamEnd, StreamError, WsError, WsFrame};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -27,8 +25,6 @@ pub struct NetFetchErrorReply {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct NetWsOpenReply {
-  #[ts(type = "string")]
-  pub connection_id: Uuid,
   pub accepted_protocol: Option<String>,
 }
 
@@ -37,15 +33,6 @@ pub struct NetWsOpenReply {
 #[ts(export, export_to = "client.ts")]
 pub struct NetWsErrorReply {
   pub error: WsError,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-pub struct NetWsOpened {
-  #[ts(type = "string")]
-  pub connection_id: Uuid,
-  pub accepted_protocol: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -86,22 +73,22 @@ pub enum BridgeToClientNetMsg {
   FetchReply(NetFetchReply),
   #[bridge_response]
   FetchErrorReply(NetFetchErrorReply),
-  #[bridge_event]
-  FetchStreamBegin(NetFetchStreamBegin),
-  #[bridge_event]
-  FetchStreamChunk(NetFetchStreamChunk),
-  #[bridge_event]
-  FetchStreamEnd(NetFetchStreamEnd),
   #[bridge_response]
   WsOpenReply(NetWsOpenReply),
   #[bridge_response]
   WsErrorReply(NetWsErrorReply),
-  #[bridge_event]
-  WsOpened(NetWsOpened),
   #[bridge_event]
   WsMessage(NetWsMessage),
   #[bridge_event]
   WsClosed(NetWsClosed),
   #[bridge_event]
   WsErrorEvent(NetWsErrorEvent),
+  #[bridge_event]
+  StreamBegin(StreamBegin),
+  #[bridge_event]
+  StreamChunk(StreamChunk),
+  #[bridge_event]
+  StreamEnd(StreamEnd),
+  #[bridge_event]
+  StreamError(StreamError),
 }

@@ -134,18 +134,10 @@ impl BluetoothManager {
     }))
   }
 
-  /// Cloneable handle the daemon's `TransportController` uses to send
-  /// outbound HID commands when iAP2 holds playback authority. Returns
-  /// `None` when the iAP2 manager isn't running (no MFi chip available).
   pub fn iap2_transport_handle(&self) -> Option<iap2::Iap2TransportHandle> {
     self.iap2_transport.clone()
   }
 
-  /// Stock-webapp-driven "connect to this paired device" entry point.
-  /// For iOS peers this kicks the accessory-initiated iAP2 dial into
-  /// the iPhone's iAP2-device channel. Android peers can't be dialed
-  /// from accessory side - the companion app is the initiator there
-  /// - so the call is a no-op aside from the trace.
   pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
     let address: Address = mac.parse()?;
     if let Some(handle) = &self.iap2_reconnect {
@@ -165,11 +157,6 @@ pub enum GatewayType {
   Network,
 }
 
-/// Inbound message from a gateway to the daemon. `protocol` records
-/// which transport carried the message — useful for tracing and for
-/// any handler that needs to know the source transport. Outbound
-/// responses do not carry a transport tag; they fan out across all
-/// gateways and the gateway holding the peer connection delivers.
 #[derive(Debug, Clone)]
 pub struct InboundGatewayMessage {
   pub address: Option<Address>,
@@ -194,16 +181,6 @@ impl InboundGatewayMessage {
   }
 }
 
-/// Outbound message from the daemon to a gateway-connected peer.
-/// `address: Some(_)` targets one peer (delivered by whichever gateway
-/// holds the connection); `address: None` broadcasts to every peer
-/// across every gateway. No transport selection at the call site —
-/// per the iAP2 strategy doc each peer is on at most one transport,
-/// so fanning out across all gateways is safe and the right answer.
-///
-/// `msg` is `Arc`-wrapped so multi-target dispatch (broadcast across
-/// transports / multiple iAP2 EA streams for the same address) is a
-/// refcount bump rather than a deep clone of the wire payload.
 #[derive(Debug, Clone)]
 pub struct OutboundGatewayMessage {
   pub address: Option<Address>,
@@ -243,33 +220,8 @@ pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<InboundGatewayMessage>;
 pub type GatewaySendTx = tokio::sync::mpsc::Sender<OutboundGatewayMessage>;
 pub type GatewaySendRx = tokio::sync::mpsc::Receiver<OutboundGatewayMessage>;
 
-/// Default timeout for daemon-initiated typed gateway requests. Long
-/// enough for the companion's encode + transport, short enough that
-/// the requesting webapp doesn't hang.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Build an `Unsupported` response for a request whose typed decode
-/// failed. Returns `None` for non-request frames (events / commands /
-/// responses are fire-and-forget; the sender doesn't have a pending
-/// future to resolve). Used by every gateway transport's recv loop so
-/// the companion's pending request doesn't have to wait for the 10s
-/// request timeout.
-pub fn auto_nack_for_failed_decode(probe: &EnvelopeProbe) -> Option<BridgeToGatewayMsg> {
-  if !probe.is_request() {
-    return None;
-  }
-  let request_id = probe.id?;
-  Some(BridgeToGatewayMsg {
-    id: Uuid::now_v7(),
-    meta: MsgMeta::Response(ResponseMeta { request_id }),
-    data: BridgeToGatewayMsgData::Error(WireError::Unsupported),
-  })
-}
-
-/// Pending-request map: in-flight `request_id`s the daemon is waiting
-/// to correlate against incoming `Response`-meta messages. The
-/// `oneshot::Sender` carries the response's wire data; the requester
-/// awaits the receiver and runs `R::extract` on the result.
 type PendingRequests = Arc<Mutex<HashMap<Uuid, oneshot::Sender<GatewayToBridgeMsgData>>>>;
 
 #[derive(Debug)]
@@ -380,7 +332,6 @@ impl GatewayMan {
     }
   }
 
-  /// Broadcast a typed event to every connected companion.
   pub async fn broadcast<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
     self
       .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
@@ -391,7 +342,6 @@ impl GatewayMan {
       .await;
   }
 
-  /// Send a typed event to one specific companion.
   pub async fn send_event<E: WireEvent<BridgeToGatewayMsgData>>(&self, address: Address, event: E) {
     self
       .send_all(OutboundGatewayMessage::to(
@@ -405,18 +355,27 @@ impl GatewayMan {
       .await;
   }
 
-  /// Broadcast a typed command to every connected companion.
   pub async fn broadcast_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
+    self.broadcast_command_with_priority(cmd, Priority::Normal).await;
+  }
+
+  pub async fn broadcast_command_bulk<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
+    self.broadcast_command_with_priority(cmd, Priority::Bulk).await;
+  }
+
+  async fn broadcast_command_with_priority<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C, priority: Priority) {
     self
-      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
-        id: uuid::Uuid::now_v7(),
-        meta: MsgMeta::Command,
-        data: cmd.into(),
-      }))
+      .send_all(
+        OutboundGatewayMessage::all(BridgeToGatewayMsg {
+          id: uuid::Uuid::now_v7(),
+          meta: MsgMeta::Command,
+          data: cmd.into(),
+        })
+        .with_priority(priority),
+      )
       .await;
   }
 
-  /// Send a typed command to one specific companion.
   pub async fn send_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, address: Address, cmd: C) {
     self
       .send_all(OutboundGatewayMessage::to(
@@ -430,19 +389,29 @@ impl GatewayMan {
       .await;
   }
 
-  /// Send a typed request and await the typed response. `address: None`
-  /// broadcasts to every connected companion; the first peer to reply
-  /// with a matching `request_id` resolves the future. With one peer
-  /// connected (Car Thing's typical case) addressed and broadcast forms
-  /// behave identically. Times out after 10 seconds.
-  ///
-  /// Domain errors surface as `RequestError::Domain(_)`; protocol
-  /// failures (`WireError`, channel close, timeout) as
-  /// `RequestError::Protocol(_)`.
   pub async fn request<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
     &self,
     address: Option<Address>,
     req: R,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
+    self.request_with_priority(address, req, Priority::Normal).await
+  }
+
+  pub async fn request_bulk<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
+    &self,
+    address: Option<Address>,
+    req: R,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
+    self.request_with_priority(address, req, Priority::Bulk).await
+  }
+
+  async fn request_with_priority<
+    R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>,
+  >(
+    &self,
+    address: Option<Address>,
+    req: R,
+    priority: Priority,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
     let id = Uuid::now_v7();
     let (tx, rx) = oneshot::channel();
@@ -457,7 +426,9 @@ impl GatewayMan {
       meta: MsgMeta::Request,
       data: req.into(),
     };
-    self.send_all(OutboundGatewayMessage::new(address, msg)).await;
+    self
+      .send_all(OutboundGatewayMessage::new(address, msg).with_priority(priority))
+      .await;
 
     match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
       Ok(Ok(data)) => R::extract(data),
@@ -476,11 +447,6 @@ impl GatewayMan {
     }
   }
 
-  /// Consume an inbound `Response`-meta message by completing the
-  /// matching pending request. Returns `true` if the message was
-  /// consumed (caller should not dispatch further); `false` if no
-  /// pending request matched (caller falls through to normal handler
-  /// dispatch).
   pub fn complete_pending(&self, request_id: &Uuid, data: GatewayToBridgeMsgData) -> bool {
     let tx = self
       .pending
@@ -550,6 +516,18 @@ impl GatewayCon {
       }
     })
   }
+}
+
+pub fn auto_nack_for_failed_decode(probe: &EnvelopeProbe) -> Option<BridgeToGatewayMsg> {
+  if !probe.is_request() {
+    return None;
+  }
+  let request_id = probe.id?;
+  Some(BridgeToGatewayMsg {
+    id: Uuid::now_v7(),
+    meta: MsgMeta::Response(ResponseMeta { request_id }),
+    data: BridgeToGatewayMsgData::Error(WireError::Unsupported),
+  })
 }
 
 pub type BluetoothResult<T> = Result<T, BluetoothError>;

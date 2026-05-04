@@ -18,9 +18,6 @@ import type {
   NetError,
   NetFetchRequest,
   NetFetchResponse,
-  NetFetchStreamBegin,
-  NetFetchStreamChunk,
-  NetFetchStreamEnd,
   Notification,
   NotificationError,
   NotificationsPage,
@@ -35,6 +32,10 @@ import type {
   RecommendationsResult,
   RepeatMode,
   SearchResult,
+  StreamBegin,
+  StreamChunk,
+  StreamEnd,
+  StreamError,
   TimeInfo,
   WebappInfo,
   WsError,
@@ -177,7 +178,9 @@ export type BridgeToGatewayNetMsg =
   | { event: 'fetch'; data: NetFetchRequestMsg }
   | { event: 'wsOpen'; data: NetWsOpen }
   | { event: 'wsClose'; data: NetWsClose }
-  | { event: 'wsSend'; data: NetWsSend };
+  | { event: 'wsSend'; data: NetWsSend }
+  | { event: 'streamOpen'; data: NetStreamOpen }
+  | { event: 'streamCancel'; data: NetStreamCancel };
 
 export type BridgeToGatewayNotificationsMsg =
   | { event: 'list'; data: NotificationsListRequest }
@@ -326,15 +329,15 @@ export type GatewayToBridgeMsgData =
 export type GatewayToBridgeNetMsg =
   | { event: 'fetchReply'; data: NetFetchReply }
   | { event: 'fetchErrorReply'; data: NetFetchErrorReply }
-  | { event: 'fetchStreamBegin'; data: NetFetchStreamBegin }
-  | { event: 'fetchStreamChunk'; data: NetFetchStreamChunk }
-  | { event: 'fetchStreamEnd'; data: NetFetchStreamEnd }
   | { event: 'wsOpenReply'; data: NetWsOpenReply }
   | { event: 'wsErrorReply'; data: NetWsErrorReply }
-  | { event: 'wsOpened'; data: NetWsOpened }
   | { event: 'wsMessage'; data: NetWsMessage }
   | { event: 'wsClosed'; data: NetWsClosed }
-  | { event: 'wsErrorEvent'; data: NetWsErrorEvent };
+  | { event: 'wsErrorEvent'; data: NetWsErrorEvent }
+  | { event: 'streamBegin'; data: StreamBegin }
+  | { event: 'streamChunk'; data: StreamChunk }
+  | { event: 'streamEnd'; data: StreamEnd }
+  | { event: 'streamError'; data: StreamError };
 
 export type GatewayToBridgeNotificationsMsg =
   | { event: 'listReply'; data: NotificationsListReply }
@@ -424,6 +427,10 @@ export type NetFetchReply = { response: NetFetchResponse };
 
 export type NetFetchRequestMsg = { request: NetFetchRequest };
 
+export type NetStreamCancel = { streamId: Uint8Array };
+
+export type NetStreamOpen = { streamId: Uint8Array; request: NetFetchRequest };
+
 export type NetWsClose = { connectionId: Uint8Array; code: number | null; reason: string | null };
 
 export type NetWsClosed = { connectionId: Uint8Array; code: number; reason: string };
@@ -434,11 +441,14 @@ export type NetWsErrorReply = { error: WsError };
 
 export type NetWsMessage = { connectionId: Uint8Array; frame: WsFrame };
 
-export type NetWsOpen = { url: string; protocols: Array<string> | null; headers: Array<HttpHeader> | null };
+export type NetWsOpen = {
+  connectionId: Uint8Array;
+  url: string;
+  protocols: Array<string> | null;
+  headers: Array<HttpHeader> | null;
+};
 
-export type NetWsOpenReply = { connectionId: Uint8Array; acceptedProtocol: string | null };
-
-export type NetWsOpened = { connectionId: Uint8Array; acceptedProtocol: string | null };
+export type NetWsOpenReply = { acceptedProtocol: string | null };
 
 export type NetWsSend = { connectionId: Uint8Array; frame: WsFrame };
 

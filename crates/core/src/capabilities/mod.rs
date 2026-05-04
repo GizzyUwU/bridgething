@@ -1,17 +1,14 @@
 //! Live `Capabilities` snapshot the daemon publishes to webapps.
 //!
-//! Three feeds merge into one snapshot:
-//!
-//! - The companion's `GatewayCapabilities` announce (uri schemes,
-//!   network info, audio capabilities, surface availability bits the
-//!   companion claims).
-//! - The daemon's local `DAEMON_BACKED` table (which surfaces have a
-//!   real backend wired in core today).
-//! - `AuthorityRegistry`'s live scope set.
-//!
-//! The first two are AND'd to produce the published
-//! `SurfaceAvailability` -- a surface is "available" only when the
-//! companion claims it AND the daemon has a backend ready to serve.
+//! Two feeds merge into the published snapshot: the companion's
+//! `GatewayCapabilities` announce (uri schemes, network info, audio
+//! capabilities, surface availability bits the companion claims) and
+//! `AuthorityRegistry`'s live scope set. The companion's
+//! `available` bits pass through unmodified -- the Car Thing has no
+//! network stack, no speaker, no GPS, no notification source, so no
+//! surface here is daemon-backed in the literal sense. The daemon
+//! routes; the gateway provides. Webapps that hit a half-built
+//! routing handler get `WireError::Unimplemented` at call time.
 //!
 //! All authority mutations funnel through this registry so a snapshot
 //! rebuild + broadcast happens at the same instant the underlying
@@ -33,16 +30,6 @@ use libbridgething::{
 use crate::{
   authority::AuthorityRegistry,
   net::{ClientMan, WSResult},
-};
-
-/// Daemon-side surface availability: which surfaces have a real
-/// backend wired in core today. Flip each bit true as the matching backend lands.
-const DAEMON_BACKED: SurfaceAvailability = SurfaceAvailability {
-  geo: false,
-  notifications: false,
-  net_fetch: false,
-  net_ws: false,
-  audio_tts: false,
 };
 
 #[derive(Debug, Clone)]
@@ -84,11 +71,10 @@ impl CapabilitiesRegistry {
   }
 
   pub async fn clear_companion(&self, addr: Address) -> WSResult<()> {
-    let removed = {
+    {
       let mut guard = self.inner.announces.write().expect("announces lock poisoned");
-      guard.remove(&addr).is_some()
-    };
-
+      guard.remove(&addr);
+    }
     self.inner.authority.drop_all();
     self.rebuild_and_broadcast().await
   }
@@ -117,7 +103,7 @@ impl CapabilitiesRegistry {
     match primary {
       Some(caps) => Capabilities {
         gateway: Some(caps.gateway.clone()),
-        available: and_availability(caps.available, DAEMON_BACKED),
+        available: caps.available,
         authority,
         uri_schemes: caps.uri_schemes.clone(),
         network: caps.network,
@@ -154,16 +140,6 @@ impl CapabilitiesRegistry {
         }
       }
     }
-  }
-}
-
-fn and_availability(a: SurfaceAvailability, b: SurfaceAvailability) -> SurfaceAvailability {
-  SurfaceAvailability {
-    geo: a.geo && b.geo,
-    notifications: a.notifications && b.notifications,
-    net_fetch: a.net_fetch && b.net_fetch,
-    net_ws: a.net_ws && b.net_ws,
-    audio_tts: a.audio_tts && b.audio_tts,
   }
 }
 
@@ -240,30 +216,26 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn announce_populates_snapshot_and_ands_availability() {
+  async fn announce_populates_snapshot_with_companion_availability() {
     let (client_man, _listener) = crate::net::create_client_manager();
     let auth = AuthorityRegistry::new();
     let reg = CapabilitiesRegistry::new(client_man, auth);
 
     let addr: Address = "00:11:22:33:44:55".parse().unwrap();
-    // Companion claims everything; daemon backs none → all-false.
-    let caps = caps_with(
-      vec!["spotify:", "Apple-Music"],
-      SurfaceAvailability {
-        geo: true,
-        notifications: true,
-        net_fetch: true,
-        net_ws: true,
-        audio_tts: true,
-      },
-    );
+    let claimed = SurfaceAvailability {
+      geo: true,
+      notifications: true,
+      net_fetch: true,
+      net_ws: true,
+      audio_tts: true,
+    };
+    let caps = caps_with(vec!["spotify:", "Apple-Music"], claimed);
     let _ = reg.set_announce(addr, caps).await;
 
     let snap = reg.snapshot();
     assert!(snap.gateway.is_some());
     assert_eq!(snap.uri_schemes, vec!["spotify", "apple-music"]);
-
-    assert_eq!(snap.available, SurfaceAvailability::default());
+    assert_eq!(snap.available, claimed);
   }
 
   #[tokio::test]

@@ -1550,15 +1550,9 @@ public struct NetErrorRequestFailedInner: Codable, Sendable {
 	}
 }
 public enum NetError: Codable, Sendable {
-	/// Gateway-side request failed before headers were received (DNS, TLS,
-	/// connect refused, transport hiccup).
 	case requestFailed(NetErrorRequestFailedInner)
-	/// `timeout_ms` elapsed before headers were received.
 	case timeout
-	/// Gateway is connected but the Net surface is unavailable
-	/// (`SurfaceAvailability::net_fetch` is false).
 	case unavailable
-	/// The companion is not connected.
 	case noGateway
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -1619,8 +1613,6 @@ public struct NetFetchErrorReply: Codable, Sendable {
 	}
 }
 
-/// Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
-/// otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
 public struct NetFetchResponse: Codable, Sendable {
 	public let status: UInt16
 	public let headers: [HttpHeader]
@@ -1660,9 +1652,6 @@ public enum RedirectPolicy: String, Codable, Sendable {
 	case error
 }
 
-/// Outbound HTTP request. `body` is inline; webapps pushing large bodies
-/// should chunk-stream via `AssetCache` and pass an asset id in a future
-/// extension. `timeout_ms` defaults to gateway choice when None.
 public struct NetFetchRequest: Codable, Sendable {
 	public let url: String
 	public let method: HttpMethod
@@ -1689,44 +1678,21 @@ public struct NetFetchRequestMsg: Codable, Sendable {
 	}
 }
 
-/// First frame of a streamed response. `total_size` is `Content-Length`
-/// when the gateway has it; otherwise `None` and the consumer accumulates
-/// chunks until `End`.
-public struct NetFetchStreamBegin: Codable, Sendable {
-	public let requestId: Data
-	public let status: UInt16
-	public let headers: [HttpHeader]
-	public let totalSize: UInt32?
+public struct NetStreamCancel: Codable, Sendable {
+	public let streamId: Data
 
-	public init(requestId: Data, status: UInt16, headers: [HttpHeader], totalSize: UInt32?) {
-		self.requestId = requestId
-		self.status = status
-		self.headers = headers
-		self.totalSize = totalSize
+	public init(streamId: Data) {
+		self.streamId = streamId
 	}
 }
 
-/// One body chunk of a streamed response. Chunks arrive in order;
-/// `offset` is the byte position of `bytes[0]` within the full body.
-public struct NetFetchStreamChunk: Codable, Sendable {
-	public let requestId: Data
-	public let offset: UInt32
-	public let bytes: Data
+public struct NetStreamOpen: Codable, Sendable {
+	public let streamId: Data
+	public let request: NetFetchRequest
 
-	public init(requestId: Data, offset: UInt32, bytes: Data) {
-		self.requestId = requestId
-		self.offset = offset
-		self.bytes = bytes
-	}
-}
-
-/// Terminates a stream. After `End` no further chunks for `request_id`
-/// are valid.
-public struct NetFetchStreamEnd: Codable, Sendable {
-	public let requestId: Data
-
-	public init(requestId: Data) {
-		self.requestId = requestId
+	public init(streamId: Data, request: NetFetchRequest) {
+		self.streamId = streamId
+		self.request = request
 	}
 }
 
@@ -1773,20 +1739,13 @@ public struct WsErrorProtocolErrorInner: Codable, Sendable {
 	}
 }
 public enum WsError: Codable, Sendable {
-	/// Gateway-side connect failed (DNS, TLS, refused).
 	case connectFailed(WsErrorConnectFailedInner)
-	/// Per-connection backpressure cap (64 frames or 1 MB) hit.
-	case backpressure
-	/// Frame exceeded the per-connection 16 KB cap.
 	case frameTooLarge
-	/// The companion went away while the WS was open.
 	case gatewayDisconnected
-	/// Server-side WS protocol violation surfaced by the underlying lib.
 	case protocolError(WsErrorProtocolErrorInner)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case connectFailed,
-			backpressure,
 			frameTooLarge,
 			gatewayDisconnected,
 			protocolError
@@ -1805,9 +1764,6 @@ public enum WsError: Codable, Sendable {
 					self = .connectFailed(content)
 					return
 				}
-			case .backpressure:
-				self = .backpressure
-				return
 			case .frameTooLarge:
 				self = .frameTooLarge
 				return
@@ -1830,8 +1786,6 @@ public enum WsError: Codable, Sendable {
 		case .connectFailed(let content):
 			try container.encode(CodingKeys.connectFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .backpressure:
-			try container.encode(CodingKeys.backpressure, forKey: .type)
 		case .frameTooLarge:
 			try container.encode(CodingKeys.frameTooLarge, forKey: .type)
 		case .gatewayDisconnected:
@@ -1861,7 +1815,6 @@ public struct NetWsErrorReply: Codable, Sendable {
 	}
 }
 
-/// One WS frame. The daemon does not split or merge frames.
 public enum WsFrame: Codable, Sendable {
 	case text(String)
 	case binary(Data)
@@ -1918,11 +1871,13 @@ public struct NetWsMessage: Codable, Sendable {
 }
 
 public struct NetWsOpen: Codable, Sendable {
+	public let connectionId: Data
 	public let url: String
 	public let protocols: [String]?
 	public let headers: [HttpHeader]?
 
-	public init(url: String, protocols: [String]?, headers: [HttpHeader]?) {
+	public init(connectionId: Data, url: String, protocols: [String]?, headers: [HttpHeader]?) {
+		self.connectionId = connectionId
 		self.url = url
 		self.protocols = protocols
 		self.headers = headers
@@ -1930,21 +1885,9 @@ public struct NetWsOpen: Codable, Sendable {
 }
 
 public struct NetWsOpenReply: Codable, Sendable {
-	public let connectionId: Data
 	public let acceptedProtocol: String?
 
-	public init(connectionId: Data, acceptedProtocol: String?) {
-		self.connectionId = connectionId
-		self.acceptedProtocol = acceptedProtocol
-	}
-}
-
-public struct NetWsOpened: Codable, Sendable {
-	public let connectionId: Data
-	public let acceptedProtocol: String?
-
-	public init(connectionId: Data, acceptedProtocol: String?) {
-		self.connectionId = connectionId
+	public init(acceptedProtocol: String?) {
 		self.acceptedProtocol = acceptedProtocol
 	}
 }
@@ -2975,6 +2918,61 @@ public struct Station: Codable, Sendable {
 	}
 }
 
+/// First event of an open stream. Carries the response status, headers,
+/// and (when known) total payload size so the consumer can preallocate
+/// or display progress. Subsequent `StreamChunk` and `StreamEnd` events
+/// for the same `stream_id` follow.
+public struct StreamBegin: Codable, Sendable {
+	public let streamId: Data
+	public let status: UInt16
+	public let headers: [HttpHeader]
+	public let totalSize: UInt32?
+
+	public init(streamId: Data, status: UInt16, headers: [HttpHeader], totalSize: UInt32?) {
+		self.streamId = streamId
+		self.status = status
+		self.headers = headers
+		self.totalSize = totalSize
+	}
+}
+
+/// One body chunk. Chunks arrive in order; `offset` is the byte
+/// position of `bytes[0]` within the full body.
+public struct StreamChunk: Codable, Sendable {
+	public let streamId: Data
+	public let offset: UInt32
+	public let bytes: Data
+
+	public init(streamId: Data, offset: UInt32, bytes: Data) {
+		self.streamId = streamId
+		self.offset = offset
+		self.bytes = bytes
+	}
+}
+
+/// Terminates a stream. After `End` no further chunks for `stream_id`
+/// are valid and the daemon clears its routing entry.
+public struct StreamEnd: Codable, Sendable {
+	public let streamId: Data
+
+	public init(streamId: Data) {
+		self.streamId = streamId
+	}
+}
+
+/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// daemon clears its routing entry. The `error` shape is shared with
+/// `fetch` since the failure modes are identical.
+public struct StreamError: Codable, Sendable {
+	public let streamId: Data
+	public let error: NetError
+
+	public init(streamId: Data, error: NetError) {
+		self.streamId = streamId
+		self.error = error
+	}
+}
+
 /// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
 /// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
 /// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
@@ -3448,12 +3446,16 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 	case wsOpen(NetWsOpen)
 	case wsClose(NetWsClose)
 	case wsSend(NetWsSend)
+	case streamOpen(NetStreamOpen)
+	case streamCancel(NetStreamCancel)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case fetch,
 			wsOpen,
 			wsClose,
-			wsSend
+			wsSend,
+			streamOpen,
+			streamCancel
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -3484,6 +3486,16 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 					self = .wsSend(content)
 					return
 				}
+			case .streamOpen:
+				if let content = try? container.decode(NetStreamOpen.self, forKey: .data) {
+					self = .streamOpen(content)
+					return
+				}
+			case .streamCancel:
+				if let content = try? container.decode(NetStreamCancel.self, forKey: .data) {
+					self = .streamCancel(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayNetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayNetMsg"))
@@ -3503,6 +3515,12 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .wsSend(let content):
 			try container.encode(CodingKeys.wsSend, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamOpen(let content):
+			try container.encode(CodingKeys.streamOpen, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamCancel(let content):
+			try container.encode(CodingKeys.streamCancel, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -4412,28 +4430,28 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 public enum GatewayToBridgeNetMsg: Codable, Sendable {
 	case fetchReply(NetFetchReply)
 	case fetchErrorReply(NetFetchErrorReply)
-	case fetchStreamBegin(NetFetchStreamBegin)
-	case fetchStreamChunk(NetFetchStreamChunk)
-	case fetchStreamEnd(NetFetchStreamEnd)
 	case wsOpenReply(NetWsOpenReply)
 	case wsErrorReply(NetWsErrorReply)
-	case wsOpened(NetWsOpened)
 	case wsMessage(NetWsMessage)
 	case wsClosed(NetWsClosed)
 	case wsErrorEvent(NetWsErrorEvent)
+	case streamBegin(StreamBegin)
+	case streamChunk(StreamChunk)
+	case streamEnd(StreamEnd)
+	case streamError(StreamError)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case fetchReply,
 			fetchErrorReply,
-			fetchStreamBegin,
-			fetchStreamChunk,
-			fetchStreamEnd,
 			wsOpenReply,
 			wsErrorReply,
-			wsOpened,
 			wsMessage,
 			wsClosed,
-			wsErrorEvent
+			wsErrorEvent,
+			streamBegin,
+			streamChunk,
+			streamEnd,
+			streamError
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4454,21 +4472,6 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 					self = .fetchErrorReply(content)
 					return
 				}
-			case .fetchStreamBegin:
-				if let content = try? container.decode(NetFetchStreamBegin.self, forKey: .data) {
-					self = .fetchStreamBegin(content)
-					return
-				}
-			case .fetchStreamChunk:
-				if let content = try? container.decode(NetFetchStreamChunk.self, forKey: .data) {
-					self = .fetchStreamChunk(content)
-					return
-				}
-			case .fetchStreamEnd:
-				if let content = try? container.decode(NetFetchStreamEnd.self, forKey: .data) {
-					self = .fetchStreamEnd(content)
-					return
-				}
 			case .wsOpenReply:
 				if let content = try? container.decode(NetWsOpenReply.self, forKey: .data) {
 					self = .wsOpenReply(content)
@@ -4477,11 +4480,6 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 			case .wsErrorReply:
 				if let content = try? container.decode(NetWsErrorReply.self, forKey: .data) {
 					self = .wsErrorReply(content)
-					return
-				}
-			case .wsOpened:
-				if let content = try? container.decode(NetWsOpened.self, forKey: .data) {
-					self = .wsOpened(content)
 					return
 				}
 			case .wsMessage:
@@ -4499,6 +4497,26 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 					self = .wsErrorEvent(content)
 					return
 				}
+			case .streamBegin:
+				if let content = try? container.decode(StreamBegin.self, forKey: .data) {
+					self = .streamBegin(content)
+					return
+				}
+			case .streamChunk:
+				if let content = try? container.decode(StreamChunk.self, forKey: .data) {
+					self = .streamChunk(content)
+					return
+				}
+			case .streamEnd:
+				if let content = try? container.decode(StreamEnd.self, forKey: .data) {
+					self = .streamEnd(content)
+					return
+				}
+			case .streamError:
+				if let content = try? container.decode(StreamError.self, forKey: .data) {
+					self = .streamError(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeNetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeNetMsg"))
@@ -4513,23 +4531,11 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 		case .fetchErrorReply(let content):
 			try container.encode(CodingKeys.fetchErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .fetchStreamBegin(let content):
-			try container.encode(CodingKeys.fetchStreamBegin, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .fetchStreamChunk(let content):
-			try container.encode(CodingKeys.fetchStreamChunk, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .fetchStreamEnd(let content):
-			try container.encode(CodingKeys.fetchStreamEnd, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .wsOpenReply(let content):
 			try container.encode(CodingKeys.wsOpenReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .wsErrorReply(let content):
 			try container.encode(CodingKeys.wsErrorReply, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .wsOpened(let content):
-			try container.encode(CodingKeys.wsOpened, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .wsMessage(let content):
 			try container.encode(CodingKeys.wsMessage, forKey: .event)
@@ -4539,6 +4545,18 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .wsErrorEvent(let content):
 			try container.encode(CodingKeys.wsErrorEvent, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamBegin(let content):
+			try container.encode(CodingKeys.streamBegin, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamChunk(let content):
+			try container.encode(CodingKeys.streamChunk, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamEnd(let content):
+			try container.encode(CodingKeys.streamEnd, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamError(let content):
+			try container.encode(CodingKeys.streamError, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

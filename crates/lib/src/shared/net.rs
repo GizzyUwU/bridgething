@@ -1,17 +1,23 @@
-//! Net surface — webapp HTTP / WebSocket access proxied through the
-//! connected companion. Inline-only response bodies up to 16 KB; larger
-//! responses use the `NetFetchStream*` chunk shape on the Bulk lane.
-//! TLS terminates at the gateway; the wire is plaintext over BT.
+//! Net surface — webapp HTTP / WebSocket / Stream access proxied
+//! through the connected companion. The Car Thing has no network of
+//! its own; the daemon is a routing layer between webapp surfaces and
+//! the companion's network stack. TLS terminates at the gateway; the
+//! Bluetooth wire is plaintext.
+//!
+//! Three flows live here. **Fetch** is a typed request/response: the
+//! webapp asks for a URL, the gateway does the work, the response
+//! lands in one frame. Bulk priority on both legs keeps it from
+//! starving normal-lane traffic. **WebSocket** carries a `connection_id`
+//! the webapp's SDK assigns up front so reverse-direction event
+//! routing (server → webapp) is set up before the companion's ack
+//! arrives. **Stream** is a unidirectional command + event flow for
+//! cases where the webapp wants bytes incrementally as they arrive
+//! (video, large media, server-sent events).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
-
-/// Single-frame inline payload cap. Daemon-side fetch returns inline body
-/// only when the response is at most this size; larger bodies switch to
-/// `NetFetchStreamBegin`/`Chunk`/`End` on the Bulk lane.
-pub const NET_FETCH_INLINE_MAX_BYTES: usize = 16 * 1024;
 
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -52,9 +58,6 @@ pub enum RedirectPolicy {
   Error,
 }
 
-/// Outbound HTTP request. `body` is inline; webapps pushing large bodies
-/// should chunk-stream via `AssetCache` and pass an asset id in a future
-/// extension. `timeout_ms` defaults to gateway choice when None.
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -72,8 +75,6 @@ pub struct NetFetchRequest {
   pub redirect: RedirectPolicy,
 }
 
-/// Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
-/// otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
 #[typeshare]
 #[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
@@ -88,54 +89,67 @@ pub struct NetFetchResponse {
   pub body: Vec<u8>,
 }
 
-/// First frame of a streamed response. `total_size` is `Content-Length`
-/// when the gateway has it; otherwise `None` and the consumer accumulates
-/// chunks until `End`.
+/// First event of an open stream. Carries the response status, headers,
+/// and (when known) total payload size so the consumer can preallocate
+/// or display progress. Subsequent `StreamChunk` and `StreamEnd` events
+/// for the same `stream_id` follow.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
-pub struct NetFetchStreamBegin {
-  #[ts(type = "Uint8Array")]
+pub struct StreamBegin {
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
-  pub request_id: Uuid,
+  pub stream_id: Uuid,
   pub status: u16,
   pub headers: Vec<HttpHeader>,
   pub total_size: Option<u32>,
 }
 
-/// One body chunk of a streamed response. Chunks arrive in order;
-/// `offset` is the byte position of `bytes[0]` within the full body.
+/// One body chunk. Chunks arrive in order; `offset` is the byte
+/// position of `bytes[0]` within the full body.
 #[typeshare]
 #[serde_with::serde_as]
-#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
-pub struct NetFetchStreamChunk {
-  #[ts(type = "Uint8Array")]
+pub struct StreamChunk {
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
-  pub request_id: Uuid,
+  pub stream_id: Uuid,
   pub offset: u32,
   #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
   pub bytes: Vec<u8>,
 }
 
-/// Terminates a stream. After `End` no further chunks for `request_id`
-/// are valid.
+/// Terminates a stream. After `End` no further chunks for `stream_id`
+/// are valid and the daemon clears its routing entry.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
-pub struct NetFetchStreamEnd {
-  #[ts(type = "Uint8Array")]
+pub struct StreamEnd {
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
-  pub request_id: Uuid,
+  pub stream_id: Uuid,
 }
 
-/// One WS frame. The daemon does not split or merge frames.
+/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// daemon clears its routing entry. The `error` shape is shared with
+/// `fetch` since the failure modes are identical.
+#[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct StreamError {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub stream_id: Uuid,
+  pub error: NetError,
+}
+
 #[typeshare]
 #[serde_with::serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -156,15 +170,9 @@ pub enum WsFrame {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum WsError {
-  /// Gateway-side connect failed (DNS, TLS, refused).
   ConnectFailed { reason: String },
-  /// Per-connection backpressure cap (64 frames or 1 MB) hit.
-  Backpressure,
-  /// Frame exceeded the per-connection 16 KB cap.
   FrameTooLarge,
-  /// The companion went away while the WS was open.
   GatewayDisconnected,
-  /// Server-side WS protocol violation surfaced by the underlying lib.
   ProtocolError { reason: String },
 }
 
@@ -174,14 +182,8 @@ pub enum WsError {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum NetError {
-  /// Gateway-side request failed before headers were received (DNS, TLS,
-  /// connect refused, transport hiccup).
   RequestFailed { reason: String },
-  /// `timeout_ms` elapsed before headers were received.
   Timeout,
-  /// Gateway is connected but the Net surface is unavailable
-  /// (`SurfaceAvailability::net_fetch` is false).
   Unavailable,
-  /// The companion is not connected.
   NoGateway,
 }

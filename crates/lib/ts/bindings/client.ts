@@ -24,9 +24,6 @@ import type {
   NetError,
   NetFetchRequest,
   NetFetchResponse,
-  NetFetchStreamBegin,
-  NetFetchStreamChunk,
-  NetFetchStreamEnd,
   Notification,
   NotificationError,
   NotificationsPage,
@@ -44,6 +41,10 @@ import type {
   RecommendationsResult,
   RepeatMode,
   SearchResult,
+  StreamBegin,
+  StreamChunk,
+  StreamEnd,
+  StreamError,
   TimeInfo,
   WebappInfo,
   WsError,
@@ -165,15 +166,15 @@ export type BridgeToClientMsgData =
 export type BridgeToClientNetMsg =
   | { event: 'fetchReply'; data: NetFetchReply }
   | { event: 'fetchErrorReply'; data: NetFetchErrorReply }
-  | { event: 'fetchStreamBegin'; data: NetFetchStreamBegin }
-  | { event: 'fetchStreamChunk'; data: NetFetchStreamChunk }
-  | { event: 'fetchStreamEnd'; data: NetFetchStreamEnd }
   | { event: 'wsOpenReply'; data: NetWsOpenReply }
   | { event: 'wsErrorReply'; data: NetWsErrorReply }
-  | { event: 'wsOpened'; data: NetWsOpened }
   | { event: 'wsMessage'; data: NetWsMessage }
   | { event: 'wsClosed'; data: NetWsClosed }
-  | { event: 'wsErrorEvent'; data: NetWsErrorEvent };
+  | { event: 'wsErrorEvent'; data: NetWsErrorEvent }
+  | { event: 'streamBegin'; data: StreamBegin }
+  | { event: 'streamChunk'; data: StreamChunk }
+  | { event: 'streamEnd'; data: StreamEnd }
+  | { event: 'streamError'; data: StreamError };
 
 export type BridgeToClientNotificationsMsg =
   | { event: 'listReply'; data: NotificationsListReply }
@@ -312,7 +313,9 @@ export type ClientToBridgeNetMsg =
   | { event: 'fetch'; data: NetFetch }
   | { event: 'wsOpen'; data: NetWsOpen }
   | { event: 'wsClose'; data: NetWsClose }
-  | { event: 'wsSend'; data: NetWsSend };
+  | { event: 'wsSend'; data: NetWsSend }
+  | { event: 'streamOpen'; data: NetStreamOpen }
+  | { event: 'streamCancel'; data: NetStreamCancel };
 
 export type ClientToBridgeNotificationsMsg =
   | { event: 'list'; data: NotificationsList }
@@ -494,6 +497,10 @@ export type NetFetchErrorReply = { error: NetError };
 
 export type NetFetchReply = { response: NetFetchResponse };
 
+export type NetStreamCancel = { streamId: string };
+
+export type NetStreamOpen = { streamId: string; request: NetFetchRequest };
+
 export type NetWsClose = { connectionId: string; code: number | null; reason: string | null };
 
 export type NetWsClosed = { connectionId: string; code: number; reason: string };
@@ -504,11 +511,14 @@ export type NetWsErrorReply = { error: WsError };
 
 export type NetWsMessage = { connectionId: string; frame: WsFrame };
 
-export type NetWsOpen = { url: string; protocols: Array<string> | null; headers: Array<HttpHeader> | null };
+export type NetWsOpen = {
+  connectionId: string;
+  url: string;
+  protocols: Array<string> | null;
+  headers: Array<HttpHeader> | null;
+};
 
-export type NetWsOpenReply = { connectionId: string; acceptedProtocol: string | null };
-
-export type NetWsOpened = { connectionId: string; acceptedProtocol: string | null };
+export type NetWsOpenReply = { acceptedProtocol: string | null };
 
 export type NetWsSend = { connectionId: string; frame: WsFrame };
 

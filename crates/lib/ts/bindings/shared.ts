@@ -304,11 +304,6 @@ export type NetError =
   | { type: 'unavailable' }
   | { type: 'noGateway' };
 
-/**
- * Outbound HTTP request. `body` is inline; webapps pushing large bodies
- * should chunk-stream via `AssetCache` and pass an asset id in a future
- * extension. `timeout_ms` defaults to gateway choice when None.
- */
 export type NetFetchRequest = {
   url: string;
   method: HttpMethod;
@@ -318,35 +313,7 @@ export type NetFetchRequest = {
   redirect: RedirectPolicy;
 };
 
-/**
- * Inline response. Used when `body.len() <= NET_FETCH_INLINE_MAX_BYTES`;
- * otherwise the response arrives as `NetFetchStreamBegin/Chunk/End`.
- */
 export type NetFetchResponse = { status: number; headers: Array<HttpHeader>; body: Uint8Array };
-
-/**
- * First frame of a streamed response. `total_size` is `Content-Length`
- * when the gateway has it; otherwise `None` and the consumer accumulates
- * chunks until `End`.
- */
-export type NetFetchStreamBegin = {
-  requestId: Uint8Array;
-  status: number;
-  headers: Array<HttpHeader>;
-  totalSize: number | null;
-};
-
-/**
- * One body chunk of a streamed response. Chunks arrive in order;
- * `offset` is the byte position of `bytes[0]` within the full body.
- */
-export type NetFetchStreamChunk = { requestId: Uint8Array; offset: number; bytes: Uint8Array };
-
-/**
- * Terminates a stream. After `End` no further chunks for `request_id`
- * are valid.
- */
-export type NetFetchStreamEnd = { requestId: Uint8Array };
 
 /**
  * What kind of network the companion's host is currently using. `metered`
@@ -671,6 +638,33 @@ export type Show = {
 export type Station = { uri: string; name: string; seed: string | null; artworkId: string | null };
 
 /**
+ * First event of an open stream. Carries the response status, headers,
+ * and (when known) total payload size so the consumer can preallocate
+ * or display progress. Subsequent `StreamChunk` and `StreamEnd` events
+ * for the same `stream_id` follow.
+ */
+export type StreamBegin = { streamId: string; status: number; headers: Array<HttpHeader>; totalSize: number | null };
+
+/**
+ * One body chunk. Chunks arrive in order; `offset` is the byte
+ * position of `bytes[0]` within the full body.
+ */
+export type StreamChunk = { streamId: string; offset: number; bytes: Uint8Array };
+
+/**
+ * Terminates a stream. After `End` no further chunks for `stream_id`
+ * are valid and the daemon clears its routing entry.
+ */
+export type StreamEnd = { streamId: string };
+
+/**
+ * Stream failed mid-flight (or before the first byte). Terminal — the
+ * daemon clears its routing entry. The `error` shape is shared with
+ * `fetch` since the failure modes are identical.
+ */
+export type StreamError = { streamId: string; error: NetError };
+
+/**
  * Bool feature flags the daemon exposes to webapps. Each is true when the
  * surface has both a backing implementation and (where applicable) a
  * connected companion claiming to provide it. False = the surface will
@@ -723,12 +717,8 @@ export type WebappSource = 'builtin' | 'installed';
 
 export type WsError =
   | { type: 'connectFailed'; data: { reason: string } }
-  | { type: 'backpressure' }
   | { type: 'frameTooLarge' }
   | { type: 'gatewayDisconnected' }
   | { type: 'protocolError'; data: { reason: string } };
 
-/**
- * One WS frame. The daemon does not split or merge frames.
- */
 export type WsFrame = { type: 'text'; data: string } | { type: 'binary'; data: Uint8Array };

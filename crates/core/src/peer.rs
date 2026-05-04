@@ -34,6 +34,7 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{ClientMan, WSError},
   player::Player,
+  state::RouteTable,
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -45,15 +46,25 @@ pub struct PeerTracker {
   client_man: ClientMan,
   player: Player,
   capabilities: CapabilitiesRegistry,
+  ws_routes: RouteTable,
+  stream_routes: RouteTable,
 }
 
 impl PeerTracker {
-  pub fn new(client_man: ClientMan, player: Player, capabilities: CapabilitiesRegistry) -> Self {
+  pub fn new(
+    client_man: ClientMan,
+    player: Player,
+    capabilities: CapabilitiesRegistry,
+    ws_routes: RouteTable,
+    stream_routes: RouteTable,
+  ) -> Self {
     Self {
       inner: RwLock::new(HashMap::new()),
       client_man,
       player,
       capabilities,
+      ws_routes,
+      stream_routes,
     }
   }
 
@@ -224,19 +235,51 @@ impl PeerTracker {
       }
     }
 
-    if let Some(addr) = diff.companion_lost
-      && let Err(err) = self.capabilities.clear_companion(addr).await
-    {
-      tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
+    if let Some(addr) = diff.companion_lost {
+      if let Err(err) = self.capabilities.clear_companion(addr).await {
+        tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
+      }
+      self.tear_down_net_routes().await;
     }
 
     if errors.is_empty() { Ok(()) } else { Err(errors) }
   }
 
-  /// Replays the stock connection broadcasts for the currently-useful peer,
-  /// if any. Used when a stock webapp connects fresh and needs to be told
-  /// the phone is already there - the regular useful_link transitions
-  /// happened before this webapp opened its socket.
+  async fn tear_down_net_routes(&self) {
+    use libbridgething::{
+      NetError, StreamError, WsError,
+      client::{BridgeToClientNetMsgEvent, NetWsClosed, NetWsErrorEvent},
+    };
+
+    for (connection_id, owner) in self.ws_routes.drain_all() {
+      let event = BridgeToClientNetMsgEvent::WsErrorEvent(NetWsErrorEvent {
+        connection_id,
+        error: WsError::GatewayDisconnected,
+      });
+      if let Err(err) = self.client_man.send_event(owner, event).await {
+        tracing::trace!(?err, "ws cleanup send failed");
+      }
+      let closed = BridgeToClientNetMsgEvent::WsClosed(NetWsClosed {
+        connection_id,
+        code: 1006,
+        reason: "gateway disconnected".into(),
+      });
+      if let Err(err) = self.client_man.send_event(owner, closed).await {
+        tracing::trace!(?err, "ws cleanup send failed");
+      }
+    }
+
+    for (stream_id, owner) in self.stream_routes.drain_all() {
+      let event = BridgeToClientNetMsgEvent::StreamError(StreamError {
+        stream_id,
+        error: NetError::NoGateway,
+      });
+      if let Err(err) = self.client_man.send_event(owner, event).await {
+        tracing::trace!(?err, "stream cleanup send failed");
+      }
+    }
+  }
+
   pub async fn resync_stock_connection(&self) -> PeerResult<()> {
     let device = {
       let peers = self.inner.read().await;

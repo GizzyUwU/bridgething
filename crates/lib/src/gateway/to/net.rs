@@ -40,6 +40,9 @@ pub struct NetFetchRequestMsg {
   error_variant = WsErrorReply,
 )]
 pub struct NetWsOpen {
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub connection_id: Uuid,
   pub url: String,
   pub protocols: Option<Vec<String>>,
   pub headers: Option<Vec<HttpHeader>>,
@@ -70,6 +73,27 @@ pub struct NetWsSend {
 }
 
 #[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct NetStreamOpen {
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub stream_id: Uuid,
+  pub request: NetFetchRequest,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct NetStreamCancel {
+  #[ts(type = "Uint8Array")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub stream_id: Uuid,
+}
+
+#[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -84,4 +108,8 @@ pub enum BridgeToGatewayNetMsg {
   WsClose(NetWsClose),
   #[bridge_command]
   WsSend(NetWsSend),
+  #[bridge_command]
+  StreamOpen(NetStreamOpen),
+  #[bridge_command]
+  StreamCancel(NetStreamCancel),
 }

@@ -59,9 +59,8 @@ import {
   type NetFetch,
   type NetFetchErrorReply,
   type NetFetchReply,
-  type NetFetchStreamBegin,
-  type NetFetchStreamChunk,
-  type NetFetchStreamEnd,
+  type NetStreamCancel,
+  type NetStreamOpen,
   type NetWsClose,
   type NetWsClosed,
   type NetWsErrorEvent,
@@ -69,7 +68,6 @@ import {
   type NetWsMessage,
   type NetWsOpen,
   type NetWsOpenReply,
-  type NetWsOpened,
   type NetWsSend,
   type Notification,
   type NotificationInvoke,
@@ -102,6 +100,10 @@ import {
   type SetVolume,
   type SkipToIndex,
   type StorageResponse,
+  type StreamBegin,
+  type StreamChunk,
+  type StreamEnd,
+  type StreamError,
   type TimeSnapshot,
   type Tts,
   type TtsCancel,
@@ -181,15 +183,15 @@ export type LibraryInboundHandlers = {
 export type NetInboundHandlers = {
   fetchReply: (msg: NetFetchReply) => void;
   fetchErrorReply: (msg: NetFetchErrorReply) => void;
-  fetchStreamBegin: (msg: NetFetchStreamBegin) => void;
-  fetchStreamChunk: (msg: NetFetchStreamChunk) => void;
-  fetchStreamEnd: (msg: NetFetchStreamEnd) => void;
   wsOpenReply: (msg: NetWsOpenReply) => void;
   wsErrorReply: (msg: NetWsErrorReply) => void;
-  wsOpened: (msg: NetWsOpened) => void;
   wsMessage: (msg: NetWsMessage) => void;
   wsClosed: (msg: NetWsClosed) => void;
   wsErrorEvent: (msg: NetWsErrorEvent) => void;
+  streamBegin: (msg: StreamBegin) => void;
+  streamChunk: (msg: StreamChunk) => void;
+  streamEnd: (msg: StreamEnd) => void;
+  streamError: (msg: StreamError) => void;
 };
 
 export type NotificationsInboundHandlers = {
@@ -1312,42 +1314,6 @@ export class NetSurface {
     });
   }
 
-  /** Subscribe to `Net::FetchStreamBegin` from the daemon. */
-  onFetchStreamBegin(handler: (msg: NetFetchStreamBegin) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'net') return;
-      const inner = data.data;
-      if (inner.event !== 'fetchStreamBegin') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Net::FetchStreamChunk` from the daemon. */
-  onFetchStreamChunk(handler: (msg: NetFetchStreamChunk) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'net') return;
-      const inner = data.data;
-      if (inner.event !== 'fetchStreamChunk') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Net::FetchStreamEnd` from the daemon. */
-  onFetchStreamEnd(handler: (msg: NetFetchStreamEnd) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'net') return;
-      const inner = data.data;
-      if (inner.event !== 'fetchStreamEnd') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Net::WsOpenReply` from the daemon. */
   onWsOpenReply(handler: (msg: NetWsOpenReply) => void): () => void {
     return this._client.on(event => {
@@ -1368,18 +1334,6 @@ export class NetSurface {
       if (data.type !== 'net') return;
       const inner = data.data;
       if (inner.event !== 'wsErrorReply') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Net::WsOpened` from the daemon. */
-  onWsOpened(handler: (msg: NetWsOpened) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'net') return;
-      const inner = data.data;
-      if (inner.event !== 'wsOpened') return;
       handler(inner.data);
     });
   }
@@ -1420,6 +1374,54 @@ export class NetSurface {
     });
   }
 
+  /** Subscribe to `Net::StreamBegin` from the daemon. */
+  onStreamBegin(handler: (msg: StreamBegin) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamBegin') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::StreamChunk` from the daemon. */
+  onStreamChunk(handler: (msg: StreamChunk) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamChunk') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::StreamEnd` from the daemon. */
+  onStreamEnd(handler: (msg: StreamEnd) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamEnd') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Net::StreamError` from the daemon. */
+  onStreamError(handler: (msg: StreamError) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'net') return;
+      const inner = data.data;
+      if (inner.event !== 'streamError') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Net` variants. */
   subscribe(handlers: NetInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1445,28 +1447,12 @@ export class NetSurface {
           handlers.fetchErrorReply?.(inner.data);
           return;
         }
-        case 'fetchStreamBegin': {
-          handlers.fetchStreamBegin?.(inner.data);
-          return;
-        }
-        case 'fetchStreamChunk': {
-          handlers.fetchStreamChunk?.(inner.data);
-          return;
-        }
-        case 'fetchStreamEnd': {
-          handlers.fetchStreamEnd?.(inner.data);
-          return;
-        }
         case 'wsOpenReply': {
           handlers.wsOpenReply?.(inner.data);
           return;
         }
         case 'wsErrorReply': {
           handlers.wsErrorReply?.(inner.data);
-          return;
-        }
-        case 'wsOpened': {
-          handlers.wsOpened?.(inner.data);
           return;
         }
         case 'wsMessage': {
@@ -1479,6 +1465,22 @@ export class NetSurface {
         }
         case 'wsErrorEvent': {
           handlers.wsErrorEvent?.(inner.data);
+          return;
+        }
+        case 'streamBegin': {
+          handlers.streamBegin?.(inner.data);
+          return;
+        }
+        case 'streamChunk': {
+          handlers.streamChunk?.(inner.data);
+          return;
+        }
+        case 'streamEnd': {
+          handlers.streamEnd?.(inner.data);
+          return;
+        }
+        case 'streamError': {
+          handlers.streamError?.(inner.data);
           return;
         }
         default: {
@@ -1505,6 +1507,26 @@ export class NetSurface {
       id: newUuidBytes(),
       meta: { kind: 'command' },
       data: { type: 'net', data: { event: 'wsSend', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Net::StreamOpen` to the daemon. */
+  async streamOpen(payload: NetStreamOpen): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'net', data: { event: 'streamOpen', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Net::StreamCancel` to the daemon. */
+  async streamCancel(payload: NetStreamCancel): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'net', data: { event: 'streamCancel', data: payload } },
     };
     await this._client.send(msg);
   }
@@ -3389,28 +3411,12 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.fetchErrorReply?.(inner.data);
             return;
           }
-          case 'fetchStreamBegin': {
-            innerHandlers.fetchStreamBegin?.(inner.data);
-            return;
-          }
-          case 'fetchStreamChunk': {
-            innerHandlers.fetchStreamChunk?.(inner.data);
-            return;
-          }
-          case 'fetchStreamEnd': {
-            innerHandlers.fetchStreamEnd?.(inner.data);
-            return;
-          }
           case 'wsOpenReply': {
             innerHandlers.wsOpenReply?.(inner.data);
             return;
           }
           case 'wsErrorReply': {
             innerHandlers.wsErrorReply?.(inner.data);
-            return;
-          }
-          case 'wsOpened': {
-            innerHandlers.wsOpened?.(inner.data);
             return;
           }
           case 'wsMessage': {
@@ -3423,6 +3429,22 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'wsErrorEvent': {
             innerHandlers.wsErrorEvent?.(inner.data);
+            return;
+          }
+          case 'streamBegin': {
+            innerHandlers.streamBegin?.(inner.data);
+            return;
+          }
+          case 'streamChunk': {
+            innerHandlers.streamChunk?.(inner.data);
+            return;
+          }
+          case 'streamEnd': {
+            innerHandlers.streamEnd?.(inner.data);
+            return;
+          }
+          case 'streamError': {
+            innerHandlers.streamError?.(inner.data);
             return;
           }
           default: {

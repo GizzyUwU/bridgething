@@ -447,6 +447,40 @@ public struct NetSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Net::StreamOpen` messages.
+  public var streamOpen: AsyncStream<(deviceId: String, msg: NetStreamOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .net(let outer) = message.data,
+             case .streamOpen(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Net::StreamCancel` messages.
+  public var streamCancel: AsyncStream<(deviceId: String, msg: NetStreamCancel)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .net(let outer) = message.data,
+             case .streamCancel(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
   public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
     AsyncStream { continuation in
@@ -480,62 +514,6 @@ public struct NetSurface: Sendable {
         continuation.finish()
       }
       continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send `Net::FetchStreamBegin` to every connected peer (broadcast).
-  public func fetchStreamBegin(_ payload: NetFetchStreamBegin, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamBegin(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Net::FetchStreamChunk` to every connected peer (broadcast).
-  public func fetchStreamChunk(_ payload: NetFetchStreamChunk, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamChunk(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Net::FetchStreamEnd` to every connected peer (broadcast).
-  public func fetchStreamEnd(_ payload: NetFetchStreamEnd, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamEnd(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Net::WsOpened` to every connected peer (broadcast).
-  public func wsOpened(_ payload: NetWsOpened, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsOpened(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
     }
   }
 
@@ -574,6 +552,62 @@ public struct NetSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsErrorEvent(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::StreamBegin` to every connected peer (broadcast).
+  public func streamBegin(_ payload: StreamBegin, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamBegin(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::StreamChunk` to every connected peer (broadcast).
+  public func streamChunk(_ payload: StreamChunk, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamChunk(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::StreamEnd` to every connected peer (broadcast).
+  public func streamEnd(_ payload: StreamEnd, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamEnd(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Net::StreamError` to every connected peer (broadcast).
+  public func streamError(_ payload: StreamError, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamError(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -1977,6 +2011,42 @@ public struct NetSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Net::StreamOpen` from this peer.
+  public var streamOpen: AsyncStream<NetStreamOpen> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .net(let outer) = message.data,
+             case .streamOpen(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Net::StreamCancel` from this peer.
+  public var streamCancel: AsyncStream<NetStreamCancel> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .net(let outer) = message.data,
+             case .streamCancel(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
   public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
     AsyncStream { continuation in
@@ -2015,30 +2085,6 @@ public struct NetSurfaceForDevice: Sendable {
     }
   }
 
-  /// Send `Net::FetchStreamBegin` to this peer.
-  public func fetchStreamBegin(_ payload: NetFetchStreamBegin, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamBegin(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Net::FetchStreamChunk` to this peer.
-  public func fetchStreamChunk(_ payload: NetFetchStreamChunk, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamChunk(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Net::FetchStreamEnd` to this peer.
-  public func fetchStreamEnd(_ payload: NetFetchStreamEnd, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.fetchStreamEnd(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Net::WsOpened` to this peer.
-  public func wsOpened(_ payload: NetWsOpened, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsOpened(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
   /// Send `Net::WsMessage` to this peer.
   public func wsMessage(_ payload: NetWsMessage, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsMessage(payload)))
@@ -2054,6 +2100,30 @@ public struct NetSurfaceForDevice: Sendable {
   /// Send `Net::WsErrorEvent` to this peer.
   public func wsErrorEvent(_ payload: NetWsErrorEvent, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.wsErrorEvent(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::StreamBegin` to this peer.
+  public func streamBegin(_ payload: StreamBegin, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamBegin(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::StreamChunk` to this peer.
+  public func streamChunk(_ payload: StreamChunk, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamChunk(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::StreamEnd` to this peer.
+  public func streamEnd(_ payload: StreamEnd, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamEnd(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Net::StreamError` to this peer.
+  public func streamError(_ payload: StreamError, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .net(.streamError(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

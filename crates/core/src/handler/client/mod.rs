@@ -179,6 +179,7 @@ impl ClientHandler {
           code,
           reason
         );
+        net::cleanup_owner_routes(&handle).await;
       }
       RecvMsgData::Error(error) => {
         tracing::error!("({}) failed to receive message: {:?}", &handle.from, error);

@@ -311,73 +311,23 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Send `Net::FetchStreamBegin` to every connected peer (broadcast). */
-  public suspend fun fetchStreamBegin(payload: NetFetchStreamBegin, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamBegin(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
+  /** Cross-peer stream of `Net::StreamOpen` messages. */
+  public val streamOpen: Flow<Pair<String, NetStreamOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.StreamOpen ?: return@mapNotNull null
+      it.deviceId to inner.data
     }
-  }
 
-  /** Send `Net::FetchStreamChunk` to every connected peer (broadcast). */
-  public suspend fun fetchStreamChunk(payload: NetFetchStreamChunk, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamChunk(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
+  /** Cross-peer stream of `Net::StreamCancel` messages. */
+  public val streamCancel: Flow<Pair<String, NetStreamCancel>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.StreamCancel ?: return@mapNotNull null
+      it.deviceId to inner.data
     }
-  }
-
-  /** Send `Net::FetchStreamEnd` to every connected peer (broadcast). */
-  public suspend fun fetchStreamEnd(payload: NetFetchStreamEnd, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamEnd(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Net::WsOpened` to every connected peer (broadcast). */
-  public suspend fun wsOpened(payload: NetWsOpened, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
-            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpened(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
 
   /** Send `Net::WsMessage` to every connected peer (broadcast). */
   public suspend fun wsMessage(payload: NetWsMessage, priority: Priority = Priority.Normal) {
@@ -423,6 +373,74 @@ public class NetSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID().toBytes(),
             meta = GatewayMsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::StreamBegin` to every connected peer (broadcast). */
+  public suspend fun streamBegin(payload: StreamBegin, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamBegin(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::StreamChunk` to every connected peer (broadcast). */
+  public suspend fun streamChunk(payload: StreamChunk, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamChunk(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::StreamEnd` to every connected peer (broadcast). */
+  public suspend fun streamEnd(payload: StreamEnd, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamEnd(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Net::StreamError` to every connected peer (broadcast). */
+  public suspend fun streamError(payload: StreamError, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamError(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1528,45 +1546,25 @@ public class NetSurfaceForDevice(
       inner.data
     }
 
-  /** Send `Net::FetchStreamBegin` to this peer. */
-  public suspend fun fetchStreamBegin(payload: NetFetchStreamBegin, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamBegin(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
+  /** Stream of `Net::StreamOpen` from this peer. */
+  public val streamOpen: Flow<NetStreamOpen> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.StreamOpen ?: return@mapNotNull null
+      inner.data
+    }
 
-  /** Send `Net::FetchStreamChunk` to this peer. */
-  public suspend fun fetchStreamChunk(payload: NetFetchStreamChunk, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamChunk(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Net::FetchStreamEnd` to this peer. */
-  public suspend fun fetchStreamEnd(payload: NetFetchStreamEnd, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchStreamEnd(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Net::WsOpened` to this peer. */
-  public suspend fun wsOpened(payload: NetWsOpened, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
-      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpened(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
+  /** Stream of `Net::StreamCancel` from this peer. */
+  public val streamCancel: Flow<NetStreamCancel> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNetMsg.StreamCancel ?: return@mapNotNull null
+      inner.data
+    }
 
   /** Send `Net::WsMessage` to this peer. */
   public suspend fun wsMessage(payload: NetWsMessage, priority: Priority = Priority.Normal) {
@@ -1594,6 +1592,46 @@ public class NetSurfaceForDevice(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::StreamBegin` to this peer. */
+  public suspend fun streamBegin(payload: StreamBegin, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamBegin(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::StreamChunk` to this peer. */
+  public suspend fun streamChunk(payload: StreamChunk, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamChunk(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::StreamEnd` to this peer. */
+  public suspend fun streamEnd(payload: StreamEnd, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamEnd(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Net::StreamError` to this peer. */
+  public suspend fun streamError(payload: StreamError, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamError(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }

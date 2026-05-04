@@ -1,4 +1,12 @@
-use libbridgething::client::ClientToBridgeNetMsg;
+use libbridgething::{
+  NetError, WsError,
+  client::{
+    ClientToBridgeNetMsg, NetFetch, NetFetchErrorReply, NetFetchReply, NetStreamCancel, NetStreamOpen, NetWsClose,
+    NetWsErrorReply, NetWsOpen, NetWsOpenReply, NetWsSend,
+  },
+  gateway::{self, BridgeToGatewayNetMsgCommand},
+  wire::RequestError,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -13,10 +21,259 @@ impl NetHandler {
 
   pub async fn handle(self, msg: ClientToBridgeNetMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeNetMsg::Fetch(_) => Ok(self.handle.unimplemented("net.fetch").await?),
-      ClientToBridgeNetMsg::WsOpen(_) => Ok(self.handle.unimplemented("net.wsOpen").await?),
-      ClientToBridgeNetMsg::WsClose(_) => Ok(self.handle.unimplemented("net.wsClose").await?),
-      ClientToBridgeNetMsg::WsSend(_) => Ok(self.handle.unimplemented("net.wsSend").await?),
+      ClientToBridgeNetMsg::Fetch(NetFetch { request }) => self.handle_fetch(request).await,
+      ClientToBridgeNetMsg::WsOpen(open) => self.handle_ws_open(open).await,
+      ClientToBridgeNetMsg::WsSend(send) => self.handle_ws_send(send).await,
+      ClientToBridgeNetMsg::WsClose(close) => self.handle_ws_close(close).await,
+      ClientToBridgeNetMsg::StreamOpen(open) => self.handle_stream_open(open).await,
+      ClientToBridgeNetMsg::StreamCancel(cancel) => self.handle_stream_cancel(cancel).await,
     }
+  }
+
+  async fn handle_fetch(self, request: libbridgething::NetFetchRequest) -> HandlerResult {
+    let snapshot = self.handle.state.capabilities.snapshot();
+    if snapshot.gateway.is_none() {
+      return self
+        .handle
+        .respond_err::<NetFetch>(NetFetchErrorReply {
+          error: NetError::NoGateway,
+        })
+        .await
+        .map_err(Into::into);
+    }
+    if !snapshot.available.net_fetch {
+      return self
+        .handle
+        .respond_err::<NetFetch>(NetFetchErrorReply {
+          error: NetError::Unavailable,
+        })
+        .await
+        .map_err(Into::into);
+    }
+
+    let outbound = gateway::NetFetchRequestMsg { request };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<NetFetch>(NetFetchReply {
+            response: reply.response,
+          })
+          .await?;
+      }
+      Err(RequestError::Domain(domain)) => {
+        self
+          .handle
+          .respond_err::<NetFetch>(NetFetchErrorReply { error: domain.error })
+          .await?;
+      }
+      Err(RequestError::Protocol(err)) => {
+        tracing::warn!(?err, "net.fetch protocol error");
+        self
+          .handle
+          .respond_err::<NetFetch>(NetFetchErrorReply {
+            error: NetError::RequestFailed {
+              reason: format!("{err:?}"),
+            },
+          })
+          .await?;
+      }
+      Err(RequestError::ResponseMismatch) => {
+        tracing::error!("net.fetch response did not match expected shape");
+        self
+          .handle
+          .respond_err::<NetFetch>(NetFetchErrorReply {
+            error: NetError::RequestFailed {
+              reason: "response shape mismatch".into(),
+            },
+          })
+          .await?;
+      }
+    }
+    Ok(())
+  }
+
+  async fn handle_ws_open(self, open: NetWsOpen) -> HandlerResult {
+    let snapshot = self.handle.state.capabilities.snapshot();
+    if snapshot.gateway.is_none() {
+      return self
+        .handle
+        .respond_err::<NetWsOpen>(NetWsErrorReply {
+          error: WsError::ConnectFailed {
+            reason: "no gateway connected".into(),
+          },
+        })
+        .await
+        .map_err(Into::into);
+    }
+    if !snapshot.available.net_ws {
+      return self
+        .handle
+        .respond_err::<NetWsOpen>(NetWsErrorReply {
+          error: WsError::ConnectFailed {
+            reason: "net.ws unavailable".into(),
+          },
+        })
+        .await
+        .map_err(Into::into);
+    }
+
+    let connection_id = open.connection_id;
+    self.handle.state.ws_routes.register(connection_id, self.handle.from);
+
+    let outbound = gateway::NetWsOpen {
+      connection_id,
+      url: open.url,
+      protocols: open.protocols,
+      headers: open.headers,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<NetWsOpen>(NetWsOpenReply {
+            accepted_protocol: reply.accepted_protocol,
+          })
+          .await?;
+      }
+      Err(RequestError::Domain(domain)) => {
+        self.handle.state.ws_routes.drop_id(connection_id);
+        self
+          .handle
+          .respond_err::<NetWsOpen>(NetWsErrorReply { error: domain.error })
+          .await?;
+      }
+      Err(RequestError::Protocol(err)) => {
+        self.handle.state.ws_routes.drop_id(connection_id);
+        tracing::warn!(?err, "net.ws.open protocol error");
+        self
+          .handle
+          .respond_err::<NetWsOpen>(NetWsErrorReply {
+            error: WsError::ConnectFailed {
+              reason: format!("{err:?}"),
+            },
+          })
+          .await?;
+      }
+      Err(RequestError::ResponseMismatch) => {
+        self.handle.state.ws_routes.drop_id(connection_id);
+        tracing::error!("net.ws.open response did not match expected shape");
+        self
+          .handle
+          .respond_err::<NetWsOpen>(NetWsErrorReply {
+            error: WsError::ProtocolError {
+              reason: "response shape mismatch".into(),
+            },
+          })
+          .await?;
+      }
+    }
+    Ok(())
+  }
+
+  async fn handle_ws_send(self, send: NetWsSend) -> HandlerResult {
+    let owner = self.handle.state.ws_routes.lookup(send.connection_id);
+    if owner != Some(self.handle.from) {
+      tracing::warn!(
+        connection_id = %send.connection_id,
+        ?owner,
+        from = %self.handle.from,
+        "net.ws.send for unknown or non-owned connection; dropping"
+      );
+      return Ok(());
+    }
+    let outbound = BridgeToGatewayNetMsgCommand::WsSend(gateway::NetWsSend {
+      connection_id: send.connection_id,
+      frame: send.frame,
+    });
+    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    Ok(())
+  }
+
+  async fn handle_ws_close(self, close: NetWsClose) -> HandlerResult {
+    let owner = self.handle.state.ws_routes.drop_id(close.connection_id);
+    if owner != Some(self.handle.from) {
+      tracing::warn!(
+        connection_id = %close.connection_id,
+        ?owner,
+        from = %self.handle.from,
+        "net.ws.close for unknown or non-owned connection; dropping"
+      );
+      return Ok(());
+    }
+    let outbound = BridgeToGatewayNetMsgCommand::WsClose(gateway::NetWsClose {
+      connection_id: close.connection_id,
+      code: close.code,
+      reason: close.reason,
+    });
+    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    Ok(())
+  }
+
+  async fn handle_stream_open(self, open: NetStreamOpen) -> HandlerResult {
+    let snapshot = self.handle.state.capabilities.snapshot();
+    if snapshot.gateway.is_none() || !snapshot.available.net_fetch {
+      // No way to surface the rejection synchronously; emit a synthetic
+      // StreamError event so the SDK's pending consumer resolves.
+      let error = if snapshot.gateway.is_none() {
+        NetError::NoGateway
+      } else {
+        NetError::Unavailable
+      };
+      let event = libbridgething::client::BridgeToClientNetMsgEvent::StreamError(libbridgething::StreamError {
+        stream_id: open.stream_id,
+        error,
+      });
+      let _ = self.handle.state.client_man.send_event(self.handle.from, event).await;
+      return Ok(());
+    }
+
+    self
+      .handle
+      .state
+      .stream_routes
+      .register(open.stream_id, self.handle.from);
+    let outbound = BridgeToGatewayNetMsgCommand::StreamOpen(gateway::NetStreamOpen {
+      stream_id: open.stream_id,
+      request: open.request,
+    });
+    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    Ok(())
+  }
+
+  async fn handle_stream_cancel(self, cancel: NetStreamCancel) -> HandlerResult {
+    let owner = self.handle.state.stream_routes.drop_id(cancel.stream_id);
+    if owner != Some(self.handle.from) {
+      tracing::warn!(
+        stream_id = %cancel.stream_id,
+        ?owner,
+        from = %self.handle.from,
+        "net.stream.cancel for unknown or non-owned stream; dropping"
+      );
+      return Ok(());
+    }
+    let outbound = BridgeToGatewayNetMsgCommand::StreamCancel(gateway::NetStreamCancel {
+      stream_id: cancel.stream_id,
+    });
+    self.handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+    Ok(())
+  }
+}
+
+pub async fn cleanup_owner_routes(handle: &MsgHandle) {
+  let ws_ids = handle.state.ws_routes.drain_for_owner(handle.from);
+  for connection_id in ws_ids {
+    let outbound = BridgeToGatewayNetMsgCommand::WsClose(gateway::NetWsClose {
+      connection_id,
+      code: Some(1001),
+      reason: Some("webapp disconnected".into()),
+    });
+    handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
+  }
+
+  let stream_ids = handle.state.stream_routes.drain_for_owner(handle.from);
+  for stream_id in stream_ids {
+    let outbound = BridgeToGatewayNetMsgCommand::StreamCancel(gateway::NetStreamCancel { stream_id });
+    handle.bluetooth.gateway_man.broadcast_command_bulk(outbound).await;
   }
 }

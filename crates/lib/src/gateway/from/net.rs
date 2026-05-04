@@ -5,9 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{
-  NetError, NetFetchResponse, NetFetchStreamBegin, NetFetchStreamChunk, NetFetchStreamEnd, WsError, WsFrame,
-};
+use crate::{NetError, NetFetchResponse, StreamBegin, StreamChunk, StreamEnd, StreamError, WsError, WsFrame};
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -32,9 +30,6 @@ pub struct NetFetchErrorReply {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsOpenReply {
-  #[ts(type = "Uint8Array")]
-  #[typeshare(serialized_as = "Vec<u8>")]
-  pub connection_id: Uuid,
   pub accepted_protocol: Option<String>,
 }
 
@@ -44,17 +39,6 @@ pub struct NetWsOpenReply {
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsErrorReply {
   pub error: WsError,
-}
-
-#[typeshare]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct NetWsOpened {
-  #[ts(type = "Uint8Array")]
-  #[typeshare(serialized_as = "Vec<u8>")]
-  pub connection_id: Uuid,
-  pub accepted_protocol: Option<String>,
 }
 
 #[typeshare]
@@ -102,22 +86,22 @@ pub enum GatewayToBridgeNetMsg {
   FetchReply(NetFetchReply),
   #[bridge_response]
   FetchErrorReply(NetFetchErrorReply),
-  #[bridge_event]
-  FetchStreamBegin(NetFetchStreamBegin),
-  #[bridge_event]
-  FetchStreamChunk(NetFetchStreamChunk),
-  #[bridge_event]
-  FetchStreamEnd(NetFetchStreamEnd),
   #[bridge_response]
   WsOpenReply(NetWsOpenReply),
   #[bridge_response]
   WsErrorReply(NetWsErrorReply),
-  #[bridge_event]
-  WsOpened(NetWsOpened),
   #[bridge_event]
   WsMessage(NetWsMessage),
   #[bridge_event]
   WsClosed(NetWsClosed),
   #[bridge_event]
   WsErrorEvent(NetWsErrorEvent),
+  #[bridge_event]
+  StreamBegin(StreamBegin),
+  #[bridge_event]
+  StreamChunk(StreamChunk),
+  #[bridge_event]
+  StreamEnd(StreamEnd),
+  #[bridge_event]
+  StreamError(StreamError),
 }

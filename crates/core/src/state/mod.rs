@@ -16,9 +16,11 @@ use crate::{
 };
 
 pub mod meta;
+pub mod routes;
 pub mod storage;
 mod webapps;
 
+pub use routes::RouteTable;
 use storage::{
   device::{Column as DeviceColumn, Entity as DeviceEntity, Model as DeviceModel},
   kv_storage::{Column as KvColumn, Entity as KvEntity},
@@ -42,6 +44,8 @@ pub struct AppState {
   pub authority: AuthorityRegistry,
   pub capabilities: CapabilitiesRegistry,
   pub peers: PeerTracker,
+  pub ws_routes: RouteTable,
+  pub stream_routes: RouteTable,
 
   db: DatabaseConnection,
   _asset_cache_handle: JoinHandle<()>,
@@ -77,7 +81,15 @@ impl AppState {
     let transfer_pending = ChunkedTransfer::init(paths::transfers_dir()).await?;
     let (transfers, _transfer_handle) = transfer_pending.spawn();
 
-    let peers = PeerTracker::new(client_man.clone(), player.clone(), capabilities.clone());
+    let ws_routes = RouteTable::new();
+    let stream_routes = RouteTable::new();
+    let peers = PeerTracker::new(
+      client_man.clone(),
+      player.clone(),
+      capabilities.clone(),
+      ws_routes.clone(),
+      stream_routes.clone(),
+    );
 
     Ok(Arc::new(Self {
       client_man,
@@ -90,6 +102,8 @@ impl AppState {
       authority,
       capabilities,
       peers,
+      ws_routes,
+      stream_routes,
 
       db,
       _asset_cache_handle,
