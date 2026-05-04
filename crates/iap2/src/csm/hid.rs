@@ -38,7 +38,11 @@ pub const SENT_BY_ACCESSORY: &[u16] = &[
   StopHID::CSM_MSG_ID,
 ];
 
-pub const RECEIVED_BY_ACCESSORY: &[u16] = &[];
+pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
+  DeviceHIDReport::CSM_MSG_ID,
+  StartNativeHID::CSM_MSG_ID,
+  HIDComponentUpdate::CSM_MSG_ID,
+];
 
 /// Identifier the accessory uses to address its virtual HID device. Stock
 /// uses `5353`; bridgething follows suit. The value is opaque to iOS
@@ -135,6 +139,36 @@ pub struct AccessoryHIDReport {
 pub struct StopHID {
   #[csm(param = 0)]
   pub component_id: u16,
+}
+
+/// `0x6801` iPhone -> accessory. Inbound HID report dispatched to a HID
+/// component the accessory has declared. Same shape as outbound. Stock
+/// Car Thing logs and drops these; bridgething follows suit.
+#[derive(Csm, Debug, Clone, PartialEq, Eq)]
+#[csm(id = 0x6801)]
+pub struct DeviceHIDReport {
+  #[csm(param = 0)]
+  pub component_id: u16,
+  #[csm(param = 1)]
+  pub report: Bytes,
+}
+
+/// `0x6806` iPhone -> accessory. Signals iOS bringing the accessory's
+/// native HID component online. No params.
+#[derive(Csm, Debug, Clone, PartialEq, Eq)]
+#[csm(id = 0x6806)]
+pub struct StartNativeHID;
+
+/// `0x6807` iPhone -> accessory. The "device is ready to consume reports
+/// for this component" gate. Indicates whether the iPhone is willing to
+/// route HID reports through the named component.
+#[derive(Csm, Debug, Clone, PartialEq, Eq)]
+#[csm(id = 0x6807)]
+pub struct HIDComponentUpdate {
+  #[csm(param = 0)]
+  pub component_id: u16,
+  #[csm(param = 1)]
+  pub component_enabled: bool,
 }
 
 /// Build an [`AccessoryHIDReport`] for the bridgething transport

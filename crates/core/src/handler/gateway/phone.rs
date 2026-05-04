@@ -14,6 +14,9 @@ impl PhoneHandler {
   pub async fn handle(self, msg: GatewayToBridgePhoneMsg) -> HandlerResult {
     match msg {
       GatewayToBridgePhoneMsg::Snapshot(_) => self.handle.unimplemented("gateway:phone.snapshot").await,
+      GatewayToBridgePhoneMsg::CommunicationsSnapshot(_) => {
+        self.handle.unimplemented("gateway:phone.communicationsSnapshot").await
+      }
       GatewayToBridgePhoneMsg::CallStarted(_) => self.handle.unimplemented("gateway:phone.callStarted").await,
       GatewayToBridgePhoneMsg::CallUpdated(_) => self.handle.unimplemented("gateway:phone.callUpdated").await,
       GatewayToBridgePhoneMsg::CallEnded(_) => self.handle.unimplemented("gateway:phone.callEnded").await,

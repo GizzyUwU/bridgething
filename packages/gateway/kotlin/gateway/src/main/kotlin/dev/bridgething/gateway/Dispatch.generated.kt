@@ -567,6 +567,15 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Phone::Accept` messages. */
+  public val accept: Flow<Pair<String, PhoneAcceptAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Accept ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Cross-peer stream of `Phone::Decline` messages. */
   public val decline: Flow<Pair<String, PhoneCallAction>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -582,6 +591,15 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayPhoneMsg.End ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::EndTyped` messages. */
+  public val endTyped: Flow<Pair<String, PhoneEndAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.EndTyped ?: return@mapNotNull null
       it.deviceId to inner.data
     }
 
@@ -603,6 +621,51 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Phone::Initiate` messages. */
+  public val initiate: Flow<Pair<String, PhoneInitiateAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Initiate ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::Swap` messages. */
+  public val swap: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPhoneMsg.Swap) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Phone::Merge` messages. */
+  public val merge: Flow<String> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPhoneMsg.Merge) return@mapNotNull null
+      it.deviceId
+    }
+
+  /** Cross-peer stream of `Phone::Mute` messages. */
+  public val mute: Flow<Pair<String, PhoneMuteAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Mute ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Phone::Dtmf` messages. */
+  public val dtmf: Flow<Pair<String, PhoneDtmfAction>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Dtmf ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `Phone::Snapshot` to every connected peer (broadcast). */
   public suspend fun snapshot(payload: PhoneStateReply, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -613,6 +676,23 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID().toBytes(),
             meta = GatewayMsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Phone::CommunicationsSnapshot` to every connected peer (broadcast). */
+  public suspend fun communicationsSnapshot(payload: CommunicationsSnapshot, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CommunicationsSnapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1821,6 +1901,16 @@ public class PhoneSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Phone::Accept` from this peer. */
+  public val accept: Flow<PhoneAcceptAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Accept ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Stream of `Phone::Decline` from this peer. */
   public val decline: Flow<PhoneCallAction> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1838,6 +1928,16 @@ public class PhoneSurfaceForDevice(
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayPhoneMsg.End ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::EndTyped` from this peer. */
+  public val endTyped: Flow<PhoneEndAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.EndTyped ?: return@mapNotNull null
       inner.data
     }
 
@@ -1861,12 +1961,72 @@ public class PhoneSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Phone::Initiate` from this peer. */
+  public val initiate: Flow<PhoneInitiateAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Initiate ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::Swap` from this peer. */
+  public val swap: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPhoneMsg.Swap) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Phone::Merge` from this peer. */
+  public val merge: Flow<Unit> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      if (outer.data !is BridgeToGatewayPhoneMsg.Merge) return@mapNotNull null
+      Unit
+    }
+
+  /** Stream of `Phone::Mute` from this peer. */
+  public val mute: Flow<PhoneMuteAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Mute ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Phone::Dtmf` from this peer. */
+  public val dtmf: Flow<PhoneDtmfAction> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPhoneMsg.Dtmf ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `Phone::Snapshot` to this peer. */
   public suspend fun snapshot(payload: PhoneStateReply, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Phone::CommunicationsSnapshot` to this peer. */
+  public suspend fun communicationsSnapshot(payload: CommunicationsSnapshot, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CommunicationsSnapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }

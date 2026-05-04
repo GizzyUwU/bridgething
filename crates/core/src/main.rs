@@ -17,6 +17,8 @@ mod paths;
 mod peer;
 mod player;
 mod state;
+mod telephony;
+mod time;
 mod transfer;
 mod transport;
 
@@ -66,6 +68,7 @@ async fn main() {
   let bluetooth = BluetoothManager::init(state.clone(), bluetooth_tx)
     .await
     .expect("failed to initialize bluetooth stack");
+  state.telephony.attach_iap2(bluetooth.iap2_telephony_handle()).await;
   let transport = TransportController::new(
     state.authority.clone(),
     state.player.clone(),

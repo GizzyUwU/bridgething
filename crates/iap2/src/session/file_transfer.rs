@@ -17,11 +17,13 @@
 //!   Pause(0x03)   ──> log only, partial buffer retained
 //! ```
 //!
-//! Type 2 (artwork) is the only file type stock and bridgething accept;
-//! anything else logs and is dropped. The reassembly buffer is
-//! pre-allocated with the Setup-declared size so we don't grow as bytes
-//! arrive. Bytes that exceed the declared size hard-stop the transfer
-//! (drops the buffer, drops the future SetupAck). Cleanroom doc 70.
+//! Reassembly accepts every Setup-declared file type and emits the
+//! result as a generic event the daemon's observer routes by transfer
+//! id (artwork vs queue-snapshot vs anything else iOS may push).
+//! The reassembly buffer is pre-allocated with the Setup-declared size
+//! so we don't grow as bytes arrive. Bytes that exceed the declared
+//! size hard-stop the transfer (drops the buffer, drops the future
+//! SetupAck). Cleanroom doc 70.
 
 use std::collections::HashMap;
 
@@ -48,6 +50,9 @@ const OP_LAST_DATA: u8 = 0x40;
 const OP_FIRST_DATA: u8 = 0x80;
 const OP_FIRST_AND_ONLY: u8 = 0xC0;
 
+/// Cleanroom-confirmed file type for `MediaItemArtwork` transfers.
+/// Other types (queue snapshots, podcast extras) are accepted with a
+/// generic event upstream.
 const FILE_TYPE_ARTWORK: u16 = 2;
 
 #[derive(Debug)]
@@ -131,16 +136,7 @@ impl FileTransferFlow {
     let _reserved = rest.get_u8();
     let file_type = rest.get_u16();
 
-    if file_type != FILE_TYPE_ARTWORK {
-      tracing::debug!(
-        transfer_id = id,
-        file_type,
-        "file-transfer: ignoring non-artwork file type"
-      );
-      return Ok(());
-    }
-
-    tracing::debug!(transfer_id = id, declared_size, "file-transfer: Setup");
+    tracing::debug!(transfer_id = id, declared_size, file_type, "file-transfer: Setup");
     self.in_flight.insert(
       id,
       InFlight {
@@ -221,12 +217,13 @@ impl FileTransferFlow {
     }
     self.send_op(id, OP_COMPLETE_ACK).await?;
 
-    if state.file_type == FILE_TYPE_ARTWORK {
-      let bytes = state.buffer.freeze();
-      let _ = events_tx
-        .send(SessionEvent::ArtworkBytes { transfer_id: id, bytes })
-        .await;
-    }
+    let bytes = state.buffer.freeze();
+    let event = if state.file_type == FILE_TYPE_ARTWORK {
+      SessionEvent::ArtworkBytes { transfer_id: id, bytes }
+    } else {
+      SessionEvent::QueueSnapshotBytes { transfer_id: id, bytes }
+    };
+    let _ = events_tx.send(event).await;
     Ok(())
   }
 
@@ -358,16 +355,29 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn non_artwork_type_is_ignored() {
+  async fn non_artwork_type_lands_as_queue_snapshot() {
     let (mut flow, mut outbox, mut events, evt_tx) = flow_with_outbox();
-    flow.dispatch_link_data(setup_payload(9, 4, 1), &evt_tx).await.unwrap(); // type 1
-    // no SetupAck for non-artwork
-    assert!(outbox.try_recv().is_err());
+    flow.dispatch_link_data(setup_payload(9, 4, 5), &evt_tx).await.unwrap(); // any non-2 type
+    // SetupAck expected for any accepted Setup
+    let cmd = outbox.recv().await.unwrap();
+    if let Iap2Command::Send { session_id: 2, payload } = cmd {
+      assert_eq!(&payload[..], &[9, OP_SETUP_ACK]);
+    } else {
+      panic!("unexpected command");
+    }
     flow
       .dispatch_link_data(data_with(9, OP_FIRST_AND_ONLY, b"abcd"), &evt_tx)
       .await
       .unwrap();
-    assert!(events.try_recv().is_err());
+    let _ = outbox.recv().await; // CompleteAck
+    let evt = events.recv().await.unwrap();
+    match evt {
+      SessionEvent::QueueSnapshotBytes { transfer_id, bytes } => {
+        assert_eq!(transfer_id, 9);
+        assert_eq!(&bytes[..], b"abcd");
+      }
+      _ => panic!("expected QueueSnapshotBytes"),
+    }
   }
 
   #[tokio::test]

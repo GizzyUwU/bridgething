@@ -26,10 +26,12 @@ use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
 
 pub mod auth;
+pub mod device;
 pub mod external_accessory;
 pub mod hid;
 pub mod identification;
 pub mod now_playing;
+pub mod telephony;
 
 pub use bridgething_macros::Csm;
 
@@ -386,6 +388,24 @@ macro_rules! csm_param_be_int {
         Ok(<$t>::from_be_bytes(buf))
       }
     }
+
+    impl CsmParamFieldDecode for Option<$t> {
+      fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError> {
+        let Some(payload) = take_optional(param_id, params)? else {
+          return Ok(None);
+        };
+        if payload.len() != $bytes {
+          return Err(CsmDecodeError::ParamLength {
+            param_id,
+            expected: $bytes,
+            got: payload.len(),
+          });
+        }
+        let mut buf = [0u8; $bytes];
+        buf.copy_from_slice(&payload);
+        Ok(Some(<$t>::from_be_bytes(buf)))
+      }
+    }
   };
 }
 
@@ -432,6 +452,44 @@ impl<T: CsmParamFieldEncode> CsmParamFieldEncode for Option<T> {
 impl CsmParamFieldDecode for Option<Bytes> {
   fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError> {
     take_optional(param_id, params)
+  }
+}
+
+impl CsmParamFieldDecode for Option<bool> {
+  fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError> {
+    let Some(payload) = take_optional(param_id, params)? else {
+      return Ok(None);
+    };
+    // Tolerant decode: presence-only TLVs (empty payload) are treated as
+    // `true`, matching the iAP2 wire convention. Single-byte payloads
+    // decode as the underlying byte != 0.
+    if payload.is_empty() {
+      Ok(Some(true))
+    } else if payload.len() == 1 {
+      Ok(Some(payload[0] != 0))
+    } else {
+      Err(CsmDecodeError::ParamLength {
+        param_id,
+        expected: 1,
+        got: payload.len(),
+      })
+    }
+  }
+}
+
+impl CsmParamFieldDecode for Option<()> {
+  fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError> {
+    let Some(payload) = take_optional(param_id, params)? else {
+      return Ok(None);
+    };
+    if !payload.is_empty() {
+      return Err(CsmDecodeError::ParamLength {
+        param_id,
+        expected: 0,
+        got: payload.len(),
+      });
+    }
+    Ok(Some(()))
   }
 }
 

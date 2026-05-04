@@ -35,6 +35,40 @@ pub enum RepeatMode {
   One,
 }
 
+/// Three-state shuffle. iAP2 and Apple Music distinguish track-level
+/// from album-level shuffle; companion gateways without that distinction
+/// project to `Songs` when on. Webapps that just need an on/off signal
+/// read `shuffle_on` (None when the underlying mode is unknown).
+#[typeshare]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum ShuffleMode {
+  #[default]
+  Off,
+  Songs,
+  Albums,
+}
+
+impl ShuffleMode {
+  pub fn is_on(self) -> bool {
+    !matches!(self, Self::Off)
+  }
+}
+
+/// The kind of media currently playing. Multi-typed: an item can be
+/// e.g. both `Podcast` and `AudioBook` (rare). Drives webapp UI choices
+/// like skip-15s-vs-skip-track and chapter UI.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum MediaType {
+  Music,
+  Podcast,
+  AudioBook,
+}
+
 /// Delta event the companion or iAP2 stream emits whenever a player
 /// attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
 /// (the only delta-shaped event in the protocol). Every field is
@@ -42,7 +76,7 @@ pub enum RepeatMode {
 /// about, and the daemon merges into stable internal state.
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct NowPlayingUpdate {
@@ -74,10 +108,19 @@ pub struct MediaItemUpdate {
   pub persistent_id: Option<String>,
   pub title: Option<String>,
   pub album: Option<String>,
+  pub album_artist: Option<String>,
   pub artist: Option<String>,
   pub liked: Option<bool>,
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,
+  pub media_types: Option<Vec<MediaType>>,
+  pub track_number: Option<u16>,
+  pub track_count: Option<u16>,
+  pub is_like_supported: Option<bool>,
+  pub is_ban_supported: Option<bool>,
+  pub is_banned: Option<bool>,
+  pub is_resident_on_device: Option<bool>,
+  pub chapter_count: Option<u16>,
 }
 
 impl MediaItemUpdate {
@@ -85,10 +128,19 @@ impl MediaItemUpdate {
     self.persistent_id.is_none()
       && self.title.is_none()
       && self.album.is_none()
+      && self.album_artist.is_none()
       && self.artist.is_none()
       && self.liked.is_none()
       && self.artwork_id.is_none()
       && self.duration_ms.is_none()
+      && self.media_types.is_none()
+      && self.track_number.is_none()
+      && self.track_count.is_none()
+      && self.is_like_supported.is_none()
+      && self.is_ban_supported.is_none()
+      && self.is_banned.is_none()
+      && self.is_resident_on_device.is_none()
+      && self.chapter_count.is_none()
   }
 }
 
@@ -97,18 +149,31 @@ impl MediaItemUpdate {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
+///
+/// `set_elapsed_time_available` is the gate webapps must honor for
+/// scrub UI: when false, scrubbing is unsupported by the foreground
+/// app and the seek button must be disabled.
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct PlaybackUpdate {
   pub playing: Option<bool>,
   pub position_ms: Option<u32>,
   pub shuffle: Option<bool>,
+  pub shuffle_mode: Option<ShuffleMode>,
   pub repeat: Option<RepeatMode>,
   pub app_bundle: Option<String>,
   pub app_display_name: Option<String>,
+  pub queue_index: Option<u32>,
+  pub queue_count: Option<u32>,
+  pub queue_chapter_index: Option<u32>,
+  pub playback_speed: Option<f32>,
+  pub set_elapsed_time_available: Option<bool>,
+  pub queue_list_avail: Option<bool>,
+  pub apple_music_radio_ad: Option<bool>,
+  pub apple_music_radio_station_name: Option<String>,
 }
 
 impl PlaybackUpdate {
@@ -116,9 +181,18 @@ impl PlaybackUpdate {
     self.playing.is_none()
       && self.position_ms.is_none()
       && self.shuffle.is_none()
+      && self.shuffle_mode.is_none()
       && self.repeat.is_none()
       && self.app_bundle.is_none()
       && self.app_display_name.is_none()
+      && self.queue_index.is_none()
+      && self.queue_count.is_none()
+      && self.queue_chapter_index.is_none()
+      && self.playback_speed.is_none()
+      && self.set_elapsed_time_available.is_none()
+      && self.queue_list_avail.is_none()
+      && self.apple_music_radio_ad.is_none()
+      && self.apple_music_radio_station_name.is_none()
   }
 }
 

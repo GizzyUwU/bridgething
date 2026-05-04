@@ -16,6 +16,7 @@ import {
   type AuthorityRelease,
   type BrowseReply,
   type ChromeNavigate,
+  type CommunicationsSnapshot,
   type Earcon,
   type FavoriteChanged,
   type FavoritesListReply,
@@ -60,9 +61,14 @@ import {
   type OtaChunk,
   type OtaError,
   type OtaProgress,
+  type PhoneAcceptAction,
   type PhoneCall,
   type PhoneCallAction,
   type PhoneCallEnded,
+  type PhoneDtmfAction,
+  type PhoneEndAction,
+  type PhoneInitiateAction,
+  type PhoneMuteAction,
   type PhoneStateReply,
   type PlayUri,
   type PlayerState,
@@ -207,19 +213,33 @@ export type NotificationsDeviceInboundHandlers = {
 
 export type PhoneInboundHandlers = {
   answer: (deviceId: string, msg: PhoneCallAction) => void;
+  accept: (deviceId: string, msg: PhoneAcceptAction) => void;
   decline: (deviceId: string, msg: PhoneCallAction) => void;
   end: (deviceId: string, msg: PhoneCallAction) => void;
+  endTyped: (deviceId: string, msg: PhoneEndAction) => void;
   hold: (deviceId: string, msg: PhoneCallAction) => void;
   unhold: (deviceId: string, msg: PhoneCallAction) => void;
+  initiate: (deviceId: string, msg: PhoneInitiateAction) => void;
+  swap: (deviceId: string) => void;
+  merge: (deviceId: string) => void;
+  mute: (deviceId: string, msg: PhoneMuteAction) => void;
+  dtmf: (deviceId: string, msg: PhoneDtmfAction) => void;
   stateGet: (handle: PhoneStateGetHandle) => Promise<void> | void;
 };
 
 export type PhoneDeviceInboundHandlers = {
   answer: (msg: PhoneCallAction) => void;
+  accept: (msg: PhoneAcceptAction) => void;
   decline: (msg: PhoneCallAction) => void;
   end: (msg: PhoneCallAction) => void;
+  endTyped: (msg: PhoneEndAction) => void;
   hold: (msg: PhoneCallAction) => void;
   unhold: (msg: PhoneCallAction) => void;
+  initiate: (msg: PhoneInitiateAction) => void;
+  swap: () => void;
+  merge: () => void;
+  mute: (msg: PhoneMuteAction) => void;
+  dtmf: (msg: PhoneDtmfAction) => void;
   stateGet: (handle: PhoneStateGetHandle) => Promise<void> | void;
 };
 
@@ -1250,6 +1270,18 @@ export class PhoneSurface {
     });
   }
 
+  /** Subscribe to `Phone::Accept` across all peers. */
+  onAccept(handler: (deviceId: string, msg: PhoneAcceptAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'accept') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::Decline` across all peers. */
   onDecline(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
     return this._gateway.on(event => {
@@ -1274,6 +1306,18 @@ export class PhoneSurface {
     });
   }
 
+  /** Subscribe to `Phone::EndTyped` across all peers. */
+  onEndTyped(handler: (deviceId: string, msg: PhoneEndAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'endTyped') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::Hold` across all peers. */
   onHold(handler: (deviceId: string, msg: PhoneCallAction) => void): () => void {
     return this._gateway.on(event => {
@@ -1294,6 +1338,66 @@ export class PhoneSurface {
       if (data.type !== 'phone') return;
       const inner = data.data;
       if (inner.event !== 'unhold') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Initiate` across all peers. */
+  onInitiate(handler: (deviceId: string, msg: PhoneInitiateAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'initiate') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Swap` across all peers. */
+  onSwap(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'swap') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Phone::Merge` across all peers. */
+  onMerge(handler: (deviceId: string) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'merge') return;
+      handler(event.deviceId);
+    });
+  }
+
+  /** Subscribe to `Phone::Mute` across all peers. */
+  onMute(handler: (deviceId: string, msg: PhoneMuteAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'mute') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Dtmf` across all peers. */
+  onDtmf(handler: (deviceId: string, msg: PhoneDtmfAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'dtmf') return;
       handler(event.deviceId, inner.data);
     });
   }
@@ -1339,6 +1443,10 @@ export class PhoneSurface {
           handlers.answer?.(event.deviceId, inner.data);
           return;
         }
+        case 'accept': {
+          handlers.accept?.(event.deviceId, inner.data);
+          return;
+        }
         case 'decline': {
           handlers.decline?.(event.deviceId, inner.data);
           return;
@@ -1347,12 +1455,36 @@ export class PhoneSurface {
           handlers.end?.(event.deviceId, inner.data);
           return;
         }
+        case 'endTyped': {
+          handlers.endTyped?.(event.deviceId, inner.data);
+          return;
+        }
         case 'hold': {
           handlers.hold?.(event.deviceId, inner.data);
           return;
         }
         case 'unhold': {
           handlers.unhold?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'initiate': {
+          handlers.initiate?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'swap': {
+          handlers.swap?.(event.deviceId);
+          return;
+        }
+        case 'merge': {
+          handlers.merge?.(event.deviceId);
+          return;
+        }
+        case 'mute': {
+          handlers.mute?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'dtmf': {
+          handlers.dtmf?.(event.deviceId, inner.data);
           return;
         }
         case 'stateGet': {
@@ -1386,6 +1518,21 @@ export class PhoneSurface {
           id: newUuidBytes(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'snapshot', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Phone::CommunicationsSnapshot` to every connected peer (broadcast). */
+  async communicationsSnapshot(payload: CommunicationsSnapshot, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'phone', data: { event: 'communicationsSnapshot', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -3254,6 +3401,19 @@ export class PhoneSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Phone::Accept` from this peer. */
+  onAccept(handler: (msg: PhoneAcceptAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'accept') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::Decline` from this peer. */
   onDecline(handler: (msg: PhoneCallAction) => void): () => void {
     return this._gateway.on(event => {
@@ -3280,6 +3440,19 @@ export class PhoneSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Phone::EndTyped` from this peer. */
+  onEndTyped(handler: (msg: PhoneEndAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'endTyped') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::Hold` from this peer. */
   onHold(handler: (msg: PhoneCallAction) => void): () => void {
     return this._gateway.on(event => {
@@ -3302,6 +3475,71 @@ export class PhoneSurfaceForDevice {
       if (data.type !== 'phone') return;
       const inner = data.data;
       if (inner.event !== 'unhold') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Initiate` from this peer. */
+  onInitiate(handler: (msg: PhoneInitiateAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'initiate') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Swap` from this peer. */
+  onSwap(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'swap') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Phone::Merge` from this peer. */
+  onMerge(handler: () => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'merge') return;
+      handler();
+    });
+  }
+
+  /** Subscribe to `Phone::Mute` from this peer. */
+  onMute(handler: (msg: PhoneMuteAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'mute') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Phone::Dtmf` from this peer. */
+  onDtmf(handler: (msg: PhoneDtmfAction) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'dtmf') return;
       handler(inner.data);
     });
   }
@@ -3349,6 +3587,10 @@ export class PhoneSurfaceForDevice {
           handlers.answer?.(inner.data);
           return;
         }
+        case 'accept': {
+          handlers.accept?.(inner.data);
+          return;
+        }
         case 'decline': {
           handlers.decline?.(inner.data);
           return;
@@ -3357,12 +3599,36 @@ export class PhoneSurfaceForDevice {
           handlers.end?.(inner.data);
           return;
         }
+        case 'endTyped': {
+          handlers.endTyped?.(inner.data);
+          return;
+        }
         case 'hold': {
           handlers.hold?.(inner.data);
           return;
         }
         case 'unhold': {
           handlers.unhold?.(inner.data);
+          return;
+        }
+        case 'initiate': {
+          handlers.initiate?.(inner.data);
+          return;
+        }
+        case 'swap': {
+          handlers.swap?.();
+          return;
+        }
+        case 'merge': {
+          handlers.merge?.();
+          return;
+        }
+        case 'mute': {
+          handlers.mute?.(inner.data);
+          return;
+        }
+        case 'dtmf': {
+          handlers.dtmf?.(inner.data);
           return;
         }
         case 'stateGet': {
@@ -3393,6 +3659,16 @@ export class PhoneSurfaceForDevice {
       id: newUuidBytes(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'snapshot', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Phone::CommunicationsSnapshot` to this peer. */
+  async communicationsSnapshot(payload: CommunicationsSnapshot, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'phone', data: { event: 'communicationsSnapshot', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -5220,6 +5496,10 @@ function outerSubscribeGateway(
             innerHandlers.answer?.(event.deviceId, inner.data);
             return;
           }
+          case 'accept': {
+            innerHandlers.accept?.(event.deviceId, inner.data);
+            return;
+          }
           case 'decline': {
             innerHandlers.decline?.(event.deviceId, inner.data);
             return;
@@ -5228,12 +5508,36 @@ function outerSubscribeGateway(
             innerHandlers.end?.(event.deviceId, inner.data);
             return;
           }
+          case 'endTyped': {
+            innerHandlers.endTyped?.(event.deviceId, inner.data);
+            return;
+          }
           case 'hold': {
             innerHandlers.hold?.(event.deviceId, inner.data);
             return;
           }
           case 'unhold': {
             innerHandlers.unhold?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'initiate': {
+            innerHandlers.initiate?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'swap': {
+            innerHandlers.swap?.(event.deviceId);
+            return;
+          }
+          case 'merge': {
+            innerHandlers.merge?.(event.deviceId);
+            return;
+          }
+          case 'mute': {
+            innerHandlers.mute?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'dtmf': {
+            innerHandlers.dtmf?.(event.deviceId, inner.data);
             return;
           }
           case 'stateGet': {
@@ -5667,6 +5971,10 @@ function outerSubscribeDevice(
             innerHandlers.answer?.(inner.data);
             return;
           }
+          case 'accept': {
+            innerHandlers.accept?.(inner.data);
+            return;
+          }
           case 'decline': {
             innerHandlers.decline?.(inner.data);
             return;
@@ -5675,12 +5983,36 @@ function outerSubscribeDevice(
             innerHandlers.end?.(inner.data);
             return;
           }
+          case 'endTyped': {
+            innerHandlers.endTyped?.(inner.data);
+            return;
+          }
           case 'hold': {
             innerHandlers.hold?.(inner.data);
             return;
           }
           case 'unhold': {
             innerHandlers.unhold?.(inner.data);
+            return;
+          }
+          case 'initiate': {
+            innerHandlers.initiate?.(inner.data);
+            return;
+          }
+          case 'swap': {
+            innerHandlers.swap?.();
+            return;
+          }
+          case 'merge': {
+            innerHandlers.merge?.();
+            return;
+          }
+          case 'mute': {
+            innerHandlers.mute?.(inner.data);
+            return;
+          }
+          case 'dtmf': {
+            innerHandlers.dtmf?.(inner.data);
             return;
           }
           case 'stateGet': {

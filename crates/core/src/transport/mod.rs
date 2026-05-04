@@ -22,7 +22,7 @@
 //!
 //! Architecture and rationale: `notes/transport-controller.md`.
 
-use bridgething_iap2::HidCommand;
+use bridgething_iap2::{HidCommand, NowPlayingCommand};
 use libbridgething::{
   CompanionAuthorityScope, RepeatMode,
   gateway::{
@@ -173,8 +173,17 @@ impl TransportController {
         .send_player(BridgeToGatewayPlayerMsgCommand::SeekTo(GatewaySeekTo { position_ms }))
         .await;
     }
-    tracing::warn!("transport seek_to({position_ms}): no iAP2 HID equivalent; ignoring");
-    Ok(())
+    let snapshot = self.player.iap2_playback_snapshot().await;
+    if snapshot.set_elapsed_time_available == Some(false) {
+      tracing::warn!("transport seek_to({position_ms}): foreground app refuses absolute seek; ignoring");
+      return Ok(());
+    }
+    self
+      .send_iap2_now_playing(NowPlayingCommand {
+        elapsed_time_ms: Some(position_ms),
+        queue_index: None,
+      })
+      .await
   }
 
   pub async fn skip_to_index(&self, index: u32) -> TransportResult<()> {
@@ -185,8 +194,12 @@ impl TransportController {
         }))
         .await;
     }
-    tracing::warn!("transport skip_to_index({index}): no iAP2 HID equivalent; ignoring");
-    Ok(())
+    self
+      .send_iap2_now_playing(NowPlayingCommand {
+        elapsed_time_ms: None,
+        queue_index: Some(index),
+      })
+      .await
   }
 
   fn companion_owns_playback(&self) -> bool {
@@ -247,7 +260,19 @@ impl TransportController {
       );
       return Err(TransportError::NoTarget);
     };
-    handle.send(cmd).await;
+    handle.send_hid(cmd).await;
+    Ok(())
+  }
+
+  async fn send_iap2_now_playing(&self, cmd: NowPlayingCommand) -> TransportResult<()> {
+    let Some(handle) = &self.iap2 else {
+      tracing::debug!(
+        ?cmd,
+        "iap2 transport not available (MFi probe failed); dropping NowPlaying command"
+      );
+      return Err(TransportError::NoTarget);
+    };
+    handle.send_now_playing(cmd).await;
     Ok(())
   }
 }

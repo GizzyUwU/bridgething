@@ -117,6 +117,11 @@ impl PlayerState {
           .album
           .clone()
           .or_else(|| self.iap2_metadata.album.clone()),
+        album_artist: self
+          .companion_metadata
+          .album_artist
+          .clone()
+          .or_else(|| self.iap2_metadata.album_artist.clone()),
         artist: self
           .companion_metadata
           .artist
@@ -129,6 +134,30 @@ impl PlayerState {
           .clone()
           .or_else(|| self.iap2_metadata.artwork_id.clone()),
         duration_ms: self.companion_metadata.duration_ms.or(self.iap2_metadata.duration_ms),
+        media_types: self
+          .companion_metadata
+          .media_types
+          .clone()
+          .or_else(|| self.iap2_metadata.media_types.clone()),
+        track_number: self.companion_metadata.track_number.or(self.iap2_metadata.track_number),
+        track_count: self.companion_metadata.track_count.or(self.iap2_metadata.track_count),
+        is_like_supported: self
+          .companion_metadata
+          .is_like_supported
+          .or(self.iap2_metadata.is_like_supported),
+        is_ban_supported: self
+          .companion_metadata
+          .is_ban_supported
+          .or(self.iap2_metadata.is_ban_supported),
+        is_banned: self.companion_metadata.is_banned.or(self.iap2_metadata.is_banned),
+        is_resident_on_device: self
+          .companion_metadata
+          .is_resident_on_device
+          .or(self.iap2_metadata.is_resident_on_device),
+        chapter_count: self
+          .companion_metadata
+          .chapter_count
+          .or(self.iap2_metadata.chapter_count),
       }
     } else {
       self.iap2_metadata.clone()
@@ -144,6 +173,7 @@ impl PlayerState {
         playing: self.companion_playback.playing.or(self.iap2_playback.playing),
         position_ms: self.companion_playback.position_ms.or(self.iap2_playback.position_ms),
         shuffle: self.companion_playback.shuffle.or(self.iap2_playback.shuffle),
+        shuffle_mode: self.companion_playback.shuffle_mode.or(self.iap2_playback.shuffle_mode),
         repeat: self.companion_playback.repeat.or(self.iap2_playback.repeat),
         app_bundle: self
           .companion_playback
@@ -155,6 +185,33 @@ impl PlayerState {
           .app_display_name
           .clone()
           .or_else(|| self.iap2_playback.app_display_name.clone()),
+        queue_index: self.companion_playback.queue_index.or(self.iap2_playback.queue_index),
+        queue_count: self.companion_playback.queue_count.or(self.iap2_playback.queue_count),
+        queue_chapter_index: self
+          .companion_playback
+          .queue_chapter_index
+          .or(self.iap2_playback.queue_chapter_index),
+        playback_speed: self
+          .companion_playback
+          .playback_speed
+          .or(self.iap2_playback.playback_speed),
+        set_elapsed_time_available: self
+          .companion_playback
+          .set_elapsed_time_available
+          .or(self.iap2_playback.set_elapsed_time_available),
+        queue_list_avail: self
+          .companion_playback
+          .queue_list_avail
+          .or(self.iap2_playback.queue_list_avail),
+        apple_music_radio_ad: self
+          .companion_playback
+          .apple_music_radio_ad
+          .or(self.iap2_playback.apple_music_radio_ad),
+        apple_music_radio_station_name: self
+          .companion_playback
+          .apple_music_radio_station_name
+          .clone()
+          .or_else(|| self.iap2_playback.apple_music_radio_station_name.clone()),
       }
     } else {
       self.iap2_playback.clone()
@@ -231,9 +288,11 @@ impl PlayerState {
   }
 
   pub fn to_send_state(&self) -> BridgeToClientPlayerMsg {
+    let merged = self.merged_playback();
+    let merged_meta = self.merged_metadata();
     BridgeToClientPlayerMsg::Snapshot(PlayerStateReply {
       state: WirePlayerState {
-        track: self.track.as_ref().map(track_to_media_item),
+        track: self.track.as_ref().map(|t| build_media_item(t, &merged_meta)),
         playback: Playback {
           state: if self.playing {
             PlaybackState::Playing
@@ -242,11 +301,18 @@ impl PlayerState {
           },
           position_ms: u32::try_from(self.position_ms).unwrap_or(u32::MAX),
           shuffle: self.options.shuffle,
+          shuffle_mode: merged.shuffle_mode,
           repeat: self.options.repeat,
+          queue_index: merged.queue_index,
+          queue_count: merged.queue_count,
+          queue_chapter_index: merged.queue_chapter_index,
+          set_elapsed_time_available: merged.set_elapsed_time_available,
+          queue_list_avail: merged.queue_list_avail,
+          apple_music_radio_ad: merged.apple_music_radio_ad,
         },
         queue: vec![],
         options: PlayerOptions {
-          speed: self.playback_speed as f32,
+          speed: merged.playback_speed.unwrap_or(self.playback_speed as f32),
           crossfade_ms: None,
         },
       },
@@ -258,16 +324,24 @@ impl PlayerState {
   }
 }
 
-fn track_to_media_item(track: &Track) -> MediaItem {
+fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
   MediaItem {
     uri: None,
     persistent_id: Some(track.id.clone()),
     title: Some(track.name.clone()),
     album: Some(track.album.name.clone()),
+    album_artist: merged.album_artist.clone(),
     artist: Some(track.artist.name.clone()),
     liked: Some(track.saved),
     artwork_id: Some(track.image_id.clone()),
     duration_ms: Some(track.duration_ms),
+    media_types: merged.media_types.clone(),
+    track_number: merged.track_number,
+    track_count: merged.track_count,
+    is_like_supported: merged.is_like_supported,
+    is_ban_supported: merged.is_ban_supported,
+    is_banned: merged.is_banned,
+    chapter_count: merged.chapter_count,
   }
 }
 
@@ -281,6 +355,9 @@ fn accumulate_media(target: &mut MediaItemUpdate, src: MediaItemUpdate) {
   if src.album.is_some() {
     target.album = src.album;
   }
+  if src.album_artist.is_some() {
+    target.album_artist = src.album_artist;
+  }
   if src.artist.is_some() {
     target.artist = src.artist;
   }
@@ -292,6 +369,30 @@ fn accumulate_media(target: &mut MediaItemUpdate, src: MediaItemUpdate) {
   }
   if src.duration_ms.is_some() {
     target.duration_ms = src.duration_ms;
+  }
+  if src.media_types.is_some() {
+    target.media_types = src.media_types;
+  }
+  if src.track_number.is_some() {
+    target.track_number = src.track_number;
+  }
+  if src.track_count.is_some() {
+    target.track_count = src.track_count;
+  }
+  if src.is_like_supported.is_some() {
+    target.is_like_supported = src.is_like_supported;
+  }
+  if src.is_ban_supported.is_some() {
+    target.is_ban_supported = src.is_ban_supported;
+  }
+  if src.is_banned.is_some() {
+    target.is_banned = src.is_banned;
+  }
+  if src.is_resident_on_device.is_some() {
+    target.is_resident_on_device = src.is_resident_on_device;
+  }
+  if src.chapter_count.is_some() {
+    target.chapter_count = src.chapter_count;
   }
 }
 
@@ -305,6 +406,9 @@ fn accumulate_playback(target: &mut PlaybackUpdate, src: PlaybackUpdate) {
   if src.shuffle.is_some() {
     target.shuffle = src.shuffle;
   }
+  if src.shuffle_mode.is_some() {
+    target.shuffle_mode = src.shuffle_mode;
+  }
   if src.repeat.is_some() {
     target.repeat = src.repeat;
   }
@@ -313,5 +417,29 @@ fn accumulate_playback(target: &mut PlaybackUpdate, src: PlaybackUpdate) {
   }
   if src.app_display_name.is_some() {
     target.app_display_name = src.app_display_name;
+  }
+  if src.queue_index.is_some() {
+    target.queue_index = src.queue_index;
+  }
+  if src.queue_count.is_some() {
+    target.queue_count = src.queue_count;
+  }
+  if src.queue_chapter_index.is_some() {
+    target.queue_chapter_index = src.queue_chapter_index;
+  }
+  if src.playback_speed.is_some() {
+    target.playback_speed = src.playback_speed;
+  }
+  if src.set_elapsed_time_available.is_some() {
+    target.set_elapsed_time_available = src.set_elapsed_time_available;
+  }
+  if src.queue_list_avail.is_some() {
+    target.queue_list_avail = src.queue_list_avail;
+  }
+  if src.apple_music_radio_ad.is_some() {
+    target.apple_music_radio_ad = src.apple_music_radio_ad;
+  }
+  if src.apple_music_radio_station_name.is_some() {
+    target.apple_music_radio_station_name = src.apple_music_radio_station_name;
   }
 }

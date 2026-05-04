@@ -1,6 +1,6 @@
 //! Typed CSMs for the iAP2 NowPlaying surface.
 //!
-//! Three messages live here:
+//! Four messages live here:
 //!
 //! - [`StartNowPlayingUpdates`] (`0x5000`) - accessory to iPhone, sent
 //!   once after identification. Carries two subscribe lists (one for
@@ -11,6 +11,10 @@
 //!   nested CSM-format block of attribute TLVs.
 //! - [`StopNowPlayingUpdates`] (`0x5002`) - accessory to iPhone, sent
 //!   on tear-down. Empty body.
+//! - [`SetNowPlayingInformation`] (`0x5003`) - accessory to iPhone,
+//!   sent in response to a Direct User Action that needs absolute
+//!   playback control (scrub thumb, queue-row tap). Three optional
+//!   params: ElapsedTime, PlaybackQueueIndex, QueueListContentTransferStartIndex.
 //!
 //! The subscribe-list encoding looks unusual at first: each subscribed
 //! sub-id is its own empty-payload TLV inside the outer group, with
@@ -32,51 +36,93 @@ use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldDecode, decode
 /// CSMs the accessory sends in this layer. iPhone silently drops any
 /// CSM not in this list; identification merges these into param 6 of
 /// `IdentificationInformation`.
-pub const SENT_BY_ACCESSORY: &[u16] = &[StartNowPlayingUpdates::CSM_MSG_ID, StopNowPlayingUpdates::CSM_MSG_ID];
+pub const SENT_BY_ACCESSORY: &[u16] = &[
+  StartNowPlayingUpdates::CSM_MSG_ID,
+  StopNowPlayingUpdates::CSM_MSG_ID,
+  SetNowPlayingInformation::CSM_MSG_ID,
+];
 
 /// CSMs the accessory accepts in this layer. Identification merges
 /// these into param 7 of `IdentificationInformation`.
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[NowPlayingUpdate::CSM_MSG_ID];
 
 /// MediaItem attribute sub-ids the accessory subscribes to. iPhone
-/// only sends these back. Drops the `0x04` sub-id whose purpose has
-/// not been pinned down in cleanroom analysis - subscribing to fields
-/// we don't render costs us inbound traffic for no benefit.
+/// only sends these back. See cleanroom `protocol/60_now_playing_inner.md`
+/// for the canonical attribute table.
 pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_PERSISTENT_ID,
   MEDIA_ITEM_TITLE,
+  MEDIA_ITEM_MEDIA_TYPE,
+  MEDIA_ITEM_DURATION_MS,
   MEDIA_ITEM_ALBUM,
+  MEDIA_ITEM_ALBUM_TRACK_NUMBER,
+  MEDIA_ITEM_ALBUM_TRACK_COUNT,
   MEDIA_ITEM_ARTIST,
+  MEDIA_ITEM_ALBUM_ARTIST,
+  MEDIA_ITEM_LIKE_SUPPORTED,
+  MEDIA_ITEM_BAN_SUPPORTED,
   MEDIA_ITEM_LIKED,
+  MEDIA_ITEM_BANNED,
+  MEDIA_ITEM_RESIDENT_ON_DEVICE,
   MEDIA_ITEM_ARTWORK_ID,
+  MEDIA_ITEM_CHAPTER_COUNT,
 ];
 
 /// Playback attribute sub-ids the accessory subscribes to.
 pub const PLAYBACK_SUBSCRIBE: &[u16] = &[
   PLAYBACK_STATE,
   PLAYBACK_POSITION_MS,
-  PLAYBACK_SHUFFLE,
+  PLAYBACK_QUEUE_INDEX,
+  PLAYBACK_QUEUE_COUNT,
+  PLAYBACK_QUEUE_CHAPTER_INDEX,
+  PLAYBACK_SHUFFLE_MODE,
   PLAYBACK_REPEAT,
   PLAYBACK_APP_DISPLAY_NAME,
   PLAYBACK_LIBRARY_UNIQUE_ID,
+  PLAYBACK_RADIO_AD,
+  PLAYBACK_RADIO_STATION_NAME,
+  PLAYBACK_SPEED,
+  PLAYBACK_SET_ELAPSED_TIME_AVAILABLE,
+  PLAYBACK_QUEUE_LIST_AVAIL,
+  PLAYBACK_QUEUE_LIST_TRANSFER_ID,
   PLAYBACK_APP_BUNDLE,
+  PLAYBACK_QUEUE_LIST_CONTENT_TRANSFER,
 ];
 
 const MEDIA_ITEM_PERSISTENT_ID: u16 = 0x00;
 const MEDIA_ITEM_TITLE: u16 = 0x01;
+const MEDIA_ITEM_MEDIA_TYPE: u16 = 0x02;
+const MEDIA_ITEM_DURATION_MS: u16 = 0x04;
 const MEDIA_ITEM_ALBUM: u16 = 0x06;
+const MEDIA_ITEM_ALBUM_TRACK_NUMBER: u16 = 0x07;
+const MEDIA_ITEM_ALBUM_TRACK_COUNT: u16 = 0x08;
 const MEDIA_ITEM_ARTIST: u16 = 0x0C;
-const MEDIA_ITEM_ARTIST_ALT: u16 = 0x0E;
+const MEDIA_ITEM_ALBUM_ARTIST: u16 = 0x0E;
+const MEDIA_ITEM_LIKE_SUPPORTED: u16 = 0x15;
+const MEDIA_ITEM_BAN_SUPPORTED: u16 = 0x16;
 const MEDIA_ITEM_LIKED: u16 = 0x17;
+const MEDIA_ITEM_BANNED: u16 = 0x18;
+const MEDIA_ITEM_RESIDENT_ON_DEVICE: u16 = 0x19;
 const MEDIA_ITEM_ARTWORK_ID: u16 = 0x1A;
+const MEDIA_ITEM_CHAPTER_COUNT: u16 = 0x1B;
 
 const PLAYBACK_STATE: u16 = 0x00;
 const PLAYBACK_POSITION_MS: u16 = 0x01;
-const PLAYBACK_SHUFFLE: u16 = 0x05;
+const PLAYBACK_QUEUE_INDEX: u16 = 0x02;
+const PLAYBACK_QUEUE_COUNT: u16 = 0x03;
+const PLAYBACK_QUEUE_CHAPTER_INDEX: u16 = 0x04;
+const PLAYBACK_SHUFFLE_MODE: u16 = 0x05;
 const PLAYBACK_REPEAT: u16 = 0x06;
 const PLAYBACK_APP_DISPLAY_NAME: u16 = 0x07;
 const PLAYBACK_LIBRARY_UNIQUE_ID: u16 = 0x08;
+const PLAYBACK_RADIO_AD: u16 = 0x09;
+const PLAYBACK_RADIO_STATION_NAME: u16 = 0x0A;
+const PLAYBACK_SPEED: u16 = 0x0C;
+const PLAYBACK_SET_ELAPSED_TIME_AVAILABLE: u16 = 0x0D;
+const PLAYBACK_QUEUE_LIST_AVAIL: u16 = 0x0E;
+const PLAYBACK_QUEUE_LIST_TRANSFER_ID: u16 = 0x0F;
 const PLAYBACK_APP_BUNDLE: u16 = 0x10;
+const PLAYBACK_QUEUE_LIST_CONTENT_TRANSFER: u16 = 0x11;
 
 const NOW_PLAYING_PARAM_MEDIA_ITEM: u16 = 0;
 const NOW_PLAYING_PARAM_PLAYBACK: u16 = 1;
@@ -128,6 +174,31 @@ impl From<StartNowPlayingUpdates> for CsmFrame {
 #[csm(id = 0x5002)]
 pub struct StopNowPlayingUpdates;
 
+/// `0x5003` accessory -> iPhone. The only iAP2 way to seek absolutely
+/// or jump to a specific queue index. Must be sent only in response to
+/// a Direct User Action; cleanroom doc 80 spells out the gating.
+///
+/// `elapsed_time_ms` is only honored when the most recent
+/// `NowPlayingUpdate.PlaybackSetElapsedTimeAvailable` was true; sending
+/// while false is silently ignored or rejected.
+///
+/// `queue_index` jumps the playback head to a specific queue position
+/// (0-based).
+///
+/// `queue_list_content_transfer_start_index` is the window-into-queue
+/// start for the file-transferred queue listing; `0xFFFF_FFFF` lets iOS
+/// center on the current track.
+#[derive(Csm, Debug, Clone, Default, PartialEq, Eq)]
+#[csm(id = 0x5003)]
+pub struct SetNowPlayingInformation {
+  #[csm(param = 0)]
+  pub elapsed_time_ms: Option<u32>,
+  #[csm(param = 1)]
+  pub queue_index: Option<u32>,
+  #[csm(param = 2)]
+  pub queue_list_content_transfer_start_index: Option<u32>,
+}
+
 /// `0x5001` iPhone -> accessory. Delta-shaped: any attribute the
 /// iPhone has fresh information about appears in the matching group;
 /// absent attributes mean "nothing to say about this field," not
@@ -160,40 +231,79 @@ impl TryFrom<CsmFrame> for NowPlayingUpdate {
   }
 }
 
+/// MediaType is multi-typed: an item can carry more than one bit. iAP2
+/// encodes it as a u32 BE with each value contributing a distinct bit
+/// position; we expand it into a `Vec<MediaTypeKind>` for ergonomics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaTypeKind {
+  Music,
+  Podcast,
+  AudioBook,
+}
+
 /// Per-track attributes carried inside the `NowPlayingUpdate` param-0
 /// group. All fields optional; iPhone sends only the ones that
 /// changed since the last update.
 ///
-/// `artist` collapses sub-ids `0x0C` and `0x0E` into one field. Stock
-/// subscribes only to `0x0C` so `0x0E` rarely shows up, but the
-/// decode tolerates either (preferring `0x0C` when both are present).
+/// `artist` is the track-credited artist (sub-id 0x0C).
+/// `album_artist` (sub-id 0x0E) is the album-level credited artist and
+/// is semantically distinct.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MediaItemAttributes {
   pub persistent_id: Option<u64>,
   pub title: Option<String>,
+  pub media_types: Option<Vec<MediaTypeKind>>,
+  pub duration_ms: Option<u32>,
   pub album: Option<String>,
+  pub track_number: Option<u16>,
+  pub track_count: Option<u16>,
   pub artist: Option<String>,
+  pub album_artist: Option<String>,
+  pub like_supported: Option<bool>,
+  pub ban_supported: Option<bool>,
   pub liked: Option<bool>,
+  pub banned: Option<bool>,
+  pub resident_on_device: Option<bool>,
   pub artwork_id: Option<u8>,
+  pub chapter_count: Option<u16>,
 }
 
 impl MediaItemAttributes {
-  fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
+  fn decode_group_inner(payload: Bytes) -> Result<Self, CsmDecodeError> {
     let mut params = decode_param_block(payload)?;
     let persistent_id = take_optional_be_u64(MEDIA_ITEM_PERSISTENT_ID, &mut params)?;
     let title = Option::<String>::decode_field(MEDIA_ITEM_TITLE, &mut params)?;
+    let media_types = take_optional_be_u32(MEDIA_ITEM_MEDIA_TYPE, &mut params)?.map(decode_media_types);
+    let duration_ms = take_optional_be_u32(MEDIA_ITEM_DURATION_MS, &mut params)?;
     let album = Option::<String>::decode_field(MEDIA_ITEM_ALBUM, &mut params)?;
-    let artist_primary = Option::<String>::decode_field(MEDIA_ITEM_ARTIST, &mut params)?;
-    let artist_alt = Option::<String>::decode_field(MEDIA_ITEM_ARTIST_ALT, &mut params)?;
+    let track_number = take_optional_be_u16(MEDIA_ITEM_ALBUM_TRACK_NUMBER, &mut params)?;
+    let track_count = take_optional_be_u16(MEDIA_ITEM_ALBUM_TRACK_COUNT, &mut params)?;
+    let artist = Option::<String>::decode_field(MEDIA_ITEM_ARTIST, &mut params)?;
+    let album_artist = Option::<String>::decode_field(MEDIA_ITEM_ALBUM_ARTIST, &mut params)?;
+    let like_supported = take_optional_presence_bool(MEDIA_ITEM_LIKE_SUPPORTED, &mut params)?;
+    let ban_supported = take_optional_presence_bool(MEDIA_ITEM_BAN_SUPPORTED, &mut params)?;
     let liked = take_optional_presence_bool(MEDIA_ITEM_LIKED, &mut params)?;
+    let banned = take_optional_presence_bool(MEDIA_ITEM_BANNED, &mut params)?;
+    let resident_on_device = take_optional_presence_bool(MEDIA_ITEM_RESIDENT_ON_DEVICE, &mut params)?;
     let artwork_id = take_optional_be_u8(MEDIA_ITEM_ARTWORK_ID, &mut params)?;
+    let chapter_count = take_optional_be_u16(MEDIA_ITEM_CHAPTER_COUNT, &mut params)?;
     Ok(Self {
       persistent_id,
       title,
+      media_types,
+      duration_ms,
       album,
-      artist: artist_primary.or(artist_alt),
+      track_number,
+      track_count,
+      artist,
+      album_artist,
+      like_supported,
+      ban_supported,
       liked,
+      banned,
+      resident_on_device,
       artwork_id,
+      chapter_count,
     })
   }
 }
@@ -202,53 +312,88 @@ impl MediaItemAttributes {
 /// `NowPlayingUpdate` param-1 group. `app_bundle` is the iOS app's
 /// bundle identifier (e.g. `"com.spotify.client"`) - the most
 /// reliable signal for "what audio app is foregrounded right now."
+///
+/// `set_elapsed_time_available` is the load-bearing scrub gate; webapp
+/// scrub UI must be disabled when this is false.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaybackAttributes {
   pub state: Option<PlaybackState>,
   pub position_ms: Option<u32>,
-  pub shuffle: Option<bool>,
+  pub queue_index: Option<u32>,
+  pub queue_count: Option<u32>,
+  pub queue_chapter_index: Option<u32>,
+  pub shuffle_mode: Option<ShuffleMode>,
   pub repeat: Option<RepeatMode>,
   pub app_display_name: Option<String>,
   pub library_unique_id: Option<String>,
+  pub apple_music_radio_ad: Option<bool>,
+  pub apple_music_radio_station_name: Option<String>,
+  pub playback_speed_hundredths: Option<u16>,
+  pub set_elapsed_time_available: Option<bool>,
+  pub queue_list_avail: Option<bool>,
+  pub queue_list_transfer_id: Option<u8>,
   pub app_bundle: Option<String>,
+  pub queue_list_content_transfer: Option<()>,
 }
 
 impl PlaybackAttributes {
-  fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
+  fn decode_group_inner(payload: Bytes) -> Result<Self, CsmDecodeError> {
     let mut params = decode_param_block(payload)?;
     let state = take_optional_be_u8(PLAYBACK_STATE, &mut params)?.map(PlaybackState::from_byte);
     let position_ms = take_optional_be_u32(PLAYBACK_POSITION_MS, &mut params)?;
-    let shuffle = take_optional_presence_bool(PLAYBACK_SHUFFLE, &mut params)?;
+    let queue_index = take_optional_be_u32(PLAYBACK_QUEUE_INDEX, &mut params)?;
+    let queue_count = take_optional_be_u32(PLAYBACK_QUEUE_COUNT, &mut params)?;
+    let queue_chapter_index = take_optional_be_u32(PLAYBACK_QUEUE_CHAPTER_INDEX, &mut params)?;
+    let shuffle_mode = take_optional_be_u8(PLAYBACK_SHUFFLE_MODE, &mut params)?.map(ShuffleMode::from_byte);
     let repeat = take_optional_be_u8(PLAYBACK_REPEAT, &mut params)?.map(RepeatMode::from_byte);
     let app_display_name = Option::<String>::decode_field(PLAYBACK_APP_DISPLAY_NAME, &mut params)?;
     let library_unique_id = Option::<String>::decode_field(PLAYBACK_LIBRARY_UNIQUE_ID, &mut params)?;
+    let apple_music_radio_ad = take_optional_presence_bool(PLAYBACK_RADIO_AD, &mut params)?;
+    let apple_music_radio_station_name = Option::<String>::decode_field(PLAYBACK_RADIO_STATION_NAME, &mut params)?;
+    let playback_speed_hundredths = take_optional_be_u16(PLAYBACK_SPEED, &mut params)?;
+    let set_elapsed_time_available = take_optional_presence_bool(PLAYBACK_SET_ELAPSED_TIME_AVAILABLE, &mut params)?;
+    let queue_list_avail = take_optional_presence_bool(PLAYBACK_QUEUE_LIST_AVAIL, &mut params)?;
+    let queue_list_transfer_id = take_optional_be_u8(PLAYBACK_QUEUE_LIST_TRANSFER_ID, &mut params)?;
     let app_bundle = Option::<String>::decode_field(PLAYBACK_APP_BUNDLE, &mut params)?;
+    let queue_list_content_transfer = take_optional_presence_marker(PLAYBACK_QUEUE_LIST_CONTENT_TRANSFER, &mut params)?;
     Ok(Self {
       state,
       position_ms,
-      shuffle,
+      queue_index,
+      queue_count,
+      queue_chapter_index,
+      shuffle_mode,
       repeat,
       app_display_name,
       library_unique_id,
+      apple_music_radio_ad,
+      apple_music_radio_station_name,
+      playback_speed_hundredths,
+      set_elapsed_time_available,
+      queue_list_avail,
+      queue_list_transfer_id,
       app_bundle,
+      queue_list_content_transfer,
     })
   }
 }
 
-/// On the wire the playback-state byte is documented as `0` paused
-/// and `1` playing, with any other value treated as paused (per the
-/// stock app's `& 0xFD` mask). Anything that isn't a clean `1` falls
-/// into `Paused` here.
+/// Three-state playback per cleanroom doc 60 catalogue: 0 stopped,
+/// 1 playing, 2 paused, 3 seek-forward, 4 seek-backward. We collapse
+/// the seeking states into Playing (the elapsed-time keeps changing
+/// either way).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
-  Paused,
+  Stopped,
   Playing,
+  Paused,
 }
 
 impl PlaybackState {
   fn from_byte(byte: u8) -> Self {
     match byte {
-      1 => Self::Playing,
+      0 => Self::Stopped,
+      1 | 3 | 4 => Self::Playing,
       _ => Self::Paused,
     }
   }
@@ -279,6 +424,45 @@ impl RepeatMode {
       Self::All => 2,
     }
   }
+}
+
+/// Apple's shuffle-mode convention: 0 off, 1 songs (per-track), 2 albums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShuffleMode {
+  Off,
+  Songs,
+  Albums,
+}
+
+impl ShuffleMode {
+  fn from_byte(byte: u8) -> Self {
+    match byte {
+      1 => Self::Songs,
+      2 => Self::Albums,
+      _ => Self::Off,
+    }
+  }
+
+  pub fn is_on(self) -> bool {
+    !matches!(self, Self::Off)
+  }
+}
+
+fn decode_media_types(bits: u32) -> Vec<MediaTypeKind> {
+  // iAP2 packs media types as a bitfield. Bit positions match the values
+  // in cleanroom doc 60: 0=Music, 1=Podcast, 2=AudioBook (a track may be
+  // tagged with multiple at once).
+  let mut out = Vec::new();
+  if bits & (1 << 0) != 0 {
+    out.push(MediaTypeKind::Music);
+  }
+  if bits & (1 << 1) != 0 {
+    out.push(MediaTypeKind::Podcast);
+  }
+  if bits & (1 << 2) != 0 {
+    out.push(MediaTypeKind::AudioBook);
+  }
+  out
 }
 
 fn encode_subscribe_list(ids: &[u16]) -> Bytes {
@@ -317,7 +501,7 @@ trait GroupDecode: Sized {
 
 impl GroupDecode for MediaItemAttributes {
   fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
-    Self::decode_group(payload)
+    Self::decode_group_inner(payload)
   }
   fn default_group() -> Self {
     Self::default()
@@ -326,7 +510,7 @@ impl GroupDecode for MediaItemAttributes {
 
 impl GroupDecode for PlaybackAttributes {
   fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
-    Self::decode_group(payload)
+    Self::decode_group_inner(payload)
   }
   fn default_group() -> Self {
     Self::default()
@@ -359,6 +543,20 @@ fn take_optional_be_u8(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Opti
   Ok(Some(payload[0]))
 }
 
+fn take_optional_be_u16(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<u16>, CsmDecodeError> {
+  let Some(payload) = take_optional(param_id, params)? else {
+    return Ok(None);
+  };
+  if payload.len() != 2 {
+    return Err(CsmDecodeError::ParamLength {
+      param_id,
+      expected: 2,
+      got: payload.len(),
+    });
+  }
+  Ok(Some(u16::from_be_bytes([payload[0], payload[1]])))
+}
+
 fn take_optional_be_u32(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<u32>, CsmDecodeError> {
   let Some(payload) = take_optional(param_id, params)? else {
     return Ok(None);
@@ -389,6 +587,24 @@ fn take_optional_be_u64(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Opt
   let mut buf = [0u8; 8];
   buf.copy_from_slice(&payload);
   Ok(Some(u64::from_be_bytes(buf)))
+}
+
+/// Presence-only marker: empty payload = present, omission = absent.
+/// Different from `take_optional_presence_bool` because the marker
+/// carries no truth value beyond its presence — an explicit `()` rather
+/// than a `bool`.
+fn take_optional_presence_marker(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<()>, CsmDecodeError> {
+  let Some(payload) = take_optional(param_id, params)? else {
+    return Ok(None);
+  };
+  if !payload.is_empty() {
+    return Err(CsmDecodeError::ParamLength {
+      param_id,
+      expected: 0,
+      got: payload.len(),
+    });
+  }
+  Ok(Some(()))
 }
 
 /// "Liked" / "shuffle" arrive as a presence-only marker (empty
@@ -471,21 +687,54 @@ mod tests {
   }
 
   #[test]
+  fn set_now_playing_information_round_trips_with_only_elapsed() {
+    let csm = SetNowPlayingInformation {
+      elapsed_time_ms: Some(123_456),
+      queue_index: None,
+      queue_list_content_transfer_start_index: None,
+    };
+    let frame: CsmFrame = csm.clone().into();
+    assert_eq!(frame.msg_id, 0x5003);
+    // Only param 0 should be present.
+    let ids: Vec<u16> = frame.params.iter().map(|p| p.id).collect();
+    assert_eq!(ids, vec![0]);
+    let decoded: SetNowPlayingInformation = frame.try_into().unwrap();
+    assert_eq!(decoded, csm);
+  }
+
+  #[test]
+  fn set_now_playing_information_round_trips_with_queue_index() {
+    let csm = SetNowPlayingInformation {
+      elapsed_time_ms: None,
+      queue_index: Some(7),
+      queue_list_content_transfer_start_index: Some(0xFFFF_FFFF),
+    };
+    let frame: CsmFrame = csm.clone().into();
+    let decoded: SetNowPlayingInformation = frame.try_into().unwrap();
+    assert_eq!(decoded, csm);
+  }
+
+  #[test]
   fn now_playing_decodes_full_media_and_playback() {
     let media_payload = build_group(&[
       (MEDIA_ITEM_PERSISTENT_ID, &0x0011_2233_4455_6677u64.to_be_bytes()),
       (MEDIA_ITEM_TITLE, b"Hello\0"),
+      (MEDIA_ITEM_DURATION_MS, &200_000u32.to_be_bytes()),
       (MEDIA_ITEM_ALBUM, b"World\0"),
       (MEDIA_ITEM_ARTIST, b"Artist\0"),
+      (MEDIA_ITEM_ALBUM_ARTIST, b"AlbumArtist\0"),
       (MEDIA_ITEM_LIKED, &[]),
       (MEDIA_ITEM_ARTWORK_ID, &[7]),
     ]);
     let playback_payload = build_group(&[
       (PLAYBACK_STATE, &[1]),
       (PLAYBACK_POSITION_MS, &12_345u32.to_be_bytes()),
-      (PLAYBACK_SHUFFLE, &[]),
+      (PLAYBACK_QUEUE_INDEX, &0u32.to_be_bytes()),
+      (PLAYBACK_QUEUE_COUNT, &10u32.to_be_bytes()),
+      (PLAYBACK_SHUFFLE_MODE, &[1]),
       (PLAYBACK_REPEAT, &[2]),
       (PLAYBACK_APP_DISPLAY_NAME, b"Spotify\0"),
+      (PLAYBACK_SET_ELAPSED_TIME_AVAILABLE, &[]),
       (PLAYBACK_APP_BUNDLE, b"com.spotify.client\0"),
     ]);
     let frame = frame_with_groups(Some(media_payload), Some(playback_payload));
@@ -493,26 +742,35 @@ mod tests {
     let media = update.media_item.expect("media_item");
     assert_eq!(media.persistent_id, Some(0x0011_2233_4455_6677u64));
     assert_eq!(media.title.as_deref(), Some("Hello"));
+    assert_eq!(media.duration_ms, Some(200_000));
     assert_eq!(media.album.as_deref(), Some("World"));
     assert_eq!(media.artist.as_deref(), Some("Artist"));
+    assert_eq!(media.album_artist.as_deref(), Some("AlbumArtist"));
     assert_eq!(media.liked, Some(true));
     assert_eq!(media.artwork_id, Some(7));
     let play = update.playback.expect("playback");
     assert_eq!(play.state, Some(PlaybackState::Playing));
     assert_eq!(play.position_ms, Some(12_345));
-    assert_eq!(play.shuffle, Some(true));
+    assert_eq!(play.queue_index, Some(0));
+    assert_eq!(play.queue_count, Some(10));
+    assert_eq!(play.shuffle_mode, Some(ShuffleMode::Songs));
     assert_eq!(play.repeat, Some(RepeatMode::All));
     assert_eq!(play.app_display_name.as_deref(), Some("Spotify"));
+    assert_eq!(play.set_elapsed_time_available, Some(true));
     assert_eq!(play.app_bundle.as_deref(), Some("com.spotify.client"));
   }
 
   #[test]
-  fn artist_falls_back_to_alternate_when_only_alt_present() {
-    let media_payload = build_group(&[(MEDIA_ITEM_ARTIST_ALT, b"AltArtist\0")]);
+  fn artist_and_album_artist_are_separately_decoded() {
+    let media_payload = build_group(&[
+      (MEDIA_ITEM_ARTIST, b"TrackArtist\0"),
+      (MEDIA_ITEM_ALBUM_ARTIST, b"AlbumArtist\0"),
+    ]);
     let frame = frame_with_groups(Some(media_payload), None);
     let update: NowPlayingUpdate = frame.try_into().unwrap();
     let media = update.media_item.expect("media_item");
-    assert_eq!(media.artist.as_deref(), Some("AltArtist"));
+    assert_eq!(media.artist.as_deref(), Some("TrackArtist"));
+    assert_eq!(media.album_artist.as_deref(), Some("AlbumArtist"));
   }
 
   #[test]
@@ -539,6 +797,16 @@ mod tests {
     let frame = frame_with_groups(None, Some(payload));
     let update: NowPlayingUpdate = frame.try_into().unwrap();
     assert_eq!(update.playback.unwrap().state, Some(PlaybackState::Paused));
+  }
+
+  #[test]
+  fn seek_states_are_treated_as_playing() {
+    for byte in [3u8, 4u8] {
+      let payload = build_group(&[(PLAYBACK_STATE, &[byte])]);
+      let frame = frame_with_groups(None, Some(payload));
+      let update: NowPlayingUpdate = frame.try_into().unwrap();
+      assert_eq!(update.playback.unwrap().state, Some(PlaybackState::Playing));
+    }
   }
 
   #[test]
@@ -573,7 +841,7 @@ mod tests {
     assert_eq!(media.title.as_deref(), Some("Round"));
     assert_eq!(media.artwork_id, Some(3));
     let play = update.playback.expect("playback");
-    assert_eq!(play.state, Some(PlaybackState::Paused));
+    assert_eq!(play.state, Some(PlaybackState::Stopped));
     assert_eq!(play.position_ms, Some(0));
   }
 
@@ -593,5 +861,17 @@ mod tests {
     expected.put_u16(CSM_PARAM_HEADER_LEN as u16);
     expected.put_u16(0x06);
     assert_eq!(&payload[..], &expected[..]);
+  }
+
+  #[test]
+  fn media_types_bitfield_decodes_to_combination() {
+    let payload = build_group(&[(MEDIA_ITEM_MEDIA_TYPE, &(0b101u32).to_be_bytes())]);
+    let frame = frame_with_groups(Some(payload), None);
+    let update: NowPlayingUpdate = frame.try_into().unwrap();
+    let media = update.media_item.expect("media_item");
+    assert_eq!(
+      media.media_types.as_deref(),
+      Some(&[MediaTypeKind::Music, MediaTypeKind::AudioBook][..])
+    );
   }
 }

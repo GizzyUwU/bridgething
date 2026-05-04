@@ -738,6 +738,23 @@ public struct PhoneSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Phone::Accept` messages.
+  public var accept: AsyncStream<(deviceId: String, msg: PhoneAcceptAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .accept(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Cross-peer stream of `Phone::Decline` messages.
   public var decline: AsyncStream<(deviceId: String, msg: PhoneCallAction)> {
     AsyncStream { continuation in
@@ -763,6 +780,23 @@ public struct PhoneSurface: Sendable {
           if case .message(let deviceId, let message) = event,
              case .phone(let outer) = message.data,
              case .end(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::EndTyped` messages.
+  public var endTyped: AsyncStream<(deviceId: String, msg: PhoneEndAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .endTyped(let inner) = outer {
             continuation.yield((deviceId: deviceId, msg: inner))
           }
         }
@@ -806,6 +840,91 @@ public struct PhoneSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Phone::Initiate` messages.
+  public var initiate: AsyncStream<(deviceId: String, msg: PhoneInitiateAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .initiate(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Swap` messages.
+  public var swap: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .swap = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Merge` messages.
+  public var merge: AsyncStream<String> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .merge = outer {
+            continuation.yield(deviceId)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Mute` messages.
+  public var mute: AsyncStream<(deviceId: String, msg: PhoneMuteAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .mute(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Phone::Dtmf` messages.
+  public var dtmf: AsyncStream<(deviceId: String, msg: PhoneDtmfAction)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .phone(let outer) = message.data,
+             case .dtmf(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
   public var requests: AsyncStream<PhoneStateGetHandle> {
     AsyncStream { continuation in
@@ -831,6 +950,20 @@ public struct PhoneSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.snapshot(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Phone::CommunicationsSnapshot` to every connected peer (broadcast).
+  public func communicationsSnapshot(_ payload: CommunicationsSnapshot, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.communicationsSnapshot(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -2307,6 +2440,24 @@ public struct PhoneSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Phone::Accept` from this peer.
+  public var accept: AsyncStream<PhoneAcceptAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .accept(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of `Phone::Decline` from this peer.
   public var decline: AsyncStream<PhoneCallAction> {
     AsyncStream { continuation in
@@ -2334,6 +2485,24 @@ public struct PhoneSurfaceForDevice: Sendable {
              evDeviceId == deviceId,
              case .phone(let outer) = message.data,
              case .end(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::EndTyped` from this peer.
+  public var endTyped: AsyncStream<PhoneEndAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .endTyped(let inner) = outer {
             continuation.yield(inner)
           }
         }
@@ -2379,6 +2548,96 @@ public struct PhoneSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Phone::Initiate` from this peer.
+  public var initiate: AsyncStream<PhoneInitiateAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .initiate(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Swap` from this peer.
+  public var swap: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .swap = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Merge` from this peer.
+  public var merge: AsyncStream<Void> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .merge = outer {
+            continuation.yield(())
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Mute` from this peer.
+  public var mute: AsyncStream<PhoneMuteAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .mute(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Phone::Dtmf` from this peer.
+  public var dtmf: AsyncStream<PhoneDtmfAction> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .phone(let outer) = message.data,
+             case .dtmf(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
   public var requests: AsyncStream<PhoneStateGetHandle> {
     AsyncStream { continuation in
@@ -2401,6 +2660,12 @@ public struct PhoneSurfaceForDevice: Sendable {
   /// Send `Phone::Snapshot` to this peer.
   public func snapshot(_ payload: PhoneStateReply, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.snapshot(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Phone::CommunicationsSnapshot` to this peer.
+  public func communicationsSnapshot(_ payload: CommunicationsSnapshot, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .phone(.communicationsSnapshot(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

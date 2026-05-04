@@ -4,12 +4,62 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
+use crate::{AcceptCallAction, DtmfTone, EndCallAction, InitiateCallType, PhoneCallService};
+
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct PhoneCallAction {
   pub call_id: String,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneAcceptAction {
+  pub call_id: String,
+  pub action: AcceptCallAction,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneEndAction {
+  pub call_id: String,
+  pub action: EndCallAction,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneInitiateAction {
+  pub kind: InitiateCallType,
+  pub destination_id: Option<String>,
+  pub service: Option<PhoneCallService>,
+  pub address_book_id: Option<String>,
+}
+
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneMuteAction {
+  pub mute: bool,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PhoneDtmfAction {
+  pub call_id: Option<String>,
+  pub tone: DtmfTone,
 }
 
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
@@ -32,13 +82,27 @@ pub enum BridgeToGatewayPhoneMsg {
   #[bridge_command]
   Answer(PhoneCallAction),
   #[bridge_command]
+  Accept(PhoneAcceptAction),
+  #[bridge_command]
   Decline(PhoneCallAction),
   #[bridge_command]
   End(PhoneCallAction),
   #[bridge_command]
+  EndTyped(PhoneEndAction),
+  #[bridge_command]
   Hold(PhoneCallAction),
   #[bridge_command]
   Unhold(PhoneCallAction),
+  #[bridge_command]
+  Initiate(PhoneInitiateAction),
+  #[bridge_command]
+  Swap,
+  #[bridge_command]
+  Merge,
+  #[bridge_command]
+  Mute(PhoneMuteAction),
+  #[bridge_command]
+  Dtmf(PhoneDtmfAction),
   #[bridge_request]
   StateGet,
 }

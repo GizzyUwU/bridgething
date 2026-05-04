@@ -22,9 +22,15 @@ use std::time::Duration;
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
-use super::send_csm;
+use super::{SessionEvent, send_csm};
 use crate::{
-  csm::hid::{StartHID, StopHID, TRANSPORT_COMPONENT_ID, TRANSPORT_DESCRIPTOR, transport_report},
+  csm::{
+    CsmFrame,
+    hid::{
+      DeviceHIDReport, HIDComponentUpdate, StartHID, StartNativeHID, StopHID, TRANSPORT_COMPONENT_ID,
+      TRANSPORT_DESCRIPTOR, transport_report,
+    },
+  },
   error::Result,
   link::Iap2Command,
 };
@@ -76,6 +82,45 @@ impl HidFlow {
       state: HidState::Idle,
       rx,
     }
+  }
+
+  pub(super) fn handles(msg_id: u16) -> bool {
+    matches!(msg_id, 0x6801 | 0x6806 | 0x6807)
+  }
+
+  /// Process one inbound HID-range CSM. The Car Thing's HID surface is
+  /// outbound-only — these inbound CSMs are decoded and logged, never
+  /// acted on. Decoding still validates the wire shape, which surfaces
+  /// peer protocol bugs early.
+  pub(super) async fn handle(
+    &mut self,
+    frame: CsmFrame,
+    _session_events_tx: &mpsc::Sender<SessionEvent>,
+  ) -> Result<Option<SessionEvent>> {
+    match frame.msg_id {
+      0x6801 => {
+        let report = DeviceHIDReport::try_from(frame)?;
+        tracing::trace!(
+          component_id = report.component_id,
+          bytes = report.report.len(),
+          "iap2 hid: inbound DeviceHIDReport (logged, not dispatched)"
+        );
+      }
+      0x6806 => {
+        let _ = StartNativeHID::try_from(frame)?;
+        tracing::debug!("iap2 hid: inbound StartNativeHID");
+      }
+      0x6807 => {
+        let update = HIDComponentUpdate::try_from(frame)?;
+        tracing::debug!(
+          component_id = update.component_id,
+          enabled = update.component_enabled,
+          "iap2 hid: inbound HIDComponentUpdate"
+        );
+      }
+      _ => {}
+    }
+    Ok(None)
   }
 
   /// Send `StartHID` if we haven't yet. Idempotent; the session calls

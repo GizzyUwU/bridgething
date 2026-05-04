@@ -23,17 +23,20 @@
 //! [`Link`]: crate::Link
 
 mod auth;
+mod device;
 mod external_accessory;
 mod file_transfer;
 mod hid;
 mod identification;
 mod mfi_worker;
 mod now_playing;
+mod telephony;
 
 use async_trait::async_trait;
 use auth::AuthFlow;
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::{Bytes, BytesMut};
+use device::DeviceFlow;
 use external_accessory::EaFlow;
 pub use external_accessory::{EaPriority, EaSendError, EaStreamSender};
 use file_transfer::FileTransferFlow;
@@ -41,12 +44,20 @@ pub use hid::HidCommand;
 use hid::HidFlow;
 use identification::IdentificationFlow;
 pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
+pub use now_playing::NowPlayingCommand;
 use now_playing::NowPlayingFlow;
+pub use telephony::TelephonyCommand;
+use telephony::TelephonyFlow;
 use tokio::sync::mpsc;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
-  csm::{CsmCodec, CsmFrame, identification::IdentificationConfig},
+  csm::{
+    CsmCodec, CsmFrame,
+    device::{DeviceInformationUpdate, DeviceLanguageUpdate, DeviceTimeUpdate, DeviceUUIDUpdate},
+    identification::IdentificationConfig,
+    telephony::{CallStateUpdate, CommunicationsUpdate},
+  },
   error::{Error, Result},
   frame::Lsp,
   link::{Iap2Command, Iap2Event},
@@ -95,6 +106,12 @@ pub enum SessionEvent {
     rejected_params: Vec<u16>,
   },
   NowPlayingUpdate(crate::csm::now_playing::NowPlayingUpdate),
+  CallStateUpdate(CallStateUpdate),
+  CommunicationsUpdate(CommunicationsUpdate),
+  DeviceName(DeviceInformationUpdate),
+  DeviceLanguage(DeviceLanguageUpdate),
+  DeviceTime(DeviceTimeUpdate),
+  DeviceUuid(DeviceUUIDUpdate),
   EaStreamOpened {
     stream_id: u16,
     protocol_id: u8,
@@ -105,6 +122,10 @@ pub enum SessionEvent {
     stream_id: u16,
   },
   ArtworkBytes {
+    transfer_id: u8,
+    bytes: Bytes,
+  },
+  QueueSnapshotBytes {
     transfer_id: u8,
     bytes: Bytes,
   },
@@ -129,6 +150,8 @@ pub struct Iap2Session<M: MfiAccess> {
   ea: Option<EaFlow>,
   file_transfer: FileTransferFlow,
   hid: HidFlow,
+  telephony: TelephonyFlow,
+  device: DeviceFlow,
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
@@ -139,6 +162,8 @@ impl<M: MfiAccess> Iap2Session<M> {
     link_events_rx: mpsc::Receiver<Iap2Event>,
     session_events_tx: mpsc::Sender<SessionEvent>,
     hid_command_rx: mpsc::Receiver<HidCommand>,
+    now_playing_command_rx: mpsc::Receiver<NowPlayingCommand>,
+    telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
     Self::with_app_launch(
       identification,
@@ -148,6 +173,8 @@ impl<M: MfiAccess> Iap2Session<M> {
       link_events_rx,
       session_events_tx,
       hid_command_rx,
+      now_playing_command_rx,
+      telephony_command_rx,
     )
   }
 
@@ -163,14 +190,18 @@ impl<M: MfiAccess> Iap2Session<M> {
     link_events_rx: mpsc::Receiver<Iap2Event>,
     session_events_tx: mpsc::Sender<SessionEvent>,
     hid_command_rx: mpsc::Receiver<HidCommand>,
+    now_playing_command_rx: mpsc::Receiver<NowPlayingCommand>,
+    telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
     Self {
       auth: AuthFlow::new(),
       ident: IdentificationFlow::new(),
-      now_playing: NowPlayingFlow::new(),
+      now_playing: NowPlayingFlow::new(now_playing_command_rx),
       ea: None,
       file_transfer: FileTransferFlow::new(link_command_tx.clone()),
       hid: HidFlow::new(hid_command_rx),
+      telephony: TelephonyFlow::new(telephony_command_rx),
+      device: DeviceFlow::new(),
       identification,
       app_launch_bundle_id,
       mfi,
@@ -208,6 +239,7 @@ impl<M: MfiAccess> Iap2Session<M> {
         if self.ident.is_accepted() {
           self.now_playing.ensure_subscribed(&self.link_command_tx).await?;
           self.hid.ensure_started(&self.link_command_tx).await?;
+          self.telephony.ensure_subscribed(&self.link_command_tx).await?;
           if let (Some(ea), Some(bundle)) = (self.ea.as_mut(), self.app_launch_bundle_id.as_deref()) {
             ea.ensure_app_launch_requested(bundle, &self.link_command_tx).await?;
           }
@@ -266,6 +298,16 @@ impl<M: MfiAccess> Iap2Session<M> {
             tracing::warn!(?err, "iap2 session: hid command dispatch failed");
           }
         }
+        Some(np_cmd) = self.now_playing.recv() => {
+          if let Err(err) = self.now_playing.handle_command(np_cmd, &self.link_command_tx).await {
+            tracing::warn!(?err, "iap2 session: now-playing command dispatch failed");
+          }
+        }
+        Some(tel_cmd) = self.telephony.recv() => {
+          if let Err(err) = self.telephony.handle_command(tel_cmd, &self.link_command_tx).await {
+            tracing::warn!(?err, "iap2 session: telephony command dispatch failed");
+          }
+        }
       }
     }
   }
@@ -304,6 +346,15 @@ impl<M: MfiAccess> Iap2Session<M> {
         "iap2 session: EA CSM before link Established"
       );
       return Ok(None);
+    }
+    if TelephonyFlow::handles(msg_id) {
+      return self.telephony.handle(frame, &self.session_events_tx).await;
+    }
+    if DeviceFlow::handles(msg_id) {
+      return self.device.handle(frame, &self.session_events_tx).await;
+    }
+    if HidFlow::handles(msg_id) {
+      return self.hid.handle(frame, &self.session_events_tx).await;
     }
     tracing::trace!(msg_id = format!("{msg_id:#06x}"), "iap2 session: unhandled CSM");
     Ok(None)

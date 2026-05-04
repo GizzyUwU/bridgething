@@ -26,19 +26,23 @@ use bluer::{
 };
 use bridgething_iap2::{
   HidCommand, IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event, Iap2Session, Link,
-  LinkConfig, Lsp, SessionEvent,
+  LinkConfig, Lsp, NowPlayingCommand, SessionEvent,
   csm::{
     identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
     now_playing::{
-      MediaItemAttributes, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState, RepeatMode,
+      MediaItemAttributes, MediaTypeKind, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState,
+      RepeatMode, ShuffleMode as Iap2ShuffleMode,
     },
   },
-  session::WorkerMfiAccess,
+  session::{TelephonyCommand, WorkerMfiAccess},
 };
 use bridgething_mfi::MfiAuth;
 pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
 use futures::StreamExt;
-use libbridgething::{DeviceType, MediaItemUpdate, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate};
+use libbridgething::{
+  DeviceType, MediaItemUpdate, MediaType as LibMediaType, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate,
+  ShuffleMode as LibShuffleMode,
+};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 mod ea;
@@ -100,9 +104,20 @@ fn iap2_service_record() -> String {
 #[derive(Debug)]
 struct ActiveSession {
   hid_tx: mpsc::Sender<HidCommand>,
+  np_tx: mpsc::Sender<NowPlayingCommand>,
+  tel_tx: mpsc::Sender<TelephonyCommand>,
   _link_handle: JoinHandle<bridgething_iap2::Result<()>>,
   _session_handle: JoinHandle<bridgething_iap2::Result<()>>,
   _events_handle: JoinHandle<()>,
+}
+
+/// One outbound transport message routed through the iAP2 manager.
+/// The manager picks the active session and forwards the inner command
+/// to the right per-session channel.
+#[derive(Debug, Clone, Copy)]
+pub enum Iap2TransportCommand {
+  Hid(HidCommand),
+  NowPlaying(NowPlayingCommand),
 }
 
 /// Cloneable handle to kick the iAP2 reconnect loop for a given peer.
@@ -124,19 +139,42 @@ impl Iap2ReconnectHandle {
 }
 
 /// Cloneable handle the daemon's `TransportController` uses to dispatch
-/// outbound HID commands when iAP2 (not the companion) holds playback
-/// authority. Each send routes to the currently-active session's
-/// HID flow; if no session is active the command is dropped with a
-/// trace log.
+/// outbound transport commands when iAP2 (not the companion) holds
+/// playback authority. Carries either HID press intents (Consumer
+/// Control buttons) or NowPlaying control intents (absolute scrub /
+/// queue jump). Routes to the currently-active session's matching
+/// channel; if no session is active the command is dropped at trace.
 #[derive(Debug, Clone)]
 pub struct Iap2TransportHandle {
-  tx: mpsc::Sender<HidCommand>,
+  tx: mpsc::Sender<Iap2TransportCommand>,
 }
 
 impl Iap2TransportHandle {
-  pub async fn send(&self, cmd: HidCommand) {
-    if self.tx.send(cmd).await.is_err() {
+  pub async fn send_hid(&self, cmd: HidCommand) {
+    if self.tx.send(Iap2TransportCommand::Hid(cmd)).await.is_err() {
       tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+    }
+  }
+
+  pub async fn send_now_playing(&self, cmd: NowPlayingCommand) {
+    if self.tx.send(Iap2TransportCommand::NowPlaying(cmd)).await.is_err() {
+      tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+    }
+  }
+}
+
+/// Cloneable handle the daemon's telephony manager uses to dispatch
+/// outbound iAP2 telephony actions (Initiate, Accept, End, Swap, Merge,
+/// Hold, Mute, DTMF). Routes to the currently-active session.
+#[derive(Debug, Clone)]
+pub struct Iap2TelephonyHandle {
+  tx: mpsc::Sender<TelephonyCommand>,
+}
+
+impl Iap2TelephonyHandle {
+  pub async fn send(&self, cmd: TelephonyCommand) {
+    if self.tx.send(cmd).await.is_err() {
+      tracing::debug!("iap2 telephony command dropped; manager exited");
     }
   }
 }
@@ -155,7 +193,8 @@ pub struct Iap2Manager {
   reconnects: HashMap<Address, JoinHandle<()>>,
   reconnect_tx: mpsc::Sender<Address>,
   reconnect_rx: mpsc::Receiver<Address>,
-  transport_rx: mpsc::Receiver<HidCommand>,
+  transport_rx: mpsc::Receiver<Iap2TransportCommand>,
+  telephony_rx: mpsc::Receiver<TelephonyCommand>,
 }
 
 impl Iap2Manager {
@@ -165,7 +204,7 @@ impl Iap2Manager {
     state: &State,
     profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
-  ) -> BluetoothResult<Option<(Self, Iap2ReconnectHandle, Iap2TransportHandle)>> {
+  ) -> BluetoothResult<Option<(Self, Iap2ReconnectHandle, Iap2TransportHandle, Iap2TelephonyHandle)>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
@@ -207,8 +246,11 @@ impl Iap2Manager {
       tx: reconnect_tx.clone(),
     };
 
-    let (transport_tx, transport_rx) = mpsc::channel(IAP2_CHANNEL_CAPACITY);
+    let (transport_tx, transport_rx) = mpsc::channel::<Iap2TransportCommand>(IAP2_CHANNEL_CAPACITY);
     let transport_handle = Iap2TransportHandle { tx: transport_tx };
+
+    let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
+    let telephony_handle = Iap2TelephonyHandle { tx: telephony_tx };
 
     Ok(Some((
       Self {
@@ -225,9 +267,11 @@ impl Iap2Manager {
         reconnect_tx,
         reconnect_rx,
         transport_rx,
+        telephony_rx,
       },
       reconnect_handle,
       transport_handle,
+      telephony_handle,
     )))
   }
 
@@ -257,6 +301,9 @@ impl Iap2Manager {
         Some(cmd) = self.transport_rx.recv() => {
           self.dispatch_transport(cmd).await;
         }
+        Some(cmd) = self.telephony_rx.recv() => {
+          self.dispatch_telephony(cmd).await;
+        }
         else => {
           tracing::error!("iAP2 manager streams all ended - this should not happen");
           return;
@@ -278,6 +325,8 @@ impl Iap2Manager {
     let (link_events_tx, link_events_rx) = mpsc::channel::<Iap2Event>(IAP2_CHANNEL_CAPACITY);
     let (session_events_tx, session_events_rx) = mpsc::channel::<SessionEvent>(IAP2_CHANNEL_CAPACITY);
     let (hid_tx, hid_rx) = mpsc::channel::<HidCommand>(IAP2_CHANNEL_CAPACITY);
+    let (np_tx, np_rx) = mpsc::channel::<NowPlayingCommand>(IAP2_CHANNEL_CAPACITY);
+    let (tel_tx, tel_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
 
     let link_config = LinkConfig::new(Lsp::accessory_default());
     let _link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
@@ -291,6 +340,8 @@ impl Iap2Manager {
       link_events_rx,
       session_events_tx,
       hid_rx,
+      np_rx,
+      tel_rx,
     );
     let _session_handle = tokio::spawn(session.run());
 
@@ -307,6 +358,8 @@ impl Iap2Manager {
       address,
       ActiveSession {
         hid_tx,
+        np_tx,
+        tel_tx,
         _link_handle,
         _session_handle,
         _events_handle,
@@ -322,13 +375,32 @@ impl Iap2Manager {
   /// command is dropped at trace level - the controller's authority check
   /// already gated on iAP2 being a viable target, so a missing session
   /// here means a race with link teardown, not a bug.
-  async fn dispatch_transport(&self, cmd: HidCommand) {
+  async fn dispatch_transport(&self, cmd: Iap2TransportCommand) {
     let Some(session) = self.sessions.values().next() else {
       tracing::trace!(?cmd, "iAP2 transport command with no active session; dropping");
       return;
     };
-    if session.hid_tx.send(cmd).await.is_err() {
-      tracing::debug!(?cmd, "iAP2 session HID receiver closed; dropping command");
+    match cmd {
+      Iap2TransportCommand::Hid(hid) => {
+        if session.hid_tx.send(hid).await.is_err() {
+          tracing::debug!(?hid, "iAP2 session HID receiver closed; dropping command");
+        }
+      }
+      Iap2TransportCommand::NowPlaying(np) => {
+        if session.np_tx.send(np).await.is_err() {
+          tracing::debug!(?np, "iAP2 session NowPlaying receiver closed; dropping command");
+        }
+      }
+    }
+  }
+
+  async fn dispatch_telephony(&self, cmd: TelephonyCommand) {
+    let Some(session) = self.sessions.values().next() else {
+      tracing::trace!(?cmd, "iAP2 telephony command with no active session; dropping");
+      return;
+    };
+    if session.tel_tx.send(cmd).await.is_err() {
+      tracing::debug!("iAP2 session telephony receiver closed; dropping command");
     }
   }
 
@@ -515,6 +587,55 @@ async fn observe_session_events(
           tracing::warn!(%address, ?err, "failed to insert iAP2 artwork into asset cache");
         }
       }
+      SessionEvent::QueueSnapshotBytes { transfer_id, bytes } => {
+        tracing::debug!(
+          %address,
+          transfer_id,
+          bytes = bytes.len(),
+          "iAP2 queue snapshot bytes received (parser TBD)"
+        );
+      }
+      SessionEvent::CallStateUpdate(update) => {
+        tracing::debug!(%address, ?update, "iAP2 call-state update");
+        if let Err(err) = state.telephony.apply_iap2_call_state(update).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 call-state update");
+        }
+      }
+      SessionEvent::CommunicationsUpdate(update) => {
+        tracing::debug!(%address, ?update, "iAP2 communications update");
+        if let Err(err) = state.telephony.apply_iap2_communications(update).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 communications update");
+        }
+      }
+      SessionEvent::DeviceName(update) => {
+        tracing::info!(%address, name = %update.device_name, "iAP2 device name");
+      }
+      SessionEvent::DeviceLanguage(update) => {
+        tracing::info!(%address, language = %update.language, "iAP2 device language");
+      }
+      SessionEvent::DeviceTime(update) => {
+        tracing::info!(
+          %address,
+          unix_s = update.seconds_since_reference_date,
+          tz_offset_minutes = update.tz_offset_minutes,
+          dst_offset_minutes = update.dst_offset_minutes,
+          "iAP2 device time"
+        );
+        if let Err(err) = state
+          .time
+          .apply_iap2_update(
+            update.seconds_since_reference_date,
+            update.tz_offset_minutes,
+            update.dst_offset_minutes,
+          )
+          .await
+        {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 time update");
+        }
+      }
+      SessionEvent::DeviceUuid(update) => {
+        tracing::info!(%address, uuid = %update.uuid, "iAP2 device UUID");
+      }
       SessionEvent::EaStreamOpened {
         stream_id,
         protocol_id,
@@ -567,10 +688,19 @@ fn translate_media_item(media: MediaItemAttributes, persistent_hex: Option<&str>
     persistent_id: pid_hex.map(|hex| format!("iap2:track:{hex}")),
     title: media.title,
     album: media.album,
+    album_artist: media.album_artist,
     artist: media.artist,
     liked: media.liked,
     artwork_id,
-    duration_ms: None,
+    duration_ms: media.duration_ms,
+    media_types: media.media_types.map(translate_media_types),
+    track_number: media.track_number,
+    track_count: media.track_count,
+    is_like_supported: media.like_supported,
+    is_ban_supported: media.ban_supported,
+    is_banned: media.banned,
+    is_resident_on_device: media.resident_on_device,
+    chapter_count: media.chapter_count,
   }
 }
 
@@ -578,10 +708,19 @@ fn translate_playback(play: PlaybackAttributes) -> PlaybackUpdate {
   PlaybackUpdate {
     playing: play.state.map(|s| matches!(s, PlaybackState::Playing)),
     position_ms: play.position_ms,
-    shuffle: play.shuffle,
+    shuffle: play.shuffle_mode.map(|m| m.is_on()),
+    shuffle_mode: play.shuffle_mode.map(translate_shuffle),
     repeat: play.repeat.map(translate_repeat),
     app_bundle: play.app_bundle,
     app_display_name: play.app_display_name,
+    queue_index: play.queue_index,
+    queue_count: play.queue_count,
+    queue_chapter_index: play.queue_chapter_index,
+    playback_speed: play.playback_speed_hundredths.map(|h| f32::from(h) / 100.0),
+    set_elapsed_time_available: play.set_elapsed_time_available,
+    queue_list_avail: play.queue_list_avail,
+    apple_music_radio_ad: play.apple_music_radio_ad,
+    apple_music_radio_station_name: play.apple_music_radio_station_name,
   }
 }
 
@@ -591,6 +730,25 @@ fn translate_repeat(mode: RepeatMode) -> libbridgething::RepeatMode {
     RepeatMode::Track => libbridgething::RepeatMode::One,
     RepeatMode::All => libbridgething::RepeatMode::All,
   }
+}
+
+fn translate_shuffle(mode: Iap2ShuffleMode) -> LibShuffleMode {
+  match mode {
+    Iap2ShuffleMode::Off => LibShuffleMode::Off,
+    Iap2ShuffleMode::Songs => LibShuffleMode::Songs,
+    Iap2ShuffleMode::Albums => LibShuffleMode::Albums,
+  }
+}
+
+fn translate_media_types(types: Vec<MediaTypeKind>) -> Vec<LibMediaType> {
+  types
+    .into_iter()
+    .map(|t| match t {
+      MediaTypeKind::Music => LibMediaType::Music,
+      MediaTypeKind::Podcast => LibMediaType::Podcast,
+      MediaTypeKind::AudioBook => LibMediaType::AudioBook,
+    })
+    .collect()
 }
 
 fn build_identification(state: &State) -> IdentificationConfig {

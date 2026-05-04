@@ -418,6 +418,59 @@ data class ChromeNavigate (
 	val url: String
 )
 
+/// Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+/// or the companion's equivalent.
+@Serializable
+enum class RegistrationStatus(val string: String) {
+	@SerialName("unknown")
+	Unknown("unknown"),
+	@SerialName("notRegistered")
+	NotRegistered("notRegistered"),
+	@SerialName("searching")
+	Searching("searching"),
+	@SerialName("denied")
+	Denied("denied"),
+	@SerialName("registeredHome")
+	RegisteredHome("registeredHome"),
+	@SerialName("registeredRoaming")
+	RegisteredRoaming("registeredRoaming"),
+	@SerialName("emergencyCallsOnly")
+	EmergencyCallsOnly("emergencyCallsOnly"),
+}
+
+/// What call-control verbs are currently legal. Webapps must gate UI on
+/// these flags; sending an unavailable verb is a protocol violation, not
+/// a no-op. All `None` = no signal received yet, treat as conservatively
+/// unavailable.
+@Serializable
+data class CommunicationsState (
+	val signalStrength: UByte? = null,
+	val registrationStatus: RegistrationStatus? = null,
+	val airplaneMode: Boolean? = null,
+	val carrierName: String? = null,
+	val cellularSupported: Boolean? = null,
+	val telephonyEnabled: Boolean? = null,
+	val faceTimeAudioEnabled: Boolean? = null,
+	val faceTimeVideoEnabled: Boolean? = null,
+	val muteStatus: Boolean? = null,
+	val currentCallCount: UByte? = null,
+	val newVoicemailCount: UByte? = null,
+	val initiateCallAvailable: Boolean? = null,
+	val endAndAcceptAvailable: Boolean? = null,
+	val holdAndAcceptAvailable: Boolean? = null,
+	val swapAvailable: Boolean? = null,
+	val mergeAvailable: Boolean? = null,
+	val holdAvailable: Boolean? = null
+)
+
+/// Companion-side cellular / call-control snapshot. Announce-on-connect
+/// pattern: companion sends an initial `CommunicationsSnapshot` after
+/// announce, then re-sends on any field change.
+@Serializable
+data class CommunicationsSnapshot (
+	val state: CommunicationsState
+)
+
 /// One key/value pair as exposed by config read APIs. `value` is always a
 /// string; consumers parse per the field's declared kind (number → parseFloat,
 /// boolean → "true"/"false", string/enum/secret → as-is).
@@ -822,20 +875,41 @@ data class LogEntry (
 	val message: String
 )
 
+/// The kind of media currently playing. Multi-typed: an item can be
+/// e.g. both `Podcast` and `AudioBook` (rare). Drives webapp UI choices
+/// like skip-15s-vs-skip-track and chapter UI.
+@Serializable
+enum class MediaType(val string: String) {
+	@SerialName("music")
+	Music("music"),
+	@SerialName("podcast")
+	Podcast("podcast"),
+	@SerialName("audioBook")
+	AudioBook("audioBook"),
+}
+
 /// Currently-playing track, populated to the extent the gateway/iAP2
 /// stream has surfaced. All fields are optional because each one arrives
-/// as a separate ANCS-style attribute fetch on iAP2; the daemon
-/// accumulates and the snapshot reflects whatever's known so far.
+/// as a separate attribute fetch on iAP2; the daemon accumulates and the
+/// snapshot reflects whatever's known so far.
 @Serializable
 data class MediaItem (
 	val uri: String? = null,
 	val persistentId: String? = null,
 	val title: String? = null,
 	val album: String? = null,
+	val albumArtist: String? = null,
 	val artist: String? = null,
 	val liked: Boolean? = null,
 	val artworkId: String? = null,
-	val durationMs: UInt? = null
+	val durationMs: UInt? = null,
+	val mediaTypes: List<MediaType>? = null,
+	val trackNumber: UShort? = null,
+	val trackCount: UShort? = null,
+	val isLikeSupported: Boolean? = null,
+	val isBanSupported: Boolean? = null,
+	val isBanned: Boolean? = null,
+	val chapterCount: UShort? = null
 )
 
 /// Per-track attributes that vary per song. `persistent_id` is a stable
@@ -850,10 +924,19 @@ data class MediaItemUpdate (
 	val persistentId: String? = null,
 	val title: String? = null,
 	val album: String? = null,
+	val albumArtist: String? = null,
 	val artist: String? = null,
 	val liked: Boolean? = null,
 	val artworkId: String? = null,
-	val durationMs: UInt? = null
+	val durationMs: UInt? = null,
+	val mediaTypes: List<MediaType>? = null,
+	val trackNumber: UShort? = null,
+	val trackCount: UShort? = null,
+	val isLikeSupported: Boolean? = null,
+	val isBanSupported: Boolean? = null,
+	val isBanned: Boolean? = null,
+	val isResidentOnDevice: Boolean? = null,
+	val chapterCount: UShort? = null
 )
 
 /// Generated type representing the anonymous struct variant `RequestFailed` of the `NetError` Rust enum
@@ -1192,6 +1275,20 @@ data class NotificationsListRequest (
 	val pageToken: String? = null
 )
 
+/// Three-state shuffle. iAP2 and Apple Music distinguish track-level
+/// from album-level shuffle; companion gateways without that distinction
+/// project to `Songs` when on. Webapps that just need an on/off signal
+/// read `shuffle_on` (None when the underlying mode is unknown).
+@Serializable
+enum class ShuffleMode(val string: String) {
+	@SerialName("off")
+	Off("off"),
+	@SerialName("songs")
+	Songs("songs"),
+	@SerialName("albums")
+	Albums("albums"),
+}
+
 /// `repeat` is a typed enum (Off/All/One) shared across the player
 /// surface and the iAP2 NowPlaying CSM / MediaSession backends, which
 /// all expose three repeat states.
@@ -1210,14 +1307,27 @@ enum class RepeatMode(val string: String) {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
+/// 
+/// `set_elapsed_time_available` is the gate webapps must honor for
+/// scrub UI: when false, scrubbing is unsupported by the foreground
+/// app and the seek button must be disabled.
 @Serializable
 data class PlaybackUpdate (
 	val playing: Boolean? = null,
 	val positionMs: UInt? = null,
 	val shuffle: Boolean? = null,
+	val shuffleMode: ShuffleMode? = null,
 	val repeat: RepeatMode? = null,
 	val appBundle: String? = null,
-	val appDisplayName: String? = null
+	val appDisplayName: String? = null,
+	val queueIndex: UInt? = null,
+	val queueCount: UInt? = null,
+	val queueChapterIndex: UInt? = null,
+	val playbackSpeed: Float? = null,
+	val setElapsedTimeAvailable: Boolean? = null,
+	val queueListAvail: Boolean? = null,
+	val appleMusicRadioAd: Boolean? = null,
+	val appleMusicRadioStationName: String? = null
 )
 
 /// Delta event the companion or iAP2 stream emits whenever a player
@@ -1397,6 +1507,25 @@ data class Peer (
 	val companion: PeerCompanionStatus
 )
 
+/// Direction the accessory wants iOS to take when answering an incoming
+/// call while another call is active.
+@Serializable
+enum class AcceptCallAction(val string: String) {
+	/// Answer the new call (placing any existing active call on hold if
+	/// telephony allows it).
+	@SerialName("accept")
+	Accept("accept"),
+	/// End the existing active call and answer the new one.
+	@SerialName("endAndAccept")
+	EndAndAccept("endAndAccept"),
+}
+
+@Serializable
+data class PhoneAcceptAction (
+	val callId: String,
+	val action: AcceptCallAction
+)
+
 @Serializable
 enum class PhoneCallStatus(val string: String) {
 	@SerialName("disconnected")
@@ -1423,6 +1552,21 @@ enum class PhoneCallDirection(val string: String) {
 	Outgoing("outgoing"),
 }
 
+/// Call bearer / service kind. iAP2's `CallStateUpdateService` enum
+/// values, projected to our wire surface. Companion gateways that don't
+/// distinguish bearers project all calls to `Telephony`.
+@Serializable
+enum class PhoneCallService(val string: String) {
+	@SerialName("unknown")
+	Unknown("unknown"),
+	@SerialName("telephony")
+	Telephony("telephony"),
+	@SerialName("faceTimeAudio")
+	FaceTimeAudio("faceTimeAudio"),
+	@SerialName("faceTimeVideo")
+	FaceTimeVideo("faceTimeVideo"),
+}
+
 /// One telephony call. `call_id` is companion-stable for the call's
 /// lifetime; webapps pass it back to `answer`/`decline`/`end`/`hold`.
 /// `remote_id` is the raw E.164 (or platform raw); `display_name` is the
@@ -1434,7 +1578,12 @@ data class PhoneCall (
 	val displayName: String,
 	val status: PhoneCallStatus,
 	val direction: PhoneCallDirection,
-	val startedAtUnixS: UInt? = null
+	val startedAtUnixS: UInt? = null,
+	val label: String? = null,
+	val addressBookId: String? = null,
+	val service: PhoneCallService? = null,
+	val isConferenced: Boolean? = null,
+	val conferenceGroup: UByte? = null
 )
 
 @Serializable
@@ -1462,6 +1611,9 @@ sealed class CallEndReason {
 	@SerialName("missed")
 	object Missed: CallEndReason()
 	@Serializable
+	@SerialName("declined")
+	object Declined: CallEndReason()
+	@Serializable
 	@SerialName("failed")
 	data class Failed(val data: CallEndReasonFailedInner): CallEndReason()
 }
@@ -1470,6 +1622,82 @@ sealed class CallEndReason {
 data class PhoneCallEnded (
 	val callId: String,
 	val reason: CallEndReason
+)
+
+/// DTMF tones the accessory can play during an active call.
+@Serializable
+enum class DtmfTone(val string: String) {
+	@SerialName("d0")
+	D0("d0"),
+	@SerialName("d1")
+	D1("d1"),
+	@SerialName("d2")
+	D2("d2"),
+	@SerialName("d3")
+	D3("d3"),
+	@SerialName("d4")
+	D4("d4"),
+	@SerialName("d5")
+	D5("d5"),
+	@SerialName("d6")
+	D6("d6"),
+	@SerialName("d7")
+	D7("d7"),
+	@SerialName("d8")
+	D8("d8"),
+	@SerialName("d9")
+	D9("d9"),
+	@SerialName("star")
+	Star("star"),
+	@SerialName("hash")
+	Hash("hash"),
+}
+
+@Serializable
+data class PhoneDtmfAction (
+	val callId: String? = null,
+	val tone: DtmfTone
+)
+
+/// Direction the accessory wants iOS to take when ending a call.
+@Serializable
+enum class EndCallAction(val string: String) {
+	/// End / decline the call referenced by `CallUUID`.
+	@SerialName("end")
+	End("end"),
+	/// End every active call.
+	@SerialName("endAll")
+	EndAll("endAll"),
+}
+
+@Serializable
+data class PhoneEndAction (
+	val callId: String,
+	val action: EndCallAction
+)
+
+/// What kind of outbound call the accessory wants placed.
+@Serializable
+enum class InitiateCallType(val string: String) {
+	@SerialName("destination")
+	Destination("destination"),
+	@SerialName("voicemail")
+	Voicemail("voicemail"),
+	@SerialName("redial")
+	Redial("redial"),
+}
+
+@Serializable
+data class PhoneInitiateAction (
+	val kind: InitiateCallType,
+	val destinationId: String? = null,
+	val service: PhoneCallService? = null,
+	val addressBookId: String? = null
+)
+
+@Serializable
+data class PhoneMuteAction (
+	val mute: Boolean
 )
 
 /// Snapshot of every active call known to the gateway. Multi-call is
@@ -1524,12 +1752,24 @@ enum class PlaybackState(val string: String) {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
+/// 
+/// `set_elapsed_time_available` gates scrub UI: when false, the foreground
+/// app refuses absolute-position seeks and webapps must disable the scrub
+/// thumb. `None` means unknown (no signal received yet); webapps treat
+/// unknown as "available" for backward compatibility with older gateways.
 @Serializable
 data class Playback (
 	val state: PlaybackState,
 	val positionMs: UInt,
 	val shuffle: Boolean,
-	val repeat: RepeatMode
+	val shuffleMode: ShuffleMode? = null,
+	val repeat: RepeatMode,
+	val queueIndex: UInt? = null,
+	val queueCount: UInt? = null,
+	val queueChapterIndex: UInt? = null,
+	val setElapsedTimeAvailable: Boolean? = null,
+	val queueListAvail: Boolean? = null,
+	val appleMusicRadioAd: Boolean? = null
 )
 
 @Serializable
@@ -1781,16 +2021,23 @@ data class StringField (
 	val default: String? = null
 )
 
-/// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
-/// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
-/// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
-/// seconds — webapps reading time should use the device clock if any
-/// but use this as the trust anchor on first arrival.
+/// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
+/// (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+/// reading time should use the device clock if any but use this as the
+/// trust anchor on first arrival.
+/// 
+/// Two zone-identification paths coexist: companion gateways send
+/// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
+/// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
+/// separate `dst_offset_minutes`. Webapps prefer `tz_iana` when present
+/// and fall back to the offset pair.
 @Serializable
 data class TimeInfo (
-	val tzIana: String,
-	val locale: String,
-	val wallClockUnixS: UInt? = null
+	val tzIana: String? = null,
+	val locale: String? = null,
+	val wallClockUnixS: UInt? = null,
+	val utcOffsetMinutes: Short? = null,
+	val dstOffsetMinutes: Byte? = null
 )
 
 @Serializable
@@ -2113,17 +2360,38 @@ sealed class BridgeToGatewayPhoneMsg {
 	@SerialName("answer")
 	data class Answer(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
 	@Serializable
+	@SerialName("accept")
+	data class Accept(val data: PhoneAcceptAction): BridgeToGatewayPhoneMsg()
+	@Serializable
 	@SerialName("decline")
 	data class Decline(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
 	@Serializable
 	@SerialName("end")
 	data class End(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
 	@Serializable
+	@SerialName("endTyped")
+	data class EndTyped(val data: PhoneEndAction): BridgeToGatewayPhoneMsg()
+	@Serializable
 	@SerialName("hold")
 	data class Hold(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
 	@Serializable
 	@SerialName("unhold")
 	data class Unhold(val data: PhoneCallAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("initiate")
+	data class Initiate(val data: PhoneInitiateAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("swap")
+	object Swap: BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("merge")
+	object Merge: BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("mute")
+	data class Mute(val data: PhoneMuteAction): BridgeToGatewayPhoneMsg()
+	@Serializable
+	@SerialName("dtmf")
+	data class Dtmf(val data: PhoneDtmfAction): BridgeToGatewayPhoneMsg()
 	@Serializable
 	@SerialName("stateGet")
 	object StateGet: BridgeToGatewayPhoneMsg()
@@ -2412,6 +2680,9 @@ sealed class GatewayToBridgePhoneMsg {
 	@SerialName("snapshot")
 	data class Snapshot(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
 	@Serializable
+	@SerialName("communicationsSnapshot")
+	data class CommunicationsSnapshot(val data: dev.bridgething.schema.CommunicationsSnapshot): GatewayToBridgePhoneMsg()
+	@Serializable
 	@SerialName("callStarted")
 	data class CallStarted(val data: PhoneCall): GatewayToBridgePhoneMsg()
 	@Serializable
@@ -2559,6 +2830,12 @@ data class PhoneErrorActionRejectedInner (
 	val reason: String
 )
 
+/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
+@Serializable
+data class PhoneErrorUnavailableInner (
+	val verb: String
+)
+
 @Serializable(with = PhoneErrorSerializer::class)
 sealed class PhoneError {
 	/// The supplied `call_id` is not in the daemon's active set.
@@ -2570,6 +2847,15 @@ sealed class PhoneError {
 	@Serializable
 	@SerialName("actionRejected")
 	data class ActionRejected(val data: PhoneErrorActionRejectedInner): PhoneError()
+	/// No iAP2 link or companion attached, so there's nowhere to send the
+	/// outbound action.
+	@Serializable
+	@SerialName("noTarget")
+	object NoTarget: PhoneError()
+	/// `*Available` flag for this verb was false at action time.
+	@Serializable
+	@SerialName("unavailable")
+	data class Unavailable(val data: PhoneErrorUnavailableInner): PhoneError()
 }
 
 /// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum

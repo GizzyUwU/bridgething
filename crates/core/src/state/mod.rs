@@ -15,6 +15,8 @@ use crate::{
   net::ClientMan,
   paths,
   peer::PeerTracker,
+  telephony::TelephonyManager,
+  time::TimeManager,
   transfer::{ChunkedTransfer, TransferError},
 };
 
@@ -45,6 +47,8 @@ pub struct AppState {
   pub authority: AuthorityRegistry,
   pub capabilities: CapabilitiesRegistry,
   pub peers: PeerTracker,
+  pub time: TimeManager,
+  pub telephony: TelephonyManager,
   pub ws_routes: RouteTable,
   pub stream_routes: RouteTable,
 
@@ -92,6 +96,9 @@ impl AppState {
       stream_routes.clone(),
     );
 
+    let time = TimeManager::new(client_man.clone());
+    let telephony = TelephonyManager::new(client_man.clone());
+
     Ok(Arc::new(Self {
       client_man,
       meta,
@@ -103,6 +110,8 @@ impl AppState {
       authority,
       capabilities,
       peers,
+      time,
+      telephony,
       ws_routes,
       stream_routes,
 

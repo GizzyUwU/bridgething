@@ -60,6 +60,7 @@ pub struct BluetoothManager {
   pub gateway_man: GatewayMan,
   iap2_reconnect: Option<Iap2ReconnectHandle>,
   iap2_transport: Option<iap2::Iap2TransportHandle>,
+  iap2_telephony: Option<iap2::Iap2TelephonyHandle>,
 
   _agent_handle: AgentHandle,
   _iap2_handle: Option<JoinHandle<()>>,
@@ -99,7 +100,7 @@ impl BluetoothManager {
     let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let (iap2_reconnect, iap2_transport, _iap2_handle) = match Iap2Manager::init(
+    let (iap2_reconnect, iap2_transport, iap2_telephony, _iap2_handle) = match Iap2Manager::init(
       &session,
       adapter.clone(),
       &state,
@@ -108,12 +109,15 @@ impl BluetoothManager {
     )
     .await?
     {
-      Some((manager, reconnect_handle, transport_handle)) => {
-        (Some(reconnect_handle), Some(transport_handle), Some(manager.spawn()))
-      }
+      Some((manager, reconnect_handle, transport_handle, telephony_handle)) => (
+        Some(reconnect_handle),
+        Some(transport_handle),
+        Some(telephony_handle),
+        Some(manager.spawn()),
+      ),
       None => {
         tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-        (None, None, None)
+        (None, None, None, None)
       }
     };
 
@@ -128,6 +132,7 @@ impl BluetoothManager {
       gateway_man,
       iap2_reconnect,
       iap2_transport,
+      iap2_telephony,
 
       _agent_handle,
       _iap2_handle,
@@ -136,6 +141,10 @@ impl BluetoothManager {
 
   pub fn iap2_transport_handle(&self) -> Option<iap2::Iap2TransportHandle> {
     self.iap2_transport.clone()
+  }
+
+  pub fn iap2_telephony_handle(&self) -> Option<iap2::Iap2TelephonyHandle> {
+    self.iap2_telephony.clone()
   }
 
   pub async fn connect(&self, mac: &str) -> bluer::Result<()> {

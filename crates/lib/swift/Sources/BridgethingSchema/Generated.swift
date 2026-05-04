@@ -786,6 +786,73 @@ public struct ChromeNavigate: Codable, Sendable {
 	}
 }
 
+/// Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+/// or the companion's equivalent.
+public enum RegistrationStatus: String, Codable, Sendable {
+	case unknown
+	case notRegistered
+	case searching
+	case denied
+	case registeredHome
+	case registeredRoaming
+	case emergencyCallsOnly
+}
+
+/// What call-control verbs are currently legal. Webapps must gate UI on
+/// these flags; sending an unavailable verb is a protocol violation, not
+/// a no-op. All `None` = no signal received yet, treat as conservatively
+/// unavailable.
+public struct CommunicationsState: Codable, Sendable {
+	public let signalStrength: UInt8?
+	public let registrationStatus: RegistrationStatus?
+	public let airplaneMode: Bool?
+	public let carrierName: String?
+	public let cellularSupported: Bool?
+	public let telephonyEnabled: Bool?
+	public let faceTimeAudioEnabled: Bool?
+	public let faceTimeVideoEnabled: Bool?
+	public let muteStatus: Bool?
+	public let currentCallCount: UInt8?
+	public let newVoicemailCount: UInt8?
+	public let initiateCallAvailable: Bool?
+	public let endAndAcceptAvailable: Bool?
+	public let holdAndAcceptAvailable: Bool?
+	public let swapAvailable: Bool?
+	public let mergeAvailable: Bool?
+	public let holdAvailable: Bool?
+
+	public init(signalStrength: UInt8?, registrationStatus: RegistrationStatus?, airplaneMode: Bool?, carrierName: String?, cellularSupported: Bool?, telephonyEnabled: Bool?, faceTimeAudioEnabled: Bool?, faceTimeVideoEnabled: Bool?, muteStatus: Bool?, currentCallCount: UInt8?, newVoicemailCount: UInt8?, initiateCallAvailable: Bool?, endAndAcceptAvailable: Bool?, holdAndAcceptAvailable: Bool?, swapAvailable: Bool?, mergeAvailable: Bool?, holdAvailable: Bool?) {
+		self.signalStrength = signalStrength
+		self.registrationStatus = registrationStatus
+		self.airplaneMode = airplaneMode
+		self.carrierName = carrierName
+		self.cellularSupported = cellularSupported
+		self.telephonyEnabled = telephonyEnabled
+		self.faceTimeAudioEnabled = faceTimeAudioEnabled
+		self.faceTimeVideoEnabled = faceTimeVideoEnabled
+		self.muteStatus = muteStatus
+		self.currentCallCount = currentCallCount
+		self.newVoicemailCount = newVoicemailCount
+		self.initiateCallAvailable = initiateCallAvailable
+		self.endAndAcceptAvailable = endAndAcceptAvailable
+		self.holdAndAcceptAvailable = holdAndAcceptAvailable
+		self.swapAvailable = swapAvailable
+		self.mergeAvailable = mergeAvailable
+		self.holdAvailable = holdAvailable
+	}
+}
+
+/// Companion-side cellular / call-control snapshot. Announce-on-connect
+/// pattern: companion sends an initial `CommunicationsSnapshot` after
+/// announce, then re-sends on any field change.
+public struct CommunicationsSnapshot: Codable, Sendable {
+	public let state: CommunicationsState
+
+	public init(state: CommunicationsState) {
+		self.state = state
+	}
+}
+
 /// One key/value pair as exposed by config read APIs. `value` is always a
 /// string; consumers parse per the field's declared kind (number → parseFloat,
 /// boolean → "true"/"false", string/enum/secret → as-is).
@@ -1526,29 +1593,54 @@ public struct LogEntry: Codable, Sendable {
 	}
 }
 
+/// The kind of media currently playing. Multi-typed: an item can be
+/// e.g. both `Podcast` and `AudioBook` (rare). Drives webapp UI choices
+/// like skip-15s-vs-skip-track and chapter UI.
+public enum MediaType: String, Codable, Sendable {
+	case music
+	case podcast
+	case audioBook
+}
+
 /// Currently-playing track, populated to the extent the gateway/iAP2
 /// stream has surfaced. All fields are optional because each one arrives
-/// as a separate ANCS-style attribute fetch on iAP2; the daemon
-/// accumulates and the snapshot reflects whatever's known so far.
+/// as a separate attribute fetch on iAP2; the daemon accumulates and the
+/// snapshot reflects whatever's known so far.
 public struct MediaItem: Codable, Sendable {
 	public let uri: String?
 	public let persistentId: String?
 	public let title: String?
 	public let album: String?
+	public let albumArtist: String?
 	public let artist: String?
 	public let liked: Bool?
 	public let artworkId: String?
 	public let durationMs: UInt32?
+	public let mediaTypes: [MediaType]?
+	public let trackNumber: UInt16?
+	public let trackCount: UInt16?
+	public let isLikeSupported: Bool?
+	public let isBanSupported: Bool?
+	public let isBanned: Bool?
+	public let chapterCount: UInt16?
 
-	public init(uri: String?, persistentId: String?, title: String?, album: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?) {
+	public init(uri: String?, persistentId: String?, title: String?, album: String?, albumArtist: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, chapterCount: UInt16?) {
 		self.uri = uri
 		self.persistentId = persistentId
 		self.title = title
 		self.album = album
+		self.albumArtist = albumArtist
 		self.artist = artist
 		self.liked = liked
 		self.artworkId = artworkId
 		self.durationMs = durationMs
+		self.mediaTypes = mediaTypes
+		self.trackNumber = trackNumber
+		self.trackCount = trackCount
+		self.isLikeSupported = isLikeSupported
+		self.isBanSupported = isBanSupported
+		self.isBanned = isBanned
+		self.chapterCount = chapterCount
 	}
 }
 
@@ -1563,19 +1655,37 @@ public struct MediaItemUpdate: Codable, Sendable {
 	public let persistentId: String?
 	public let title: String?
 	public let album: String?
+	public let albumArtist: String?
 	public let artist: String?
 	public let liked: Bool?
 	public let artworkId: String?
 	public let durationMs: UInt32?
+	public let mediaTypes: [MediaType]?
+	public let trackNumber: UInt16?
+	public let trackCount: UInt16?
+	public let isLikeSupported: Bool?
+	public let isBanSupported: Bool?
+	public let isBanned: Bool?
+	public let isResidentOnDevice: Bool?
+	public let chapterCount: UInt16?
 
-	public init(persistentId: String?, title: String?, album: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?) {
+	public init(persistentId: String?, title: String?, album: String?, albumArtist: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, isResidentOnDevice: Bool?, chapterCount: UInt16?) {
 		self.persistentId = persistentId
 		self.title = title
 		self.album = album
+		self.albumArtist = albumArtist
 		self.artist = artist
 		self.liked = liked
 		self.artworkId = artworkId
 		self.durationMs = durationMs
+		self.mediaTypes = mediaTypes
+		self.trackNumber = trackNumber
+		self.trackCount = trackCount
+		self.isLikeSupported = isLikeSupported
+		self.isBanSupported = isBanSupported
+		self.isBanned = isBanned
+		self.isResidentOnDevice = isResidentOnDevice
+		self.chapterCount = chapterCount
 	}
 }
 
@@ -2166,6 +2276,16 @@ public struct NotificationsListRequest: Codable, Sendable {
 	}
 }
 
+/// Three-state shuffle. iAP2 and Apple Music distinguish track-level
+/// from album-level shuffle; companion gateways without that distinction
+/// project to `Songs` when on. Webapps that just need an on/off signal
+/// read `shuffle_on` (None when the underlying mode is unknown).
+public enum ShuffleMode: String, Codable, Sendable {
+	case off
+	case songs
+	case albums
+}
+
 /// `repeat` is a typed enum (Off/All/One) shared across the player
 /// surface and the iAP2 NowPlaying CSM / MediaSession backends, which
 /// all expose three repeat states.
@@ -2180,21 +2300,43 @@ public enum RepeatMode: String, Codable, Sendable {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
+/// 
+/// `set_elapsed_time_available` is the gate webapps must honor for
+/// scrub UI: when false, scrubbing is unsupported by the foreground
+/// app and the seek button must be disabled.
 public struct PlaybackUpdate: Codable, Sendable {
 	public let playing: Bool?
 	public let positionMs: UInt32?
 	public let shuffle: Bool?
+	public let shuffleMode: ShuffleMode?
 	public let `repeat`: RepeatMode?
 	public let appBundle: String?
 	public let appDisplayName: String?
+	public let queueIndex: UInt32?
+	public let queueCount: UInt32?
+	public let queueChapterIndex: UInt32?
+	public let playbackSpeed: Float?
+	public let setElapsedTimeAvailable: Bool?
+	public let queueListAvail: Bool?
+	public let appleMusicRadioAd: Bool?
+	public let appleMusicRadioStationName: String?
 
-	public init(playing: Bool?, positionMs: UInt32?, shuffle: Bool?, repeat: RepeatMode?, appBundle: String?, appDisplayName: String?) {
+	public init(playing: Bool?, positionMs: UInt32?, shuffle: Bool?, shuffleMode: ShuffleMode?, repeat: RepeatMode?, appBundle: String?, appDisplayName: String?, queueIndex: UInt32?, queueCount: UInt32?, queueChapterIndex: UInt32?, playbackSpeed: Float?, setElapsedTimeAvailable: Bool?, queueListAvail: Bool?, appleMusicRadioAd: Bool?, appleMusicRadioStationName: String?) {
 		self.playing = playing
 		self.positionMs = positionMs
 		self.shuffle = shuffle
+		self.shuffleMode = shuffleMode
 		self.repeat = `repeat`
 		self.appBundle = appBundle
 		self.appDisplayName = appDisplayName
+		self.queueIndex = queueIndex
+		self.queueCount = queueCount
+		self.queueChapterIndex = queueChapterIndex
+		self.playbackSpeed = playbackSpeed
+		self.setElapsedTimeAvailable = setElapsedTimeAvailable
+		self.queueListAvail = queueListAvail
+		self.appleMusicRadioAd = appleMusicRadioAd
+		self.appleMusicRadioStationName = appleMusicRadioStationName
 	}
 }
 
@@ -2439,6 +2581,26 @@ public struct Peer: Codable, Sendable {
 	}
 }
 
+/// Direction the accessory wants iOS to take when answering an incoming
+/// call while another call is active.
+public enum AcceptCallAction: String, Codable, Sendable {
+	/// Answer the new call (placing any existing active call on hold if
+	/// telephony allows it).
+	case accept
+	/// End the existing active call and answer the new one.
+	case endAndAccept
+}
+
+public struct PhoneAcceptAction: Codable, Sendable {
+	public let callId: String
+	public let action: AcceptCallAction
+
+	public init(callId: String, action: AcceptCallAction) {
+		self.callId = callId
+		self.action = action
+	}
+}
+
 public enum PhoneCallStatus: String, Codable, Sendable {
 	case disconnected
 	case sending
@@ -2454,6 +2616,16 @@ public enum PhoneCallDirection: String, Codable, Sendable {
 	case outgoing
 }
 
+/// Call bearer / service kind. iAP2's `CallStateUpdateService` enum
+/// values, projected to our wire surface. Companion gateways that don't
+/// distinguish bearers project all calls to `Telephony`.
+public enum PhoneCallService: String, Codable, Sendable {
+	case unknown
+	case telephony
+	case faceTimeAudio
+	case faceTimeVideo
+}
+
 /// One telephony call. `call_id` is companion-stable for the call's
 /// lifetime; webapps pass it back to `answer`/`decline`/`end`/`hold`.
 /// `remote_id` is the raw E.164 (or platform raw); `display_name` is the
@@ -2465,14 +2637,24 @@ public struct PhoneCall: Codable, Sendable {
 	public let status: PhoneCallStatus
 	public let direction: PhoneCallDirection
 	public let startedAtUnixS: UInt32?
+	public let label: String?
+	public let addressBookId: String?
+	public let service: PhoneCallService?
+	public let isConferenced: Bool?
+	public let conferenceGroup: UInt8?
 
-	public init(callId: String, remoteId: String, displayName: String, status: PhoneCallStatus, direction: PhoneCallDirection, startedAtUnixS: UInt32?) {
+	public init(callId: String, remoteId: String, displayName: String, status: PhoneCallStatus, direction: PhoneCallDirection, startedAtUnixS: UInt32?, label: String?, addressBookId: String?, service: PhoneCallService?, isConferenced: Bool?, conferenceGroup: UInt8?) {
 		self.callId = callId
 		self.remoteId = remoteId
 		self.displayName = displayName
 		self.status = status
 		self.direction = direction
 		self.startedAtUnixS = startedAtUnixS
+		self.label = label
+		self.addressBookId = addressBookId
+		self.service = service
+		self.isConferenced = isConferenced
+		self.conferenceGroup = conferenceGroup
 	}
 }
 
@@ -2499,12 +2681,14 @@ public enum CallEndReason: Codable, Sendable {
 	case local
 	case remote
 	case missed
+	case declined
 	case failed(CallEndReasonFailedInner)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case local,
 			remote,
 			missed,
+			declined,
 			failed
 	}
 
@@ -2525,6 +2709,9 @@ public enum CallEndReason: Codable, Sendable {
 			case .missed:
 				self = .missed
 				return
+			case .declined:
+				self = .declined
+				return
 			case .failed:
 				if let content = try? container.decode(CallEndReasonFailedInner.self, forKey: .data) {
 					self = .failed(content)
@@ -2544,6 +2731,8 @@ public enum CallEndReason: Codable, Sendable {
 			try container.encode(CodingKeys.remote, forKey: .type)
 		case .missed:
 			try container.encode(CodingKeys.missed, forKey: .type)
+		case .declined:
+			try container.encode(CodingKeys.declined, forKey: .type)
 		case .failed(let content):
 			try container.encode(CodingKeys.failed, forKey: .type)
 			try container.encode(content, forKey: .data)
@@ -2558,6 +2747,79 @@ public struct PhoneCallEnded: Codable, Sendable {
 	public init(callId: String, reason: CallEndReason) {
 		self.callId = callId
 		self.reason = reason
+	}
+}
+
+/// DTMF tones the accessory can play during an active call.
+public enum DtmfTone: String, Codable, Sendable {
+	case d0
+	case d1
+	case d2
+	case d3
+	case d4
+	case d5
+	case d6
+	case d7
+	case d8
+	case d9
+	case star
+	case hash
+}
+
+public struct PhoneDtmfAction: Codable, Sendable {
+	public let callId: String?
+	public let tone: DtmfTone
+
+	public init(callId: String?, tone: DtmfTone) {
+		self.callId = callId
+		self.tone = tone
+	}
+}
+
+/// Direction the accessory wants iOS to take when ending a call.
+public enum EndCallAction: String, Codable, Sendable {
+	/// End / decline the call referenced by `CallUUID`.
+	case end
+	/// End every active call.
+	case endAll
+}
+
+public struct PhoneEndAction: Codable, Sendable {
+	public let callId: String
+	public let action: EndCallAction
+
+	public init(callId: String, action: EndCallAction) {
+		self.callId = callId
+		self.action = action
+	}
+}
+
+/// What kind of outbound call the accessory wants placed.
+public enum InitiateCallType: String, Codable, Sendable {
+	case destination
+	case voicemail
+	case redial
+}
+
+public struct PhoneInitiateAction: Codable, Sendable {
+	public let kind: InitiateCallType
+	public let destinationId: String?
+	public let service: PhoneCallService?
+	public let addressBookId: String?
+
+	public init(kind: InitiateCallType, destinationId: String?, service: PhoneCallService?, addressBookId: String?) {
+		self.kind = kind
+		self.destinationId = destinationId
+		self.service = service
+		self.addressBookId = addressBookId
+	}
+}
+
+public struct PhoneMuteAction: Codable, Sendable {
+	public let mute: Bool
+
+	public init(mute: Bool) {
+		self.mute = mute
 	}
 }
 
@@ -2623,17 +2885,36 @@ public enum PlaybackState: String, Codable, Sendable {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
+/// 
+/// `set_elapsed_time_available` gates scrub UI: when false, the foreground
+/// app refuses absolute-position seeks and webapps must disable the scrub
+/// thumb. `None` means unknown (no signal received yet); webapps treat
+/// unknown as "available" for backward compatibility with older gateways.
 public struct Playback: Codable, Sendable {
 	public let state: PlaybackState
 	public let positionMs: UInt32
 	public let shuffle: Bool
+	public let shuffleMode: ShuffleMode?
 	public let `repeat`: RepeatMode
+	public let queueIndex: UInt32?
+	public let queueCount: UInt32?
+	public let queueChapterIndex: UInt32?
+	public let setElapsedTimeAvailable: Bool?
+	public let queueListAvail: Bool?
+	public let appleMusicRadioAd: Bool?
 
-	public init(state: PlaybackState, positionMs: UInt32, shuffle: Bool, repeat: RepeatMode) {
+	public init(state: PlaybackState, positionMs: UInt32, shuffle: Bool, shuffleMode: ShuffleMode?, repeat: RepeatMode, queueIndex: UInt32?, queueCount: UInt32?, queueChapterIndex: UInt32?, setElapsedTimeAvailable: Bool?, queueListAvail: Bool?, appleMusicRadioAd: Bool?) {
 		self.state = state
 		self.positionMs = positionMs
 		self.shuffle = shuffle
+		self.shuffleMode = shuffleMode
 		self.repeat = `repeat`
+		self.queueIndex = queueIndex
+		self.queueCount = queueCount
+		self.queueChapterIndex = queueChapterIndex
+		self.setElapsedTimeAvailable = setElapsedTimeAvailable
+		self.queueListAvail = queueListAvail
+		self.appleMusicRadioAd = appleMusicRadioAd
 	}
 }
 
@@ -3048,20 +3329,29 @@ public struct StringField: Codable, Sendable {
 	}
 }
 
-/// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
-/// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
-/// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
-/// seconds — webapps reading time should use the device clock if any
-/// but use this as the trust anchor on first arrival.
+/// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
+/// (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+/// reading time should use the device clock if any but use this as the
+/// trust anchor on first arrival.
+/// 
+/// Two zone-identification paths coexist: companion gateways send
+/// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
+/// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
+/// separate `dst_offset_minutes`. Webapps prefer `tz_iana` when present
+/// and fall back to the offset pair.
 public struct TimeInfo: Codable, Sendable {
-	public let tzIana: String
-	public let locale: String
+	public let tzIana: String?
+	public let locale: String?
 	public let wallClockUnixS: UInt32?
+	public let utcOffsetMinutes: Int16?
+	public let dstOffsetMinutes: Int8?
 
-	public init(tzIana: String, locale: String, wallClockUnixS: UInt32?) {
+	public init(tzIana: String?, locale: String?, wallClockUnixS: UInt32?, utcOffsetMinutes: Int16?, dstOffsetMinutes: Int8?) {
 		self.tzIana = tzIana
 		self.locale = locale
 		self.wallClockUnixS = wallClockUnixS
+		self.utcOffsetMinutes = utcOffsetMinutes
+		self.dstOffsetMinutes = dstOffsetMinutes
 	}
 }
 
@@ -3857,18 +4147,32 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 
 public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 	case answer(PhoneCallAction)
+	case accept(PhoneAcceptAction)
 	case decline(PhoneCallAction)
 	case end(PhoneCallAction)
+	case endTyped(PhoneEndAction)
 	case hold(PhoneCallAction)
 	case unhold(PhoneCallAction)
+	case initiate(PhoneInitiateAction)
+	case swap
+	case merge
+	case mute(PhoneMuteAction)
+	case dtmf(PhoneDtmfAction)
 	case stateGet
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case answer,
+			accept,
 			decline,
 			end,
+			endTyped,
 			hold,
 			unhold,
+			initiate,
+			swap,
+			merge,
+			mute,
+			dtmf,
 			stateGet
 	}
 
@@ -3885,6 +4189,11 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 					self = .answer(content)
 					return
 				}
+			case .accept:
+				if let content = try? container.decode(PhoneAcceptAction.self, forKey: .data) {
+					self = .accept(content)
+					return
+				}
 			case .decline:
 				if let content = try? container.decode(PhoneCallAction.self, forKey: .data) {
 					self = .decline(content)
@@ -3895,6 +4204,11 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 					self = .end(content)
 					return
 				}
+			case .endTyped:
+				if let content = try? container.decode(PhoneEndAction.self, forKey: .data) {
+					self = .endTyped(content)
+					return
+				}
 			case .hold:
 				if let content = try? container.decode(PhoneCallAction.self, forKey: .data) {
 					self = .hold(content)
@@ -3903,6 +4217,27 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 			case .unhold:
 				if let content = try? container.decode(PhoneCallAction.self, forKey: .data) {
 					self = .unhold(content)
+					return
+				}
+			case .initiate:
+				if let content = try? container.decode(PhoneInitiateAction.self, forKey: .data) {
+					self = .initiate(content)
+					return
+				}
+			case .swap:
+				self = .swap
+				return
+			case .merge:
+				self = .merge
+				return
+			case .mute:
+				if let content = try? container.decode(PhoneMuteAction.self, forKey: .data) {
+					self = .mute(content)
+					return
+				}
+			case .dtmf:
+				if let content = try? container.decode(PhoneDtmfAction.self, forKey: .data) {
+					self = .dtmf(content)
 					return
 				}
 			case .stateGet:
@@ -3919,17 +4254,36 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 		case .answer(let content):
 			try container.encode(CodingKeys.answer, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .accept(let content):
+			try container.encode(CodingKeys.accept, forKey: .event)
+			try container.encode(content, forKey: .data)
 		case .decline(let content):
 			try container.encode(CodingKeys.decline, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .end(let content):
 			try container.encode(CodingKeys.end, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .endTyped(let content):
+			try container.encode(CodingKeys.endTyped, forKey: .event)
+			try container.encode(content, forKey: .data)
 		case .hold(let content):
 			try container.encode(CodingKeys.hold, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .unhold(let content):
 			try container.encode(CodingKeys.unhold, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .initiate(let content):
+			try container.encode(CodingKeys.initiate, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .swap:
+			try container.encode(CodingKeys.swap, forKey: .event)
+		case .merge:
+			try container.encode(CodingKeys.merge, forKey: .event)
+		case .mute(let content):
+			try container.encode(CodingKeys.mute, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .dtmf(let content):
+			try container.encode(CodingKeys.dtmf, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .stateGet:
 			try container.encode(CodingKeys.stateGet, forKey: .event)
@@ -4953,6 +5307,7 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 
 public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	case snapshot(PhoneStateReply)
+	case communicationsSnapshot(CommunicationsSnapshot)
 	case callStarted(PhoneCall)
 	case callUpdated(PhoneCall)
 	case callEnded(PhoneCallEnded)
@@ -4960,6 +5315,7 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
+			communicationsSnapshot,
 			callStarted,
 			callUpdated,
 			callEnded,
@@ -4977,6 +5333,11 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 			case .snapshot:
 				if let content = try? container.decode(PhoneStateReply.self, forKey: .data) {
 					self = .snapshot(content)
+					return
+				}
+			case .communicationsSnapshot:
+				if let content = try? container.decode(CommunicationsSnapshot.self, forKey: .data) {
+					self = .communicationsSnapshot(content)
 					return
 				}
 			case .callStarted:
@@ -5009,6 +5370,9 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 		switch self {
 		case .snapshot(let content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .communicationsSnapshot(let content):
+			try container.encode(CodingKeys.communicationsSnapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .callStarted(let content):
 			try container.encode(CodingKeys.callStarted, forKey: .event)
@@ -5395,16 +5759,32 @@ public struct PhoneErrorActionRejectedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
+/// Generated type representing the anonymous struct variant `Unavailable` of the `PhoneError` Rust enum
+public struct PhoneErrorUnavailableInner: Codable, Sendable {
+	public let verb: String
+
+	public init(verb: String) {
+		self.verb = verb
+	}
+}
 public enum PhoneError: Codable, Sendable {
 	/// The supplied `call_id` is not in the daemon's active set.
 	case callNotFound(PhoneErrorCallNotFoundInner)
 	/// The companion or platform refused the action (e.g. answer while no
 	/// ringing call exists, end on a remote-controlled conference leg).
 	case actionRejected(PhoneErrorActionRejectedInner)
+	/// No iAP2 link or companion attached, so there's nowhere to send the
+	/// outbound action.
+	case noTarget
+	/// `*Available` flag for this verb was false at action time.
+	case unavailable(PhoneErrorUnavailableInner)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case callNotFound,
-			actionRejected
+			actionRejected,
+			noTarget,
+			unavailable
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5425,6 +5805,14 @@ public enum PhoneError: Codable, Sendable {
 					self = .actionRejected(content)
 					return
 				}
+			case .noTarget:
+				self = .noTarget
+				return
+			case .unavailable:
+				if let content = try? container.decode(PhoneErrorUnavailableInner.self, forKey: .data) {
+					self = .unavailable(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(PhoneError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for PhoneError"))
@@ -5438,6 +5826,11 @@ public enum PhoneError: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .actionRejected(let content):
 			try container.encode(CodingKeys.actionRejected, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .noTarget:
+			try container.encode(CodingKeys.noTarget, forKey: .type)
+		case .unavailable(let content):
+			try container.encode(CodingKeys.unavailable, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}

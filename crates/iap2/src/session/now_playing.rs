@@ -1,6 +1,9 @@
 //! NowPlaying flow: subscribes to the iPhone's NowPlaying surface
 //! after identification reaches Accepted, then translates each
 //! inbound `NowPlayingUpdate` (CSM `0x5001`) into a session event.
+//! Also handles outbound `SetNowPlayingInformation` (CSM `0x5003`)
+//! commands that the daemon's `TransportController` issues for scrub
+//! and queue-jump verbs.
 //!
 //! `ensure_subscribed` sends `StartNowPlayingUpdates` exactly once per
 //! session - the iPhone keeps the subscription for the life of the
@@ -13,11 +16,26 @@ use super::{SessionEvent, emit, send_csm};
 use crate::{
   csm::{
     CsmFrame,
-    now_playing::{NowPlayingUpdate, StartNowPlayingUpdates},
+    now_playing::{NowPlayingUpdate, SetNowPlayingInformation, StartNowPlayingUpdates},
   },
   error::Result,
   link::Iap2Command,
 };
+
+/// One outbound NowPlaying control message. `TransportController`
+/// emits one of these per webapp scrub or queue-row tap; the flow
+/// turns it into a `SetNowPlayingInformation` CSM on the wire.
+///
+/// The `set_elapsed_time_available` gate documented in cleanroom doc
+/// 80 is enforced upstream (in `core::transport`) by reading the most
+/// recent `PlaybackAttributes.set_elapsed_time_available` snapshot
+/// before issuing seek; this flow trusts callers and emits whatever it
+/// receives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NowPlayingCommand {
+  pub elapsed_time_ms: Option<u32>,
+  pub queue_index: Option<u32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NowPlayingState {
@@ -29,12 +47,14 @@ enum NowPlayingState {
 
 pub(super) struct NowPlayingFlow {
   state: NowPlayingState,
+  rx: mpsc::Receiver<NowPlayingCommand>,
 }
 
 impl NowPlayingFlow {
-  pub(super) fn new() -> Self {
+  pub(super) fn new(rx: mpsc::Receiver<NowPlayingCommand>) -> Self {
     Self {
       state: NowPlayingState::Idle,
+      rx,
     }
   }
 
@@ -73,5 +93,40 @@ impl NowPlayingFlow {
     tracing::trace!(?update, "iap2 now-playing: delta received");
     emit(session_events_tx, SessionEvent::NowPlayingUpdate(update)).await;
     Ok(None)
+  }
+
+  /// Pull the next outbound command from the controller. The session's
+  /// main loop selects this alongside the link-event channel; returning
+  /// `None` means the controller's sender was dropped.
+  pub(super) async fn recv(&mut self) -> Option<NowPlayingCommand> {
+    self.rx.recv().await
+  }
+
+  /// Translate an outbound command into a `SetNowPlayingInformation`
+  /// CSM. No-op when neither `elapsed_time_ms` nor `queue_index` is
+  /// set (the `Default` value).
+  pub(super) async fn handle_command(
+    &mut self,
+    cmd: NowPlayingCommand,
+    link_command_tx: &mpsc::Sender<Iap2Command>,
+  ) -> Result<()> {
+    if !matches!(self.state, NowPlayingState::Subscribed) {
+      tracing::warn!(
+        ?cmd,
+        "iap2 now-playing: command before StartNowPlayingUpdates; dropping"
+      );
+      return Ok(());
+    }
+    if cmd.elapsed_time_ms.is_none() && cmd.queue_index.is_none() {
+      tracing::trace!("iap2 now-playing: empty NowPlayingCommand; ignoring");
+      return Ok(());
+    }
+    let csm = SetNowPlayingInformation {
+      elapsed_time_ms: cmd.elapsed_time_ms,
+      queue_index: cmd.queue_index,
+      queue_list_content_transfer_start_index: None,
+    };
+    tracing::debug!(?csm, "iap2 now-playing: sending SetNowPlayingInformation");
+    send_csm(csm, link_command_tx).await
   }
 }

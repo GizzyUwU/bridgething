@@ -83,10 +83,16 @@ import {
   type PairBluetooth,
   type PairedDevicesMap,
   type PeerSnapshotMap,
+  type PhoneAcceptAction,
   type PhoneCall,
   type PhoneCallAction,
   type PhoneCallEnded,
+  type PhoneCommunicationsReply,
+  type PhoneDtmfAction,
+  type PhoneEndAction,
   type PhoneErrorReply,
+  type PhoneInitiateAction,
+  type PhoneMuteAction,
   type PhoneStateReply,
   type PlayUri,
   type PlayerErrorReply,
@@ -218,6 +224,7 @@ export type PhoneInboundHandlers = {
   callStarted: (msg: PhoneCall) => void;
   callUpdated: (msg: PhoneCall) => void;
   callEnded: (msg: PhoneCallEnded) => void;
+  communicationsChanged: (msg: PhoneCommunicationsReply) => void;
   stateReply: (msg: PhoneStateReply) => void;
   errorReply: (msg: PhoneErrorReply) => void;
 };
@@ -1883,6 +1890,18 @@ export class PhoneSurface {
     });
   }
 
+  /** Subscribe to `Phone::CommunicationsChanged` from the daemon. */
+  onCommunicationsChanged(handler: (msg: PhoneCommunicationsReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'phone') return;
+      const inner = data.data;
+      if (inner.event !== 'communicationsChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Phone::StateReply` from the daemon. */
   onStateReply(handler: (msg: PhoneStateReply) => void): () => void {
     return this._client.on(event => {
@@ -1936,6 +1955,10 @@ export class PhoneSurface {
           handlers.callEnded?.(inner.data);
           return;
         }
+        case 'communicationsChanged': {
+          handlers.communicationsChanged?.(inner.data);
+          return;
+        }
         case 'stateReply': {
           handlers.stateReply?.(inner.data);
           return;
@@ -1962,6 +1985,16 @@ export class PhoneSurface {
     await this._client.send(msg);
   }
 
+  /** Send `Phone::Accept` to the daemon. */
+  async accept(payload: PhoneAcceptAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'accept', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
   /** Send `Phone::Decline` to the daemon. */
   async decline(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
@@ -1982,6 +2015,16 @@ export class PhoneSurface {
     await this._client.send(msg);
   }
 
+  /** Send `Phone::EndTyped` to the daemon. */
+  async endTyped(payload: PhoneEndAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'endTyped', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
   /** Send `Phone::Hold` to the daemon. */
   async hold(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
@@ -1998,6 +2041,56 @@ export class PhoneSurface {
       id: newUuidBytes(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'unhold', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Initiate` to the daemon. */
+  async initiate(payload: PhoneInitiateAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'initiate', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Swap` to the daemon. */
+  async swap(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'swap' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Merge` to the daemon. */
+  async merge(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'merge' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Mute` to the daemon. */
+  async mute(payload: PhoneMuteAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'mute', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Phone::Dtmf` to the daemon. */
+  async dtmf(payload: PhoneDtmfAction): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'phone', data: { event: 'dtmf', data: payload } },
     };
     await this._client.send(msg);
   }
@@ -3711,6 +3804,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'callEnded': {
             innerHandlers.callEnded?.(inner.data);
+            return;
+          }
+          case 'communicationsChanged': {
+            innerHandlers.communicationsChanged?.(inner.data);
             return;
           }
           case 'stateReply': {

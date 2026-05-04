@@ -24,7 +24,7 @@ pub use frame::{
   SessionType,
 };
 pub use link::{Iap2Command, Iap2Event, Link, LinkConfig};
-pub use session::{HidCommand, Iap2Session, MfiAccess, MfiHandle, SessionEvent, WorkerMfiAccess};
+pub use session::{HidCommand, Iap2Session, MfiAccess, MfiHandle, NowPlayingCommand, SessionEvent, WorkerMfiAccess};
 
 /// SDP service-class UUID the accessory advertises for an iAP2-over-RFCOMM
 /// listener. iPhones scan for this UUID, read the channel from the
