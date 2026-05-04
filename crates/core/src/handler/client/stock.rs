@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use base64::Engine as _;
 use libbridgething::{
-  ItemKind, ItemRef, QueuePosition,
+  BrowseEntry, ItemKind, ItemRef, LibraryItem, QueuePosition,
   client::ClientLegacyStockCommand,
   gateway::{
     self, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
@@ -11,10 +11,12 @@ use libbridgething::{
   stock::{StockPreset, StockSetPreset},
   wire::RequestError,
 };
+use serde_json::{Value, json};
 
 use super::{HandlerResult, MsgHandle};
 use crate::stock::{
-  StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip, presets,
+  GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
+  presets,
 };
 
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
@@ -80,6 +82,10 @@ impl LegacyStockHandler {
         self
           .spotify_play_uri(uri, feature_identifier, interaction_id, skip_to_uri, skip_to_uid)
           .await
+      }
+      ClientLegacyStockCommand::SpotifyGraphql { payload } => self.spotify_graphql(payload).await,
+      ClientLegacyStockCommand::SuperbirdPhoneCallImage { phone_number } => {
+        self.superbird_phone_call_image(phone_number).await
       }
     }
   }
@@ -376,21 +382,22 @@ impl LegacyStockHandler {
 
   async fn spotify_set_saved(&self, id: Option<String>, uri: Option<String>, saved: bool) -> HandlerResult {
     if let Some(item_uri) = uri.or(id)
-      && self.has_gateway() {
-        self
-          .handle
-          .bluetooth
-          .gateway_man
-          .broadcast_command(BridgeToGatewayLibraryMsgCommand::FavoritesSet(gateway::FavoritesSet {
-            item: ItemRef {
-              uri: item_uri,
-              kind: ItemKind::Track,
-              persistent_id: None,
-            },
-            liked: saved,
-          }))
-          .await;
-      }
+      && self.has_gateway()
+    {
+      self
+        .handle
+        .bluetooth
+        .gateway_man
+        .broadcast_command(BridgeToGatewayLibraryMsgCommand::FavoritesSet(gateway::FavoritesSet {
+          item: ItemRef {
+            uri: item_uri,
+            kind: ItemKind::Track,
+            persistent_id: None,
+          },
+          liked: saved,
+        }))
+        .await;
+    }
     self.ack().await
   }
 
@@ -407,6 +414,139 @@ impl LegacyStockHandler {
     _skip_to_uid: Option<String>,
   ) -> HandlerResult {
     self.forward_play(uri).await
+  }
+
+  async fn spotify_graphql(&self, payload: String) -> HandlerResult {
+    let result = match classify_graphql(&payload) {
+      Some(GraphqlOp::Shelf { limit }) => self.graphql_shelf(limit).await,
+      Some(GraphqlOp::Section { id, limit, offset }) => self.graphql_section(id, limit, offset).await,
+      Some(GraphqlOp::TipsOnDemand) => Ok(graphql_tips_data()),
+      Some(GraphqlOp::Presets) => Ok(self.graphql_presets_data().await),
+      None => {
+        tracing::debug!(?payload, "unrecognized graphql operation");
+        Err("unrecognized graphql operation".to_string())
+      }
+    };
+    let envelope = match result {
+      Ok(data) => StockInterAppSendPayload::Graphql {
+        data: Some(data),
+        errors: None,
+      },
+      Err(message) => StockInterAppSendPayload::Graphql {
+        data: None,
+        errors: Some(vec![GraphqlError { message }]),
+      },
+    };
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(self.handle.stock_msg_id, envelope))
+      .await?;
+    Ok(())
+  }
+
+  async fn graphql_shelf(&self, limit: u32) -> Result<Value, String> {
+    if !self.has_gateway() {
+      return Ok(json!({ "shelf": { "items": [] } }));
+    }
+    let req = LibraryBrowseRequest {
+      node_id: None,
+      limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
+      offset: 0,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+      Ok(reply) => Ok(json!({
+        "shelf": {
+          "items": reply
+            .result
+            .entries
+            .into_iter()
+            .filter_map(shelf_section_value)
+            .collect::<Vec<_>>(),
+        }
+      })),
+      Err(err) => {
+        log_request_failure("library.browse (shelf)", &err);
+        Ok(json!({ "shelf": { "items": [] } }))
+      }
+    }
+  }
+
+  async fn graphql_section(&self, id: String, limit: u32, offset: u32) -> Result<Value, String> {
+    if !self.has_gateway() {
+      return Ok(json!({
+        "section": { "id": id, "title": "", "children": [], "total": offset }
+      }));
+    }
+    let req = LibraryBrowseRequest {
+      node_id: Some(id.clone()),
+      limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
+      offset,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+      Ok(reply) => {
+        let entries_len = reply.result.entries.len() as u32;
+        let total = reply.result.total.unwrap_or_else(|| {
+          let consumed = offset.saturating_add(entries_len);
+          if reply.result.has_more {
+            consumed.saturating_add(1)
+          } else {
+            consumed
+          }
+        });
+        Ok(json!({
+          "section": {
+            "id": id,
+            "title": "",
+            "children": reply
+              .result
+              .entries
+              .into_iter()
+              .map(graphql_child_value)
+              .collect::<Vec<_>>(),
+            "total": total,
+          }
+        }))
+      }
+      Err(err) => {
+        log_request_failure("library.browse (section)", &err);
+        Ok(json!({
+          "section": { "id": id, "title": "", "children": [], "total": offset }
+        }))
+      }
+    }
+  }
+
+  async fn graphql_presets_data(&self) -> Value {
+    let presets = presets::list(&self.handle.state.kv).await.unwrap_or_default();
+    json!({
+      "presets": {
+        "presets": presets
+          .iter()
+          .map(|p| json!({
+            "context_uri": p.context_uri,
+            "name": p.name,
+            "slot_index": p.slot_index,
+            "description": p.description,
+            "image_url": p.image_url,
+          }))
+          .collect::<Vec<_>>(),
+      }
+    })
+  }
+
+  async fn superbird_phone_call_image(&self, _phone_number: String) -> HandlerResult {
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::Image {
+          height: 0,
+          width: 0,
+          image_data: String::new(),
+        },
+      ))
+      .await?;
+    Ok(())
   }
 
   async fn forward_play(&self, uri: String) -> HandlerResult {
@@ -460,6 +600,142 @@ fn log_request_failure(verb: &str, err: &RequestError<gateway::LibraryErrorReply
   }
 }
 
+enum GraphqlOp {
+  Shelf { limit: u32 },
+  Section { id: String, limit: u32, offset: u32 },
+  TipsOnDemand,
+  Presets,
+}
+
+fn classify_graphql(payload: &str) -> Option<GraphqlOp> {
+  let body = payload.trim_start();
+  let body = body.strip_prefix("query")?.trim_start();
+  let body = body.strip_prefix('{')?.trim_start();
+
+  if body.starts_with("section(") {
+    let id = parse_quoted_arg(body, "id")?.to_string();
+    let limit = parse_int_arg(body, "limit").unwrap_or(20);
+    let offset = parse_int_arg(body, "offset").unwrap_or(0);
+    Some(GraphqlOp::Section { id, limit, offset })
+  } else if body.starts_with("shelf(") {
+    let limit = parse_int_arg(body, "limit").unwrap_or(14);
+    Some(GraphqlOp::Shelf { limit })
+  } else if body.starts_with("tipsOnDemand") {
+    Some(GraphqlOp::TipsOnDemand)
+  } else if body.starts_with("presets(") {
+    Some(GraphqlOp::Presets)
+  } else {
+    None
+  }
+}
+
+fn parse_int_arg(text: &str, key: &str) -> Option<u32> {
+  let needle = format!("{key}:");
+  let pos = text.find(&needle)?;
+  let rest = text[pos + needle.len()..].trim_start();
+  let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+  if end == 0 { None } else { rest[..end].parse().ok() }
+}
+
+fn parse_quoted_arg<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+  let needle = format!("{key}:");
+  let pos = text.find(&needle)?;
+  let rest = text[pos + needle.len()..].trim_start();
+  let rest = rest.strip_prefix('"')?;
+  let end = rest.find('"')?;
+  Some(&rest[..end])
+}
+
+fn shelf_section_value(entry: BrowseEntry) -> Option<Value> {
+  let folder = match entry {
+    BrowseEntry::Folder(f) => f,
+    BrowseEntry::Item(_) => return None,
+  };
+  let preview = folder.preview_children.unwrap_or_default();
+  let total = folder
+    .total
+    .unwrap_or_else(|| u32::try_from(preview.len()).unwrap_or(u32::MAX));
+  Some(json!({
+    "title": folder.title,
+    "id": folder.node_id,
+    "total": total,
+    "children": preview.into_iter().map(graphql_child_value).collect::<Vec<_>>(),
+  }))
+}
+
+fn graphql_child_value(entry: BrowseEntry) -> Value {
+  match entry {
+    BrowseEntry::Folder(f) => json!({
+      "uri": f.node_id,
+      "title": f.title,
+      "subtitle": f.subtitle.unwrap_or_default(),
+      "image_id": f.artwork_id.unwrap_or_default(),
+    }),
+    BrowseEntry::Item(item) => library_item_to_graphql_child(item),
+  }
+}
+
+fn library_item_to_graphql_child(item: LibraryItem) -> Value {
+  match item {
+    LibraryItem::Track(t) => json!({
+      "uri": t.id,
+      "title": t.name,
+      "subtitle": t.artist.name,
+      "image_id": t.image_id,
+    }),
+    LibraryItem::Album(a) => json!({
+      "uri": a.id,
+      "title": a.name,
+      "subtitle": "",
+      "image_id": "",
+    }),
+    LibraryItem::Playlist(p) => json!({
+      "uri": p.uri,
+      "title": p.name,
+      "subtitle": p.owner_name.unwrap_or_default(),
+      "image_id": p.artwork_id.unwrap_or_default(),
+    }),
+    LibraryItem::PodcastEpisode(e) => json!({
+      "uri": e.uri,
+      "title": e.name,
+      "subtitle": e.show_name.unwrap_or_default(),
+      "image_id": e.artwork_id.unwrap_or_default(),
+    }),
+    LibraryItem::Show(s) => json!({
+      "uri": s.uri,
+      "title": s.name,
+      "subtitle": s.publisher.unwrap_or_default(),
+      "image_id": s.artwork_id.unwrap_or_default(),
+    }),
+    LibraryItem::Artist(a) => json!({
+      "uri": a.id,
+      "title": a.name,
+      "subtitle": "",
+      "image_id": "",
+    }),
+    LibraryItem::Station(s) => json!({
+      "uri": s.uri,
+      "title": s.name,
+      "subtitle": "",
+      "image_id": s.artwork_id.unwrap_or_default(),
+    }),
+  }
+}
+
+fn graphql_tips_data() -> Value {
+  let tips = canned_tips()
+    .into_iter()
+    .map(|t| {
+      json!({
+        "id": t.id,
+        "title": t.title,
+        "description": t.description,
+      })
+    })
+    .collect::<Vec<_>>();
+  json!({ "tipsOnDemand": { "tips": tips } })
+}
+
 fn canned_tips() -> Vec<StockTip> {
   vec![
     StockTip {
@@ -481,4 +757,156 @@ fn canned_tips() -> Vec<StockTip> {
       action: "".into(),
     },
   ]
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn classify_shelf() {
+    let payload =
+      "query{shelf(limit:14 overrides:[]){...on Shelf{items{title id total children{uri}}}...on ShelfError{message}}}";
+    let op = classify_graphql(payload).expect("shelf classifies");
+    let GraphqlOp::Shelf { limit } = op else {
+      panic!("expected Shelf");
+    };
+    assert_eq!(limit, 14);
+  }
+
+  #[test]
+  fn classify_shelf_default_limit_when_missing() {
+    let payload = "query{shelf(overrides:[]){...on Shelf{items{title}}}}";
+    let op = classify_graphql(payload).expect("shelf classifies");
+    let GraphqlOp::Shelf { limit } = op else {
+      panic!("expected Shelf");
+    };
+    assert_eq!(limit, 14);
+  }
+
+  #[test]
+  fn classify_section() {
+    let payload =
+      "query{section(id:\"spotify:section:home-recently-played\" limit:20 offset:5){...on ShelfSection{id title}}}";
+    let op = classify_graphql(payload).expect("section classifies");
+    let GraphqlOp::Section { id, limit, offset } = op else {
+      panic!("expected Section");
+    };
+    assert_eq!(id, "spotify:section:home-recently-played");
+    assert_eq!(limit, 20);
+    assert_eq!(offset, 5);
+  }
+
+  #[test]
+  fn classify_section_with_commas() {
+    let payload = "query{section(id:\"abc\", limit:10, offset:0){children{uri}}}";
+    let op = classify_graphql(payload).expect("section classifies with commas");
+    let GraphqlOp::Section { id, limit, offset } = op else {
+      panic!("expected Section");
+    };
+    assert_eq!(id, "abc");
+    assert_eq!(limit, 10);
+    assert_eq!(offset, 0);
+  }
+
+  #[test]
+  fn classify_tips() {
+    let payload = "query{tipsOnDemand{...on Tips{tips{id title description}}...on TipsError{message}}}";
+    assert!(matches!(classify_graphql(payload), Some(GraphqlOp::TipsOnDemand)));
+  }
+
+  #[test]
+  fn classify_presets() {
+    let payload = "query{presets(serial:\"000000000000\"){... on Presets{presets{context_uri:contextUri}}}}";
+    assert!(matches!(classify_graphql(payload), Some(GraphqlOp::Presets)));
+  }
+
+  #[test]
+  fn classify_unknown() {
+    assert!(classify_graphql("query{somethingElse}").is_none());
+    assert!(classify_graphql("mutation{setPreset(input:{...})}").is_none());
+    assert!(classify_graphql("").is_none());
+  }
+
+  #[test]
+  fn classify_with_leading_whitespace() {
+    let payload = "  query  {  shelf(limit:7){items{id}}  }";
+    let op = classify_graphql(payload).expect("classifies after whitespace");
+    let GraphqlOp::Shelf { limit } = op else {
+      panic!("expected Shelf");
+    };
+    assert_eq!(limit, 7);
+  }
+
+  #[test]
+  fn parse_int_arg_basic() {
+    assert_eq!(parse_int_arg("limit:42 something", "limit"), Some(42));
+    assert_eq!(parse_int_arg("limit: 42", "limit"), Some(42));
+    assert_eq!(parse_int_arg("offset:0", "offset"), Some(0));
+    assert_eq!(parse_int_arg("limit:abc", "limit"), None);
+    assert_eq!(parse_int_arg("nothing here", "limit"), None);
+  }
+
+  #[test]
+  fn parse_quoted_arg_basic() {
+    assert_eq!(parse_quoted_arg("id:\"abc\"", "id"), Some("abc"));
+    assert_eq!(parse_quoted_arg("id: \"with spaces\"", "id"), Some("with spaces"));
+    assert_eq!(parse_quoted_arg("id:notquoted", "id"), None);
+    assert_eq!(parse_quoted_arg("nothing here", "id"), None);
+  }
+
+  #[test]
+  fn graphql_child_value_track() {
+    use libbridgething::Track;
+    let entry = BrowseEntry::Item(LibraryItem::Track(Track {
+      id: "spotify:track:abc".into(),
+      name: "Hey".into(),
+      artist: libbridgething::Artist {
+        id: "spotify:artist:x".into(),
+        name: "Artist".into(),
+      },
+      ..Track::default()
+    }));
+    let v = graphql_child_value(entry);
+    assert_eq!(v["uri"], "spotify:track:abc");
+    assert_eq!(v["title"], "Hey");
+    assert_eq!(v["subtitle"], "Artist");
+  }
+
+  #[test]
+  fn shelf_section_value_uses_preview_children_and_total() {
+    use libbridgething::BrowseFolder;
+    let folder = BrowseFolder {
+      node_id: "section:1".into(),
+      title: "Recently Played".into(),
+      subtitle: None,
+      artwork_id: None,
+      total: Some(50),
+      preview_children: Some(vec![BrowseEntry::Folder(BrowseFolder {
+        node_id: "child:1".into(),
+        title: "Pop".into(),
+        subtitle: Some("Top Hits".into()),
+        artwork_id: Some("img-1".into()),
+        total: None,
+        preview_children: None,
+      })]),
+    };
+    let v = shelf_section_value(BrowseEntry::Folder(folder)).expect("folder maps");
+    assert_eq!(v["title"], "Recently Played");
+    assert_eq!(v["id"], "section:1");
+    assert_eq!(v["total"], 50);
+    let children = v["children"].as_array().expect("children array");
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0]["uri"], "child:1");
+    assert_eq!(children[0]["title"], "Pop");
+    assert_eq!(children[0]["subtitle"], "Top Hits");
+    assert_eq!(children[0]["image_id"], "img-1");
+  }
+
+  #[test]
+  fn shelf_section_value_filters_root_items() {
+    use libbridgething::Track;
+    let entry = BrowseEntry::Item(LibraryItem::Track(Track::default()));
+    assert!(shelf_section_value(entry).is_none());
+  }
 }

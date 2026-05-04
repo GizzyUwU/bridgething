@@ -135,7 +135,13 @@ pub enum BrowseEntry {
 }
 
 /// A drilldown node. `node_id` is opaque and gateway-defined; webapps
-/// pass it back as the next `browse({ node_id })` to descend.
+/// pass it back as the next `browse({ node_id })` to descend. `total` is
+/// the count of children behind this folder when the gateway can cheaply
+/// expose it. `preview_children` is an inline first-N slice of those
+/// children so home-shelf shapes don't need a separate drill round-trip;
+/// gateways populate it when cheap (Spotify Web API home shelves include
+/// previews; Apple Music curated rails do too) and leave it `None`
+/// otherwise.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -146,6 +152,8 @@ pub struct BrowseFolder {
   pub title: String,
   pub subtitle: Option<String>,
   pub artwork_id: Option<String>,
+  pub total: Option<u32>,
+  pub preview_children: Option<Vec<BrowseEntry>>,
 }
 
 /// Page of browse results. `total` is the count of items in the

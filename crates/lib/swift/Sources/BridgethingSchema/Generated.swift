@@ -615,22 +615,6 @@ public struct BrightnessState: Codable, Sendable {
 	}
 }
 
-/// A drilldown node. `node_id` is opaque and gateway-defined; webapps
-/// pass it back as the next `browse({ node_id })` to descend.
-public struct BrowseFolder: Codable, Sendable {
-	public let nodeId: String
-	public let title: String
-	public let subtitle: String?
-	public let artworkId: String?
-
-	public init(nodeId: String, title: String, subtitle: String?, artworkId: String?) {
-		self.nodeId = nodeId
-		self.title = title
-		self.subtitle = subtitle
-		self.artworkId = artworkId
-	}
-}
-
 /// One row in a `BrowseResult`: either a folder (drilldown) or a leaf
 /// item the user can play / queue / favorite.
 public enum BrowseEntry: Codable, Sendable {
@@ -675,6 +659,32 @@ public enum BrowseEntry: Codable, Sendable {
 			try container.encode(CodingKeys.item, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
+	}
+}
+
+/// A drilldown node. `node_id` is opaque and gateway-defined; webapps
+/// pass it back as the next `browse({ node_id })` to descend. `total` is
+/// the count of children behind this folder when the gateway can cheaply
+/// expose it. `preview_children` is an inline first-N slice of those
+/// children so home-shelf shapes don't need a separate drill round-trip;
+/// gateways populate it when cheap (Spotify Web API home shelves include
+/// previews; Apple Music curated rails do too) and leave it `None`
+/// otherwise.
+public struct BrowseFolder: Codable, Sendable {
+	public let nodeId: String
+	public let title: String
+	public let subtitle: String?
+	public let artworkId: String?
+	public let total: UInt32?
+	public let previewChildren: [BrowseEntry]?
+
+	public init(nodeId: String, title: String, subtitle: String?, artworkId: String?, total: UInt32?, previewChildren: [BrowseEntry]?) {
+		self.nodeId = nodeId
+		self.title = title
+		self.subtitle = subtitle
+		self.artworkId = artworkId
+		self.total = total
+		self.previewChildren = previewChildren
 	}
 }
 

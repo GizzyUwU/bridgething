@@ -91,7 +91,7 @@ pub enum StockInterAppRecv {
   #[serde(rename = "com.spotify.superbird.tts.speak")]
   GetTts { file: String },
   #[serde(rename = "com.spotify.superbird.graphql")]
-  Graph,
+  Graph { payload: String },
   #[serde(rename = "com.spotify.log_message")]
   LogMessage(serde_json::Value),
   #[serde(rename = "com.spotify.superbird.pitstop.log")]
@@ -266,6 +266,17 @@ pub enum StockInterAppSendPayload {
   Tips { result: Vec<StockTip> },
   #[serde(rename = "call_result")]
   Saved { saved: bool },
+  #[serde(rename = "call_result")]
+  Graphql {
+    data: Option<serde_json::Value>,
+    errors: Option<Vec<GraphqlError>>,
+  },
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GraphqlError {
+  pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -762,13 +773,18 @@ impl RecvMsgData {
       StockInterAppRecv::GetTips {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTips),
       StockInterAppRecv::GetTts { file } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTts { file }),
       StockInterAppRecv::SummonDj => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifySummonDj),
+      StockInterAppRecv::Graph { payload } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGraphql { payload })
+      }
+      StockInterAppRecv::PhoneCallImage { phone_number } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SuperbirdPhoneCallImage { phone_number })
+      }
 
-      // ---- pure stock-side concerns the daemon swallows ----
-      // The daemon doesn't display caller-id images on its own (no
-      // speakers, and the stock dispatcher already handed the asset to
-      // the webapp via GetImage). Same for arbitrary SMS — Phone
-      // surface has no message-send verb in v1.
-      StockInterAppRecv::PhoneCallImage { .. } | StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
+      // SMS send has no companion path: iAP2 doesn't expose it and the
+      // modern Phone surface has no message-send verb. Webapp's stub
+      // promise stays unresolved, which is fine — stock declares but
+      // never calls this in any captured build.
+      StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
 
       // Instrumentation, logs, crash reports, search/recommendations
       // shapes the daemon ignores.
@@ -790,6 +806,11 @@ impl RecvMsgData {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetSessionState)
       }
 
+      // Stock declares these in InterappActions.ts but no store/component
+      // ever invokes them (verified by grepping superbird-webapp for call
+      // sites). Player-state derivatives are read off the SpotifyPlayerState
+      // payload; ratings were retired by Spotify; the rest are stubs for
+      // features that never shipped. Swallow rather than implement.
       StockInterAppRecv::GetCapabilities {}
       | StockInterAppRecv::GetShuffle {}
       | StockInterAppRecv::GetRepeat {}
@@ -802,7 +823,6 @@ impl RecvMsgData {
       | StockInterAppRecv::GetItemForURI {}
       | StockInterAppRecv::GetRecommendedContentForType {}
       | StockInterAppRecv::SearchQuery
-      | StockInterAppRecv::Graph
       | StockInterAppRecv::SetRating
       | StockInterAppRecv::StartRadio => RecvMsgData::Hole,
 
@@ -1075,21 +1095,6 @@ mod test {
   }
 
   #[test]
-  fn translate_phone_call_image_to_hole() {
-    let recv = PossibleRecvMsg::StockInterApp {
-      msg_id: 1,
-      data: StockInterAppRecv::PhoneCallImage {
-        phone_number: "1234567890".into(),
-      },
-      user_action: false,
-    };
-    assert!(matches!(
-      RecvMsgData::from_stock_inter_app_possible_recv(recv),
-      RecvMsgData::Hole
-    ));
-  }
-
-  #[test]
   fn translate_phone_call_message_to_hole() {
     let recv = PossibleRecvMsg::StockInterApp {
       msg_id: 2,
@@ -1183,5 +1188,55 @@ mod test {
       RecvMsgData::from_stock_inter_app_possible_recv(recv),
       RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPermissions)
     ));
+  }
+
+  #[test]
+  fn translate_graphql_to_legacy_stock() {
+    let payload = "query{shelf(limit:14 overrides:[]){...on Shelf{items{title id total}}}}".to_string();
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 8,
+      data: StockInterAppRecv::Graph {
+        payload: payload.clone(),
+      },
+      user_action: false,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGraphql { payload: out }) = translated else {
+      panic!("expected LegacyStock::SpotifyGraphql, got {translated:?}");
+    };
+    assert_eq!(out, payload);
+  }
+
+  #[test]
+  fn translate_phone_call_image_to_legacy_stock() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 9,
+      data: StockInterAppRecv::PhoneCallImage {
+        phone_number: "1234567890".into(),
+      },
+      user_action: false,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::LegacyStock(ClientLegacyStockCommand::SuperbirdPhoneCallImage { phone_number }) = translated
+    else {
+      panic!("expected LegacyStock::SuperbirdPhoneCallImage, got {translated:?}");
+    };
+    assert_eq!(phone_number, "1234567890");
+  }
+
+  #[test]
+  fn de_stock_recv_graphql() {
+    let json = r#"{"msgId":42,"method":"com.spotify.superbird.graphql","args":{"payload":"query{tipsOnDemand{tips{id}}}"},"userAction":true}"#;
+    let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize graphql msg");
+    assert_eq!(
+      de,
+      PossibleRecvMsg::StockInterApp {
+        msg_id: 42,
+        data: StockInterAppRecv::Graph {
+          payload: "query{tipsOnDemand{tips{id}}}".into(),
+        },
+        user_action: true,
+      }
+    );
   }
 }

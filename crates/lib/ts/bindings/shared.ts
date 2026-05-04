@@ -69,9 +69,22 @@ export type BrowseEntry = { type: 'folder'; data: BrowseFolder } | { type: 'item
 
 /**
  * A drilldown node. `node_id` is opaque and gateway-defined; webapps
- * pass it back as the next `browse({ node_id })` to descend.
+ * pass it back as the next `browse({ node_id })` to descend. `total` is
+ * the count of children behind this folder when the gateway can cheaply
+ * expose it. `preview_children` is an inline first-N slice of those
+ * children so home-shelf shapes don't need a separate drill round-trip;
+ * gateways populate it when cheap (Spotify Web API home shelves include
+ * previews; Apple Music curated rails do too) and leave it `None`
+ * otherwise.
  */
-export type BrowseFolder = { nodeId: string; title: string; subtitle: string | null; artworkId: string | null };
+export type BrowseFolder = {
+  nodeId: string;
+  title: string;
+  subtitle: string | null;
+  artworkId: string | null;
+  total: number | null;
+  previewChildren: Array<BrowseEntry> | null;
+};
 
 /**
  * Page of browse results. `total` is the count of items in the

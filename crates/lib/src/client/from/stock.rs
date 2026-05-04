@@ -64,4 +64,10 @@ pub enum ClientLegacyStockCommand {
   SpotifyGetTts {
     file: String,
   },
+  SpotifyGraphql {
+    payload: String,
+  },
+  SuperbirdPhoneCallImage {
+    phone_number: String,
+  },
 }

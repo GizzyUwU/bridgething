@@ -315,16 +315,6 @@ data class BrightnessState (
 	val effectiveLevel: Float
 )
 
-/// A drilldown node. `node_id` is opaque and gateway-defined; webapps
-/// pass it back as the next `browse({ node_id })` to descend.
-@Serializable
-data class BrowseFolder (
-	val nodeId: String,
-	val title: String,
-	val subtitle: String? = null,
-	val artworkId: String? = null
-)
-
 /// One row in a `BrowseResult`: either a folder (drilldown) or a leaf
 /// item the user can play / queue / favorite.
 @Serializable(with = BrowseEntrySerializer::class)
@@ -336,6 +326,24 @@ sealed class BrowseEntry {
 	@SerialName("item")
 	data class Item(val data: LibraryItem): BrowseEntry()
 }
+
+/// A drilldown node. `node_id` is opaque and gateway-defined; webapps
+/// pass it back as the next `browse({ node_id })` to descend. `total` is
+/// the count of children behind this folder when the gateway can cheaply
+/// expose it. `preview_children` is an inline first-N slice of those
+/// children so home-shelf shapes don't need a separate drill round-trip;
+/// gateways populate it when cheap (Spotify Web API home shelves include
+/// previews; Apple Music curated rails do too) and leave it `None`
+/// otherwise.
+@Serializable
+data class BrowseFolder (
+	val nodeId: String,
+	val title: String,
+	val subtitle: String? = null,
+	val artworkId: String? = null,
+	val total: UInt? = null,
+	val previewChildren: List<BrowseEntry>? = null
+)
 
 /// Page of browse results. `total` is the count of items in the
 /// underlying collection when the gateway can cheaply expose it (None
