@@ -143,6 +143,7 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     | BridgeToClientMsgData::Peer(_)
     | BridgeToClientMsgData::Phone(_)
     | BridgeToClientMsgData::Time(_)
+    | BridgeToClientMsgData::Voice(_)
     | BridgeToClientMsgData::Webapp(_) => StockSendMsg::Unsupported,
   }
 }

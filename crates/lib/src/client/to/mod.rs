@@ -14,6 +14,7 @@ mod player;
 mod store;
 mod system;
 mod time;
+mod voice;
 mod webapp;
 
 pub use asset::*;
@@ -32,4 +33,5 @@ pub use player::*;
 pub use store::*;
 pub use system::*;
 pub use time::*;
+pub use voice::*;
 pub use webapp::*;

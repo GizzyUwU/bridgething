@@ -127,6 +127,8 @@ pub enum BridgeToClientMsgData {
   #[from]
   Time(BridgeToClientTimeMsg),
   #[from]
+  Voice(BridgeToClientVoiceMsg),
+  #[from]
   Webapp(BridgeToClientWebappMsg),
   #[from]
   Forward(ForwardMessage),

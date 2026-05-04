@@ -95,6 +95,10 @@ import {
   type TtsCancel,
   type TtsEnded,
   type TtsStarted,
+  type VoiceFrame,
+  type VoiceMicOpen,
+  type VoiceStreamClose,
+  type VoiceStreamOpen,
   type VolumeChanged,
   type WebappActive,
   type WebappConfigAck,
@@ -285,6 +289,18 @@ export type SystemDeviceInboundHandlers = {
   otaError: (msg: OtaError) => void;
   otaBeginAck: (msg: OtaBeginAck) => void;
   otaBeginRejected: (msg: OtaBeginRejected) => void;
+};
+
+export type VoiceInboundHandlers = {
+  streamOpen: (deviceId: string, msg: VoiceStreamOpen) => void;
+  frame: (deviceId: string, msg: VoiceFrame) => void;
+  streamClose: (deviceId: string, msg: VoiceStreamClose) => void;
+};
+
+export type VoiceDeviceInboundHandlers = {
+  streamOpen: (msg: VoiceStreamOpen) => void;
+  frame: (msg: VoiceFrame) => void;
+  streamClose: (msg: VoiceStreamClose) => void;
 };
 
 export type ForwardInboundHandlers = {
@@ -2004,6 +2020,113 @@ export class SystemSurface {
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class VoiceSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Voice::StreamOpen` across all peers. */
+  onStreamOpen(handler: (deviceId: string, msg: VoiceStreamOpen) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'streamOpen') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::Frame` across all peers. */
+  onFrame(handler: (deviceId: string, msg: VoiceFrame) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'frame') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::StreamClose` across all peers. */
+  onStreamClose(handler: (deviceId: string, msg: VoiceStreamClose) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'streamClose') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Voice` variants. */
+  subscribe(handlers: VoiceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<VoiceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<VoiceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'streamOpen': {
+          handlers.streamOpen?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'frame': {
+          handlers.frame?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'streamClose': {
+          handlers.streamClose?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Voice: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Voice::MicOpen` to every connected peer (broadcast). */
+  async micOpen(payload: VoiceMicOpen, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'command' },
+          data: { type: 'voice', data: { event: 'micOpen', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Voice::MicClose` to every connected peer (broadcast). */
+  async micClose(options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'command' },
+          data: { type: 'voice', data: { event: 'micClose' } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
   }
 }
 
@@ -4119,6 +4242,110 @@ export class SystemSurfaceForDevice {
   }
 }
 
+export class VoiceSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Voice::StreamOpen` from this peer. */
+  onStreamOpen(handler: (msg: VoiceStreamOpen) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'streamOpen') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::Frame` from this peer. */
+  onFrame(handler: (msg: VoiceFrame) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'frame') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::StreamClose` from this peer. */
+  onStreamClose(handler: (msg: VoiceStreamClose) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'streamClose') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Voice` variants from this peer. */
+  subscribe(handlers: VoiceDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<VoiceDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<VoiceDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'streamOpen': {
+          handlers.streamOpen?.(inner.data);
+          return;
+        }
+        case 'frame': {
+          handlers.frame?.(inner.data);
+          return;
+        }
+        case 'streamClose': {
+          handlers.streamClose?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Voice: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Voice::MicOpen` to this peer. */
+  async micOpen(payload: VoiceMicOpen, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'micOpen', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Voice::MicClose` to this peer. */
+  async micClose(options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'micClose' } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class ForwardSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -4544,6 +4771,7 @@ export type BridgeMessageHandlers = {
   phone: PhoneInboundHandlers;
   player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
+  voice: VoiceInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
@@ -4557,6 +4785,7 @@ export type PartialBridgeMessageHandlers = {
   phone?: Partial<PhoneInboundHandlers>;
   player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
+  voice?: Partial<VoiceInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
@@ -4570,6 +4799,7 @@ export type BridgeMessageDeviceHandlers = {
   phone: PhoneDeviceInboundHandlers;
   player: PlayerDeviceInboundHandlers;
   system: SystemDeviceInboundHandlers;
+  voice: VoiceDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
@@ -4583,6 +4813,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   phone?: Partial<PhoneDeviceInboundHandlers>;
   player?: Partial<PlayerDeviceInboundHandlers>;
   system?: Partial<SystemDeviceInboundHandlers>;
+  voice?: Partial<VoiceDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
 };
@@ -4605,6 +4836,8 @@ declare module './index' {
     readonly player: PlayerSurface;
     /** Methods scoped to the `System` wire surface. */
     readonly system: SystemSurface;
+    /** Methods scoped to the `Voice` wire surface. */
+    readonly voice: VoiceSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
     /** Methods scoped to the `Asset` wire surface. */
@@ -4977,6 +5210,7 @@ type DeviceSurfaceCache = {
   phone?: PhoneSurfaceForDevice;
   player?: PlayerSurfaceForDevice;
   system?: SystemSurfaceForDevice;
+  voice?: VoiceSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
   authority?: AuthoritySurfaceForDevice;
@@ -5016,6 +5250,9 @@ export class BridgethingGatewayDevice {
   }
   get system(): SystemSurfaceForDevice {
     return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get voice(): VoiceSurfaceForDevice {
+    return (this._surfaces.voice ??= new VoiceSurfaceForDevice(this._gateway, this.deviceId));
   }
   get forward(): ForwardSurfaceForDevice {
     return (this._surfaces.forward ??= new ForwardSurfaceForDevice(this._gateway, this.deviceId));
@@ -5057,6 +5294,7 @@ type GatewaySurfaceCache = {
   phone?: PhoneSurface;
   player?: PlayerSurface;
   system?: SystemSurface;
+  voice?: VoiceSurface;
   forward?: ForwardSurface;
   asset?: AssetSurface;
   authority?: AuthoritySurface;
@@ -5143,6 +5381,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): SystemSurface {
       const bucket = bucketFor(this);
       return (bucket.system ??= new SystemSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'voice', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): VoiceSurface {
+      const bucket = bucketFor(this);
+      return (bucket.voice ??= new VoiceSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'forward', {
@@ -5651,6 +5897,32 @@ function outerSubscribeGateway(
           }
         }
       }
+      case 'voice': {
+        const innerHandlers = handlers.voice;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for voice');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'streamOpen': {
+            innerHandlers.streamOpen?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'frame': {
+            innerHandlers.frame?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'streamClose': {
+            innerHandlers.streamClose?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Voice: no handler for inner', inner);
+            return;
+          }
+        }
+      }
       case 'forward': {
         const innerHandlers = handlers.forward;
         if (!innerHandlers) {
@@ -6122,6 +6394,32 @@ function outerSubscribeDevice(
           }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'voice': {
+        const innerHandlers = handlers.voice;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for voice');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'streamOpen': {
+            innerHandlers.streamOpen?.(inner.data);
+            return;
+          }
+          case 'frame': {
+            innerHandlers.frame?.(inner.data);
+            return;
+          }
+          case 'streamClose': {
+            innerHandlers.streamClose?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Voice: no handler for inner', inner);
             return;
           }
         }

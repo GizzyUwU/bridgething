@@ -1398,6 +1398,91 @@ public struct SystemSurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `Voice` wire surface.
+public struct VoiceSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Voice::StreamOpen` messages.
+  public var streamOpen: AsyncStream<(deviceId: String, msg: VoiceStreamOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .voice(let outer) = message.data,
+             case .streamOpen(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Voice::Frame` messages.
+  public var frame: AsyncStream<(deviceId: String, msg: VoiceFrame)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .voice(let outer) = message.data,
+             case .frame(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Voice::StreamClose` messages.
+  public var streamClose: AsyncStream<(deviceId: String, msg: VoiceStreamClose)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .voice(let outer) = message.data,
+             case .streamClose(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Voice::MicOpen` to every connected peer (broadcast).
+  public func micOpen(_ payload: VoiceMicOpen, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .voice(.micOpen(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Voice::MicClose` to every connected peer (broadcast).
+  public func micClose(priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .voice(.micClose))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Forward` wire surface.
 public struct ForwardSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -3042,6 +3127,79 @@ public struct SystemSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Voice` wire surface (deviceId is baked in).
+public struct VoiceSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Voice::StreamOpen` from this peer.
+  public var streamOpen: AsyncStream<VoiceStreamOpen> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .voice(let outer) = message.data,
+             case .streamOpen(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Voice::Frame` from this peer.
+  public var frame: AsyncStream<VoiceFrame> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .voice(let outer) = message.data,
+             case .frame(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Voice::StreamClose` from this peer.
+  public var streamClose: AsyncStream<VoiceStreamClose> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .voice(let outer) = message.data,
+             case .streamClose(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Voice::MicOpen` to this peer.
+  public func micOpen(_ payload: VoiceMicOpen, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .voice(.micOpen(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Voice::MicClose` to this peer.
+  public func micClose(priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .command, data: .voice(.micClose))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Forward` wire surface (deviceId is baked in).
 public struct ForwardSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -3402,6 +3560,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var player: PlayerSurfaceForDevice { PlayerSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `System` wire surface.
   public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Voice` wire surface.
+  public var voice: VoiceSurfaceForDevice { VoiceSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
   public var forward: ForwardSurfaceForDevice { ForwardSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Asset` wire surface.
@@ -3435,6 +3595,8 @@ extension BridgethingGateway {
   public nonisolated var player: PlayerSurface { PlayerSurface(gateway: self) }
   /// Methods scoped to the `System` wire surface.
   public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
+  /// Methods scoped to the `Voice` wire surface.
+  public nonisolated var voice: VoiceSurface { VoiceSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
   public nonisolated var forward: ForwardSurface { ForwardSurface(gateway: self) }
   /// Methods scoped to the `Asset` wire surface.

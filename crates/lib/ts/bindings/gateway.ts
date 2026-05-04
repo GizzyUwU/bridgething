@@ -175,6 +175,7 @@ export type BridgeToGatewayMsgData =
   | { type: 'phone'; data: BridgeToGatewayPhoneMsg }
   | { type: 'player'; data: BridgeToGatewayPlayerMsg }
   | { type: 'system'; data: BridgeToGatewaySystemMsg }
+  | { type: 'voice'; data: BridgeToGatewayVoiceMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'error'; data: WireError }
@@ -235,6 +236,11 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'otaError'; data: OtaError }
   | { event: 'otaBeginAck'; data: OtaBeginAck }
   | { event: 'otaBeginRejected'; data: OtaBeginRejected };
+
+export type BridgeToGatewayVoiceMsg =
+  | { event: 'streamOpen'; data: VoiceStreamOpen }
+  | { event: 'frame'; data: VoiceFrame }
+  | { event: 'streamClose'; data: VoiceStreamClose };
 
 export type BridgeToGatewayWebappMsg =
   | { event: 'webapps'; data: WebappList }
@@ -348,6 +354,7 @@ export type GatewayToBridgeMsgData =
   | { type: 'player'; data: GatewayToBridgePlayerMsg }
   | { type: 'system'; data: GatewayToBridgeSystemMsg }
   | { type: 'time'; data: GatewayToBridgeTimeMsg }
+  | { type: 'voice'; data: GatewayToBridgeVoiceMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
   | { type: 'error'; data: WireError };
 
@@ -405,6 +412,8 @@ export type GatewayToBridgeSystemMsg =
  * changes.
  */
 export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
+
+export type GatewayToBridgeVoiceMsg = { event: 'micOpen'; data: VoiceMicOpen } | { event: 'micClose' };
 
 export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
@@ -666,6 +675,42 @@ export type TtsEnded = { id: Uint8Array; completed: boolean };
  * before speech started); webapps should treat both as best-effort.
  */
 export type TtsStarted = { id: Uint8Array };
+
+export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
+
+/**
+ * PCM frame format the daemon ships in `Frame` payloads. Voice capture
+ * runs at a fixed format per session; format is announced once on
+ * `StreamOpen` and held constant through `StreamClose`.
+ */
+export type VoiceFormat = { sampleRateHz: number; channels: number; bitsPerSample: number };
+
+/**
+ * One PCM frame in an active capture session. Sent on the Bulk lane so
+ * it interleaves between Normal-priority traffic. `seq` increments
+ * from 0; gaps mean the daemon dropped frames under backpressure and
+ * the companion should treat them as silence rather than retransmit.
+ */
+export type VoiceFrame = { streamId: Uint8Array; seq: number; pcm: Uint8Array };
+
+/**
+ * Why the gateway is opening the mic. The daemon currently treats every
+ * intent the same (open and stream); the field is kept so future policy
+ * (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
+ * shape it needs.
+ */
+export type VoiceIntent = 'pushToTalk' | 'assistant' | 'wakeWord';
+
+export type VoiceMicOpen = { intent: VoiceIntent };
+
+export type VoiceStreamClose = { streamId: Uint8Array; reason: VoiceCloseReason };
+
+/**
+ * Daemon opens a capture session. The companion is expected to begin
+ * consuming `Frame`s with the same `stream_id` until a `StreamClose`
+ * for that id arrives.
+ */
+export type VoiceStreamOpen = { streamId: Uint8Array; format: VoiceFormat };
 
 /**
  * Volume / mute snapshot. Fired on any change to either; webapps treat

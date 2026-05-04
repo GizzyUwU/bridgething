@@ -1,4 +1,4 @@
-use bridgething_macros::BridgeEnum;
+use bridgething_macros::{BridgeEnum, WireRequest};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -16,6 +16,16 @@ pub struct MicUnmute {
   pub preserve: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Voice,
+  request_variant = StateGet,
+  response = crate::client::VoiceStateReply,
+  response_variant = StateReply,
+)]
+pub struct VoiceStateGet;
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -30,4 +40,6 @@ pub enum ClientToBridgeVoiceMsg {
   MuteMic(MicMute),
   #[bridge_command]
   UnmuteMic(MicUnmute),
+  #[bridge_request]
+  StateGet,
 }

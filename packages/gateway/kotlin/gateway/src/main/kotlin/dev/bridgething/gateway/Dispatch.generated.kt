@@ -1033,6 +1033,71 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
 
 }
 
+/** Cross-peer methods for the `Voice` wire surface. */
+public class VoiceSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Voice::StreamOpen` messages. */
+  public val streamOpen: Flow<Pair<String, VoiceStreamOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.StreamOpen ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Voice::Frame` messages. */
+  public val frame: Flow<Pair<String, VoiceFrame>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.Frame ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Voice::StreamClose` messages. */
+  public val streamClose: Flow<Pair<String, VoiceStreamClose>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.StreamClose ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Voice::MicOpen` to every connected peer (broadcast). */
+  public suspend fun micOpen(payload: VoiceMicOpen, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Command,
+            data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicOpen(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Voice::MicClose` to every connected peer (broadcast). */
+  public suspend fun micClose(priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Command,
+            data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
 /** Cross-peer methods for the `Forward` wire surface. */
 public class ForwardSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `Forward::Text` messages. */
@@ -2324,6 +2389,63 @@ public class SystemSurfaceForDevice(
 
 }
 
+/** Per-peer methods for the `Voice` wire surface (deviceId is baked in). */
+public class VoiceSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Voice::StreamOpen` from this peer. */
+  public val streamOpen: Flow<VoiceStreamOpen> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.StreamOpen ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Voice::Frame` from this peer. */
+  public val frame: Flow<VoiceFrame> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.Frame ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Voice::StreamClose` from this peer. */
+  public val streamClose: Flow<VoiceStreamClose> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.StreamClose ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Voice::MicOpen` to this peer. */
+  public suspend fun micOpen(payload: VoiceMicOpen, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Command,
+      data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicOpen(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Voice::MicClose` to this peer. */
+  public suspend fun micClose(priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Command,
+      data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
 /** Per-peer methods for the `Forward` wire surface (deviceId is baked in). */
 public class ForwardSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -2689,6 +2811,8 @@ public class BridgethingGatewayDevice(
   public val player: PlayerSurfaceForDevice get() = PlayerSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `System` wire surface. */
   public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Voice` wire surface. */
+  public val voice: VoiceSurfaceForDevice get() = VoiceSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
   public val forward: ForwardSurfaceForDevice get() = ForwardSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Asset` wire surface. */
@@ -2736,6 +2860,10 @@ public val BridgethingGateway.player: PlayerSurface
 /** Methods scoped to the `System` wire surface. */
 public val BridgethingGateway.system: SystemSurface
   get() = SystemSurface(this)
+
+/** Methods scoped to the `Voice` wire surface. */
+public val BridgethingGateway.voice: VoiceSurface
+  get() = VoiceSurface(this)
 
 /** Methods scoped to the `Forward` wire surface. */
 public val BridgethingGateway.forward: ForwardSurface

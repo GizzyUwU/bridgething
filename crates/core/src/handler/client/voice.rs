@@ -1,4 +1,4 @@
-use libbridgething::client::{ClientToBridgeVoiceMsgCommand, MicMute, MicUnmute};
+use libbridgething::client::{BridgeToClientVoiceMsg, ClientToBridgeVoiceMsg, MicMute, MicUnmute, VoiceStateReply};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -12,38 +12,35 @@ impl VoiceHandler {
     Self { handle }
   }
 
-  pub async fn handle(&self, msg: ClientToBridgeVoiceMsgCommand) -> HandlerResult {
-    tracing::debug!("({}) handling voice message", &self.handle.from);
-
+  pub async fn handle(&self, msg: ClientToBridgeVoiceMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeVoiceMsgCommand::Cancel => self.cancel().await,
-      ClientToBridgeVoiceMsgCommand::PushToTalk => self.push_to_talk().await,
-      ClientToBridgeVoiceMsgCommand::MuteMic(MicMute { preserve }) => self.mute_mic(preserve).await,
-      ClientToBridgeVoiceMsgCommand::UnmuteMic(MicUnmute { preserve }) => self.unmute_mic(preserve).await,
+      ClientToBridgeVoiceMsg::Cancel => {
+        if let Err(err) = self.handle.state.mic.cancel().await {
+          tracing::warn!("({}) voice.cancel failed: {err}", &self.handle.from);
+        }
+      }
+      ClientToBridgeVoiceMsg::PushToTalk => match self.handle.state.mic.push_to_talk().await {
+        Ok(stream_id) => tracing::debug!("({}) voice.pushToTalk -> stream {stream_id}", &self.handle.from),
+        Err(err) => tracing::warn!("({}) voice.pushToTalk failed: {err}", &self.handle.from),
+      },
+      ClientToBridgeVoiceMsg::MuteMic(MicMute { preserve }) => {
+        if let Err(err) = self.handle.state.mic.set_muted(true, preserve).await {
+          tracing::warn!("({}) voice.muteMic failed: {err}", &self.handle.from);
+        }
+      }
+      ClientToBridgeVoiceMsg::UnmuteMic(MicUnmute { preserve }) => {
+        if let Err(err) = self.handle.state.mic.set_muted(false, preserve).await {
+          tracing::warn!("({}) voice.unmuteMic failed: {err}", &self.handle.from);
+        }
+      }
+      ClientToBridgeVoiceMsg::StateGet => {
+        let state = self.handle.state.mic.snapshot().await;
+        self
+          .handle
+          .respond(BridgeToClientVoiceMsg::StateReply(VoiceStateReply { state }))
+          .await?;
+      }
     }
-  }
-
-  async fn cancel(&self) -> HandlerResult {
-    tracing::debug!("({}) cancelling voice command", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn push_to_talk(&self) -> HandlerResult {
-    tracing::debug!("({}) activating push-to-talk", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn mute_mic(&self, preserve: bool) -> HandlerResult {
-    tracing::debug!("({}) muting microphone, preserve: {}", &self.handle.from, preserve);
-    // Ok(self.handle.respond().await?)
-    Ok(())
-  }
-
-  async fn unmute_mic(&self, preserve: bool) -> HandlerResult {
-    tracing::debug!("({}) unmuting microphone, preserve: {}", &self.handle.from, preserve);
-    // Ok(self.handle.respond().await?)
     Ok(())
   }
 }

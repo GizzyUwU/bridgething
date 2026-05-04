@@ -7,6 +7,7 @@ mod notifications;
 mod phone;
 mod player;
 mod system;
+mod voice;
 mod webapp;
 
 pub use asset::*;
@@ -18,4 +19,5 @@ pub use notifications::*;
 pub use phone::*;
 pub use player::*;
 pub use system::*;
+pub use voice::*;
 pub use webapp::*;

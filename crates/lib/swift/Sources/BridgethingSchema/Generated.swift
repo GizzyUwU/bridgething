@@ -407,6 +407,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case phone(BridgeToGatewayPhoneMsg)
 	case player(BridgeToGatewayPlayerMsg)
 	case system(BridgeToGatewaySystemMsg)
+	case voice(BridgeToGatewayVoiceMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
 	case error(WireError)
@@ -426,6 +427,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			phone,
 			player,
 			system,
+			voice,
 			webapp,
 			forward,
 			error,
@@ -491,6 +493,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 					self = .system(content)
 					return
 				}
+			case .voice:
+				if let content = try? container.decode(BridgeToGatewayVoiceMsg.self, forKey: .data) {
+					self = .voice(content)
+					return
+				}
 			case .webapp:
 				if let content = try? container.decode(BridgeToGatewayWebappMsg.self, forKey: .data) {
 					self = .webapp(content)
@@ -549,6 +556,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .system(let content):
 			try container.encode(CodingKeys.system, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .voice(let content):
+			try container.encode(CodingKeys.voice, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
@@ -1156,6 +1166,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case player(GatewayToBridgePlayerMsg)
 	case system(GatewayToBridgeSystemMsg)
 	case time(GatewayToBridgeTimeMsg)
+	case voice(GatewayToBridgeVoiceMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case error(WireError)
 
@@ -1173,6 +1184,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			player,
 			system,
 			time,
+			voice,
 			webapp,
 			error
 	}
@@ -1250,6 +1262,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .time(content)
 					return
 				}
+			case .voice:
+				if let content = try? container.decode(GatewayToBridgeVoiceMsg.self, forKey: .data) {
+					self = .voice(content)
+					return
+				}
 			case .webapp:
 				if let content = try? container.decode(GatewayToBridgeWebappMsg.self, forKey: .data) {
 					self = .webapp(content)
@@ -1306,6 +1323,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .time(let content):
 			try container.encode(CodingKeys.time, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .voice(let content):
+			try container.encode(CodingKeys.voice, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .webapp(let content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
@@ -3433,6 +3453,85 @@ public struct TtsStarted: Codable, Sendable {
 	}
 }
 
+/// PCM frame format the daemon ships in `Frame` payloads. Voice capture
+/// runs at a fixed format per session; format is announced once on
+/// `StreamOpen` and held constant through `StreamClose`.
+public struct VoiceFormat: Codable, Sendable {
+	public let sampleRateHz: UInt32
+	public let channels: UInt16
+	public let bitsPerSample: UInt16
+
+	public init(sampleRateHz: UInt32, channels: UInt16, bitsPerSample: UInt16) {
+		self.sampleRateHz = sampleRateHz
+		self.channels = channels
+		self.bitsPerSample = bitsPerSample
+	}
+}
+
+/// One PCM frame in an active capture session. Sent on the Bulk lane so
+/// it interleaves between Normal-priority traffic. `seq` increments
+/// from 0; gaps mean the daemon dropped frames under backpressure and
+/// the companion should treat them as silence rather than retransmit.
+public struct VoiceFrame: Codable, Sendable {
+	public let streamId: Data
+	public let seq: UInt32
+	public let pcm: Data
+
+	public init(streamId: Data, seq: UInt32, pcm: Data) {
+		self.streamId = streamId
+		self.seq = seq
+		self.pcm = pcm
+	}
+}
+
+/// Why the gateway is opening the mic. The daemon currently treats every
+/// intent the same (open and stream); the field is kept so future policy
+/// (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
+/// shape it needs.
+public enum VoiceIntent: String, Codable, Sendable {
+	case pushToTalk
+	case assistant
+	case wakeWord
+}
+
+public struct VoiceMicOpen: Codable, Sendable {
+	public let intent: VoiceIntent
+
+	public init(intent: VoiceIntent) {
+		self.intent = intent
+	}
+}
+
+public enum VoiceCloseReason: String, Codable, Sendable {
+	case endOfSpeech
+	case cancelled
+	case muted
+	case error
+}
+
+public struct VoiceStreamClose: Codable, Sendable {
+	public let streamId: Data
+	public let reason: VoiceCloseReason
+
+	public init(streamId: Data, reason: VoiceCloseReason) {
+		self.streamId = streamId
+		self.reason = reason
+	}
+}
+
+/// Daemon opens a capture session. The companion is expected to begin
+/// consuming `Frame`s with the same `stream_id` until a `StreamClose`
+/// for that id arrives.
+public struct VoiceStreamOpen: Codable, Sendable {
+	public let streamId: Data
+	public let format: VoiceFormat
+
+	public init(streamId: Data, format: VoiceFormat) {
+		self.streamId = streamId
+		self.format = format
+	}
+}
+
 /// Volume / mute snapshot. Fired on any change to either; webapps treat
 /// `level` as the canonical value.
 public struct VolumeChanged: Codable, Sendable {
@@ -4494,6 +4593,61 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	}
 }
 
+public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
+	case streamOpen(VoiceStreamOpen)
+	case frame(VoiceFrame)
+	case streamClose(VoiceStreamClose)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case streamOpen,
+			frame,
+			streamClose
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .streamOpen:
+				if let content = try? container.decode(VoiceStreamOpen.self, forKey: .data) {
+					self = .streamOpen(content)
+					return
+				}
+			case .frame:
+				if let content = try? container.decode(VoiceFrame.self, forKey: .data) {
+					self = .frame(content)
+					return
+				}
+			case .streamClose:
+				if let content = try? container.decode(VoiceStreamClose.self, forKey: .data) {
+					self = .streamClose(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayVoiceMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayVoiceMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .streamOpen(let content):
+			try container.encode(CodingKeys.streamOpen, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .frame(let content):
+			try container.encode(CodingKeys.frame, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .streamClose(let content):
+			try container.encode(CodingKeys.streamClose, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
 public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	/// response to List
 	case webapps(WebappList)
@@ -5548,6 +5702,48 @@ public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 		case .snapshot(let content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
+	case micOpen(VoiceMicOpen)
+	case micClose
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case micOpen,
+			micClose
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .micOpen:
+				if let content = try? container.decode(VoiceMicOpen.self, forKey: .data) {
+					self = .micOpen(content)
+					return
+				}
+			case .micClose:
+				self = .micClose
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeVoiceMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeVoiceMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .micOpen(let content):
+			try container.encode(CodingKeys.micOpen, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .micClose:
+			try container.encode(CodingKeys.micClose, forKey: .event)
 		}
 	}
 }

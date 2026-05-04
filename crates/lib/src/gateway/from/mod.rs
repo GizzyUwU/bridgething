@@ -11,6 +11,7 @@ mod phone;
 mod player;
 mod system;
 mod time;
+mod voice;
 mod webapp;
 
 pub use asset::*;
@@ -26,4 +27,5 @@ pub use phone::*;
 pub use player::*;
 pub use system::*;
 pub use time::*;
+pub use voice::*;
 pub use webapp::*;

@@ -1,4 +1,4 @@
-use libbridgething::client::ClientToBridgeHardwareMsg;
+use libbridgething::client::{BridgeToClientHardwareMsg, ClientToBridgeHardwareMsg, DisplaySetLevel, DisplaySetMode};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -13,9 +13,30 @@ impl HardwareHandler {
 
   pub async fn handle(self, msg: ClientToBridgeHardwareMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeHardwareMsg::DisplaySetMode(_) => Ok(self.handle.unimplemented("hardware.displaySetMode").await?),
-      ClientToBridgeHardwareMsg::DisplaySetLevel(_) => Ok(self.handle.unimplemented("hardware.displaySetLevel").await?),
-      ClientToBridgeHardwareMsg::StateGet => Ok(self.handle.unimplemented("hardware.stateGet").await?),
+      ClientToBridgeHardwareMsg::DisplaySetMode(DisplaySetMode { mode }) => {
+        if let Err(err) = self.handle.state.als.set_mode(mode).await {
+          tracing::warn!("({}) hardware.displaySetMode failed: {err}", &self.handle.from);
+        }
+      }
+      ClientToBridgeHardwareMsg::DisplaySetLevel(DisplaySetLevel { level }) => {
+        match self.handle.state.als.set_level(level).await {
+          Ok(Ok(())) => {}
+          Ok(Err(err)) => {
+            tracing::debug!("({}) hardware.displaySetLevel rejected: {err:?}", &self.handle.from);
+          }
+          Err(err) => {
+            tracing::warn!("({}) hardware.displaySetLevel failed: {err}", &self.handle.from);
+          }
+        }
+      }
+      ClientToBridgeHardwareMsg::StateGet => {
+        let reply = self.handle.state.als.snapshot_reply().await;
+        self
+          .handle
+          .respond(BridgeToClientHardwareMsg::StateReply(reply))
+          .await?;
+      }
     }
+    Ok(())
   }
 }

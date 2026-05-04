@@ -119,6 +119,8 @@ import {
   type TtsCancel,
   type TtsEnded,
   type TtsStarted,
+  type VoiceState,
+  type VoiceStateReply,
   type VolumeChanged,
   type WebappActivate,
   type WebappActiveChanged,
@@ -249,6 +251,11 @@ export type SystemInboundHandlers = {
 export type TimeInboundHandlers = {
   changed: (msg: TimeSnapshot) => void;
   snapshot: (msg: TimeSnapshot) => void;
+};
+
+export type VoiceInboundHandlers = {
+  stateChanged: (msg: VoiceState) => void;
+  stateReply: (msg: VoiceStateReply) => void;
 };
 
 export type WebappInboundHandlers = {
@@ -2658,6 +2665,120 @@ export class TimeSurface {
   }
 }
 
+export class VoiceSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Voice::StateChanged` from the daemon. */
+  onStateChanged(handler: (msg: VoiceState) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'stateChanged') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::StateReply` from the daemon. */
+  onStateReply(handler: (msg: VoiceStateReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'stateReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Voice` variants. */
+  subscribe(handlers: VoiceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<VoiceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<VoiceInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'stateChanged': {
+          handlers.stateChanged?.(inner.data);
+          return;
+        }
+        case 'stateReply': {
+          handlers.stateReply?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Voice: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Voice::Cancel` to the daemon. */
+  async cancel(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'cancel' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Voice::PushToTalk` to the daemon. */
+  async pushToTalk(): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'pushToTalk' } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Voice::MuteMic` to the daemon. */
+  async muteMic(payload: MicMute): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'muteMic', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Voice::UnmuteMic` to the daemon. */
+  async unmuteMic(payload: MicUnmute): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'unmuteMic', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async stateGet(options?: { timeoutMs?: number }): Promise<TypedRequestResult<VoiceStateReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'voice', data: { event: 'stateGet' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'voice') {
+      const inner = d.data;
+      if (inner.event === 'stateReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
 export class WebappSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
@@ -3064,50 +3185,6 @@ export class ForwardSurface {
   }
 }
 
-export class VoiceSurface {
-  constructor(private readonly _client: BridgethingClient) {}
-
-  /** Send `Voice::Cancel` to the daemon. */
-  async cancel(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'voice', data: { event: 'cancel' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Voice::PushToTalk` to the daemon. */
-  async pushToTalk(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'voice', data: { event: 'pushToTalk' } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Voice::MuteMic` to the daemon. */
-  async muteMic(payload: MicMute): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'voice', data: { event: 'muteMic', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Voice::UnmuteMic` to the daemon. */
-  async unmuteMic(payload: MicUnmute): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'command' },
-      data: { type: 'voice', data: { event: 'unmuteMic', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-}
-
 export class StoreSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
@@ -3167,6 +3244,7 @@ export type ClientMessageHandlers = {
   player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
   time: TimeInboundHandlers;
+  voice: VoiceInboundHandlers;
   webapp: WebappInboundHandlers;
   forward: ForwardInboundHandlers;
 };
@@ -3187,6 +3265,7 @@ export type PartialClientMessageHandlers = {
   player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
   time?: Partial<TimeInboundHandlers>;
+  voice?: Partial<VoiceInboundHandlers>;
   webapp?: Partial<WebappInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
 };
@@ -3223,12 +3302,12 @@ declare module './index' {
     readonly system: SystemSurface;
     /** Methods scoped to the `Time` wire surface. */
     readonly time: TimeSurface;
+    /** Methods scoped to the `Voice` wire surface. */
+    readonly voice: VoiceSurface;
     /** Methods scoped to the `Webapp` wire surface. */
     readonly webapp: WebappSurface;
     /** Methods scoped to the `Forward` wire surface. */
     readonly forward: ForwardSurface;
-    /** Methods scoped to the `Voice` wire surface. */
-    readonly voice: VoiceSurface;
     /** Methods scoped to the `Store` wire surface. */
     readonly store: StoreSurface;
     /** Exhaustive subscribe across every inbound wire surface. */
@@ -3253,9 +3332,9 @@ type ClientSurfaceCache = {
   player?: PlayerSurface;
   system?: SystemSurface;
   time?: TimeSurface;
+  voice?: VoiceSurface;
   webapp?: WebappSurface;
   forward?: ForwardSurface;
-  voice?: VoiceSurface;
   store?: StoreSurface;
 };
 
@@ -3394,6 +3473,14 @@ export function applyDispatch(): void {
       return (bucket.time ??= new TimeSurface(this));
     },
   });
+  Object.defineProperty(BridgethingClient.prototype, 'voice', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): VoiceSurface {
+      const bucket = bucketFor(this);
+      return (bucket.voice ??= new VoiceSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingClient.prototype, 'webapp', {
     configurable: true,
     enumerable: true,
@@ -3408,14 +3495,6 @@ export function applyDispatch(): void {
     get(this: BridgethingClient): ForwardSurface {
       const bucket = bucketFor(this);
       return (bucket.forward ??= new ForwardSurface(this));
-    },
-  });
-  Object.defineProperty(BridgethingClient.prototype, 'voice', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingClient): VoiceSurface {
-      const bucket = bucketFor(this);
-      return (bucket.voice ??= new VoiceSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'store', {
@@ -3914,6 +3993,28 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           default: {
             if (!partial) c.logger.warn('Time: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'voice': {
+        const innerHandlers = handlers.voice;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for voice');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'stateChanged': {
+            innerHandlers.stateChanged?.(inner.data);
+            return;
+          }
+          case 'stateReply': {
+            innerHandlers.stateReply?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Voice: no handler for inner', inner);
             return;
           }
         }

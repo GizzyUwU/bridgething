@@ -6,10 +6,12 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::{
+  als::AlsManager,
   asset::{AssetCache, AssetError},
   authority::AuthorityRegistry,
   capabilities::CapabilitiesRegistry,
   chrome,
+  mic::MicManager,
   net::{ClientMan, WireEventBus},
   paths,
   peer::PeerTracker,
@@ -45,6 +47,8 @@ pub struct AppState {
   pub peers: PeerTracker,
   pub telephony: TelephonyManager,
   pub time: TimeManager,
+  pub als: AlsManager,
+  pub mic: MicManager,
   pub devices: DeviceStore,
   pub kv: KvStore,
   pub ws_routes: RouteTable,
@@ -54,6 +58,8 @@ pub struct AppState {
   meta_store: MetaStore,
   _asset_cache_handle: JoinHandle<()>,
   _transfer_handle: JoinHandle<()>,
+  _als_handle: JoinHandle<()>,
+  _mic_handle: JoinHandle<()>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -73,6 +79,8 @@ impl AppState {
       peers,
       telephony,
       time,
+      als,
+      mic,
       devices,
       kv,
       ws_routes,
@@ -81,6 +89,8 @@ impl AppState {
       meta_store,
       asset_cache_handle,
       transfer_handle,
+      als_handle,
+      mic_handle,
     } = parts;
     Arc::new(Self {
       client_man,
@@ -96,6 +106,8 @@ impl AppState {
       peers,
       telephony,
       time,
+      als,
+      mic,
       devices,
       kv,
       ws_routes,
@@ -104,6 +116,8 @@ impl AppState {
       meta_store,
       _asset_cache_handle: asset_cache_handle,
       _transfer_handle: transfer_handle,
+      _als_handle: als_handle,
+      _mic_handle: mic_handle,
     })
   }
 
@@ -143,6 +157,8 @@ pub struct AssembledState {
   pub peers: PeerTracker,
   pub telephony: TelephonyManager,
   pub time: TimeManager,
+  pub als: AlsManager,
+  pub mic: MicManager,
   pub devices: DeviceStore,
   pub kv: KvStore,
   pub ws_routes: RouteTable,
@@ -151,6 +167,8 @@ pub struct AssembledState {
   pub meta_store: MetaStore,
   pub asset_cache_handle: JoinHandle<()>,
   pub transfer_handle: JoinHandle<()>,
+  pub als_handle: JoinHandle<()>,
+  pub mic_handle: JoinHandle<()>,
 }
 
 pub async fn open_state_db() -> StateResult<DatabaseConnection> {

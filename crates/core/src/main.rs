@@ -26,12 +26,14 @@ mod stock;
 
 mod monitoring;
 
+use als::{AlsConfig, AlsManager};
 use asset::AssetCache;
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothDeps, BluetoothManager};
 use capabilities::CapabilitiesRegistry;
 use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler, Iap2EventRouter};
+use mic::{MicConfig, MicManager};
 use ota::OtaOrchestrator;
 use peer::PeerTracker;
 use player::Player;
@@ -119,6 +121,14 @@ async fn main() {
   let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2_telephony_handle());
   let time = TimeManager::new(bus.clone());
 
+  let (als, als_handle) = AlsManager::init(bus.clone(), AlsConfig::default())
+    .await
+    .expect("failed to initialize ALS manager")
+    .spawn();
+  let (mic, mic_handle) = MicManager::init(bus.clone(), bluetooth.clone(), MicConfig::default())
+    .await
+    .spawn();
+
   let state = AppState::assemble(AssembledState {
     client_man: client_man.clone(),
     bus,
@@ -133,6 +143,8 @@ async fn main() {
     peers,
     telephony,
     time,
+    als,
+    mic,
     devices,
     kv,
     ws_routes,
@@ -141,6 +153,8 @@ async fn main() {
     meta_store,
     asset_cache_handle,
     transfer_handle,
+    als_handle,
+    mic_handle,
   });
 
   let transport = TransportController::new(

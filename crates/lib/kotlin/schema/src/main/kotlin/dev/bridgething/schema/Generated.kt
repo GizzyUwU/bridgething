@@ -263,6 +263,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("system")
 	data class System(val data: BridgeToGatewaySystemMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("voice")
+	data class Voice(val data: BridgeToGatewayVoiceMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: BridgeToGatewayWebappMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -685,6 +688,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("time")
 	data class Time(val data: GatewayToBridgeTimeMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("voice")
+	data class Voice(val data: GatewayToBridgeVoiceMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("webapp")
 	data class Webapp(val data: GatewayToBridgeWebappMsg): GatewayToBridgeMsgData()
@@ -2090,6 +2096,73 @@ data class TtsStarted (
 	val id: ByteArray
 )
 
+/// PCM frame format the daemon ships in `Frame` payloads. Voice capture
+/// runs at a fixed format per session; format is announced once on
+/// `StreamOpen` and held constant through `StreamClose`.
+@Serializable
+data class VoiceFormat (
+	val sampleRateHz: UInt,
+	val channels: UShort,
+	val bitsPerSample: UShort
+)
+
+/// One PCM frame in an active capture session. Sent on the Bulk lane so
+/// it interleaves between Normal-priority traffic. `seq` increments
+/// from 0; gaps mean the daemon dropped frames under backpressure and
+/// the companion should treat them as silence rather than retransmit.
+@Serializable
+data class VoiceFrame (
+	val streamId: ByteArray,
+	val seq: UInt,
+	val pcm: ByteArray
+)
+
+/// Why the gateway is opening the mic. The daemon currently treats every
+/// intent the same (open and stream); the field is kept so future policy
+/// (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
+/// shape it needs.
+@Serializable
+enum class VoiceIntent(val string: String) {
+	@SerialName("pushToTalk")
+	PushToTalk("pushToTalk"),
+	@SerialName("assistant")
+	Assistant("assistant"),
+	@SerialName("wakeWord")
+	WakeWord("wakeWord"),
+}
+
+@Serializable
+data class VoiceMicOpen (
+	val intent: VoiceIntent
+)
+
+@Serializable
+enum class VoiceCloseReason(val string: String) {
+	@SerialName("endOfSpeech")
+	EndOfSpeech("endOfSpeech"),
+	@SerialName("cancelled")
+	Cancelled("cancelled"),
+	@SerialName("muted")
+	Muted("muted"),
+	@SerialName("error")
+	Error("error"),
+}
+
+@Serializable
+data class VoiceStreamClose (
+	val streamId: ByteArray,
+	val reason: VoiceCloseReason
+)
+
+/// Daemon opens a capture session. The companion is expected to begin
+/// consuming `Frame`s with the same `stream_id` until a `StreamClose`
+/// for that id arrives.
+@Serializable
+data class VoiceStreamOpen (
+	val streamId: ByteArray,
+	val format: VoiceFormat
+)
+
 /// Volume / mute snapshot. Fired on any change to either; webapps treat
 /// `level` as the canonical value.
 @Serializable
@@ -2458,6 +2531,19 @@ sealed class BridgeToGatewaySystemMsg {
 	data class OtaBeginRejected(val data: dev.bridgething.schema.OtaBeginRejected): BridgeToGatewaySystemMsg()
 }
 
+@Serializable(with = BridgeToGatewayVoiceMsgSerializer::class)
+sealed class BridgeToGatewayVoiceMsg {
+	@Serializable
+	@SerialName("streamOpen")
+	data class StreamOpen(val data: VoiceStreamOpen): BridgeToGatewayVoiceMsg()
+	@Serializable
+	@SerialName("frame")
+	data class Frame(val data: VoiceFrame): BridgeToGatewayVoiceMsg()
+	@Serializable
+	@SerialName("streamClose")
+	data class StreamClose(val data: VoiceStreamClose): BridgeToGatewayVoiceMsg()
+}
+
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
 sealed class BridgeToGatewayWebappMsg {
 	/// response to List
@@ -2740,6 +2826,16 @@ sealed class GatewayToBridgeTimeMsg {
 	@Serializable
 	@SerialName("snapshot")
 	data class Snapshot(val data: TimeInfo): GatewayToBridgeTimeMsg()
+}
+
+@Serializable(with = GatewayToBridgeVoiceMsgSerializer::class)
+sealed class GatewayToBridgeVoiceMsg {
+	@Serializable
+	@SerialName("micOpen")
+	data class MicOpen(val data: VoiceMicOpen): GatewayToBridgeVoiceMsg()
+	@Serializable
+	@SerialName("micClose")
+	object MicClose: GatewayToBridgeVoiceMsg()
 }
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)

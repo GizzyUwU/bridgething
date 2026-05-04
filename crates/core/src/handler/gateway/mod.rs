@@ -14,6 +14,7 @@ mod phone;
 mod player;
 mod system;
 mod time;
+mod voice;
 mod webapp;
 
 use asset::*;
@@ -33,6 +34,7 @@ use phone::*;
 use player::*;
 use system::*;
 use time::*;
+use voice::*;
 use webapp::*;
 
 use super::HandlerResult;
@@ -147,6 +149,11 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Time(time_msg) => {
         tokio::spawn(async move { TimeHandler::new(handle).handle(time_msg).await });
+      }
+      GatewayToBridgeMsgData::Voice(voice_msg) => {
+        if let Some(cmd) = voice_msg.into_command() {
+          tokio::spawn(async move { VoiceHandler::new(handle).handle(cmd).await });
+        }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {
         if let Some(req) = webapp_msg.into_request() {

@@ -170,6 +170,7 @@ export type BridgeToClientMsgData =
   | { type: 'store'; data: BridgeToClientStoreMsg }
   | { type: 'system'; data: BridgeToClientSystemMsg }
   | { type: 'time'; data: BridgeToClientTimeMsg }
+  | { type: 'voice'; data: BridgeToClientVoiceMsg }
   | { type: 'webapp'; data: BridgeToClientWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
   | { type: 'error'; data: WireError }
@@ -233,6 +234,10 @@ export type BridgeToClientSystemMsg =
 export type BridgeToClientTimeMsg =
   | { event: 'changed'; data: TimeSnapshot }
   | { event: 'snapshot'; data: TimeSnapshot };
+
+export type BridgeToClientVoiceMsg =
+  | { event: 'stateChanged'; data: VoiceState }
+  | { event: 'stateReply'; data: VoiceStateReply };
 
 export type BridgeToClientWebappMsg =
   | { event: 'listReply'; data: WebappListReply }
@@ -392,7 +397,8 @@ export type ClientToBridgeVoiceMsg =
   | { event: 'cancel' }
   | { event: 'pushToTalk' }
   | { event: 'muteMic'; data: MicMute }
-  | { event: 'unmuteMic'; data: MicUnmute };
+  | { event: 'unmuteMic'; data: MicUnmute }
+  | { event: 'stateGet' };
 
 export type ClientToBridgeWebappMsg =
   | { event: 'list' }
@@ -665,6 +671,10 @@ export type TtsCancel = { id: string };
 export type TtsEnded = { id: string; completed: boolean };
 
 export type TtsStarted = { id: string };
+
+export type VoiceState = { muted: boolean; capturing: boolean };
+
+export type VoiceStateReply = { state: VoiceState };
 
 export type VolumeChanged = { level: number; muted: boolean };
 

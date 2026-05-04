@@ -365,12 +365,23 @@ impl GatewayMan {
   }
 
   pub async fn broadcast<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
+    self.broadcast_event_with_priority(event, Priority::Normal).await;
+  }
+
+  pub async fn broadcast_event_bulk<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
+    self.broadcast_event_with_priority(event, Priority::Bulk).await;
+  }
+
+  async fn broadcast_event_with_priority<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E, priority: Priority) {
     self
-      .send_all(OutboundGatewayMessage::all(BridgeToGatewayMsg {
-        id: uuid::Uuid::now_v7(),
-        meta: MsgMeta::Event,
-        data: event.into(),
-      }))
+      .send_all(
+        OutboundGatewayMessage::all(BridgeToGatewayMsg {
+          id: uuid::Uuid::now_v7(),
+          meta: MsgMeta::Event,
+          data: event.into(),
+        })
+        .with_priority(priority),
+      )
       .await;
   }
 
