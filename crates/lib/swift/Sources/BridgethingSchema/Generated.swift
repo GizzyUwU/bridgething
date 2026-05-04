@@ -678,16 +678,20 @@ public enum BrowseEntry: Codable, Sendable {
 	}
 }
 
-/// Page of browse results. `next_page_token` is the opaque cursor a
-/// webapp passes back as `browse({ page_token: ... })` to fetch the
-/// next page; `None` means this is the last page.
+/// Page of browse results. `total` is the count of items in the
+/// underlying collection when the gateway can cheaply expose it (None
+/// means indeterminate). `has_more` is the authoritative end-of-data
+/// signal — webapps paginate by raising `offset` until `has_more` is
+/// false rather than relying on `total`.
 public struct BrowseResult: Codable, Sendable {
 	public let entries: [BrowseEntry]
-	public let nextPageToken: String?
+	public let total: UInt32?
+	public let hasMore: Bool
 
-	public init(entries: [BrowseEntry], nextPageToken: String?) {
+	public init(entries: [BrowseEntry], total: UInt32?, hasMore: Bool) {
 		self.entries = entries
-		self.nextPageToken = nextPageToken
+		self.total = total
+		self.hasMore = hasMore
 	}
 }
 
@@ -965,6 +969,16 @@ public struct FavoriteChanged: Codable, Sendable {
 	}
 }
 
+/// Batch favorites-contains reply. `liked` is index-aligned with the
+/// request's `uris`.
+public struct FavoritesContainsReply: Codable, Sendable {
+	public let liked: [Bool]
+
+	public init(liked: [Bool]) {
+		self.liked = liked
+	}
+}
+
 /// One playable / browsable item from the library. Lean per-variant
 /// payload — gateways translate platform-specific extras down to these
 /// fields, rare per-platform fields just don't surface. Forward-compat:
@@ -1069,11 +1083,13 @@ public enum LibraryItem: Codable, Sendable {
 /// because most platforms expose one "Saved" surface across kinds.
 public struct FavoritesPage: Codable, Sendable {
 	public let items: [LibraryItem]
-	public let nextPageToken: String?
+	public let total: UInt32?
+	public let hasMore: Bool
 
-	public init(items: [LibraryItem], nextPageToken: String?) {
+	public init(items: [LibraryItem], total: UInt32?, hasMore: Bool) {
 		self.items = items
-		self.nextPageToken = nextPageToken
+		self.total = total
+		self.hasMore = hasMore
 	}
 }
 
@@ -1121,6 +1137,19 @@ public struct FavoritesSet: Codable, Sendable {
 	public init(item: ItemRef, liked: Bool) {
 		self.item = item
 		self.liked = liked
+	}
+}
+
+/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
+/// applications; gateway returns once it has issued each underlying
+/// platform call. Per-entry errors are not surfaced — companion logs
+/// and best-efforts the rest. Webapps observing partial success listen
+/// for `FavoriteChanged` events.
+public struct FavoritesSetMany: Codable, Sendable {
+	public let entries: [FavoritesSet]
+
+	public init(entries: [FavoritesSet]) {
+		self.entries = entries
 	}
 }
 
@@ -1463,11 +1492,13 @@ public struct HttpHeader: Codable, Sendable {
 public struct LibraryBrowseRequest: Codable, Sendable {
 	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	public let nodeId: String?
-	public let pageToken: String?
+	public let limit: UInt32
+	public let offset: UInt32
 
-	public init(nodeId: String?, pageToken: String?) {
+	public init(nodeId: String?, limit: UInt32, offset: UInt32) {
 		self.nodeId = nodeId
-		self.pageToken = pageToken
+		self.limit = limit
+		self.offset = offset
 	}
 }
 
@@ -1561,37 +1592,56 @@ public struct LibraryErrorReply: Codable, Sendable {
 	}
 }
 
-public struct LibraryFavoritesListRequest: Codable, Sendable {
-	public let pageToken: String?
+/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
+/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
+/// the request `uris`.
+public struct LibraryFavoritesContainsRequest: Codable, Sendable {
+	public let uris: [String]
 
-	public init(pageToken: String?) {
-		self.pageToken = pageToken
+	public init(uris: [String]) {
+		self.uris = uris
 	}
 }
 
-public struct LibraryRecommendationsRequest: Codable, Sendable {
-	public let seed: ItemRef?
-	public let kind: ItemKind?
-	public let limit: UInt32?
-	public let pageToken: String?
+public struct LibraryFavoritesListRequest: Codable, Sendable {
+	public let limit: UInt32
+	public let offset: UInt32
 
-	public init(seed: ItemRef?, kind: ItemKind?, limit: UInt32?, pageToken: String?) {
-		self.seed = seed
+	public init(limit: UInt32, offset: UInt32) {
+		self.limit = limit
+		self.offset = offset
+	}
+}
+
+/// Recommendations seeded by up to 5 items. The daemon caps the seed
+/// list at the platform-permissive limit (Spotify hard-caps at 5
+/// combined seeds across tracks/artists/genres). Gateway decides how to
+/// distribute seeds across its native API surfaces.
+public struct LibraryRecommendationsRequest: Codable, Sendable {
+	public let seeds: [ItemRef]
+	public let kind: ItemKind?
+	public let limit: UInt32
+	public let offset: UInt32
+
+	public init(seeds: [ItemRef], kind: ItemKind?, limit: UInt32, offset: UInt32) {
+		self.seeds = seeds
 		self.kind = kind
 		self.limit = limit
-		self.pageToken = pageToken
+		self.offset = offset
 	}
 }
 
 public struct LibrarySearchRequest: Codable, Sendable {
 	public let query: String
 	public let kinds: [ItemKind]?
-	public let pageToken: String?
+	public let limit: UInt32
+	public let offset: UInt32
 
-	public init(query: String, kinds: [ItemKind]?, pageToken: String?) {
+	public init(query: String, kinds: [ItemKind]?, limit: UInt32, offset: UInt32) {
 		self.query = query
 		self.kinds = kinds
-		self.pageToken = pageToken
+		self.limit = limit
+		self.offset = offset
 	}
 }
 
@@ -3147,11 +3197,13 @@ public struct QueueUri: Codable, Sendable {
 /// rails) — the daemon doesn't prescribe.
 public struct RecommendationsResult: Codable, Sendable {
 	public let items: [LibraryItem]
-	public let nextPageToken: String?
+	public let total: UInt32?
+	public let hasMore: Bool
 
-	public init(items: [LibraryItem], nextPageToken: String?) {
+	public init(items: [LibraryItem], total: UInt32?, hasMore: Bool) {
 		self.items = items
-		self.nextPageToken = nextPageToken
+		self.total = total
+		self.hasMore = hasMore
 	}
 }
 
@@ -3179,12 +3231,14 @@ public struct ResponseMeta: Codable, Sendable {
 public struct SearchResult: Codable, Sendable {
 	public let items: [LibraryItem]
 	public let kinds: [ItemKind]
-	public let nextPageToken: String?
+	public let total: UInt32?
+	public let hasMore: Bool
 
-	public init(items: [LibraryItem], kinds: [ItemKind], nextPageToken: String?) {
+	public init(items: [LibraryItem], kinds: [ItemKind], total: UInt32?, hasMore: Bool) {
 		self.items = items
 		self.kinds = kinds
-		self.nextPageToken = nextPageToken
+		self.total = total
+		self.hasMore = hasMore
 	}
 }
 
@@ -4046,16 +4100,20 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 	case search(LibrarySearchRequest)
 	case recommendations(LibraryRecommendationsRequest)
 	case favoritesList(LibraryFavoritesListRequest)
+	case favoritesContains(LibraryFavoritesContainsRequest)
 	case favoritesToggle(FavoritesToggle)
 	case favoritesSet(FavoritesSet)
+	case favoritesSetMany(FavoritesSetMany)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browse,
 			search,
 			recommendations,
 			favoritesList,
+			favoritesContains,
 			favoritesToggle,
-			favoritesSet
+			favoritesSet,
+			favoritesSetMany
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4086,6 +4144,11 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 					self = .favoritesList(content)
 					return
 				}
+			case .favoritesContains:
+				if let content = try? container.decode(LibraryFavoritesContainsRequest.self, forKey: .data) {
+					self = .favoritesContains(content)
+					return
+				}
 			case .favoritesToggle:
 				if let content = try? container.decode(FavoritesToggle.self, forKey: .data) {
 					self = .favoritesToggle(content)
@@ -4094,6 +4157,11 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 			case .favoritesSet:
 				if let content = try? container.decode(FavoritesSet.self, forKey: .data) {
 					self = .favoritesSet(content)
+					return
+				}
+			case .favoritesSetMany:
+				if let content = try? container.decode(FavoritesSetMany.self, forKey: .data) {
+					self = .favoritesSetMany(content)
 					return
 				}
 			}
@@ -4116,11 +4184,17 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 		case .favoritesList(let content):
 			try container.encode(CodingKeys.favoritesList, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .favoritesContains(let content):
+			try container.encode(CodingKeys.favoritesContains, forKey: .event)
+			try container.encode(content, forKey: .data)
 		case .favoritesToggle(let content):
 			try container.encode(CodingKeys.favoritesToggle, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .favoritesSet(let content):
 			try container.encode(CodingKeys.favoritesSet, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .favoritesSetMany(let content):
+			try container.encode(CodingKeys.favoritesSetMany, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5191,6 +5265,7 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 	case searchReply(SearchReply)
 	case recommendationsReply(RecommendationsReply)
 	case favoritesListReply(FavoritesListReply)
+	case favoritesContainsReply(FavoritesContainsReply)
 	case libraryErrorReply(LibraryErrorReply)
 	case favoriteChanged(FavoriteChanged)
 
@@ -5199,6 +5274,7 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			searchReply,
 			recommendationsReply,
 			favoritesListReply,
+			favoritesContainsReply,
 			libraryErrorReply,
 			favoriteChanged
 	}
@@ -5231,6 +5307,11 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 					self = .favoritesListReply(content)
 					return
 				}
+			case .favoritesContainsReply:
+				if let content = try? container.decode(FavoritesContainsReply.self, forKey: .data) {
+					self = .favoritesContainsReply(content)
+					return
+				}
 			case .libraryErrorReply:
 				if let content = try? container.decode(LibraryErrorReply.self, forKey: .data) {
 					self = .libraryErrorReply(content)
@@ -5260,6 +5341,9 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .favoritesListReply(let content):
 			try container.encode(CodingKeys.favoritesListReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .favoritesContainsReply(let content):
+			try container.encode(CodingKeys.favoritesContainsReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .libraryErrorReply(let content):
 			try container.encode(CodingKeys.libraryErrorReply, forKey: .event)

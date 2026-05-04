@@ -53,7 +53,9 @@ impl AudioHandler {
       ClientToBridgeAudioMsgCommand::TtsCancelAll => self.forward(BridgeToGatewayAudioMsgCommand::TtsCancelAll).await,
       ClientToBridgeAudioMsgCommand::Earcon(req) => {
         self
-          .forward(BridgeToGatewayAudioMsgCommand::Earcon(gateway::Earcon { name: req.name }))
+          .forward(BridgeToGatewayAudioMsgCommand::Earcon(gateway::Earcon {
+            name: req.name,
+          }))
           .await
       }
     }

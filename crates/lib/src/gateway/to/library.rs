@@ -23,7 +23,8 @@ use crate::{ItemKind, ItemRef};
 pub struct LibraryBrowseRequest {
   /// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
   pub node_id: Option<String>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
 #[typeshare]
@@ -43,9 +44,14 @@ pub struct LibraryBrowseRequest {
 pub struct LibrarySearchRequest {
   pub query: String,
   pub kinds: Option<Vec<ItemKind>>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
+/// Recommendations seeded by up to 5 items. The daemon caps the seed
+/// list at the platform-permissive limit (Spotify hard-caps at 5
+/// combined seeds across tracks/artists/genres). Gateway decides how to
+/// distribute seeds across its native API surfaces.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -61,10 +67,10 @@ pub struct LibrarySearchRequest {
   error_variant = LibraryErrorReply,
 )]
 pub struct LibraryRecommendationsRequest {
-  pub seed: Option<ItemRef>,
+  pub seeds: Vec<ItemRef>,
   pub kind: Option<ItemKind>,
-  pub limit: Option<u32>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
 #[typeshare]
@@ -82,7 +88,29 @@ pub struct LibraryRecommendationsRequest {
   error_variant = LibraryErrorReply,
 )]
 pub struct LibraryFavoritesListRequest {
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
+}
+
+/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
+/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
+/// the request `uris`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = BridgeToGateway,
+  surface = Library,
+  request_variant = FavoritesContains,
+  response = crate::gateway::FavoritesContainsReply,
+  response_variant = FavoritesContainsReply,
+  error = crate::gateway::LibraryErrorReply,
+  error_variant = LibraryErrorReply,
+)]
+pub struct LibraryFavoritesContainsRequest {
+  pub uris: Vec<String>,
 }
 
 #[typeshare]
@@ -104,6 +132,20 @@ pub struct FavoritesSet {
   pub liked: bool,
 }
 
+/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
+/// applications; gateway returns once it has issued each underlying
+/// platform call. Per-entry errors are not surfaced — companion logs
+/// and best-efforts the rest. Webapps observing partial success listen
+/// for `FavoriteChanged` events.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct FavoritesSetMany {
+  pub entries: Vec<FavoritesSet>,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -119,8 +161,12 @@ pub enum BridgeToGatewayLibraryMsg {
   Recommendations(LibraryRecommendationsRequest),
   #[bridge_request]
   FavoritesList(LibraryFavoritesListRequest),
+  #[bridge_request]
+  FavoritesContains(LibraryFavoritesContainsRequest),
   #[bridge_command]
   FavoritesToggle(FavoritesToggle),
   #[bridge_command]
   FavoritesSet(FavoritesSet),
+  #[bridge_command]
+  FavoritesSetMany(FavoritesSetMany),
 }

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  Album, Artist, CurrentlyActiveApplication, ItemKind, ItemRef, MediaItem, PlaybackOptions, PlaybackRestrictions,
-  PlaybackState, PlayerOptions as WirePlayerOptions, PlayerState as WirePlayerState, QueueItem, QueuePosition,
-  RepeatMode, Track,
+  Album, Artist, BrowseEntry, BrowseResult, CurrentlyActiveApplication, ItemKind, ItemRef, LibraryItem, MediaItem,
+  PlaybackOptions, PlaybackRestrictions, PlaybackState, PlayerOptions as WirePlayerOptions,
+  PlayerState as WirePlayerState, QueueItem, QueuePosition, RepeatMode, Track,
   client::{
     BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg,
     ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, Earcon as ClientEarcon, FavoritesSet as ClientFavoritesSet,
@@ -11,7 +11,7 @@ use libbridgething::{
     SeekTo as ClientSeekTo, SetRepeat as ClientSetRepeat, SetShuffle as ClientSetShuffle, SetSpeed as ClientSetSpeed,
     SkipToIndex as ClientSkipToIndex,
   },
-  stock::StockSetPreset,
+  stock::{StockPreset, StockSetPreset},
 };
 use serde::{Deserialize, Serialize};
 
@@ -260,6 +260,20 @@ pub enum StockInterAppSendPayload {
     #[debug(skip)]
     image_data: String,
   },
+  #[serde(rename = "call_result")]
+  Presets { result: Vec<StockPreset>, success: bool },
+  #[serde(rename = "call_result")]
+  Tips { result: Vec<StockTip> },
+  #[serde(rename = "call_result")]
+  Saved { saved: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StockTip {
+  pub id: u32,
+  pub title: String,
+  pub description: String,
+  pub action: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -294,7 +308,7 @@ pub struct ChildItem {
   pub metadata: ChildMeta,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ChildMeta {
   pub is_explicit_content: bool,
   pub is_19_plus_content: bool,
@@ -315,7 +329,7 @@ impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
   }
 }
 
-fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayload {
+pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayload {
   let WirePlayerState {
     track,
     playback,
@@ -343,7 +357,135 @@ fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayload {
   }
 }
 
-fn player_queue_to_stock(reply: PlayerQueueReply) -> StockInterAppSendPayload {
+pub fn library_browse_to_stock(result: BrowseResult, limit: u32, offset: u32) -> StockInterAppSendPayload {
+  let entries_len = result.entries.len() as u32;
+  let total = match result.total {
+    Some(t) => t as usize,
+    None => {
+      let consumed = offset.saturating_add(entries_len);
+      let synth = if result.has_more {
+        consumed.saturating_add(1)
+      } else {
+        consumed
+      };
+      synth as usize
+    }
+  };
+  let items = result.entries.into_iter().map(browse_entry_to_child).collect();
+  StockInterAppSendPayload::ItemChildren {
+    limit: limit as usize,
+    offset: offset as usize,
+    total,
+    items,
+  }
+}
+
+fn browse_entry_to_child(entry: BrowseEntry) -> ChildItem {
+  match entry {
+    BrowseEntry::Folder(folder) => ChildItem {
+      id: folder.node_id.clone(),
+      uri: folder.node_id,
+      image_id: folder.artwork_id.unwrap_or_default(),
+      title: folder.title,
+      subtitle: folder.subtitle.unwrap_or_default(),
+      playable: false,
+      has_children: true,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+    BrowseEntry::Item(item) => library_item_to_child(item),
+  }
+}
+
+fn library_item_to_child(item: LibraryItem) -> ChildItem {
+  match item {
+    LibraryItem::Track(t) => ChildItem {
+      id: t.id.clone(),
+      uri: t.id,
+      image_id: t.image_id,
+      title: t.name,
+      subtitle: t.artist.name,
+      playable: true,
+      has_children: false,
+      available_offline: false,
+      metadata: ChildMeta {
+        duration_ms: t.duration_ms as usize,
+        ..ChildMeta::default()
+      },
+    },
+    LibraryItem::Album(a) => ChildItem {
+      id: a.id.clone(),
+      uri: a.id,
+      image_id: String::new(),
+      title: a.name,
+      subtitle: String::new(),
+      playable: true,
+      has_children: true,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+    LibraryItem::Playlist(p) => ChildItem {
+      id: p.uri.clone(),
+      uri: p.uri,
+      image_id: p.artwork_id.unwrap_or_default(),
+      title: p.name,
+      subtitle: p.owner_name.unwrap_or_default(),
+      playable: true,
+      has_children: true,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+    LibraryItem::PodcastEpisode(e) => ChildItem {
+      id: e.uri.clone(),
+      uri: e.uri,
+      image_id: e.artwork_id.unwrap_or_default(),
+      title: e.name,
+      subtitle: e.show_name.unwrap_or_default(),
+      playable: true,
+      has_children: false,
+      available_offline: false,
+      metadata: ChildMeta {
+        duration_ms: e.duration_ms.unwrap_or(0) as usize,
+        ..ChildMeta::default()
+      },
+    },
+    LibraryItem::Show(s) => ChildItem {
+      id: s.uri.clone(),
+      uri: s.uri,
+      image_id: s.artwork_id.unwrap_or_default(),
+      title: s.name,
+      subtitle: s.publisher.unwrap_or_default(),
+      playable: false,
+      has_children: true,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+    LibraryItem::Artist(a) => ChildItem {
+      id: a.id.clone(),
+      uri: a.id,
+      image_id: String::new(),
+      title: a.name,
+      subtitle: String::new(),
+      playable: false,
+      has_children: true,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+    LibraryItem::Station(s) => ChildItem {
+      id: s.uri.clone(),
+      uri: s.uri,
+      image_id: s.artwork_id.unwrap_or_default(),
+      title: s.name,
+      subtitle: String::new(),
+      playable: true,
+      has_children: false,
+      available_offline: false,
+      metadata: ChildMeta::default(),
+    },
+  }
+}
+
+pub fn player_queue_to_stock(reply: PlayerQueueReply) -> StockInterAppSendPayload {
   StockInterAppSendPayload::PlayerQueue {
     next: reply.items.into_iter().map(queue_item_to_stock).collect(),
     current: StockQueueTrack::default(),
@@ -629,8 +771,7 @@ impl RecvMsgData {
       StockInterAppRecv::PhoneCallImage { .. } | StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
 
       // Instrumentation, logs, crash reports, search/recommendations
-      // shapes the daemon ignores (or returns a canned response from
-      // the legacy-stock dispatcher elsewhere).
+      // shapes the daemon ignores.
       StockInterAppRecv::CrashReport(_)
       | StockInterAppRecv::LogMessage(_)
       | StockInterAppRecv::PitstopLog(_)
@@ -639,16 +780,17 @@ impl RecvMsgData {
       | StockInterAppRecv::SendUbiImpression(_)
       | StockInterAppRecv::SendUbiBatch(_) => RecvMsgData::Hole,
 
-      // One-shot reads of player/state surfaced via the stock wire
-      // protocol. The §4 stock-translation rewire wires these to
-      // synthesised stock responses derived from the cached PlayerState
-      // / Capabilities; until then the daemon swallows them.
-      StockInterAppRecv::GetCapabilities {}
+      StockInterAppRecv::GetCurrentTrack {}
       | StockInterAppRecv::GetCurrentContext {}
-      | StockInterAppRecv::GetCurrentTrack {}
-      | StockInterAppRecv::GetSessionState {}
       | StockInterAppRecv::GetPlayerState {}
-      | StockInterAppRecv::GetTrackElapsed {}
+      | StockInterAppRecv::GetTrackElapsed {} => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetPlayerState)
+      }
+      StockInterAppRecv::GetSessionState {} => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetSessionState)
+      }
+
+      StockInterAppRecv::GetCapabilities {}
       | StockInterAppRecv::GetShuffle {}
       | StockInterAppRecv::GetRepeat {}
       | StockInterAppRecv::GetPlaybackSpeed {}

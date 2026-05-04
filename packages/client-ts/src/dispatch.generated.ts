@@ -7,6 +7,7 @@ import {
   type AssetGet,
   type AssetGot,
   type AssetNotFound,
+  type AssetPreload,
   type AssetReady,
   type BluetoothInterface,
   type BluetoothPairingResult,
@@ -31,6 +32,7 @@ import {
   type EnablePan,
   type FavoriteChanged,
   type FavoritesSet,
+  type FavoritesSetMany,
   type FavoritesToggle,
   type ForgetBluetooth,
   type GeoErrorReply,
@@ -46,6 +48,8 @@ import {
   type LibraryBrowse,
   type LibraryBrowseReply,
   type LibraryErrorReply,
+  type LibraryFavoritesContains,
+  type LibraryFavoritesContainsReply,
   type LibraryFavoritesList,
   type LibraryFavoritesListReply,
   type LibraryRecommendations,
@@ -196,6 +200,7 @@ export type LibraryInboundHandlers = {
   searchReply: (msg: LibrarySearchReply) => void;
   recommendationsReply: (msg: LibraryRecommendationsReply) => void;
   favoritesListReply: (msg: LibraryFavoritesListReply) => void;
+  favoritesContainsReply: (msg: LibraryFavoritesContainsReply) => void;
   libraryErrorReply: (msg: LibraryErrorReply) => void;
   favoriteChanged: (msg: FavoriteChanged) => void;
 };
@@ -368,6 +373,16 @@ export class AssetSurface {
         }
       }
     });
+  }
+
+  /** Send `Asset::Preload` to the daemon. */
+  async preload(payload: AssetPreload): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'asset', data: { event: 'preload', data: payload } },
+    };
+    await this._client.send(msg);
   }
 
   /** Typed request to the daemon: webapp sends, daemon responds. */
@@ -1255,6 +1270,18 @@ export class LibrarySurface {
     });
   }
 
+  /** Subscribe to `Library::FavoritesContainsReply` from the daemon. */
+  onFavoritesContainsReply(handler: (msg: LibraryFavoritesContainsReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesContainsReply') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Library::LibraryErrorReply` from the daemon. */
   onLibraryErrorReply(handler: (msg: LibraryErrorReply) => void): () => void {
     return this._client.on(event => {
@@ -1312,6 +1339,10 @@ export class LibrarySurface {
           handlers.favoritesListReply?.(inner.data);
           return;
         }
+        case 'favoritesContainsReply': {
+          handlers.favoritesContainsReply?.(inner.data);
+          return;
+        }
         case 'libraryErrorReply': {
           handlers.libraryErrorReply?.(inner.data);
           return;
@@ -1344,6 +1375,16 @@ export class LibrarySurface {
       id: newUuidBytes(),
       meta: { kind: 'command' },
       data: { type: 'library', data: { event: 'favoritesSet', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Library::FavoritesSetMany` to the daemon. */
+  async favoritesSetMany(payload: FavoritesSetMany): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'command' },
+      data: { type: 'library', data: { event: 'favoritesSetMany', data: payload } },
     };
     await this._client.send(msg);
   }
@@ -1410,6 +1451,23 @@ export class LibrarySurface {
     if (d.type === 'library') {
       const inner = d.data;
       if (inner.event === 'favoritesListReply') return { ok: true, response: inner.data };
+      if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async favoritesContains(
+    req: LibraryFavoritesContains,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LibraryFavoritesContainsReply, LibraryErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'library', data: { event: 'favoritesContains', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'library') {
+      const inner = d.data;
+      if (inner.event === 'favoritesContainsReply') return { ok: true, response: inner.data };
       if (inner.event === 'libraryErrorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -3739,6 +3797,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'favoritesListReply': {
             innerHandlers.favoritesListReply?.(inner.data);
+            return;
+          }
+          case 'favoritesContainsReply': {
+            innerHandlers.favoritesContainsReply?.(inner.data);
             return;
           }
           case 'libraryErrorReply': {

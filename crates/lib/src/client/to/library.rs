@@ -40,6 +40,14 @@ pub struct LibraryFavoritesListReply {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+pub struct LibraryFavoritesContainsReply {
+  pub liked: Vec<bool>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
 pub struct LibraryErrorReply {
   pub error: LibraryError,
 }
@@ -66,6 +74,8 @@ pub enum BridgeToClientLibraryMsg {
   RecommendationsReply(LibraryRecommendationsReply),
   #[bridge_response]
   FavoritesListReply(LibraryFavoritesListReply),
+  #[bridge_response]
+  FavoritesContainsReply(LibraryFavoritesContainsReply),
   #[bridge_response]
   LibraryErrorReply(LibraryErrorReply),
   #[bridge_event]

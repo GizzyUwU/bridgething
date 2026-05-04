@@ -19,7 +19,8 @@ use crate::{ItemKind, ItemRef};
 )]
 pub struct LibraryBrowse {
   pub node_id: Option<String>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
 #[serde_with::skip_serializing_none]
@@ -38,9 +39,13 @@ pub struct LibraryBrowse {
 pub struct LibrarySearch {
   pub query: String,
   pub kinds: Option<Vec<ItemKind>>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
+/// Recommendations seeded by up to 5 items. The daemon caps the seed
+/// list at the platform-permissive limit (Spotify hard-caps at 5
+/// combined seeds across tracks/artists/genres).
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -55,10 +60,10 @@ pub struct LibrarySearch {
   error_variant = LibraryErrorReply,
 )]
 pub struct LibraryRecommendations {
-  pub seed: Option<ItemRef>,
+  pub seeds: Vec<ItemRef>,
   pub kind: Option<ItemKind>,
-  pub limit: Option<u32>,
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
 }
 
 #[serde_with::skip_serializing_none]
@@ -75,7 +80,28 @@ pub struct LibraryRecommendations {
   error_variant = LibraryErrorReply,
 )]
 pub struct LibraryFavoritesList {
-  pub page_token: Option<String>,
+  pub limit: u32,
+  pub offset: u32,
+}
+
+/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
+/// `GET /me/tracks/contains` — reply `liked` is index-aligned with the
+/// request `uris`. Daemon caps `uris` at 50 per call.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Library,
+  request_variant = FavoritesContains,
+  response = crate::client::LibraryFavoritesContainsReply,
+  response_variant = FavoritesContainsReply,
+  error = crate::client::LibraryErrorReply,
+  error_variant = LibraryErrorReply,
+)]
+pub struct LibraryFavoritesContains {
+  pub uris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -93,6 +119,15 @@ pub struct FavoritesSet {
   pub liked: bool,
 }
 
+/// Bulk favorites mutation. Webapps observing partial success listen
+/// for `FavoriteChanged` events.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct FavoritesSetMany {
+  pub entries: Vec<FavoritesSet>,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -107,8 +142,12 @@ pub enum ClientToBridgeLibraryMsg {
   Recommendations(LibraryRecommendations),
   #[bridge_request]
   FavoritesList(LibraryFavoritesList),
+  #[bridge_request]
+  FavoritesContains(LibraryFavoritesContains),
   #[bridge_command]
   FavoritesToggle(FavoritesToggle),
   #[bridge_command]
   FavoritesSet(FavoritesSet),
+  #[bridge_command]
+  FavoritesSetMany(FavoritesSetMany),
 }

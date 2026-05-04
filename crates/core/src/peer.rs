@@ -252,7 +252,7 @@ impl PeerTracker {
         {
           errors.extend(errs);
         }
-        if let Err(errs) = broadcast_stock_connection(&self.inner.bus, device).await {
+        if let Err(errs) = broadcast_stock_connection(&self.inner.bus, device, &self.inner.capabilities).await {
           errors.extend(errs);
         }
         if let Err(err) = self.inner.player.send_state().await {
@@ -340,7 +340,7 @@ impl PeerTracker {
     let Some(device) = device else {
       return Ok(());
     };
-    broadcast_stock_connection(&self.inner.bus, &device).await?;
+    broadcast_stock_connection(&self.inner.bus, &device, &self.inner.capabilities).await?;
     if let Err(err) = self.inner.player.send_state().await {
       tracing::warn!(?err, "failed to send player state during stock resync");
     }

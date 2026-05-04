@@ -321,6 +321,23 @@ public struct LibrarySurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Library::FavoritesSetMany` messages.
+  public var favoritesSetMany: AsyncStream<(deviceId: String, msg: FavoritesSetMany)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .library(let outer) = message.data,
+             case .favoritesSetMany(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
   public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
     AsyncStream { continuation in
@@ -385,6 +402,24 @@ public struct LibrarySurface: Sendable {
           guard case .library(let outer) = message.data else { continue }
           guard case .favoritesList(let payload) = outer else { continue }
           let handle = LibraryFavoritesListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryFavoritesContainsRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .favoritesContains(let payload) = outer else { continue }
+          let handle = LibraryFavoritesContainsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
           continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
@@ -2179,6 +2214,24 @@ public struct LibrarySurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Library::FavoritesSetMany` from this peer.
+  public var favoritesSetMany: AsyncStream<FavoritesSetMany> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .library(let outer) = message.data,
+             case .favoritesSetMany(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
   public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
     AsyncStream { continuation in
@@ -2247,6 +2300,25 @@ public struct LibrarySurfaceForDevice: Sendable {
           guard case .library(let outer) = message.data else { continue }
           guard case .favoritesList(let payload) = outer else { continue }
           let handle = LibraryFavoritesListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryFavoritesContainsRequest` requests with handles for typed responses.
+  public var requests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .favoritesContains(let payload) = outer else { continue }
+          let handle = LibraryFavoritesContainsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
           continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
@@ -3789,6 +3861,45 @@ public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.favoritesListReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: GatewayError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: FavoritesContainsReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.favoritesContainsReply(response))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }

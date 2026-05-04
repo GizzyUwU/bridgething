@@ -228,6 +228,15 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Library::FavoritesSetMany` messages. */
+  public val favoritesSetMany: Flow<Pair<String, FavoritesSetMany>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesSetMany ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `Library::FavoriteChanged` to every connected peer (broadcast). */
   public suspend fun favoriteChanged(payload: FavoriteChanged, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -286,6 +295,17 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesList ?: return@mapNotNull null
       val handle = LibraryFavoritesListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
+  public val requests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesContains ?: return@mapNotNull null
+      val handle = LibraryFavoritesContainsRequestHandle(gateway, it.deviceId, it.message.id)
       handle to inner.data
     }
 
@@ -1681,6 +1701,16 @@ public class LibrarySurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Library::FavoritesSetMany` from this peer. */
+  public val favoritesSetMany: Flow<FavoritesSetMany> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesSetMany ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `Library::FavoriteChanged` to this peer. */
   public suspend fun favoriteChanged(payload: FavoriteChanged, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -1736,6 +1766,18 @@ public class LibrarySurfaceForDevice(
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesList ?: return@mapNotNull null
       val handle = LibraryFavoritesListRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
+  public val requests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesContains ?: return@mapNotNull null
+      val handle = LibraryFavoritesContainsRequestHandle(gateway, it.deviceId, it.message.id)
       handle to inner.data
     }
 
@@ -3038,6 +3080,39 @@ public class LibraryFavoritesListRequestHandle internal constructor(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesListReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: GatewayError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibraryFavoritesContainsRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: FavoritesContainsReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesContainsReply(response)),
     )
     gateway.send(deviceId, msg)
   }

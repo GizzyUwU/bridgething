@@ -73,6 +73,14 @@ export type AssetGot = { requestId: string; id: string; bytes: Uint8Array; mime:
 
 export type AssetNotFound = { requestId: string; id: string };
 
+/**
+ * Webapp hint to warm the daemon's asset cache. The daemon issues an
+ * `AssetRequest` to the connected companion for each id that isn't
+ * already cached, in parallel; subsequent `Get` calls hit cache.
+ * Fire-and-forget — webapps observe completion via `Asset.Ready` events.
+ */
+export type AssetPreload = { ids: Array<string> };
+
 export type AssetReady = { id: string };
 
 export type BluetoothInterface = { mac: string; name: string; interface: string };
@@ -142,6 +150,7 @@ export type BridgeToClientLibraryMsg =
   | { event: 'searchReply'; data: LibrarySearchReply }
   | { event: 'recommendationsReply'; data: LibraryRecommendationsReply }
   | { event: 'favoritesListReply'; data: LibraryFavoritesListReply }
+  | { event: 'favoritesContainsReply'; data: LibraryFavoritesContainsReply }
   | { event: 'libraryErrorReply'; data: LibraryErrorReply }
   | { event: 'favoriteChanged'; data: FavoriteChanged };
 
@@ -257,7 +266,7 @@ export type CapabilitiesSnapshot = { capabilities: Capabilities };
 /**
  * Webapp-side asset operations.
  */
-export type ClientToBridgeAssetMsg = { event: 'get'; data: AssetGet };
+export type ClientToBridgeAssetMsg = { event: 'get'; data: AssetGet } | { event: 'preload'; data: AssetPreload };
 
 export type ClientToBridgeAudioMsg =
   | { event: 'volumeUp' }
@@ -301,8 +310,10 @@ export type ClientToBridgeLibraryMsg =
   | { event: 'search'; data: LibrarySearch }
   | { event: 'recommendations'; data: LibraryRecommendations }
   | { event: 'favoritesList'; data: LibraryFavoritesList }
+  | { event: 'favoritesContains'; data: LibraryFavoritesContains }
   | { event: 'favoritesToggle'; data: FavoritesToggle }
-  | { event: 'favoritesSet'; data: FavoritesSet };
+  | { event: 'favoritesSet'; data: FavoritesSet }
+  | { event: 'favoritesSetMany'; data: FavoritesSetMany };
 
 /**
  * client -> bridgething
@@ -445,6 +456,12 @@ export type FavoriteChanged = { uri: string; liked: boolean };
 
 export type FavoritesSet = { item: ItemRef; liked: boolean };
 
+/**
+ * Bulk favorites mutation. Webapps observing partial success listen
+ * for `FavoriteChanged` events.
+ */
+export type FavoritesSetMany = { entries: Array<FavoritesSet> };
+
 export type FavoritesToggle = { item: ItemRef };
 
 export type ForgetBluetooth = { mac: string };
@@ -489,26 +506,35 @@ export type KVGet = { key: string };
  */
 export type KVPut = { key: string; value: string };
 
-export type LibraryBrowse = { nodeId: string | null; pageToken: string | null };
+export type LibraryBrowse = { nodeId: string | null; limit: number; offset: number };
 
 export type LibraryBrowseReply = { result: BrowseResult };
 
 export type LibraryErrorReply = { error: LibraryError };
 
-export type LibraryFavoritesList = { pageToken: string | null };
+/**
+ * Batch "is each of these favorited?" lookup. Mirrors Spotify's
+ * `GET /me/tracks/contains` — reply `liked` is index-aligned with the
+ * request `uris`. Daemon caps `uris` at 50 per call.
+ */
+export type LibraryFavoritesContains = { uris: Array<string> };
+
+export type LibraryFavoritesContainsReply = { liked: Array<boolean> };
+
+export type LibraryFavoritesList = { limit: number; offset: number };
 
 export type LibraryFavoritesListReply = { page: FavoritesPage };
 
-export type LibraryRecommendations = {
-  seed: ItemRef | null;
-  kind: ItemKind | null;
-  limit: number | null;
-  pageToken: string | null;
-};
+/**
+ * Recommendations seeded by up to 5 items. The daemon caps the seed
+ * list at the platform-permissive limit (Spotify hard-caps at 5
+ * combined seeds across tracks/artists/genres).
+ */
+export type LibraryRecommendations = { seeds: Array<ItemRef>; kind: ItemKind | null; limit: number; offset: number };
 
 export type LibraryRecommendationsReply = { result: RecommendationsResult };
 
-export type LibrarySearch = { query: string; kinds: Array<ItemKind> | null; pageToken: string | null };
+export type LibrarySearch = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
 
 export type LibrarySearchReply = { result: SearchResult };
 

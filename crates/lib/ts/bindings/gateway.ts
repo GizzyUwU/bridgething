@@ -153,8 +153,10 @@ export type BridgeToGatewayLibraryMsg =
   | { event: 'search'; data: LibrarySearchRequest }
   | { event: 'recommendations'; data: LibraryRecommendationsRequest }
   | { event: 'favoritesList'; data: LibraryFavoritesListRequest }
+  | { event: 'favoritesContains'; data: LibraryFavoritesContainsRequest }
   | { event: 'favoritesToggle'; data: FavoritesToggle }
-  | { event: 'favoritesSet'; data: FavoritesSet };
+  | { event: 'favoritesSet'; data: FavoritesSet }
+  | { event: 'favoritesSetMany'; data: FavoritesSetMany };
 
 /**
  * bridgething -> gateway
@@ -278,9 +280,24 @@ export type Earcon = { name: string };
  */
 export type FavoriteChanged = { uri: string; liked: boolean };
 
+/**
+ * Batch favorites-contains reply. `liked` is index-aligned with the
+ * request's `uris`.
+ */
+export type FavoritesContainsReply = { liked: Array<boolean> };
+
 export type FavoritesListReply = { page: FavoritesPage };
 
 export type FavoritesSet = { item: ItemRef; liked: boolean };
+
+/**
+ * Bulk favorites mutation. `entries` are independent `FavoritesSet`
+ * applications; gateway returns once it has issued each underlying
+ * platform call. Per-entry errors are not surfaced — companion logs
+ * and best-efforts the rest. Webapps observing partial success listen
+ * for `FavoriteChanged` events.
+ */
+export type FavoritesSetMany = { entries: Array<FavoritesSet> };
 
 export type FavoritesToggle = { item: ItemRef };
 
@@ -329,6 +346,7 @@ export type GatewayToBridgeLibraryMsg =
   | { event: 'searchReply'; data: SearchReply }
   | { event: 'recommendationsReply'; data: RecommendationsReply }
   | { event: 'favoritesListReply'; data: FavoritesListReply }
+  | { event: 'favoritesContainsReply'; data: FavoritesContainsReply }
   | { event: 'libraryErrorReply'; data: LibraryErrorReply }
   | { event: 'favoriteChanged'; data: FavoriteChanged };
 
@@ -445,21 +463,35 @@ export type LibraryBrowseRequest = {
    * Drilldown node id from a prior `BrowseFolder`. `None` means "root".
    */
   nodeId: string | null;
-  pageToken: string | null;
+  limit: number;
+  offset: number;
 };
 
 export type LibraryErrorReply = { error: LibraryError };
 
-export type LibraryFavoritesListRequest = { pageToken: string | null };
+/**
+ * Batch "is each of these favorited?" lookup. Mirrors Spotify's
+ * `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
+ * the request `uris`.
+ */
+export type LibraryFavoritesContainsRequest = { uris: Array<string> };
 
+export type LibraryFavoritesListRequest = { limit: number; offset: number };
+
+/**
+ * Recommendations seeded by up to 5 items. The daemon caps the seed
+ * list at the platform-permissive limit (Spotify hard-caps at 5
+ * combined seeds across tracks/artists/genres). Gateway decides how to
+ * distribute seeds across its native API surfaces.
+ */
 export type LibraryRecommendationsRequest = {
-  seed: ItemRef | null;
+  seeds: Array<ItemRef>;
   kind: ItemKind | null;
-  limit: number | null;
-  pageToken: string | null;
+  limit: number;
+  offset: number;
 };
 
-export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; pageToken: string | null };
+export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
 
 export type NetFetchErrorReply = { error: NetError };
 

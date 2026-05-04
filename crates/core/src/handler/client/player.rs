@@ -53,7 +53,9 @@ impl PlayerHandler {
   async fn play(self, PlayUri { uri, context }: PlayUri) -> HandlerResult {
     let snapshot = self.handle.state.capabilities.snapshot();
     let Some(scheme) = scheme_of(&uri) else {
-      return self.respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri }).await;
+      return self
+        .respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri })
+        .await;
     };
     if snapshot.gateway.is_none() {
       return self.respond_player_error(PlayerError::NoGateway).await;
@@ -69,7 +71,9 @@ impl PlayerHandler {
   async fn queue(self, QueueUri { uri, position }: QueueUri) -> HandlerResult {
     let snapshot = self.handle.state.capabilities.snapshot();
     let Some(scheme) = scheme_of(&uri) else {
-      return self.respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri }).await;
+      return self
+        .respond_player_error(PlayerError::SchemeUnclaimed { scheme: uri })
+        .await;
     };
     if snapshot.gateway.is_none() {
       return self.respond_player_error(PlayerError::NoGateway).await;
@@ -78,7 +82,10 @@ impl PlayerHandler {
       return self.respond_player_error(PlayerError::SchemeUnclaimed { scheme }).await;
     }
     self
-      .forward_command(BridgeToGatewayPlayerMsgCommand::Queue(gateway::QueueUri { uri, position }))
+      .forward_command(BridgeToGatewayPlayerMsgCommand::Queue(gateway::QueueUri {
+        uri,
+        position,
+      }))
       .await
   }
 

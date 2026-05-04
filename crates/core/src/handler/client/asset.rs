@@ -1,8 +1,8 @@
 use libbridgething::{
   AssetRetention,
   client::{
-    AssetGet, AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, BridgeToClientAssetMsg,
-    ClientToBridgeAssetMsgRequest,
+    AssetGet, AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, AssetPreload, BridgeToClientAssetMsg,
+    ClientToBridgeAssetMsg,
   },
   gateway::AssetRequest,
   wire::RequestError,
@@ -11,6 +11,8 @@ use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
+
+const PRELOAD_IDS_MAX: usize = 64;
 
 #[derive(Debug)]
 pub struct AssetHandler {
@@ -22,9 +24,13 @@ impl AssetHandler {
     Self { handle }
   }
 
-  pub async fn handle(&self, msg: ClientToBridgeAssetMsgRequest) -> HandlerResult {
+  pub async fn handle(&self, msg: ClientToBridgeAssetMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeAssetMsgRequest::Get(AssetGet { id, request_id }) => self.handle_get(id, request_id).await,
+      ClientToBridgeAssetMsg::Get(AssetGet { id, request_id }) => self.handle_get(id, request_id).await,
+      ClientToBridgeAssetMsg::Preload(AssetPreload { ids }) => {
+        self.handle_preload(ids).await;
+        Ok(())
+      }
     }
   }
 
@@ -58,11 +64,6 @@ impl AssetHandler {
 
     match response {
       Ok(got) => {
-        // One Bytes view shared between the cache insert and the wire
-        // send. Bytes::clone() is a refcount bump; the heap-allocation
-        // for the asset bytes happens once, when rmp_serde::from_slice
-        // built `got.bytes`. The wire send below converts that single
-        // allocation back into a Vec via `into()`.
         let bytes = Bytes::from(got.bytes);
         if let Err(err) = self
           .handle
@@ -111,6 +112,43 @@ impl AssetHandler {
           .await
           .map_err(Into::into)
       }
+    }
+  }
+
+  async fn handle_preload(&self, ids: Vec<String>) {
+    if self.handle.state.gateway_info().await.is_none() {
+      return;
+    }
+    for id in ids.into_iter().take(PRELOAD_IDS_MAX) {
+      if matches!(self.handle.state.assets.get(&id).await, Ok(Some(_))) {
+        continue;
+      }
+      let state = self.handle.state.clone();
+      let bluetooth = self.handle.bluetooth.clone();
+      tokio::spawn(async move {
+        let req = AssetRequest {
+          id: id.clone(),
+          request_id: Uuid::now_v7(),
+        };
+        match bluetooth.gateway_man.request(None, req).await {
+          Ok(got) => {
+            let bytes = Bytes::from(got.bytes);
+            if let Err(err) = state
+              .assets
+              .insert(id.clone(), bytes, got.mime, AssetRetention::Lru)
+              .await
+            {
+              tracing::warn!(?err, %id, "preload: failed to insert into cache");
+            }
+          }
+          Err(RequestError::Domain(_)) => {
+            tracing::debug!(%id, "preload: companion reported asset not found");
+          }
+          Err(err) => {
+            tracing::debug!(?err, %id, "preload: companion request failed");
+          }
+        }
+      });
     }
   }
 }

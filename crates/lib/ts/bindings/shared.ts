@@ -74,11 +74,13 @@ export type BrowseEntry = { type: 'folder'; data: BrowseFolder } | { type: 'item
 export type BrowseFolder = { nodeId: string; title: string; subtitle: string | null; artworkId: string | null };
 
 /**
- * Page of browse results. `next_page_token` is the opaque cursor a
- * webapp passes back as `browse({ page_token: ... })` to fetch the
- * next page; `None` means this is the last page.
+ * Page of browse results. `total` is the count of items in the
+ * underlying collection when the gateway can cheaply expose it (None
+ * means indeterminate). `has_more` is the authoritative end-of-data
+ * signal — webapps paginate by raising `offset` until `has_more` is
+ * false rather than relying on `total`.
  */
-export type BrowseResult = { entries: Array<BrowseEntry>; nextPageToken: string | null };
+export type BrowseResult = { entries: Array<BrowseEntry>; total: number | null; hasMore: boolean };
 
 /**
  * Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
@@ -206,7 +208,7 @@ export type EnumField = { key: string; label: string; choices: Array<string>; de
  * Page of the user's favorited / liked / saved library items. Mixed-kind
  * because most platforms expose one "Saved" surface across kinds.
  */
-export type FavoritesPage = { items: Array<LibraryItem>; nextPageToken: string | null };
+export type FavoritesPage = { items: Array<LibraryItem>; total: number | null; hasMore: boolean };
 
 export type ForwardMessage =
   | { encoding: 'text'; data: string }
@@ -758,7 +760,7 @@ export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'ind
  * interact (Spotify uses radio-style seeding, Apple Music uses curated
  * rails) — the daemon doesn't prescribe.
  */
-export type RecommendationsResult = { items: Array<LibraryItem>; nextPageToken: string | null };
+export type RecommendationsResult = { items: Array<LibraryItem>; total: number | null; hasMore: boolean };
 
 export type RedirectPolicy = 'follow' | 'manual' | 'error';
 
@@ -787,7 +789,12 @@ export type RepeatMode = 'off' | 'all' | 'one';
  * honored (echoed back so webapps can detect ignored constraints); items
  * are ranked best-first.
  */
-export type SearchResult = { items: Array<LibraryItem>; kinds: Array<ItemKind>; nextPageToken: string | null };
+export type SearchResult = {
+  items: Array<LibraryItem>;
+  kinds: Array<ItemKind>;
+  total: number | null;
+  hasMore: boolean;
+};
 
 /**
  * One podcast show (parent of `PodcastEpisode`). `episode_count` is

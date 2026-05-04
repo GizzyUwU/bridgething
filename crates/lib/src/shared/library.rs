@@ -148,9 +148,11 @@ pub struct BrowseFolder {
   pub artwork_id: Option<String>,
 }
 
-/// Page of browse results. `next_page_token` is the opaque cursor a
-/// webapp passes back as `browse({ page_token: ... })` to fetch the
-/// next page; `None` means this is the last page.
+/// Page of browse results. `total` is the count of items in the
+/// underlying collection when the gateway can cheaply expose it (None
+/// means indeterminate). `has_more` is the authoritative end-of-data
+/// signal — webapps paginate by raising `offset` until `has_more` is
+/// false rather than relying on `total`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -158,7 +160,8 @@ pub struct BrowseFolder {
 #[ts(export, export_to = "shared.ts")]
 pub struct BrowseResult {
   pub entries: Vec<BrowseEntry>,
-  pub next_page_token: Option<String>,
+  pub total: Option<u32>,
+  pub has_more: bool,
 }
 
 /// Page of search results. `kinds` is the constrained kinds the search
@@ -172,7 +175,8 @@ pub struct BrowseResult {
 pub struct SearchResult {
   pub items: Vec<LibraryItem>,
   pub kinds: Vec<ItemKind>,
-  pub next_page_token: Option<String>,
+  pub total: Option<u32>,
+  pub has_more: bool,
 }
 
 /// Page of recommendation results. Gateway decides how seed + kind
@@ -185,7 +189,8 @@ pub struct SearchResult {
 #[ts(export, export_to = "shared.ts")]
 pub struct RecommendationsResult {
   pub items: Vec<LibraryItem>,
-  pub next_page_token: Option<String>,
+  pub total: Option<u32>,
+  pub has_more: bool,
 }
 
 /// Page of the user's favorited / liked / saved library items. Mixed-kind
@@ -197,7 +202,8 @@ pub struct RecommendationsResult {
 #[ts(export, export_to = "shared.ts")]
 pub struct FavoritesPage {
   pub items: Vec<LibraryItem>,
-  pub next_page_token: Option<String>,
+  pub total: Option<u32>,
+  pub has_more: bool,
 }
 
 #[typeshare]

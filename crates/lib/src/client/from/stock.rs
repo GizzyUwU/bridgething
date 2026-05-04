@@ -49,6 +49,8 @@ pub enum ClientLegacyStockCommand {
   },
 
   SpotifyGetPermissions,
+  SpotifyGetPlayerState,
+  SpotifyGetSessionState,
   SpotifySummonDj,
   SpotifyGetHome {
     limit: usize,

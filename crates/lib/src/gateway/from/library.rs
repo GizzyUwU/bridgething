@@ -42,6 +42,17 @@ pub struct FavoritesListReply {
   pub page: FavoritesPage,
 }
 
+/// Batch favorites-contains reply. `liked` is index-aligned with the
+/// request's `uris`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct FavoritesContainsReply {
+  pub liked: Vec<bool>,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -79,6 +90,8 @@ pub enum GatewayToBridgeLibraryMsg {
   RecommendationsReply(RecommendationsReply),
   #[bridge_response]
   FavoritesListReply(FavoritesListReply),
+  #[bridge_response]
+  FavoritesContainsReply(FavoritesContainsReply),
   #[bridge_response]
   LibraryErrorReply(LibraryErrorReply),
   #[bridge_event]

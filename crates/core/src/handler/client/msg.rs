@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use libbridgething::{
   ForwardMessage,
   client::{
-    BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsgRequest, ClientToBridgeAudioMsgCommand,
+    BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsg, ClientToBridgeAudioMsgCommand,
     ClientToBridgeBluetoothMsg, ClientToBridgeCapabilitiesMsgRequest, ClientToBridgeConfigMsgRequest,
     ClientToBridgeGeoMsg, ClientToBridgeHardwareMsg, ClientToBridgeLibraryMsg, ClientToBridgeMsg,
     ClientToBridgeMsgData, ClientToBridgeNetMsg, ClientToBridgeNotificationsMsg, ClientToBridgePhoneMsg,
@@ -39,7 +39,7 @@ pub struct RecvMsg {
 
 #[derive(Debug)]
 pub enum RecvMsgData {
-  Asset(ClientToBridgeAssetMsgRequest),
+  Asset(ClientToBridgeAssetMsg),
   Audio(ClientToBridgeAudioMsgCommand),
   Bluetooth(ClientToBridgeBluetoothMsg),
   Capabilities(ClientToBridgeCapabilitiesMsgRequest),
@@ -82,10 +82,7 @@ pub enum RecvMsgData {
 impl From<ClientToBridgeMsg> for RecvMsgData {
   fn from(msg: ClientToBridgeMsg) -> Self {
     match msg.data {
-      ClientToBridgeMsgData::Asset(inner) => match inner.into_request() {
-        Some(req) => Self::Asset(req),
-        None => Self::Hole,
-      },
+      ClientToBridgeMsgData::Asset(inner) => Self::Asset(inner),
       ClientToBridgeMsgData::Audio(inner) => match inner.into_command() {
         Some(cmd) => Self::Audio(cmd),
         None => Self::Hole,

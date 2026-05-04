@@ -2,17 +2,21 @@ use libbridgething::{
   LibraryError,
   client::{
     BridgeToClientMsgData, ClientToBridgeLibraryMsg, LibraryBrowse, LibraryBrowseReply, LibraryErrorReply,
-    LibraryFavoritesList, LibraryFavoritesListReply, LibraryRecommendations, LibraryRecommendationsReply,
-    LibrarySearch, LibrarySearchReply,
+    LibraryFavoritesContains, LibraryFavoritesContainsReply, LibraryFavoritesList, LibraryFavoritesListReply,
+    LibraryRecommendations, LibraryRecommendationsReply, LibrarySearch, LibrarySearchReply,
   },
   gateway::{
-    self, BridgeToGatewayLibraryMsgCommand, LibraryBrowseRequest, LibraryFavoritesListRequest,
-    LibraryRecommendationsRequest, LibrarySearchRequest,
+    self, BridgeToGatewayLibraryMsgCommand, LibraryBrowseRequest, LibraryFavoritesContainsRequest,
+    LibraryFavoritesListRequest, LibraryRecommendationsRequest, LibrarySearchRequest,
   },
   wire::{RequestError, WireRequest},
 };
 
 use super::{HandlerResult, MsgHandle};
+
+const RECOMMENDATIONS_SEEDS_MAX: usize = 5;
+const FAVORITES_CONTAINS_MAX: usize = 50;
+const BROWSE_LIMIT_MAX: u32 = 100;
 
 pub struct LibraryHandler {
   handle: MsgHandle,
@@ -29,6 +33,7 @@ impl LibraryHandler {
       ClientToBridgeLibraryMsg::Search(req) => self.search(req).await,
       ClientToBridgeLibraryMsg::Recommendations(req) => self.recommendations(req).await,
       ClientToBridgeLibraryMsg::FavoritesList(req) => self.favorites_list(req).await,
+      ClientToBridgeLibraryMsg::FavoritesContains(req) => self.favorites_contains(req).await,
       ClientToBridgeLibraryMsg::FavoritesToggle(toggle) => {
         self
           .forward_command(BridgeToGatewayLibraryMsgCommand::FavoritesToggle(
@@ -44,14 +49,33 @@ impl LibraryHandler {
           }))
           .await
       }
+      ClientToBridgeLibraryMsg::FavoritesSetMany(many) => {
+        let entries = many
+          .entries
+          .into_iter()
+          .map(|e| gateway::FavoritesSet {
+            item: e.item,
+            liked: e.liked,
+          })
+          .collect();
+        self
+          .forward_command(BridgeToGatewayLibraryMsgCommand::FavoritesSetMany(
+            gateway::FavoritesSetMany { entries },
+          ))
+          .await
+      }
     }
   }
 
-  async fn browse(self, LibraryBrowse { node_id, page_token }: LibraryBrowse) -> HandlerResult {
+  async fn browse(self, LibraryBrowse { node_id, limit, offset }: LibraryBrowse) -> HandlerResult {
     if !self.has_gateway() {
       return self.respond_error::<LibraryBrowse>(LibraryError::NoGateway).await;
     }
-    let outbound = LibraryBrowseRequest { node_id, page_token };
+    let outbound = LibraryBrowseRequest {
+      node_id,
+      limit: limit.min(BROWSE_LIMIT_MAX),
+      offset,
+    };
     match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
       Ok(reply) => {
         self
@@ -59,19 +83,32 @@ impl LibraryHandler {
           .respond_to::<LibraryBrowse>(LibraryBrowseReply { result: reply.result })
           .await?;
       }
-      Err(err) => self.respond_request_error::<LibraryBrowse>("library.browse", err).await?,
+      Err(err) => {
+        self
+          .respond_request_error::<LibraryBrowse>("library.browse", err)
+          .await?
+      }
     }
     Ok(())
   }
 
-  async fn search(self, LibrarySearch { query, kinds, page_token }: LibrarySearch) -> HandlerResult {
+  async fn search(
+    self,
+    LibrarySearch {
+      query,
+      kinds,
+      limit,
+      offset,
+    }: LibrarySearch,
+  ) -> HandlerResult {
     if !self.has_gateway() {
       return self.respond_error::<LibrarySearch>(LibraryError::NoGateway).await;
     }
     let outbound = LibrarySearchRequest {
       query,
       kinds,
-      page_token,
+      limit: limit.min(BROWSE_LIMIT_MAX),
+      offset,
     };
     match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
       Ok(reply) => {
@@ -80,20 +117,28 @@ impl LibraryHandler {
           .respond_to::<LibrarySearch>(LibrarySearchReply { result: reply.result })
           .await?;
       }
-      Err(err) => self.respond_request_error::<LibrarySearch>("library.search", err).await?,
+      Err(err) => {
+        self
+          .respond_request_error::<LibrarySearch>("library.search", err)
+          .await?
+      }
     }
     Ok(())
   }
 
   async fn recommendations(self, req: LibraryRecommendations) -> HandlerResult {
     if !self.has_gateway() {
-      return self.respond_error::<LibraryRecommendations>(LibraryError::NoGateway).await;
+      return self
+        .respond_error::<LibraryRecommendations>(LibraryError::NoGateway)
+        .await;
     }
+    let mut seeds = req.seeds;
+    seeds.truncate(RECOMMENDATIONS_SEEDS_MAX);
     let outbound = LibraryRecommendationsRequest {
-      seed: req.seed,
+      seeds,
       kind: req.kind,
-      limit: req.limit,
-      page_token: req.page_token,
+      limit: req.limit.min(BROWSE_LIMIT_MAX),
+      offset: req.offset,
     };
     match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
       Ok(reply) => {
@@ -111,11 +156,16 @@ impl LibraryHandler {
     Ok(())
   }
 
-  async fn favorites_list(self, LibraryFavoritesList { page_token }: LibraryFavoritesList) -> HandlerResult {
+  async fn favorites_list(self, LibraryFavoritesList { limit, offset }: LibraryFavoritesList) -> HandlerResult {
     if !self.has_gateway() {
-      return self.respond_error::<LibraryFavoritesList>(LibraryError::NoGateway).await;
+      return self
+        .respond_error::<LibraryFavoritesList>(LibraryError::NoGateway)
+        .await;
     }
-    let outbound = LibraryFavoritesListRequest { page_token };
+    let outbound = LibraryFavoritesListRequest {
+      limit: limit.min(BROWSE_LIMIT_MAX),
+      offset,
+    };
     match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
       Ok(reply) => {
         self
@@ -126,6 +176,38 @@ impl LibraryHandler {
       Err(err) => {
         self
           .respond_request_error::<LibraryFavoritesList>("library.favoritesList", err)
+          .await?
+      }
+    }
+    Ok(())
+  }
+
+  async fn favorites_contains(self, LibraryFavoritesContains { uris }: LibraryFavoritesContains) -> HandlerResult {
+    if !self.has_gateway() {
+      return self
+        .respond_error::<LibraryFavoritesContains>(LibraryError::NoGateway)
+        .await;
+    }
+    if uris.is_empty() {
+      self
+        .handle
+        .respond_to::<LibraryFavoritesContains>(LibraryFavoritesContainsReply { liked: Vec::new() })
+        .await?;
+      return Ok(());
+    }
+    let mut uris = uris;
+    uris.truncate(FAVORITES_CONTAINS_MAX);
+    let outbound = LibraryFavoritesContainsRequest { uris };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibraryFavoritesContains>(LibraryFavoritesContainsReply { liked: reply.liked })
+          .await?;
+      }
+      Err(err) => {
+        self
+          .respond_request_error::<LibraryFavoritesContains>("library.favoritesContains", err)
           .await?
       }
     }
@@ -152,11 +234,7 @@ impl LibraryHandler {
       .map_err(Into::into)
   }
 
-  async fn respond_request_error<R>(
-    &self,
-    verb: &str,
-    err: RequestError<gateway::LibraryErrorReply>,
-  ) -> HandlerResult
+  async fn respond_request_error<R>(&self, verb: &str, err: RequestError<gateway::LibraryErrorReply>) -> HandlerResult
   where
     R: WireRequest<Inbound = BridgeToClientMsgData, DomainError = LibraryErrorReply>,
   {

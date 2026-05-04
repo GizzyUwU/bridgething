@@ -1,8 +1,11 @@
-use libbridgething::Device;
+use libbridgething::{Device, NetworkKind};
 
 use crate::{
+  capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
-  stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload},
+  stock::{
+    StockConfigurationSend, StockConnectionSend, StockConnectionType, StockInterAppSend, StockInterAppSendPayload,
+  },
 };
 
 /// Broadcasts that put the stock Spotify webapp into the "phone connected"
@@ -11,7 +14,11 @@ use crate::{
 /// not just on first BlueZ pair, since the webapp will sit on stale state
 /// (and ignore now-playing deltas) if it doesn't see these on every link
 /// transition.
-pub async fn broadcast_stock_connection(bus: &WireEventBus, device: &Device) -> Result<(), Vec<WSError>> {
+pub async fn broadcast_stock_connection(
+  bus: &WireEventBus,
+  device: &Device,
+  capabilities: &CapabilitiesRegistry,
+) -> Result<(), Vec<WSError>> {
   bus
     .broadcast_stock(StockConnectionSend::RemoteStatus {
       payload: true,
@@ -24,14 +31,26 @@ pub async fn broadcast_stock_connection(bus: &WireEventBus, device: &Device) -> 
     .await?;
   bus.broadcast_stock(StockConfigurationSend::default()).await?;
 
+  let snapshot = capabilities.snapshot();
+  let connection_type = match snapshot.network.kind {
+    NetworkKind::Wifi | NetworkKind::Ethernet => StockConnectionType::Wlan,
+    NetworkKind::Cellular => StockConnectionType::FourG,
+    NetworkKind::Unknown => {
+      if snapshot.gateway.is_some() {
+        StockConnectionType::Wlan
+      } else {
+        StockConnectionType::None
+      }
+    }
+  };
   bus
     .broadcast_stock(StockInterAppSend {
       msg_id: None,
       data: StockInterAppSendPayload::SessionState {
-        connection_type: crate::stock::StockConnectionType::FourG,
+        connection_type,
         is_in_forced_offline_mode: false,
-        is_logged_in: true,
-        is_offline: false,
+        is_logged_in: snapshot.gateway.is_some(),
+        is_offline: snapshot.gateway.is_none(),
       },
     })
     .await?;

@@ -19,8 +19,10 @@ import {
   type CommunicationsSnapshot,
   type Earcon,
   type FavoriteChanged,
+  type FavoritesContainsReply,
   type FavoritesListReply,
   type FavoritesSet,
+  type FavoritesSetMany,
   type FavoritesToggle,
   type GatewayCapabilities,
   type GatewayError,
@@ -31,6 +33,7 @@ import {
   type GeoWatch,
   type LibraryBrowseRequest,
   type LibraryErrorReply,
+  type LibraryFavoritesContainsRequest,
   type LibraryFavoritesListRequest,
   type LibraryRecommendationsRequest,
   type LibrarySearchRequest,
@@ -164,6 +167,7 @@ export type GeoDeviceInboundHandlers = {
 export type LibraryInboundHandlers = {
   favoritesToggle: (deviceId: string, msg: FavoritesToggle) => void;
   favoritesSet: (deviceId: string, msg: FavoritesSet) => void;
+  favoritesSetMany: (deviceId: string, msg: FavoritesSetMany) => void;
   browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
   search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
   recommendations: (
@@ -171,11 +175,16 @@ export type LibraryInboundHandlers = {
     req: LibraryRecommendationsRequest,
   ) => Promise<void> | void;
   favoritesList: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void;
+  favoritesContains: (
+    handle: LibraryFavoritesContainsRequestHandle,
+    req: LibraryFavoritesContainsRequest,
+  ) => Promise<void> | void;
 };
 
 export type LibraryDeviceInboundHandlers = {
   favoritesToggle: (msg: FavoritesToggle) => void;
   favoritesSet: (msg: FavoritesSet) => void;
+  favoritesSetMany: (msg: FavoritesSetMany) => void;
   browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
   search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
   recommendations: (
@@ -183,6 +192,10 @@ export type LibraryDeviceInboundHandlers = {
     req: LibraryRecommendationsRequest,
   ) => Promise<void> | void;
   favoritesList: (handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) => Promise<void> | void;
+  favoritesContains: (
+    handle: LibraryFavoritesContainsRequestHandle,
+    req: LibraryFavoritesContainsRequest,
+  ) => Promise<void> | void;
 };
 
 export type NetInboundHandlers = {
@@ -670,6 +683,18 @@ export class LibrarySurface {
     });
   }
 
+  /** Subscribe to `Library::FavoritesSetMany` across all peers. */
+  onFavoritesSetMany(handler: (deviceId: string, msg: FavoritesSetMany) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesSetMany') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Typed inbound `LibraryBrowseRequest` request: handler is given a typed handle for the response. */
   onBrowse(
     handler: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void,
@@ -758,6 +783,31 @@ export class LibrarySurface {
     });
   }
 
+  /** Typed inbound `LibraryFavoritesContainsRequest` request: handler is given a typed handle for the response. */
+  onFavoritesContains(
+    handler: (
+      handle: LibraryFavoritesContainsRequestHandle,
+      req: LibraryFavoritesContainsRequest,
+    ) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesContains') return;
+      const handle = new LibraryFavoritesContainsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFavoritesContains handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Library` variants. */
   subscribe(handlers: LibraryInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -781,6 +831,10 @@ export class LibrarySurface {
         }
         case 'favoritesSet': {
           handlers.favoritesSet?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'favoritesSetMany': {
+          handlers.favoritesSetMany?.(event.deviceId, inner.data);
           return;
         }
         case 'browse': {
@@ -833,6 +887,20 @@ export class LibrarySurface {
             return;
           }
           const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'favoritesContains': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.favoritesContains;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'favoritesContains');
+            return;
+          }
+          const handle = new LibraryFavoritesContainsRequestHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -2937,6 +3005,19 @@ export class LibrarySurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Library::FavoritesSetMany` from this peer. */
+  onFavoritesSetMany(handler: (msg: FavoritesSetMany) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesSetMany') return;
+      handler(inner.data);
+    });
+  }
+
   /** Typed inbound `LibraryBrowseRequest` request from this peer: handler is given a typed handle for the response. */
   onBrowse(
     handler: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void,
@@ -3029,6 +3110,32 @@ export class LibrarySurfaceForDevice {
     });
   }
 
+  /** Typed inbound `LibraryFavoritesContainsRequest` request from this peer: handler is given a typed handle for the response. */
+  onFavoritesContains(
+    handler: (
+      handle: LibraryFavoritesContainsRequestHandle,
+      req: LibraryFavoritesContainsRequest,
+    ) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'favoritesContains') return;
+      const handle = new LibraryFavoritesContainsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onFavoritesContains handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Library` variants from this peer. */
   subscribe(handlers: LibraryDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -3053,6 +3160,10 @@ export class LibrarySurfaceForDevice {
         }
         case 'favoritesSet': {
           handlers.favoritesSet?.(inner.data);
+          return;
+        }
+        case 'favoritesSetMany': {
+          handlers.favoritesSetMany?.(inner.data);
           return;
         }
         case 'browse': {
@@ -3105,6 +3216,20 @@ export class LibrarySurfaceForDevice {
             return;
           }
           const handle = new LibraryFavoritesListRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'favoritesContains': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.favoritesContains;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'favoritesContains');
+            return;
+          }
+          const handle = new LibraryFavoritesContainsRequestHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -5035,6 +5160,41 @@ export class LibraryFavoritesListRequestHandle {
   }
 }
 
+export class LibraryFavoritesContainsRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: FavoritesContainsReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'favoritesContainsReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: GatewayError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
 export class NetFetchRequestMsgHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -5581,6 +5741,10 @@ function outerSubscribeGateway(
             innerHandlers.favoritesSet?.(event.deviceId, inner.data);
             return;
           }
+          case 'favoritesSetMany': {
+            innerHandlers.favoritesSetMany?.(event.deviceId, inner.data);
+            return;
+          }
           case 'browse': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.browse;
@@ -5628,6 +5792,19 @@ function outerSubscribeGateway(
               return;
             }
             const handle = new LibraryFavoritesListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'favoritesContains': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.favoritesContains;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'favoritesContains');
+              return;
+            }
+            const handle = new LibraryFavoritesContainsRequestHandle(g, event.deviceId, event.message.id);
             const result = handler(handle, inner.data);
             if (result && typeof result.then === 'function')
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
@@ -6082,6 +6259,10 @@ function outerSubscribeDevice(
             innerHandlers.favoritesSet?.(inner.data);
             return;
           }
+          case 'favoritesSetMany': {
+            innerHandlers.favoritesSetMany?.(inner.data);
+            return;
+          }
           case 'browse': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.browse;
@@ -6129,6 +6310,19 @@ function outerSubscribeDevice(
               return;
             }
             const handle = new LibraryFavoritesListRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'favoritesContains': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.favoritesContains;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'favoritesContains');
+              return;
+            }
+            const handle = new LibraryFavoritesContainsRequestHandle(g, event.deviceId, event.message.id);
             const result = handler(handle, inner.data);
             if (result && typeof result.then === 'function')
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));

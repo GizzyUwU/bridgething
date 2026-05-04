@@ -337,13 +337,16 @@ sealed class BrowseEntry {
 	data class Item(val data: LibraryItem): BrowseEntry()
 }
 
-/// Page of browse results. `next_page_token` is the opaque cursor a
-/// webapp passes back as `browse({ page_token: ... })` to fetch the
-/// next page; `None` means this is the last page.
+/// Page of browse results. `total` is the count of items in the
+/// underlying collection when the gateway can cheaply expose it (None
+/// means indeterminate). `has_more` is the authoritative end-of-data
+/// signal — webapps paginate by raising `offset` until `has_more` is
+/// false rather than relying on `total`.
 @Serializable
 data class BrowseResult (
 	val entries: List<BrowseEntry>,
-	val nextPageToken: String? = null
+	val total: UInt? = null,
+	val hasMore: Boolean
 )
 
 @Serializable
@@ -548,6 +551,13 @@ data class FavoriteChanged (
 	val liked: Boolean
 )
 
+/// Batch favorites-contains reply. `liked` is index-aligned with the
+/// request's `uris`.
+@Serializable
+data class FavoritesContainsReply (
+	val liked: List<Boolean>
+)
+
 /// One playable / browsable item from the library. Lean per-variant
 /// payload — gateways translate platform-specific extras down to these
 /// fields, rare per-platform fields just don't surface. Forward-compat:
@@ -583,7 +593,8 @@ sealed class LibraryItem {
 @Serializable
 data class FavoritesPage (
 	val items: List<LibraryItem>,
-	val nextPageToken: String? = null
+	val total: UInt? = null,
+	val hasMore: Boolean
 )
 
 @Serializable
@@ -627,6 +638,16 @@ data class ItemRef (
 data class FavoritesSet (
 	val item: ItemRef,
 	val liked: Boolean
+)
+
+/// Bulk favorites mutation. `entries` are independent `FavoritesSet`
+/// applications; gateway returns once it has issued each underlying
+/// platform call. Per-entry errors are not surfaced — companion logs
+/// and best-efforts the rest. Webapps observing partial success listen
+/// for `FavoriteChanged` events.
+@Serializable
+data class FavoritesSetMany (
+	val entries: List<FavoritesSet>
 )
 
 @Serializable
@@ -798,7 +819,8 @@ data class HttpHeader (
 data class LibraryBrowseRequest (
 	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	val nodeId: String? = null,
-	val pageToken: String? = null
+	val limit: UInt,
+	val offset: UInt
 )
 
 /// Generated type representing the anonymous struct variant `NotFound` of the `LibraryError` Rust enum
@@ -839,24 +861,38 @@ data class LibraryErrorReply (
 	val error: LibraryError
 )
 
+/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
+/// `GET /me/tracks/contains` shape. Reply `liked` is index-aligned with
+/// the request `uris`.
 @Serializable
-data class LibraryFavoritesListRequest (
-	val pageToken: String? = null
+data class LibraryFavoritesContainsRequest (
+	val uris: List<String>
 )
 
 @Serializable
+data class LibraryFavoritesListRequest (
+	val limit: UInt,
+	val offset: UInt
+)
+
+/// Recommendations seeded by up to 5 items. The daemon caps the seed
+/// list at the platform-permissive limit (Spotify hard-caps at 5
+/// combined seeds across tracks/artists/genres). Gateway decides how to
+/// distribute seeds across its native API surfaces.
+@Serializable
 data class LibraryRecommendationsRequest (
-	val seed: ItemRef? = null,
+	val seeds: List<ItemRef>,
 	val kind: ItemKind? = null,
-	val limit: UInt? = null,
-	val pageToken: String? = null
+	val limit: UInt,
+	val offset: UInt
 )
 
 @Serializable
 data class LibrarySearchRequest (
 	val query: String,
 	val kinds: List<ItemKind>? = null,
-	val pageToken: String? = null
+	val limit: UInt,
+	val offset: UInt
 )
 
 @Serializable
@@ -1896,7 +1932,8 @@ data class QueueUri (
 @Serializable
 data class RecommendationsResult (
 	val items: List<LibraryItem>,
-	val nextPageToken: String? = null
+	val total: UInt? = null,
+	val hasMore: Boolean
 )
 
 @Serializable
@@ -1918,7 +1955,8 @@ data class ResponseMeta (
 data class SearchResult (
 	val items: List<LibraryItem>,
 	val kinds: List<ItemKind>,
-	val nextPageToken: String? = null
+	val total: UInt? = null,
+	val hasMore: Boolean
 )
 
 @Serializable
@@ -2396,11 +2434,17 @@ sealed class BridgeToGatewayLibraryMsg {
 	@SerialName("favoritesList")
 	data class FavoritesList(val data: LibraryFavoritesListRequest): BridgeToGatewayLibraryMsg()
 	@Serializable
+	@SerialName("favoritesContains")
+	data class FavoritesContains(val data: LibraryFavoritesContainsRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
 	@SerialName("favoritesToggle")
 	data class FavoritesToggle(val data: dev.bridgething.schema.FavoritesToggle): BridgeToGatewayLibraryMsg()
 	@Serializable
 	@SerialName("favoritesSet")
 	data class FavoritesSet(val data: dev.bridgething.schema.FavoritesSet): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("favoritesSetMany")
+	data class FavoritesSetMany(val data: dev.bridgething.schema.FavoritesSetMany): BridgeToGatewayLibraryMsg()
 }
 
 @Serializable(with = BridgeToGatewayNetMsgSerializer::class)
@@ -2707,6 +2751,9 @@ sealed class GatewayToBridgeLibraryMsg {
 	@Serializable
 	@SerialName("favoritesListReply")
 	data class FavoritesListReply(val data: dev.bridgething.schema.FavoritesListReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("favoritesContainsReply")
+	data class FavoritesContainsReply(val data: dev.bridgething.schema.FavoritesContainsReply): GatewayToBridgeLibraryMsg()
 	@Serializable
 	@SerialName("libraryErrorReply")
 	data class LibraryErrorReply(val data: dev.bridgething.schema.LibraryErrorReply): GatewayToBridgeLibraryMsg()

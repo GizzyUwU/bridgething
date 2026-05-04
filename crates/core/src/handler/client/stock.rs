@@ -1,10 +1,24 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
-use libbridgething::{client::ClientLegacyStockCommand, stock::StockSetPreset};
+use libbridgething::{
+  ItemKind, ItemRef, QueuePosition,
+  client::ClientLegacyStockCommand,
+  gateway::{
+    self, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
+    LibraryFavoritesContainsRequest,
+  },
+  stock::{StockPreset, StockSetPreset},
+  wire::RequestError,
+};
 
 use super::{HandlerResult, MsgHandle};
-use crate::stock::{ChildItem, ChildMeta, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend};
+use crate::stock::{
+  StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip, presets,
+};
+
+const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
+const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
 
 #[derive(Debug)]
 pub struct LegacyStockHandler {
@@ -39,11 +53,13 @@ impl LegacyStockHandler {
         self.spotify_get_home(limit, limit_overrides).await
       }
       ClientLegacyStockCommand::SpotifyGetPermissions => self.spotify_get_permissions().await,
+      ClientLegacyStockCommand::SpotifyGetPlayerState => self.spotify_get_player_state().await,
       ClientLegacyStockCommand::SpotifyGetPodcast { uri, limit, offset } => {
         self.spotify_get_podcast(uri, limit, offset).await
       }
       ClientLegacyStockCommand::SpotifyGetPresets => self.spotify_get_presets().await,
       ClientLegacyStockCommand::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
+      ClientLegacyStockCommand::SpotifyGetSessionState => self.spotify_get_session_state().await,
       ClientLegacyStockCommand::SpotifyGetTips => self.spotify_get_tips().await,
       ClientLegacyStockCommand::SpotifyGetTts { file } => self.spotify_get_tts(file).await,
       ClientLegacyStockCommand::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
@@ -106,59 +122,70 @@ impl LegacyStockHandler {
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {
-    tracing::debug!("({}) getting next tracks", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+    let reply = self.handle.state.player.queue_reply().await;
+    let payload = crate::stock::interapp::player_queue_to_stock(reply);
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(self.handle.stock_msg_id, payload))
+      .await?;
     Ok(())
   }
 
   async fn spotify_get_children(&self, parent_id: String, limit: usize, offset: Option<usize>) -> HandlerResult {
-    tracing::debug!(
-      "({}) getting Spotify children for parent id: {}, limit: {}, offset: {:?}",
-      &self.handle.id,
-      parent_id,
-      limit,
-      offset
-    );
+    self
+      .browse_through_modern(Some(parent_id), limit_to_u32(limit), offset_to_u32(offset))
+      .await
+  }
 
-    // TODO: remove testing code
+  async fn spotify_get_home(&self, limit: usize, _limit_overrides: HashMap<String, usize>) -> HandlerResult {
+    self.browse_through_modern(None, limit_to_u32(limit), 0).await
+  }
+
+  async fn spotify_get_podcast(&self, uri: String, limit: Option<usize>, offset: Option<usize>) -> HandlerResult {
+    let limit = limit.map(limit_to_u32).unwrap_or(STOCK_BROWSE_LIMIT_MAX);
+    self
+      .browse_through_modern(Some(uri), limit, offset_to_u32(offset))
+      .await
+  }
+
+  async fn browse_through_modern(&self, node_id: Option<String>, limit: u32, offset: u32) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.send_empty_children(limit, offset).await;
+    }
+    let req = LibraryBrowseRequest {
+      node_id,
+      limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
+      offset,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+      Ok(reply) => {
+        let payload = crate::stock::interapp::library_browse_to_stock(reply.result, limit, offset);
+        self
+          .handle
+          .send_stock(StockInterAppSend::new(self.handle.stock_msg_id, payload))
+          .await?;
+      }
+      Err(err) => {
+        log_request_failure("library.browse", &err);
+        self.send_empty_children(limit, offset).await?;
+      }
+    }
+    Ok(())
+  }
+
+  async fn send_empty_children(&self, limit: u32, offset: u32) -> HandlerResult {
     self
       .handle
       .send_stock(StockInterAppSend::new(
         self.handle.stock_msg_id,
         StockInterAppSendPayload::ItemChildren {
-          limit: 10000,
-          offset: 0,
-          total: 1,
-          items: vec![ChildItem {
-            id: "spotify:track:bridgething".to_string(),
-            uri: "spotify:track:bridgething".to_string(),
-            image_id: "spotify:image:bridgething".to_string(),
-            title: "BridgeThing".to_string(),
-            subtitle: "Thing Labs".to_string(),
-            playable: true,
-            has_children: false,
-            available_offline: false,
-            metadata: ChildMeta {
-              is_explicit_content: false,
-              is_19_plus_content: false,
-              duration_ms: 5_000_000,
-            },
-          }],
+          limit: limit as usize,
+          offset: offset as usize,
+          total: offset as usize,
+          items: Vec::new(),
         },
       ))
       .await?;
-
-    Ok(())
-  }
-
-  async fn spotify_get_home(&self, limit: usize, limit_overrides: HashMap<String, usize>) -> HandlerResult {
-    tracing::debug!(
-      "({}) getting Spotify home with limit: {}, limit overrides: {:?}",
-      &self.handle.id,
-      limit,
-      limit_overrides
-    );
-    // Ok(self.handle.respond().await?)
     Ok(())
   }
 
@@ -185,110 +212,273 @@ impl LegacyStockHandler {
     Ok(())
   }
 
-  async fn spotify_get_podcast(&self, uri: String, limit: Option<usize>, offset: Option<usize>) -> HandlerResult {
-    tracing::debug!(
-      "({}) getting Spotify podcast for uri: {}, limit: {:?}, offset: {:?}",
-      &self.handle.id,
-      uri,
-      limit,
-      offset
-    );
-    // Ok(self.handle.respond().await?)
+  async fn spotify_get_player_state(&self) -> HandlerResult {
+    let reply = self.handle.state.player.state_reply().await;
+    let payload = crate::stock::interapp::player_state_to_stock(reply);
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(self.handle.stock_msg_id, payload))
+      .await?;
+    Ok(())
+  }
+
+  async fn spotify_get_session_state(&self) -> HandlerResult {
+    let snapshot = self.handle.state.capabilities.snapshot();
+    let connection_type = match snapshot.network.kind {
+      libbridgething::NetworkKind::Wifi | libbridgething::NetworkKind::Ethernet => StockConnectionType::Wlan,
+      libbridgething::NetworkKind::Cellular => StockConnectionType::FourG,
+      libbridgething::NetworkKind::Unknown => {
+        if snapshot.gateway.is_some() {
+          StockConnectionType::Wlan
+        } else {
+          StockConnectionType::None
+        }
+      }
+    };
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::SessionState {
+          connection_type,
+          is_in_forced_offline_mode: false,
+          is_logged_in: snapshot.gateway.is_some(),
+          is_offline: snapshot.gateway.is_none(),
+        },
+      ))
+      .await?;
     Ok(())
   }
 
   async fn spotify_get_presets(&self) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify presets", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+    let result = match presets::list(&self.handle.state.kv).await {
+      Ok(list) => list,
+      Err(err) => {
+        tracing::warn!(?err, "stock get_presets read failed");
+        Vec::new()
+      }
+    };
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::Presets { result, success: true },
+      ))
+      .await?;
     Ok(())
   }
 
   async fn spotify_get_saved(&self, id: String) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify saved item for id: {}", &self.handle.from, id);
-    // Ok(self.handle.respond().await?)
+    if !self.has_gateway() {
+      return self.send_saved_result(false).await;
+    }
+    let req = LibraryFavoritesContainsRequest { uris: vec![id] };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+      Ok(reply) => {
+        let liked = reply.liked.first().copied().unwrap_or(false);
+        self.send_saved_result(liked).await?;
+      }
+      Err(err) => {
+        log_request_failure("library.favoritesContains", &err);
+        self.send_saved_result(false).await?;
+      }
+    }
+    Ok(())
+  }
+
+  async fn send_saved_result(&self, liked: bool) -> HandlerResult {
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::Saved { saved: liked },
+      ))
+      .await?;
     Ok(())
   }
 
   async fn spotify_get_tips(&self) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify tips", &self.handle.from);
-    // Ok(self.handle.respond().await?)
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::Tips { result: canned_tips() },
+      ))
+      .await?;
     Ok(())
   }
 
-  async fn spotify_get_tts(&self, file: String) -> HandlerResult {
-    tracing::debug!("({}) getting Spotify TTS for file: {}", &self.handle.from, file);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+  async fn spotify_get_tts(&self, _file: String) -> HandlerResult {
+    // Stock TTS played pre-cached audio files on the phone (closer to Earcon
+    // than modern Audio.tts text). The daemon has no companion path to
+    // request such a file; ack to resolve the webapp's promise.
+    self.ack().await
   }
 
   async fn spotify_play_podcast_trailer(&self, uri: String) -> HandlerResult {
-    tracing::debug!(
-      "({}) playing Spotify podcast trailer for uri: {}",
-      &self.handle.from,
-      uri
-    );
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    self.forward_play(uri).await
   }
 
   async fn spotify_queue_uri(&self, uri: String) -> HandlerResult {
-    tracing::debug!("({}) queuing Spotify uri: {}", &self.handle.from, uri);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    if !self.has_gateway() {
+      return self.ack().await;
+    }
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast_command(BridgeToGatewayPlayerMsgCommand::Queue(gateway::QueueUri {
+        uri,
+        position: QueuePosition::Append,
+      }))
+      .await;
+    self.ack().await
   }
 
   async fn spotify_set_podcast_playback_speed(&self, playback_speed: usize) -> HandlerResult {
-    tracing::debug!(
-      "({}) setting Spotify podcast playback speed to: {}",
-      &self.handle.id,
-      playback_speed
-    );
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    if !self.has_gateway() {
+      return self.ack().await;
+    }
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast_command(BridgeToGatewayPlayerMsgCommand::SetSpeed(gateway::SetSpeed {
+        speed: playback_speed as f32 / 100.0,
+      }))
+      .await;
+    self.ack().await
   }
 
-  async fn spotify_set_preset(&self, presets: Vec<StockSetPreset>) -> HandlerResult {
-    tracing::debug!("({}) setting Spotify presets: {:?}", &self.handle.from, presets);
-    // Ok(self.handle.respond().await?)
+  async fn spotify_set_preset(&self, requests: Vec<StockSetPreset>) -> HandlerResult {
+    for req in requests {
+      let preset = StockPreset {
+        context_uri: req.context_uri,
+        image_url: None,
+        slot_index: req.slot_index,
+        name: None,
+        description: None,
+      };
+      if let Err(err) = presets::upsert(&self.handle.state.kv, &preset).await {
+        tracing::warn!(?err, "stock set_preset write failed");
+      }
+    }
+    let result = presets::list(&self.handle.state.kv).await.unwrap_or_default();
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        self.handle.stock_msg_id,
+        StockInterAppSendPayload::Presets { result, success: true },
+      ))
+      .await?;
     Ok(())
   }
 
   async fn spotify_set_saved(&self, id: Option<String>, uri: Option<String>, saved: bool) -> HandlerResult {
-    tracing::debug!(
-      "({}) setting Spotify saved item for id: {:?}, uri: {:?}, saved: {}",
-      &self.handle.id,
-      id,
-      uri,
-      saved
-    );
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    if let Some(item_uri) = uri.or(id)
+      && self.has_gateway() {
+        self
+          .handle
+          .bluetooth
+          .gateway_man
+          .broadcast_command(BridgeToGatewayLibraryMsgCommand::FavoritesSet(gateway::FavoritesSet {
+            item: ItemRef {
+              uri: item_uri,
+              kind: ItemKind::Track,
+              persistent_id: None,
+            },
+            liked: saved,
+          }))
+          .await;
+      }
+    self.ack().await
   }
 
   async fn spotify_summon_dj(&self) -> HandlerResult {
-    tracing::debug!("({}) summoning Spotify DJ", &self.handle.from);
-    // Ok(self.handle.respond().await?)
-    Ok(())
+    self.forward_play(DJ_PLAYLIST_URI.to_string()).await
   }
 
   async fn spotify_play_uri(
     &self,
     uri: String,
-    feature_identifier: String,
-    interaction_id: Option<String>,
-    skip_to_uri: Option<String>,
-    skip_to_uid: Option<String>,
+    _feature_identifier: String,
+    _interaction_id: Option<String>,
+    _skip_to_uri: Option<String>,
+    _skip_to_uid: Option<String>,
   ) -> HandlerResult {
-    tracing::debug!(
-      "({}) playing Spotify uri: {}, feature identifier: {}, interaction id: {:?}, skip to uri: {:?}, skip to uid: {:?}",
-      &self.handle.from,
-      uri,
-      feature_identifier,
-      interaction_id,
-      skip_to_uri,
-      skip_to_uid
-    );
-    // Ok(self.handle.respond().await?)
+    self.forward_play(uri).await
+  }
+
+  async fn forward_play(&self, uri: String) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.ack().await;
+    }
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast_command(BridgeToGatewayPlayerMsgCommand::Play(gateway::PlayUri {
+        uri,
+        context: None,
+      }))
+      .await;
+    self.ack().await
+  }
+
+  fn has_gateway(&self) -> bool {
+    self.handle.state.capabilities.snapshot().gateway.is_some()
+  }
+
+  async fn ack(&self) -> HandlerResult {
+    self
+      .handle
+      .send_stock(StockInterAppSend::make_ack(self.handle.stock_msg_id))
+      .await?;
     Ok(())
   }
+}
+
+fn limit_to_u32(limit: usize) -> u32 {
+  u32::try_from(limit).unwrap_or(STOCK_BROWSE_LIMIT_MAX)
+}
+
+fn offset_to_u32(offset: Option<usize>) -> u32 {
+  offset.and_then(|o| u32::try_from(o).ok()).unwrap_or(0)
+}
+
+fn log_request_failure(verb: &str, err: &RequestError<gateway::LibraryErrorReply>) {
+  match err {
+    RequestError::Domain(domain) => {
+      tracing::debug!(?domain.error, "{verb} returned domain error; sending stock fallback");
+    }
+    RequestError::Protocol(err) => {
+      tracing::warn!(?err, "{verb} protocol error; sending stock fallback");
+    }
+    RequestError::ResponseMismatch => {
+      tracing::error!("{verb} response did not match expected shape; sending stock fallback");
+    }
+  }
+}
+
+fn canned_tips() -> Vec<StockTip> {
+  vec![
+    StockTip {
+      id: 1,
+      title: "running on bridgething".into(),
+      description: "this car thing is alive thanks to thinglabs.".into(),
+      action: "".into(),
+    },
+    StockTip {
+      id: 2,
+      title: "no spotify required".into(),
+      description: "your phone's the boss now. spotify, apple music, whatever you connect.".into(),
+      action: "".into(),
+    },
+    StockTip {
+      id: 3,
+      title: "press the wheel to chill".into(),
+      description: "single click pauses, double-click skips. classic car thing moves.".into(),
+      action: "".into(),
+    },
+  ]
 }

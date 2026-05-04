@@ -152,11 +152,7 @@ impl TelephonyManager {
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
   }
 
-  pub async fn apply_companion_call_ended(
-    &self,
-    call_id: String,
-    reason: CallEndReason,
-  ) -> Result<(), TelephonyError> {
+  pub async fn apply_companion_call_ended(&self, call_id: String, reason: CallEndReason) -> Result<(), TelephonyError> {
     {
       let mut inner = self.inner.write().await;
       inner.calls.remove(&call_id);
