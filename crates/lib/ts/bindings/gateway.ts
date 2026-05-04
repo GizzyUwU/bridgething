@@ -5,6 +5,7 @@ import type {
   BrowseResult,
   CallEndReason,
   CompanionAuthorityScope,
+  ConfigEntry,
   DismissReason,
   FavoritesPage,
   ForwardMessage,
@@ -228,7 +229,11 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'switched'; data: WebappActive }
   | { event: 'installed'; data: WebappInfo }
   | { event: 'uninstalled'; data: WebappActive }
-  | { event: 'webappError'; data: WebappError };
+  | { event: 'webappError'; data: WebappError }
+  | { event: 'icon'; data: WebappIconReply }
+  | { event: 'configGet'; data: WebappConfigGetReply }
+  | { event: 'configList'; data: WebappConfigListReply }
+  | { event: 'configAck'; data: WebappConfigAck };
 
 export type BrowseReply = { result: BrowseResult };
 
@@ -385,7 +390,12 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'getActive' }
   | { event: 'switchTo'; data: WebappSwitchTo }
   | { event: 'install'; data: WebappInstall }
-  | { event: 'uninstall'; data: WebappUninstall };
+  | { event: 'uninstall'; data: WebappUninstall }
+  | { event: 'icon'; data: WebappIcon }
+  | { event: 'configGet'; data: WebappConfigGet }
+  | { event: 'configList'; data: WebappConfigList }
+  | { event: 'configSet'; data: WebappConfigSet }
+  | { event: 'configDelete'; data: WebappConfigDelete };
 
 export type GeoErrorReply = { error: GeoError };
 
@@ -627,24 +637,53 @@ export type TtsStarted = { id: Uint8Array };
  */
 export type VolumeChanged = { level: number; muted: boolean };
 
-export type WebappActive = { name: string };
+export type WebappActive = { id: string | null; name: string | null };
+
+/**
+ * Ack for WebappConfigSet / WebappConfigDelete. The `value` field
+ * echoes what's now stored after the write (None for delete).
+ */
+export type WebappConfigAck = { key: string; value: string | null };
+
+export type WebappConfigDelete = { id: string; key: string };
+
+export type WebappConfigGet = { id: string; key: string };
+
+export type WebappConfigGetReply = { key: string; value: string | null };
+
+export type WebappConfigList = { id: string };
+
+export type WebappConfigListReply = { entries: Array<ConfigEntry> };
+
+export type WebappConfigSet = { id: string; key: string; value: string };
 
 export type WebappError =
-  | { type: 'unknownWebapp'; data: { name: string } }
-  | { type: 'cannotUninstallBuiltin'; data: { name: string } }
-  | { type: 'installFailed'; data: { reason: string } };
+  | { type: 'webappNotFound'; data: { id: string } }
+  | { type: 'cannotUninstallBuiltin'; data: { id: string } }
+  | { type: 'installFailed'; data: { reason: string } }
+  | { type: 'iconNotAvailable'; data: { id: string } }
+  | { type: 'unknownConfigKey'; data: { key: string } }
+  | { type: 'invalidConfigValue'; data: { key: string; reason: string } };
+
+/**
+ * Icon byte fetch. Daemon reads the icon declared by the manifest from
+ * the bundle directory and returns the bytes + mime.
+ */
+export type WebappIcon = { id: string };
+
+export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
 
 export type WebappInstall = {
-  name: string;
   /**
    * zip archive whose top-level entries become the bundle contents.
-   * Must include an `index.html` at the archive root.
+   * Must include an `index.html` and a valid `manifest.json` at the
+   * archive root. The bundle's identity comes from the manifest's id.
    */
   archive: Uint8Array;
 };
 
 export type WebappList = { webapps: Array<WebappInfo> };
 
-export type WebappSwitchTo = { name: string };
+export type WebappSwitchTo = { id: string };
 
-export type WebappUninstall = { name: string };
+export type WebappUninstall = { id: string };

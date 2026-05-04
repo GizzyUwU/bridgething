@@ -170,24 +170,18 @@ async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx)
   })
 }
 
-/// Looks up the active webapp's bundle directory at request time. Falls
-/// back to the configured default if the persisted active app no longer
-/// resolves (e.g. it was uninstalled while the daemon was down).
 async fn resolve_active_webapp(state: &BridgeThingState) -> Option<PathBuf> {
-  let name = match state.active_webapp().await {
-    Ok(n) => n,
+  let id = match state.active_webapp().await {
+    Ok(Some(id)) => id,
+    Ok(None) => return None,
     Err(err) => {
       tracing::warn!(?err, "failed to read active webapp; treating as no active webapp");
       return None;
     }
   };
-  state.webapps.resolve(&name)
+  state.webapps.resolve(id).await
 }
 
-/// Pumps the request through a `ServeDir` rooted at the given directory.
-/// Constructed per-request because the active webapp can change at runtime;
-/// `ServeDir::new` is cheap (no fs walk) and reusing one across requests
-/// would freeze the kiosk on the boot-time webapp.
 async fn serve_from_dir(dir: PathBuf, req: Request<Body>) -> Response {
   let svc = ServeDir::new(dir).precompressed_gzip();
   match svc.oneshot(req).await {

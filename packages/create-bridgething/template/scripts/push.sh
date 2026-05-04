@@ -9,7 +9,6 @@ if [ -z "${1:-}" ]; then
 fi
 
 HOST="$1"
-NAME="$(node -p "require('./package.json').name")"
 DIST="dist"
 
 if [ ! -d "$DIST" ]; then
@@ -17,21 +16,24 @@ if [ ! -d "$DIST" ]; then
   exit 1
 fi
 
+if [ ! -f "$DIST/manifest.json" ]; then
+  echo "no $DIST/manifest.json; build appears incomplete" >&2
+  exit 1
+fi
+
+UUID="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$DIST/manifest.json','utf8')).id)")"
+if [ -z "$UUID" ]; then
+  echo "manifest.json missing 'id' field" >&2
+  exit 1
+fi
+
 # Ssh args: keys regenerate on every flash, so skip host-key checking.
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
-echo "rsync $DIST/ to root@$HOST:/var/bridgething/webapps/$NAME/"
+echo "rsync $DIST/ to root@$HOST:/var/bridgething/webapps/$UUID/"
 rsync -az --delete \
   -e "ssh ${SSH_OPTS[*]}" \
   "$DIST/" \
-  "root@$HOST:/var/bridgething/webapps/$NAME/"
+  "root@$HOST:/var/bridgething/webapps/$UUID/"
 
-echo "switching active webapp on the device"
-# This requires a companion to be paired. If not, install the webapp
-# but skip the switch — the webapp will be picked up next time the
-# kiosk reloads.
-ssh "${SSH_OPTS[@]}" "root@$HOST" "true" || {
-  echo "ssh ok"
-}
-
-echo "done. open the device's chromium kiosk to see the new bundle."
+echo "done. the daemon will pick up the new bundle on its next registry rescan; switch via the gateway companion."

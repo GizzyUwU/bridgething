@@ -1,0 +1,8 @@
+{
+  "id": "__WEBAPP_UUID__",
+  "name": "__PROJECT_NAME__",
+  "version": "0.1.0",
+  "description": "",
+  "config": [],
+  "permissions": []
+}

@@ -31,6 +31,9 @@ public object GatewayToBridgeMsgDataSerializer :
 public object ImageSerializer :
     KSerializer<Image> by AdjacentTaggedSerializer(Image::class, discriminator = "type")
 
+public object ConfigFieldSerializer :
+    KSerializer<ConfigField> by AdjacentTaggedSerializer(ConfigField::class, discriminator = "type")
+
 public object BridgeToGatewayAssetMsgSerializer :
     KSerializer<BridgeToGatewayAssetMsg> by AdjacentTaggedSerializer(
         BridgeToGatewayAssetMsg::class,

@@ -3,6 +3,7 @@ use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
+use uuid::Uuid;
 
 /// Marker struct for the `List` request — pairs with `BridgeToGatewayWebappMsg::Webapps`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
@@ -41,7 +42,9 @@ pub struct GetActiveWebapp;
   error_variant = WebappError,
 )]
 pub struct WebappSwitchTo {
-  pub name: String,
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
 }
 
 #[typeshare]
@@ -60,9 +63,9 @@ pub struct WebappSwitchTo {
   error_variant = WebappError,
 )]
 pub struct WebappInstall {
-  pub name: String,
   /// zip archive whose top-level entries become the bundle contents.
-  /// Must include an `index.html` at the archive root.
+  /// Must include an `index.html` and a valid `manifest.json` at the
+  /// archive root. The bundle's identity comes from the manifest's id.
   #[debug(skip)]
   #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
@@ -84,7 +87,115 @@ pub struct WebappInstall {
   error_variant = WebappError,
 )]
 pub struct WebappUninstall {
-  pub name: String,
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+}
+
+/// Icon byte fetch. Daemon reads the icon declared by the manifest from
+/// the bundle directory and returns the bytes + mime.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = Icon,
+  response = crate::gateway::WebappIconReply,
+  response_variant = Icon,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappIcon {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = ConfigGet,
+  response = crate::gateway::WebappConfigGetReply,
+  response_variant = ConfigGet,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappConfigGet {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+  pub key: String,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = ConfigList,
+  response = crate::gateway::WebappConfigListReply,
+  response_variant = ConfigList,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappConfigList {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = ConfigSet,
+  response = crate::gateway::WebappConfigAck,
+  response_variant = ConfigAck,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappConfigSet {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+  pub key: String,
+  pub value: String,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = Webapp,
+  request_variant = ConfigDelete,
+  response = crate::gateway::WebappConfigAck,
+  response_variant = ConfigAck,
+  error = crate::gateway::WebappError,
+  error_variant = WebappError,
+)]
+pub struct WebappConfigDelete {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub id: Uuid,
+  pub key: String,
 }
 
 #[typeshare]
@@ -111,4 +222,15 @@ pub enum GatewayToBridgeWebappMsg {
   /// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
   #[bridge_request]
   Uninstall(WebappUninstall),
+  /// request: bridge replies with `Icon`
+  #[bridge_request]
+  Icon(WebappIcon),
+  #[bridge_request]
+  ConfigGet(WebappConfigGet),
+  #[bridge_request]
+  ConfigList(WebappConfigList),
+  #[bridge_request]
+  ConfigSet(WebappConfigSet),
+  #[bridge_request]
+  ConfigDelete(WebappConfigDelete),
 }

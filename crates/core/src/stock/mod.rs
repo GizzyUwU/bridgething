@@ -92,11 +92,6 @@ pub enum StockSendMsg {
   Unsupported,
 }
 
-/// Translate a modern `BridgeToClientMsg` into a stock-format `StockSendMsg`.
-/// `stock_msg_id` is the inter-app correlation id from the originating
-/// `StockInterApp` request; it lives outside the modern wire type and is
-/// threaded through the connection layer so the modern `BridgeToClientMsg`
-/// stays free of stock-specific fields.
 pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>) -> StockSendMsg {
   match msg.data {
     BridgeToClientMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
@@ -135,10 +130,11 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
-    // Surfaces with no stock equivalent. §4 stock translation rewire will
-    // wire mappings where they exist.
+
+    // Surfaces with no stock equivalent yet
     BridgeToClientMsgData::Audio(_)
     | BridgeToClientMsgData::Capabilities(_)
+    | BridgeToClientMsgData::Config(_)
     | BridgeToClientMsgData::Geo(_)
     | BridgeToClientMsgData::Hardware(_)
     | BridgeToClientMsgData::Library(_)

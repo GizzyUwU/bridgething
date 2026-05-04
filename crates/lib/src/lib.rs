@@ -11,18 +11,18 @@ pub mod protocol;
 
 pub use shared::{
   Album, Artist, AssetRetention, AudioCapabilities, BridgeThingMeta, BrightnessMode, BrightnessState, BrowseEntry,
-  BrowseFolder, BrowseResult, CARTHING_HACKS_LOGO, CallEndReason, Capabilities, CompanionAuthorityScope,
-  CurrentlyActiveApplication, Device, DeviceType, Diagnostics, DismissReason, FavoritesPage, ForwardMessage,
-  GatewayCapabilities, GatewayInfo, GeoAccuracy, GeoError, HardwareError, HardwareState, HttpHeader, HttpMethod,
-  IMAGE_SIZE, Image, ItemKind, ItemRef, LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry, LogLevel,
-  LogSource, MediaItem, MediaItemUpdate, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
-  Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationError, NotificationFlags,
-  NotificationsPage, NowPlayingUpdate, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall, PhoneCallDirection,
-  PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback, PlaybackOptions, PlaybackQueue, PlaybackRestrictions,
-  PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position, Priority,
-  QueueItem, QueuePosition, RecommendationsResult, RepeatMode, SearchResult, Show, Station, StreamBegin, StreamChunk,
-  StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, VoiceDescriptor,
-  WebappInfo, WebappSource, WsError, WsFrame, to_slug,
+  BrowseFolder, BrowseResult, CARTHING_HACKS_LOGO, CallEndReason, Capabilities, CompanionAuthorityScope, ConfigEntry,
+  ConfigField, CurrentlyActiveApplication, Device, DeviceType, Diagnostics, DismissReason, FavoritesPage,
+  ForwardMessage, GatewayCapabilities, GatewayInfo, GeoAccuracy, GeoError, HardwareError, HardwareState, HttpHeader,
+  HttpMethod, IMAGE_SIZE, Image, ItemKind, ItemRef, LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry,
+  LogLevel, LogSource, MediaItem, MediaItemUpdate, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo,
+  NetworkKind, Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationError,
+  NotificationFlags, NotificationsPage, NowPlayingUpdate, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
+  PhoneCallDirection, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback, PlaybackOptions, PlaybackQueue,
+  PlaybackRestrictions, PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist,
+  PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RecommendationsResult, RepeatMode, SearchResult, Show,
+  Station, StreamBegin, StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track,
+  TtlRetention, VoiceDescriptor, WebappInfo, WebappManifest, WebappSource, WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

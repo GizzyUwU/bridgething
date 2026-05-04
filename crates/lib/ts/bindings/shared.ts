@@ -16,6 +16,8 @@ export type AssetRetention =
  */
 export type AudioCapabilities = { earcons: Array<string>; voices: Array<VoiceDescriptor> };
 
+export type BoolField = { key: string; label: string; default: boolean | null };
+
 /**
  * Bridge-side identity announce. Daemon sends one of these to every
  * gateway on connect (companion needs to know what daemon it's talking
@@ -106,6 +108,24 @@ export type Capabilities = {
  */
 export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback';
 
+/**
+ * One key/value pair as exposed by config read APIs. `value` is always a
+ * string; consumers parse per the field's declared kind (number → parseFloat,
+ * boolean → "true"/"false", string/enum/secret → as-is).
+ */
+export type ConfigEntry = { key: string; value: string };
+
+/**
+ * One declared user-tunable setting. Adjacent-tagged on the wire to
+ * stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
+ */
+export type ConfigField =
+  | { type: 'string'; data: StringField }
+  | { type: 'number'; data: NumberField }
+  | { type: 'boolean'; data: BoolField }
+  | { type: 'enum'; data: EnumField }
+  | { type: 'secret'; data: StringField };
+
 export type CurrentlyActiveApplication = { id: string; name: string };
 
 export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
@@ -136,6 +156,8 @@ export type Diagnostics = {
  * surface both as `Acted`.
  */
 export type DismissReason = 'userDismissed' | 'acted' | 'remoteDismissed';
+
+export type EnumField = { key: string; label: string; choices: Array<string>; default: string | null };
 
 /**
  * Page of the user's favorited / liked / saved library items. Mixed-kind
@@ -401,6 +423,15 @@ export type NotificationsPage = { items: Array<Notification>; nextPageToken: str
  */
 export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null; playback: PlaybackUpdate | null };
 
+export type NumberField = {
+  key: string;
+  label: string;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  default: number | null;
+};
+
 export type Peer = { device: Device; paired: boolean; iap2: PeerIap2Status; companion: PeerCompanionStatus };
 
 export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { type: 'connected'; data: GatewayInfo };
@@ -664,6 +695,15 @@ export type StreamEnd = { streamId: string };
  */
 export type StreamError = { streamId: string; error: NetError };
 
+export type StringField = {
+  key: string;
+  label: string;
+  pattern: string | null;
+  minLength: number | null;
+  maxLength: number | null;
+  default: string | null;
+};
+
 /**
  * Bool feature flags the daemon exposes to webapps. Each is true when the
  * surface has both a backing implementation and (where applicable) a
@@ -706,13 +746,33 @@ export type TtlRetention = { seconds: number };
  */
 export type VoiceDescriptor = { id: string; name: string; locale: string };
 
-export type WebappInfo = { name: string; source: WebappSource; version: string | null; description: string | null };
+export type WebappInfo = {
+  id: string;
+  name: string;
+  source: WebappSource;
+  version: string;
+  description: string | null;
+  iconAvailable: boolean;
+  iconMime: string | null;
+  config: Array<ConfigField>;
+  permissions: Array<string>;
+};
 
 /**
- * Source of a webapp bundle. Built-in apps live in the read-only image
- * (rootfs) and cannot be uninstalled. Installed apps live on the data
- * partition and shadow built-ins of the same name.
+ * On-disk `manifest.json` shape. Read from the bundle at install time
+ * and validated; the resulting metadata projects to `WebappInfo` for
+ * the wire.
  */
+export type WebappManifest = {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  icon: string | null;
+  config: Array<ConfigField>;
+  permissions: Array<string>;
+};
+
 export type WebappSource = 'builtin' | 'installed';
 
 export type WsError =

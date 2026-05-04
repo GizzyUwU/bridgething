@@ -42,6 +42,8 @@ pub enum ClientToBridgeMsgData {
   #[from]
   Capabilities(ClientToBridgeCapabilitiesMsg),
   #[from]
+  Config(ClientToBridgeConfigMsg),
+  #[from]
   Geo(ClientToBridgeGeoMsg),
   #[from]
   Hardware(ClientToBridgeHardwareMsg),
@@ -100,6 +102,8 @@ pub enum BridgeToClientMsgData {
   Bluetooth(BridgeToClientBluetoothMsg),
   #[from]
   Capabilities(BridgeToClientCapabilitiesMsg),
+  #[from]
+  Config(BridgeToClientConfigMsg),
   #[from]
   Geo(BridgeToClientGeoMsg),
   #[from]

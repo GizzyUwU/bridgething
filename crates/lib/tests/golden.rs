@@ -28,6 +28,8 @@ const PRIORITY_BULK: u8 = 0x01;
 
 const FIXED_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000001";
 const FIXED_REQUEST_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000099";
+const FIXED_STOCK_WEBAPP: &str = "0192f2a0-bbb0-7c00-a000-000000000100";
+const FIXED_DEMO_WEBAPP: &str = "0192f2a0-bbb0-7c00-a000-000000000101";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct GoldenFile {
@@ -291,16 +293,26 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Webapps(WebappList {
         webapps: vec![
           WebappInfo {
-            name: "stock".into(),
+            id: FIXED_STOCK_WEBAPP.parse().unwrap(),
+            name: "Stock".into(),
             source: WebappSource::Builtin,
-            version: Some("8.9.2".into()),
+            version: "8.9.2".into(),
             description: Some("Spotify Car Thing stock UI".into()),
+            icon_available: false,
+            icon_mime: None,
+            config: vec![],
+            permissions: vec![],
           },
           WebappInfo {
-            name: "demo".into(),
+            id: FIXED_DEMO_WEBAPP.parse().unwrap(),
+            name: "Demo".into(),
             source: WebappSource::Installed,
-            version: Some("0.1.0".into()),
+            version: "0.1.0".into(),
             description: None,
+            icon_available: true,
+            icon_mime: Some("image/png".into()),
+            config: vec![],
+            permissions: vec![],
           },
         ],
       })),
@@ -309,11 +321,14 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
 
   out.push(bridge_fixture(
     "bridge_to_gateway/webapp-active-response",
-    "response to a webapp GetActive request - currently active app name",
+    "response to a webapp GetActive request - currently active app id + display name",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
-      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Active(WebappActive { name: "stock".into() })),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Active(WebappActive {
+        id: Some(FIXED_STOCK_WEBAPP.parse().unwrap()),
+        name: Some("Stock".into()),
+      })),
     },
   ));
 
@@ -323,7 +338,10 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Event,
-      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(WebappActive { name: "demo".into() })),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Switched(WebappActive {
+        id: Some(FIXED_DEMO_WEBAPP.parse().unwrap()),
+        name: Some("Demo".into()),
+      })),
     },
   ));
 
@@ -334,10 +352,15 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
       data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Installed(WebappInfo {
-        name: "demo".into(),
+        id: FIXED_DEMO_WEBAPP.parse().unwrap(),
+        name: "Demo".into(),
         source: WebappSource::Installed,
-        version: Some("0.1.0".into()),
+        version: "0.1.0".into(),
         description: None,
+        icon_available: false,
+        icon_mime: None,
+        config: vec![],
+        permissions: vec![],
       })),
     },
   ));
@@ -349,19 +372,20 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
       data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Uninstalled(WebappActive {
-        name: "stock".into(),
+        id: Some(FIXED_STOCK_WEBAPP.parse().unwrap()),
+        name: Some("Stock".into()),
       })),
     },
   ));
 
   out.push(bridge_fixture(
     "bridge_to_gateway/webapp-error-unknown",
-    "domain error: requested webapp is not installed and not built-in",
+    "domain error: requested webapp id is not installed",
     BridgeToGatewayMsg {
       id: id(),
       meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
-      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(WebappError::UnknownWebapp {
-        name: "ghost".into(),
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappError(WebappError::WebappNotFound {
+        id: FIXED_DEMO_WEBAPP.into(),
       })),
     },
   ));
@@ -520,7 +544,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       id: id(),
       meta: GatewayMsgMeta::Command,
       data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::SwitchTo(WebappSwitchTo {
-        name: "demo".into(),
+        id: FIXED_DEMO_WEBAPP.parse().unwrap(),
       })),
     },
   ));
@@ -532,7 +556,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       id: id(),
       meta: GatewayMsgMeta::Command,
       data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Install(WebappInstall {
-        name: "demo".into(),
         archive: fingerprint_bytes(),
       })),
     },
@@ -545,7 +568,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       id: id(),
       meta: GatewayMsgMeta::Command,
       data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Uninstall(WebappUninstall {
-        name: "demo".into(),
+        id: FIXED_DEMO_WEBAPP.parse().unwrap(),
       })),
     },
   ));

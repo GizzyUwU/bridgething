@@ -1,4 +1,5 @@
 use libbridgething::client::{ClientToBridgeStoreMsgRequest, KVDelete, KVGet, KVPut, StorageResponse};
+use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
 use crate::stock::StockSetupSend;
@@ -16,20 +17,18 @@ impl StorageHandler {
   pub async fn handle(&mut self, msg: ClientToBridgeStoreMsgRequest) -> HandlerResult {
     tracing::debug!("({}) handling storage message", &self.handle.from);
 
+    let app_id = self.handle.state.active_webapp().await?.unwrap_or(Uuid::nil());
     match msg {
-      ClientToBridgeStoreMsgRequest::Get(KVGet { key }) => self.get(key).await,
-      ClientToBridgeStoreMsgRequest::Put(KVPut { key, value }) => self.put(key, value).await,
-      ClientToBridgeStoreMsgRequest::Delete(KVDelete { key }) => self.delete(key).await,
+      ClientToBridgeStoreMsgRequest::Get(KVGet { key }) => self.get(app_id, key).await,
+      ClientToBridgeStoreMsgRequest::Put(KVPut { key, value }) => self.put(app_id, key, value).await,
+      ClientToBridgeStoreMsgRequest::Delete(KVDelete { key }) => self.delete(app_id, key).await,
     }
   }
 
-  async fn get(&self, key: String) -> HandlerResult {
+  async fn get(&self, app_id: Uuid, key: String) -> HandlerResult {
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
-    #[cfg(debug_assertions)]
-    let mut value = self.handle.state.get_storage_key(&key).await?;
 
-    #[cfg(not(debug_assertions))]
-    let value = self.handle.state.get_storage_key(&key).await?;
+    let mut value = self.handle.state.data_get(app_id, &key).await?;
 
     // handle for stock firmware
     if &key == "onboarding_status" {
@@ -56,9 +55,9 @@ impl StorageHandler {
     Ok(self.handle.respond_to::<KVGet>(StorageResponse { key, value }).await?)
   }
 
-  async fn put(&mut self, key: String, value: String) -> HandlerResult {
+  async fn put(&mut self, app_id: Uuid, key: String, value: String) -> HandlerResult {
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
-    self.handle.state.set_storage_key(key.clone(), value.clone()).await?;
+    self.handle.state.data_set(app_id, &key, value.clone()).await?;
 
     Ok(
       self
@@ -71,9 +70,9 @@ impl StorageHandler {
     )
   }
 
-  async fn delete(&mut self, key: String) -> HandlerResult {
+  async fn delete(&mut self, app_id: Uuid, key: String) -> HandlerResult {
     tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
-    self.handle.state.del_storage_key(&key).await?;
+    self.handle.state.data_delete(app_id, &key).await?;
 
     Ok(
       self

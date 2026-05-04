@@ -10,7 +10,7 @@ homepage.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-uuid = { workspace = true, features = ["v7", "serde", "fast-rng"] }
+uuid = { workspace = true, features = ["v5", "v7", "serde", "fast-rng"] }
 serde_with = { workspace = true, features = ["json"] }
 derive_more = { workspace = true, features = ["debug", "from"] }
 paste = "1.0.15"

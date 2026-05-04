@@ -6,6 +6,7 @@ import type {
   BrowseResult,
   CallEndReason,
   Capabilities,
+  ConfigEntry,
   Device,
   Diagnostics,
   DismissReason,
@@ -114,6 +115,11 @@ export type BridgeToClientCapabilitiesMsg =
   | { event: 'update'; data: CapabilitiesSnapshot }
   | { event: 'snapshot'; data: CapabilitiesSnapshot };
 
+export type BridgeToClientConfigMsg =
+  | { event: 'get'; data: ConfigGetReply }
+  | { event: 'list'; data: ConfigListReply }
+  | { event: 'changed'; data: ConfigChanged };
+
 export type BridgeToClientGeoMsg =
   | { event: 'position'; data: Position }
   | { event: 'watchReply'; data: GeoWatchReply }
@@ -146,6 +152,7 @@ export type BridgeToClientMsgData =
   | { type: 'audio'; data: BridgeToClientAudioMsg }
   | { type: 'bluetooth'; data: BridgeToClientBluetoothMsg }
   | { type: 'capabilities'; data: BridgeToClientCapabilitiesMsg }
+  | { type: 'config'; data: BridgeToClientConfigMsg }
   | { type: 'geo'; data: BridgeToClientGeoMsg }
   | { type: 'hardware'; data: BridgeToClientHardwareMsg }
   | { type: 'library'; data: BridgeToClientLibraryMsg }
@@ -227,6 +234,7 @@ export type BridgeToClientWebappMsg =
   | { event: 'uninstalledReply'; data: WebappActiveReply }
   | { event: 'installedReply'; data: WebappInstalledReply }
   | { event: 'errorReply'; data: WebappErrorReply }
+  | { event: 'iconReply'; data: WebappIconReply }
   | { event: 'activeChanged'; data: WebappActiveChanged }
   | { event: 'webappInstalled'; data: WebappInstalledReply }
   | { event: 'installProgress'; data: WebappInstallProgress }
@@ -264,6 +272,8 @@ export type ClientToBridgeBluetoothMsg =
 
 export type ClientToBridgeCapabilitiesMsg = { event: 'get' };
 
+export type ClientToBridgeConfigMsg = { event: 'get'; data: ConfigGet } | { event: 'list' };
+
 export type ClientToBridgeGeoMsg =
   | { event: 'watch'; data: GeoWatch }
   | { event: 'unwatch'; data: GeoUnwatch }
@@ -295,6 +305,7 @@ export type ClientToBridgeMsgData =
   | { type: 'audio'; data: ClientToBridgeAudioMsg }
   | { type: 'bluetooth'; data: ClientToBridgeBluetoothMsg }
   | { type: 'capabilities'; data: ClientToBridgeCapabilitiesMsg }
+  | { type: 'config'; data: ClientToBridgeConfigMsg }
   | { type: 'geo'; data: ClientToBridgeGeoMsg }
   | { type: 'hardware'; data: ClientToBridgeHardwareMsg }
   | { type: 'library'; data: ClientToBridgeLibraryMsg }
@@ -374,7 +385,21 @@ export type ClientToBridgeWebappMsg =
   | { event: 'current' }
   | { event: 'activate'; data: WebappActivate }
   | { event: 'uninstall'; data: WebappUninstall }
-  | { event: 'install'; data: WebappInstall };
+  | { event: 'install'; data: WebappInstall }
+  | { event: 'icon'; data: WebappIcon };
+
+/**
+ * Broadcast when the gateway writes a new value for the active webapp.
+ * `value: None` means the entry was deleted; consumers should fall back
+ * to whatever default they declared.
+ */
+export type ConfigChanged = { key: string; value: string | null };
+
+export type ConfigGet = { key: string };
+
+export type ConfigGetReply = { key: string; value: string | null };
+
+export type ConfigListReply = { entries: Array<ConfigEntry> };
 
 export type ConnectBluetooth = { mac: string };
 
@@ -602,21 +627,31 @@ export type TtsStarted = { id: string };
 
 export type VolumeChanged = { level: number; muted: boolean };
 
-export type WebappActivate = { name: string };
+export type WebappActivate = { id: string };
 
 export type WebappActiveChanged = { name: string };
 
-export type WebappActiveReply = { name: string };
+export type WebappActiveReply = { id: string | null; name: string | null };
 
-export type WebappCurrentReply = { name: string | null };
+export type WebappCurrentReply = { id: string | null; name: string | null };
 
 export type WebappError =
   | { type: 'notFound'; data: { name: string } }
   | { type: 'alreadyInstalled'; data: { name: string } }
   | { type: 'invalidBundle'; data: { reason: string } }
-  | { type: 'installFailed'; data: { reason: string } };
+  | { type: 'installFailed'; data: { reason: string } }
+  | { type: 'webappNotFound'; data: { id: string } }
+  | { type: 'iconNotAvailable'; data: { id: string } };
 
 export type WebappErrorReply = { error: WebappError };
+
+/**
+ * Fetch the icon bytes for an installed webapp. Returns the raw bytes
+ * declared by the manifest's `icon` field.
+ */
+export type WebappIcon = { id: string };
+
+export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
 
 /**
  * Install a webapp from a previously-pushed `.zip` archive in the
@@ -631,6 +666,6 @@ export type WebappInstalledReply = { info: WebappInfo };
 
 export type WebappListReply = { webapps: Array<WebappInfo> };
 
-export type WebappUninstall = { name: string };
+export type WebappUninstall = { id: string };
 
 export type WebappUninstalled = { name: string };

@@ -17,6 +17,10 @@ import {
   type BrightnessState,
   type CapabilitiesSnapshot,
   type ClientToBridgeMsg,
+  type ConfigChanged,
+  type ConfigGet,
+  type ConfigGetReply,
+  type ConfigListReply,
   type ConnectBluetooth,
   type ConnectedDevice,
   type DiagnosticsReply,
@@ -115,6 +119,8 @@ import {
   type WebappActiveReply,
   type WebappCurrentReply,
   type WebappErrorReply,
+  type WebappIcon,
+  type WebappIconReply,
   type WebappInstall,
   type WebappInstallProgress,
   type WebappInstalledReply,
@@ -156,6 +162,12 @@ export type BluetoothInboundHandlers = {
 export type CapabilitiesInboundHandlers = {
   update: (msg: CapabilitiesSnapshot) => void;
   snapshot: (msg: CapabilitiesSnapshot) => void;
+};
+
+export type ConfigInboundHandlers = {
+  get: (msg: ConfigGetReply) => void;
+  list: (msg: ConfigListReply) => void;
+  changed: (msg: ConfigChanged) => void;
 };
 
 export type GeoInboundHandlers = {
@@ -239,6 +251,7 @@ export type WebappInboundHandlers = {
   uninstalledReply: (msg: WebappActiveReply) => void;
   installedReply: (msg: WebappInstalledReply) => void;
   errorReply: (msg: WebappErrorReply) => void;
+  iconReply: (msg: WebappIconReply) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
   webappInstalled: (msg: WebappInstalledReply) => void;
   installProgress: (msg: WebappInstallProgress) => void;
@@ -821,6 +834,109 @@ export class CapabilitiesSurface {
     if (d.type === 'capabilities') {
       const inner = d.data;
       if (inner.event === 'snapshot') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class ConfigSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Config::Get` from the daemon. */
+  onGet(handler: (msg: ConfigGetReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'config') return;
+      const inner = data.data;
+      if (inner.event !== 'get') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Config::List` from the daemon. */
+  onList(handler: (msg: ConfigListReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'config') return;
+      const inner = data.data;
+      if (inner.event !== 'list') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Config::Changed` from the daemon. */
+  onChanged(handler: (msg: ConfigChanged) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'config') return;
+      const inner = data.data;
+      if (inner.event !== 'changed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Config` variants. */
+  subscribe(handlers: ConfigInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<ConfigInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<ConfigInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'config') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'get': {
+          handlers.get?.(inner.data);
+          return;
+        }
+        case 'list': {
+          handlers.list?.(inner.data);
+          return;
+        }
+        case 'changed': {
+          handlers.changed?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Config: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async get(req: ConfigGet, options?: { timeoutMs?: number }): Promise<TypedRequestResult<ConfigGetReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'config', data: { event: 'get', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'config') {
+      const inner = d.data;
+      if (inner.event === 'get') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async list(options?: { timeoutMs?: number }): Promise<TypedRequestResult<ConfigListReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'config', data: { event: 'list' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'config') {
+      const inner = d.data;
+      if (inner.event === 'list') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -2524,6 +2640,18 @@ export class WebappSurface {
     });
   }
 
+  /** Subscribe to `Webapp::IconReply` from the daemon. */
+  onIconReply(handler: (msg: WebappIconReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'iconReply') return;
+      handler(inner.data);
+    });
+  }
+
   /** Subscribe to `Webapp::ActiveChanged` from the daemon. */
   onActiveChanged(handler: (msg: WebappActiveChanged) => void): () => void {
     return this._client.on(event => {
@@ -2611,6 +2739,10 @@ export class WebappSurface {
         }
         case 'errorReply': {
           handlers.errorReply?.(inner.data);
+          return;
+        }
+        case 'iconReply': {
+          handlers.iconReply?.(inner.data);
           return;
         }
         case 'activeChanged': {
@@ -2708,6 +2840,23 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'installedReply') return { ok: true, response: inner.data };
+      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async icon(
+    req: WebappIcon,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappIconReply, WebappErrorReply>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'iconReply') return { ok: true, response: inner.data };
       if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -2914,6 +3063,7 @@ export type ClientMessageHandlers = {
   audio: AudioInboundHandlers;
   bluetooth: BluetoothInboundHandlers;
   capabilities: CapabilitiesInboundHandlers;
+  config: ConfigInboundHandlers;
   geo: GeoInboundHandlers;
   hardware: HardwareInboundHandlers;
   library: LibraryInboundHandlers;
@@ -2933,6 +3083,7 @@ export type PartialClientMessageHandlers = {
   audio?: Partial<AudioInboundHandlers>;
   bluetooth?: Partial<BluetoothInboundHandlers>;
   capabilities?: Partial<CapabilitiesInboundHandlers>;
+  config?: Partial<ConfigInboundHandlers>;
   geo?: Partial<GeoInboundHandlers>;
   hardware?: Partial<HardwareInboundHandlers>;
   library?: Partial<LibraryInboundHandlers>;
@@ -2957,6 +3108,8 @@ declare module './index' {
     readonly bluetooth: BluetoothSurface;
     /** Methods scoped to the `Capabilities` wire surface. */
     readonly capabilities: CapabilitiesSurface;
+    /** Methods scoped to the `Config` wire surface. */
+    readonly config: ConfigSurface;
     /** Methods scoped to the `Geo` wire surface. */
     readonly geo: GeoSurface;
     /** Methods scoped to the `Hardware` wire surface. */
@@ -2996,6 +3149,7 @@ type ClientSurfaceCache = {
   audio?: AudioSurface;
   bluetooth?: BluetoothSurface;
   capabilities?: CapabilitiesSurface;
+  config?: ConfigSurface;
   geo?: GeoSurface;
   hardware?: HardwareSurface;
   library?: LibrarySurface;
@@ -3057,6 +3211,14 @@ export function applyDispatch(): void {
     get(this: BridgethingClient): CapabilitiesSurface {
       const bucket = bucketFor(this);
       return (bucket.capabilities ??= new CapabilitiesSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'config', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): ConfigSurface {
+      const bucket = bucketFor(this);
+      return (bucket.config ??= new ConfigSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'geo', {
@@ -3297,6 +3459,32 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           default: {
             if (!partial) c.logger.warn('Capabilities: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'config': {
+        const innerHandlers = handlers.config;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for config');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'get': {
+            innerHandlers.get?.(inner.data);
+            return;
+          }
+          case 'list': {
+            innerHandlers.list?.(inner.data);
+            return;
+          }
+          case 'changed': {
+            innerHandlers.changed?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Config: no handler for inner', inner);
             return;
           }
         }
@@ -3663,6 +3851,10 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'errorReply': {
             innerHandlers.errorReply?.(inner.data);
+            return;
+          }
+          case 'iconReply': {
+            innerHandlers.iconReply?.(inner.data);
             return;
           }
           case 'activeChanged': {

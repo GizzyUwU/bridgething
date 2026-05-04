@@ -1,10 +1,23 @@
 use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::WebappInfo;
 
+#[serde_with::serde_as]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+pub struct WebappIconReply {
+  #[serde_as(as = "serde_with::Bytes")]
+  #[ts(type = "Uint8Array")]
+  pub bytes: Vec<u8>,
+  pub mime: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct WebappListReply {
@@ -16,17 +29,22 @@ pub struct WebappListReply {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct WebappCurrentReply {
+  #[ts(type = "string | null")]
+  pub id: Option<Uuid>,
   pub name: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct WebappActiveReply {
-  pub name: String,
+  #[ts(type = "string | null")]
+  pub id: Option<Uuid>,
+  pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct WebappInstalledReply {
@@ -47,6 +65,10 @@ pub enum WebappError {
   /// Install failed for a reason orthogonal to the bundle (disk full,
   /// asset id not in cache, etc.).
   InstallFailed { reason: String },
+  /// No installed webapp matches this id.
+  WebappNotFound { id: String },
+  /// The webapp's manifest doesn't declare an icon (or it's missing on disk).
+  IconNotAvailable { id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -79,7 +101,7 @@ pub struct WebappUninstalled {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
@@ -96,6 +118,8 @@ pub enum BridgeToClientWebappMsg {
   InstalledReply(WebappInstalledReply),
   #[bridge_response]
   ErrorReply(WebappErrorReply),
+  #[bridge_response]
+  IconReply(WebappIconReply),
   #[bridge_event]
   ActiveChanged(WebappActiveChanged),
   #[bridge_event]

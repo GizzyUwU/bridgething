@@ -1,8 +1,5 @@
 use sea_orm::entity::prelude::*;
 
-/// Single-row scalar values that don't deserve their own table:
-/// `active_webapp` and `last_device`. Schemaless on the value side -
-/// callers serialize/deserialize the string they expect.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "meta")]
 pub struct Model {

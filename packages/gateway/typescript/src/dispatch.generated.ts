@@ -91,7 +91,16 @@ import {
   type TtsStarted,
   type VolumeChanged,
   type WebappActive,
+  type WebappConfigAck,
+  type WebappConfigDelete,
+  type WebappConfigGet,
+  type WebappConfigGetReply,
+  type WebappConfigList,
+  type WebappConfigListReply,
+  type WebappConfigSet,
   type WebappError,
+  type WebappIcon,
+  type WebappIconReply,
   type WebappInfo,
   type WebappInstall,
   type WebappList,
@@ -2206,6 +2215,96 @@ export class WebappSurface {
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async icon(
+    deviceId: string,
+    req: WebappIcon,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configGet(
+    deviceId: string,
+    req: WebappConfigGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configList(
+    deviceId: string,
+    req: WebappConfigList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configSet(
+    deviceId: string,
+    req: WebappConfigSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configDelete(
+    deviceId: string,
+    req: WebappConfigDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
 }
 
 export class AudioSurfaceForDevice {
@@ -4068,6 +4167,91 @@ export class WebappSurfaceForDevice {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async icon(
+    req: WebappIcon,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configGet(
+    req: WebappConfigGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configList(
+    req: WebappConfigList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configSet(
+    req: WebappConfigSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configDelete(
+    req: WebappConfigDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };

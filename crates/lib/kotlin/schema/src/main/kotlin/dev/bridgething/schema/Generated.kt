@@ -177,6 +177,13 @@ data class AuthorityRelease (
 	val scope: CompanionAuthorityScope
 )
 
+@Serializable
+data class BoolField (
+	val key: String,
+	val label: String,
+	val default: Boolean? = null
+)
+
 /// Bridge-side identity announce. Daemon sends one of these to every
 /// gateway on connect (companion needs to know what daemon it's talking
 /// to so it can opt out of unsupported surfaces). The companion's mirror
@@ -411,6 +418,15 @@ data class ChromeNavigate (
 	val url: String
 )
 
+/// One key/value pair as exposed by config read APIs. `value` is always a
+/// string; consumers parse per the field's declared kind (number → parseFloat,
+/// boolean → "true"/"false", string/enum/secret → as-is).
+@Serializable
+data class ConfigEntry (
+	val key: String,
+	val value: String
+)
+
 @Serializable
 enum class DeviceType(val string: String) {
 	@SerialName("android")
@@ -457,6 +473,14 @@ data class Diagnostics (
 @Serializable
 data class Earcon (
 	val name: String
+)
+
+@Serializable
+data class EnumField (
+	val key: String,
+	val label: String,
+	val choices: List<String>,
+	val default: String? = null
 )
 
 /// Fired when the favorited / liked status of an item changes —
@@ -1207,6 +1231,16 @@ data class NowPlayingUpdate (
 	val playback: PlaybackUpdate? = null
 )
 
+@Serializable
+data class NumberField (
+	val key: String,
+	val label: String,
+	val min: Double? = null,
+	val max: Double? = null,
+	val step: Double? = null,
+	val default: Double? = null
+)
+
 /// Drop the daemon-side partial for `update_id`. After `CancelUpdate`
 /// keeps the partial for resume; `OtaAbandon` is the explicit clean-up
 /// when the companion no longer wants to retry this artifact.
@@ -1737,6 +1771,16 @@ data class StreamError (
 	val error: NetError
 )
 
+@Serializable
+data class StringField (
+	val key: String,
+	val label: String,
+	val pattern: String? = null,
+	val minLength: UInt? = null,
+	val maxLength: UInt? = null,
+	val default: String? = null
+)
+
 /// Wall clock + locale snapshot. `tz_iana` is the IANA zone identifier
 /// (`America/Denver`, `Europe/London`); `locale` is BCP-47;
 /// `wall_clock_unix_s` is the gateway's claimed "now" in unix-epoch
@@ -1809,12 +1853,66 @@ data class VolumeChanged (
 
 @Serializable
 data class WebappActive (
-	val name: String
+	val id: ByteArray? = null,
+	val name: String? = null
 )
 
-/// Source of a webapp bundle. Built-in apps live in the read-only image
-/// (rootfs) and cannot be uninstalled. Installed apps live on the data
-/// partition and shadow built-ins of the same name.
+/// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
+/// echoes what's now stored after the write (None for delete).
+@Serializable
+data class WebappConfigAck (
+	val key: String,
+	val value: String? = null
+)
+
+@Serializable
+data class WebappConfigDelete (
+	val id: ByteArray,
+	val key: String
+)
+
+@Serializable
+data class WebappConfigGet (
+	val id: ByteArray,
+	val key: String
+)
+
+@Serializable
+data class WebappConfigGetReply (
+	val key: String,
+	val value: String? = null
+)
+
+@Serializable
+data class WebappConfigList (
+	val id: ByteArray
+)
+
+@Serializable
+data class WebappConfigListReply (
+	val entries: List<ConfigEntry>
+)
+
+@Serializable
+data class WebappConfigSet (
+	val id: ByteArray,
+	val key: String,
+	val value: String
+)
+
+/// Icon byte fetch. Daemon reads the icon declared by the manifest from
+/// the bundle directory and returns the bytes + mime.
+@Serializable
+data class WebappIcon (
+	val id: ByteArray
+)
+
+@Serializable
+data class WebappIconReply (
+	val bytes: ByteArray,
+	val mime: String? = null
+)
+
 @Serializable
 enum class WebappSource(val string: String) {
 	@SerialName("builtin")
@@ -1823,19 +1921,46 @@ enum class WebappSource(val string: String) {
 	Installed("installed"),
 }
 
+/// One declared user-tunable setting. Adjacent-tagged on the wire to
+/// stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
+@Serializable(with = ConfigFieldSerializer::class)
+sealed class ConfigField {
+	@Serializable
+	@SerialName("string")
+	data class String(val data: StringField): ConfigField()
+	@Serializable
+	@SerialName("number")
+	data class Number(val data: NumberField): ConfigField()
+	@Serializable
+	@SerialName("boolean")
+	data class Boolean(val data: BoolField): ConfigField()
+	@Serializable
+	@SerialName("enum")
+	data class Enum(val data: EnumField): ConfigField()
+	/// String semantics, masked in companion UI. No actual secure storage.
+	@Serializable
+	@SerialName("secret")
+	data class Secret(val data: StringField): ConfigField()
+}
+
 @Serializable
 data class WebappInfo (
+	val id: ByteArray,
 	val name: String,
 	val source: WebappSource,
-	val version: String? = null,
-	val description: String? = null
+	val version: String,
+	val description: String? = null,
+	val iconAvailable: Boolean,
+	val iconMime: String? = null,
+	val config: List<ConfigField>,
+	val permissions: List<String>
 )
 
 @Serializable
 data class WebappInstall (
-	val name: String,
 	/// zip archive whose top-level entries become the bundle contents.
-	/// Must include an `index.html` at the archive root.
+	/// Must include an `index.html` and a valid `manifest.json` at the
+	/// archive root. The bundle's identity comes from the manifest's id.
 	val archive: ByteArray
 )
 
@@ -1844,14 +1969,28 @@ data class WebappList (
 	val webapps: List<WebappInfo>
 )
 
+/// On-disk `manifest.json` shape. Read from the bundle at install time
+/// and validated; the resulting metadata projects to `WebappInfo` for
+/// the wire.
+@Serializable
+data class WebappManifest (
+	val id: ByteArray,
+	val name: String,
+	val version: String,
+	val description: String? = null,
+	val icon: String? = null,
+	val config: List<ConfigField>? = null,
+	val permissions: List<String>? = null
+)
+
 @Serializable
 data class WebappSwitchTo (
-	val name: String
+	val id: ByteArray
 )
 
 @Serializable
 data class WebappUninstall (
-	val name: String
+	val id: ByteArray
 )
 
 @Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
@@ -2078,6 +2217,18 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("webappError")
 	data class WebappError(val data: dev.bridgething.schema.WebappError): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("icon")
+	data class Icon(val data: WebappIconReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("configGet")
+	data class ConfigGet(val data: WebappConfigGetReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("configList")
+	data class ConfigList(val data: WebappConfigListReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("configAck")
+	data class ConfigAck(val data: WebappConfigAck): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -2344,6 +2495,22 @@ sealed class GatewayToBridgeWebappMsg {
 	@Serializable
 	@SerialName("uninstall")
 	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()
+	/// request: bridge replies with `Icon`
+	@Serializable
+	@SerialName("icon")
+	data class Icon(val data: WebappIcon): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("configGet")
+	data class ConfigGet(val data: WebappConfigGet): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("configList")
+	data class ConfigList(val data: WebappConfigList): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("configSet")
+	data class ConfigSet(val data: WebappConfigSet): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("configDelete")
+	data class ConfigDelete(val data: WebappConfigDelete): GatewayToBridgeWebappMsg()
 }
 
 @Serializable
@@ -2452,16 +2619,16 @@ enum class Priority(val string: String) {
 	Bulk("bulk"),
 }
 
-/// Generated type representing the anonymous struct variant `UnknownWebapp` of the `WebappError` Rust enum
+/// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum
 @Serializable
-data class WebappErrorUnknownWebappInner (
-	val name: String
+data class WebappErrorWebappNotFoundInner (
+	val id: String
 )
 
 /// Generated type representing the anonymous struct variant `CannotUninstallBuiltin` of the `WebappError` Rust enum
 @Serializable
 data class WebappErrorCannotUninstallBuiltinInner (
-	val name: String
+	val id: String
 )
 
 /// Generated type representing the anonymous struct variant `InstallFailed` of the `WebappError` Rust enum
@@ -2470,20 +2637,52 @@ data class WebappErrorInstallFailedInner (
 	val reason: String
 )
 
+/// Generated type representing the anonymous struct variant `IconNotAvailable` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorIconNotAvailableInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `UnknownConfigKey` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorUnknownConfigKeyInner (
+	val key: String
+)
+
+/// Generated type representing the anonymous struct variant `InvalidConfigValue` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInvalidConfigValueInner (
+	val key: String,
+	val reason: String
+)
+
 @Serializable(with = WebappErrorSerializer::class)
 sealed class WebappError {
-	/// The named webapp is not installed and not built-in.
+	/// No installed webapp matches this id.
 	@Serializable
-	@SerialName("unknownWebapp")
-	data class UnknownWebapp(val data: WebappErrorUnknownWebappInner): WebappError()
+	@SerialName("webappNotFound")
+	data class WebappNotFound(val data: WebappErrorWebappNotFoundInner): WebappError()
 	/// Built-in webapps cannot be uninstalled.
 	@Serializable
 	@SerialName("cannotUninstallBuiltin")
 	data class CannotUninstallBuiltin(val data: WebappErrorCannotUninstallBuiltinInner): WebappError()
-	/// The install archive could not be applied (corrupt zip, missing index.html, etc).
+	/// The install archive could not be applied (corrupt zip, missing
+	/// index.html, manifest validation failed, etc).
 	@Serializable
 	@SerialName("installFailed")
 	data class InstallFailed(val data: WebappErrorInstallFailedInner): WebappError()
+	/// The webapp's manifest doesn't declare an icon (or it's missing on disk).
+	@Serializable
+	@SerialName("iconNotAvailable")
+	data class IconNotAvailable(val data: WebappErrorIconNotAvailableInner): WebappError()
+	/// Config key is not declared in the webapp's manifest schema.
+	@Serializable
+	@SerialName("unknownConfigKey")
+	data class UnknownConfigKey(val data: WebappErrorUnknownConfigKeyInner): WebappError()
+	/// Value failed schema validation (out of range, regex mismatch, not in enum).
+	@Serializable
+	@SerialName("invalidConfigValue")
+	data class InvalidConfigValue(val data: WebappErrorInvalidConfigValueInner): WebappError()
 }
 
 /// Generated type representing the anonymous struct variant `Malformed` of the `WireError` Rust enum

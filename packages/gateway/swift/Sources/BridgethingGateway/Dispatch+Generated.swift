@@ -1588,6 +1588,81 @@ public struct WebappSurface: Sendable {
     }
   }
 
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func icon(deviceId: String, _ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .icon(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configGet(deviceId: String, _ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configList(deviceId: String, _ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configSet(deviceId: String, _ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configDelete(deviceId: String, _ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
 }
 
 /// Per-peer methods for the `Audio` wire surface (deviceId is baked in).
@@ -2956,6 +3031,81 @@ public struct WebappSurfaceForDevice: Sendable {
     case .webapp(let inner):
       switch inner {
       case .uninstalled(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func icon(_ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .icon(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configGet(_ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configList(_ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configSet(_ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configDelete(_ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }

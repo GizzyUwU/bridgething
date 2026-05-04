@@ -3,12 +3,58 @@ use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
+use uuid::Uuid;
 
-use crate::WebappInfo;
+use crate::{ConfigEntry, WebappInfo};
+
+#[typeshare]
+#[serde_with::serde_as]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappIconReply {
+  #[debug(skip)]
+  #[serde_as(as = "serde_with::Bytes")]
+  #[ts(type = "Uint8Array")]
+  pub bytes: Vec<u8>,
+  pub mime: Option<String>,
+}
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappConfigGetReply {
+  pub key: String,
+  pub value: Option<String>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappConfigListReply {
+  pub entries: Vec<ConfigEntry>,
+}
+
+/// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
+/// echoes what's now stored after the write (None for delete).
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappConfigAck {
+  pub key: String,
+  pub value: Option<String>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct WebappList {
@@ -21,12 +67,15 @@ pub struct WebappList {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct WebappActive {
-  pub name: String,
+  #[ts(type = "string | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub id: Option<Uuid>,
+  pub name: Option<String>,
 }
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 #[bridge_enum(into = crate::gateway::BridgeToGatewayMsgData)]
@@ -50,6 +99,14 @@ pub enum BridgeToGatewayWebappMsg {
   /// CannotUninstallBuiltin)
   #[bridge_response]
   WebappError(WebappError),
+  #[bridge_response]
+  Icon(WebappIconReply),
+  #[bridge_response]
+  ConfigGet(WebappConfigGetReply),
+  #[bridge_response]
+  ConfigList(WebappConfigListReply),
+  #[bridge_response]
+  ConfigAck(WebappConfigAck),
 }
 
 #[typeshare]
@@ -58,10 +115,17 @@ pub enum BridgeToGatewayWebappMsg {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub enum WebappError {
-  /// The named webapp is not installed and not built-in.
-  UnknownWebapp { name: String },
+  /// No installed webapp matches this id.
+  WebappNotFound { id: String },
   /// Built-in webapps cannot be uninstalled.
-  CannotUninstallBuiltin { name: String },
-  /// The install archive could not be applied (corrupt zip, missing index.html, etc).
+  CannotUninstallBuiltin { id: String },
+  /// The install archive could not be applied (corrupt zip, missing
+  /// index.html, manifest validation failed, etc).
   InstallFailed { reason: String },
+  /// The webapp's manifest doesn't declare an icon (or it's missing on disk).
+  IconNotAvailable { id: String },
+  /// Config key is not declared in the webapp's manifest schema.
+  UnknownConfigKey { key: String },
+  /// Value failed schema validation (out of range, regex mismatch, not in enum).
+  InvalidConfigValue { key: String, reason: String },
 }

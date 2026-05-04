@@ -1,8 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
-use libbridgething::{Device, GatewayInfo};
-use sea_orm::{DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, Set, TransactionTrait};
+use libbridgething::{Device, GatewayInfo, WebappManifest};
+use sea_orm::{
+  ColumnTrait, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter, Set, TransactionTrait,
+};
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 use crate::{
   asset::{AssetCache, AssetError},
@@ -26,11 +29,9 @@ use storage::{
   kv_storage::{Column as KvColumn, Entity as KvEntity},
   meta::{Column as MetaColumn, Entity as MetaEntity, KEY_ACTIVE_WEBAPP, KEY_LAST_DEVICE},
 };
-pub use webapps::WebappRegistry;
+pub use webapps::{InstallError, WebappRegistry};
 
 pub type State = Arc<AppState>;
-
-const DEFAULT_ACTIVE_WEBAPP: &str = "stock";
 
 #[derive(Debug)]
 pub struct AppState {
@@ -111,16 +112,19 @@ impl AppState {
     }))
   }
 
-  pub async fn active_webapp(&self) -> StateResult<String> {
-    Ok(
-      read_meta(&self.db, KEY_ACTIVE_WEBAPP)
-        .await?
-        .unwrap_or_else(|| DEFAULT_ACTIVE_WEBAPP.to_string()),
-    )
+  pub async fn active_webapp(&self) -> StateResult<Option<Uuid>> {
+    let stored = read_meta(&self.db, KEY_ACTIVE_WEBAPP).await?;
+    let parsed = stored.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+    if let Some(id) = parsed
+      && self.webapps.resolve(id).await.is_some()
+    {
+      return Ok(Some(id));
+    }
+    Ok(self.webapps.default_id().await)
   }
 
-  pub async fn set_active_webapp(&self, name: String) -> StateResult<()> {
-    write_meta(&self.db, KEY_ACTIVE_WEBAPP, &name).await?;
+  pub async fn set_active_webapp(&self, id: Uuid) -> StateResult<()> {
+    write_meta(&self.db, KEY_ACTIVE_WEBAPP, &id.simple().to_string()).await?;
     Ok(())
   }
 
@@ -210,6 +214,75 @@ impl AppState {
     Ok(())
   }
 
+  pub async fn data_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
+    self.get_storage_key(&data_namespace_key(app_id, key)).await
+  }
+
+  pub async fn data_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
+    self.set_storage_key(data_namespace_key(app_id, key), value).await
+  }
+
+  pub async fn data_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
+    self.del_storage_key(&data_namespace_key(app_id, key)).await
+  }
+
+  pub async fn config_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
+    self.get_storage_key(&config_namespace_key(app_id, key)).await
+  }
+
+  pub async fn config_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
+    self.set_storage_key(config_namespace_key(app_id, key), value).await
+  }
+
+  pub async fn config_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
+    self.del_storage_key(&config_namespace_key(app_id, key)).await
+  }
+
+  pub async fn config_list(&self, app_id: Uuid) -> StateResult<Vec<(String, String)>> {
+    let prefix = config_namespace_prefix(app_id);
+    let pattern = format!("{prefix}%");
+    let rows = KvEntity::find()
+      .filter(KvColumn::Key.like(&pattern))
+      .all(&self.db)
+      .await?;
+    Ok(
+      rows
+        .into_iter()
+        .filter_map(|m| m.key.strip_prefix(&prefix).map(|k| (k.to_string(), m.value)))
+        .collect(),
+    )
+  }
+
+  pub async fn seed_config_defaults(&self, manifest: &WebappManifest) -> StateResult<()> {
+    for field in &manifest.config {
+      let Some(default) = field.default_as_storage() else {
+        continue;
+      };
+      let key = field.key();
+      if self.config_get(manifest.id, key).await?.is_some() {
+        continue;
+      }
+      self.config_set(manifest.id, key, default).await?;
+    }
+    Ok(())
+  }
+
+  pub async fn webapp_storage_purge(&self, app_id: Uuid) -> StateResult<()> {
+    let data_pattern = format!("{}:data:%", app_id.simple());
+    let config_pattern = format!("{}:config:%", app_id.simple());
+    let tx = self.db.begin().await?;
+    KvEntity::delete_many()
+      .filter(KvColumn::Key.like(&data_pattern))
+      .exec(&tx)
+      .await?;
+    KvEntity::delete_many()
+      .filter(KvColumn::Key.like(&config_pattern))
+      .exec(&tx)
+      .await?;
+    tx.commit().await?;
+    Ok(())
+  }
+
   pub async fn reset(&self) -> StateResult<()> {
     let tx = self.db.begin().await?;
     DeviceEntity::delete_many().exec(&tx).await?;
@@ -233,19 +306,40 @@ async fn open_state_db(_state_dir: &std::path::Path) -> Result<DatabaseConnectio
 }
 
 async fn enforce_active_webapp_exists(db: &DatabaseConnection, webapps: &WebappRegistry) -> Result<(), StateError> {
-  let current = read_meta(db, KEY_ACTIVE_WEBAPP)
-    .await?
-    .unwrap_or_else(|| DEFAULT_ACTIVE_WEBAPP.to_string());
-  if webapps.resolve(&current).is_some() {
+  let stored = read_meta(db, KEY_ACTIVE_WEBAPP).await?;
+  let parsed = stored.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+  if let Some(id) = parsed
+    && webapps.resolve(id).await.is_some()
+  {
     return Ok(());
   }
-  tracing::warn!(
-    "active webapp '{}' not present on disk; falling back to '{}'",
-    current,
-    DEFAULT_ACTIVE_WEBAPP
-  );
-  write_meta(db, KEY_ACTIVE_WEBAPP, DEFAULT_ACTIVE_WEBAPP).await?;
+  match webapps.default_id().await {
+    Some(id) => {
+      tracing::warn!(
+        "persisted active webapp ({:?}) does not resolve; falling back to {}",
+        stored,
+        id
+      );
+      write_meta(db, KEY_ACTIVE_WEBAPP, &id.simple().to_string()).await?;
+    }
+    None => {
+      tracing::warn!("no webapps installed and no builtin available; clearing active webapp meta");
+      MetaEntity::delete_by_id(KEY_ACTIVE_WEBAPP.to_string()).exec(db).await?;
+    }
+  }
   Ok(())
+}
+
+fn data_namespace_key(app_id: Uuid, key: &str) -> String {
+  format!("{}:data:{key}", app_id.simple())
+}
+
+fn config_namespace_key(app_id: Uuid, key: &str) -> String {
+  format!("{}:config:{key}", app_id.simple())
+}
+
+fn config_namespace_prefix(app_id: Uuid) -> String {
+  format!("{}:config:", app_id.simple())
 }
 
 async fn read_meta(db: &DatabaseConnection, key: &str) -> Result<Option<String>, DbErr> {

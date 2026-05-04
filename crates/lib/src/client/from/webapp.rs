@@ -1,6 +1,7 @@
 use bridgething_macros::{BridgeEnum, WireRequest};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
@@ -35,7 +36,8 @@ pub struct WebappCurrent;
   error_variant = ErrorReply,
 )]
 pub struct WebappActivate {
-  pub name: String,
+  #[ts(type = "string")]
+  pub id: Uuid,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -51,7 +53,8 @@ pub struct WebappActivate {
   error_variant = ErrorReply,
 )]
 pub struct WebappUninstall {
-  pub name: String,
+  #[ts(type = "string")]
+  pub id: Uuid,
 }
 
 /// Install a webapp from a previously-pushed `.zip` archive in the
@@ -73,6 +76,25 @@ pub struct WebappInstall {
   pub archive_asset_id: String,
 }
 
+/// Fetch the icon bytes for an installed webapp. Returns the raw bytes
+/// declared by the manifest's `icon` field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = Webapp,
+  request_variant = Icon,
+  response = crate::client::WebappIconReply,
+  response_variant = IconReply,
+  error = crate::client::WebappErrorReply,
+  error_variant = ErrorReply,
+)]
+pub struct WebappIcon {
+  #[ts(type = "string")]
+  pub id: Uuid,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -89,4 +111,6 @@ pub enum ClientToBridgeWebappMsg {
   Uninstall(WebappUninstall),
   #[bridge_request]
   Install(WebappInstall),
+  #[bridge_request]
+  Icon(WebappIcon),
 }

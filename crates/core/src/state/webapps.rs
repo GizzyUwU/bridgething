@@ -1,30 +1,40 @@
 use std::{
-  collections::BTreeMap,
+  collections::{BTreeMap, HashMap},
   path::{Component, Path, PathBuf},
+  sync::Arc,
 };
 
-use libbridgething::{WebappInfo, WebappSource};
-use serde::Deserialize;
-use tokio::fs;
+use libbridgething::{ConfigField, WebappInfo, WebappManifest, WebappSource};
+use tokio::{fs, sync::RwLock};
+use uuid::Uuid;
 
-use super::{StateError, StateResult};
+use super::StateResult;
 use crate::paths;
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WebappManifest {
-  #[serde(default)]
-  version: Option<String>,
-  #[serde(default)]
-  description: Option<String>,
+const ICON_MAX_BYTES: u64 = 64 * 1024;
+
+const STOCK_DIR_NAME: &str = "stock";
+const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
+const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID];
+
+fn is_reserved(id: Uuid) -> bool {
+  RESERVED_BUILTIN_IDS.contains(&id)
+}
+
+#[derive(Debug, Clone)]
+pub struct WebappBundle {
+  pub path: PathBuf,
+  pub source: WebappSource,
+  pub manifest: Arc<WebappManifest>,
+  pub icon_mime: Option<String>,
+  pub icon_size: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WebappRegistry {
-  /// writable root for user-installed webapps (data partition in prod).
   installed_root: PathBuf,
-  /// read-only root for built-in webapps (rootfs in prod - optional).
   builtin_root: PathBuf,
+  bundles: Arc<RwLock<HashMap<Uuid, WebappBundle>>>,
 }
 
 impl WebappRegistry {
@@ -43,74 +53,129 @@ impl WebappRegistry {
       builtin_root.display()
     );
 
-    Ok(Self {
+    let me = Self {
       installed_root,
       builtin_root,
-    })
+      bundles: Arc::new(RwLock::new(HashMap::new())),
+    };
+    me.rescan().await;
+    Ok(me)
   }
 
-  pub fn resolve(&self, name: &str) -> Option<PathBuf> {
-    if !is_safe_name(name) {
-      return None;
+  pub async fn rescan(&self) {
+    let mut bundles: HashMap<Uuid, WebappBundle> = HashMap::new();
+    for path in scan_root(&self.builtin_root).await {
+      if let Some(bundle) = load_bundle(&path, WebappSource::Builtin).await
+        && bundles.insert(bundle.manifest.id, bundle).is_some()
+      {
+        tracing::warn!("duplicate webapp uuid in builtin root: {}", path.display());
+      }
     }
-    let installed = self.installed_root.join(name);
-    if is_valid_bundle(&installed) {
-      return Some(installed);
+    for path in scan_root(&self.installed_root).await {
+      if let Some(bundle) = load_bundle(&path, WebappSource::Installed).await {
+        if is_reserved(bundle.manifest.id) {
+          tracing::warn!(
+            "installed bundle at {} claims reserved uuid {}; refusing to load",
+            bundle.path.display(),
+            bundle.manifest.id
+          );
+          continue;
+        }
+        if let Some(prev) = bundles.insert(bundle.manifest.id, bundle.clone()) {
+          tracing::debug!(
+            "installed webapp '{}' shadows builtin at {}",
+            bundle.path.display(),
+            prev.path.display()
+          );
+        }
+      }
     }
-    let builtin = self.builtin_root.join(name);
-    if is_valid_bundle(&builtin) {
-      return Some(builtin);
-    }
-    None
+    tracing::debug!("webapp registry: {} bundles loaded", bundles.len());
+    *self.bundles.write().await = bundles;
+  }
+
+  pub async fn resolve(&self, id: Uuid) -> Option<PathBuf> {
+    self.bundles.read().await.get(&id).map(|b| b.path.clone())
+  }
+
+  pub async fn bundle(&self, id: Uuid) -> Option<WebappBundle> {
+    self.bundles.read().await.get(&id).cloned()
+  }
+
+  pub async fn manifest(&self, id: Uuid) -> Option<Arc<WebappManifest>> {
+    self.bundles.read().await.get(&id).map(|b| b.manifest.clone())
   }
 
   pub async fn list(&self) -> Vec<WebappInfo> {
-    let mut out: BTreeMap<String, WebappInfo> = BTreeMap::new();
-
-    for entry in scan_root(&self.builtin_root).await {
-      let info = read_info(&entry, WebappSource::Builtin).await;
-      out.insert(info.name.clone(), info);
+    let bundles = self.bundles.read().await;
+    let mut infos: BTreeMap<String, WebappInfo> = BTreeMap::new();
+    for b in bundles.values() {
+      let info = bundle_to_info(b);
+      infos.insert(format!("{}-{}", info.name, info.id.simple()), info);
     }
-    for entry in scan_root(&self.installed_root).await {
-      let info = read_info(&entry, WebappSource::Installed).await;
-      out.insert(info.name.clone(), info);
-    }
-
-    out.into_values().collect()
+    infos.into_values().collect()
   }
 
-  pub async fn install(&self, name: &str, archive: Vec<u8>) -> StateResult<WebappInfo> {
-    if !is_safe_name(name) {
-      return Err(StateError::InvalidPath(name.to_string()));
+  pub async fn is_builtin(&self, id: Uuid) -> bool {
+    matches!(
+      self.bundles.read().await.get(&id).map(|b| b.source),
+      Some(WebappSource::Builtin)
+    )
+  }
+
+  pub async fn default_id(&self) -> Option<Uuid> {
+    let bundles = self.bundles.read().await;
+    if bundles.contains_key(&STOCK_WEBAPP_ID) {
+      return Some(STOCK_WEBAPP_ID);
     }
+    bundles
+      .values()
+      .find(|b| matches!(b.source, WebappSource::Builtin))
+      .map(|b| b.manifest.id)
+  }
 
-    let final_path = self.installed_root.join(name);
-    let staging = self
-      .installed_root
-      .join(format!("{name}.tmp.{}", uuid::Uuid::now_v7().simple()));
-
-    fs::create_dir_all(&staging).await?;
+  pub async fn install(&self, archive: Vec<u8>) -> Result<WebappInfo, InstallError> {
+    let staging = self.installed_root.join(format!(".tmp.{}", Uuid::now_v7().simple()));
+    fs::create_dir_all(&staging).await.map_err(InstallError::Io)?;
 
     let staging_for_unzip = staging.clone();
-    let unzip_result = tokio::task::spawn_blocking(move || extract_zip(&archive, &staging_for_unzip))
+    let unzip = tokio::task::spawn_blocking(move || extract_zip(&archive, &staging_for_unzip))
       .await
-      .map_err(|e| StateError::InvalidPath(format!("zip extract task failed: {e}")))?;
-
-    if let Err(e) = unzip_result {
+      .map_err(|e| InstallError::Validation(format!("zip extract task failed: {e}")))?;
+    if let Err(e) = unzip {
       let _ = fs::remove_dir_all(&staging).await;
       return Err(e);
     }
 
     if !is_valid_bundle(&staging) {
       let _ = fs::remove_dir_all(&staging).await;
-      return Err(StateError::InvalidPath(format!("webapp '{name}' has no index.html")));
+      return Err(InstallError::Validation("bundle has no index.html".into()));
     }
 
+    let bundle = match load_bundle(&staging, WebappSource::Installed).await {
+      Some(b) if b.manifest.id != Uuid::nil() => b,
+      _ => {
+        let _ = fs::remove_dir_all(&staging).await;
+        return Err(InstallError::Validation(
+          "bundle missing or invalid manifest.json".into(),
+        ));
+      }
+    };
+
+    if is_reserved(bundle.manifest.id) {
+      let _ = fs::remove_dir_all(&staging).await;
+      return Err(InstallError::Validation(format!(
+        "manifest id {} is reserved for a system builtin",
+        bundle.manifest.id
+      )));
+    }
+
+    let final_dir_name = bundle.manifest.id.simple().to_string();
+    let final_path = self.installed_root.join(&final_dir_name);
+
     if final_path.exists() {
-      let trash = self
-        .installed_root
-        .join(format!("{name}.old.{}", uuid::Uuid::now_v7().simple()));
-      fs::rename(&final_path, &trash).await?;
+      let trash = self.installed_root.join(format!(".old.{}", Uuid::now_v7().simple()));
+      fs::rename(&final_path, &trash).await.map_err(InstallError::Io)?;
       tokio::spawn(async move {
         if let Err(e) = fs::remove_dir_all(&trash).await {
           tracing::warn!("failed to clean old webapp dir {}: {:?}", trash.display(), e);
@@ -118,29 +183,45 @@ impl WebappRegistry {
       });
     }
 
-    fs::rename(&staging, &final_path).await?;
+    fs::rename(&staging, &final_path).await.map_err(InstallError::Io)?;
 
-    let info = read_info(&final_path, WebappSource::Installed).await;
-    Ok(info)
+    self.rescan().await;
+    let installed = self
+      .bundle(bundle.manifest.id)
+      .await
+      .ok_or_else(|| InstallError::Validation("post-install scan dropped the bundle".into()))?;
+    Ok(bundle_to_info(&installed))
   }
 
-  pub async fn uninstall(&self, name: &str) -> StateResult<bool> {
-    if !is_safe_name(name) {
-      return Err(StateError::InvalidPath(name.to_string()));
-    }
+  pub async fn read_icon(&self, id: Uuid) -> Option<(Vec<u8>, Option<String>)> {
+    let bundle = self.bundle(id).await?;
+    let rel = bundle.manifest.icon.as_deref()?;
+    bundle.icon_size?;
+    let path = bundle.path.join(rel);
+    let bytes = fs::read(&path).await.ok()?;
+    Some((bytes, bundle.icon_mime.clone()))
+  }
 
-    let path = self.installed_root.join(name);
-    if !path.exists() {
+  pub async fn uninstall(&self, id: Uuid) -> StateResult<bool> {
+    let bundle = match self.bundle(id).await {
+      Some(b) => b,
+      None => return Ok(false),
+    };
+    if !matches!(bundle.source, WebappSource::Installed) {
       return Ok(false);
     }
-
-    fs::remove_dir_all(&path).await?;
+    fs::remove_dir_all(&bundle.path).await?;
+    self.rescan().await;
     Ok(true)
   }
+}
 
-  pub fn is_builtin(&self, name: &str) -> bool {
-    is_safe_name(name) && is_valid_bundle(&self.builtin_root.join(name))
-  }
+#[derive(Debug, thiserror::Error)]
+pub enum InstallError {
+  #[error("io error: {0}")]
+  Io(#[from] tokio::io::Error),
+  #[error("invalid bundle: {0}")]
+  Validation(String),
 }
 
 fn is_safe_name(name: &str) -> bool {
@@ -175,7 +256,7 @@ async fn scan_root(root: &Path) -> Vec<PathBuf> {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
       continue;
     };
-    if name.starts_with('.') || name.contains(".tmp.") || name.contains(".old.") {
+    if name.starts_with('.') {
       continue;
     }
     if is_valid_bundle(&path) {
@@ -185,40 +266,184 @@ async fn scan_root(root: &Path) -> Vec<PathBuf> {
   out
 }
 
-async fn read_info(path: &Path, source: WebappSource) -> WebappInfo {
-  let name = path
-    .file_name()
-    .and_then(|n| n.to_str())
-    .unwrap_or_default()
-    .to_string();
-  let manifest = fs::read(path.join("manifest.json"))
-    .await
-    .ok()
-    .and_then(|b| serde_json::from_slice::<WebappManifest>(&b).ok())
-    .unwrap_or_default();
-  WebappInfo {
-    name,
+async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> {
+  if !is_valid_bundle(path) {
+    return None;
+  }
+  let dir_name = path.file_name().and_then(|n| n.to_str())?.to_string();
+  if !is_safe_name(&dir_name) {
+    return None;
+  }
+
+  let manifest = match fs::read(path.join("manifest.json")).await {
+    Ok(bytes) => match serde_json::from_slice::<WebappManifest>(&bytes) {
+      Ok(m) => match validate_manifest(&m) {
+        Ok(()) => m,
+        Err(e) => {
+          tracing::warn!("webapp '{dir_name}' manifest invalid ({e}); skipping");
+          return None;
+        }
+      },
+      Err(e) => {
+        tracing::warn!("webapp '{dir_name}' manifest.json failed to parse ({e}); skipping");
+        return None;
+      }
+    },
+    Err(_) if dir_name == STOCK_DIR_NAME && matches!(source, WebappSource::Builtin) => {
+      tracing::debug!("synthesizing manifest for the stock webapp (no manifest.json on disk)");
+      stock_manifest()
+    }
+    Err(_) => {
+      tracing::warn!("webapp '{dir_name}' has no manifest.json; skipping");
+      return None;
+    }
+  };
+
+  let (icon_mime, icon_size) = match manifest.icon.as_deref() {
+    Some(rel) => {
+      let p = path.join(rel);
+      match fs::metadata(&p).await {
+        Ok(meta) if meta.is_file() && meta.len() <= ICON_MAX_BYTES => {
+          (Some(guess_mime_from_ext(rel)), Some(meta.len()))
+        }
+        Ok(meta) if meta.is_file() => {
+          tracing::warn!(
+            "webapp '{}' icon {} is {} bytes (cap {}); ignoring",
+            dir_name,
+            p.display(),
+            meta.len(),
+            ICON_MAX_BYTES
+          );
+          (None, None)
+        }
+        _ => (None, None),
+      }
+    }
+    None => (None, None),
+  };
+
+  Some(WebappBundle {
+    path: path.to_path_buf(),
     source,
-    version: manifest.version,
-    description: manifest.description,
+    manifest: Arc::new(manifest),
+    icon_mime,
+    icon_size,
+  })
+}
+
+fn validate_manifest(m: &WebappManifest) -> Result<(), String> {
+  if m.id.is_nil() {
+    return Err("manifest id is nil".into());
+  }
+  if m.name.trim().is_empty() {
+    return Err("manifest name is empty".into());
+  }
+  if m.version.trim().is_empty() {
+    return Err("manifest version is empty".into());
+  }
+  let mut seen = std::collections::HashSet::new();
+  for f in &m.config {
+    let key = f.key();
+    if key.trim().is_empty() {
+      return Err("config field key is empty".into());
+    }
+    if !seen.insert(key) {
+      return Err(format!("duplicate config key '{key}'"));
+    }
+    validate_config_field(f)?;
+  }
+  Ok(())
+}
+
+fn validate_config_field(field: &ConfigField) -> Result<(), String> {
+  match field {
+    ConfigField::Number(f) => {
+      if let Some(d) = f.default {
+        if let Some(min) = f.min
+          && d < min
+        {
+          return Err(format!("default for '{}' below min", f.key));
+        }
+        if let Some(max) = f.max
+          && d > max
+        {
+          return Err(format!("default for '{}' above max", f.key));
+        }
+      }
+    }
+    ConfigField::Enum(f) => {
+      if f.choices.is_empty() {
+        return Err(format!("enum '{}' has no choices", f.key));
+      }
+      if let Some(d) = &f.default
+        && !f.choices.contains(d)
+      {
+        return Err(format!("default '{d}' for '{}' not in choices", f.key));
+      }
+    }
+    _ => {}
+  }
+  Ok(())
+}
+
+fn stock_manifest() -> WebappManifest {
+  WebappManifest {
+    id: STOCK_WEBAPP_ID,
+    name: "Spotify".into(),
+    version: "8.9.2".into(),
+    description: Some("Built-in Spotify Car Thing UI".into()),
+    icon: None,
+    config: Vec::new(),
+    permissions: Vec::new(),
   }
 }
 
-fn extract_zip(archive: &[u8], dest: &Path) -> StateResult<()> {
+fn guess_mime_from_ext(name: &str) -> String {
+  let ext = Path::new(name)
+    .extension()
+    .and_then(|s| s.to_str())
+    .unwrap_or("")
+    .to_ascii_lowercase();
+  match ext.as_str() {
+    "png" => "image/png",
+    "jpg" | "jpeg" => "image/jpeg",
+    "svg" => "image/svg+xml",
+    "webp" => "image/webp",
+    "gif" => "image/gif",
+    _ => "application/octet-stream",
+  }
+  .to_string()
+}
+
+fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
+  WebappInfo {
+    id: b.manifest.id,
+    name: b.manifest.name.clone(),
+    source: b.source,
+    version: b.manifest.version.clone(),
+    description: b.manifest.description.clone(),
+    icon_available: b.icon_size.is_some(),
+    icon_mime: b.icon_mime.clone(),
+    config: b.manifest.config.clone(),
+    permissions: b.manifest.permissions.clone(),
+  }
+}
+
+fn extract_zip(archive: &[u8], dest: &Path) -> Result<(), InstallError> {
   let cursor = std::io::Cursor::new(archive);
-  let mut zip = zip::ZipArchive::new(cursor).map_err(|e| StateError::InvalidPath(format!("zip read failed: {e}")))?;
+  let mut zip = zip::ZipArchive::new(cursor).map_err(|e| InstallError::Validation(format!("zip read failed: {e}")))?;
 
   for i in 0..zip.len() {
     let mut entry = zip
       .by_index(i)
-      .map_err(|e| StateError::InvalidPath(format!("zip entry {i} read failed: {e}")))?;
+      .map_err(|e| InstallError::Validation(format!("zip entry {i} read failed: {e}")))?;
     let raw_name = entry
       .enclosed_name()
-      .ok_or_else(|| StateError::InvalidPath(format!("zip entry {i} has unsafe path")))?;
+      .ok_or_else(|| InstallError::Validation(format!("zip entry {i} has unsafe path")))?;
 
     let target = dest.join(&raw_name);
     if !target.starts_with(dest) {
-      return Err(StateError::InvalidPath(format!(
+      return Err(InstallError::Validation(format!(
         "zip entry escapes destination: {}",
         raw_name.display()
       )));

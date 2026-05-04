@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { v7 as uuidv7 } from 'uuid';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = resolve(__dirname, '..', 'template');
@@ -54,17 +55,24 @@ Options:
 `);
 }
 
-function copyTemplate(src: string, dest: string, projectName: string): void {
+type Substitutions = {
+  projectName: string;
+  webappUuid: string;
+};
+
+function copyTemplate(src: string, dest: string, subs: Substitutions): void {
   for (const entry of readdirSync(src)) {
     const srcPath = join(src, entry);
     const destPath = join(dest, entry === '_gitignore' ? '.gitignore' : entry);
     const stat = statSync(srcPath);
     if (stat.isDirectory()) {
       mkdirSync(destPath, { recursive: true });
-      copyTemplate(srcPath, destPath, projectName);
+      copyTemplate(srcPath, destPath, subs);
     } else {
       const raw = readFileSync(srcPath, 'utf8');
-      const substituted = raw.replace(/__PROJECT_NAME__/g, projectName);
+      const substituted = raw
+        .replace(/__PROJECT_NAME__/g, subs.projectName)
+        .replace(/__WEBAPP_UUID__/g, subs.webappUuid);
       writeFileSync(destPath, substituted);
     }
   }
@@ -90,8 +98,9 @@ function main(): void {
     mkdirSync(target, { recursive: true });
   }
 
-  console.log(`scaffolding ${projectName} in ${target}`);
-  copyTemplate(TEMPLATE_DIR, target, projectName);
+  const webappUuid = uuidv7();
+  console.log(`scaffolding ${projectName} (${webappUuid}) in ${target}`);
+  copyTemplate(TEMPLATE_DIR, target, { projectName, webappUuid });
   console.log('  ✓ template copied');
 
   if (args.git) {
