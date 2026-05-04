@@ -1,3 +1,4 @@
+mod bus;
 mod connection;
 mod connman;
 
@@ -10,6 +11,7 @@ use axum::{
   http::Request,
   response::{IntoResponse, Response},
 };
+pub use bus::WireEventBus;
 pub use connman::{ClientMan, create_client_manager};
 use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use reqwest::StatusCode;

@@ -26,7 +26,8 @@ use crate::{
   bluetooth::{
     GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode,
   },
-  state::State,
+  peer::PeerTracker,
+  state::meta::SuperbirdMeta,
 };
 
 /// Soft cap on a single batched write. RFCOMM transparently segments
@@ -151,7 +152,8 @@ async fn writer_task(address: Address, mut writer: WriteHalf<Stream>, mut packer
 
 #[derive(Debug)]
 pub struct RfcommGateway {
-  state: State,
+  meta: SuperbirdMeta,
+  peers: PeerTracker,
   handle: ProfileHandle,
 
   conn_tx: ConnectionTx,
@@ -166,7 +168,8 @@ pub struct RfcommGateway {
 impl RfcommGateway {
   pub async fn init(
     session: &Session,
-    state: State,
+    meta: SuperbirdMeta,
+    peers: PeerTracker,
     recv_tx: GatewayRecvTx,
     send_rx: GatewaySendRx,
     peer_owners: PeerOwners,
@@ -186,7 +189,8 @@ impl RfcommGateway {
     let (conn_tx, conn_rx) = mpsc::channel(16);
 
     Ok(Self {
-      state,
+      meta,
+      peers,
       handle,
 
       conn_tx,
@@ -239,7 +243,7 @@ impl RfcommGateway {
               tracing::debug!("rfcomm connection closed: {:?}", address);
               self.connections.remove(&address);
               self.peer_owners.unregister(address, GatewayType::Rfcomm);
-              let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
+              let _ = self.peers.set_companion(address, PeerCompanionStatus::None).await;
             },
             ConnectionMessage::Msg(msg) => {
               if let Err(e) = self.recv_tx.send(InboundGatewayMessage::new(Some(address), GatewayType::Rfcomm, *msg)).await {
@@ -247,13 +251,11 @@ impl RfcommGateway {
               }
             }
             ConnectionMessage::DecodeFailed(probe) => {
-              if let Some(nack) = auto_nack_for_failed_decode(&probe) {
-                if let Some(conn) = self.connections.get(&address) {
-                  if let Err(e) = conn.send(&nack, Priority::Normal).await {
+              if let Some(nack) = auto_nack_for_failed_decode(&probe)
+                && let Some(conn) = self.connections.get(&address)
+                  && let Err(e) = conn.send(&nack, Priority::Normal).await {
                     tracing::error!("({address}) failed to send auto-nack: {:?}", e);
                   }
-                }
-              }
             }
           }
         },
@@ -276,17 +278,13 @@ impl RfcommGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.state.meta.clone().into(),
+      data: self.meta.clone().into(),
     };
     connection.send(&version, Priority::Normal).await?;
 
     self.connections.insert(address, connection);
     self.peer_owners.register(address, GatewayType::Rfcomm);
-    let _ = self
-      .state
-      .peers
-      .set_companion(address, PeerCompanionStatus::Pending)
-      .await;
+    let _ = self.peers.set_companion(address, PeerCompanionStatus::Pending).await;
 
     Ok(())
   }

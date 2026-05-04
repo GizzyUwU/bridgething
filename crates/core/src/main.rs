@@ -26,15 +26,20 @@ mod stock;
 
 mod monitoring;
 
+use asset::AssetCache;
 use authority::AuthorityRegistry;
-use bluetooth::BluetoothManager;
+use bluetooth::{BluetoothDeps, BluetoothManager};
 use capabilities::CapabilitiesRegistry;
 use chrome::ChromeCommand;
-use handler::{ClientHandler, GatewayHandler};
+use handler::{ClientHandler, GatewayHandler, Iap2EventRouter};
 use ota::OtaOrchestrator;
+use peer::PeerTracker;
 use player::Player;
-use state::AppState;
+use state::{AppState, AssembledState, DeviceStore, KvStore, MetaStore, RouteTable, WebappRegistry};
 use systemd::Notify;
+use telephony::TelephonyManager;
+use time::TimeManager;
+use transfer::ChunkedTransfer;
 use transport::TransportController;
 
 #[tokio::main]
@@ -48,9 +53,44 @@ async fn main() {
   tracing::debug!("metadata: {:?}", &meta);
 
   let (client_man, mut client_listener) = net::create_client_manager();
+  let bus = net::WireEventBus::new(client_man.clone());
+
+  let db = state::open_state_db().await.expect("failed to open state database");
+  let devices = DeviceStore::new(db.clone());
+  let kv = KvStore::new(db.clone());
+  let meta_store = MetaStore::new(db.clone());
+
+  let webapps = WebappRegistry::init()
+    .await
+    .expect("failed to initialize webapp registry");
+  meta_store
+    .enforce_active_webapp_exists(&webapps)
+    .await
+    .expect("failed to enforce active webapp invariant");
+
+  let asset_pending = AssetCache::init(db.clone(), paths::assets_blobs_dir())
+    .await
+    .expect("failed to initialize asset cache");
+  let (assets, asset_cache_handle) = asset_pending.spawn();
+
+  let transfer_pending = ChunkedTransfer::init(paths::transfers_dir())
+    .await
+    .expect("failed to initialize chunked transfer manager");
+  let (transfers, transfer_handle) = transfer_pending.spawn();
+
+  let ws_routes = RouteTable::new();
+  let stream_routes = RouteTable::new();
+
   let authority = AuthorityRegistry::new();
-  let capabilities = CapabilitiesRegistry::new(client_man.clone(), authority.clone());
-  let player = Player::new(client_man.clone(), authority.clone());
+  let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
+  let player = Player::new(bus.clone(), authority.clone());
+  let peers = PeerTracker::new(
+    bus.clone(),
+    player.clone(),
+    capabilities.clone(),
+    ws_routes.clone(),
+    stream_routes.clone(),
+  );
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
 
@@ -59,22 +99,65 @@ async fn main() {
     tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
   }
 
-  let state = AppState::init(client_man.clone(), meta, player, chrome, authority, capabilities)
-    .await
-    .expect("failed to initialize state!!");
-
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
-  let bluetooth = BluetoothManager::init(state.clone(), bluetooth_tx)
-    .await
-    .expect("failed to initialize bluetooth stack");
-  state.telephony.attach_iap2(bluetooth.iap2_telephony_handle()).await;
+  let bluetooth::BluetoothInit {
+    manager: bluetooth,
+    mut iap2_events_rx,
+  } = BluetoothManager::init(
+    BluetoothDeps {
+      bus: bus.clone(),
+      meta: meta.clone(),
+      devices: devices.clone(),
+      peers: peers.clone(),
+    },
+    bluetooth_tx,
+  )
+  .await
+  .expect("failed to initialize bluetooth stack");
+
+  let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2_telephony_handle());
+  let time = TimeManager::new(bus.clone());
+
+  let state = AppState::assemble(AssembledState {
+    client_man: client_man.clone(),
+    bus,
+    meta,
+    player,
+    chrome,
+    webapps,
+    assets,
+    transfers,
+    authority,
+    capabilities,
+    peers,
+    telephony,
+    time,
+    devices,
+    kv,
+    ws_routes,
+    stream_routes,
+    db,
+    meta_store,
+    asset_cache_handle,
+    transfer_handle,
+  });
+
   let transport = TransportController::new(
     state.authority.clone(),
     state.player.clone(),
     bluetooth.clone(),
     bluetooth.iap2_transport_handle(),
   );
+
+  let iap2_router = bluetooth.iap2_reconnect_handle().map(|reconnect| {
+    std::sync::Arc::new(Iap2EventRouter::new(
+      state.clone(),
+      bluetooth.profile_man.clone(),
+      bluetooth.gateway_man.iap2_ea_handle(),
+      reconnect,
+    ))
+  });
 
   notifier.status("initializing server binds...");
   let mut server = net::Server::bind(state.clone(), bluetooth.clone())
@@ -116,6 +199,11 @@ async fn main() {
           }
         }
       },
+      Some(event) = recv_iap2(&mut iap2_events_rx) => {
+        if let Some(router) = iap2_router.as_ref() {
+          router.route(event).await;
+        }
+      },
 
       _ = monitoring::wait_for_signal() => {
         break;
@@ -128,6 +216,13 @@ async fn main() {
   server.shutdown().await;
 
   tracing::info!("thank you for using bridgething!");
+}
+
+async fn recv_iap2(rx: &mut Option<bluetooth::iap2::Iap2EventsRx>) -> Option<bluetooth::iap2::Iap2Event> {
+  match rx {
+    Some(rx) => rx.recv().await,
+    None => std::future::pending().await,
+  }
 }
 
 fn spawn_ota_event_forwarder(

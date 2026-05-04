@@ -28,7 +28,7 @@ impl StorageHandler {
   async fn get(&self, app_id: Uuid, key: String) -> HandlerResult {
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
 
-    let mut value = self.handle.state.data_get(app_id, &key).await?;
+    let mut value = self.handle.state.kv.data_get(app_id, &key).await?;
 
     // handle for stock firmware
     if &key == "onboarding_status" {
@@ -37,7 +37,7 @@ impl StorageHandler {
         &self.handle.from
       );
 
-      let payload = if self.handle.state.last_device().await?.is_some() {
+      let payload = if self.handle.state.devices.last().await?.is_some() {
         "finished"
       } else {
         ""
@@ -57,7 +57,7 @@ impl StorageHandler {
 
   async fn put(&mut self, app_id: Uuid, key: String, value: String) -> HandlerResult {
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
-    self.handle.state.data_set(app_id, &key, value.clone()).await?;
+    self.handle.state.kv.data_set(app_id, &key, value.clone()).await?;
 
     Ok(
       self
@@ -72,7 +72,7 @@ impl StorageHandler {
 
   async fn delete(&mut self, app_id: Uuid, key: String) -> HandlerResult {
     tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
-    self.handle.state.data_delete(app_id, &key).await?;
+    self.handle.state.kv.data_delete(app_id, &key).await?;
 
     Ok(
       self

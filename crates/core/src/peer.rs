@@ -17,7 +17,7 @@
 //! the map behind a command channel, every public method becomes a
 //! oneshot send/await, no caller-side change.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use bluer::Address;
 use libbridgething::{
@@ -32,7 +32,7 @@ use tokio::sync::RwLock;
 
 use crate::{
   capabilities::CapabilitiesRegistry,
-  net::{ClientMan, WSError},
+  net::{WSError, WireEventBus},
   player::Player,
   state::RouteTable,
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
@@ -40,10 +40,15 @@ use crate::{
 
 pub type PeerResult<T> = Result<T, Vec<WSError>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PeerTracker {
-  inner: RwLock<HashMap<Address, Peer>>,
-  client_man: ClientMan,
+  inner: Arc<Inner>,
+}
+
+#[derive(Debug)]
+struct Inner {
+  peers: RwLock<HashMap<Address, Peer>>,
+  bus: WireEventBus,
   player: Player,
   capabilities: CapabilitiesRegistry,
   ws_routes: RouteTable,
@@ -52,28 +57,30 @@ pub struct PeerTracker {
 
 impl PeerTracker {
   pub fn new(
-    client_man: ClientMan,
+    bus: WireEventBus,
     player: Player,
     capabilities: CapabilitiesRegistry,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
   ) -> Self {
     Self {
-      inner: RwLock::new(HashMap::new()),
-      client_man,
-      player,
-      capabilities,
-      ws_routes,
-      stream_routes,
+      inner: Arc::new(Inner {
+        peers: RwLock::new(HashMap::new()),
+        bus,
+        player,
+        capabilities,
+        ws_routes,
+        stream_routes,
+      }),
     }
   }
 
   pub async fn get(&self, mac: &Address) -> Option<Peer> {
-    self.inner.read().await.get(mac).cloned()
+    self.inner.peers.read().await.get(mac).cloned()
   }
 
   pub async fn first_connected_gateway(&self) -> Option<GatewayInfo> {
-    let peers = self.inner.read().await;
+    let peers = self.inner.peers.read().await;
     peers.values().find_map(|peer| match &peer.companion {
       PeerCompanionStatus::Connected(info) => Some(info.clone()),
       _ => None,
@@ -82,7 +89,7 @@ impl PeerTracker {
 
   pub async fn upsert(&self, mac: Address, device: Device) -> PeerResult<()> {
     let diff = {
-      let mut peers = self.inner.write().await;
+      let mut peers = self.inner.peers.write().await;
       let prior = peers.get(&mac).cloned();
       let entry = peers.entry(mac).or_insert_with(|| Peer::new(device.clone()));
       entry.device = device;
@@ -93,7 +100,7 @@ impl PeerTracker {
 
   pub async fn set_paired(&self, mac: Address, paired: bool) -> PeerResult<()> {
     let diff = {
-      let mut peers = self.inner.write().await;
+      let mut peers = self.inner.peers.write().await;
       let Some(peer) = peers.get_mut(&mac) else {
         return Ok(());
       };
@@ -106,7 +113,7 @@ impl PeerTracker {
 
   pub async fn set_iap2(&self, mac: Address, iap2: PeerIap2Status) -> PeerResult<()> {
     let diff = {
-      let mut peers = self.inner.write().await;
+      let mut peers = self.inner.peers.write().await;
       let Some(peer) = peers.get_mut(&mac) else {
         return Ok(());
       };
@@ -119,7 +126,7 @@ impl PeerTracker {
 
   pub async fn set_companion(&self, mac: Address, companion: PeerCompanionStatus) -> PeerResult<()> {
     let diff = {
-      let mut peers = self.inner.write().await;
+      let mut peers = self.inner.peers.write().await;
       let Some(peer) = peers.get_mut(&mac) else {
         return Ok(());
       };
@@ -132,7 +139,7 @@ impl PeerTracker {
 
   pub async fn remove(&self, mac: Address) -> PeerResult<()> {
     let diff = {
-      let mut peers = self.inner.write().await;
+      let mut peers = self.inner.peers.write().await;
       let prior = peers.remove(&mac);
       if prior.is_none() {
         return Ok(());
@@ -146,7 +153,8 @@ impl PeerTracker {
     let mut errors: Vec<WSError> = Vec::new();
 
     if let Err(errs) = self
-      .client_man
+      .inner
+      .bus
       .broadcast(
         BridgeToClientPeerMsg::Snapshot(PeerSnapshotMap(diff.snapshot.clone())),
         MsgMeta::Event,
@@ -164,7 +172,8 @@ impl PeerTracker {
         .map(|p| (p.device.mac.clone(), p.device.clone()))
         .collect();
       if let Err(errs) = self
-        .client_man
+        .inner
+        .bus
         .broadcast(
           BridgeToClientBluetoothMsg::PairedDevices(PairedDevicesMap(paired_map)),
           MsgMeta::Event,
@@ -177,7 +186,8 @@ impl PeerTracker {
 
     if diff.paired_transitioned_up
       && let Err(errs) = self
-        .client_man
+        .inner
+        .bus
         .broadcast(
           BridgeToClientBluetoothMsg::PairingResult(BluetoothPairingResult { success: true }),
           MsgMeta::Event,
@@ -190,7 +200,8 @@ impl PeerTracker {
     if diff.useful_link_transitioned_up {
       if let Some(device) = diff.useful_device.as_ref() {
         if let Err(errs) = self
-          .client_man
+          .inner
+          .bus
           .broadcast(
             BridgeToClientBluetoothMsg::ConnectedDevice(WireConnectedDevice {
               name: device.name.clone(),
@@ -202,15 +213,16 @@ impl PeerTracker {
         {
           errors.extend(errs);
         }
-        if let Err(errs) = broadcast_stock_connection(&self.client_man, device).await {
+        if let Err(errs) = broadcast_stock_connection(&self.inner.bus, device).await {
           errors.extend(errs);
         }
-        if let Err(err) = self.player.send_state().await {
+        if let Err(err) = self.inner.player.send_state().await {
           tracing::warn!(?err, "failed to send player state after useful link came up");
         }
       }
       if let Err(errs) = self
-        .client_man
+        .inner
+        .bus
         .broadcast(
           BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: true }),
           MsgMeta::Event,
@@ -221,7 +233,8 @@ impl PeerTracker {
       }
     } else if diff.useful_link_transitioned_down {
       if let Err(errs) = self
-        .client_man
+        .inner
+        .bus
         .broadcast(
           BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: false }),
           MsgMeta::Event,
@@ -230,13 +243,13 @@ impl PeerTracker {
       {
         errors.extend(errs);
       }
-      if let Err(errs) = broadcast_stock_disconnection(&self.client_man).await {
+      if let Err(errs) = broadcast_stock_disconnection(&self.inner.bus).await {
         errors.extend(errs);
       }
     }
 
     if let Some(addr) = diff.companion_lost {
-      if let Err(err) = self.capabilities.clear_companion(addr).await {
+      if let Err(err) = self.inner.capabilities.clear_companion(addr).await {
         tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
       }
       self.tear_down_net_routes().await;
@@ -251,12 +264,12 @@ impl PeerTracker {
       client::{BridgeToClientNetMsgEvent, NetWsClosed, NetWsErrorEvent},
     };
 
-    for (connection_id, owner) in self.ws_routes.drain_all() {
+    for (connection_id, owner) in self.inner.ws_routes.drain_all() {
       let event = BridgeToClientNetMsgEvent::WsErrorEvent(NetWsErrorEvent {
         connection_id,
         error: WsError::GatewayDisconnected,
       });
-      if let Err(err) = self.client_man.send_event(owner, event).await {
+      if let Err(err) = self.inner.bus.send_event(owner, event).await {
         tracing::trace!(?err, "ws cleanup send failed");
       }
       let closed = BridgeToClientNetMsgEvent::WsClosed(NetWsClosed {
@@ -264,17 +277,17 @@ impl PeerTracker {
         code: 1006,
         reason: "gateway disconnected".into(),
       });
-      if let Err(err) = self.client_man.send_event(owner, closed).await {
+      if let Err(err) = self.inner.bus.send_event(owner, closed).await {
         tracing::trace!(?err, "ws cleanup send failed");
       }
     }
 
-    for (stream_id, owner) in self.stream_routes.drain_all() {
+    for (stream_id, owner) in self.inner.stream_routes.drain_all() {
       let event = BridgeToClientNetMsgEvent::StreamError(StreamError {
         stream_id,
         error: NetError::NoGateway,
       });
-      if let Err(err) = self.client_man.send_event(owner, event).await {
+      if let Err(err) = self.inner.bus.send_event(owner, event).await {
         tracing::trace!(?err, "stream cleanup send failed");
       }
     }
@@ -282,14 +295,14 @@ impl PeerTracker {
 
   pub async fn resync_stock_connection(&self) -> PeerResult<()> {
     let device = {
-      let peers = self.inner.read().await;
+      let peers = self.inner.peers.read().await;
       peers.values().find(|p| p.has_useful_link()).map(|p| p.device.clone())
     };
     let Some(device) = device else {
       return Ok(());
     };
-    broadcast_stock_connection(&self.client_man, &device).await?;
-    if let Err(err) = self.player.send_state().await {
+    broadcast_stock_connection(&self.inner.bus, &device).await?;
+    if let Err(err) = self.inner.player.send_state().await {
       tracing::warn!(?err, "failed to send player state during stock resync");
     }
     Ok(())

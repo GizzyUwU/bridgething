@@ -2,11 +2,9 @@ use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
   PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, Track,
   client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
-  wire::MsgMeta,
 };
 
-use super::PlayerResult;
-use crate::{authority::AuthorityRegistry, net::ClientMan};
+use crate::authority::AuthorityRegistry;
 
 /// Which producer fed an inbound `NowPlayingUpdate`. The merge stage
 /// uses this to route the partial fields into the right source-snapshot
@@ -24,7 +22,6 @@ pub enum NowPlayingSource {
 
 #[derive(Debug, Clone)]
 pub struct PlayerState {
-  client_man: ClientMan,
   authority: AuthorityRegistry,
 
   pub playing: bool,
@@ -46,9 +43,8 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-  pub fn new(client_man: ClientMan, authority: AuthorityRegistry) -> Self {
+  pub fn new(authority: AuthorityRegistry) -> Self {
     Self {
-      client_man,
       authority,
 
       playing: false,
@@ -70,11 +66,7 @@ impl PlayerState {
     }
   }
 
-  pub(crate) async fn apply_now_playing(
-    &mut self,
-    source: NowPlayingSource,
-    update: NowPlayingUpdate,
-  ) -> PlayerResult<()> {
+  pub(crate) fn apply_now_playing(&mut self, source: NowPlayingSource, update: NowPlayingUpdate) {
     let NowPlayingUpdate { media_item, playback } = update;
 
     let (meta_target, play_target) = match source {
@@ -93,7 +85,6 @@ impl PlayerState {
     let merged_play = self.merged_playback();
 
     self.apply_merged(merged_meta, merged_play);
-    self.send_state().await
   }
 
   fn merged_metadata(&self) -> MediaItemUpdate {
@@ -278,13 +269,6 @@ impl PlayerState {
 
   pub fn iap2_playback_snapshot(&self) -> PlaybackUpdate {
     self.iap2_playback.clone()
-  }
-
-  pub async fn send_state(&self) -> PlayerResult<()> {
-    self.client_man.broadcast(self.to_send_state(), MsgMeta::Event).await?;
-    self.client_man.broadcast(self.to_send_queue(), MsgMeta::Event).await?;
-
-    Ok(())
   }
 
   pub fn to_send_state(&self) -> BridgeToClientPlayerMsg {

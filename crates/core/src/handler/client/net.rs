@@ -224,7 +224,7 @@ impl NetHandler {
         stream_id: open.stream_id,
         error,
       });
-      let _ = self.handle.state.client_man.send_event(self.handle.from, event).await;
+      let _ = self.handle.state.bus.send_event(self.handle.from, event).await;
       return Ok(());
     }
 

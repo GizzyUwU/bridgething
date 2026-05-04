@@ -1,7 +1,7 @@
 use libbridgething::Device;
 
 use crate::{
-  net::{ClientMan, WSError},
+  net::{WSError, WireEventBus},
   stock::{StockConfigurationSend, StockConnectionSend, StockInterAppSend, StockInterAppSendPayload},
 };
 
@@ -11,20 +11,20 @@ use crate::{
 /// not just on first BlueZ pair, since the webapp will sit on stale state
 /// (and ignore now-playing deltas) if it doesn't see these on every link
 /// transition.
-pub async fn broadcast_stock_connection(client_man: &ClientMan, device: &Device) -> Result<(), Vec<WSError>> {
-  client_man
+pub async fn broadcast_stock_connection(bus: &WireEventBus, device: &Device) -> Result<(), Vec<WSError>> {
+  bus
     .broadcast_stock(StockConnectionSend::RemoteStatus {
       payload: true,
       mac: device.mac.clone(),
       phone_type: device.device_type.clone().into(),
     })
     .await?;
-  client_man
+  bus
     .broadcast_stock(StockConnectionSend::TransportStatus { payload: true })
     .await?;
-  client_man.broadcast_stock(StockConfigurationSend::default()).await?;
+  bus.broadcast_stock(StockConfigurationSend::default()).await?;
 
-  client_man
+  bus
     .broadcast_stock(StockInterAppSend {
       msg_id: None,
       data: StockInterAppSendPayload::SessionState {
@@ -36,7 +36,7 @@ pub async fn broadcast_stock_connection(client_man: &ClientMan, device: &Device)
     })
     .await?;
 
-  client_man
+  bus
     .broadcast_stock(StockConnectionSend::RemoteApp {
       app_id: "com.bridgething".to_string(),
       is_spotify: true,
@@ -46,8 +46,8 @@ pub async fn broadcast_stock_connection(client_man: &ClientMan, device: &Device)
   Ok(())
 }
 
-pub async fn broadcast_stock_disconnection(client_man: &ClientMan) -> Result<(), Vec<WSError>> {
-  client_man
+pub async fn broadcast_stock_disconnection(bus: &WireEventBus) -> Result<(), Vec<WSError>> {
+  bus
     .broadcast_stock(StockConnectionSend::TransportStatus { payload: false })
     .await
 }

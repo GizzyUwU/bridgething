@@ -5,7 +5,7 @@ use std::{
 };
 
 use bluer::{Adapter, Address, Session, agent::AgentHandle};
-use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2Manager, Iap2ReconnectHandle};
+use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Manager, Iap2ReconnectHandle};
 use libbridgething::{
   Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
@@ -18,7 +18,7 @@ use uuid::Uuid;
 // protocol modules
 pub mod iap2;
 mod network;
-mod profiles;
+pub mod profiles;
 mod rfcomm;
 
 // general modules
@@ -36,9 +36,10 @@ use profiles::ProfileMan;
 use rfcomm::RfcommGateway;
 
 use crate::{
-  net::WSError,
+  net::{WSError, WireEventBus},
+  peer::PeerTracker,
   player::PlayerError,
-  state::{State, StateError},
+  state::{DeviceStore, StateError, meta::SuperbirdMeta},
 };
 
 pub type BluetoothMan = Arc<BluetoothManager>;
@@ -49,12 +50,17 @@ pub enum BluetoothEvent {
   Gateway(InboundGatewayMessage),
 }
 
+#[derive(Debug, Clone)]
+pub struct BluetoothDeps {
+  pub bus: WireEventBus,
+  pub meta: SuperbirdMeta,
+  pub devices: DeviceStore,
+  pub peers: PeerTracker,
+}
+
 #[derive(Debug)]
 pub struct BluetoothManager {
-  session: Session,
-  pub adapter: Adapter,
-  state: State,
-  tx: BluetoothTx,
+  _adapter: Adapter,
 
   pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
@@ -66,8 +72,14 @@ pub struct BluetoothManager {
   _iap2_handle: Option<JoinHandle<()>>,
 }
 
+#[derive(Debug)]
+pub struct BluetoothInit {
+  pub manager: BluetoothMan,
+  pub iap2_events_rx: Option<Iap2EventsRx>,
+}
+
 impl BluetoothManager {
-  pub async fn init(state: State, tx: BluetoothTx) -> BluetoothResult<BluetoothMan> {
+  pub async fn init(deps: BluetoothDeps, tx: BluetoothTx) -> BluetoothResult<BluetoothInit> {
     tracing::debug!("initializing bluetooth manager");
     let session = Session::new().await?;
     let adapter = adapter::get_adapter(&session).await?;
@@ -89,7 +101,15 @@ impl BluetoothManager {
     debug::query_adapter(&adapter).await?;
 
     tracing::debug!("setting up bluetooth profile manager");
-    let profile_man = Arc::new(profiles::ProfileManager::init(adapter.clone(), state.clone(), tx.clone()).await);
+    let profile_man = Arc::new(
+      profiles::ProfileManager::init(
+        adapter.clone(),
+        deps.bus.clone(),
+        deps.devices.clone(),
+        deps.peers.clone(),
+      )
+      .await,
+    );
     let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
 
     // start stream BEFORE device reconnection attempts
@@ -97,36 +117,26 @@ impl BluetoothManager {
       adapter::AdapterEventStream(Box::new(adapter.events().await?)).spawn(profile_man.clone());
 
     tracing::debug!("setting up bluetooth gateway manager");
-    let gateway_man = GatewayMan::init(adapter.clone(), &session, state.clone(), tx.clone()).await?;
+    let gateway_man = GatewayMan::init(adapter.clone(), &session, &deps, tx.clone()).await?;
 
     tracing::debug!("setting up iap2 manager");
-    let (iap2_reconnect, iap2_transport, iap2_telephony, _iap2_handle) = match Iap2Manager::init(
-      &session,
-      adapter.clone(),
-      &state,
-      profile_man.clone(),
-      gateway_man.iap2_ea_handle(),
-    )
-    .await?
-    {
-      Some((manager, reconnect_handle, transport_handle, telephony_handle)) => (
-        Some(reconnect_handle),
-        Some(transport_handle),
-        Some(telephony_handle),
-        Some(manager.spawn()),
-      ),
-      None => {
-        tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-        (None, None, None, None)
-      }
-    };
+    let (iap2_reconnect, iap2_transport, iap2_telephony, _iap2_handle, iap2_events_rx) =
+      match Iap2Manager::init(&session, adapter.clone(), &deps.meta).await? {
+        Some(out) => (
+          Some(out.reconnect),
+          Some(out.transport),
+          Some(out.telephony),
+          Some(out.manager.spawn()),
+          Some(out.events_rx),
+        ),
+        None => {
+          tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
+          (None, None, None, None, None)
+        }
+      };
 
-    Ok(Arc::new(Self {
-      session,
-      adapter,
-      state,
-
-      tx,
+    let manager = Arc::new(Self {
+      _adapter: adapter,
 
       profile_man,
       gateway_man,
@@ -136,7 +146,12 @@ impl BluetoothManager {
 
       _agent_handle,
       _iap2_handle,
-    }))
+    });
+
+    Ok(BluetoothInit {
+      manager,
+      iap2_events_rx,
+    })
   }
 
   pub fn iap2_transport_handle(&self) -> Option<iap2::Iap2TransportHandle> {
@@ -145,6 +160,10 @@ impl BluetoothManager {
 
   pub fn iap2_telephony_handle(&self) -> Option<iap2::Iap2TelephonyHandle> {
     self.iap2_telephony.clone()
+  }
+
+  pub fn iap2_reconnect_handle(&self) -> Option<Iap2ReconnectHandle> {
+    self.iap2_reconnect.clone()
   }
 
   pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
@@ -235,11 +254,6 @@ type PendingRequests = Arc<Mutex<HashMap<Uuid, oneshot::Sender<GatewayToBridgeMs
 
 #[derive(Debug)]
 pub struct GatewayMan {
-  adapter: Adapter,
-  state: State,
-
-  tx: BluetoothTx,
-
   rfcomm: GatewayCon,
   iap2_ea_send_tx: GatewaySendTx,
   iap2_ea_handle: Iap2EaGatewayHandle,
@@ -252,26 +266,35 @@ pub struct GatewayMan {
 }
 
 impl GatewayMan {
-  pub async fn init(adapter: Adapter, session: &Session, state: State, tx: BluetoothTx) -> BluetoothResult<Self> {
+  pub async fn init(
+    adapter: Adapter,
+    session: &Session,
+    deps: &BluetoothDeps,
+    tx: BluetoothTx,
+  ) -> BluetoothResult<Self> {
     tracing::debug!("initializing bluetooth gateway manager");
     let peer_owners = PeerOwners::new();
 
-    let rfcomm = GatewayCon::init(&adapter, session, state.clone(), tx.clone(), peer_owners.clone()).await?;
+    let rfcomm = GatewayCon::init(
+      &adapter,
+      session,
+      deps.meta.clone(),
+      deps.peers.clone(),
+      tx.clone(),
+      peer_owners.clone(),
+    )
+    .await?;
 
-    let (iap2_ea, iap2_ea_handle) = Iap2EaGateway::init(state.clone(), tx.clone(), peer_owners.clone());
+    let (iap2_ea, iap2_ea_handle) =
+      Iap2EaGateway::init(deps.meta.clone(), deps.peers.clone(), tx.clone(), peer_owners.clone());
     let iap2_ea_send_tx = iap2_ea.send_tx();
     let _iap2_ea_handle = iap2_ea.spawn();
 
-    let network = NetworkGateway::init(state.clone(), tx.clone(), peer_owners.clone()).await?;
+    let network = NetworkGateway::init(deps.meta.clone(), deps.peers.clone(), tx.clone(), peer_owners.clone()).await?;
     let network_send_tx = network.send_tx();
     let _network_handle = network.spawn();
 
     Ok(Self {
-      adapter,
-      state,
-
-      tx,
-
       rfcomm,
       iap2_ea_send_tx,
       iap2_ea_handle,
@@ -483,7 +506,8 @@ impl GatewayCon {
   pub async fn init(
     _adapter: &Adapter,
     session: &Session,
-    state: State,
+    meta: SuperbirdMeta,
+    peers: PeerTracker,
     bluetooth_tx: BluetoothTx,
     peer_owners: PeerOwners,
   ) -> BluetoothResult<Self> {
@@ -491,7 +515,7 @@ impl GatewayCon {
     let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
     let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
 
-    let _handle = RfcommGateway::init(session, state, recv_tx, notify_rx, peer_owners)
+    let _handle = RfcommGateway::init(session, meta, peers, recv_tx, notify_rx, peer_owners)
       .await?
       .spawn();
 

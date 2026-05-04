@@ -52,7 +52,7 @@ use super::{
   BluetoothEvent, BluetoothResult, BluetoothTx, GatewaySendTx, GatewayType, InboundGatewayMessage,
   OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode, peer_owners::PeerOwners,
 };
-use crate::state::State;
+use crate::{peer::PeerTracker, state::meta::SuperbirdMeta};
 
 /// Soft cap on a single batched WS write. Keeps the packer's
 /// Normal-before-Bulk discipline meaningful without one writer task
@@ -262,7 +262,8 @@ async fn ws_handler(
 
 #[derive(Debug)]
 pub struct NetworkGateway {
-  state: State,
+  meta: SuperbirdMeta,
+  peers: PeerTracker,
   bluetooth_tx: BluetoothTx,
 
   send_tx: GatewaySendTx,
@@ -280,7 +281,12 @@ pub struct NetworkGateway {
 }
 
 impl NetworkGateway {
-  pub async fn init(state: State, bluetooth_tx: BluetoothTx, peer_owners: PeerOwners) -> BluetoothResult<Self> {
+  pub async fn init(
+    meta: SuperbirdMeta,
+    peers: PeerTracker,
+    bluetooth_tx: BluetoothTx,
+    peer_owners: PeerOwners,
+  ) -> BluetoothResult<Self> {
     tracing::debug!("initializing network gateway on port {BRIDGETHING_NETWORK_GATEWAY_PORT}");
 
     let (accept_tx, accept_rx) = mpsc::channel::<ConnectAccepted>(16);
@@ -312,7 +318,8 @@ impl NetworkGateway {
     let (send_tx, send_rx) = mpsc::channel(16);
 
     Ok(Self {
-      state,
+      meta,
+      peers,
       bluetooth_tx,
 
       send_tx,
@@ -355,7 +362,7 @@ impl NetworkGateway {
               tracing::debug!("network connection closed: {address}");
               self.connections.remove(&address);
               self.peer_owners.unregister(address, GatewayType::Network);
-              let _ = self.state.peers.set_companion(address, PeerCompanionStatus::None).await;
+              let _ = self.peers.set_companion(address, PeerCompanionStatus::None).await;
             }
             ConnectionMessage::Msg(msg) => {
               let inbound = InboundGatewayMessage::new(Some(address), GatewayType::Network, *msg);
@@ -364,13 +371,11 @@ impl NetworkGateway {
               }
             }
             ConnectionMessage::DecodeFailed(probe) => {
-              if let Some(nack) = auto_nack_for_failed_decode(&probe) {
-                if let Some(conn) = self.connections.get(&address) {
-                  if let Err(e) = conn.send(&nack, Priority::Normal).await {
+              if let Some(nack) = auto_nack_for_failed_decode(&probe)
+                && let Some(conn) = self.connections.get(&address)
+                  && let Err(e) = conn.send(&nack, Priority::Normal).await {
                     tracing::error!("({address}) failed to send auto-nack: {:?}", e);
                   }
-                }
-              }
             }
           }
         }
@@ -410,7 +415,7 @@ impl NetworkGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.state.meta.clone().into(),
+      data: self.meta.clone().into(),
     };
     if let Err(err) = connection.send(&version, Priority::Normal).await {
       tracing::warn!("({address}) failed to send initial Version: {err:?}");
@@ -418,11 +423,7 @@ impl NetworkGateway {
 
     self.connections.insert(address, connection);
     self.peer_owners.register(address, GatewayType::Network);
-    let _ = self
-      .state
-      .peers
-      .set_companion(address, PeerCompanionStatus::Pending)
-      .await;
+    let _ = self.peers.set_companion(address, PeerCompanionStatus::Pending).await;
   }
 }
 

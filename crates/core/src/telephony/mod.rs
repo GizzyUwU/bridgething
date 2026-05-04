@@ -26,7 +26,7 @@ use libbridgething::{
 };
 use tokio::sync::RwLock;
 
-use crate::{bluetooth::iap2::Iap2TelephonyHandle, net::ClientMan};
+use crate::{bluetooth::iap2::Iap2TelephonyHandle, net::WireEventBus};
 
 #[derive(Debug, Default)]
 struct Inner {
@@ -37,8 +37,8 @@ struct Inner {
 #[derive(Debug, Clone)]
 pub struct TelephonyManager {
   inner: Arc<RwLock<Inner>>,
-  client_man: ClientMan,
-  iap2: Arc<RwLock<Option<Iap2TelephonyHandle>>>,
+  bus: WireEventBus,
+  iap2: Option<Iap2TelephonyHandle>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,18 +50,12 @@ pub enum TelephonyError {
 }
 
 impl TelephonyManager {
-  pub fn new(client_man: ClientMan) -> Self {
+  pub fn new(bus: WireEventBus, iap2: Option<Iap2TelephonyHandle>) -> Self {
     Self {
       inner: Arc::new(RwLock::new(Inner::default())),
-      client_man,
-      iap2: Arc::new(RwLock::new(None)),
+      bus,
+      iap2,
     }
-  }
-
-  /// Install the iAP2 dispatch handle once the Bluetooth manager is up.
-  /// Idempotent; the daemon calls this exactly once during startup.
-  pub async fn attach_iap2(&self, handle: Option<Iap2TelephonyHandle>) {
-    *self.iap2.write().await = handle;
   }
 
   pub async fn snapshot(&self) -> PhoneState {
@@ -196,8 +190,7 @@ impl TelephonyManager {
   }
 
   pub async fn dispatch(&self, cmd: TelephonyCommand) -> Result<(), TelephonyError> {
-    let guard = self.iap2.read().await;
-    let Some(handle) = guard.as_ref() else {
+    let Some(handle) = self.iap2.as_ref() else {
       return Err(TelephonyError::NoIap2);
     };
     handle.send(cmd).await;
@@ -253,7 +246,7 @@ impl TelephonyManager {
   }
 
   async fn broadcast(&self, event: BridgeToClientPhoneMsg) -> Result<(), TelephonyError> {
-    if let Err(errors) = self.client_man.broadcast(event, MsgMeta::Event).await {
+    if let Err(errors) = self.bus.broadcast(event, MsgMeta::Event).await {
       return Err(TelephonyError::Broadcast(errors.len()));
     }
     Ok(())

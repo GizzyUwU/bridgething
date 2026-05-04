@@ -11,7 +11,6 @@ use crate::{
   bluetooth::BluetoothMan, net::WSResult, state::State, stock::StockSendMsg, transport::TransportController,
 };
 
-// TODO: don't allow cloning of message handle
 #[derive(Debug, Clone)]
 pub struct MsgHandle {
   pub state: State,
@@ -40,14 +39,14 @@ impl MsgHandle {
 
   #[allow(unused)]
   pub async fn send(&self, id: Uuid, data: impl Into<BridgeToClientMsgData>, meta: MsgMeta) -> WSResult<()> {
-    self.state.client_man.send(id, self.from, data, meta, None).await
+    self.state.bus.send(id, self.from, data, meta, None).await
   }
 
   #[allow(unused)]
   pub async fn request(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
-      .client_man
+      .bus
       .send(Uuid::now_v7(), self.from, data, MsgMeta::Request, None)
       .await
   }
@@ -55,7 +54,7 @@ impl MsgHandle {
   pub async fn respond(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
-      .client_man
+      .bus
       .send(
         Uuid::now_v7(),
         self.from,
@@ -84,13 +83,13 @@ impl MsgHandle {
   pub async fn send_info(&self, data: impl Into<BridgeToClientMsgData>) -> WSResult<()> {
     self
       .state
-      .client_man
+      .bus
       .send(Uuid::now_v7(), self.from, data, MsgMeta::Event, None)
       .await
   }
 
   pub async fn send_stock(&self, data: impl Into<StockSendMsg>) -> WSResult<()> {
-    self.state.client_man.send_stock(self.from, data).await
+    self.state.bus.send_stock(self.from, data).await
   }
 
   /// Mark a verb as recognized-but-not-yet-built. Logs at the

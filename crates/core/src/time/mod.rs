@@ -14,12 +14,12 @@ use libbridgething::{
 };
 use tokio::sync::RwLock;
 
-use crate::net::ClientMan;
+use crate::net::WireEventBus;
 
 #[derive(Debug, Clone)]
 pub struct TimeManager {
   state: Arc<RwLock<TimeInfo>>,
-  client_man: ClientMan,
+  bus: WireEventBus,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,10 +29,10 @@ pub enum TimeError {
 }
 
 impl TimeManager {
-  pub fn new(client_man: ClientMan) -> Self {
+  pub fn new(bus: WireEventBus) -> Self {
     Self {
       state: Arc::new(RwLock::new(TimeInfo::default())),
-      client_man,
+      bus,
     }
   }
 
@@ -66,7 +66,7 @@ impl TimeManager {
   async fn broadcast(&self) -> Result<(), TimeError> {
     let snapshot = self.snapshot().await;
     let event = BridgeToClientTimeMsg::Changed(TimeSnapshot { time: snapshot });
-    if let Err(errors) = self.client_man.broadcast(event, MsgMeta::Event).await {
+    if let Err(errors) = self.bus.broadcast(event, MsgMeta::Event).await {
       return Err(TimeError::Broadcast(errors.len()));
     }
     Ok(())

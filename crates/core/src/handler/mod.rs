@@ -1,8 +1,10 @@
 pub mod client;
 pub mod gateway;
+pub mod iap2;
 
 pub use client::ClientHandler;
 pub use gateway::GatewayHandler;
+pub use iap2::Iap2EventRouter;
 
 use crate::{
   asset::AssetError, bluetooth::BluetoothError, impl_broadcast_failure_from, net::WSError, player::PlayerError,

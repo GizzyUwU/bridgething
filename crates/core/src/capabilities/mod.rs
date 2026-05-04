@@ -29,7 +29,7 @@ use libbridgething::{
 
 use crate::{
   authority::AuthorityRegistry,
-  net::{ClientMan, WSResult},
+  net::{WSResult, WireEventBus},
 };
 
 #[derive(Debug, Clone)]
@@ -41,17 +41,17 @@ pub struct CapabilitiesRegistry {
 struct Inner {
   snapshot: RwLock<Capabilities>,
   announces: RwLock<HashMap<Address, GatewayCapabilities>>,
-  client_man: ClientMan,
+  bus: WireEventBus,
   authority: AuthorityRegistry,
 }
 
 impl CapabilitiesRegistry {
-  pub fn new(client_man: ClientMan, authority: AuthorityRegistry) -> Self {
+  pub fn new(bus: WireEventBus, authority: AuthorityRegistry) -> Self {
     Self {
       inner: Arc::new(Inner {
         snapshot: RwLock::new(Capabilities::default()),
         announces: RwLock::new(HashMap::new()),
-        client_man,
+        bus,
         authority,
       }),
     }
@@ -92,7 +92,7 @@ impl CapabilitiesRegistry {
   pub async fn send_snapshot_to(&self, to: SocketAddr) -> WSResult<()> {
     let caps = self.snapshot();
     let event = BridgeToClientCapabilitiesMsgEvent::Update(CapabilitiesSnapshot { capabilities: caps });
-    self.inner.client_man.send_event(to, event).await
+    self.inner.bus.send_event(to, event).await
   }
 
   fn build_snapshot(&self) -> Capabilities {
@@ -127,7 +127,7 @@ impl CapabilitiesRegistry {
       *guard = snapshot.clone();
     }
     let event = BridgeToClientCapabilitiesMsgEvent::Update(CapabilitiesSnapshot { capabilities: snapshot });
-    match self.inner.client_man.broadcast_event(event).await {
+    match self.inner.bus.broadcast_event(event).await {
       Ok(()) => Ok(()),
       Err(errs) => {
         for err in &errs {
@@ -206,8 +206,9 @@ mod tests {
   #[tokio::test]
   async fn snapshot_empty_without_announce() {
     let (client_man, _listener) = crate::net::create_client_manager();
+    let bus = WireEventBus::new(client_man);
     let auth = AuthorityRegistry::new();
-    let reg = CapabilitiesRegistry::new(client_man, auth);
+    let reg = CapabilitiesRegistry::new(bus, auth);
     let snap = reg.snapshot();
     assert!(snap.gateway.is_none());
     assert!(snap.uri_schemes.is_empty());
@@ -218,8 +219,9 @@ mod tests {
   #[tokio::test]
   async fn announce_populates_snapshot_with_companion_availability() {
     let (client_man, _listener) = crate::net::create_client_manager();
+    let bus = WireEventBus::new(client_man);
     let auth = AuthorityRegistry::new();
-    let reg = CapabilitiesRegistry::new(client_man, auth);
+    let reg = CapabilitiesRegistry::new(bus, auth);
 
     let addr: Address = "00:11:22:33:44:55".parse().unwrap();
     let claimed = SurfaceAvailability {
@@ -241,8 +243,9 @@ mod tests {
   #[tokio::test]
   async fn authority_mutations_appear_in_snapshot() {
     let (client_man, _listener) = crate::net::create_client_manager();
+    let bus = WireEventBus::new(client_man);
     let auth = AuthorityRegistry::new();
-    let reg = CapabilitiesRegistry::new(client_man, auth.clone());
+    let reg = CapabilitiesRegistry::new(bus, auth.clone());
 
     let _ = reg.claim_authority(CompanionAuthorityScope::NowPlayingMetadata).await;
     let snap = reg.snapshot();
@@ -256,8 +259,9 @@ mod tests {
   #[tokio::test]
   async fn clear_companion_drops_announce_and_authority() {
     let (client_man, _listener) = crate::net::create_client_manager();
+    let bus = WireEventBus::new(client_man);
     let auth = AuthorityRegistry::new();
-    let reg = CapabilitiesRegistry::new(client_man, auth.clone());
+    let reg = CapabilitiesRegistry::new(bus, auth.clone());
 
     let addr: Address = "00:11:22:33:44:55".parse().unwrap();
     let _ = reg

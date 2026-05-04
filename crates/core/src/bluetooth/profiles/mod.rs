@@ -4,8 +4,8 @@ use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
 use tokio::sync::RwLock;
 
-use super::{BluetoothResult, BluetoothTx};
-use crate::{state::State, stock::StockSetupSend};
+use super::BluetoothResult;
+use crate::{net::WireEventBus, peer::PeerTracker, state::DeviceStore, stock::StockSetupSend};
 
 pub type ProfileMan = Arc<ProfileManager>;
 
@@ -18,20 +18,22 @@ struct ProfileConnectionState {
 #[derive(Debug)]
 pub struct ProfileManager {
   adapter: Adapter,
-  state: State,
-  tx: BluetoothTx,
+  bus: WireEventBus,
+  devices: DeviceStore,
+  peers: PeerTracker,
 
   profile_state: RwLock<ProfileConnectionState>,
 }
 
 impl ProfileManager {
-  pub async fn init(adapter: Adapter, state: State, tx: BluetoothTx) -> ProfileManager {
+  pub async fn init(adapter: Adapter, bus: WireEventBus, devices: DeviceStore, peers: PeerTracker) -> ProfileManager {
     tracing::debug!("initializing bluetooth profile connection manager");
 
     Self {
       adapter,
-      state,
-      tx,
+      bus,
+      devices,
+      peers,
 
       profile_state: RwLock::new(ProfileConnectionState::default()),
     }
@@ -59,7 +61,7 @@ impl ProfileManager {
 
   pub async fn reset(&self) -> BluetoothResult<()> {
     tracing::debug!("forgetting all devices");
-    for mac in self.state.get_devices().await?.keys() {
+    for mac in self.devices.list().await?.keys() {
       self.forget(mac).await?;
     }
 
@@ -94,8 +96,7 @@ impl ProfileManager {
           );
 
           self
-            .state
-            .client_man
+            .bus
             .broadcast(
               BridgeToClientBluetoothMsg::Pin(libbridgething::client::BluetoothPin {
                 mac: mac.to_string(),
@@ -137,9 +138,7 @@ impl ProfileManager {
             .is_some()
           {
             tracing::info!("current device with mac address {:?} has disconnected!", &mac);
-            self.state.handle_disconnect().await?;
-
-            let _ = self.state.peers.remove(mac).await;
+            let _ = self.peers.remove(mac).await;
           }
 
           Ok(())
@@ -171,25 +170,24 @@ impl ProfileManager {
       default: true,
     };
 
-    let new_device = self.state.get_device(&mac_str).await?.is_none();
+    let new_device = self.devices.get(&mac_str).await?.is_none();
     if new_device {
-      self.state.add_device(device.clone()).await?;
+      self.devices.upsert(device.clone()).await?;
       self.set_discoverable(false).await?;
     }
-    self.state.set_last_device(mac_str).await?;
+    self.devices.set_last(mac_str).await?;
 
     {
       let mut profile_state = self.profile_state.write().await;
       profile_state.device = Some(bluez);
     }
 
-    let _ = self.state.peers.upsert(mac, device.clone()).await;
-    let _ = self.state.peers.set_paired(mac, true).await;
+    let _ = self.peers.upsert(mac, device.clone()).await;
+    let _ = self.peers.set_paired(mac, true).await;
 
     if new_device {
       self
-        .state
-        .client_man
+        .bus
         .broadcast_stock(StockSetupSend::Status {
           payload: "finished".to_string(),
         })

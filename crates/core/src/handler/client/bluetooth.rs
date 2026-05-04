@@ -34,7 +34,7 @@ impl BluetoothHandler {
   async fn list(&self) -> HandlerResult {
     tracing::debug!("({}) sending list of paired devices", &self.handle.from);
 
-    let devices = self.handle.state.get_devices().await?;
+    let devices = self.handle.state.devices.list().await?;
     tracing::trace!("({}) devices: {:?}", &self.handle.from, &devices);
 
     Ok(
@@ -76,7 +76,7 @@ impl BluetoothHandler {
     tracing::debug!("({}) forgetting device with MAC: {}", &self.handle.from, mac);
 
     self.handle.bluetooth.profile_man.forget(&mac).await?;
-    self.handle.state.remove_device(mac).await?;
+    self.handle.state.devices.remove(mac).await?;
     self.list().await?;
 
     // Ok(self.handle.respond().await?)

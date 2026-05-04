@@ -63,7 +63,7 @@ impl NetHandler {
       connection_id: msg.connection_id,
       frame: msg.frame,
     });
-    if let Err(err) = self.handle.state.client_man.send_event(owner, event).await {
+    if let Err(err) = self.handle.state.bus.send_event(owner, event).await {
       tracing::warn!(?err, "failed to forward ws message to webapp");
     }
     Ok(())
@@ -79,7 +79,7 @@ impl NetHandler {
       code: msg.code,
       reason: msg.reason,
     });
-    if let Err(err) = self.handle.state.client_man.send_event(owner, event).await {
+    if let Err(err) = self.handle.state.bus.send_event(owner, event).await {
       tracing::warn!(?err, "failed to forward ws closed to webapp");
     }
     Ok(())
@@ -94,7 +94,7 @@ impl NetHandler {
       connection_id: msg.connection_id,
       error: msg.error,
     });
-    if let Err(err) = self.handle.state.client_man.send_event(owner, event).await {
+    if let Err(err) = self.handle.state.bus.send_event(owner, event).await {
       tracing::warn!(?err, "failed to forward ws error to webapp");
     }
     Ok(())
@@ -115,7 +115,7 @@ impl NetHandler {
       tracing::trace!(%stream_id, "stream event for unknown stream; dropping");
       return Ok(());
     };
-    if let Err(err) = self.handle.state.client_man.send_event(owner, event).await {
+    if let Err(err) = self.handle.state.bus.send_event(owner, event).await {
       tracing::warn!(?err, "failed to forward stream event to webapp");
     }
     Ok(())

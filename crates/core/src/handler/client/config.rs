@@ -19,7 +19,7 @@ impl ConfigHandler {
     let app_id = self.handle.state.active_webapp().await?.unwrap_or(Uuid::nil());
     match msg {
       ClientToBridgeConfigMsgRequest::Get(ConfigGet { key }) => {
-        let value = self.handle.state.config_get(app_id, &key).await?;
+        let value = self.handle.state.kv.config_get(app_id, &key).await?;
         Ok(
           self
             .handle
@@ -31,6 +31,7 @@ impl ConfigHandler {
         let entries = self
           .handle
           .state
+          .kv
           .config_list(app_id)
           .await?
           .into_iter()

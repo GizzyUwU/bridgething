@@ -35,7 +35,8 @@ use crate::{
     BluetoothEvent, GatewayType, InboundGatewayMessage, OutboundGatewayMessage, auto_nack_for_failed_decode,
     peer_owners::PeerOwners,
   },
-  state::State,
+  peer::PeerTracker,
+  state::meta::SuperbirdMeta,
 };
 
 const STREAM_INPUT_CAPACITY: usize = 16;
@@ -100,7 +101,8 @@ struct StreamConn {
 
 #[derive(Debug)]
 pub struct Iap2EaGateway {
-  state: State,
+  meta: SuperbirdMeta,
+  peers: PeerTracker,
   bluetooth_tx: mpsc::Sender<BluetoothEvent>,
   send_tx: mpsc::Sender<OutboundGatewayMessage>,
   send_rx: mpsc::Receiver<OutboundGatewayMessage>,
@@ -114,7 +116,8 @@ pub struct Iap2EaGateway {
 
 impl Iap2EaGateway {
   pub fn init(
-    state: State,
+    meta: SuperbirdMeta,
+    peers: PeerTracker,
     bluetooth_tx: mpsc::Sender<BluetoothEvent>,
     peer_owners: PeerOwners,
   ) -> (Self, Iap2EaGatewayHandle) {
@@ -124,7 +127,8 @@ impl Iap2EaGateway {
     let (conn_close_tx, conn_close_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
     let handle = Iap2EaGatewayHandle { open_tx, closed_tx };
     let gateway = Self {
-      state,
+      meta,
+      peers,
       bluetooth_tx,
       send_tx,
       send_rx,
@@ -202,16 +206,12 @@ impl Iap2EaGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.state.meta.clone().into(),
+      data: self.meta.clone().into(),
     };
     self.send_to_stream(key, &version, Priority::Normal).await;
 
     self.peer_owners.register(address, GatewayType::Iap2Ea);
-    let _ = self
-      .state
-      .peers
-      .set_companion(address, PeerCompanionStatus::Pending)
-      .await;
+    let _ = self.peers.set_companion(address, PeerCompanionStatus::Pending).await;
     Ok(())
   }
 
@@ -259,7 +259,7 @@ impl Iap2EaGateway {
     let still_open_for_address = self.conns.keys().any(|(a, _)| *a == key.0);
     if !still_open_for_address {
       self.peer_owners.unregister(key.0, GatewayType::Iap2Ea);
-      let _ = self.state.peers.set_companion(key.0, PeerCompanionStatus::None).await;
+      let _ = self.peers.set_companion(key.0, PeerCompanionStatus::None).await;
     }
   }
 }

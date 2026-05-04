@@ -76,7 +76,7 @@ impl WebappHandler {
     match self.handle.state.webapps.install(archive).await {
       Ok(info) => {
         if let Some(manifest) = self.handle.state.webapps.manifest(info.id).await
-          && let Err(e) = self.handle.state.seed_config_defaults(&manifest).await
+          && let Err(e) = self.handle.state.kv.seed_config_defaults(&manifest).await
         {
           tracing::warn!("config-default seed failed for {}: {:?}", info.id, e);
         }
@@ -113,7 +113,7 @@ impl WebappHandler {
 
     let removed = self.handle.state.webapps.uninstall(id).await?;
     if removed {
-      self.handle.state.webapp_storage_purge(id).await?;
+      self.handle.state.kv.webapp_purge(id).await?;
     } else {
       tracing::debug!(
         "({:?}) webapp {id} was not installed; nothing to do",
@@ -165,7 +165,7 @@ impl WebappHandler {
         .await;
       return Ok(());
     }
-    let value = self.handle.state.config_get(id, &key).await?;
+    let value = self.handle.state.kv.config_get(id, &key).await?;
     self
       .handle
       .respond_to::<WebappConfigGet>(WebappConfigGetReply { key, value })
@@ -185,6 +185,7 @@ impl WebappHandler {
     let entries = self
       .handle
       .state
+      .kv
       .config_list(id)
       .await?
       .into_iter()
@@ -227,7 +228,7 @@ impl WebappHandler {
       return Ok(());
     }
 
-    self.handle.state.config_set(id, &key, value.clone()).await?;
+    self.handle.state.kv.config_set(id, &key, value.clone()).await?;
     self.broadcast_config_change(id, &key, Some(value.clone())).await;
     self
       .handle
@@ -265,10 +266,10 @@ impl WebappHandler {
     let restored = field.default_as_storage();
     match restored.clone() {
       Some(default) => {
-        self.handle.state.config_set(id, &key, default).await?;
+        self.handle.state.kv.config_set(id, &key, default).await?;
       }
       None => {
-        self.handle.state.config_delete(id, &key).await?;
+        self.handle.state.kv.config_delete(id, &key).await?;
       }
     }
     self.broadcast_config_change(id, &key, restored.clone()).await;
@@ -291,7 +292,7 @@ impl WebappHandler {
       key: key.to_string(),
       value,
     });
-    if let Err(errs) = self.handle.state.client_man.broadcast_event(event).await {
+    if let Err(errs) = self.handle.state.bus.broadcast_event(event).await {
       tracing::debug!("config-change broadcast: {} non-fatal errors", errs.len());
     }
   }
