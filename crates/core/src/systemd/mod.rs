@@ -1,4 +1,5 @@
 pub mod power;
+pub mod time;
 
 #[cfg(feature = "systemd")]
 use sd_notify::{NotifyState, booted, notify};

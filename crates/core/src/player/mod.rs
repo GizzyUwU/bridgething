@@ -65,6 +65,19 @@ impl Player {
   pub async fn iap2_playback_snapshot(&self) -> libbridgething::PlaybackUpdate {
     self.state.read().await.iap2_playback_snapshot()
   }
+
+  pub async fn apply_iap2_queue(&self, items: Vec<libbridgething::QueueItem>) -> PlayerResult<()> {
+    let queue_msg = {
+      let mut guard = self.state.write().await;
+      guard.replace_iap2_queue(items);
+      guard.to_send_queue()
+    };
+    self
+      .bus
+      .broadcast(queue_msg, libbridgething::wire::MsgMeta::Event)
+      .await?;
+    Ok(())
+  }
 }
 
 pub type PlayerResult<T> = Result<T, PlayerError>;

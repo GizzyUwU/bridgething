@@ -1510,7 +1510,10 @@ data class Peer (
 	val device: Device,
 	val paired: Boolean,
 	val iap2: PeerIap2Status,
-	val companion: PeerCompanionStatus
+	val companion: PeerCompanionStatus,
+	val displayName: String? = null,
+	val language: String? = null,
+	val uuid: String? = null
 )
 
 /// Direction the accessory wants iOS to take when answering an incoming

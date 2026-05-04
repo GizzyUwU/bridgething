@@ -269,6 +269,15 @@ pub struct MediaItemAttributes {
 }
 
 impl MediaItemAttributes {
+  /// Decode a single MediaItem parameter group from its inner payload
+  /// (the bytes inside a `param 0` of a `NowPlayingUpdate`, or one
+  /// element of a queue snapshot blob). The payload is the inner
+  /// CSM-format param block; the outer 4-byte param header is the
+  /// caller's responsibility.
+  pub fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
+    Self::decode_group_inner(payload)
+  }
+
   fn decode_group_inner(payload: Bytes) -> Result<Self, CsmDecodeError> {
     let mut params = decode_param_block(payload)?;
     let persistent_id = take_optional_be_u64(MEDIA_ITEM_PERSISTENT_ID, &mut params)?;
@@ -376,6 +385,27 @@ impl PlaybackAttributes {
       queue_list_content_transfer,
     })
   }
+}
+
+/// Decode the queue snapshot blob delivered over File Transfer Session
+/// id 2. Each element is a MediaItem parameter group wrapped as one
+/// CsmParam entry; the entry's id position carries no information for
+/// us (Apple uses it as a slot tag we ignore). Per-element decode is
+/// best-effort: malformed entries are dropped with a warn rather than
+/// aborting the whole parse — a partially-decoded queue is more useful
+/// than no queue.
+pub fn decode_queue_snapshot(blob: Bytes) -> Result<Vec<MediaItemAttributes>, CsmDecodeError> {
+  let entries = decode_param_block(blob)?;
+  let mut out = Vec::with_capacity(entries.len());
+  for (idx, CsmParam { id, payload }) in entries.into_iter().enumerate() {
+    match MediaItemAttributes::decode_group(payload) {
+      Ok(item) => out.push(item),
+      Err(err) => {
+        tracing::warn!(?err, idx, slot_id = id, "queue snapshot entry decode failed; skipping");
+      }
+    }
+  }
+  Ok(out)
 }
 
 /// Three-state playback per cleanroom doc 60 catalogue: 0 stopped,
@@ -873,5 +903,54 @@ mod tests {
       media.media_types.as_deref(),
       Some(&[MediaTypeKind::Music, MediaTypeKind::AudioBook][..])
     );
+  }
+
+  #[test]
+  fn queue_snapshot_decodes_each_wrapped_media_item() {
+    let item_a = build_group(&[
+      (MEDIA_ITEM_PERSISTENT_ID, &0x0011_2233_4455_6677u64.to_be_bytes()),
+      (MEDIA_ITEM_TITLE, b"A\0"),
+      (MEDIA_ITEM_ARTIST, b"AArt\0"),
+      (MEDIA_ITEM_ARTWORK_ID, &[1]),
+    ]);
+    let item_b = build_group(&[
+      (MEDIA_ITEM_PERSISTENT_ID, &0x8899_aabb_ccdd_eeffu64.to_be_bytes()),
+      (MEDIA_ITEM_TITLE, b"B\0"),
+      (MEDIA_ITEM_DURATION_MS, &123_000u32.to_be_bytes()),
+    ]);
+    let blob = encode_param_block(vec![
+      CsmParam { id: 0, payload: item_a },
+      CsmParam { id: 1, payload: item_b },
+    ]);
+    let items = decode_queue_snapshot(blob).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].title.as_deref(), Some("A"));
+    assert_eq!(items[0].artist.as_deref(), Some("AArt"));
+    assert_eq!(items[0].artwork_id, Some(1));
+    assert_eq!(items[0].persistent_id, Some(0x0011_2233_4455_6677u64));
+    assert_eq!(items[1].title.as_deref(), Some("B"));
+    assert_eq!(items[1].duration_ms, Some(123_000));
+  }
+
+  #[test]
+  fn queue_snapshot_skips_malformed_entry_and_continues() {
+    let good = build_group(&[(MEDIA_ITEM_TITLE, b"OK\0")]);
+    let bad_payload = Bytes::from_static(&[0xFF, 0xFE]); // not a valid param block
+    let blob = encode_param_block(vec![
+      CsmParam { id: 0, payload: good },
+      CsmParam {
+        id: 1,
+        payload: bad_payload,
+      },
+    ]);
+    let items = decode_queue_snapshot(blob).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].title.as_deref(), Some("OK"));
+  }
+
+  #[test]
+  fn queue_snapshot_empty_blob_yields_empty_vec() {
+    let items = decode_queue_snapshot(Bytes::new()).unwrap();
+    assert!(items.is_empty());
   }
 }

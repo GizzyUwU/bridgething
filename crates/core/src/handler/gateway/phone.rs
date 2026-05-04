@@ -14,8 +14,16 @@ impl PhoneHandler {
   pub async fn handle(self, msg: GatewayToBridgePhoneMsg) -> HandlerResult {
     match msg {
       GatewayToBridgePhoneMsg::Snapshot(_) => self.handle.unimplemented("gateway:phone.snapshot").await,
-      GatewayToBridgePhoneMsg::CommunicationsSnapshot(_) => {
-        self.handle.unimplemented("gateway:phone.communicationsSnapshot").await
+      GatewayToBridgePhoneMsg::CommunicationsSnapshot(snapshot) => {
+        if let Err(err) = self
+          .handle
+          .state
+          .telephony
+          .apply_companion_communications(snapshot.state)
+          .await
+        {
+          tracing::warn!(?err, "failed to apply companion communications snapshot");
+        }
       }
       GatewayToBridgePhoneMsg::CallStarted(_) => self.handle.unimplemented("gateway:phone.callStarted").await,
       GatewayToBridgePhoneMsg::CallUpdated(_) => self.handle.unimplemented("gateway:phone.callUpdated").await,

@@ -26,6 +26,9 @@ pub struct Peer {
   pub paired: bool,
   pub iap2: PeerIap2Status,
   pub companion: PeerCompanionStatus,
+  pub display_name: Option<String>,
+  pub language: Option<String>,
+  pub uuid: Option<String>,
 }
 
 impl Peer {
@@ -35,6 +38,9 @@ impl Peer {
       paired: false,
       iap2: PeerIap2Status::None,
       companion: PeerCompanionStatus::None,
+      display_name: None,
+      language: None,
+      uuid: None,
     }
   }
 

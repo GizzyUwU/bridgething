@@ -13,12 +13,12 @@ use bridgething_iap2::{
   SessionEvent,
   csm::now_playing::{
     MediaItemAttributes, MediaTypeKind, NowPlayingUpdate as Iap2NowPlayingUpdate, PlaybackAttributes, PlaybackState,
-    RepeatMode, ShuffleMode as Iap2ShuffleMode,
+    RepeatMode, ShuffleMode as Iap2ShuffleMode, decode_queue_snapshot,
   },
 };
 use libbridgething::{
   AssetRetention, DeviceType, MediaItemUpdate, MediaType as LibMediaType, NowPlayingUpdate, PeerIap2Status,
-  PlaybackUpdate, ShuffleMode as LibShuffleMode,
+  PlaybackUpdate, QueueItem, ShuffleMode as LibShuffleMode,
 };
 use tokio::sync::Mutex;
 
@@ -31,11 +31,14 @@ use crate::{
 };
 
 /// Per-session NowPlaying context. Each iPhone reports `persistent_id`
-/// only when it changes; subsequent deltas (for example, an artwork
-/// update on the same track) reuse the prior value. We hold the most
-/// recent hex form per peer to synthesise asset ids and tag inbound
-/// FileTransfer bytes with their owning track.
 type LastPidMap = Mutex<HashMap<Address, String>>;
+
+#[derive(Debug, Default)]
+struct QueueContext {
+  expected_transfer_id: Option<u8>,
+  list_avail: Option<bool>,
+}
+type QueueContextMap = Mutex<HashMap<Address, QueueContext>>;
 
 #[derive(Debug)]
 pub struct Iap2EventRouter {
@@ -44,6 +47,7 @@ pub struct Iap2EventRouter {
   ea_gateway: Iap2EaGatewayHandle,
   reconnect: Iap2ReconnectHandle,
   last_pid_hex: LastPidMap,
+  queue_ctx: QueueContextMap,
 }
 
 impl Iap2EventRouter {
@@ -59,6 +63,7 @@ impl Iap2EventRouter {
       ea_gateway,
       reconnect,
       last_pid_hex: Mutex::new(HashMap::new()),
+      queue_ctx: Mutex::new(HashMap::new()),
     }
   }
 
@@ -97,6 +102,10 @@ impl Iap2EventRouter {
         } else {
           self.last_pid_hex.lock().await.get(&address).cloned()
         };
+        let queue_avail_change = update
+          .playback
+          .as_ref()
+          .and_then(|p| p.queue_list_avail.map(|avail| (avail, p.queue_list_transfer_id)));
         let lib_update = translate_now_playing(update, pid_hex.as_deref());
         tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
         if let Err(err) = self
@@ -106,6 +115,21 @@ impl Iap2EventRouter {
           .await
         {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
+        }
+        if let Some((avail, transfer_id)) = queue_avail_change {
+          let cleared_queue = {
+            let mut guard = self.queue_ctx.lock().await;
+            let entry = guard.entry(address).or_default();
+            entry.list_avail = Some(avail);
+            entry.expected_transfer_id = transfer_id;
+            !avail
+          };
+          if cleared_queue {
+            tracing::debug!(%address, "queue_list_avail=false; clearing iAP2 queue");
+            if let Err(err) = self.state.player.apply_iap2_queue(Vec::new()).await {
+              tracing::warn!(%address, ?err, "failed to clear iAP2 queue");
+            }
+          }
         }
       }
       SessionEvent::ArtworkBytes { transfer_id, bytes } => {
@@ -131,12 +155,34 @@ impl Iap2EventRouter {
         }
       }
       SessionEvent::QueueSnapshotBytes { transfer_id, bytes } => {
-        tracing::debug!(
-          %address,
-          transfer_id,
-          bytes = bytes.len(),
-          "iAP2 queue snapshot bytes received (parser TBD)"
-        );
+        let expected = self
+          .queue_ctx
+          .lock()
+          .await
+          .get(&address)
+          .and_then(|c| c.expected_transfer_id);
+        if let Some(want) = expected
+          && want != transfer_id
+        {
+          tracing::warn!(
+            %address,
+            transfer_id,
+            expected = want,
+            "iAP2 queue snapshot transfer-id mismatch; honoring arrival anyway"
+          );
+        }
+        let raw_items = match decode_queue_snapshot(bytes) {
+          Ok(items) => items,
+          Err(err) => {
+            tracing::warn!(%address, transfer_id, ?err, "iAP2 queue snapshot decode failed; dropping");
+            return;
+          }
+        };
+        tracing::debug!(%address, transfer_id, count = raw_items.len(), "iAP2 queue snapshot decoded");
+        let queue = build_queue_items(&raw_items);
+        if let Err(err) = self.state.player.apply_iap2_queue(queue).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 queue");
+        }
       }
       SessionEvent::CallStateUpdate(update) => {
         tracing::debug!(%address, ?update, "iAP2 call-state update");
@@ -152,9 +198,15 @@ impl Iap2EventRouter {
       }
       SessionEvent::DeviceName(update) => {
         tracing::info!(%address, name = %update.device_name, "iAP2 device name");
+        if let Err(err) = self.state.peers.set_display_name(address, update.device_name).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 device name");
+        }
       }
       SessionEvent::DeviceLanguage(update) => {
         tracing::info!(%address, language = %update.language, "iAP2 device language");
+        if let Err(err) = self.state.peers.set_language(address, update.language).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 device language");
+        }
       }
       SessionEvent::DeviceTime(update) => {
         tracing::info!(
@@ -179,6 +231,9 @@ impl Iap2EventRouter {
       }
       SessionEvent::DeviceUuid(update) => {
         tracing::info!(%address, uuid = %update.uuid, "iAP2 device UUID");
+        if let Err(err) = self.state.peers.set_uuid(address, update.uuid).await {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 device UUID");
+        }
       }
       SessionEvent::EaStreamOpened {
         stream_id,
@@ -206,6 +261,10 @@ impl Iap2EventRouter {
         tracing::info!(%address, %reason, "iAP2 link down");
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
         self.last_pid_hex.lock().await.remove(&address);
+        self.queue_ctx.lock().await.remove(&address);
+        if let Err(err) = self.state.player.apply_iap2_queue(Vec::new()).await {
+          tracing::warn!(%address, ?err, "failed to clear iAP2 queue on link-down");
+        }
         self.reconnect.kick(address).await;
       }
     }
@@ -293,4 +352,29 @@ fn translate_media_types(types: Vec<MediaTypeKind>) -> Vec<LibMediaType> {
       MediaTypeKind::AudioBook => LibMediaType::AudioBook,
     })
     .collect()
+}
+
+fn build_queue_items(items: &[MediaItemAttributes]) -> Vec<QueueItem> {
+  items.iter().map(build_queue_item).collect()
+}
+
+fn build_queue_item(media: &MediaItemAttributes) -> QueueItem {
+  let pid_hex = media.persistent_id.map(|id| format!("{id:016x}"));
+  let artwork_id = match (media.artwork_id, pid_hex.as_deref()) {
+    (Some(id), Some(pid)) => Some(format!("iap2/art/{pid}/{id}")),
+    _ => None,
+  };
+  let uri = pid_hex
+    .as_deref()
+    .map(|pid| format!("iap2:track:{pid}"))
+    .unwrap_or_default();
+  QueueItem {
+    uri,
+    title: media.title.clone(),
+    artist: media.artist.clone().or_else(|| media.album_artist.clone()),
+    album: media.album.clone(),
+    artwork_id,
+    duration_ms: media.duration_ms,
+    persistent_id: pid_hex.map(|pid| format!("iap2:track:{pid}")),
+  }
 }

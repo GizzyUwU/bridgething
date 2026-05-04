@@ -504,7 +504,15 @@ export type NumberField = {
   default: number | null;
 };
 
-export type Peer = { device: Device; paired: boolean; iap2: PeerIap2Status; companion: PeerCompanionStatus };
+export type Peer = {
+  device: Device;
+  paired: boolean;
+  iap2: PeerIap2Status;
+  companion: PeerCompanionStatus;
+  displayName: string | null;
+  language: string | null;
+  uuid: string | null;
+};
 
 export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { type: 'connected'; data: GatewayInfo };
 

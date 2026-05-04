@@ -13,7 +13,11 @@ impl TimeHandler {
 
   pub async fn handle(self, msg: GatewayToBridgeTimeMsg) -> HandlerResult {
     match msg {
-      GatewayToBridgeTimeMsg::Snapshot(_) => self.handle.unimplemented("gateway:time.snapshot").await,
+      GatewayToBridgeTimeMsg::Snapshot(info) => {
+        if let Err(err) = self.handle.state.time.apply_companion_snapshot(info).await {
+          tracing::warn!(?err, "failed to apply companion time snapshot");
+        }
+      }
     }
     Ok(())
   }

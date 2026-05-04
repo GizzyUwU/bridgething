@@ -125,6 +125,19 @@ impl TelephonyManager {
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
   }
 
+  pub async fn apply_companion_communications(&self, state: CommunicationsState) -> Result<(), TelephonyError> {
+    {
+      let mut inner = self.inner.write().await;
+      inner.communications = state;
+    }
+    let snapshot = self.communications().await;
+    self
+      .broadcast(BridgeToClientPhoneMsg::CommunicationsChanged(
+        PhoneCommunicationsReply { state: snapshot },
+      ))
+      .await
+  }
+
   pub async fn apply_iap2_communications(&self, update: Iap2CommunicationsUpdate) -> Result<(), TelephonyError> {
     {
       let mut inner = self.inner.write().await;
@@ -252,7 +265,6 @@ impl TelephonyManager {
     Ok(())
   }
 
-  /// Snapshot reply for `phone.stateGet` requests.
   pub async fn snapshot_reply(&self) -> PhoneStateReply {
     PhoneStateReply {
       state: self.snapshot().await,

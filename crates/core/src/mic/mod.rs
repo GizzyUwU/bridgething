@@ -294,9 +294,10 @@ async fn start_session(
       return Err(MicError::Unavailable);
     }
     if guard.capturing
-      && let Some(id) = guard.current_stream {
-        return Ok(id);
-      }
+      && let Some(id) = guard.current_stream
+    {
+      return Ok(id);
+    }
   }
 
   let stream_id = Uuid::now_v7();

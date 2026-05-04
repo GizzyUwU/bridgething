@@ -1,6 +1,6 @@
 use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
-  PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, Track,
+  PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, Track,
   client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
 };
 
@@ -40,6 +40,8 @@ pub struct PlayerState {
   iap2_playback: PlaybackUpdate,
   companion_metadata: MediaItemUpdate,
   companion_playback: PlaybackUpdate,
+
+  iap2_queue: Vec<QueueItem>,
 }
 
 impl PlayerState {
@@ -63,7 +65,17 @@ impl PlayerState {
       iap2_playback: PlaybackUpdate::default(),
       companion_metadata: MediaItemUpdate::default(),
       companion_playback: PlaybackUpdate::default(),
+
+      iap2_queue: Vec::new(),
     }
+  }
+
+  pub(crate) fn replace_iap2_queue(&mut self, items: Vec<QueueItem>) {
+    self.iap2_queue = items;
+  }
+
+  fn merged_queue(&self) -> Vec<QueueItem> {
+    self.iap2_queue.clone()
   }
 
   pub(crate) fn apply_now_playing(&mut self, source: NowPlayingSource, update: NowPlayingUpdate) {
@@ -294,7 +306,7 @@ impl PlayerState {
           queue_list_avail: merged.queue_list_avail,
           apple_music_radio_ad: merged.apple_music_radio_ad,
         },
-        queue: vec![],
+        queue: self.merged_queue(),
         options: PlayerOptions {
           speed: merged.playback_speed.unwrap_or(self.playback_speed as f32),
           crossfade_ms: None,
@@ -304,7 +316,9 @@ impl PlayerState {
   }
 
   pub fn to_send_queue(&self) -> BridgeToClientPlayerMsg {
-    BridgeToClientPlayerMsg::QueueChanged(PlayerQueueReply { items: vec![] })
+    BridgeToClientPlayerMsg::QueueChanged(PlayerQueueReply {
+      items: self.merged_queue(),
+    })
   }
 }
 

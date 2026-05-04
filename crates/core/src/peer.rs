@@ -137,6 +137,45 @@ impl PeerTracker {
     self.broadcast_diff(diff).await
   }
 
+  pub async fn set_display_name(&self, mac: Address, display_name: String) -> PeerResult<()> {
+    let diff = {
+      let mut peers = self.inner.peers.write().await;
+      let Some(peer) = peers.get_mut(&mac) else {
+        return Ok(());
+      };
+      let prior = peer.clone();
+      peer.display_name = Some(display_name);
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
+    };
+    self.broadcast_diff(diff).await
+  }
+
+  pub async fn set_language(&self, mac: Address, language: String) -> PeerResult<()> {
+    let diff = {
+      let mut peers = self.inner.peers.write().await;
+      let Some(peer) = peers.get_mut(&mac) else {
+        return Ok(());
+      };
+      let prior = peer.clone();
+      peer.language = Some(language);
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
+    };
+    self.broadcast_diff(diff).await
+  }
+
+  pub async fn set_uuid(&self, mac: Address, uuid: String) -> PeerResult<()> {
+    let diff = {
+      let mut peers = self.inner.peers.write().await;
+      let Some(peer) = peers.get_mut(&mac) else {
+        return Ok(());
+      };
+      let prior = peer.clone();
+      peer.uuid = Some(uuid);
+      Diff::compute(mac, Some(prior), Some(peer.clone()), &peers)
+    };
+    self.broadcast_diff(diff).await
+  }
+
   pub async fn remove(&self, mac: Address) -> PeerResult<()> {
     let diff = {
       let mut peers = self.inner.peers.write().await;

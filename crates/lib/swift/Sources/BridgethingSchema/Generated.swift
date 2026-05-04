@@ -2592,12 +2592,18 @@ public struct Peer: Codable, Sendable {
 	public let paired: Bool
 	public let iap2: PeerIap2Status
 	public let companion: PeerCompanionStatus
+	public let displayName: String?
+	public let language: String?
+	public let uuid: String?
 
-	public init(device: Device, paired: Bool, iap2: PeerIap2Status, companion: PeerCompanionStatus) {
+	public init(device: Device, paired: Bool, iap2: PeerIap2Status, companion: PeerCompanionStatus, displayName: String?, language: String?, uuid: String?) {
 		self.device = device
 		self.paired = paired
 		self.iap2 = iap2
 		self.companion = companion
+		self.displayName = displayName
+		self.language = language
+		self.uuid = uuid
 	}
 }
 
