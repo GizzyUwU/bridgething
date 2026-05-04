@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgePhoneMsg;
+use libbridgething::gateway::GatewayToBridgePhoneMsgEvent;
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,24 +11,21 @@ impl PhoneHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: GatewayToBridgePhoneMsg) -> HandlerResult {
-    match msg {
-      GatewayToBridgePhoneMsg::Snapshot(_) => self.handle.unimplemented("gateway:phone.snapshot").await,
-      GatewayToBridgePhoneMsg::CommunicationsSnapshot(snapshot) => {
-        if let Err(err) = self
-          .handle
-          .state
-          .telephony
-          .apply_companion_communications(snapshot.state)
-          .await
-        {
-          tracing::warn!(?err, "failed to apply companion communications snapshot");
-        }
+  pub async fn handle(self, msg: GatewayToBridgePhoneMsgEvent) -> HandlerResult {
+    let telephony = self.handle.state.telephony.clone();
+    let result = match msg {
+      GatewayToBridgePhoneMsgEvent::Snapshot(snapshot) => telephony.apply_companion_snapshot(snapshot.state).await,
+      GatewayToBridgePhoneMsgEvent::CommunicationsSnapshot(snapshot) => {
+        telephony.apply_companion_communications(snapshot.state).await
       }
-      GatewayToBridgePhoneMsg::CallStarted(_) => self.handle.unimplemented("gateway:phone.callStarted").await,
-      GatewayToBridgePhoneMsg::CallUpdated(_) => self.handle.unimplemented("gateway:phone.callUpdated").await,
-      GatewayToBridgePhoneMsg::CallEnded(_) => self.handle.unimplemented("gateway:phone.callEnded").await,
-      GatewayToBridgePhoneMsg::StateReply(_) => self.handle.unimplemented("gateway:phone.stateReply").await,
+      GatewayToBridgePhoneMsgEvent::CallStarted(call) => telephony.apply_companion_call_started(call).await,
+      GatewayToBridgePhoneMsgEvent::CallUpdated(call) => telephony.apply_companion_call_updated(call).await,
+      GatewayToBridgePhoneMsgEvent::CallEnded(ended) => {
+        telephony.apply_companion_call_ended(ended.call_id, ended.reason).await
+      }
+    };
+    if let Err(err) = result {
+      tracing::warn!(?err, "failed to apply companion phone event");
     }
     Ok(())
   }

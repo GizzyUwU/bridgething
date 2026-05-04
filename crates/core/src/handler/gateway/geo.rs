@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgeGeoMsg;
+use libbridgething::gateway::GatewayToBridgeGeoMsgEvent;
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,11 +11,9 @@ impl GeoHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: GatewayToBridgeGeoMsg) -> HandlerResult {
+  pub async fn handle(self, msg: GatewayToBridgeGeoMsgEvent) -> HandlerResult {
     match msg {
-      GatewayToBridgeGeoMsg::Position(_) => self.handle.unimplemented("gateway:geo.position").await,
-      GatewayToBridgeGeoMsg::GetOnceReply(_) => self.handle.unimplemented("gateway:geo.getOnceReply").await,
-      GatewayToBridgeGeoMsg::ErrorReply(_) => self.handle.unimplemented("gateway:geo.errorReply").await,
+      GatewayToBridgeGeoMsgEvent::Position(_) => self.handle.unimplemented("gateway:geo.position").await,
     }
     Ok(())
   }

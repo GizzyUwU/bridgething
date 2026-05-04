@@ -297,7 +297,8 @@ export type ItemRef = { uri: string; kind: ItemKind; persistentId: string | null
 export type LibraryError =
   | { type: 'notFound'; data: { uri: string } }
   | { type: 'notSupported'; data: { reason: string } }
-  | { type: 'unauthorized' };
+  | { type: 'unauthorized' }
+  | { type: 'noGateway' };
 
 /**
  * One playable / browsable item from the library. Lean per-variant
@@ -469,7 +470,8 @@ export type NotificationCategory =
 export type NotificationError =
   | { type: 'notFound'; data: { id: string } }
   | { type: 'noActionAvailable' }
-  | { type: 'actionRejected'; data: { reason: string } };
+  | { type: 'actionRejected'; data: { reason: string } }
+  | { type: 'noGateway' };
 
 /**
  * ANCS-shaped flags. `silent` mirrors the iOS "do not surface

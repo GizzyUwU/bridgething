@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 mod state;
 
+use libbridgething::client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply};
 pub use state::NowPlayingSource;
 use state::*;
 use tokio::sync::RwLock;
@@ -26,19 +27,11 @@ impl Player {
   }
 
   pub async fn send_state(&self) -> PlayerResult<()> {
-    let (state_msg, queue_msg) = {
+    let (state_reply, queue_reply) = {
       let guard = self.state.read().await;
-      (guard.to_send_state(), guard.to_send_queue())
+      (guard.state_reply(), guard.queue_reply())
     };
-    self
-      .bus
-      .broadcast(state_msg, libbridgething::wire::MsgMeta::Event)
-      .await?;
-    self
-      .bus
-      .broadcast(queue_msg, libbridgething::wire::MsgMeta::Event)
-      .await?;
-    Ok(())
+    self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
   pub async fn apply_now_playing(
@@ -46,20 +39,12 @@ impl Player {
     source: NowPlayingSource,
     update: libbridgething::NowPlayingUpdate,
   ) -> PlayerResult<()> {
-    let (state_msg, queue_msg) = {
+    let (state_reply, queue_reply) = {
       let mut guard = self.state.write().await;
       guard.apply_now_playing(source, update);
-      (guard.to_send_state(), guard.to_send_queue())
+      (guard.state_reply(), guard.queue_reply())
     };
-    self
-      .bus
-      .broadcast(state_msg, libbridgething::wire::MsgMeta::Event)
-      .await?;
-    self
-      .bus
-      .broadcast(queue_msg, libbridgething::wire::MsgMeta::Event)
-      .await?;
-    Ok(())
+    self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
   pub async fn iap2_playback_snapshot(&self) -> libbridgething::PlaybackUpdate {
@@ -67,14 +52,43 @@ impl Player {
   }
 
   pub async fn apply_iap2_queue(&self, items: Vec<libbridgething::QueueItem>) -> PlayerResult<()> {
-    let queue_msg = {
+    let queue_reply = {
       let mut guard = self.state.write().await;
       guard.replace_iap2_queue(items);
-      guard.to_send_queue()
+      guard.queue_reply()
     };
     self
       .bus
-      .broadcast(queue_msg, libbridgething::wire::MsgMeta::Event)
+      .broadcast(
+        BridgeToClientPlayerMsg::QueueChanged(queue_reply),
+        libbridgething::wire::MsgMeta::Event,
+      )
+      .await?;
+    Ok(())
+  }
+
+  pub async fn state_reply(&self) -> PlayerStateReply {
+    self.state.read().await.state_reply()
+  }
+
+  pub async fn queue_reply(&self) -> PlayerQueueReply {
+    self.state.read().await.queue_reply()
+  }
+
+  async fn broadcast_snapshot(&self, state: PlayerStateReply, queue: PlayerQueueReply) -> PlayerResult<()> {
+    self
+      .bus
+      .broadcast(
+        BridgeToClientPlayerMsg::Snapshot(state),
+        libbridgething::wire::MsgMeta::Event,
+      )
+      .await?;
+    self
+      .bus
+      .broadcast(
+        BridgeToClientPlayerMsg::QueueChanged(queue),
+        libbridgething::wire::MsgMeta::Event,
+      )
       .await?;
     Ok(())
   }

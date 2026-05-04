@@ -15,19 +15,21 @@ use crate::{
   net::{ClientMan, WireEventBus},
   paths,
   peer::PeerTracker,
-  telephony::TelephonyManager,
-  time::TimeManager,
   transfer::{ChunkedTransfer, TransferError},
 };
 
 pub mod meta;
 pub mod routes;
 pub mod storage;
+mod telephony;
+mod time;
 mod webapps;
 
 pub use routes::RouteTable;
 pub use storage::{DeviceStore, KvStore, MetaStore};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
+pub use telephony::TelephonyManager;
+pub use time::TimeManager;
 pub use webapps::{InstallError, WebappRegistry};
 
 pub type State = Arc<AppState>;

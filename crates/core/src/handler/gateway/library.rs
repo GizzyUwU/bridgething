@@ -1,4 +1,7 @@
-use libbridgething::gateway::GatewayToBridgeLibraryMsg;
+use libbridgething::{
+  client::{BridgeToClientLibraryMsgEvent, FavoriteChanged},
+  gateway::GatewayToBridgeLibraryMsgEvent,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,21 +14,18 @@ impl LibraryHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: GatewayToBridgeLibraryMsg) -> HandlerResult {
+  pub async fn handle(self, msg: GatewayToBridgeLibraryMsgEvent) -> HandlerResult {
     match msg {
-      GatewayToBridgeLibraryMsg::BrowseReply(_) => self.handle.unimplemented("gateway:library.browseReply").await,
-      GatewayToBridgeLibraryMsg::SearchReply(_) => self.handle.unimplemented("gateway:library.searchReply").await,
-      GatewayToBridgeLibraryMsg::RecommendationsReply(_) => {
-        self.handle.unimplemented("gateway:library.recommendationsReply").await
-      }
-      GatewayToBridgeLibraryMsg::FavoritesListReply(_) => {
-        self.handle.unimplemented("gateway:library.favoritesListReply").await
-      }
-      GatewayToBridgeLibraryMsg::LibraryErrorReply(_) => {
-        self.handle.unimplemented("gateway:library.libraryErrorReply").await
-      }
-      GatewayToBridgeLibraryMsg::FavoriteChanged(_) => {
-        self.handle.unimplemented("gateway:library.favoriteChanged").await
+      GatewayToBridgeLibraryMsgEvent::FavoriteChanged(change) => {
+        self
+          .handle
+          .state
+          .bus
+          .broadcast_event(BridgeToClientLibraryMsgEvent::FavoriteChanged(FavoriteChanged {
+            uri: change.uri,
+            liked: change.liked,
+          }))
+          .await?;
       }
     }
     Ok(())

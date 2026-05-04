@@ -98,7 +98,9 @@ impl GatewayHandler {
         }
       }
       GatewayToBridgeMsgData::Audio(audio_msg) => {
-        tokio::spawn(async move { AudioHandler::new(handle).handle(audio_msg).await });
+        if let Some(event) = audio_msg.into_event() {
+          tokio::spawn(async move { AudioHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Authority(auth_msg) => {
         if let Some(event) = auth_msg.into_event() {
@@ -116,19 +118,27 @@ impl GatewayHandler {
         }
       }
       GatewayToBridgeMsgData::Geo(geo_msg) => {
-        tokio::spawn(async move { GeoHandler::new(handle).handle(geo_msg).await });
+        if let Some(event) = geo_msg.into_event() {
+          tokio::spawn(async move { GeoHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Library(lib_msg) => {
-        tokio::spawn(async move { LibraryHandler::new(handle).handle(lib_msg).await });
+        if let Some(event) = lib_msg.into_event() {
+          tokio::spawn(async move { LibraryHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Net(net_msg) => {
         tokio::spawn(async move { NetHandler::new(handle).handle(net_msg).await });
       }
       GatewayToBridgeMsgData::Notifications(notif_msg) => {
-        tokio::spawn(async move { NotificationsHandler::new(handle).handle(notif_msg).await });
+        if let Some(event) = notif_msg.into_event() {
+          tokio::spawn(async move { NotificationsHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Phone(phone_msg) => {
-        tokio::spawn(async move { PhoneHandler::new(handle).handle(phone_msg).await });
+        if let Some(event) = phone_msg.into_event() {
+          tokio::spawn(async move { PhoneHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Player(player_msg) => {
         if let Some(event) = player_msg.into_event() {

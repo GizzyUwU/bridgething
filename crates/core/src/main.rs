@@ -17,8 +17,6 @@ mod paths;
 mod peer;
 mod player;
 mod state;
-mod telephony;
-mod time;
 mod transfer;
 mod transport;
 
@@ -37,10 +35,10 @@ use mic::{MicConfig, MicManager};
 use ota::OtaOrchestrator;
 use peer::PeerTracker;
 use player::Player;
-use state::{AppState, AssembledState, DeviceStore, KvStore, MetaStore, RouteTable, WebappRegistry};
+use state::{
+  AppState, AssembledState, DeviceStore, KvStore, MetaStore, RouteTable, TelephonyManager, TimeManager, WebappRegistry,
+};
 use systemd::Notify;
-use telephony::TelephonyManager;
-use time::TimeManager;
 use transfer::ChunkedTransfer;
 use transport::TransportController;
 

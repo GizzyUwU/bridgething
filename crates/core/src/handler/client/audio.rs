@@ -1,4 +1,7 @@
-use libbridgething::client::ClientToBridgeAudioMsgCommand;
+use libbridgething::{
+  client::ClientToBridgeAudioMsgCommand,
+  gateway::{self, BridgeToGatewayAudioMsgCommand},
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -16,13 +19,48 @@ impl AudioHandler {
     match msg {
       ClientToBridgeAudioMsgCommand::VolumeUp => Ok(transport.volume_up().await?),
       ClientToBridgeAudioMsgCommand::VolumeDown => Ok(transport.volume_down().await?),
-      ClientToBridgeAudioMsgCommand::SetVolume(_) => Ok(self.handle.unimplemented("audio.setVolume").await?),
+      ClientToBridgeAudioMsgCommand::SetVolume(req) => {
+        self
+          .forward(BridgeToGatewayAudioMsgCommand::SetVolume(gateway::SetVolume {
+            level: req.level,
+          }))
+          .await
+      }
       ClientToBridgeAudioMsgCommand::MuteToggle => Ok(transport.mute_toggle().await?),
-      ClientToBridgeAudioMsgCommand::SetMute(_) => Ok(self.handle.unimplemented("audio.setMute").await?),
-      ClientToBridgeAudioMsgCommand::Tts(_) => Ok(self.handle.unimplemented("audio.tts").await?),
-      ClientToBridgeAudioMsgCommand::TtsCancel(_) => Ok(self.handle.unimplemented("audio.ttsCancel").await?),
-      ClientToBridgeAudioMsgCommand::TtsCancelAll => Ok(self.handle.unimplemented("audio.ttsCancelAll").await?),
-      ClientToBridgeAudioMsgCommand::Earcon(_) => Ok(self.handle.unimplemented("audio.earcon").await?),
+      ClientToBridgeAudioMsgCommand::SetMute(req) => {
+        self
+          .forward(BridgeToGatewayAudioMsgCommand::SetMute(gateway::SetMute {
+            muted: req.muted,
+          }))
+          .await
+      }
+      ClientToBridgeAudioMsgCommand::Tts(req) => {
+        self
+          .forward(BridgeToGatewayAudioMsgCommand::Tts(gateway::Tts {
+            id: req.id,
+            text: req.text,
+            voice: req.voice,
+          }))
+          .await
+      }
+      ClientToBridgeAudioMsgCommand::TtsCancel(req) => {
+        self
+          .forward(BridgeToGatewayAudioMsgCommand::TtsCancel(gateway::TtsCancel {
+            id: req.id,
+          }))
+          .await
+      }
+      ClientToBridgeAudioMsgCommand::TtsCancelAll => self.forward(BridgeToGatewayAudioMsgCommand::TtsCancelAll).await,
+      ClientToBridgeAudioMsgCommand::Earcon(req) => {
+        self
+          .forward(BridgeToGatewayAudioMsgCommand::Earcon(gateway::Earcon { name: req.name }))
+          .await
+      }
     }
+  }
+
+  async fn forward(self, cmd: BridgeToGatewayAudioMsgCommand) -> HandlerResult {
+    self.handle.bluetooth.gateway_man.broadcast_command(cmd).await;
+    Ok(())
   }
 }

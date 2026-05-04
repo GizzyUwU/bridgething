@@ -1,7 +1,7 @@
 use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
   PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, Track,
-  client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
+  client::{PlayerQueueReply, PlayerStateReply},
 };
 
 use crate::authority::AuthorityRegistry;
@@ -283,10 +283,10 @@ impl PlayerState {
     self.iap2_playback.clone()
   }
 
-  pub fn to_send_state(&self) -> BridgeToClientPlayerMsg {
+  pub fn state_reply(&self) -> PlayerStateReply {
     let merged = self.merged_playback();
     let merged_meta = self.merged_metadata();
-    BridgeToClientPlayerMsg::Snapshot(PlayerStateReply {
+    PlayerStateReply {
       state: WirePlayerState {
         track: self.track.as_ref().map(|t| build_media_item(t, &merged_meta)),
         playback: Playback {
@@ -312,13 +312,13 @@ impl PlayerState {
           crossfade_ms: None,
         },
       },
-    })
+    }
   }
 
-  pub fn to_send_queue(&self) -> BridgeToClientPlayerMsg {
-    BridgeToClientPlayerMsg::QueueChanged(PlayerQueueReply {
+  pub fn queue_reply(&self) -> PlayerQueueReply {
+    PlayerQueueReply {
       items: self.merged_queue(),
-    })
+    }
   }
 }
 

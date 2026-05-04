@@ -1,4 +1,7 @@
-use libbridgething::gateway::GatewayToBridgeNotificationsMsg;
+use libbridgething::{
+  client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved as ClientNotificationRemoved},
+  gateway::GatewayToBridgeNotificationsMsgEvent,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,18 +14,22 @@ impl NotificationsHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: GatewayToBridgeNotificationsMsg) -> HandlerResult {
-    match msg {
-      GatewayToBridgeNotificationsMsg::ListReply(_) => {
-        self.handle.unimplemented("gateway:notifications.listReply").await
+  pub async fn handle(self, msg: GatewayToBridgeNotificationsMsgEvent) -> HandlerResult {
+    let event = match msg {
+      GatewayToBridgeNotificationsMsgEvent::Posted(notification) => {
+        BridgeToClientNotificationsMsgEvent::Posted(notification)
       }
-      GatewayToBridgeNotificationsMsg::ErrorReply(_) => {
-        self.handle.unimplemented("gateway:notifications.errorReply").await
+      GatewayToBridgeNotificationsMsgEvent::Updated(notification) => {
+        BridgeToClientNotificationsMsgEvent::Updated(notification)
       }
-      GatewayToBridgeNotificationsMsg::Posted(_) => self.handle.unimplemented("gateway:notifications.posted").await,
-      GatewayToBridgeNotificationsMsg::Updated(_) => self.handle.unimplemented("gateway:notifications.updated").await,
-      GatewayToBridgeNotificationsMsg::Removed(_) => self.handle.unimplemented("gateway:notifications.removed").await,
-    }
+      GatewayToBridgeNotificationsMsgEvent::Removed(removed) => {
+        BridgeToClientNotificationsMsgEvent::Removed(ClientNotificationRemoved {
+          id: removed.id,
+          reason: removed.reason,
+        })
+      }
+    };
+    self.handle.state.bus.broadcast_event(event).await?;
     Ok(())
   }
 }

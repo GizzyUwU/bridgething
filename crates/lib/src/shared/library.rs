@@ -213,4 +213,6 @@ pub enum LibraryError {
   NotSupported { reason: String },
   /// User account / OAuth scope does not permit the operation.
   Unauthorized,
+  /// No companion is connected to back the surface.
+  NoGateway,
 }

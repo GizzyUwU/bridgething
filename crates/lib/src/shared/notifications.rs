@@ -127,4 +127,6 @@ pub enum NotificationError {
   NoActionAvailable,
   /// The companion or platform refused the action.
   ActionRejected { reason: String },
+  /// No companion is connected to back the surface.
+  NoGateway,
 }

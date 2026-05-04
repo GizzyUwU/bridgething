@@ -4,7 +4,7 @@ use libbridgething::{
 };
 
 use super::{HandlerResult, MsgHandle};
-use crate::telephony::TelephonyManager;
+use crate::state::TelephonyManager;
 
 pub struct PhoneHandler {
   handle: MsgHandle,

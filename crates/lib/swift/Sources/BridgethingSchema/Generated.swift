@@ -1497,11 +1497,14 @@ public enum LibraryError: Codable, Sendable {
 	case notSupported(LibraryErrorNotSupportedInner)
 	/// User account / OAuth scope does not permit the operation.
 	case unauthorized
+	/// No companion is connected to back the surface.
+	case noGateway
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case notFound,
 			notSupported,
-			unauthorized
+			unauthorized,
+			noGateway
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1525,6 +1528,9 @@ public enum LibraryError: Codable, Sendable {
 			case .unauthorized:
 				self = .unauthorized
 				return
+			case .noGateway:
+				self = .noGateway
+				return
 			}
 		}
 		throw DecodingError.typeMismatch(LibraryError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for LibraryError"))
@@ -1541,6 +1547,8 @@ public enum LibraryError: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .unauthorized:
 			try container.encode(CodingKeys.unauthorized, forKey: .type)
+		case .noGateway:
+			try container.encode(CodingKeys.noGateway, forKey: .type)
 		}
 	}
 }
@@ -2211,11 +2219,14 @@ public enum NotificationError: Codable, Sendable {
 	case noActionAvailable
 	/// The companion or platform refused the action.
 	case actionRejected(NotificationErrorActionRejectedInner)
+	/// No companion is connected to back the surface.
+	case noGateway
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case notFound,
 			noActionAvailable,
-			actionRejected
+			actionRejected,
+			noGateway
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -2239,6 +2250,9 @@ public enum NotificationError: Codable, Sendable {
 					self = .actionRejected(content)
 					return
 				}
+			case .noGateway:
+				self = .noGateway
+				return
 			}
 		}
 		throw DecodingError.typeMismatch(NotificationError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for NotificationError"))
@@ -2255,6 +2269,8 @@ public enum NotificationError: Codable, Sendable {
 		case .actionRejected(let content):
 			try container.encode(CodingKeys.actionRejected, forKey: .type)
 			try container.encode(content, forKey: .data)
+		case .noGateway:
+			try container.encode(CodingKeys.noGateway, forKey: .type)
 		}
 	}
 }

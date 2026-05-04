@@ -1,4 +1,10 @@
-use libbridgething::gateway::GatewayToBridgeAudioMsg;
+use libbridgething::{
+  client::{
+    BridgeToClientAudioMsgEvent, TtsEnded as ClientTtsEnded, TtsStarted as ClientTtsStarted,
+    VolumeChanged as ClientVolumeChanged,
+  },
+  gateway::GatewayToBridgeAudioMsgEvent,
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -11,12 +17,23 @@ impl AudioHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: GatewayToBridgeAudioMsg) -> HandlerResult {
-    match msg {
-      GatewayToBridgeAudioMsg::TtsStarted(_) => self.handle.unimplemented("gateway:audio.ttsStarted").await,
-      GatewayToBridgeAudioMsg::TtsEnded(_) => self.handle.unimplemented("gateway:audio.ttsEnded").await,
-      GatewayToBridgeAudioMsg::VolumeChanged(_) => self.handle.unimplemented("gateway:audio.volumeChanged").await,
-    }
+  pub async fn handle(self, msg: GatewayToBridgeAudioMsgEvent) -> HandlerResult {
+    let event = match msg {
+      GatewayToBridgeAudioMsgEvent::TtsStarted(started) => {
+        BridgeToClientAudioMsgEvent::TtsStarted(ClientTtsStarted { id: started.id })
+      }
+      GatewayToBridgeAudioMsgEvent::TtsEnded(ended) => BridgeToClientAudioMsgEvent::TtsEnded(ClientTtsEnded {
+        id: ended.id,
+        completed: ended.completed,
+      }),
+      GatewayToBridgeAudioMsgEvent::VolumeChanged(vol) => {
+        BridgeToClientAudioMsgEvent::VolumeChanged(ClientVolumeChanged {
+          level: vol.level,
+          muted: vol.muted,
+        })
+      }
+    };
+    self.handle.state.bus.broadcast_event(event).await?;
     Ok(())
   }
 }

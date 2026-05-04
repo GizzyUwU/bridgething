@@ -1,4 +1,16 @@
-use libbridgething::client::ClientToBridgeLibraryMsg;
+use libbridgething::{
+  LibraryError,
+  client::{
+    BridgeToClientMsgData, ClientToBridgeLibraryMsg, LibraryBrowse, LibraryBrowseReply, LibraryErrorReply,
+    LibraryFavoritesList, LibraryFavoritesListReply, LibraryRecommendations, LibraryRecommendationsReply,
+    LibrarySearch, LibrarySearchReply,
+  },
+  gateway::{
+    self, BridgeToGatewayLibraryMsgCommand, LibraryBrowseRequest, LibraryFavoritesListRequest,
+    LibraryRecommendationsRequest, LibrarySearchRequest,
+  },
+  wire::{RequestError, WireRequest},
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -13,12 +25,156 @@ impl LibraryHandler {
 
   pub async fn handle(self, msg: ClientToBridgeLibraryMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeLibraryMsg::Browse(_) => Ok(self.handle.unimplemented("library.browse").await?),
-      ClientToBridgeLibraryMsg::Search(_) => Ok(self.handle.unimplemented("library.search").await?),
-      ClientToBridgeLibraryMsg::Recommendations(_) => Ok(self.handle.unimplemented("library.recommendations").await?),
-      ClientToBridgeLibraryMsg::FavoritesList(_) => Ok(self.handle.unimplemented("library.favoritesList").await?),
-      ClientToBridgeLibraryMsg::FavoritesToggle(_) => Ok(self.handle.unimplemented("library.favoritesToggle").await?),
-      ClientToBridgeLibraryMsg::FavoritesSet(_) => Ok(self.handle.unimplemented("library.favoritesSet").await?),
+      ClientToBridgeLibraryMsg::Browse(req) => self.browse(req).await,
+      ClientToBridgeLibraryMsg::Search(req) => self.search(req).await,
+      ClientToBridgeLibraryMsg::Recommendations(req) => self.recommendations(req).await,
+      ClientToBridgeLibraryMsg::FavoritesList(req) => self.favorites_list(req).await,
+      ClientToBridgeLibraryMsg::FavoritesToggle(toggle) => {
+        self
+          .forward_command(BridgeToGatewayLibraryMsgCommand::FavoritesToggle(
+            gateway::FavoritesToggle { item: toggle.item },
+          ))
+          .await
+      }
+      ClientToBridgeLibraryMsg::FavoritesSet(set) => {
+        self
+          .forward_command(BridgeToGatewayLibraryMsgCommand::FavoritesSet(gateway::FavoritesSet {
+            item: set.item,
+            liked: set.liked,
+          }))
+          .await
+      }
     }
+  }
+
+  async fn browse(self, LibraryBrowse { node_id, page_token }: LibraryBrowse) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.respond_error::<LibraryBrowse>(LibraryError::NoGateway).await;
+    }
+    let outbound = LibraryBrowseRequest { node_id, page_token };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibraryBrowse>(LibraryBrowseReply { result: reply.result })
+          .await?;
+      }
+      Err(err) => self.respond_request_error::<LibraryBrowse>("library.browse", err).await?,
+    }
+    Ok(())
+  }
+
+  async fn search(self, LibrarySearch { query, kinds, page_token }: LibrarySearch) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.respond_error::<LibrarySearch>(LibraryError::NoGateway).await;
+    }
+    let outbound = LibrarySearchRequest {
+      query,
+      kinds,
+      page_token,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibrarySearch>(LibrarySearchReply { result: reply.result })
+          .await?;
+      }
+      Err(err) => self.respond_request_error::<LibrarySearch>("library.search", err).await?,
+    }
+    Ok(())
+  }
+
+  async fn recommendations(self, req: LibraryRecommendations) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.respond_error::<LibraryRecommendations>(LibraryError::NoGateway).await;
+    }
+    let outbound = LibraryRecommendationsRequest {
+      seed: req.seed,
+      kind: req.kind,
+      limit: req.limit,
+      page_token: req.page_token,
+    };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibraryRecommendations>(LibraryRecommendationsReply { result: reply.result })
+          .await?;
+      }
+      Err(err) => {
+        self
+          .respond_request_error::<LibraryRecommendations>("library.recommendations", err)
+          .await?
+      }
+    }
+    Ok(())
+  }
+
+  async fn favorites_list(self, LibraryFavoritesList { page_token }: LibraryFavoritesList) -> HandlerResult {
+    if !self.has_gateway() {
+      return self.respond_error::<LibraryFavoritesList>(LibraryError::NoGateway).await;
+    }
+    let outbound = LibraryFavoritesListRequest { page_token };
+    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+      Ok(reply) => {
+        self
+          .handle
+          .respond_to::<LibraryFavoritesList>(LibraryFavoritesListReply { page: reply.page })
+          .await?;
+      }
+      Err(err) => {
+        self
+          .respond_request_error::<LibraryFavoritesList>("library.favoritesList", err)
+          .await?
+      }
+    }
+    Ok(())
+  }
+
+  fn has_gateway(&self) -> bool {
+    self.handle.state.capabilities.snapshot().gateway.is_some()
+  }
+
+  async fn forward_command(self, cmd: BridgeToGatewayLibraryMsgCommand) -> HandlerResult {
+    self.handle.bluetooth.gateway_man.broadcast_command(cmd).await;
+    Ok(())
+  }
+
+  async fn respond_error<R>(&self, error: LibraryError) -> HandlerResult
+  where
+    R: WireRequest<Inbound = BridgeToClientMsgData, DomainError = LibraryErrorReply>,
+  {
+    self
+      .handle
+      .respond_err::<R>(LibraryErrorReply { error })
+      .await
+      .map_err(Into::into)
+  }
+
+  async fn respond_request_error<R>(
+    &self,
+    verb: &str,
+    err: RequestError<gateway::LibraryErrorReply>,
+  ) -> HandlerResult
+  where
+    R: WireRequest<Inbound = BridgeToClientMsgData, DomainError = LibraryErrorReply>,
+  {
+    let error = match err {
+      RequestError::Domain(domain) => domain.error,
+      RequestError::Protocol(err) => {
+        tracing::warn!(?err, "{verb} protocol error");
+        LibraryError::NotSupported {
+          reason: format!("{err:?}"),
+        }
+      }
+      RequestError::ResponseMismatch => {
+        tracing::error!("{verb} response did not match expected shape");
+        LibraryError::NotSupported {
+          reason: "response shape mismatch".into(),
+        }
+      }
+    };
+    self.respond_error::<R>(error).await
   }
 }

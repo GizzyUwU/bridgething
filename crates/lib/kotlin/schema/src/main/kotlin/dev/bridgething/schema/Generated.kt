@@ -828,6 +828,10 @@ sealed class LibraryError {
 	@Serializable
 	@SerialName("unauthorized")
 	object Unauthorized: LibraryError()
+	/// No companion is connected to back the surface.
+	@Serializable
+	@SerialName("noGateway")
+	object NoGateway: LibraryError()
 }
 
 @Serializable
@@ -1255,6 +1259,10 @@ sealed class NotificationError {
 	@Serializable
 	@SerialName("actionRejected")
 	data class ActionRejected(val data: NotificationErrorActionRejectedInner): NotificationError()
+	/// No companion is connected to back the surface.
+	@Serializable
+	@SerialName("noGateway")
+	object NoGateway: NotificationError()
 }
 
 @Serializable

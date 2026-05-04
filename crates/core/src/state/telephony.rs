@@ -19,9 +19,9 @@ use bridgething_iap2::{
   session::TelephonyCommand,
 };
 use libbridgething::{
-  CommunicationsState, DtmfTone, PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneState,
-  RegistrationStatus,
-  client::{BridgeToClientPhoneMsg, PhoneCommunicationsReply, PhoneStateReply},
+  CallEndReason, CommunicationsState, DtmfTone, PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus,
+  PhoneState, RegistrationStatus,
+  client::{BridgeToClientPhoneMsg, PhoneCallEnded, PhoneCommunicationsReply, PhoneStateReply},
   wire::MsgMeta,
 };
 use tokio::sync::RwLock;
@@ -123,6 +123,47 @@ impl TelephonyManager {
     drop(inner);
 
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
+  }
+
+  /// Replace the active-call set with the companion's announce-time
+  /// snapshot. No per-call event is fanned out — webapps that connect
+  /// later read the merged state via `phone.stateGet`.
+  pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
+    let mut inner = self.inner.write().await;
+    inner.calls = state.active_calls.into_iter().map(|c| (c.call_id.clone(), c)).collect();
+    Ok(())
+  }
+
+  pub async fn apply_companion_call_started(&self, call: PhoneCall) -> Result<(), TelephonyError> {
+    let snapshot = call.clone();
+    {
+      let mut inner = self.inner.write().await;
+      inner.calls.insert(call.call_id.clone(), call);
+    }
+    self.broadcast(BridgeToClientPhoneMsg::CallStarted(snapshot)).await
+  }
+
+  pub async fn apply_companion_call_updated(&self, call: PhoneCall) -> Result<(), TelephonyError> {
+    let snapshot = call.clone();
+    {
+      let mut inner = self.inner.write().await;
+      inner.calls.insert(call.call_id.clone(), call);
+    }
+    self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
+  }
+
+  pub async fn apply_companion_call_ended(
+    &self,
+    call_id: String,
+    reason: CallEndReason,
+  ) -> Result<(), TelephonyError> {
+    {
+      let mut inner = self.inner.write().await;
+      inner.calls.remove(&call_id);
+    }
+    self
+      .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason }))
+      .await
   }
 
   pub async fn apply_companion_communications(&self, state: CommunicationsState) -> Result<(), TelephonyError> {
