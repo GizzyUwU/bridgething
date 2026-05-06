@@ -17,7 +17,31 @@ impl KvStore {
     Self { db }
   }
 
-  pub async fn get(&self, key: &str) -> StateResult<Option<String>> {
+  pub async fn data_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
+    self.read_raw(&data_namespace_key(app_id, key)).await
+  }
+
+  pub async fn data_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
+    self.write_raw(data_namespace_key(app_id, key), value).await
+  }
+
+  pub async fn data_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
+    self.delete_raw(&data_namespace_key(app_id, key)).await
+  }
+
+  pub async fn config_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
+    self.read_raw(&config_namespace_key(app_id, key)).await
+  }
+
+  pub async fn config_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
+    self.write_raw(config_namespace_key(app_id, key), value).await
+  }
+
+  pub async fn config_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
+    self.delete_raw(&config_namespace_key(app_id, key)).await
+  }
+
+  async fn read_raw(&self, key: &str) -> StateResult<Option<String>> {
     Ok(
       KvEntity::find_by_id(key.to_string())
         .one(&self.db)
@@ -26,7 +50,7 @@ impl KvStore {
     )
   }
 
-  pub async fn set(&self, key: String, value: String) -> StateResult<()> {
+  async fn write_raw(&self, key: String, value: String) -> StateResult<()> {
     let model = super::kv_storage::ActiveModel {
       key: Set(key),
       value: Set(value),
@@ -42,33 +66,9 @@ impl KvStore {
     Ok(())
   }
 
-  pub async fn delete(&self, key: &str) -> StateResult<()> {
+  async fn delete_raw(&self, key: &str) -> StateResult<()> {
     KvEntity::delete_by_id(key.to_string()).exec(&self.db).await?;
     Ok(())
-  }
-
-  pub async fn data_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
-    self.get(&data_namespace_key(app_id, key)).await
-  }
-
-  pub async fn data_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
-    self.set(data_namespace_key(app_id, key), value).await
-  }
-
-  pub async fn data_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
-    self.delete(&data_namespace_key(app_id, key)).await
-  }
-
-  pub async fn config_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
-    self.get(&config_namespace_key(app_id, key)).await
-  }
-
-  pub async fn config_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
-    self.set(config_namespace_key(app_id, key), value).await
-  }
-
-  pub async fn config_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
-    self.delete(&config_namespace_key(app_id, key)).await
   }
 
   pub async fn config_list(&self, app_id: Uuid) -> StateResult<Vec<(String, String)>> {

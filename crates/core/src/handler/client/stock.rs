@@ -69,7 +69,6 @@ impl LegacyStockHandler {
       ClientLegacyStockCommand::SpotifyGetSaved { id } => self.spotify_get_saved(id).await,
       ClientLegacyStockCommand::SpotifyGetSessionState => self.spotify_get_session_state().await,
       ClientLegacyStockCommand::SpotifyGetTips => self.spotify_get_tips().await,
-      ClientLegacyStockCommand::SpotifyGetTts { file } => self.spotify_get_tts(file).await,
       ClientLegacyStockCommand::SpotifyPlayPodcastTrailer { uri } => self.spotify_play_podcast_trailer(uri).await,
       ClientLegacyStockCommand::SpotifyQueueUri { uri } => self.spotify_queue_uri(uri).await,
       ClientLegacyStockCommand::SpotifySetPodcastPlaybackSpeed { playback_speed } => {
@@ -340,13 +339,6 @@ impl LegacyStockHandler {
       ))
       .await?;
     Ok(())
-  }
-
-  async fn spotify_get_tts(&self, _file: String) -> HandlerResult {
-    // Stock TTS played pre-cached audio files on the phone (closer to Earcon
-    // than modern Audio.tts text). The daemon has no companion path to
-    // request such a file; ack to resolve the webapp's promise.
-    self.ack().await
   }
 
   async fn spotify_play_podcast_trailer(&self, uri: String) -> HandlerResult {

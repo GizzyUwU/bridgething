@@ -61,9 +61,6 @@ pub enum ClientLegacyStockCommand {
     presets: Vec<crate::stock::StockSetPreset>,
   },
   SpotifyGetTips,
-  SpotifyGetTts {
-    file: String,
-  },
   SpotifyGraphql {
     payload: String,
   },

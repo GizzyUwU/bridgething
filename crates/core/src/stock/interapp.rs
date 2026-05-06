@@ -721,6 +721,10 @@ impl RecvMsgData {
       StockInterAppRecv::Earcon { earcon } => {
         RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::Earcon(ClientEarcon { name: earcon }))
       }
+      // Stock TTS plays a pre-cached audio file by name; closer to an earcon than text-to-speech
+      StockInterAppRecv::GetTts { file } => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::Earcon(ClientEarcon {
+        name: format!("spotify-stock:{file}"),
+      })),
 
       // ---- modern Phone surface ----
       // Stock doesn't carry a call_id; the phone surface uses an empty
@@ -773,7 +777,6 @@ impl RecvMsgData {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifySetPreset { presets })
       }
       StockInterAppRecv::GetTips {} => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTips),
-      StockInterAppRecv::GetTts { file } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetTts { file }),
       StockInterAppRecv::SummonDj => RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifySummonDj),
       StockInterAppRecv::Graph { payload } => {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGraphql { payload })
