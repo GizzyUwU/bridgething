@@ -40,6 +40,7 @@
         "@bridgething/adapter-react-native": "workspace:*",
         "@bridgething/gateway": "workspace:*",
         "@bridgething/lib": "workspace:*",
+        "@bridgething/session-react-native": "workspace:*",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "lucide-react-native": "^1.14.0",
@@ -168,6 +169,25 @@
         "tailwindcss": "^4.1.16",
         "typescript": "^6.0.3",
         "vite": "^7.1.13",
+      },
+    },
+    "packages/session-rn": {
+      "name": "@bridgething/session-react-native",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@react-native-community/cli": "20.1.3",
+        "@react-native/eslint-config": "0.85.2",
+        "@types/react": "^19.2.14",
+        "nitrogen": "^0.35.5",
+        "react": "19.2.5",
+        "react-native": "0.85.2",
+        "react-native-builder-bob": "^0.41.0",
+        "react-native-nitro-modules": "^0.35.5",
+      },
+      "peerDependencies": {
+        "react": "*",
+        "react-native": "*",
+        "react-native-nitro-modules": "*",
       },
     },
     "packages/webapp-shared": {
@@ -431,6 +451,8 @@
     "@bridgething/lib": ["@bridgething/lib@workspace:crates/lib"],
 
     "@bridgething/mobile": ["@bridgething/mobile@workspace:mobile"],
+
+    "@bridgething/session-react-native": ["@bridgething/session-react-native@workspace:packages/session-rn"],
 
     "@bridgething/webapp-shared": ["@bridgething/webapp-shared@workspace:packages/webapp-shared"],
 

@@ -28,3 +28,6 @@ project(":packages:tidal:kotlin:tidal").projectDir = file("packages/tidal/kotlin
 
 include(":packages:lyrics:kotlin:lyrics")
 project(":packages:lyrics:kotlin:lyrics").projectDir = file("packages/lyrics/kotlin/lyrics")
+
+include(":packages:companion:kotlin:companion")
+project(":packages:companion:kotlin:companion").projectDir = file("packages/companion/kotlin/companion")

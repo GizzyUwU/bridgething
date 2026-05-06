@@ -14,6 +14,7 @@
     "@bridgething/adapter-react-native": "workspace:*",
     "@bridgething/gateway": "workspace:*",
     "@bridgething/lib": "workspace:*",
+    "@bridgething/session-react-native": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react-native": "^1.14.0",

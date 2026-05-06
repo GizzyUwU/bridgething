@@ -4,13 +4,15 @@ import PackageDescription
 let package = Package(
   name: "Bridgething",
   platforms: [
-    .iOS(.v16),
-    .macOS(.v13),
+    .iOS(.v18),
+    .macOS(.v15),
   ],
   products: [
     .library(name: "BridgethingSchema", targets: ["BridgethingSchema"]),
     .library(name: "BridgethingGateway", targets: ["BridgethingGateway"]),
+    .library(name: "BridgethingLyrics", targets: ["BridgethingLyrics"]),
     .library(name: "BridgethingGlue", targets: ["BridgethingGlue"]),
+    .library(name: "BridgethingCompanion", targets: ["BridgethingCompanion"]),
   ],
   dependencies: [
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
@@ -36,9 +38,23 @@ let package = Package(
       path: "packages/gateway/swift/Tests/BridgethingGatewayTests"
     ),
     .target(
+      name: "BridgethingLyrics",
+      path: "packages/lyrics/swift/Sources/BridgethingLyrics"
+    ),
+    .testTarget(
+      name: "BridgethingLyricsTests",
+      dependencies: ["BridgethingLyrics"],
+      path: "packages/lyrics/swift/Tests/BridgethingLyricsTests"
+    ),
+    .target(
       name: "BridgethingGlue",
-      dependencies: ["BridgethingGateway"],
+      dependencies: ["BridgethingGateway", "BridgethingLyrics"],
       path: "packages/glue/swift/Sources/BridgethingGlue"
+    ),
+    .target(
+      name: "BridgethingCompanion",
+      dependencies: ["BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema"],
+      path: "packages/companion/swift/Sources/BridgethingCompanion"
     ),
   ]
 )

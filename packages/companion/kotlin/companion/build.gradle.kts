@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.glue"
+  namespace = "dev.bridgething.companion"
   compileSdk = 36
 
   defaultConfig {
@@ -33,6 +33,7 @@ kotlin {
 
 dependencies {
   api(project(":packages:gateway:kotlin:gateway"))
+  api(project(":packages:glue:kotlin:glue"))
   api(project(":packages:lyrics:kotlin:lyrics"))
   api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")

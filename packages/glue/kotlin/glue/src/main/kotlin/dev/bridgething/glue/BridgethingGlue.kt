@@ -1,21 +1,70 @@
 package dev.bridgething.glue
 
 import dev.bridgething.gateway.BridgethingGateway
+import dev.bridgething.lyrics.Lyrics
+import dev.bridgething.lyrics.TrackIdentity
+import dev.bridgething.schema.MusicProvider
+import dev.bridgething.schema.PlayUri
+import dev.bridgething.schema.RepeatMode
 
 /**
  * Pluggable music-provider abstraction over a connected `BridgethingGateway`.
- * One concrete impl per music service (Spotify, Apple Music, Tidal, ...).
- * At most one glue is attached to a gateway at a time; switching providers
- * goes detach -> attach.
+ *
+ * Glues are lifecycle-managed by `BridgethingCompanion`: the companion calls
+ * `attach(gateway)` after the gateway is running, and dispatches inbound
+ * player verbs / asset / lyrics requests to the corresponding methods.
+ * Outbound (NowPlayingUpdate delta, authority claim/release) is the glue's
+ * own responsibility once it holds the gateway reference.
+ *
+ * Capabilities are composed by the companion. Glues contribute
+ * `uriSchemes`, `musicProvider`, and `lyricsSupported`; everything else
+ * (geo, net, audioTts, ...) is companion-level and ignored here.
+ *
+ * Mirror of the Swift `BridgethingGlue` protocol with default no-op
+ * (`NotImplemented`) impls; concrete glues override what they support.
  */
 interface BridgethingGlue {
     val name: String
     val displayName: String
     val capabilities: Set<GlueCapability>
+    val uriSchemes: List<String>
+    val musicProvider: MusicProvider
+    val lyricsSupported: Boolean
 
     suspend fun attach(gateway: BridgethingGateway)
     suspend fun detach()
+
+    suspend fun play(uri: PlayUri): Unit = throw GlueError.NotImplemented
+    suspend fun pause(): Unit = throw GlueError.NotImplemented
+    suspend fun resume(): Unit = throw GlueError.NotImplemented
+    suspend fun skipNext(): Unit = throw GlueError.NotImplemented
+    suspend fun skipPrev(): Unit = throw GlueError.NotImplemented
+    suspend fun skipToIndex(index: UInt): Unit = throw GlueError.NotImplemented
+    suspend fun seekTo(positionMs: UInt): Unit = throw GlueError.NotImplemented
+    suspend fun setShuffle(on: Boolean): Unit = throw GlueError.NotImplemented
+    suspend fun setRepeat(mode: RepeatMode): Unit = throw GlueError.NotImplemented
+    suspend fun setSpeed(speed: Float): Unit = throw GlueError.NotImplemented
+    suspend fun setCrossfade(durationMs: UInt?): Unit = throw GlueError.NotImplemented
+
+    /**
+     * Bytes for an asset id this glue produced (e.g.
+     * `"spotify/img/<percent-encoded>"`). Return null if the id isn't this
+     * glue's; the companion replies `AssetNotFound` in that case.
+     */
+    suspend fun asset(id: String): AssetBytes? = null
+
+    /**
+     * Provider-native lyrics path. Return null to fall through to the
+     * companion's injected `LyricsResolver` (lrclib by default).
+     */
+    suspend fun lyrics(track: TrackIdentity): Lyrics? = null
 }
+
+/** Bytes payload returned from `BridgethingGlue.asset(id)`. */
+data class AssetBytes(
+    val bytes: ByteArray,
+    val mime: String? = null,
+)
 
 enum class GlueCapability {
     STREAMING,

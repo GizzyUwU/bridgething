@@ -1,6 +1,6 @@
-import XCTest
-import BridgethingSchema
 @testable import BridgethingGateway
+import BridgethingSchema
+import XCTest
 
 private let fixedID = UUID(uuidString: "0192f2a0-bbb0-7c00-a000-000000000001")!
 private let fixedRequestID = UUID(uuidString: "0192f2a0-bbb0-7c00-a000-000000000099")!
@@ -52,12 +52,12 @@ final class GoldenTests: XCTestCase {
     }
   }
 
-  private func assertMetaMatches(_ meta: GatewayMsgMeta, fixture: GoldenFixture) throws {
+  private func assertMetaMatches(_ meta: MsgMeta, fixture: GoldenFixture) throws {
     let expectedKind = try fixture.metaKind()
     switch (meta, expectedKind) {
     case (.command, "command"), (.event, "event"), (.request, "request"):
       break
-    case (.response(let payload), "response"):
+    case let (.response(payload), "response"):
       XCTAssertEqual(
         UUID(data: payload.requestId), fixedRequestID,
         "requestId mismatch on \(fixture.name)"
@@ -72,7 +72,7 @@ final class GoldenTests: XCTestCase {
     let fixture = try XCTUnwrap(goldens.fixtures.first { $0.name == "bridge_to_gateway/forward-text-event" })
     let codec = Codec(compression: .none, encoding: .msgpack)
     let msg = try codec.decode(BridgeToGatewayMsg.self, from: Data(hex: fixture.framedHex))
-    guard case .forward(.text(let text)) = msg.data else {
+    guard case let .forward(.text(text)) = msg.data else {
       XCTFail("expected .forward(.text), got \(msg.data)"); return
     }
     XCTAssertEqual(text, "hello, gateway")
@@ -83,15 +83,15 @@ final class GoldenTests: XCTestCase {
     let fixture = try XCTUnwrap(goldens.fixtures.first { $0.name == "bridge_to_gateway/forward-json-event" })
     let codec = Codec(compression: .none, encoding: .msgpack)
     let msg = try codec.decode(BridgeToGatewayMsg.self, from: Data(hex: fixture.framedHex))
-    guard case .forward(.json(let value)) = msg.data else {
+    guard case let .forward(.json(value)) = msg.data else {
       XCTFail("expected .forward(.json), got \(msg.data)"); return
     }
 
     // Rust's serde_json::to_value emitted:
     // {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
-    guard case .object(let dict) = value else { XCTFail("expected object, got \(value)"); return }
+    guard case let .object(dict) = value else { XCTFail("expected object, got \(value)"); return }
     XCTAssertEqual(dict["kind"], .string("playback-changed"))
-    guard case .object(let payload) = try XCTUnwrap(dict["payload"]) else {
+    guard case let .object(payload) = try XCTUnwrap(dict["payload"]) else {
       XCTFail("expected payload object"); return
     }
     XCTAssertEqual(payload["playing"], .bool(true))
@@ -99,7 +99,7 @@ final class GoldenTests: XCTestCase {
 
     let reEncoded = try codec.encode(msg)
     let reDecoded = try codec.decode(BridgeToGatewayMsg.self, from: reEncoded)
-    guard case .forward(.json(let reValue)) = reDecoded.data else {
+    guard case let .forward(.json(reValue)) = reDecoded.data else {
       XCTFail("expected .forward(.json) after round-trip"); return
     }
     XCTAssertEqual(value, reValue, "JSON value drifted on msgpack round-trip")
@@ -110,10 +110,10 @@ final class GoldenTests: XCTestCase {
     let fixture = try XCTUnwrap(goldens.fixtures.first { $0.name == "bridge_to_gateway/forward-binary-event" })
     let codec = Codec(compression: .none, encoding: .msgpack)
     let msg = try codec.decode(BridgeToGatewayMsg.self, from: Data(hex: fixture.framedHex))
-    guard case .forward(.binary(let bytes)) = msg.data else {
+    guard case let .forward(.binary(bytes)) = msg.data else {
       XCTFail("expected .forward(.binary), got \(msg.data)"); return
     }
-    XCTAssertEqual(bytes, Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    XCTAssertEqual(bytes, Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
   }
 
   func testGzipFrameRoundTrip() throws {
@@ -126,7 +126,7 @@ final class GoldenTests: XCTestCase {
     let frame = try codec.encode(original)
     let decoded = try codec.decode(BridgeToGatewayMsg.self, from: frame)
     XCTAssertEqual(decoded.id, original.id)
-    if case .response(let r) = decoded.meta {
+    if case let .response(r) = decoded.meta {
       XCTAssertEqual(r.requestId, fixedRequestID.data)
     } else {
       XCTFail("expected .response meta, got \(decoded.meta)")
@@ -184,7 +184,7 @@ private struct GoldenFixture: Decodable {
       let kind = meta["kind"] as? String
     else {
       throw NSError(domain: "GoldenFixture", code: 1, userInfo: [
-        NSLocalizedDescriptionKey: "decoded_json missing meta.kind on \(name)"
+        NSLocalizedDescriptionKey: "decoded_json missing meta.kind on \(name)",
       ])
     }
     return kind
@@ -208,7 +208,7 @@ private struct AnyCodable: Decodable {
     if let v = try? container.decode([String: AnyCodable].self) {
       value = v.mapValues { $0.value }
     } else if let v = try? container.decode([AnyCodable].self) {
-      value = v.map { $0.value }
+      value = v.map(\.value)
     } else if let v = try? container.decode(String.self) {
       value = v
     } else if let v = try? container.decode(Int.self) {
@@ -233,7 +233,7 @@ private extension Data {
     var idx = hex.startIndex
     while idx < hex.endIndex {
       let next = hex.index(idx, offsetBy: 2, limitedBy: hex.endIndex) ?? hex.endIndex
-      if let byte = UInt8(hex[idx..<next], radix: 16) {
+      if let byte = UInt8(hex[idx ..< next], radix: 16) {
         data.append(byte)
       }
       idx = next

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": ["bridgething", "session"],
+  "ios": {
+    "iosModuleName": "BridgethingSession"
+  },
+  "android": {
+    "androidNamespace": ["bridgething", "session"],
+    "androidCxxLibName": "BridgethingSession"
+  },
+  "autolinking": {
+    "BridgethingSession": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridBridgethingSession"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridBridgethingSession"
+      }
+    }
+  },
+  "ignorePaths": ["node_modules", "lib", "nitrogen/generated"]
+}

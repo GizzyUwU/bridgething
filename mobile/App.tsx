@@ -1,64 +1,31 @@
 import './global.css';
 
 import {
-  type BridgethingTransportDevice,
-  ReactNativeAdapter,
-} from '@bridgething/adapter-react-native';
-import { BridgethingGateway, type GatewayEvent } from '@bridgething/gateway';
-import {
-  type BridgeThingMeta,
-  type BridgeToGatewayMsg,
-  type GatewayMeta,
-  LIB_VERSION,
-  LIBBRIDGETHING_VERSION,
-  LogLevel,
-  newUuidBytes,
-} from '@bridgething/lib';
+  BridgethingSession,
+  type BridgethingAuthState,
+  type BridgethingProviderInfo,
+  type BridgethingSessionPeer,
+} from '@bridgething/session-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  type Permission,
-  PermissionsAndroid,
-  Platform,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-
-const GATEWAY_META: GatewayMeta = {
-  adapterVersion: 'v0.1.0',
-  appVersion: '0.1.0',
-  appName: 'bridgething-mobile',
-  libbridgethingVersion: LIBBRIDGETHING_VERSION,
-  libVersion: LIB_VERSION,
-  osName: Platform.OS,
-};
-
-type ConnectedPeer = {
-  id: string;
-  name: string;
-  bridgeMeta?: BridgeThingMeta;
-};
 
 type LogEntry = { id: number; text: string };
 
 export default function App() {
-  const adapter = useMemo(() => new ReactNativeAdapter(), []);
-  const gateway = useMemo(
-    () => new BridgethingGateway(adapter, { logLevel: LogLevel.Trace }),
-    [adapter],
-  );
+  const session = useMemo(() => new BridgethingSession(), []);
   const logIdRef = useRef(0);
 
   const [running, setRunning] = useState(false);
-  const [knownDevices, setKnownDevices] = useState<
-    BridgethingTransportDevice[]
-  >([]);
-  const [connectedPeers, setConnectedPeers] = useState<
-    Record<string, ConnectedPeer>
-  >({});
+  const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
+  const [activeProvider, setActiveProvider] =
+    useState<BridgethingProviderInfo | null>(null);
+  const [authState, setAuthState] = useState<BridgethingAuthState>({
+    kind: 'idle',
+  });
+  const [peers, setPeers] = useState<Record<string, BridgethingSessionPeer>>(
+    {},
+  );
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const appendLog = (text: string) => {
@@ -66,153 +33,77 @@ export default function App() {
   };
 
   useEffect(() => {
-    const unsubscribe = gateway.on(event => handleGatewayEvent(event));
-    return () => {
-      unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway]);
-
-  useEffect(() => {
-    if (!running) return;
-    let cancelled = false;
-    let inFlight = false;
-    const refresh = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const devices = await adapter.getKnownDevices();
-        if (!cancelled) setKnownDevices(devices);
-      } catch {
-        // adapter not started yet
-      } finally {
-        inFlight = false;
-      }
-    };
-    void refresh();
-    const interval = setInterval(refresh, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [running, adapter]);
-
-  const handleGatewayEvent = (event: GatewayEvent) => {
-    switch (event.type) {
-      case 'connected':
-        appendLog(`++ connected ${event.device.name} (${event.device.id})`);
-        setConnectedPeers(prev => ({
-          ...prev,
-          [event.device.id]: { id: event.device.id, name: event.device.name },
-        }));
-        break;
-      case 'disconnected':
-        appendLog(`-- disconnected ${event.deviceId}`);
-        setConnectedPeers(prev => {
-          const next = { ...prev };
-          delete next[event.deviceId];
-          return next;
-        });
-        break;
-      case 'message':
-        void handleBridgeMessage(event.deviceId, event.message);
-        break;
-      case 'decodeError':
-        appendLog(`!! decode error on ${event.deviceId}: ${event.description}`);
-        break;
-    }
-  };
-
-  const handleBridgeMessage = async (
-    deviceId: string,
-    msg: BridgeToGatewayMsg,
-  ) => {
-    switch (msg.data.type) {
-      case 'version': {
-        const meta = msg.data.data;
-        appendLog(
-          `<< version from ${deviceId}: ${meta.appName} ${meta.appVersion}`,
-        );
-        setConnectedPeers(prev => {
-          const peer = prev[deviceId];
-          if (!peer) return prev;
-          return { ...prev, [deviceId]: { ...peer, bridgeMeta: meta } };
-        });
-        try {
-          await gateway.send(deviceId, {
-            id: newUuidBytes(),
-            meta: { kind: 'event' },
-            data: { type: 'version', data: GATEWAY_META },
+    const off = session.on(event => {
+      switch (event.type) {
+        case 'providerChanged':
+          setActiveProvider(event.provider);
+          appendLog(
+            event.provider
+              ? `++ provider ${event.provider.id}`
+              : '-- provider cleared',
+          );
+          break;
+        case 'authStateChanged':
+          setAuthState(event.state);
+          appendLog(`auth ${event.state.kind}`);
+          break;
+        case 'peerConnected':
+          setPeers(prev => ({ ...prev, [event.peer.id]: event.peer }));
+          appendLog(`++ peer ${event.peer.name} (${event.peer.id})`);
+          break;
+        case 'peerDisconnected':
+          setPeers(prev => {
+            const next = { ...prev };
+            delete next[event.peerId];
+            return next;
           });
-          appendLog(`>> sent gateway version to ${deviceId}`);
-        } catch (err) {
-          appendLog(`!! send version failed: ${errMsg(err)}`);
-        }
-        break;
+          appendLog(`-- peer ${event.peerId}`);
+          break;
+        case 'log':
+          appendLog(`[${event.level}] ${event.message}`);
+          break;
       }
-      case 'forward':
-        appendLog(`<< forward (${msg.data.data.encoding}) from ${deviceId}`);
-        break;
-      case 'file':
-        appendLog(`<< file ${msg.data.data.event} from ${deviceId}`);
-        break;
-      case 'ack':
-      case 'done':
-        appendLog(`<< ${msg.data.type} from ${deviceId}`);
-        break;
-    }
-  };
+    });
+    return off;
+  }, [session]);
 
   const start = async () => {
     if (running) return;
-    if (Platform.OS === 'android') {
-      const ok = await ensureAndroidBluetoothPermissions();
-      if (!ok) {
-        appendLog('!! bluetooth permissions denied');
-        return;
-      }
-    }
     try {
-      await gateway.start();
+      await session.start();
       setRunning(true);
-      setKnownDevices(await adapter.getKnownDevices());
-      appendLog('++ gateway started');
+      const list = await session.availableProviders();
+      setProviders(list);
+      const current = await session.currentProvider();
+      setActiveProvider(current);
+      appendLog('++ session started');
     } catch (err) {
-      appendLog(`!! gateway start failed: ${errMsg(err)}`);
+      appendLog(`!! start failed: ${errMsg(err)}`);
     }
   };
 
   const stop = async () => {
     if (!running) return;
     try {
-      await gateway.stop();
+      await session.stop();
     } catch (err) {
-      appendLog(`!! gateway stop failed: ${errMsg(err)}`);
+      appendLog(`!! stop failed: ${errMsg(err)}`);
     }
     setRunning(false);
-    setKnownDevices([]);
-    setConnectedPeers({});
-    appendLog('-- gateway stopped');
+    setActiveProvider(null);
+    setPeers({});
+    appendLog('-- session stopped');
   };
 
-  const connectDevice = async (deviceId: string) => {
+  const switchProvider = async (id: string | null) => {
     try {
-      const device = await adapter.connect(deviceId);
-      appendLog(`>> connect requested ${device.name} (${device.id})`);
+      await session.setActiveProvider(id);
     } catch (err) {
-      appendLog(`!! connect failed: ${errMsg(err)}`);
+      appendLog(`!! set provider failed: ${errMsg(err)}`);
     }
   };
 
-  const disconnectDevice = async (deviceId: string) => {
-    try {
-      await gateway.disconnect(deviceId);
-    } catch (err) {
-      appendLog(`!! disconnect failed: ${errMsg(err)}`);
-    }
-  };
-
-  const peers = Object.values(connectedPeers);
+  const peerList = Object.values(peers);
 
   return (
     <SafeAreaProvider>
@@ -225,7 +116,9 @@ export default function App() {
               bridgething
             </Text>
             <Text className="mt-0.5 text-xs text-muted-foreground">
-              {running ? `running · ${peers.length} connected` : 'idle'}
+              {running
+                ? `running · ${peerList.length} peer${peerList.length === 1 ? '' : 's'}`
+                : 'idle'}
             </Text>
           </View>
           <Pressable
@@ -238,68 +131,69 @@ export default function App() {
           </Pressable>
         </View>
 
-        <Section title={`known devices (${knownDevices.length})`}>
-          {knownDevices.length === 0 ? (
+        <Section
+          title={`provider${activeProvider ? ` · ${activeProvider.displayName}` : ''}`}
+        >
+          {providers.length === 0 ? (
             <Empty>
-              {running
-                ? 'no peers - pair a Car Thing in system Bluetooth settings'
-                : 'press start to scan'}
+              {running ? 'no providers registered' : 'press start to discover'}
             </Empty>
           ) : (
-            knownDevices.map(d => (
-              <Pressable
-                key={d.id}
-                onPress={() => connectDevice(d.id)}
-                className="mb-1.5 rounded-md bg-secondary px-3 py-2 active:opacity-70"
-              >
-                <Text className="text-sm font-semibold text-secondary-foreground">
-                  {d.name}
+            providers.map(provider => {
+              const selected = activeProvider?.id === provider.id;
+              return (
+                <Pressable
+                  key={provider.id}
+                  onPress={() => switchProvider(selected ? null : provider.id)}
+                  disabled={!provider.available}
+                  className={`mb-1.5 rounded-md px-3 py-2 ${selected ? 'bg-primary' : 'bg-secondary'} ${provider.available ? '' : 'opacity-50'}`}
+                >
+                  <Text className="text-sm font-semibold">
+                    {provider.displayName}
+                    {provider.available ? '' : ' (coming soon)'}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
+          {authState.kind === 'pending' && (
+            <View className="mt-2 rounded-md bg-card p-3">
+              <Text className="text-xs text-muted-foreground">
+                waiting on auth…
+              </Text>
+              {authState.userCode ? (
+                <Text className="mt-1 font-mono text-sm font-semibold">
+                  enter code: {authState.userCode}
                 </Text>
-                <Text className="mt-0.5 text-xs text-muted-foreground">
-                  {d.id}
+              ) : null}
+              {authState.verificationUrl ? (
+                <Text className="mt-1 text-xs text-muted-foreground">
+                  {authState.verificationUrl}
                 </Text>
-              </Pressable>
-            ))
+              ) : null}
+            </View>
+          )}
+          {authState.kind === 'failed' && (
+            <View className="mt-2 rounded-md bg-destructive/10 p-3">
+              <Text className="text-xs text-destructive">
+                {authState.message}
+              </Text>
+            </View>
           )}
         </Section>
 
-        <Section title={`connected (${peers.length})`}>
-          {peers.length === 0 ? (
-            <Empty>no active sessions</Empty>
+        <Section title={`connected (${peerList.length})`}>
+          {peerList.length === 0 ? (
+            <Empty>no Car Things connected</Empty>
           ) : (
-            peers.map(peer => (
+            peerList.map(peer => (
               <View key={peer.id} className="mb-2 rounded-md bg-card p-3">
-                <View className="flex-row items-center justify-between">
-                  <Text className="text-sm font-semibold text-card-foreground">
-                    {peer.name}
-                  </Text>
-                  <Pressable onPress={() => disconnectDevice(peer.id)}>
-                    <Text className="text-xs text-destructive">disconnect</Text>
-                  </Pressable>
-                </View>
-                {peer.bridgeMeta ? (
-                  <View className="mt-2">
-                    <MetaLine
-                      label="app"
-                      value={`${peer.bridgeMeta.appName} ${peer.bridgeMeta.appVersion}`}
-                    />
-                    <MetaLine
-                      label="os"
-                      value={`${peer.bridgeMeta.osName} ${peer.bridgeMeta.osVersion}`}
-                    />
-                    <MetaLine
-                      label="image"
-                      value={peer.bridgeMeta.imageBuildId}
-                    />
-                    <MetaLine label="model" value={peer.bridgeMeta.modelName} />
-                    <MetaLine
-                      label="serial"
-                      value={peer.bridgeMeta.serialNumber}
-                    />
-                  </View>
-                ) : (
-                  <Empty>waiting for version…</Empty>
-                )}
+                <Text className="text-sm font-semibold text-card-foreground">
+                  {peer.name}
+                </Text>
+                <Text className="mt-0.5 text-xs text-muted-foreground">
+                  {peer.id}
+                </Text>
               </View>
             ))
           )}
@@ -345,30 +239,6 @@ function Section({
 function Empty({ children }: { children: React.ReactNode }) {
   return (
     <Text className="text-xs italic text-muted-foreground">{children}</Text>
-  );
-}
-
-function MetaLine({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="mb-0.5 flex-row">
-      <Text className="w-16 text-xs text-muted-foreground">{label}</Text>
-      <Text className="flex-1 text-xs text-foreground">{value || '-'}</Text>
-    </View>
-  );
-}
-
-async function ensureAndroidBluetoothPermissions(): Promise<boolean> {
-  const permissions: Permission[] = [];
-  if (Platform.Version && Number(Platform.Version) >= 31) {
-    permissions.push(
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-    );
-  }
-  if (permissions.length === 0) return true;
-  const result = await PermissionsAndroid.requestMultiple(permissions);
-  return permissions.every(
-    p => result[p] === PermissionsAndroid.RESULTS.GRANTED,
   );
 }
 
