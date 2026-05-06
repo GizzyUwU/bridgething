@@ -928,6 +928,7 @@ export type WebappInfo = {
   id: string;
   name: string;
   source: WebappSource;
+  role: WebappRole;
   version: string;
   description: string | null;
   iconAvailable: boolean;
@@ -947,9 +948,18 @@ export type WebappManifest = {
   version: string;
   description: string | null;
   icon: string | null;
+  role: WebappRole;
   config: Array<ConfigField>;
   permissions: Array<string>;
 };
+
+/**
+ * A webapp's launcher visibility. `Standard` shows up in user-facing
+ * listings (the hub grid, etc); `Launcher` is itself a launcher and is
+ * hidden from those listings. The daemon filters `Launcher` bundles
+ * out of `client.webapp.list`; the gateway list keeps everything.
+ */
+export type WebappRole = 'standard' | 'launcher';
 
 export type WebappSource = 'builtin' | 'installed';
 

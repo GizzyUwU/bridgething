@@ -2305,6 +2305,18 @@ enum class WebappSource(val string: String) {
 	Installed("installed"),
 }
 
+/// A webapp's launcher visibility. `Standard` shows up in user-facing
+/// listings (the hub grid, etc); `Launcher` is itself a launcher and is
+/// hidden from those listings. The daemon filters `Launcher` bundles
+/// out of `client.webapp.list`; the gateway list keeps everything.
+@Serializable
+enum class WebappRole(val string: String) {
+	@SerialName("standard")
+	Standard("standard"),
+	@SerialName("launcher")
+	Launcher("launcher"),
+}
+
 /// One declared user-tunable setting. Adjacent-tagged on the wire to
 /// stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
 @Serializable(with = ConfigFieldSerializer::class)
@@ -2332,6 +2344,7 @@ data class WebappInfo (
 	val id: ByteArray,
 	val name: String,
 	val source: WebappSource,
+	val role: WebappRole,
 	val version: String,
 	val description: String? = null,
 	val iconAvailable: Boolean,
@@ -2363,6 +2376,7 @@ data class WebappManifest (
 	val version: String,
 	val description: String? = null,
 	val icon: String? = null,
+	val role: WebappRole? = null,
 	val config: List<ConfigField>? = null,
 	val permissions: List<String>? = null
 )

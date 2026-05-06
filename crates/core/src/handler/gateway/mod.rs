@@ -15,7 +15,7 @@ mod player;
 mod system;
 mod time;
 mod voice;
-mod webapp;
+pub mod webapp;
 
 use asset::*;
 use audio::*;

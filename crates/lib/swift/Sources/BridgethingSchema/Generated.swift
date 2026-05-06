@@ -3741,6 +3741,15 @@ public enum WebappSource: String, Codable, Sendable {
 	case installed
 }
 
+/// A webapp's launcher visibility. `Standard` shows up in user-facing
+/// listings (the hub grid, etc); `Launcher` is itself a launcher and is
+/// hidden from those listings. The daemon filters `Launcher` bundles
+/// out of `client.webapp.list`; the gateway list keeps everything.
+public enum WebappRole: String, Codable, Sendable {
+	case standard
+	case launcher
+}
+
 /// One declared user-tunable setting. Adjacent-tagged on the wire to
 /// stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
 public enum ConfigField: Codable, Sendable {
@@ -3823,6 +3832,7 @@ public struct WebappInfo: Codable, Sendable {
 	public let id: Data
 	public let name: String
 	public let source: WebappSource
+	public let role: WebappRole
 	public let version: String
 	public let description: String?
 	public let iconAvailable: Bool
@@ -3830,10 +3840,11 @@ public struct WebappInfo: Codable, Sendable {
 	public let config: [ConfigField]
 	public let permissions: [String]
 
-	public init(id: Data, name: String, source: WebappSource, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String]) {
+	public init(id: Data, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String]) {
 		self.id = id
 		self.name = name
 		self.source = source
+		self.role = role
 		self.version = version
 		self.description = description
 		self.iconAvailable = iconAvailable
@@ -3871,15 +3882,17 @@ public struct WebappManifest: Codable, Sendable {
 	public let version: String
 	public let description: String?
 	public let icon: String?
+	public let role: WebappRole?
 	public let config: [ConfigField]?
 	public let permissions: [String]?
 
-	public init(id: Data, name: String, version: String, description: String?, icon: String?, config: [ConfigField]?, permissions: [String]?) {
+	public init(id: Data, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?) {
 		self.id = id
 		self.name = name
 		self.version = version
 		self.description = description
 		self.icon = icon
+		self.role = role
 		self.config = config
 		self.permissions = permissions
 	}

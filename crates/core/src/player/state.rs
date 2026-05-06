@@ -166,6 +166,18 @@ impl PlayerState {
     self.apply_merged(merged_meta, merged_play);
   }
 
+  pub(crate) fn apply_artwork_id(&mut self, source: NowPlayingSource, asset_id: String) {
+    let meta_target = match source {
+      NowPlayingSource::Companion => &mut self.companion_metadata,
+      NowPlayingSource::Iap2 => &mut self.iap2_metadata,
+    };
+    meta_target.artwork_id = Some(asset_id);
+
+    let merged_meta = self.merged_metadata();
+    let merged_play = self.merged_playback();
+    self.apply_merged(merged_meta, merged_play);
+  }
+
   fn merged_metadata(&self) -> MediaItemUpdate {
     let companion_authoritative = self
       .authority
@@ -198,11 +210,7 @@ impl PlayerState {
           .clone()
           .or_else(|| self.iap2_metadata.artist.clone()),
         liked: self.companion_metadata.liked.or(self.iap2_metadata.liked),
-        artwork_id: self
-          .companion_metadata
-          .artwork_id
-          .clone()
-          .or_else(|| self.iap2_metadata.artwork_id.clone()),
+        artwork_id: self.companion_metadata.artwork_id.clone(),
         duration_ms: self.companion_metadata.duration_ms.or(self.iap2_metadata.duration_ms),
         media_types: self
           .companion_metadata
@@ -315,9 +323,7 @@ impl PlayerState {
       track.artist = artist.clone().into();
       track.artists = vec![artist.into()];
     }
-    if let Some(image_id) = media.artwork_id {
-      track.image_id = image_id;
-    }
+    track.image_id = media.artwork_id.unwrap_or_default();
     if let Some(duration) = media.duration_ms {
       track.duration_ms = duration;
     }
@@ -411,7 +417,9 @@ impl PlayerState {
   }
 
   pub fn current_artwork_id(&self) -> Option<String> {
-    self.merged_metadata().artwork_id
+    self.effective_track()?;
+    let id = self.merged_metadata().artwork_id?;
+    if id.is_empty() { None } else { Some(id) }
   }
 
   fn effective_track(&self) -> Option<&Track> {
@@ -449,6 +457,11 @@ impl PlayerState {
 }
 
 fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
+  let artwork_id = if track.image_id.is_empty() {
+    None
+  } else {
+    Some(track.image_id.clone())
+  };
   MediaItem {
     uri: Some(track.id.clone()),
     persistent_id: Some(track.id.clone()),
@@ -457,7 +470,7 @@ fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
     album_artist: merged.album_artist.clone(),
     artist: Some(track.artist.name.clone()),
     liked: Some(track.saved),
-    artwork_id: Some(track.image_id.clone()),
+    artwork_id,
     duration_ms: Some(track.duration_ms),
     media_types: merged.media_types.clone(),
     track_number: merged.track_number,
@@ -565,5 +578,138 @@ fn accumulate_playback(target: &mut PlaybackUpdate, src: PlaybackUpdate) {
   }
   if src.apple_music_radio_station_name.is_some() {
     target.apple_music_radio_station_name = src.apple_music_radio_station_name;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use libbridgething::CompanionAuthorityScope;
+
+  use super::*;
+
+  fn iap2_track(persistent_id: &str, title: &str) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(persistent_id.to_string()),
+        title: Some(title.to_string()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    }
+  }
+
+  fn companion_track(persistent_id: &str, title: &str, artwork_id: Option<&str>) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(persistent_id.to_string()),
+        title: Some(title.to_string()),
+        artwork_id: artwork_id.map(|s| s.to_string()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    }
+  }
+
+  fn artwork_id_of(state: &PlayerState) -> Option<String> {
+    state.state_reply().state.track.and_then(|t| t.artwork_id)
+  }
+
+  #[test]
+  fn iap2_now_playing_does_not_emit_artwork_id_until_apply_artwork_id() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("iap2:track:abc", "Heart of Glass"));
+    assert_eq!(artwork_id_of(&state), None);
+
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/abc/5".to_string());
+    assert_eq!(artwork_id_of(&state), Some("iap2/art/abc/5".to_string()));
+  }
+
+  #[test]
+  fn idle_persistent_id_zero_suppresses_track_emission() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      NowPlayingUpdate {
+        media_item: Some(MediaItemUpdate {
+          persistent_id: Some("iap2:track:0000000000000000".to_string()),
+          ..MediaItemUpdate::default()
+        }),
+        playback: None,
+      },
+    );
+    assert!(state.state_reply().state.track.is_none());
+    assert_eq!(state.current_artwork_id(), None);
+  }
+
+  #[test]
+  fn track_change_clears_stale_iap2_art() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("iap2:track:a", "Track A"));
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/a/5".to_string());
+    assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
+
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("iap2:track:b", "Track B"));
+    assert_eq!(artwork_id_of(&state), None);
+  }
+
+  #[test]
+  fn companion_authoritative_clears_iap2_art_on_wire() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/a/5".to_string());
+    assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
+
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_now_playing(NowPlayingSource::Companion, companion_track("track:a", "A", None));
+    assert_eq!(
+      artwork_id_of(&state),
+      None,
+      "companion authoritative without artwork_id must NOT leak iap2 art onto the wire"
+    );
+  }
+
+  #[test]
+  fn companion_release_restores_iap2_art() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/a/5".to_string());
+
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_now_playing(
+      NowPlayingSource::Companion,
+      companion_track("track:a", "A", Some("spotify/track/a/image")),
+    );
+    assert_eq!(artwork_id_of(&state), Some("spotify/track/a/image".to_string()));
+
+    auth.release(CompanionAuthorityScope::NowPlayingMetadata);
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
+    assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
+  }
+
+  #[test]
+  fn current_artwork_id_filters_idle_track() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      NowPlayingUpdate {
+        media_item: Some(MediaItemUpdate {
+          persistent_id: Some("iap2:track:0000000000000000".to_string()),
+          ..MediaItemUpdate::default()
+        }),
+        playback: None,
+      },
+    );
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/0000000000000000/1".to_string());
+    assert_eq!(state.current_artwork_id(), None);
+  }
+
+  #[test]
+  fn build_media_item_emits_none_for_empty_image_id() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
+    let track = state.state_reply().state.track.expect("track present");
+    assert_eq!(track.artwork_id, None);
   }
 }

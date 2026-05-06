@@ -12,6 +12,20 @@ pub enum WebappSource {
   Installed,
 }
 
+/// A webapp's launcher visibility. `Standard` shows up in user-facing
+/// listings (the hub grid, etc); `Launcher` is itself a launcher and is
+/// hidden from those listings. The daemon filters `Launcher` bundles
+/// out of `client.webapp.list`; the gateway list keeps everything.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum WebappRole {
+  #[default]
+  Standard,
+  Launcher,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -23,6 +37,7 @@ pub struct WebappInfo {
   pub id: Uuid,
   pub name: String,
   pub source: WebappSource,
+  pub role: WebappRole,
   pub version: String,
   pub description: Option<String>,
   pub icon_available: bool,
@@ -47,6 +62,8 @@ pub struct WebappManifest {
   pub version: String,
   pub description: Option<String>,
   pub icon: Option<String>,
+  #[serde(default)]
+  pub role: WebappRole,
   #[serde(default)]
   pub config: Vec<ConfigField>,
   #[serde(default)]

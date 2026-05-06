@@ -1,0 +1,41 @@
+{
+  "name": "@bridgething/webapp-shared",
+  "type": "module",
+  "private": false,
+  "version": "0.1.0",
+  "exports": {
+    "./vite": {
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
+    },
+    "./push": {
+      "types": "./dist/push.d.mts",
+      "default": "./dist/push.mjs"
+    },
+    "./tsconfig.json": "./tsconfig.json",
+    "./gitignore": "./gitignore",
+    "./styles.css": "./styles.css"
+  },
+  "files": [
+    "dist",
+    "tsconfig.json",
+    "gitignore",
+    "styles.css"
+  ],
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "tsdown"
+  },
+  "devDependencies": {
+    "tsdown": "^0.21.10"
+  },
+  "peerDependencies": {
+    "@msgpack/msgpack": "*",
+    "@tailwindcss/vite": "*",
+    "@vitejs/plugin-react": "*",
+    "babel-plugin-react-compiler": "*",
+    "tailwindcss": "*",
+    "typescript": "*",
+    "vite": "*"
+  }
+}

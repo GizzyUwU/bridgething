@@ -23,7 +23,7 @@ pub use shared::{
   PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position, Priority,
   QueueItem, QueuePosition, RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode,
   Station, StreamBegin, StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track,
-  TtlRetention, VoiceDescriptor, WebappInfo, WebappManifest, WebappSource, WsError, WsFrame, to_slug,
+  TtlRetention, VoiceDescriptor, WebappInfo, WebappManifest, WebappRole, WebappSource, WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

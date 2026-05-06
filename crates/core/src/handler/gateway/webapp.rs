@@ -13,6 +13,7 @@ use super::{HandlerResult, MsgHandle};
 use crate::{chrome::ChromeCommand, state::InstallError};
 
 const KIOSK_HOME_URL: &str = "http://127.0.0.1:8891/";
+const KIOSK_HUB_URL_BASE: &str = "http://127.0.0.1:8891/_hub/";
 
 #[derive(Debug)]
 pub struct WebappHandler {
@@ -305,15 +306,23 @@ impl WebappHandler {
   }
 
   async fn reload_kiosk(&self) {
-    if let Err(e) = self
-      .handle
-      .state
-      .chrome
-      .send(ChromeCommand::Navigate(KIOSK_HOME_URL.to_string()))
-      .await
-    {
+    let url = navigate_url_for_active(&self.handle.state).await;
+    if let Err(e) = self.handle.state.chrome.send(ChromeCommand::Navigate(url)).await {
       tracing::warn!("failed to reload kiosk after webapp switch: {:?}", e);
     }
+  }
+}
+
+pub async fn navigate_url_for_active(state: &crate::state::State) -> String {
+  let Ok(Some(active)) = state.active_webapp().await else {
+    return KIOSK_HOME_URL.to_string();
+  };
+  if active != crate::state::HUB_WEBAPP_ID {
+    return KIOSK_HOME_URL.to_string();
+  }
+  match state.webapps.bundle_hash(crate::state::HUB_WEBAPP_ID).await {
+    Some(hash) => format!("{KIOSK_HUB_URL_BASE}{hash}/"),
+    None => KIOSK_HOME_URL.to_string(),
   }
 }
 

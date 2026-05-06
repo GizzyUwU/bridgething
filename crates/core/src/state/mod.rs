@@ -7,10 +7,11 @@ use uuid::Uuid;
 
 use crate::{
   als::AlsManager,
-  asset::{AssetCache, AssetError},
+  asset::{AssetCache, AssetError, wait::AssetWaitTracker},
   authority::AuthorityRegistry,
   capabilities::CapabilitiesRegistry,
   chrome,
+  handler::iap2::Iap2PendingArt,
   mic::MicManager,
   net::{ClientMan, WireEventBus},
   paths,
@@ -32,7 +33,7 @@ pub use storage::{DeviceStore, KvStore, MetaStore};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
-pub use webapps::{InstallError, WebappRegistry};
+pub use webapps::{HUB_WEBAPP_ID, InstallError, WebappRegistry};
 
 pub type State = Arc<AppState>;
 
@@ -45,6 +46,8 @@ pub struct AppState {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
+  pub asset_wait: AssetWaitTracker,
+  pub iap2_pending_art: Iap2PendingArt,
   pub transfers: ChunkedTransfer,
   pub authority: AuthorityRegistry,
   pub capabilities: CapabilitiesRegistry,
@@ -78,6 +81,8 @@ impl AppState {
       chrome,
       webapps,
       assets,
+      asset_wait,
+      iap2_pending_art,
       transfers,
       authority,
       capabilities,
@@ -106,6 +111,8 @@ impl AppState {
       chrome,
       webapps,
       assets,
+      asset_wait,
+      iap2_pending_art,
       transfers,
       authority,
       capabilities,
@@ -158,6 +165,8 @@ pub struct AssembledState {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
+  pub asset_wait: AssetWaitTracker,
+  pub iap2_pending_art: Iap2PendingArt,
   pub transfers: ChunkedTransfer,
   pub authority: AuthorityRegistry,
   pub capabilities: CapabilitiesRegistry,

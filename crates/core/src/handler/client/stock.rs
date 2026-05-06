@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use base64::Engine as _;
 use libbridgething::{
@@ -15,14 +15,15 @@ use serde_json::{Value, json};
 
 use super::{HandlerResult, MsgHandle};
 use crate::{
-  asset::{AssetCacheEvent, CachedAsset},
+  asset::{
+    CachedAsset,
+    wait::{ASSET_WAIT_TIMEOUT, wait_for_asset},
+  },
   stock::{
     GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
     presets,
   },
 };
-
-const NOW_PLAYING_ART_WAIT: Duration = Duration::from_secs(30);
 
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
@@ -107,8 +108,6 @@ impl LegacyStockHandler {
     tracing::debug!("({}) stock image lookup for id: {}", &self.handle.from, id);
     let stock_msg_id = self.handle.stock_msg_id;
 
-    let mut events = self.handle.state.assets.subscribe();
-
     if let Some(asset) = self.handle.state.assets.get(&id).await? {
       return self.send_stock_image(stock_msg_id, &asset).await;
     }
@@ -123,19 +122,7 @@ impl LegacyStockHandler {
       return self.send_empty_stock_image(stock_msg_id).await;
     }
 
-    let waited = tokio::time::timeout(NOW_PLAYING_ART_WAIT, async {
-      loop {
-        match events.recv().await {
-          Ok(AssetCacheEvent::Ready { id: ready_id }) if ready_id == id => return true,
-          Ok(_) => continue,
-          Err(_) => return false,
-        }
-      }
-    })
-    .await
-    .unwrap_or(false);
-
-    if waited && let Some(asset) = self.handle.state.assets.get(&id).await? {
+    if let Some(asset) = wait_for_asset(&self.handle.state.assets, &id, ASSET_WAIT_TIMEOUT).await {
       tracing::debug!("({}) now-playing art landed during wait: {}", &self.handle.from, id);
       return self.send_stock_image(stock_msg_id, &asset).await;
     }

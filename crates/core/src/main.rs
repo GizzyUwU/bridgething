@@ -12,6 +12,7 @@ mod chrome;
 mod db;
 
 mod handler;
+mod input;
 mod ota;
 mod paths;
 mod peer;
@@ -84,6 +85,9 @@ async fn main() {
   let authority = AuthorityRegistry::new();
   let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
   let player = Player::new(bus.clone(), authority.clone());
+  let asset_wait = asset::wait::AssetWaitTracker::new();
+  let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());
+  let iap2_pending_art = handler::iap2::Iap2PendingArt::new();
   let peers = PeerTracker::new(
     bus.clone(),
     player.clone(),
@@ -131,6 +135,8 @@ async fn main() {
     chrome,
     webapps,
     assets,
+    asset_wait,
+    iap2_pending_art,
     transfers,
     authority,
     capabilities,
@@ -165,6 +171,7 @@ async fn main() {
       bluetooth.profile_man.clone(),
       bluetooth.gateway_man.iap2_ea_handle(),
       reconnect,
+      state.iap2_pending_art.clone(),
     ))
   });
 
@@ -183,6 +190,8 @@ async fn main() {
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota.clone());
+
+  let _input = input::InputManager::spawn(state.clone());
 
   notifier.ready(true, Some("ready to accept connections..."));
 

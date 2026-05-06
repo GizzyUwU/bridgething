@@ -11,8 +11,13 @@ use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
+use crate::asset::{
+  CachedAsset,
+  wait::{ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
+};
 
 const PRELOAD_IDS_MAX: usize = 64;
+const IAP2_ART_PREFIX: &str = "iap2/art/";
 
 #[derive(Debug)]
 pub struct AssetHandler {
@@ -36,83 +41,106 @@ impl AssetHandler {
 
   async fn handle_get(&self, id: String, request_id: Uuid) -> HandlerResult {
     if let Some(asset) = self.handle.state.assets.get(&id).await? {
-      return self
-        .handle
-        .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
-          request_id,
-          id,
-          bytes: asset.bytes.to_vec(),
-          mime: asset.mime,
-        }))
-        .await
-        .map_err(Into::into);
+      return self.respond_got(request_id, id, asset).await;
     }
 
-    if self.handle.state.gateway_info().await.is_none() {
-      return self
-        .handle
-        .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
-        .await
-        .map_err(Into::into);
-    }
-
-    let req = AssetRequest {
-      id: id.clone(),
-      request_id: Uuid::now_v7(),
+    let outcome = if id.starts_with(IAP2_ART_PREFIX) {
+      self.fetch_iap2_art(&id).await
+    } else if self.handle.state.gateway_info().await.is_none() {
+      FetchOutcome::NotFound
+    } else {
+      self.fetch_via_companion(&id).await
     };
-    let response = self.handle.bluetooth.gateway_man.request(None, req).await;
 
-    match response {
-      Ok(got) => {
-        let bytes = Bytes::from(got.bytes);
-        if let Err(err) = self
-          .handle
-          .state
-          .assets
-          .insert(id.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
-          .await
-        {
-          tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
-        }
-        self
-          .handle
-          .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
-            request_id,
-            id: got.id,
-            bytes: bytes.into(),
-            mime: got.mime,
-          }))
-          .await
-          .map_err(Into::into)
-      }
-      Err(RequestError::Domain(nf)) => {
-        tracing::debug!(id = %nf.id, "companion reported asset not found");
-        self
-          .handle
-          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound {
-            request_id,
-            id: nf.id,
-          }))
-          .await
-          .map_err(Into::into)
-      }
-      Err(RequestError::Protocol(err)) => {
-        tracing::warn!(?err, %id, "asset request failed at protocol level");
-        self
-          .handle
-          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
-          .await
-          .map_err(Into::into)
-      }
-      Err(RequestError::ResponseMismatch) => {
-        tracing::error!(%id, "asset response did not match expected shape");
-        self
-          .handle
-          .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
-          .await
-          .map_err(Into::into)
-      }
+    match outcome {
+      FetchOutcome::Got(asset) => self.respond_got(request_id, id, asset).await,
+      FetchOutcome::NotFound => self.respond_not_found(request_id, id).await,
     }
+  }
+
+  async fn fetch_iap2_art(&self, id: &str) -> FetchOutcome {
+    if !self.handle.state.iap2_pending_art.is_pending(id).await {
+      return FetchOutcome::NotFound;
+    }
+    let cache = self.handle.state.assets.clone();
+    let id_owned = id.to_string();
+    self
+      .handle
+      .state
+      .asset_wait
+      .fetch_or_wait(id, move || async move {
+        match wait_for_asset(&cache, &id_owned, ASSET_WAIT_TIMEOUT).await {
+          Some(asset) => FetchOutcome::Got(asset),
+          None => FetchOutcome::NotFound,
+        }
+      })
+      .await
+  }
+
+  async fn fetch_via_companion(&self, id: &str) -> FetchOutcome {
+    let cache = self.handle.state.assets.clone();
+    let bluetooth = self.handle.bluetooth.clone();
+    let id_owned = id.to_string();
+    self
+      .handle
+      .state
+      .asset_wait
+      .fetch_or_wait(id, move || async move {
+        let req = AssetRequest {
+          id: id_owned.clone(),
+          request_id: Uuid::now_v7(),
+        };
+        match bluetooth.gateway_man.request(None, req).await {
+          Ok(got) => {
+            let bytes = Bytes::from(got.bytes);
+            if let Err(err) = cache
+              .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
+              .await
+            {
+              tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
+            }
+            FetchOutcome::Got(CachedAsset {
+              bytes,
+              mime: got.mime,
+              retention: AssetRetention::Lru,
+            })
+          }
+          Err(RequestError::Domain(nf)) => {
+            tracing::debug!(id = %nf.id, "companion reported asset not found");
+            FetchOutcome::NotFound
+          }
+          Err(RequestError::Protocol(err)) => {
+            tracing::warn!(?err, %id_owned, "asset request failed at protocol level");
+            FetchOutcome::NotFound
+          }
+          Err(RequestError::ResponseMismatch) => {
+            tracing::error!(%id_owned, "asset response did not match expected shape");
+            FetchOutcome::NotFound
+          }
+        }
+      })
+      .await
+  }
+
+  async fn respond_got(&self, request_id: Uuid, id: String, asset: CachedAsset) -> HandlerResult {
+    self
+      .handle
+      .respond(BridgeToClientAssetMsg::Got(WireAssetGot {
+        request_id,
+        id,
+        bytes: asset.bytes.to_vec(),
+        mime: asset.mime,
+      }))
+      .await
+      .map_err(Into::into)
+  }
+
+  async fn respond_not_found(&self, request_id: Uuid, id: String) -> HandlerResult {
+    self
+      .handle
+      .respond(BridgeToClientAssetMsg::NotFound(WireAssetNotFound { request_id, id }))
+      .await
+      .map_err(Into::into)
   }
 
   async fn handle_preload(&self, ids: Vec<String>) {
@@ -120,34 +148,50 @@ impl AssetHandler {
       return;
     }
     for id in ids.into_iter().take(PRELOAD_IDS_MAX) {
+      if id.starts_with(IAP2_ART_PREFIX) {
+        continue;
+      }
       if matches!(self.handle.state.assets.get(&id).await, Ok(Some(_))) {
         continue;
       }
       let state = self.handle.state.clone();
       let bluetooth = self.handle.bluetooth.clone();
       tokio::spawn(async move {
-        let req = AssetRequest {
-          id: id.clone(),
-          request_id: Uuid::now_v7(),
-        };
-        match bluetooth.gateway_man.request(None, req).await {
-          Ok(got) => {
-            let bytes = Bytes::from(got.bytes);
-            if let Err(err) = state
-              .assets
-              .insert(id.clone(), bytes, got.mime, AssetRetention::Lru)
-              .await
-            {
-              tracing::warn!(?err, %id, "preload: failed to insert into cache");
+        let cache = state.assets.clone();
+        let id_owned = id.clone();
+        let _ = state
+          .asset_wait
+          .fetch_or_wait(&id, move || async move {
+            let req = AssetRequest {
+              id: id_owned.clone(),
+              request_id: Uuid::now_v7(),
+            };
+            match bluetooth.gateway_man.request(None, req).await {
+              Ok(got) => {
+                let bytes = Bytes::from(got.bytes);
+                if let Err(err) = cache
+                  .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
+                  .await
+                {
+                  tracing::warn!(?err, %id_owned, "preload: failed to insert into cache");
+                }
+                FetchOutcome::Got(CachedAsset {
+                  bytes,
+                  mime: got.mime,
+                  retention: AssetRetention::Lru,
+                })
+              }
+              Err(RequestError::Domain(_)) => {
+                tracing::debug!(%id_owned, "preload: companion reported asset not found");
+                FetchOutcome::NotFound
+              }
+              Err(err) => {
+                tracing::debug!(?err, %id_owned, "preload: companion request failed");
+                FetchOutcome::NotFound
+              }
             }
-          }
-          Err(RequestError::Domain(_)) => {
-            tracing::debug!(%id, "preload: companion reported asset not found");
-          }
-          Err(err) => {
-            tracing::debug!(?err, %id, "preload: companion request failed");
-          }
-        }
+          })
+          .await;
       });
     }
   }

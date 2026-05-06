@@ -4,7 +4,7 @@ use std::{
   sync::Arc,
 };
 
-use libbridgething::{ConfigField, WebappInfo, WebappManifest, WebappSource};
+use libbridgething::{ConfigField, WebappInfo, WebappManifest, WebappRole, WebappSource};
 use tokio::{fs, sync::RwLock};
 use uuid::Uuid;
 
@@ -14,8 +14,9 @@ use crate::paths;
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 
 const STOCK_DIR_NAME: &str = "stock";
-const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
-const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID];
+pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
+pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
+const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID, HUB_WEBAPP_ID];
 
 fn is_reserved(id: Uuid) -> bool {
   RESERVED_BUILTIN_IDS.contains(&id)
@@ -28,6 +29,7 @@ pub struct WebappBundle {
   pub manifest: Arc<WebappManifest>,
   pub icon_mime: Option<String>,
   pub icon_size: Option<u64>,
+  pub bundle_hash: String,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +100,18 @@ impl WebappRegistry {
     self.bundles.read().await.get(&id).map(|b| b.path.clone())
   }
 
+  pub async fn bundle_hash(&self, id: Uuid) -> Option<String> {
+    self.bundles.read().await.get(&id).map(|b| b.bundle_hash.clone())
+  }
+
+  pub async fn launcher_id(&self) -> Option<Uuid> {
+    let bundles = self.bundles.read().await;
+    bundles
+      .values()
+      .find(|b| matches!(b.manifest.role, WebappRole::Launcher))
+      .map(|b| b.manifest.id)
+  }
+
   pub async fn bundle(&self, id: Uuid) -> Option<WebappBundle> {
     self.bundles.read().await.get(&id).cloned()
   }
@@ -114,6 +128,15 @@ impl WebappRegistry {
       infos.insert(format!("{}-{}", info.name, info.id.simple()), info);
     }
     infos.into_values().collect()
+  }
+
+  pub async fn list_for_clients(&self) -> Vec<WebappInfo> {
+    self
+      .list()
+      .await
+      .into_iter()
+      .filter(|info| !matches!(info.role, WebappRole::Launcher))
+      .collect()
   }
 
   pub async fn is_builtin(&self, id: Uuid) -> bool {
@@ -322,13 +345,53 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     None => (None, None),
   };
 
+  let bundle_hash = compute_bundle_hash(path).await;
+
   Some(WebappBundle {
     path: path.to_path_buf(),
     source,
     manifest: Arc::new(manifest),
     icon_mime,
     icon_size,
+    bundle_hash,
   })
+}
+
+async fn compute_bundle_hash(root: &Path) -> String {
+  use sha2::{Digest, Sha256};
+  let mut hasher = Sha256::new();
+  let mut entries = collect_files(root).await;
+  entries.sort();
+  for rel in entries {
+    let abs = root.join(&rel);
+    if let Ok(bytes) = fs::read(&abs).await {
+      hasher.update(rel.to_string_lossy().as_bytes());
+      hasher.update([0u8]);
+      hasher.update(&bytes);
+      hasher.update([0u8]);
+    }
+  }
+  let digest = hasher.finalize();
+  hex::encode(&digest[..8])
+}
+
+async fn collect_files(root: &Path) -> Vec<PathBuf> {
+  let mut out = Vec::new();
+  let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+  while let Some(dir) = stack.pop() {
+    let Ok(mut rd) = fs::read_dir(&dir).await else {
+      continue;
+    };
+    while let Ok(Some(entry)) = rd.next_entry().await {
+      let path = entry.path();
+      if path.is_dir() {
+        stack.push(path);
+      } else if let Ok(rel) = path.strip_prefix(root) {
+        out.push(rel.to_path_buf());
+      }
+    }
+  }
+  out
 }
 
 fn validate_manifest(m: &WebappManifest) -> Result<(), String> {
@@ -392,7 +455,8 @@ fn stock_manifest() -> WebappManifest {
     name: "Spotify".into(),
     version: "8.9.2".into(),
     description: Some("Built-in Spotify Car Thing UI".into()),
-    icon: None,
+    icon: Some("spotify.svg".into()),
+    role: WebappRole::Standard,
     config: Vec::new(),
     permissions: Vec::new(),
   }
@@ -420,6 +484,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     id: b.manifest.id,
     name: b.manifest.name.clone(),
     source: b.source,
+    role: b.manifest.role,
     version: b.manifest.version.clone(),
     description: b.manifest.description.clone(),
     icon_available: b.icon_size.is_some(),

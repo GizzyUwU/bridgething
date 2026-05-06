@@ -6,7 +6,7 @@
 //! `Iap2EventRouter::route` for each event. State mutation lives here,
 //! one variant per arm.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use bluer::Address;
 use bridgething_iap2::{
@@ -30,6 +30,8 @@ use crate::{
   state::State,
 };
 
+const IDLE_PID_HEX: &str = "0000000000000000";
+
 /// Per-session NowPlaying context. Each iPhone reports `persistent_id`
 type LastPidMap = Mutex<HashMap<Address, String>>;
 
@@ -40,12 +42,54 @@ struct QueueContext {
 }
 type QueueContextMap = Mutex<HashMap<Address, QueueContext>>;
 
+#[derive(Debug, Clone)]
+struct PendingArtEntry {
+  transfer_id: u8,
+  asset_id: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Iap2PendingArt {
+  inner: Arc<Mutex<HashMap<Address, PendingArtEntry>>>,
+}
+
+impl Iap2PendingArt {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  async fn mark(&self, address: Address, transfer_id: u8, asset_id: String) {
+    self
+      .inner
+      .lock()
+      .await
+      .insert(address, PendingArtEntry { transfer_id, asset_id });
+  }
+
+  async fn take_if_matches(&self, address: Address, transfer_id: u8) -> Option<String> {
+    let mut guard = self.inner.lock().await;
+    match guard.get(&address) {
+      Some(entry) if entry.transfer_id == transfer_id => guard.remove(&address).map(|e| e.asset_id),
+      _ => None,
+    }
+  }
+
+  async fn clear(&self, address: Address) {
+    self.inner.lock().await.remove(&address);
+  }
+
+  pub async fn is_pending(&self, asset_id: &str) -> bool {
+    self.inner.lock().await.values().any(|e| e.asset_id == asset_id)
+  }
+}
+
 #[derive(Debug)]
 pub struct Iap2EventRouter {
   state: State,
   profile_man: ProfileMan,
   ea_gateway: Iap2EaGatewayHandle,
   reconnect: Iap2ReconnectHandle,
+  pending_art: Iap2PendingArt,
   last_pid_hex: LastPidMap,
   queue_ctx: QueueContextMap,
 }
@@ -56,12 +100,14 @@ impl Iap2EventRouter {
     profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
     reconnect: Iap2ReconnectHandle,
+    pending_art: Iap2PendingArt,
   ) -> Self {
     Self {
       state,
       profile_man,
       ea_gateway,
       reconnect,
+      pending_art,
       last_pid_hex: Mutex::new(HashMap::new()),
       queue_ctx: Mutex::new(HashMap::new()),
     }
@@ -95,13 +141,28 @@ impl Iap2EventRouter {
         tracing::warn!(%address, ?rejected_params, "iAP2 identification rejected");
       }
       SessionEvent::NowPlayingUpdate(update) => {
-        let pid_hex = if let Some(pid) = update.media_item.as_ref().and_then(|m| m.persistent_id) {
-          let hex = format!("{pid:016x}");
-          self.last_pid_hex.lock().await.insert(address, hex.clone());
-          Some(hex)
-        } else {
-          self.last_pid_hex.lock().await.get(&address).cloned()
+        let pid_hex = {
+          let mut guard = self.last_pid_hex.lock().await;
+          if let Some(pid) = update.media_item.as_ref().and_then(|m| m.persistent_id) {
+            let hex = format!("{pid:016x}");
+            let track_changed = guard.get(&address) != Some(&hex);
+            guard.insert(address, hex.clone());
+            drop(guard);
+            if track_changed {
+              self.pending_art.clear(address).await;
+            }
+            Some(hex)
+          } else {
+            guard.get(&address).cloned()
+          }
         };
+        if let Some(pid_hex) = pid_hex.as_deref()
+          && pid_hex != IDLE_PID_HEX
+          && let Some(transfer_id) = update.media_item.as_ref().and_then(|m| m.artwork_id)
+        {
+          let asset_id = format!("iap2/art/{pid_hex}/{transfer_id}");
+          self.pending_art.mark(address, transfer_id, asset_id).await;
+        }
         let queue_avail_change = update
           .playback
           .as_ref()
@@ -133,18 +194,20 @@ impl Iap2EventRouter {
         }
       }
       SessionEvent::ArtworkBytes { transfer_id, bytes } => {
-        let pid_hex = self.last_pid_hex.lock().await.get(&address).cloned();
-        let Some(pid_hex) = pid_hex else {
-          tracing::warn!(%address, transfer_id, "iAP2 artwork bytes received before any NowPlayingUpdate; dropping");
+        let Some(asset_id) = self.pending_art.take_if_matches(address, transfer_id).await else {
+          tracing::debug!(
+            %address,
+            transfer_id,
+            "iAP2 artwork bytes with no matching pending entry; dropping"
+          );
           return;
         };
-        let id = format!("iap2/art/{pid_hex}/{transfer_id}");
-        tracing::debug!(%address, asset_id = %id, bytes = bytes.len(), "iAP2 artwork bytes -> AssetCache");
+        tracing::debug!(%address, asset_id = %asset_id, bytes = bytes.len(), "iAP2 artwork bytes -> AssetCache");
         if let Err(err) = self
           .state
           .assets
           .insert(
-            id,
+            asset_id.clone(),
             tokio_util::bytes::Bytes::copy_from_slice(&bytes),
             Some("image/jpeg".to_string()),
             AssetRetention::Lru,
@@ -152,6 +215,15 @@ impl Iap2EventRouter {
           .await
         {
           tracing::warn!(%address, ?err, "failed to insert iAP2 artwork into asset cache");
+          return;
+        }
+        if let Err(err) = self
+          .state
+          .player
+          .apply_artwork_id(crate::player::NowPlayingSource::Iap2, asset_id)
+          .await
+        {
+          tracing::warn!(%address, ?err, "failed to apply iAP2 artwork id to player");
         }
       }
       SessionEvent::QueueSnapshotBytes { transfer_id, bytes } => {
@@ -262,6 +334,7 @@ impl Iap2EventRouter {
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
         self.last_pid_hex.lock().await.remove(&address);
         self.queue_ctx.lock().await.remove(&address);
+        self.pending_art.clear(address).await;
         if let Err(err) = self.state.player.apply_iap2_queue(Vec::new()).await {
           tracing::warn!(%address, ?err, "failed to clear iAP2 queue on link-down");
         }
@@ -283,10 +356,6 @@ fn translate_media_item(media: MediaItemAttributes, persistent_hex: Option<&str>
     .persistent_id
     .map(|id| format!("{id:016x}"))
     .or_else(|| persistent_hex.map(str::to_string));
-  let artwork_id = match (media.artwork_id, pid_hex.as_deref()) {
-    (Some(id), Some(pid)) => Some(format!("iap2/art/{pid}/{id}")),
-    _ => None,
-  };
   MediaItemUpdate {
     persistent_id: pid_hex.map(|hex| format!("iap2:track:{hex}")),
     title: media.title,
@@ -294,7 +363,7 @@ fn translate_media_item(media: MediaItemAttributes, persistent_hex: Option<&str>
     album_artist: media.album_artist,
     artist: media.artist,
     liked: media.liked,
-    artwork_id,
+    artwork_id: None,
     duration_ms: media.duration_ms,
     media_types: media.media_types.map(translate_media_types),
     track_number: media.track_number,
@@ -360,10 +429,6 @@ fn build_queue_items(items: &[MediaItemAttributes]) -> Vec<QueueItem> {
 
 fn build_queue_item(media: &MediaItemAttributes) -> QueueItem {
   let pid_hex = media.persistent_id.map(|id| format!("{id:016x}"));
-  let artwork_id = match (media.artwork_id, pid_hex.as_deref()) {
-    (Some(id), Some(pid)) => Some(format!("iap2/art/{pid}/{id}")),
-    _ => None,
-  };
   let uri = pid_hex
     .as_deref()
     .map(|pid| format!("iap2:track:{pid}"))
@@ -373,8 +438,57 @@ fn build_queue_item(media: &MediaItemAttributes) -> QueueItem {
     title: media.title.clone(),
     artist: media.artist.clone().or_else(|| media.album_artist.clone()),
     album: media.album.clone(),
-    artwork_id,
+    artwork_id: None,
     duration_ms: media.duration_ms,
     persistent_id: pid_hex.map(|pid| format!("iap2:track:{pid}")),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn addr() -> Address {
+    "AA:BB:CC:DD:EE:FF".parse().unwrap()
+  }
+
+  #[tokio::test]
+  async fn pending_take_matches_transfer_id() {
+    let pending = Iap2PendingArt::new();
+    let id = "iap2/art/abcd/5".to_string();
+    pending.mark(addr(), 5, id.clone()).await;
+    assert!(pending.is_pending(&id).await);
+    assert_eq!(pending.take_if_matches(addr(), 5).await, Some(id));
+    assert!(!pending.is_pending("iap2/art/abcd/5").await);
+  }
+
+  #[tokio::test]
+  async fn pending_rejects_mismatched_transfer_id() {
+    let pending = Iap2PendingArt::new();
+    pending.mark(addr(), 5, "iap2/art/abcd/5".to_string()).await;
+    assert_eq!(pending.take_if_matches(addr(), 4).await, None);
+    assert!(pending.is_pending("iap2/art/abcd/5").await);
+  }
+
+  #[tokio::test]
+  async fn mark_replaces_prior_entry_for_same_address() {
+    let pending = Iap2PendingArt::new();
+    pending.mark(addr(), 5, "iap2/art/old/5".to_string()).await;
+    pending.mark(addr(), 7, "iap2/art/new/7".to_string()).await;
+    assert!(!pending.is_pending("iap2/art/old/5").await);
+    assert!(pending.is_pending("iap2/art/new/7").await);
+    assert_eq!(
+      pending.take_if_matches(addr(), 7).await,
+      Some("iap2/art/new/7".to_string())
+    );
+  }
+
+  #[tokio::test]
+  async fn clear_drops_all_for_address() {
+    let pending = Iap2PendingArt::new();
+    pending.mark(addr(), 5, "iap2/art/abcd/5".to_string()).await;
+    pending.clear(addr()).await;
+    assert!(!pending.is_pending("iap2/art/abcd/5").await);
+    assert_eq!(pending.take_if_matches(addr(), 5).await, None);
   }
 }

@@ -25,6 +25,7 @@
 
 mod actor;
 pub mod storage;
+pub mod wait;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 

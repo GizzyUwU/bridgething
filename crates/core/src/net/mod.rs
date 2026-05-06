@@ -151,6 +151,11 @@ async fn modern_handler(
     };
   }
 
+  let req = match try_serve_hub(&state.state, req).await {
+    Ok(resp) => return resp,
+    Err(req) => req,
+  };
+
   let active_path = match resolve_active_webapp(&state.state).await {
     Some(p) => p,
     None => {
@@ -160,6 +165,72 @@ async fn modern_handler(
   };
 
   serve_from_dir(active_path, req).await
+}
+
+const HUB_PREFIX: &str = "/_hub/";
+
+async fn try_serve_hub(state: &BridgeThingState, req: Request<Body>) -> Result<Response, Request<Body>> {
+  if !req.uri().path().starts_with(HUB_PREFIX) {
+    return Err(req);
+  }
+  let Some(hash) = state.webapps.bundle_hash(crate::state::HUB_WEBAPP_ID).await else {
+    return Err(req);
+  };
+  let Some(bundle_path) = state.webapps.resolve(crate::state::HUB_WEBAPP_ID).await else {
+    return Err(req);
+  };
+
+  let path = req.uri().path().to_owned();
+  let after_prefix = &path[HUB_PREFIX.len()..];
+  let (segment_hash, rest) = match after_prefix.find('/') {
+    Some(idx) => (&after_prefix[..idx], &after_prefix[idx + 1..]),
+    None => (after_prefix, ""),
+  };
+
+  if segment_hash.is_empty() {
+    let location = format!("{HUB_PREFIX}{hash}/");
+    return Ok(
+      axum::http::Response::builder()
+        .status(StatusCode::TEMPORARY_REDIRECT)
+        .header(axum::http::header::LOCATION, location)
+        .body(Body::empty())
+        .expect("static redirect response"),
+    );
+  }
+
+  if segment_hash != hash {
+    let location = format!("{HUB_PREFIX}{hash}/{rest}");
+    return Ok(
+      axum::http::Response::builder()
+        .status(StatusCode::TEMPORARY_REDIRECT)
+        .header(axum::http::header::LOCATION, location)
+        .body(Body::empty())
+        .expect("hash redirect response"),
+    );
+  }
+
+  let inner_path = if rest.is_empty() { "/" } else { rest };
+  let new_uri: axum::http::Uri = format!("/{}", inner_path.trim_start_matches('/'))
+    .parse()
+    .expect("inner uri");
+  let (mut parts, body) = req.into_parts();
+  parts.uri = new_uri;
+  let sub_req = Request::from_parts(parts, body);
+
+  let svc = ServeDir::new(&bundle_path).precompressed_gzip();
+  let resp = match svc.oneshot(sub_req).await {
+    Ok(r) => r,
+    Err(err) => {
+      tracing::error!("hub ServeDir error: {:?}", err);
+      return Ok((StatusCode::INTERNAL_SERVER_ERROR, "serve error").into_response());
+    }
+  };
+  let mut resp = resp.map(Body::new);
+  resp.headers_mut().insert(
+    axum::http::header::CACHE_CONTROL,
+    axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+  );
+  Ok(resp)
 }
 
 async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx) -> impl IntoResponse {

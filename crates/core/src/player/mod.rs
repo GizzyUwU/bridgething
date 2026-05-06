@@ -47,6 +47,15 @@ impl Player {
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
+  pub async fn apply_artwork_id(&self, source: NowPlayingSource, asset_id: String) -> PlayerResult<()> {
+    let (state_reply, queue_reply) = {
+      let mut guard = self.state.write().await;
+      guard.apply_artwork_id(source, asset_id);
+      (guard.state_reply(), guard.queue_reply())
+    };
+    self.broadcast_snapshot(state_reply, queue_reply).await
+  }
+
   pub async fn iap2_playback_snapshot(&self) -> libbridgething::PlaybackUpdate {
     self.state.read().await.iap2_playback_snapshot()
   }
