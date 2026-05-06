@@ -414,6 +414,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case phone(BridgeToGatewayPhoneMsg)
 	case player(BridgeToGatewayPlayerMsg)
 	case system(BridgeToGatewaySystemMsg)
+	case tunnel(BridgeToGatewayTunnelMsg)
 	case voice(BridgeToGatewayVoiceMsg)
 	case webapp(BridgeToGatewayWebappMsg)
 	case forward(ForwardMessage)
@@ -435,6 +436,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			phone,
 			player,
 			system,
+			tunnel,
 			voice,
 			webapp,
 			forward,
@@ -506,6 +508,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 					self = .system(content)
 					return
 				}
+			case .tunnel:
+				if let content = try? container.decode(BridgeToGatewayTunnelMsg.self, forKey: .data) {
+					self = .tunnel(content)
+					return
+				}
 			case .voice:
 				if let content = try? container.decode(BridgeToGatewayVoiceMsg.self, forKey: .data) {
 					self = .voice(content)
@@ -572,6 +579,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .system(let content):
 			try container.encode(CodingKeys.system, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .tunnel(let content):
+			try container.encode(CodingKeys.tunnel, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .voice(let content):
 			try container.encode(CodingKeys.voice, forKey: .type)
@@ -1237,6 +1247,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case player(GatewayToBridgePlayerMsg)
 	case system(GatewayToBridgeSystemMsg)
 	case time(GatewayToBridgeTimeMsg)
+	case tunnel(GatewayToBridgeTunnelMsg)
 	case voice(GatewayToBridgeVoiceMsg)
 	case webapp(GatewayToBridgeWebappMsg)
 	case error(WireError)
@@ -1256,6 +1267,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			player,
 			system,
 			time,
+			tunnel,
 			voice,
 			webapp,
 			error
@@ -1339,6 +1351,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .time(content)
 					return
 				}
+			case .tunnel:
+				if let content = try? container.decode(GatewayToBridgeTunnelMsg.self, forKey: .data) {
+					self = .tunnel(content)
+					return
+				}
 			case .voice:
 				if let content = try? container.decode(GatewayToBridgeVoiceMsg.self, forKey: .data) {
 					self = .voice(content)
@@ -1403,6 +1420,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .time(let content):
 			try container.encode(CodingKeys.time, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .tunnel(let content):
+			try container.encode(CodingKeys.tunnel, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .voice(let content):
 			try container.encode(CodingKeys.voice, forKey: .type)
@@ -2362,124 +2382,6 @@ public struct NotificationRemoved: Codable, Sendable {
 	public init(id: String, reason: DismissReason) {
 		self.id = id
 		self.reason = reason
-	}
-}
-
-
-/// Generated type representing the anonymous struct variant `NotFound` of the `NotificationError` Rust enum
-public struct NotificationErrorNotFoundInner: Codable, Sendable {
-	public let id: String
-
-	public init(id: String) {
-		self.id = id
-	}
-}
-
-/// Generated type representing the anonymous struct variant `ActionRejected` of the `NotificationError` Rust enum
-public struct NotificationErrorActionRejectedInner: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-public enum NotificationError: Codable, Sendable {
-	/// The named notification id does not exist (likely already dismissed).
-	case notFound(NotificationErrorNotFoundInner)
-	/// The notification has no action slot in the requested polarity.
-	case noActionAvailable
-	/// The companion or platform refused the action.
-	case actionRejected(NotificationErrorActionRejectedInner)
-	/// No companion is connected to back the surface.
-	case noGateway
-
-	enum CodingKeys: String, CodingKey, Codable {
-		case notFound,
-			noActionAvailable,
-			actionRejected,
-			noGateway
-	}
-
-	private enum ContainerCodingKeys: String, CodingKey {
-		case type, data
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
-		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
-			switch type {
-			case .notFound:
-				if let content = try? container.decode(NotificationErrorNotFoundInner.self, forKey: .data) {
-					self = .notFound(content)
-					return
-				}
-			case .noActionAvailable:
-				self = .noActionAvailable
-				return
-			case .actionRejected:
-				if let content = try? container.decode(NotificationErrorActionRejectedInner.self, forKey: .data) {
-					self = .actionRejected(content)
-					return
-				}
-			case .noGateway:
-				self = .noGateway
-				return
-			}
-		}
-		throw DecodingError.typeMismatch(NotificationError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for NotificationError"))
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
-		switch self {
-		case .notFound(let content):
-			try container.encode(CodingKeys.notFound, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .noActionAvailable:
-			try container.encode(CodingKeys.noActionAvailable, forKey: .type)
-		case .actionRejected(let content):
-			try container.encode(CodingKeys.actionRejected, forKey: .type)
-			try container.encode(content, forKey: .data)
-		case .noGateway:
-			try container.encode(CodingKeys.noGateway, forKey: .type)
-		}
-	}
-}
-
-public struct NotificationsErrorReply: Codable, Sendable {
-	public let error: NotificationError
-
-	public init(error: NotificationError) {
-		self.error = error
-	}
-}
-
-/// Page of notifications returned from `notifications.list`. Gateways
-/// page large notification centers; webapps drive pagination via
-/// `next_page_token`.
-public struct NotificationsPage: Codable, Sendable {
-	public let items: [Notification]
-	public let nextPageToken: String?
-
-	public init(items: [Notification], nextPageToken: String?) {
-		self.items = items
-		self.nextPageToken = nextPageToken
-	}
-}
-
-public struct NotificationsListReply: Codable, Sendable {
-	public let page: NotificationsPage
-
-	public init(page: NotificationsPage) {
-		self.page = page
-	}
-}
-
-public struct NotificationsListRequest: Codable, Sendable {
-	public let pageToken: String?
-
-	public init(pageToken: String?) {
-		self.pageToken = pageToken
 	}
 }
 
@@ -3650,6 +3552,111 @@ public struct TtsStarted: Codable, Sendable {
 	}
 }
 
+public struct TunnelClosed: Codable, Sendable {
+	public let tunnelId: Data
+	public let reason: String?
+
+	public init(tunnelId: Data, reason: String?) {
+		self.tunnelId = tunnelId
+		self.reason = reason
+	}
+}
+
+public struct TunnelData: Codable, Sendable {
+	public let tunnelId: Data
+	public let bytes: Data
+
+	public init(tunnelId: Data, bytes: Data) {
+		self.tunnelId = tunnelId
+		self.bytes = bytes
+	}
+}
+
+
+/// Generated type representing the anonymous struct variant `ConnectFailed` of the `TunnelError` Rust enum
+public struct TunnelErrorConnectFailedInner: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+public enum TunnelError: Codable, Sendable {
+	/// Companion couldn't reach the host (DNS / TCP RST / network unreachable).
+	case connectFailed(TunnelErrorConnectFailedInner)
+	/// Companion refused to open a tunnel (e.g. user-denied policy).
+	case permissionDenied
+	/// Tunnel surface unavailable on this companion.
+	case unavailable
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case connectFailed,
+			permissionDenied,
+			unavailable
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .connectFailed:
+				if let content = try? container.decode(TunnelErrorConnectFailedInner.self, forKey: .data) {
+					self = .connectFailed(content)
+					return
+				}
+			case .permissionDenied:
+				self = .permissionDenied
+				return
+			case .unavailable:
+				self = .unavailable
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(TunnelError.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for TunnelError"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .connectFailed(let content):
+			try container.encode(CodingKeys.connectFailed, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .permissionDenied:
+			try container.encode(CodingKeys.permissionDenied, forKey: .type)
+		case .unavailable:
+			try container.encode(CodingKeys.unavailable, forKey: .type)
+		}
+	}
+}
+
+public struct TunnelErrorReply: Codable, Sendable {
+	public let error: TunnelError
+
+	public init(error: TunnelError) {
+		self.error = error
+	}
+}
+
+public struct TunnelOpen: Codable, Sendable {
+	public let tunnelId: Data
+	public let host: String
+	public let port: UInt16
+
+	public init(tunnelId: Data, host: String, port: UInt16) {
+		self.tunnelId = tunnelId
+		self.host = host
+		self.port = port
+	}
+}
+
+public struct TunnelOpenReply: Codable, Sendable {
+	public init() {}
+}
+
 /// PCM frame format the daemon ships in `Frame` payloads. Voice capture
 /// runs at a fixed format per session; format is announced once on
 /// `StreamOpen` and held constant through `StreamClose`.
@@ -4455,13 +4462,11 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 }
 
 public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
-	case list(NotificationsListRequest)
 	case invokePositive(NotificationInvoke)
 	case invokeNegative(NotificationInvoke)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case list,
-			invokePositive,
+		case invokePositive,
 			invokeNegative
 	}
 
@@ -4473,11 +4478,6 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .list:
-				if let content = try? container.decode(NotificationsListRequest.self, forKey: .data) {
-					self = .list(content)
-					return
-				}
 			case .invokePositive:
 				if let content = try? container.decode(NotificationInvoke.self, forKey: .data) {
 					self = .invokePositive(content)
@@ -4496,9 +4496,6 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .list(let content):
-			try container.encode(CodingKeys.list, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .invokePositive(let content):
 			try container.encode(CodingKeys.invokePositive, forKey: .event)
 			try container.encode(content, forKey: .data)
@@ -4853,6 +4850,61 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .otaBeginRejected(let content):
 			try container.encode(CodingKeys.otaBeginRejected, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
+	case open(TunnelOpen)
+	case data(TunnelData)
+	case close(TunnelClosed)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case open,
+			data,
+			close
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .open:
+				if let content = try? container.decode(TunnelOpen.self, forKey: .data) {
+					self = .open(content)
+					return
+				}
+			case .data:
+				if let content = try? container.decode(TunnelData.self, forKey: .data) {
+					self = .data(content)
+					return
+				}
+			case .close:
+				if let content = try? container.decode(TunnelClosed.self, forKey: .data) {
+					self = .close(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayTunnelMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayTunnelMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .open(let content):
+			try container.encode(CodingKeys.open, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .data(let content):
+			try container.encode(CodingKeys.data, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .close(let content):
+			try container.encode(CodingKeys.close, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5705,16 +5757,12 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 }
 
 public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
-	case listReply(NotificationsListReply)
-	case errorReply(NotificationsErrorReply)
 	case posted(Notification)
 	case updated(Notification)
 	case removed(NotificationRemoved)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case listReply,
-			errorReply,
-			posted,
+		case posted,
 			updated,
 			removed
 	}
@@ -5727,16 +5775,6 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .listReply:
-				if let content = try? container.decode(NotificationsListReply.self, forKey: .data) {
-					self = .listReply(content)
-					return
-				}
-			case .errorReply:
-				if let content = try? container.decode(NotificationsErrorReply.self, forKey: .data) {
-					self = .errorReply(content)
-					return
-				}
 			case .posted:
 				if let content = try? container.decode(Notification.self, forKey: .data) {
 					self = .posted(content)
@@ -5760,12 +5798,6 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .listReply(let content):
-			try container.encode(CodingKeys.listReply, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .errorReply(let content):
-			try container.encode(CodingKeys.errorReply, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .posted(let content):
 			try container.encode(CodingKeys.posted, forKey: .event)
 			try container.encode(content, forKey: .data)
@@ -6021,6 +6053,71 @@ public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 		switch self {
 		case .snapshot(let content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
+	case openReply(TunnelOpenReply)
+	case errorReply(TunnelErrorReply)
+	case data(TunnelData)
+	case closed(TunnelClosed)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case openReply,
+			errorReply,
+			data,
+			closed
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .openReply:
+				if let content = try? container.decode(TunnelOpenReply.self, forKey: .data) {
+					self = .openReply(content)
+					return
+				}
+			case .errorReply:
+				if let content = try? container.decode(TunnelErrorReply.self, forKey: .data) {
+					self = .errorReply(content)
+					return
+				}
+			case .data:
+				if let content = try? container.decode(TunnelData.self, forKey: .data) {
+					self = .data(content)
+					return
+				}
+			case .closed:
+				if let content = try? container.decode(TunnelClosed.self, forKey: .data) {
+					self = .closed(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeTunnelMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeTunnelMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .openReply(let content):
+			try container.encode(CodingKeys.openReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .errorReply(let content):
+			try container.encode(CodingKeys.errorReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .data(let content):
+			try container.encode(CodingKeys.data, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .closed(let content):
+			try container.encode(CodingKeys.closed, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

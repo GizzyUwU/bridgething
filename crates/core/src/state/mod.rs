@@ -9,6 +9,7 @@ use crate::{
   als::AlsManager,
   asset::{AssetCache, AssetError, wait::AssetWaitTracker},
   authority::AuthorityRegistry,
+  bluetooth::ancs::AncsManager,
   capabilities::CapabilitiesRegistry,
   chrome,
   handler::iap2::Iap2PendingArt,
@@ -20,19 +21,25 @@ use crate::{
 };
 
 mod audio;
+mod geo_watchers;
+pub mod log_tap;
 pub mod meta;
 pub mod routes;
 pub mod storage;
 mod telephony;
 mod time;
+mod tunnel_routes;
 mod webapps;
 
 pub use audio::{AudioError, AudioManager};
+pub use geo_watchers::{GeoWatchers, WatchAggregate, WatchChange};
+pub use log_tap::{LogTap, LogTapLayer};
 pub use routes::RouteTable;
 pub use storage::{DeviceStore, KvStore, MetaStore};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
+pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
 pub use webapps::{HUB_WEBAPP_ID, InstallError, WebappRegistry};
 
 pub type State = Arc<AppState>;
@@ -61,6 +68,10 @@ pub struct AppState {
   pub kv: KvStore,
   pub ws_routes: RouteTable,
   pub stream_routes: RouteTable,
+  pub geo_watchers: GeoWatchers,
+  pub log_tap: LogTap,
+  pub tunnel_routes: TunnelRoutes,
+  pub ancs: AncsManager,
 
   db: DatabaseConnection,
   meta_store: MetaStore,
@@ -96,6 +107,10 @@ impl AppState {
       kv,
       ws_routes,
       stream_routes,
+      geo_watchers,
+      log_tap,
+      tunnel_routes,
+      ancs,
       db,
       meta_store,
       asset_cache_handle,
@@ -126,6 +141,10 @@ impl AppState {
       kv,
       ws_routes,
       stream_routes,
+      geo_watchers,
+      log_tap,
+      tunnel_routes,
+      ancs,
       db,
       meta_store,
       _asset_cache_handle: asset_cache_handle,
@@ -140,7 +159,12 @@ impl AppState {
   }
 
   pub async fn set_active_webapp(&self, id: Uuid) -> StateResult<()> {
-    self.meta_store.set_active_webapp(id).await
+    let prev = self.active_webapp().await?;
+    self.meta_store.set_active_webapp(id).await?;
+    if prev != Some(id) {
+      self.tunnel_routes.kill_all();
+    }
+    Ok(())
   }
 
   pub async fn gateway_info(&self) -> Option<GatewayInfo> {
@@ -153,6 +177,9 @@ impl AppState {
     KvEntity::delete_many().exec(&tx).await?;
     MetaEntity::delete_many().exec(&tx).await?;
     tx.commit().await?;
+    if let Err(err) = self.assets.clear_all().await {
+      tracing::warn!(?err, "factory reset: asset cache wipe failed");
+    }
     Ok(())
   }
 }
@@ -180,6 +207,10 @@ pub struct AssembledState {
   pub kv: KvStore,
   pub ws_routes: RouteTable,
   pub stream_routes: RouteTable,
+  pub geo_watchers: GeoWatchers,
+  pub log_tap: LogTap,
+  pub tunnel_routes: TunnelRoutes,
+  pub ancs: AncsManager,
   pub db: DatabaseConnection,
   pub meta_store: MetaStore,
   pub asset_cache_handle: JoinHandle<()>,

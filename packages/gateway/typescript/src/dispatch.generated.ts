@@ -55,9 +55,6 @@ import {
   type Notification,
   type NotificationInvoke,
   type NotificationRemoved,
-  type NotificationsErrorReply,
-  type NotificationsListReply,
-  type NotificationsListRequest,
   type NowPlayingUpdate,
   type OtaAbandon,
   type OtaBegin,
@@ -100,6 +97,11 @@ import {
   type TtsCancel,
   type TtsEnded,
   type TtsStarted,
+  type TunnelClosed,
+  type TunnelData,
+  type TunnelErrorReply,
+  type TunnelOpen,
+  type TunnelOpenReply,
   type VoiceFrame,
   type VoiceMicOpen,
   type VoiceStreamClose,
@@ -222,13 +224,11 @@ export type NetDeviceInboundHandlers = {
 export type NotificationsInboundHandlers = {
   invokePositive: (deviceId: string, msg: NotificationInvoke) => void;
   invokeNegative: (deviceId: string, msg: NotificationInvoke) => void;
-  list: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void;
 };
 
 export type NotificationsDeviceInboundHandlers = {
   invokePositive: (msg: NotificationInvoke) => void;
   invokeNegative: (msg: NotificationInvoke) => void;
-  list: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void;
 };
 
 export type PhoneInboundHandlers = {
@@ -305,6 +305,18 @@ export type SystemDeviceInboundHandlers = {
   otaError: (msg: OtaError) => void;
   otaBeginAck: (msg: OtaBeginAck) => void;
   otaBeginRejected: (msg: OtaBeginRejected) => void;
+};
+
+export type TunnelInboundHandlers = {
+  data: (deviceId: string, msg: TunnelData) => void;
+  close: (deviceId: string, msg: TunnelClosed) => void;
+  open: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void;
+};
+
+export type TunnelDeviceInboundHandlers = {
+  data: (msg: TunnelData) => void;
+  close: (msg: TunnelClosed) => void;
+  open: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void;
 };
 
 export type VoiceInboundHandlers = {
@@ -1227,28 +1239,6 @@ export class NotificationsSurface {
     });
   }
 
-  /** Typed inbound `NotificationsListRequest` request: handler is given a typed handle for the response. */
-  onList(
-    handler: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void,
-  ): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const message = event.message;
-      if (message.meta.kind !== 'request') return;
-      const data = message.data;
-      if (data.type !== 'notifications') return;
-      const inner = data.data;
-      if (inner.event !== 'list') return;
-      const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, message.id);
-      const result = handler(handle, inner.data);
-      if (result && typeof result.then === 'function') {
-        result.catch((err: unknown) => {
-          this._gateway.logger.error('onList handler threw:', err);
-        });
-      }
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Notifications` variants. */
   subscribe(handlers: NotificationsInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1272,20 +1262,6 @@ export class NotificationsSurface {
         }
         case 'invokeNegative': {
           handlers.invokeNegative?.(event.deviceId, inner.data);
-          return;
-        }
-        case 'list': {
-          if (event.message.meta.kind !== 'request') return;
-          const handler = handlers.list;
-          if (!handler) {
-            if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', 'list');
-            return;
-          }
-          const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, event.message.id);
-          const result = handler(handle, inner.data);
-          if (result && typeof result.then === 'function') {
-            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
-          }
           return;
         }
         default: {
@@ -2091,6 +2067,131 @@ export class SystemSurface {
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class TunnelSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Tunnel::Data` across all peers. */
+  onData(handler: (deviceId: string, msg: TunnelData) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'data') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Tunnel::Close` across all peers. */
+  onClose(handler: (deviceId: string, msg: TunnelClosed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'close') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `TunnelOpen` request: handler is given a typed handle for the response. */
+  onOpen(handler: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'open') return;
+      const handle = new TunnelOpenHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onOpen handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Tunnel` variants. */
+  subscribe(handlers: TunnelInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<TunnelInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<TunnelInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'data': {
+          handlers.data?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'close': {
+          handlers.close?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'open': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.open;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Tunnel: no handler for inner', 'open');
+            return;
+          }
+          const handle = new TunnelOpenHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Tunnel: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Tunnel::Data` to every connected peer (broadcast). */
+  async data(payload: TunnelData, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'tunnel', data: { event: 'data', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Tunnel::Closed` to every connected peer (broadcast). */
+  async closed(payload: TunnelClosed, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuidBytes(),
+          meta: { kind: 'event' },
+          data: { type: 'tunnel', data: { event: 'closed', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
   }
 }
 
@@ -3555,29 +3656,6 @@ export class NotificationsSurfaceForDevice {
     });
   }
 
-  /** Typed inbound `NotificationsListRequest` request from this peer: handler is given a typed handle for the response. */
-  onList(
-    handler: (handle: NotificationsListRequestHandle, req: NotificationsListRequest) => Promise<void> | void,
-  ): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const message = event.message;
-      if (message.meta.kind !== 'request') return;
-      const data = message.data;
-      if (data.type !== 'notifications') return;
-      const inner = data.data;
-      if (inner.event !== 'list') return;
-      const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, message.id);
-      const result = handler(handle, inner.data);
-      if (result && typeof result.then === 'function') {
-        result.catch((err: unknown) => {
-          this._gateway.logger.error('onList handler threw:', err);
-        });
-      }
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Notifications` variants from this peer. */
   subscribe(handlers: NotificationsDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -3602,20 +3680,6 @@ export class NotificationsSurfaceForDevice {
         }
         case 'invokeNegative': {
           handlers.invokeNegative?.(inner.data);
-          return;
-        }
-        case 'list': {
-          if (event.message.meta.kind !== 'request') return;
-          const handler = handlers.list;
-          if (!handler) {
-            if (!partial) this._gateway.logger.warn('Notifications: no handler for inner', 'list');
-            return;
-          }
-          const handle = new NotificationsListRequestHandle(this._gateway, event.deviceId, event.message.id);
-          const result = handler(handle, inner.data);
-          if (result && typeof result.then === 'function') {
-            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
-          }
           return;
         }
         default: {
@@ -4394,6 +4458,128 @@ export class SystemSurfaceForDevice {
   }
 }
 
+export class TunnelSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Tunnel::Data` from this peer. */
+  onData(handler: (msg: TunnelData) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'data') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Tunnel::Close` from this peer. */
+  onClose(handler: (msg: TunnelClosed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'close') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `TunnelOpen` request from this peer: handler is given a typed handle for the response. */
+  onOpen(handler: (handle: TunnelOpenHandle, req: TunnelOpen) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      if (inner.event !== 'open') return;
+      const handle = new TunnelOpenHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onOpen handler threw:', err);
+        });
+      }
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Tunnel` variants from this peer. */
+  subscribe(handlers: TunnelDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<TunnelDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<TunnelDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'tunnel') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'data': {
+          handlers.data?.(inner.data);
+          return;
+        }
+        case 'close': {
+          handlers.close?.(inner.data);
+          return;
+        }
+        case 'open': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.open;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Tunnel: no handler for inner', 'open');
+            return;
+          }
+          const handle = new TunnelOpenHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Tunnel: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Tunnel::Data` to this peer. */
+  async data(payload: TunnelData, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'tunnel', data: { event: 'data', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Tunnel::Closed` to this peer. */
+  async closed(payload: TunnelClosed, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'event' },
+      data: { type: 'tunnel', data: { event: 'closed', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class VoiceSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -4951,6 +5137,7 @@ export type BridgeMessageHandlers = {
   phone: PhoneInboundHandlers;
   player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
+  tunnel: TunnelInboundHandlers;
   voice: VoiceInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
@@ -4966,6 +5153,7 @@ export type PartialBridgeMessageHandlers = {
   phone?: Partial<PhoneInboundHandlers>;
   player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
+  tunnel?: Partial<TunnelInboundHandlers>;
   voice?: Partial<VoiceInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
@@ -4981,6 +5169,7 @@ export type BridgeMessageDeviceHandlers = {
   phone: PhoneDeviceInboundHandlers;
   player: PlayerDeviceInboundHandlers;
   system: SystemDeviceInboundHandlers;
+  tunnel: TunnelDeviceInboundHandlers;
   voice: VoiceDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
@@ -4996,6 +5185,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   phone?: Partial<PhoneDeviceInboundHandlers>;
   player?: Partial<PlayerDeviceInboundHandlers>;
   system?: Partial<SystemDeviceInboundHandlers>;
+  tunnel?: Partial<TunnelDeviceInboundHandlers>;
   voice?: Partial<VoiceDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
@@ -5020,6 +5210,8 @@ declare module './index' {
     readonly player: PlayerSurface;
     /** Methods scoped to the `System` wire surface. */
     readonly system: SystemSurface;
+    /** Methods scoped to the `Tunnel` wire surface. */
+    readonly tunnel: TunnelSurface;
     /** Methods scoped to the `Voice` wire surface. */
     readonly voice: VoiceSurface;
     /** Methods scoped to the `Forward` wire surface. */
@@ -5326,27 +5518,18 @@ export class NetWsOpenHandle {
   }
 }
 
-export class NotificationsListRequestHandle {
+export class PhoneStateGetHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
     private readonly _requestId: Uint8Array,
   ) {}
 
-  async respond(response: NotificationsListReply): Promise<void> {
+  async respond(response: PhoneStateReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
-      data: { type: 'notifications', data: { event: 'listReply', data: response } },
-    };
-    await this._gateway.send(this.deviceId, msg);
-  }
-
-  async respondErr(error: NotificationsErrorReply): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
-      data: { type: 'notifications', data: { event: 'errorReply', data: error } },
+      data: { type: 'phone', data: { event: 'stateReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -5361,18 +5544,27 @@ export class NotificationsListRequestHandle {
   }
 }
 
-export class PhoneStateGetHandle {
+export class TunnelOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
     private readonly _requestId: Uint8Array,
   ) {}
 
-  async respond(response: PhoneStateReply): Promise<void> {
+  async respond(response: TunnelOpenReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
-      data: { type: 'phone', data: { event: 'stateReply', data: response } },
+      data: { type: 'tunnel', data: { event: 'openReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: TunnelErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'tunnel', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -5466,6 +5658,7 @@ type DeviceSurfaceCache = {
   phone?: PhoneSurfaceForDevice;
   player?: PlayerSurfaceForDevice;
   system?: SystemSurfaceForDevice;
+  tunnel?: TunnelSurfaceForDevice;
   voice?: VoiceSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
@@ -5507,6 +5700,9 @@ export class BridgethingGatewayDevice {
   }
   get system(): SystemSurfaceForDevice {
     return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
+  }
+  get tunnel(): TunnelSurfaceForDevice {
+    return (this._surfaces.tunnel ??= new TunnelSurfaceForDevice(this._gateway, this.deviceId));
   }
   get voice(): VoiceSurfaceForDevice {
     return (this._surfaces.voice ??= new VoiceSurfaceForDevice(this._gateway, this.deviceId));
@@ -5554,6 +5750,7 @@ type GatewaySurfaceCache = {
   phone?: PhoneSurface;
   player?: PlayerSurface;
   system?: SystemSurface;
+  tunnel?: TunnelSurface;
   voice?: VoiceSurface;
   forward?: ForwardSurface;
   asset?: AssetSurface;
@@ -5642,6 +5839,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): SystemSurface {
       const bucket = bucketFor(this);
       return (bucket.system ??= new SystemSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'tunnel', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): TunnelSurface {
+      const bucket = bucketFor(this);
+      return (bucket.tunnel ??= new TunnelSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'voice', {
@@ -5997,19 +6202,6 @@ function outerSubscribeGateway(
             innerHandlers.invokeNegative?.(event.deviceId, inner.data);
             return;
           }
-          case 'list': {
-            if (event.message.meta.kind !== 'request') return;
-            const handler = innerHandlers.list;
-            if (!handler) {
-              if (!partial) g.logger.warn('Notifications: no handler for inner', 'list');
-              return;
-            }
-            const handle = new NotificationsListRequestHandle(g, event.deviceId, event.message.id);
-            const result = handler(handle, inner.data);
-            if (result && typeof result.then === 'function')
-              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
-            return;
-          }
           default: {
             if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
             return;
@@ -6179,6 +6371,41 @@ function outerSubscribeGateway(
           }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'tunnel': {
+        const innerHandlers = handlers.tunnel;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for tunnel');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'data': {
+            innerHandlers.data?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'close': {
+            innerHandlers.close?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'open': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.open;
+            if (!handler) {
+              if (!partial) g.logger.warn('Tunnel: no handler for inner', 'open');
+              return;
+            }
+            const handle = new TunnelOpenHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Tunnel: no handler for inner', inner);
             return;
           }
         }
@@ -6528,19 +6755,6 @@ function outerSubscribeDevice(
             innerHandlers.invokeNegative?.(inner.data);
             return;
           }
-          case 'list': {
-            if (event.message.meta.kind !== 'request') return;
-            const handler = innerHandlers.list;
-            if (!handler) {
-              if (!partial) g.logger.warn('Notifications: no handler for inner', 'list');
-              return;
-            }
-            const handle = new NotificationsListRequestHandle(g, event.deviceId, event.message.id);
-            const result = handler(handle, inner.data);
-            if (result && typeof result.then === 'function')
-              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
-            return;
-          }
           default: {
             if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
             return;
@@ -6710,6 +6924,41 @@ function outerSubscribeDevice(
           }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'tunnel': {
+        const innerHandlers = handlers.tunnel;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for tunnel');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'data': {
+            innerHandlers.data?.(inner.data);
+            return;
+          }
+          case 'close': {
+            innerHandlers.close?.(inner.data);
+            return;
+          }
+          case 'open': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.open;
+            if (!handler) {
+              if (!partial) g.logger.warn('Tunnel: no handler for inner', 'open');
+              return;
+            }
+            const handle = new TunnelOpenHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Tunnel: no handler for inner', inner);
             return;
           }
         }

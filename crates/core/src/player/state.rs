@@ -48,6 +48,7 @@ pub struct PlayerState {
   companion_playback: PlaybackUpdate,
 
   iap2_queue: Vec<QueueItem>,
+  companion_queue: Vec<QueueItem>,
 
   transport_intent: Option<TransportIntent>,
   seek_intent: Option<SeekIntent>,
@@ -88,6 +89,7 @@ impl PlayerState {
       companion_playback: PlaybackUpdate::default(),
 
       iap2_queue: Vec::new(),
+      companion_queue: Vec::new(),
 
       transport_intent: None,
       seek_intent: None,
@@ -136,8 +138,74 @@ impl PlayerState {
     self.iap2_queue = items;
   }
 
+  pub(crate) fn replace_companion_queue(&mut self, items: Vec<QueueItem>) {
+    self.companion_queue = items;
+  }
+
+  pub(crate) fn apply_companion_snapshot(&mut self, snapshot: WirePlayerState) {
+    let WirePlayerState {
+      track,
+      playback,
+      queue,
+      options,
+    } = snapshot;
+
+    self.companion_metadata = match track {
+      Some(t) => MediaItemUpdate {
+        persistent_id: t.persistent_id,
+        title: t.title,
+        album: t.album,
+        album_artist: t.album_artist,
+        artist: t.artist,
+        liked: t.liked,
+        artwork_id: t.artwork_id,
+        duration_ms: t.duration_ms,
+        media_types: t.media_types,
+        track_number: t.track_number,
+        track_count: t.track_count,
+        is_like_supported: t.is_like_supported,
+        is_ban_supported: t.is_ban_supported,
+        is_banned: t.is_banned,
+        is_resident_on_device: None,
+        chapter_count: t.chapter_count,
+      },
+      None => MediaItemUpdate::default(),
+    };
+
+    self.companion_playback = PlaybackUpdate {
+      playing: Some(matches!(playback.state, PlaybackState::Playing)),
+      position_ms: Some(playback.position_ms),
+      shuffle: Some(playback.shuffle),
+      shuffle_mode: playback.shuffle_mode,
+      repeat: Some(playback.repeat),
+      app_bundle: None,
+      app_display_name: None,
+      queue_index: playback.queue_index,
+      queue_count: playback.queue_count,
+      queue_chapter_index: playback.queue_chapter_index,
+      playback_speed: Some(options.speed),
+      set_elapsed_time_available: playback.set_elapsed_time_available,
+      queue_list_avail: playback.queue_list_avail,
+      apple_music_radio_ad: playback.apple_music_radio_ad,
+      apple_music_radio_station_name: None,
+    };
+
+    self.companion_queue = queue;
+
+    let merged_meta = self.merged_metadata();
+    let merged_play = self.merged_playback();
+    self.apply_merged(merged_meta, merged_play);
+  }
+
   fn merged_queue(&self) -> Vec<QueueItem> {
-    self.iap2_queue.clone()
+    let companion_authoritative = self
+      .authority
+      .is_authoritative(CompanionAuthorityScope::NowPlayingMetadata);
+    if companion_authoritative {
+      self.companion_queue.clone()
+    } else {
+      self.iap2_queue.clone()
+    }
   }
 
   pub(crate) fn apply_now_playing(&mut self, source: NowPlayingSource, update: NowPlayingUpdate) {

@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgeGeoMsgEvent;
+use libbridgething::{client::BridgeToClientGeoMsgEvent, gateway::GatewayToBridgeGeoMsgEvent};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -13,7 +13,19 @@ impl GeoHandler {
 
   pub async fn handle(self, msg: GatewayToBridgeGeoMsgEvent) -> HandlerResult {
     match msg {
-      GatewayToBridgeGeoMsgEvent::Position(_) => self.handle.unimplemented("gateway:geo.position").await,
+      GatewayToBridgeGeoMsgEvent::Position(position) => {
+        let owners = self.handle.state.geo_watchers.owners();
+        if owners.is_empty() {
+          tracing::trace!("geo position arrived with no watchers; dropping");
+          return Ok(());
+        }
+        for owner in owners {
+          let event = BridgeToClientGeoMsgEvent::Position(position);
+          if let Err(err) = self.handle.state.bus.send_event(owner, event).await {
+            tracing::warn!(?err, %owner, "failed to forward geo position to webapp");
+          }
+        }
+      }
     }
     Ok(())
   }

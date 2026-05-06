@@ -16,6 +16,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use uuid::Uuid;
 
 // protocol modules
+pub mod ancs;
 pub mod iap2;
 mod network;
 pub mod profiles;
@@ -93,7 +94,6 @@ impl BluetoothManager {
     adapter.set_pairable_timeout(0).await?;
     adapter.set_pairable(true).await?;
 
-    // TODO: what am i supposed to do here?
     adapter.set_discoverable_timeout(0).await?;
     adapter.set_discoverable(true).await?;
 

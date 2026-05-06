@@ -21,16 +21,14 @@ impl PlayerHandler {
           .player
           .apply_now_playing(NowPlayingSource::Companion, update)
           .await?;
-        Ok(())
       }
-      GatewayToBridgePlayerMsgEvent::Snapshot(_) => {
-        tracing::trace!(target: "bridgething::gateway::player", "player snapshot ignored — companion-side authoritative snapshot not yet wired");
-        Ok(())
+      GatewayToBridgePlayerMsgEvent::Snapshot(state) => {
+        self.handle.state.player.apply_companion_snapshot(state).await?;
       }
-      GatewayToBridgePlayerMsgEvent::QueueChanged(_) => {
-        tracing::trace!(target: "bridgething::gateway::player", "queue change ignored — queue mirror not yet wired");
-        Ok(())
+      GatewayToBridgePlayerMsgEvent::QueueChanged(snapshot) => {
+        self.handle.state.player.apply_companion_queue(snapshot.items).await?;
       }
     }
+    Ok(())
   }
 }

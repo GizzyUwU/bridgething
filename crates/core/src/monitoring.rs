@@ -1,4 +1,4 @@
-pub fn init_logger() {
+pub fn init_logger(tap: crate::state::LogTapLayer) {
   use tracing::metadata::LevelFilter;
   use tracing_subscriber::{
     EnvFilter, Layer, filter::Directive, fmt, fmt::format::FmtSpan, prelude::__tracing_subscriber_SubscriberExt,
@@ -27,12 +27,15 @@ pub fn init_logger() {
     "bridgething=info,libbridgething=info,bridgething-iap2=info,bridgething-mfi=info".to_string()
   };
 
-  let filter = EnvFilter::builder()
-    .with_default_directive(default_directive)
-    .parse_lossy(filter_directives);
+  let make_filter = || {
+    EnvFilter::builder()
+      .with_default_directive(default_directive.clone())
+      .parse_lossy(&filter_directives)
+  };
 
   tracing_subscriber::registry()
-    .with(fmt::layer().with_span_events(FmtSpan::CLOSE).with_filter(filter))
+    .with(fmt::layer().with_span_events(FmtSpan::CLOSE).with_filter(make_filter()))
+    .with(tap.with_filter(make_filter()))
     .init();
 
   tracing::debug!("initialized logger");

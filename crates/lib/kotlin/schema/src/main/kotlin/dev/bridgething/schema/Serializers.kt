@@ -106,11 +106,26 @@ public object GatewayToBridgeLyricsMsgSerializer :
         discriminator = "event"
     )
 
+public object BridgeToGatewayTunnelMsgSerializer :
+    KSerializer<BridgeToGatewayTunnelMsg> by AdjacentTaggedSerializer(
+        BridgeToGatewayTunnelMsg::class,
+        discriminator = "event"
+    )
+
+public object GatewayToBridgeTunnelMsgSerializer :
+    KSerializer<GatewayToBridgeTunnelMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeTunnelMsg::class,
+        discriminator = "event"
+    )
+
 public object WireErrorSerializer :
     KSerializer<WireError> by AdjacentTaggedSerializer(WireError::class, discriminator = "type")
 
 public object WebappErrorSerializer :
     KSerializer<WebappError> by AdjacentTaggedSerializer(WebappError::class, discriminator = "type")
+
+public object TunnelErrorSerializer :
+    KSerializer<TunnelError> by AdjacentTaggedSerializer(TunnelError::class, discriminator = "type")
 
 public object PeerCompanionStatusSerializer :
     KSerializer<PeerCompanionStatus> by AdjacentTaggedSerializer(

@@ -4,6 +4,7 @@ use libbridgething::{BridgeThingMeta, client::BridgeToClientMsgData, gateway::Br
 use serde::{Deserialize, Serialize};
 
 const BRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
+const BRIDGETHING_APP_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -70,8 +71,8 @@ impl From<SuperbirdMeta> for BridgeThingMeta {
     Self {
       bridgething_version: format!("v{}", BRIDGETHING_VERSION),
       libbridgething_version: Self::libbridgething_version(),
-      app_name: "(unknown)".to_string(), // TODO: find a way to handle application name
-      app_version: "(unknown)".to_string(), // TODO: find a way to handle application version
+      app_name: BRIDGETHING_APP_NAME.to_string(),
+      app_version: format!("v{}", BRIDGETHING_VERSION),
       os_name: meta.name,
       os_version: meta.version,
       os_description: meta.description,

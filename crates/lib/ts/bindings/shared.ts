@@ -490,12 +490,6 @@ export type NotificationCategory =
   | 'location'
   | 'entertainment';
 
-export type NotificationError =
-  | { type: 'notFound'; data: { id: string } }
-  | { type: 'noActionAvailable' }
-  | { type: 'actionRejected'; data: { reason: string } }
-  | { type: 'noGateway' };
-
 /**
  * ANCS-shaped flags. `silent` mirrors the iOS "do not surface
  * audibly" hint, `important` is the high-importance flag, and
@@ -503,13 +497,6 @@ export type NotificationError =
  * daemon connected (replayed by the companion on first sync).
  */
 export type NotificationFlags = { silent: boolean; important: boolean; preExisting: boolean };
-
-/**
- * Page of notifications returned from `notifications.list`. Gateways
- * page large notification centers; webapps drive pagination via
- * `next_page_token`.
- */
-export type NotificationsPage = { items: Array<Notification>; nextPageToken: string | null };
 
 /**
  * Delta event the companion or iAP2 stream emits whenever a player
@@ -926,6 +913,15 @@ export type Track = {
 };
 
 export type TtlRetention = { seconds: number };
+
+export type TunnelClosed = { tunnelId: string; reason: string | null };
+
+export type TunnelData = { tunnelId: string; bytes: Uint8Array };
+
+export type TunnelError =
+  | { type: 'connectFailed'; data: { reason: string } }
+  | { type: 'permissionDenied' }
+  | { type: 'unavailable' };
 
 /**
  * One TTS voice the companion's audio backend can speak as. `id` is

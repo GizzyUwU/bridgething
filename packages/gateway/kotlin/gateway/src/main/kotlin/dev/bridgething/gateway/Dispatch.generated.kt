@@ -563,17 +563,6 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
     }
   }
 
-  /** Stream of typed inbound `NotificationsListRequest` requests. */
-  public val listRequests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayNotificationsMsg.List ?: return@mapNotNull null
-      val handle = NotificationsListRequestHandle(gateway, it.deviceId, it.message.id)
-      handle to inner.data
-    }
-
 }
 
 /** Cross-peer methods for the `Phone` wire surface. */
@@ -1050,6 +1039,73 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+}
+
+/** Cross-peer methods for the `Tunnel` wire surface. */
+public class TunnelSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Tunnel::Data` messages. */
+  public val data: Flow<Pair<String, TunnelData>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Data ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Tunnel::Close` messages. */
+  public val close: Flow<Pair<String, TunnelClosed>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Close ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Tunnel::Data` to every connected peer (broadcast). */
+  public suspend fun data(payload: TunnelData, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Tunnel::Closed` to every connected peer (broadcast). */
+  public suspend fun closed(payload: TunnelClosed, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID().toBytes(),
+            meta = GatewayMsgMeta.Event,
+            data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Closed(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Stream of typed inbound `TunnelOpen` requests. */
+  public val openRequests: Flow<Pair<TunnelOpenHandle, TunnelOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Open ?: return@mapNotNull null
+      val handle = TunnelOpenHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -1994,18 +2050,6 @@ public class NotificationsSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
-  /** Stream of typed inbound `NotificationsListRequest` requests. */
-  public val listRequests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayNotificationsMsg.List ?: return@mapNotNull null
-      val handle = NotificationsListRequestHandle(gateway, it.deviceId, it.message.id)
-      handle to inner.data
-    }
-
 }
 
 /** Per-peer methods for the `Phone` wire surface (deviceId is baked in). */
@@ -2443,6 +2487,65 @@ public class SystemSurfaceForDevice(
       else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+}
+
+/** Per-peer methods for the `Tunnel` wire surface (deviceId is baked in). */
+public class TunnelSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Tunnel::Data` from this peer. */
+  public val data: Flow<TunnelData> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Data ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Tunnel::Close` from this peer. */
+  public val close: Flow<TunnelClosed> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Close ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Tunnel::Data` to this peer. */
+  public suspend fun data(payload: TunnelData, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Tunnel::Closed` to this peer. */
+  public suspend fun closed(payload: TunnelClosed, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Event,
+      data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Closed(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Stream of typed inbound `TunnelOpen` requests. */
+  public val openRequests: Flow<Pair<TunnelOpenHandle, TunnelOpen>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTunnelMsg.Open ?: return@mapNotNull null
+      val handle = TunnelOpenHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -2887,6 +2990,8 @@ public class BridgethingGatewayDevice(
   public val player: PlayerSurfaceForDevice get() = PlayerSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `System` wire surface. */
   public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Tunnel` wire surface. */
+  public val tunnel: TunnelSurfaceForDevice get() = TunnelSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Voice` wire surface. */
   public val voice: VoiceSurfaceForDevice get() = VoiceSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Forward` wire surface. */
@@ -2938,6 +3043,10 @@ public val BridgethingGateway.player: PlayerSurface
 /** Methods scoped to the `System` wire surface. */
 public val BridgethingGateway.system: SystemSurface
   get() = SystemSurface(this)
+
+/** Methods scoped to the `Tunnel` wire surface. */
+public val BridgethingGateway.tunnel: TunnelSurface
+  get() = TunnelSurface(this)
 
 /** Methods scoped to the `Voice` wire surface. */
 public val BridgethingGateway.voice: VoiceSurface
@@ -3242,25 +3351,16 @@ public class NetWsOpenHandle internal constructor(
   }
 }
 
-public class NotificationsListRequestHandle internal constructor(
+public class PhoneStateGetHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
   private val requestId: ByteArray,
 ) {
-  public suspend fun respond(response: NotificationsListReply) {
+  public suspend fun respond(response: PhoneStateReply) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ListReply(response)),
-    )
-    gateway.send(deviceId, msg)
-  }
-
-  public suspend fun respondErr(error: NotificationsErrorReply) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.ErrorReply(error)),
+      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.StateReply(response)),
     )
     gateway.send(deviceId, msg)
   }
@@ -3275,16 +3375,25 @@ public class NotificationsListRequestHandle internal constructor(
   }
 }
 
-public class PhoneStateGetHandle internal constructor(
+public class TunnelOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
   private val requestId: ByteArray,
 ) {
-  public suspend fun respond(response: PhoneStateReply) {
+  public suspend fun respond(response: TunnelOpenReply) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
-      data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.StateReply(response)),
+      data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.OpenReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: TunnelErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
   }

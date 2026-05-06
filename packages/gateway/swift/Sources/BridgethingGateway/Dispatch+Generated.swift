@@ -690,24 +690,6 @@ public struct NotificationsSurface: Sendable {
     }
   }
 
-  /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
-  public var listRequests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          guard case .message(let deviceId, let message) = event else { continue }
-          guard case .request = message.meta else { continue }
-          guard case .notifications(let outer) = message.data else { continue }
-          guard case .list(let payload) = outer else { continue }
-          let handle = NotificationsListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
-          continuation.yield((handle: handle, req: payload))
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Send `Notifications::Posted` to every connected peer (broadcast).
   public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1428,6 +1410,92 @@ public struct SystemSurface: Sendable {
       }
     case .error(let err): return .protocolError(err)
     default: return .protocolError(.unsupported)
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Tunnel` wire surface.
+public struct TunnelSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Tunnel::Data` messages.
+  public var data: AsyncStream<(deviceId: String, msg: TunnelData)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .tunnel(let outer) = message.data,
+             case .data(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Tunnel::Close` messages.
+  public var close: AsyncStream<(deviceId: String, msg: TunnelClosed)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .tunnel(let outer) = message.data,
+             case .close(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `TunnelOpen` requests with handles for typed responses.
+  public var `open`Requests: AsyncStream<(handle: TunnelOpenHandle, req: TunnelOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .tunnel(let outer) = message.data else { continue }
+          guard case .`open`(let payload) = outer else { continue }
+          let handle = TunnelOpenHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Tunnel::Data` to every connected peer (broadcast).
+  public func data(_ payload: TunnelData, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .tunnel(.data(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Tunnel::Closed` to every connected peer (broadcast).
+  public func closed(_ payload: TunnelClosed, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .tunnel(.closed(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
     }
   }
 
@@ -2559,25 +2627,6 @@ public struct NotificationsSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
-  public var listRequests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          guard case .message(let deviceId, let message) = event else { continue }
-          guard deviceId == self.deviceId else { continue }
-          guard case .request = message.meta else { continue }
-          guard case .notifications(let outer) = message.data else { continue }
-          guard case .list(let payload) = outer else { continue }
-          let handle = NotificationsListRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
-          continuation.yield((handle: handle, req: payload))
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Send `Notifications::Posted` to this peer.
   public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.posted(payload)))
@@ -3223,6 +3272,80 @@ public struct SystemSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Tunnel` wire surface (deviceId is baked in).
+public struct TunnelSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Tunnel::Data` from this peer.
+  public var data: AsyncStream<TunnelData> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .tunnel(let outer) = message.data,
+             case .data(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Tunnel::Close` from this peer.
+  public var close: AsyncStream<TunnelClosed> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .tunnel(let outer) = message.data,
+             case .close(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `TunnelOpen` requests with handles for typed responses.
+  public var `open`Requests: AsyncStream<(handle: TunnelOpenHandle, req: TunnelOpen)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .tunnel(let outer) = message.data else { continue }
+          guard case .`open`(let payload) = outer else { continue }
+          let handle = TunnelOpenHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Tunnel::Data` to this peer.
+  public func data(_ payload: TunnelData, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .tunnel(.data(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Tunnel::Closed` to this peer.
+  public func closed(_ payload: TunnelClosed, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .tunnel(.closed(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Voice` wire surface (deviceId is baked in).
 public struct VoiceSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -3682,6 +3805,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var player: PlayerSurfaceForDevice { PlayerSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `System` wire surface.
   public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Tunnel` wire surface.
+  public var tunnel: TunnelSurfaceForDevice { TunnelSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Voice` wire surface.
   public var voice: VoiceSurfaceForDevice { VoiceSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
@@ -3719,6 +3844,8 @@ extension BridgethingGateway {
   public nonisolated var player: PlayerSurface { PlayerSurface(gateway: self) }
   /// Methods scoped to the `System` wire surface.
   public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
+  /// Methods scoped to the `Tunnel` wire surface.
+  public nonisolated var tunnel: TunnelSurface { TunnelSurface(gateway: self) }
   /// Methods scoped to the `Voice` wire surface.
   public nonisolated var voice: VoiceSurface { VoiceSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
@@ -4055,45 +4182,6 @@ public final class NetWsOpenHandle: @unchecked Sendable {
   }
 }
 
-public final class NotificationsListRequestHandle: @unchecked Sendable {
-  private let gateway: BridgethingGateway
-  public let deviceId: String
-  private let requestId: Data
-
-  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
-    self.gateway = gateway
-    self.deviceId = deviceId
-    self.requestId = requestId
-  }
-
-  public func respond(_ response: NotificationsListReply) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .response(ResponseMeta(requestId: requestId)),
-      data: .notifications(.listReply(response))
-    )
-    try await gateway.send(deviceId: deviceId, msg)
-  }
-
-  public func respondErr(_ error: NotificationsErrorReply) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .response(ResponseMeta(requestId: requestId)),
-      data: .notifications(.errorReply(error))
-    )
-    try await gateway.send(deviceId: deviceId, msg)
-  }
-
-  public func respondProtocolErr(_ error: WireError) async throws {
-    let msg = GatewayToBridgeMsg(
-      id: UUID().data,
-      meta: .response(ResponseMeta(requestId: requestId)),
-      data: .error(error)
-    )
-    try await gateway.send(deviceId: deviceId, msg)
-  }
-}
-
 public final class PhoneStateGetHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
@@ -4110,6 +4198,45 @@ public final class PhoneStateGetHandle: @unchecked Sendable {
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .phone(.stateReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: WireError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class TunnelOpenHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: TunnelOpenReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .tunnel(.openReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: TunnelErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .tunnel(.errorReply(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }

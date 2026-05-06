@@ -25,8 +25,6 @@ import type {
   NetFetchRequest,
   NetFetchResponse,
   Notification,
-  NotificationError,
-  NotificationsPage,
   NowPlayingUpdate,
   PhoneCall,
   PhoneCallService,
@@ -44,6 +42,9 @@ import type {
   StreamEnd,
   StreamError,
   TimeInfo,
+  TunnelClosed,
+  TunnelData,
+  TunnelError,
   WebappInfo,
   WsError,
   WsFrame,
@@ -180,6 +181,7 @@ export type BridgeToGatewayMsgData =
   | { type: 'phone'; data: BridgeToGatewayPhoneMsg }
   | { type: 'player'; data: BridgeToGatewayPlayerMsg }
   | { type: 'system'; data: BridgeToGatewaySystemMsg }
+  | { type: 'tunnel'; data: BridgeToGatewayTunnelMsg }
   | { type: 'voice'; data: BridgeToGatewayVoiceMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
   | { type: 'forward'; data: ForwardMessage }
@@ -196,7 +198,6 @@ export type BridgeToGatewayNetMsg =
   | { event: 'streamCancel'; data: NetStreamCancel };
 
 export type BridgeToGatewayNotificationsMsg =
-  | { event: 'list'; data: NotificationsListRequest }
   | { event: 'invokePositive'; data: NotificationInvoke }
   | { event: 'invokeNegative'; data: NotificationInvoke };
 
@@ -241,6 +242,11 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'otaError'; data: OtaError }
   | { event: 'otaBeginAck'; data: OtaBeginAck }
   | { event: 'otaBeginRejected'; data: OtaBeginRejected };
+
+export type BridgeToGatewayTunnelMsg =
+  | { event: 'open'; data: TunnelOpen }
+  | { event: 'data'; data: TunnelData }
+  | { event: 'close'; data: TunnelClosed };
 
 export type BridgeToGatewayVoiceMsg =
   | { event: 'streamOpen'; data: VoiceStreamOpen }
@@ -380,6 +386,7 @@ export type GatewayToBridgeMsgData =
   | { type: 'player'; data: GatewayToBridgePlayerMsg }
   | { type: 'system'; data: GatewayToBridgeSystemMsg }
   | { type: 'time'; data: GatewayToBridgeTimeMsg }
+  | { type: 'tunnel'; data: GatewayToBridgeTunnelMsg }
   | { type: 'voice'; data: GatewayToBridgeVoiceMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
   | { type: 'error'; data: WireError };
@@ -398,8 +405,6 @@ export type GatewayToBridgeNetMsg =
   | { event: 'streamError'; data: StreamError };
 
 export type GatewayToBridgeNotificationsMsg =
-  | { event: 'listReply'; data: NotificationsListReply }
-  | { event: 'errorReply'; data: NotificationsErrorReply }
   | { event: 'posted'; data: Notification }
   | { event: 'updated'; data: Notification }
   | { event: 'removed'; data: NotificationRemoved };
@@ -438,6 +443,12 @@ export type GatewayToBridgeSystemMsg =
  * changes.
  */
 export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
+
+export type GatewayToBridgeTunnelMsg =
+  | { event: 'openReply'; data: TunnelOpenReply }
+  | { event: 'errorReply'; data: TunnelErrorReply }
+  | { event: 'data'; data: TunnelData }
+  | { event: 'closed'; data: TunnelClosed };
 
 export type GatewayToBridgeVoiceMsg = { event: 'micOpen'; data: VoiceMicOpen } | { event: 'micClose' };
 
@@ -551,12 +562,6 @@ export type NetWsSend = { connectionId: Uint8Array; frame: WsFrame };
 export type NotificationInvoke = { id: string };
 
 export type NotificationRemoved = { id: string; reason: DismissReason };
-
-export type NotificationsErrorReply = { error: NotificationError };
-
-export type NotificationsListReply = { page: NotificationsPage };
-
-export type NotificationsListRequest = { pageToken: string | null };
 
 /**
  * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
@@ -745,6 +750,12 @@ export type TtsEnded = { id: Uint8Array; completed: boolean };
  * before speech started); webapps should treat both as best-effort.
  */
 export type TtsStarted = { id: Uint8Array };
+
+export type TunnelErrorReply = { error: TunnelError };
+
+export type TunnelOpen = { tunnelId: string; host: string; port: number };
+
+export type TunnelOpenReply = Record<symbol, never>;
 
 export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
 

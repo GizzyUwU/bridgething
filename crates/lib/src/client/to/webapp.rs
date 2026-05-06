@@ -113,10 +113,6 @@ pub enum BridgeToClientWebappMsg {
   #[bridge_response]
   ActiveReply(WebappActiveReply),
   #[bridge_response]
-  UninstalledReply(WebappActiveReply),
-  #[bridge_response]
-  InstalledReply(WebappInstalledReply),
-  #[bridge_response]
   ErrorReply(WebappErrorReply),
   #[bridge_response]
   IconReply(WebappIconReply),

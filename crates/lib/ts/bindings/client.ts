@@ -31,8 +31,6 @@ import type {
   NetFetchRequest,
   NetFetchResponse,
   Notification,
-  NotificationError,
-  NotificationsPage,
   NowPlayingUpdate,
   Peer,
   PhoneCall,
@@ -200,8 +198,6 @@ export type BridgeToClientNetMsg =
   | { event: 'streamError'; data: StreamError };
 
 export type BridgeToClientNotificationsMsg =
-  | { event: 'listReply'; data: NotificationsListReply }
-  | { event: 'errorReply'; data: NotificationsErrorReply }
   | { event: 'posted'; data: Notification }
   | { event: 'updated'; data: Notification }
   | { event: 'removed'; data: NotificationRemoved };
@@ -252,8 +248,6 @@ export type BridgeToClientWebappMsg =
   | { event: 'listReply'; data: WebappListReply }
   | { event: 'currentReply'; data: WebappCurrentReply }
   | { event: 'activeReply'; data: WebappActiveReply }
-  | { event: 'uninstalledReply'; data: WebappActiveReply }
-  | { event: 'installedReply'; data: WebappInstalledReply }
   | { event: 'errorReply'; data: WebappErrorReply }
   | { event: 'iconReply'; data: WebappIconReply }
   | { event: 'activeChanged'; data: WebappActiveChanged }
@@ -352,7 +346,6 @@ export type ClientToBridgeNetMsg =
   | { event: 'streamCancel'; data: NetStreamCancel };
 
 export type ClientToBridgeNotificationsMsg =
-  | { event: 'list'; data: NotificationsList }
   | { event: 'invokePositive'; data: NotificationInvoke }
   | { event: 'invokeNegative'; data: NotificationInvoke };
 
@@ -415,8 +408,6 @@ export type ClientToBridgeWebappMsg =
   | { event: 'list' }
   | { event: 'current' }
   | { event: 'activate'; data: WebappActivate }
-  | { event: 'uninstall'; data: WebappUninstall }
-  | { event: 'install'; data: WebappInstall }
   | { event: 'icon'; data: WebappIcon };
 
 /**
@@ -597,12 +588,6 @@ export type NotificationInvoke = { id: string };
 
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
-export type NotificationsErrorReply = { error: NotificationError };
-
-export type NotificationsList = { pageToken: string | null };
-
-export type NotificationsListReply = { page: NotificationsPage };
-
 export type PairBluetooth = { mac: string };
 
 /**
@@ -730,19 +715,10 @@ export type WebappIcon = { id: string };
 
 export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
 
-/**
- * Install a webapp from a previously-pushed `.zip` archive in the
- * AssetCache. The webapp surface validates structure, lays out the
- * bundle, and emits `onWebappInstalled` on success.
- */
-export type WebappInstall = { archiveAssetId: string };
-
 export type WebappInstallProgress = { name: string; percent: number };
 
 export type WebappInstalledReply = { info: WebappInfo };
 
 export type WebappListReply = { webapps: Array<WebappInfo> };
-
-export type WebappUninstall = { id: string };
 
 export type WebappUninstalled = { name: string };

@@ -76,6 +76,31 @@ impl Player {
     Ok(())
   }
 
+  pub async fn apply_companion_queue(&self, items: Vec<libbridgething::QueueItem>) -> PlayerResult<()> {
+    let queue_reply = {
+      let mut guard = self.state.write().await;
+      guard.replace_companion_queue(items);
+      guard.queue_reply()
+    };
+    self
+      .bus
+      .broadcast(
+        BridgeToClientPlayerMsg::QueueChanged(queue_reply),
+        libbridgething::wire::MsgMeta::Event,
+      )
+      .await?;
+    Ok(())
+  }
+
+  pub async fn apply_companion_snapshot(&self, snapshot: libbridgething::PlayerState) -> PlayerResult<()> {
+    let (state_reply, queue_reply) = {
+      let mut guard = self.state.write().await;
+      guard.apply_companion_snapshot(snapshot);
+      (guard.state_reply(), guard.queue_reply())
+    };
+    self.broadcast_snapshot(state_reply, queue_reply).await
+  }
+
   pub async fn state_reply(&self) -> PlayerStateReply {
     self.state.read().await.state_reply()
   }

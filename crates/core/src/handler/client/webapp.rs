@@ -20,8 +20,6 @@ impl WebappHandler {
       ClientToBridgeWebappMsgRequest::List => self.list().await,
       ClientToBridgeWebappMsgRequest::Current => self.current().await,
       ClientToBridgeWebappMsgRequest::Activate(req) => self.activate(req).await,
-      ClientToBridgeWebappMsgRequest::Uninstall(_) => Ok(self.handle.unimplemented("webapp.uninstall").await?),
-      ClientToBridgeWebappMsgRequest::Install(_) => Ok(self.handle.unimplemented("webapp.install").await?),
       ClientToBridgeWebappMsgRequest::Icon(WebappIcon { id }) => {
         match self.handle.state.webapps.read_icon(id).await {
           Some((bytes, mime)) => {

@@ -17,6 +17,7 @@ mod ota;
 mod paths;
 mod peer;
 mod player;
+mod proxy;
 mod state;
 mod transfer;
 mod transport;
@@ -45,7 +46,8 @@ use transport::TransportController;
 
 #[tokio::main]
 async fn main() {
-  monitoring::init_logger();
+  let (log_tap, log_tap_layer) = state::LogTap::new();
+  monitoring::init_logger(log_tap_layer);
 
   let notifier = systemd::init_notifier();
 
@@ -81,6 +83,8 @@ async fn main() {
 
   let ws_routes = RouteTable::new();
   let stream_routes = RouteTable::new();
+  let geo_watchers = state::GeoWatchers::new();
+  let tunnel_routes = state::TunnelRoutes::new();
 
   let authority = AuthorityRegistry::new();
   let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
@@ -127,6 +131,10 @@ async fn main() {
     .await
     .spawn();
 
+  let (ancs, _ancs_handle) = bluetooth::ancs::AncsManager::spawn(bus.clone())
+    .await
+    .expect("failed to initialize ANCS manager");
+
   let state = AppState::assemble(AssembledState {
     client_man: client_man.clone(),
     bus,
@@ -150,6 +158,10 @@ async fn main() {
     kv,
     ws_routes,
     stream_routes,
+    geo_watchers,
+    log_tap,
+    tunnel_routes,
+    ancs,
     db,
     meta_store,
     asset_cache_handle,
@@ -192,6 +204,13 @@ async fn main() {
   let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota.clone());
 
   let _input = input::InputManager::spawn(state.clone());
+
+  if let Err(err) = proxy::spawn(state.clone(), bluetooth.clone()).await {
+    tracing::warn!(
+      ?err,
+      "SOCKS proxy failed to bind; chromium net.proxy webapps will not work"
+    );
+  }
 
   notifier.ready(true, Some("ready to accept connections..."));
 

@@ -48,6 +48,9 @@ pub(super) enum Command {
     id: String,
     ack: oneshot::Sender<Result<(), AssetError>>,
   },
+  ClearAll {
+    ack: oneshot::Sender<Result<(), AssetError>>,
+  },
 }
 
 /// Storage backing for an in-flight cache entry. `Memory` holds the
@@ -198,6 +201,10 @@ impl AssetActor {
       }
       Command::Clear { id, ack } => {
         let result = self.handle_clear(id).await;
+        let _ = ack.send(result);
+      }
+      Command::ClearAll { ack } => {
+        let result = self.handle_clear_all().await;
         let _ = ack.send(result);
       }
     }
@@ -366,6 +373,15 @@ impl AssetActor {
     Ok(())
   }
 
+  async fn handle_clear_all(&mut self) -> Result<(), AssetError> {
+    let ids: Vec<String> = self.entries.keys().cloned().collect();
+    for id in ids {
+      self.evict_entry(&id).await;
+      let _ = self.events_tx.send(AssetCacheEvent::Cleared { id });
+    }
+    Ok(())
+  }
+
   /// Drop one entry, updating byte counters and removing from disk if
   /// the entry was persistent. Does not broadcast `Cleared`; callers
   /// decide whether the eviction is user-visible.
@@ -488,10 +504,10 @@ impl AssetActor {
       })
       .collect();
     for id in expired {
-      if let Some(entry) = self.entries.remove(&id) {
-        if matches!(entry.storage, EntryStorage::Memory(_)) {
-          self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
-        }
+      if let Some(entry) = self.entries.remove(&id)
+        && matches!(entry.storage, EntryStorage::Memory(_))
+      {
+        self.memory_byte_total = self.memory_byte_total.saturating_sub(entry.byte_len);
       }
       let _ = self.events_tx.send(AssetCacheEvent::Cleared { id });
     }

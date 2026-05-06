@@ -8,6 +8,7 @@ mod notifications;
 mod phone;
 mod player;
 mod system;
+mod tunnel;
 mod voice;
 mod webapp;
 
@@ -21,5 +22,6 @@ pub use notifications::*;
 pub use phone::*;
 pub use player::*;
 pub use system::*;
+pub use tunnel::*;
 pub use voice::*;
 pub use webapp::*;

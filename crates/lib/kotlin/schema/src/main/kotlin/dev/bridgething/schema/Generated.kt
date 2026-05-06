@@ -273,6 +273,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("system")
 	data class System(val data: BridgeToGatewaySystemMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("tunnel")
+	data class Tunnel(val data: BridgeToGatewayTunnelMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("voice")
 	data class Voice(val data: BridgeToGatewayVoiceMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -747,6 +750,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("time")
 	data class Time(val data: GatewayToBridgeTimeMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("tunnel")
+	data class Tunnel(val data: GatewayToBridgeTunnelMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("voice")
 	data class Voice(val data: GatewayToBridgeVoiceMsg): GatewayToBridgeMsgData()
@@ -1350,62 +1356,6 @@ enum class DismissReason(val string: String) {
 data class NotificationRemoved (
 	val id: String,
 	val reason: DismissReason
-)
-
-/// Generated type representing the anonymous struct variant `NotFound` of the `NotificationError` Rust enum
-@Serializable
-data class NotificationErrorNotFoundInner (
-	val id: String
-)
-
-/// Generated type representing the anonymous struct variant `ActionRejected` of the `NotificationError` Rust enum
-@Serializable
-data class NotificationErrorActionRejectedInner (
-	val reason: String
-)
-
-@Serializable(with = NotificationErrorSerializer::class)
-sealed class NotificationError {
-	/// The named notification id does not exist (likely already dismissed).
-	@Serializable
-	@SerialName("notFound")
-	data class NotFound(val data: NotificationErrorNotFoundInner): NotificationError()
-	/// The notification has no action slot in the requested polarity.
-	@Serializable
-	@SerialName("noActionAvailable")
-	object NoActionAvailable: NotificationError()
-	/// The companion or platform refused the action.
-	@Serializable
-	@SerialName("actionRejected")
-	data class ActionRejected(val data: NotificationErrorActionRejectedInner): NotificationError()
-	/// No companion is connected to back the surface.
-	@Serializable
-	@SerialName("noGateway")
-	object NoGateway: NotificationError()
-}
-
-@Serializable
-data class NotificationsErrorReply (
-	val error: NotificationError
-)
-
-/// Page of notifications returned from `notifications.list`. Gateways
-/// page large notification centers; webapps drive pagination via
-/// `next_page_token`.
-@Serializable
-data class NotificationsPage (
-	val items: List<Notification>,
-	val nextPageToken: String? = null
-)
-
-@Serializable
-data class NotificationsListReply (
-	val page: NotificationsPage
-)
-
-@Serializable
-data class NotificationsListRequest (
-	val pageToken: String? = null
 )
 
 /// Three-state shuffle. iAP2 and Apple Music distinguish track-level
@@ -2228,6 +2178,55 @@ data class TtsStarted (
 	val id: ByteArray
 )
 
+@Serializable
+data class TunnelClosed (
+	val tunnelId: ByteArray,
+	val reason: String? = null
+)
+
+@Serializable
+data class TunnelData (
+	val tunnelId: ByteArray,
+	val bytes: ByteArray
+)
+
+/// Generated type representing the anonymous struct variant `ConnectFailed` of the `TunnelError` Rust enum
+@Serializable
+data class TunnelErrorConnectFailedInner (
+	val reason: String
+)
+
+@Serializable(with = TunnelErrorSerializer::class)
+sealed class TunnelError {
+	/// Companion couldn't reach the host (DNS / TCP RST / network unreachable).
+	@Serializable
+	@SerialName("connectFailed")
+	data class ConnectFailed(val data: TunnelErrorConnectFailedInner): TunnelError()
+	/// Companion refused to open a tunnel (e.g. user-denied policy).
+	@Serializable
+	@SerialName("permissionDenied")
+	object PermissionDenied: TunnelError()
+	/// Tunnel surface unavailable on this companion.
+	@Serializable
+	@SerialName("unavailable")
+	object Unavailable: TunnelError()
+}
+
+@Serializable
+data class TunnelErrorReply (
+	val error: TunnelError
+)
+
+@Serializable
+data class TunnelOpen (
+	val tunnelId: ByteArray,
+	val host: String,
+	val port: UShort
+)
+
+@Serializable
+object TunnelOpenReply
+
 /// PCM frame format the daemon ships in `Frame` payloads. Voice capture
 /// runs at a fixed format per session; format is announced once on
 /// `StreamOpen` and held constant through `StreamClose`.
@@ -2576,9 +2575,6 @@ sealed class BridgeToGatewayNetMsg {
 @Serializable(with = BridgeToGatewayNotificationsMsgSerializer::class)
 sealed class BridgeToGatewayNotificationsMsg {
 	@Serializable
-	@SerialName("list")
-	data class List(val data: NotificationsListRequest): BridgeToGatewayNotificationsMsg()
-	@Serializable
 	@SerialName("invokePositive")
 	data class InvokePositive(val data: NotificationInvoke): BridgeToGatewayNotificationsMsg()
 	@Serializable
@@ -2688,6 +2684,19 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("otaBeginRejected")
 	data class OtaBeginRejected(val data: dev.bridgething.schema.OtaBeginRejected): BridgeToGatewaySystemMsg()
+}
+
+@Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
+sealed class BridgeToGatewayTunnelMsg {
+	@Serializable
+	@SerialName("open")
+	data class Open(val data: TunnelOpen): BridgeToGatewayTunnelMsg()
+	@Serializable
+	@SerialName("data")
+	data class Data(val data: TunnelData): BridgeToGatewayTunnelMsg()
+	@Serializable
+	@SerialName("close")
+	data class Close(val data: TunnelClosed): BridgeToGatewayTunnelMsg()
 }
 
 @Serializable(with = BridgeToGatewayVoiceMsgSerializer::class)
@@ -2916,12 +2925,6 @@ sealed class GatewayToBridgeNetMsg {
 @Serializable(with = GatewayToBridgeNotificationsMsgSerializer::class)
 sealed class GatewayToBridgeNotificationsMsg {
 	@Serializable
-	@SerialName("listReply")
-	data class ListReply(val data: NotificationsListReply): GatewayToBridgeNotificationsMsg()
-	@Serializable
-	@SerialName("errorReply")
-	data class ErrorReply(val data: NotificationsErrorReply): GatewayToBridgeNotificationsMsg()
-	@Serializable
 	@SerialName("posted")
 	data class Posted(val data: Notification): GatewayToBridgeNotificationsMsg()
 	@Serializable
@@ -2998,6 +3001,22 @@ sealed class GatewayToBridgeTimeMsg {
 	@Serializable
 	@SerialName("snapshot")
 	data class Snapshot(val data: TimeInfo): GatewayToBridgeTimeMsg()
+}
+
+@Serializable(with = GatewayToBridgeTunnelMsgSerializer::class)
+sealed class GatewayToBridgeTunnelMsg {
+	@Serializable
+	@SerialName("openReply")
+	data class OpenReply(val data: TunnelOpenReply): GatewayToBridgeTunnelMsg()
+	@Serializable
+	@SerialName("errorReply")
+	data class ErrorReply(val data: TunnelErrorReply): GatewayToBridgeTunnelMsg()
+	@Serializable
+	@SerialName("data")
+	data class Data(val data: TunnelData): GatewayToBridgeTunnelMsg()
+	@Serializable
+	@SerialName("closed")
+	data class Closed(val data: TunnelClosed): GatewayToBridgeTunnelMsg()
 }
 
 @Serializable(with = GatewayToBridgeVoiceMsgSerializer::class)

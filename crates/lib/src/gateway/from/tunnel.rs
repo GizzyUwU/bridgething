@@ -4,15 +4,20 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-use crate::{DismissReason, Notification};
+use crate::{TunnelClosed, TunnelData, TunnelError};
+
+#[typeshare]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct TunnelOpenReply {}
 
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
-pub struct NotificationRemoved {
-  pub id: String,
-  pub reason: DismissReason,
+pub struct TunnelErrorReply {
+  pub error: TunnelError,
 }
 
 #[typeshare]
@@ -21,11 +26,13 @@ pub struct NotificationRemoved {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 #[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]
-pub enum GatewayToBridgeNotificationsMsg {
+pub enum GatewayToBridgeTunnelMsg {
+  #[bridge_response]
+  OpenReply(TunnelOpenReply),
+  #[bridge_response]
+  ErrorReply(TunnelErrorReply),
   #[bridge_event]
-  Posted(Notification),
+  Data(TunnelData),
   #[bridge_event]
-  Updated(Notification),
-  #[bridge_event]
-  Removed(NotificationRemoved),
+  Closed(TunnelClosed),
 }

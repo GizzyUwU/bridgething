@@ -66,6 +66,8 @@ pub enum GatewayToBridgeMsgData {
   #[from]
   Time(GatewayToBridgeTimeMsg),
   #[from]
+  Tunnel(GatewayToBridgeTunnelMsg),
+  #[from]
   Voice(GatewayToBridgeVoiceMsg),
   #[from]
   Webapp(GatewayToBridgeWebappMsg),
@@ -116,6 +118,8 @@ pub enum BridgeToGatewayMsgData {
   Player(BridgeToGatewayPlayerMsg),
   #[from]
   System(BridgeToGatewaySystemMsg),
+  #[from]
+  Tunnel(BridgeToGatewayTunnelMsg),
   #[from]
   Voice(BridgeToGatewayVoiceMsg),
   #[from]

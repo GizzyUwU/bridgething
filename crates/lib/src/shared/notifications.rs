@@ -101,32 +101,3 @@ pub enum DismissReason {
   Acted,
   RemoteDismissed,
 }
-
-/// Page of notifications returned from `notifications.list`. Gateways
-/// page large notification centers; webapps drive pagination via
-/// `next_page_token`.
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
-pub struct NotificationsPage {
-  pub items: Vec<Notification>,
-  pub next_page_token: Option<String>,
-}
-
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
-#[ts(export, export_to = "shared.ts")]
-pub enum NotificationError {
-  /// The named notification id does not exist (likely already dismissed).
-  NotFound { id: String },
-  /// The notification has no action slot in the requested polarity.
-  NoActionAvailable,
-  /// The companion or platform refused the action.
-  ActionRejected { reason: String },
-  /// No companion is connected to back the surface.
-  NoGateway,
-}

@@ -40,42 +40,6 @@ pub struct WebappActivate {
   pub id: Uuid,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-#[wire_request(
-  direction = ClientToBridge,
-  surface = Webapp,
-  request_variant = Uninstall,
-  response = crate::client::WebappActiveReply,
-  response_variant = UninstalledReply,
-  error = crate::client::WebappErrorReply,
-  error_variant = ErrorReply,
-)]
-pub struct WebappUninstall {
-  #[ts(type = "string")]
-  pub id: Uuid,
-}
-
-/// Install a webapp from a previously-pushed `.zip` archive in the
-/// AssetCache. The webapp surface validates structure, lays out the
-/// bundle, and emits `onWebappInstalled` on success.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-#[wire_request(
-  direction = ClientToBridge,
-  surface = Webapp,
-  request_variant = Install,
-  response = crate::client::WebappInstalledReply,
-  response_variant = InstalledReply,
-  error = crate::client::WebappErrorReply,
-  error_variant = ErrorReply,
-)]
-pub struct WebappInstall {
-  pub archive_asset_id: String,
-}
-
 /// Fetch the icon bytes for an installed webapp. Returns the raw bytes
 /// declared by the manifest's `icon` field.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -107,10 +71,6 @@ pub enum ClientToBridgeWebappMsg {
   Current,
   #[bridge_request]
   Activate(WebappActivate),
-  #[bridge_request]
-  Uninstall(WebappUninstall),
-  #[bridge_request]
-  Install(WebappInstall),
   #[bridge_request]
   Icon(WebappIcon),
 }

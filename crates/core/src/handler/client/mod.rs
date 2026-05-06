@@ -185,6 +185,8 @@ impl ClientHandler {
           reason
         );
         net::cleanup_owner_routes(&handle).await;
+        geo::cleanup_owner_watchers(&handle).await;
+        handle.state.log_tap.drain_for_owner(handle.from);
       }
       RecvMsgData::Error(error) => {
         tracing::error!("({}) failed to receive message: {:?}", &handle.from, error);

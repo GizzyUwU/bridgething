@@ -16,6 +16,7 @@ mod player;
 mod priority;
 mod system;
 mod time;
+mod tunnel;
 mod webapp;
 
 pub use asset::*;
@@ -36,6 +37,7 @@ pub use player::*;
 pub use priority::*;
 pub use system::*;
 pub use time::*;
+pub use tunnel::*;
 pub use webapp::*;
 
 pub fn to_slug(value: &str) -> String {

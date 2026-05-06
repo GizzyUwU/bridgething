@@ -80,9 +80,6 @@ import {
   type Notification,
   type NotificationInvoke,
   type NotificationRemoved,
-  type NotificationsErrorReply,
-  type NotificationsList,
-  type NotificationsListReply,
   type NowPlayingUpdate,
   type PairBluetooth,
   type PairedDevicesMap,
@@ -133,11 +130,9 @@ import {
   type WebappErrorReply,
   type WebappIcon,
   type WebappIconReply,
-  type WebappInstall,
   type WebappInstallProgress,
   type WebappInstalledReply,
   type WebappListReply,
-  type WebappUninstall,
   type WebappUninstalled,
   type WireError,
   newUuidBytes,
@@ -220,8 +215,6 @@ export type NetInboundHandlers = {
 };
 
 export type NotificationsInboundHandlers = {
-  listReply: (msg: NotificationsListReply) => void;
-  errorReply: (msg: NotificationsErrorReply) => void;
   posted: (msg: Notification) => void;
   updated: (msg: Notification) => void;
   removed: (msg: NotificationRemoved) => void;
@@ -267,8 +260,6 @@ export type WebappInboundHandlers = {
   listReply: (msg: WebappListReply) => void;
   currentReply: (msg: WebappCurrentReply) => void;
   activeReply: (msg: WebappActiveReply) => void;
-  uninstalledReply: (msg: WebappActiveReply) => void;
-  installedReply: (msg: WebappInstalledReply) => void;
   errorReply: (msg: WebappErrorReply) => void;
   iconReply: (msg: WebappIconReply) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
@@ -1757,30 +1748,6 @@ export class NetSurface {
 export class NotificationsSurface {
   constructor(private readonly _client: BridgethingClient) {}
 
-  /** Subscribe to `Notifications::ListReply` from the daemon. */
-  onListReply(handler: (msg: NotificationsListReply) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'notifications') return;
-      const inner = data.data;
-      if (inner.event !== 'listReply') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Notifications::ErrorReply` from the daemon. */
-  onErrorReply(handler: (msg: NotificationsErrorReply) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'notifications') return;
-      const inner = data.data;
-      if (inner.event !== 'errorReply') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Notifications::Posted` from the daemon. */
   onPosted(handler: (msg: Notification) => void): () => void {
     return this._client.on(event => {
@@ -1834,14 +1801,6 @@ export class NotificationsSurface {
       if (data.type !== 'notifications') return;
       const inner = data.data;
       switch (inner.event) {
-        case 'listReply': {
-          handlers.listReply?.(inner.data);
-          return;
-        }
-        case 'errorReply': {
-          handlers.errorReply?.(inner.data);
-          return;
-        }
         case 'posted': {
           handlers.posted?.(inner.data);
           return;
@@ -1880,23 +1839,6 @@ export class NotificationsSurface {
       data: { type: 'notifications', data: { event: 'invokeNegative', data: payload } },
     };
     await this._client.send(msg);
-  }
-
-  /** Typed request to the daemon: webapp sends, daemon responds. */
-  async list(
-    req: NotificationsList,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<NotificationsListReply, NotificationsErrorReply>> {
-    const wireData: ClientToBridgeMsg['data'] = { type: 'notifications', data: { event: 'list', data: req } };
-    const response = await this._client.request(wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'notifications') {
-      const inner = d.data;
-      if (inner.event === 'listReply') return { ok: true, response: inner.data };
-      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -2876,30 +2818,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::UninstalledReply` from the daemon. */
-  onUninstalledReply(handler: (msg: WebappActiveReply) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'uninstalledReply') return;
-      handler(inner.data);
-    });
-  }
-
-  /** Subscribe to `Webapp::InstalledReply` from the daemon. */
-  onInstalledReply(handler: (msg: WebappInstalledReply) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'installedReply') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::ErrorReply` from the daemon. */
   onErrorReply(handler: (msg: WebappErrorReply) => void): () => void {
     return this._client.on(event => {
@@ -3001,14 +2919,6 @@ export class WebappSurface {
           handlers.activeReply?.(inner.data);
           return;
         }
-        case 'uninstalledReply': {
-          handlers.uninstalledReply?.(inner.data);
-          return;
-        }
-        case 'installedReply': {
-          handlers.installedReply?.(inner.data);
-          return;
-        }
         case 'errorReply': {
           handlers.errorReply?.(inner.data);
           return;
@@ -3078,40 +2988,6 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'activeReply') return { ok: true, response: inner.data };
-      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to the daemon: webapp sends, daemon responds. */
-  async uninstall(
-    req: WebappUninstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActiveReply, WebappErrorReply>> {
-    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
-    const response = await this._client.request(wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'uninstalledReply') return { ok: true, response: inner.data };
-      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to the daemon: webapp sends, daemon responds. */
-  async install(
-    req: WebappInstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInstalledReply, WebappErrorReply>> {
-    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'install', data: req } };
-    const response = await this._client.request(wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installedReply') return { ok: true, response: inner.data };
       if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -3883,14 +3759,6 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
         }
         const inner = data.data;
         switch (inner.event) {
-          case 'listReply': {
-            innerHandlers.listReply?.(inner.data);
-            return;
-          }
-          case 'errorReply': {
-            innerHandlers.errorReply?.(inner.data);
-            return;
-          }
           case 'posted': {
             innerHandlers.posted?.(inner.data);
             return;
@@ -4099,14 +3967,6 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'activeReply': {
             innerHandlers.activeReply?.(inner.data);
-            return;
-          }
-          case 'uninstalledReply': {
-            innerHandlers.uninstalledReply?.(inner.data);
-            return;
-          }
-          case 'installedReply': {
-            innerHandlers.installedReply?.(inner.data);
             return;
           }
           case 'errorReply': {

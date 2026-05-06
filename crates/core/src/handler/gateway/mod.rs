@@ -14,6 +14,7 @@ mod phone;
 mod player;
 mod system;
 mod time;
+mod tunnel;
 mod voice;
 pub mod webapp;
 
@@ -34,6 +35,7 @@ use phone::*;
 use player::*;
 use system::*;
 use time::*;
+use tunnel::*;
 use voice::*;
 use webapp::*;
 
@@ -166,6 +168,11 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Time(time_msg) => {
         tokio::spawn(async move { TimeHandler::new(handle).handle(time_msg).await });
+      }
+      GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {
+        if let Some(event) = tunnel_msg.into_event() {
+          tokio::spawn(async move { TunnelHandler::new(handle).handle(event).await });
+        }
       }
       GatewayToBridgeMsgData::Voice(voice_msg) => {
         if let Some(cmd) = voice_msg.into_command() {
