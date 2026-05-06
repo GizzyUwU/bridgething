@@ -408,6 +408,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case audio(BridgeToGatewayAudioMsg)
 	case geo(BridgeToGatewayGeoMsg)
 	case library(BridgeToGatewayLibraryMsg)
+	case lyrics(BridgeToGatewayLyricsMsg)
 	case net(BridgeToGatewayNetMsg)
 	case notifications(BridgeToGatewayNotificationsMsg)
 	case phone(BridgeToGatewayPhoneMsg)
@@ -428,6 +429,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			audio,
 			geo,
 			library,
+			lyrics,
 			net,
 			notifications,
 			phone,
@@ -472,6 +474,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .library:
 				if let content = try? container.decode(BridgeToGatewayLibraryMsg.self, forKey: .data) {
 					self = .library(content)
+					return
+				}
+			case .lyrics:
+				if let content = try? container.decode(BridgeToGatewayLyricsMsg.self, forKey: .data) {
+					self = .lyrics(content)
 					return
 				}
 			case .net:
@@ -547,6 +554,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .library(let content):
 			try container.encode(CodingKeys.library, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .lyrics(let content):
+			try container.encode(CodingKeys.lyrics, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .net(let content):
 			try container.encode(CodingKeys.net, forKey: .type)
@@ -756,13 +766,15 @@ public struct SurfaceAvailability: Codable, Sendable {
 	public let netFetch: Bool
 	public let netWs: Bool
 	public let audioTts: Bool
+	public let lyrics: Bool
 
-	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool) {
+	public init(geo: Bool, notifications: Bool, netFetch: Bool, netWs: Bool, audioTts: Bool, lyrics: Bool) {
 		self.geo = geo
 		self.notifications = notifications
 		self.netFetch = netFetch
 		self.netWs = netWs
 		self.audioTts = audioTts
+		self.lyrics = lyrics
 	}
 }
 
@@ -786,6 +798,15 @@ public struct NetworkInfo: Codable, Sendable {
 	}
 }
 
+/// Which music service the companion is currently logged into and
+/// driving on behalf of the user. `None` when no glue is attached.
+public enum MusicProvider: String, Codable, Sendable {
+	case none
+	case spotify
+	case appleMusic
+	case tidal
+}
+
 /// What the daemon advertises to webapps. `gateway: None` means no
 /// companion is connected; webapps that depend on companion-routed
 /// surfaces (Library, Net, Notifications, etc.) should branch on this.
@@ -797,14 +818,16 @@ public struct Capabilities: Codable, Sendable {
 	public let uriSchemes: [String]
 	public let network: NetworkInfo
 	public let audio: AudioCapabilities
+	public let musicProvider: MusicProvider
 
-	public init(gateway: GatewayInfo?, available: SurfaceAvailability, authority: [CompanionAuthorityScope], uriSchemes: [String], network: NetworkInfo, audio: AudioCapabilities) {
+	public init(gateway: GatewayInfo?, available: SurfaceAvailability, authority: [CompanionAuthorityScope], uriSchemes: [String], network: NetworkInfo, audio: AudioCapabilities, musicProvider: MusicProvider) {
 		self.gateway = gateway
 		self.available = available
 		self.authority = authority
 		self.uriSchemes = uriSchemes
 		self.network = network
 		self.audio = audio
+		self.musicProvider = musicProvider
 	}
 }
 
@@ -1187,13 +1210,15 @@ public struct GatewayCapabilities: Codable, Sendable {
 	public let network: NetworkInfo
 	public let available: SurfaceAvailability
 	public let audio: AudioCapabilities
+	public let musicProvider: MusicProvider
 
-	public init(gateway: GatewayInfo, uriSchemes: [String], network: NetworkInfo, available: SurfaceAvailability, audio: AudioCapabilities) {
+	public init(gateway: GatewayInfo, uriSchemes: [String], network: NetworkInfo, available: SurfaceAvailability, audio: AudioCapabilities, musicProvider: MusicProvider) {
 		self.gateway = gateway
 		self.uriSchemes = uriSchemes
 		self.network = network
 		self.available = available
 		self.audio = audio
+		self.musicProvider = musicProvider
 	}
 }
 
@@ -1205,6 +1230,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case chrome(GatewayToBridgeChromeMsg)
 	case geo(GatewayToBridgeGeoMsg)
 	case library(GatewayToBridgeLibraryMsg)
+	case lyrics(GatewayToBridgeLyricsMsg)
 	case net(GatewayToBridgeNetMsg)
 	case notifications(GatewayToBridgeNotificationsMsg)
 	case phone(GatewayToBridgePhoneMsg)
@@ -1223,6 +1249,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			chrome,
 			geo,
 			library,
+			lyrics,
 			net,
 			notifications,
 			phone,
@@ -1275,6 +1302,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			case .library:
 				if let content = try? container.decode(GatewayToBridgeLibraryMsg.self, forKey: .data) {
 					self = .library(content)
+					return
+				}
+			case .lyrics:
+				if let content = try? container.decode(GatewayToBridgeLyricsMsg.self, forKey: .data) {
+					self = .lyrics(content)
 					return
 				}
 			case .net:
@@ -1350,6 +1382,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .library(let content):
 			try container.encode(CodingKeys.library, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .lyrics(let content):
+			try container.encode(CodingKeys.lyrics, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .net(let content):
 			try container.encode(CodingKeys.net, forKey: .type)
@@ -1684,6 +1719,76 @@ public struct LogEntry: Codable, Sendable {
 		self.level = level
 		self.target = target
 		self.message = message
+	}
+}
+
+public struct LyricLine: Codable, Sendable {
+	public let startMs: UInt32
+	public let text: String
+
+	public init(startMs: UInt32, text: String) {
+		self.startMs = startMs
+		self.text = text
+	}
+}
+
+public struct Lyrics: Codable, Sendable {
+	public let synced: [LyricLine]?
+	public let plain: String?
+	public let source: String
+
+	public init(synced: [LyricLine]?, plain: String?, source: String) {
+		self.synced = synced
+		self.plain = plain
+		self.source = source
+	}
+}
+
+public struct LyricsErrorReply: Codable, Sendable {
+	public let message: String
+
+	public init(message: String) {
+		self.message = message
+	}
+}
+
+/// Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
+/// to completion without a hit (e.g. lrclib 404, no fallback configured)
+/// and is distinct from `LyricsErrorReply` which signals a transient
+/// failure (network, parse, resolver-internal error).
+public struct LyricsReply: Codable, Sendable {
+	public let lyrics: Lyrics?
+
+	public init(lyrics: Lyrics?) {
+		self.lyrics = lyrics
+	}
+}
+
+/// Identifies a track for lyrics lookup. Different resolvers consume
+/// different subsets: lrclib does signature lookup (artist + track +
+/// album + duration), other resolvers may use ISRC or platform-specific
+/// ids. Populate what's available; resolvers ignore the rest.
+public struct TrackIdentity: Codable, Sendable {
+	public let artist: String
+	public let track: String
+	public let album: String?
+	public let durationMs: UInt32?
+	public let isrc: String?
+
+	public init(artist: String, track: String, album: String?, durationMs: UInt32?, isrc: String?) {
+		self.artist = artist
+		self.track = track
+		self.album = album
+		self.durationMs = durationMs
+		self.isrc = isrc
+	}
+}
+
+public struct LyricsRequest: Codable, Sendable {
+	public let track: TrackIdentity
+
+	public init(track: TrackIdentity) {
+		self.track = track
 	}
 }
 
@@ -4229,6 +4334,41 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 	}
 }
 
+public enum BridgeToGatewayLyricsMsg: Codable, Sendable {
+	case get(LyricsRequest)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case get
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .get:
+				if let content = try? container.decode(LyricsRequest.self, forKey: .data) {
+					self = .get(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayLyricsMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayLyricsMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .get(let content):
+			try container.encode(CodingKeys.get, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
 public enum BridgeToGatewayNetMsg: Codable, Sendable {
 	case fetch(NetFetchRequestMsg)
 	case wsOpen(NetWsOpen)
@@ -5379,6 +5519,51 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .favoriteChanged(let content):
 			try container.encode(CodingKeys.favoriteChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeLyricsMsg: Codable, Sendable {
+	case lyricsReply(LyricsReply)
+	case lyricsErrorReply(LyricsErrorReply)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case lyricsReply,
+			lyricsErrorReply
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .lyricsReply:
+				if let content = try? container.decode(LyricsReply.self, forKey: .data) {
+					self = .lyricsReply(content)
+					return
+				}
+			case .lyricsErrorReply:
+				if let content = try? container.decode(LyricsErrorReply.self, forKey: .data) {
+					self = .lyricsErrorReply(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeLyricsMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeLyricsMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .lyricsReply(let content):
+			try container.encode(CodingKeys.lyricsReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .lyricsErrorReply(let content):
+			try container.encode(CodingKeys.lyricsErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

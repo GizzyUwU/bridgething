@@ -52,6 +52,8 @@ pub enum GatewayToBridgeMsgData {
   #[from]
   Library(GatewayToBridgeLibraryMsg),
   #[from]
+  Lyrics(GatewayToBridgeLyricsMsg),
+  #[from]
   Net(GatewayToBridgeNetMsg),
   #[from]
   Notifications(GatewayToBridgeNotificationsMsg),
@@ -102,6 +104,8 @@ pub enum BridgeToGatewayMsgData {
   Geo(BridgeToGatewayGeoMsg),
   #[from]
   Library(BridgeToGatewayLibraryMsg),
+  #[from]
+  Lyrics(BridgeToGatewayLyricsMsg),
   #[from]
   Net(BridgeToGatewayNetMsg),
   #[from]

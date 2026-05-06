@@ -16,14 +16,15 @@ pub use shared::{
   DismissReason, DtmfTone, EndCallAction, FavoritesPage, ForwardMessage, GatewayCapabilities, GatewayInfo, GeoAccuracy,
   GeoError, HardwareError, HardwareState, HttpHeader, HttpMethod, IMAGE_SIZE, Image, InitiateCallType, ItemKind,
   ItemRef, LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry, LogLevel, LogSource, MediaItem,
-  MediaItemUpdate, MediaType, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind, Notification,
-  NotificationAction, NotificationApp, NotificationCategory, NotificationError, NotificationFlags, NotificationsPage,
-  NowPlayingUpdate, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall, PhoneCallDirection, PhoneCallService,
-  PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback, PlaybackOptions, PlaybackQueue, PlaybackRestrictions,
-  PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position, Priority,
-  QueueItem, QueuePosition, RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode,
-  Station, StreamBegin, StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track,
-  TtlRetention, VoiceDescriptor, WebappInfo, WebappManifest, WebappRole, WebappSource, WsError, WsFrame, to_slug,
+  MediaItemUpdate, MediaType, MusicProvider, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
+  Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationError, NotificationFlags,
+  NotificationsPage, NowPlayingUpdate, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall, PhoneCallDirection,
+  PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback, PlaybackOptions, PlaybackQueue,
+  PlaybackRestrictions, PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist,
+  PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RecommendationsResult, RegistrationStatus, RepeatMode,
+  SearchResult, Show, ShuffleMode, Station, StreamBegin, StreamChunk, StreamEnd, StreamError, SurfaceAvailability,
+  THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention, VoiceDescriptor, WebappInfo, WebappManifest, WebappRole, WebappSource,
+  WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;

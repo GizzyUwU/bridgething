@@ -7,7 +7,7 @@ import Foundation
 public enum RequestResult<R: Sendable, E: Sendable>: Sendable {
   case ok(R)
   case domain(E)
-  case protocolError(GatewayError)
+  case protocolError(WireError)
 }
 
 /// Cross-peer methods for the `Audio` wire surface.
@@ -250,7 +250,7 @@ public struct GeoSurface: Sendable {
   }
 
   /// Stream of typed inbound `GeoGetOnce` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
+  public var getOnceRequests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -339,7 +339,7 @@ public struct LibrarySurface: Sendable {
   }
 
   /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
+  public var browseRequests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -357,7 +357,7 @@ public struct LibrarySurface: Sendable {
   }
 
   /// Stream of typed inbound `LibrarySearchRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
+  public var searchRequests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -375,7 +375,7 @@ public struct LibrarySurface: Sendable {
   }
 
   /// Stream of typed inbound `LibraryRecommendationsRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
+  public var recommendationsRequests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -393,7 +393,7 @@ public struct LibrarySurface: Sendable {
   }
 
   /// Stream of typed inbound `LibraryFavoritesListRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
+  public var favoritesListRequests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -411,7 +411,7 @@ public struct LibrarySurface: Sendable {
   }
 
   /// Stream of typed inbound `LibraryFavoritesContainsRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
+  public var favoritesContainsRequests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -517,7 +517,7 @@ public struct NetSurface: Sendable {
   }
 
   /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
+  public var fetchRequests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -535,7 +535,7 @@ public struct NetSurface: Sendable {
   }
 
   /// Stream of typed inbound `NetWsOpen` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
+  public var wsOpenRequests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -691,7 +691,7 @@ public struct NotificationsSurface: Sendable {
   }
 
   /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
+  public var listRequests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -709,7 +709,7 @@ public struct NotificationsSurface: Sendable {
   }
 
   /// Send `Notifications::Posted` to every connected peer (broadcast).
-  public func posted(_ payload: Notification, priority: Priority = .normal) async throws {
+  public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
     try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
       for deviceId in ids {
@@ -723,7 +723,7 @@ public struct NotificationsSurface: Sendable {
   }
 
   /// Send `Notifications::Updated` to every connected peer (broadcast).
-  public func updated(_ payload: Notification, priority: Priority = .normal) async throws {
+  public func updated(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
     try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
       for deviceId in ids {
@@ -961,7 +961,7 @@ public struct PhoneSurface: Sendable {
   }
 
   /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
-  public var requests: AsyncStream<PhoneStateGetHandle> {
+  public var stateGetRequests: AsyncStream<PhoneStateGetHandle> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -1580,7 +1580,7 @@ public struct AssetSurface: Sendable {
   public let gateway: BridgethingGateway
 
   /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
+  public var requestRequests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -1918,6 +1918,30 @@ public struct WebappSurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `Lyrics` wire surface.
+public struct LyricsSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Stream of typed inbound `LyricsRequest` requests with handles for typed responses.
+  public var getRequests: AsyncStream<(handle: LyricsRequestHandle, req: LyricsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .lyrics(let outer) = message.data else { continue }
+          guard case .get(let payload) = outer else { continue }
+          let handle = LyricsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+}
+
 /// Per-peer methods for the `Audio` wire surface (deviceId is baked in).
 public struct AudioSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -2147,7 +2171,7 @@ public struct GeoSurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `GeoGetOnce` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
+  public var getOnceRequests: AsyncStream<(handle: GeoGetOnceHandle, req: GeoGetOnce)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2233,7 +2257,7 @@ public struct LibrarySurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `LibraryBrowseRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
+  public var browseRequests: AsyncStream<(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2252,7 +2276,7 @@ public struct LibrarySurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `LibrarySearchRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
+  public var searchRequests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2271,7 +2295,7 @@ public struct LibrarySurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `LibraryRecommendationsRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
+  public var recommendationsRequests: AsyncStream<(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2290,7 +2314,7 @@ public struct LibrarySurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `LibraryFavoritesListRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
+  public var favoritesListRequests: AsyncStream<(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2309,7 +2333,7 @@ public struct LibrarySurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `LibraryFavoritesContainsRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
+  public var favoritesContainsRequests: AsyncStream<(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2413,7 +2437,7 @@ public struct NetSurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `NetFetchRequestMsg` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
+  public var fetchRequests: AsyncStream<(handle: NetFetchRequestMsgHandle, req: NetFetchRequestMsg)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2432,7 +2456,7 @@ public struct NetSurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `NetWsOpen` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
+  public var wsOpenRequests: AsyncStream<(handle: NetWsOpenHandle, req: NetWsOpen)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2536,7 +2560,7 @@ public struct NotificationsSurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `NotificationsListRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
+  public var listRequests: AsyncStream<(handle: NotificationsListRequestHandle, req: NotificationsListRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -2555,13 +2579,13 @@ public struct NotificationsSurfaceForDevice: Sendable {
   }
 
   /// Send `Notifications::Posted` to this peer.
-  public func posted(_ payload: Notification, priority: Priority = .normal) async throws {
+  public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.posted(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
   /// Send `Notifications::Updated` to this peer.
-  public func updated(_ payload: Notification, priority: Priority = .normal) async throws {
+  public func updated(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID().data, meta: .event, data: .notifications(.updated(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
@@ -2796,7 +2820,7 @@ public struct PhoneSurfaceForDevice: Sendable {
   }
 
   /// Stream of typed inbound `PhoneStateGet` requests with handles for typed responses.
-  public var requests: AsyncStream<PhoneStateGetHandle> {
+  public var stateGetRequests: AsyncStream<PhoneStateGetHandle> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -3339,7 +3363,7 @@ public struct AssetSurfaceForDevice: Sendable {
   public let deviceId: String
 
   /// Stream of typed inbound `AssetRequest` requests with handles for typed responses.
-  public var requests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
+  public var requestRequests: AsyncStream<(handle: AssetRequestHandle, req: AssetRequest)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
@@ -3611,6 +3635,32 @@ public struct WebappSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Lyrics` wire surface (deviceId is baked in).
+public struct LyricsSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of typed inbound `LyricsRequest` requests with handles for typed responses.
+  public var getRequests: AsyncStream<(handle: LyricsRequestHandle, req: LyricsRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .lyrics(let outer) = message.data else { continue }
+          guard case .get(let payload) = outer else { continue }
+          let handle = LyricsRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+}
+
 /// Per-peer view of `BridgethingGateway` returned by `device(_:)`.
 public struct BridgethingGatewayDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -3648,6 +3698,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var time: TimeSurfaceForDevice { TimeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Webapp` wire surface.
   public var webapp: WebappSurfaceForDevice { WebappSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Lyrics` wire surface.
+  public var lyrics: LyricsSurfaceForDevice { LyricsSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
 }
 
 extension BridgethingGateway {
@@ -3683,6 +3735,8 @@ extension BridgethingGateway {
   public nonisolated var time: TimeSurface { TimeSurface(gateway: self) }
   /// Methods scoped to the `Webapp` wire surface.
   public nonisolated var webapp: WebappSurface { WebappSurface(gateway: self) }
+  /// Methods scoped to the `Lyrics` wire surface.
+  public nonisolated var lyrics: LyricsSurface { LyricsSurface(gateway: self) }
   /// Returns a per-device proxy with `deviceId` baked into every method and stream.
   public nonisolated func device(_ deviceId: String) -> BridgethingGatewayDevice {
     BridgethingGatewayDevice(gateway: self, deviceId: deviceId)
@@ -3718,7 +3772,7 @@ public final class GeoGetOnceHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3757,7 +3811,7 @@ public final class LibraryBrowseRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3796,7 +3850,7 @@ public final class LibrarySearchRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3835,7 +3889,7 @@ public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3874,7 +3928,7 @@ public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3913,7 +3967,7 @@ public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3952,7 +4006,7 @@ public final class NetFetchRequestMsgHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -3991,7 +4045,7 @@ public final class NetWsOpenHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -4030,7 +4084,7 @@ public final class NotificationsListRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -4060,7 +4114,7 @@ public final class PhoneStateGetHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),
@@ -4099,7 +4153,46 @@ public final class AssetRequestHandle: @unchecked Sendable {
     try await gateway.send(deviceId: deviceId, msg)
   }
 
-  public func respondProtocolErr(_ error: GatewayError) async throws {
+  public func respondProtocolErr(_ error: WireError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LyricsRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  private let requestId: Data
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: LyricsReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .lyrics(.lyricsReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LyricsErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID().data,
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .lyrics(.lyricsErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: WireError) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID().data,
       meta: .response(ResponseMeta(requestId: requestId)),

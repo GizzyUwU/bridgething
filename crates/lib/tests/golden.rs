@@ -224,11 +224,13 @@ fn gateway_capabilities() -> GatewayCapabilities {
       net_fetch: true,
       net_ws: true,
       audio_tts: false,
+      lyrics: true,
     },
     audio: AudioCapabilities {
       earcons: vec![],
       voices: vec![],
     },
+    music_provider: MusicProvider::Spotify,
   }
 }
 

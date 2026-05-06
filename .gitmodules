@@ -2,3 +2,7 @@
 	path = crates/swupdate-sys/vendor/swupdate
 	url = https://github.com/sbabic/swupdate.git
 	shallow = true
+[submodule "packages/spotify/swift/spotiny"]
+	path = packages/spotify/swift/spotiny
+	url = https://github.com/thinglabsoss/spotiny
+	branch = joey

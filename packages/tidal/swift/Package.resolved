@@ -1,0 +1,24 @@
+{
+  "originHash" : "2eea2a1da83aec332850ff857b70f356d0d2d5cfb3528d2c83a41443536b8c91",
+  "pins" : [
+    {
+      "identity" : "gzipswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1024jp/GzipSwift",
+      "state" : {
+        "revision" : "56bf51fdd2fe4b2cf254b2cf34aede3d7caccc6c",
+        "version" : "6.1.0"
+      }
+    },
+    {
+      "identity" : "msgpack-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/fumoboy007/msgpack-swift",
+      "state" : {
+        "revision" : "fe3101819f4f82b086da5279a9df81f6754798e9",
+        "version" : "2.0.6"
+      }
+    }
+  ],
+  "version" : 3
+}

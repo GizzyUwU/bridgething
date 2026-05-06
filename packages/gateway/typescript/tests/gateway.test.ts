@@ -197,20 +197,20 @@ describe('BridgethingGateway', () => {
     await gateway.stop();
   });
 
-  test('transport.onPause fires only for matching variant', async () => {
+  test('player.onPause fires only for matching variant', async () => {
     const adapter = new MockAdapter();
     const gateway = new BridgethingGateway(adapter);
     let pauseCalls = 0;
     let playCalls = 0;
-    gateway.transport.onPause(() => pauseCalls++);
-    gateway.transport.onPlay(() => playCalls++);
+    gateway.player.onPause(() => pauseCalls++);
+    gateway.player.onPlay(() => playCalls++);
     await gateway.start();
     adapter.emit({ type: 'connected', device: DEVICE });
 
     const pause: BridgeToGatewayMsg = {
       id: newUuidBytes(),
       meta: { kind: 'command' },
-      data: { type: 'transport', data: { event: 'pause' } },
+      data: { type: 'player', data: { event: 'pause' } },
     };
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(pause) });
     expect(pauseCalls).toBe(1);
@@ -222,13 +222,13 @@ describe('BridgethingGateway', () => {
     const adapter = new MockAdapter();
     const gateway = new BridgethingGateway(adapter);
     let assetReqCalls = 0;
-    let transportPauseCalls = 0;
+    let playerPauseCalls = 0;
     gateway.subscribePartial({
       asset: async handle => {
         assetReqCalls++;
         await handle.respondErr({ id: 'x' });
       },
-      transport: { pause: () => transportPauseCalls++ },
+      player: { pause: () => playerPauseCalls++ },
     });
     await gateway.start();
     adapter.emit({ type: 'connected', device: DEVICE });
@@ -240,16 +240,16 @@ describe('BridgethingGateway', () => {
     };
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(asset) });
 
-    const transport: BridgeToGatewayMsg = {
+    const player: BridgeToGatewayMsg = {
       id: newUuidBytes(),
       meta: { kind: 'command' },
-      data: { type: 'transport', data: { event: 'pause' } },
+      data: { type: 'player', data: { event: 'pause' } },
     };
-    adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(transport) });
+    adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(player) });
 
     while (adapter.sentFrames.length === 0) await new Promise(r => setTimeout(r, 5));
     expect(assetReqCalls).toBe(1);
-    expect(transportPauseCalls).toBe(1);
+    expect(playerPauseCalls).toBe(1);
     await gateway.stop();
   });
 

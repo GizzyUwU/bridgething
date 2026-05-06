@@ -19,7 +19,7 @@ import kotlin.time.Duration.Companion.seconds
 public sealed class RequestResult<out R, out E> {
   public data class Ok<R>(val response: R): RequestResult<R, Nothing>()
   public data class DomainErr<E>(val error: E): RequestResult<Nothing, E>()
-  public data class ProtocolErr(val error: GatewayError): RequestResult<Nothing, Nothing>()
+  public data class ProtocolErr(val error: WireError): RequestResult<Nothing, Nothing>()
 }
 
 /** Cross-peer methods for the `Audio` wire surface. */
@@ -196,7 +196,7 @@ public class GeoSurface(private val gateway: BridgethingGateway) {
   }
 
   /** Stream of typed inbound `GeoGetOnce` requests. */
-  public val requests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
+  public val getOnceRequests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -255,7 +255,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   }
 
   /** Stream of typed inbound `LibraryBrowseRequest` requests. */
-  public val requests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
+  public val browseRequests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -266,7 +266,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
     }
 
   /** Stream of typed inbound `LibrarySearchRequest` requests. */
-  public val requests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
+  public val searchRequests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -277,7 +277,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
     }
 
   /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
-  public val requests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
+  public val recommendationsRequests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -288,7 +288,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
     }
 
   /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
-  public val requests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
+  public val favoritesListRequests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -299,7 +299,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
     }
 
   /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
-  public val requests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
+  public val favoritesContainsRequests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -469,7 +469,7 @@ public class NetSurface(private val gateway: BridgethingGateway) {
   }
 
   /** Stream of typed inbound `NetFetchRequestMsg` requests. */
-  public val requests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
+  public val fetchRequests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -480,7 +480,7 @@ public class NetSurface(private val gateway: BridgethingGateway) {
     }
 
   /** Stream of typed inbound `NetWsOpen` requests. */
-  public val requests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
+  public val wsOpenRequests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -564,7 +564,7 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
   }
 
   /** Stream of typed inbound `NotificationsListRequest` requests. */
-  public val requests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
+  public val listRequests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -772,7 +772,7 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
   }
 
   /** Stream of typed inbound `PhoneStateGet` requests. */
-  public val requests: Flow<PhoneStateGetHandle> = gateway.events
+  public val stateGetRequests: Flow<PhoneStateGetHandle> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -1044,10 +1044,10 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
         is BridgeToGatewaySystemMsg.OtaBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewaySystemMsg.OtaBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1227,15 +1227,15 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
         is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
   /** Stream of typed inbound `AssetRequest` requests. */
-  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
+  public val requestRequests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .mapNotNull {
@@ -1357,10 +1357,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Webapps -> RequestResult.Ok(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1371,10 +1371,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Active -> RequestResult.Ok(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1386,10 +1386,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Switched -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1401,10 +1401,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Installed -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1416,10 +1416,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Uninstalled -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1431,10 +1431,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Icon -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1446,10 +1446,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigGet -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1461,10 +1461,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigList -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1476,10 +1476,10 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1491,12 +1491,27 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+}
+
+/** Cross-peer methods for the `Lyrics` wire surface. */
+public class LyricsSurface(private val gateway: BridgethingGateway) {
+  /** Stream of typed inbound `LyricsRequest` requests. */
+  public val getRequests: Flow<Pair<LyricsRequestHandle, LyricsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Lyrics ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLyricsMsg.Get ?: return@mapNotNull null
+      val handle = LyricsRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -1663,7 +1678,7 @@ public class GeoSurfaceForDevice(
   }
 
   /** Stream of typed inbound `GeoGetOnce` requests. */
-  public val requests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
+  public val getOnceRequests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1722,7 +1737,7 @@ public class LibrarySurfaceForDevice(
   }
 
   /** Stream of typed inbound `LibraryBrowseRequest` requests. */
-  public val requests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
+  public val browseRequests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1734,7 +1749,7 @@ public class LibrarySurfaceForDevice(
     }
 
   /** Stream of typed inbound `LibrarySearchRequest` requests. */
-  public val requests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
+  public val searchRequests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1746,7 +1761,7 @@ public class LibrarySurfaceForDevice(
     }
 
   /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
-  public val requests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
+  public val recommendationsRequests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1758,7 +1773,7 @@ public class LibrarySurfaceForDevice(
     }
 
   /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
-  public val requests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
+  public val favoritesListRequests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1770,7 +1785,7 @@ public class LibrarySurfaceForDevice(
     }
 
   /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
-  public val requests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
+  public val favoritesContainsRequests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1899,7 +1914,7 @@ public class NetSurfaceForDevice(
   }
 
   /** Stream of typed inbound `NetFetchRequestMsg` requests. */
-  public val requests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
+  public val fetchRequests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1911,7 +1926,7 @@ public class NetSurfaceForDevice(
     }
 
   /** Stream of typed inbound `NetWsOpen` requests. */
-  public val requests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
+  public val wsOpenRequests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -1980,7 +1995,7 @@ public class NotificationsSurfaceForDevice(
   }
 
   /** Stream of typed inbound `NotificationsListRequest` requests. */
-  public val requests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
+  public val listRequests: Flow<Pair<NotificationsListRequestHandle, NotificationsListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -2169,7 +2184,7 @@ public class PhoneSurfaceForDevice(
   }
 
   /** Stream of typed inbound `PhoneStateGet` requests. */
-  public val requests: Flow<PhoneStateGetHandle> = gateway.events
+  public val stateGetRequests: Flow<PhoneStateGetHandle> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -2422,10 +2437,10 @@ public class SystemSurfaceForDevice(
       is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
         is BridgeToGatewaySystemMsg.OtaBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewaySystemMsg.OtaBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2578,15 +2593,15 @@ public class AssetSurfaceForDevice(
       is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
         is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
   /** Stream of typed inbound `AssetRequest` requests. */
-  public val requests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
+  public val requestRequests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
     .filter { it.message.meta is GatewayMsgMeta.Request }
     .filter { it.deviceId == deviceId }
@@ -2689,10 +2704,10 @@ public class WebappSurfaceForDevice(
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Webapps -> RequestResult.Ok(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2703,10 +2718,10 @@ public class WebappSurfaceForDevice(
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Active -> RequestResult.Ok(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2718,10 +2733,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Switched -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2733,10 +2748,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Installed -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2748,10 +2763,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Uninstalled -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2763,10 +2778,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Icon -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2778,10 +2793,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigGet -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2793,10 +2808,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigList -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2808,10 +2823,10 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -2823,12 +2838,31 @@ public class WebappSurfaceForDevice(
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.ConfigAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+}
+
+/** Per-peer methods for the `Lyrics` wire surface (deviceId is baked in). */
+public class LyricsSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of typed inbound `LyricsRequest` requests. */
+  public val getRequests: Flow<Pair<LyricsRequestHandle, LyricsRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Lyrics ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLyricsMsg.Get ?: return@mapNotNull null
+      val handle = LyricsRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -2869,6 +2903,8 @@ public class BridgethingGatewayDevice(
   public val time: TimeSurfaceForDevice get() = TimeSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Webapp` wire surface. */
   public val webapp: WebappSurfaceForDevice get() = WebappSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Lyrics` wire surface. */
+  public val lyrics: LyricsSurfaceForDevice get() = LyricsSurfaceForDevice(gateway, deviceId)
 }
 
 /** Methods scoped to the `Audio` wire surface. */
@@ -2935,6 +2971,10 @@ public val BridgethingGateway.time: TimeSurface
 public val BridgethingGateway.webapp: WebappSurface
   get() = WebappSurface(this)
 
+/** Methods scoped to the `Lyrics` wire surface. */
+public val BridgethingGateway.lyrics: LyricsSurface
+  get() = LyricsSurface(this)
+
 /** Returns a per-device proxy with `deviceId` baked into every method and Flow. */
 public fun BridgethingGateway.device(deviceId: String): BridgethingGatewayDevice = BridgethingGatewayDevice(this, deviceId)
 
@@ -2961,7 +3001,7 @@ public class GeoGetOnceHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -2994,7 +3034,7 @@ public class LibraryBrowseRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3027,7 +3067,7 @@ public class LibrarySearchRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3060,7 +3100,7 @@ public class LibraryRecommendationsRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3093,7 +3133,7 @@ public class LibraryFavoritesListRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3126,7 +3166,7 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3159,7 +3199,7 @@ public class NetFetchRequestMsgHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3192,7 +3232,7 @@ public class NetWsOpenHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3225,7 +3265,7 @@ public class NotificationsListRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3249,7 +3289,7 @@ public class PhoneStateGetHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
@@ -3282,7 +3322,40 @@ public class AssetRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 
-  public suspend fun respondProtocolErr(error: GatewayError) {
+  public suspend fun respondProtocolErr(error: WireError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LyricsRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: ByteArray,
+) {
+  public suspend fun respond(response: LyricsReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Lyrics(GatewayToBridgeLyricsMsg.LyricsReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LyricsErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID().toBytes(),
+      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Lyrics(GatewayToBridgeLyricsMsg.LyricsErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID().toBytes(),
       meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),

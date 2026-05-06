@@ -108,6 +108,7 @@ impl CapabilitiesRegistry {
         uri_schemes: caps.uri_schemes.clone(),
         network: caps.network,
         audio: caps.audio.clone(),
+        music_provider: caps.music_provider,
       },
       None => Capabilities {
         gateway: None,
@@ -116,6 +117,7 @@ impl CapabilitiesRegistry {
         uri_schemes: Vec::new(),
         network: Default::default(),
         audio: Default::default(),
+        music_provider: Default::default(),
       },
     }
   }
@@ -168,7 +170,7 @@ fn is_valid_scheme(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-  use libbridgething::{AudioCapabilities, GatewayInfo, NetworkInfo, NetworkKind, SurfaceAvailability};
+  use libbridgething::{AudioCapabilities, GatewayInfo, MusicProvider, NetworkInfo, NetworkKind, SurfaceAvailability};
 
   use super::*;
 
@@ -187,6 +189,7 @@ mod tests {
       },
       available,
       audio: AudioCapabilities::default(),
+      music_provider: MusicProvider::Spotify,
     }
   }
 
@@ -230,6 +233,7 @@ mod tests {
       net_fetch: true,
       net_ws: true,
       audio_tts: true,
+      lyrics: true,
     };
     let caps = caps_with(vec!["spotify:", "Apple-Music"], claimed);
     let _ = reg.set_announce(addr, caps).await;

@@ -119,6 +119,7 @@ export type Capabilities = {
   uriSchemes: Array<string>;
   network: NetworkInfo;
   audio: AudioCapabilities;
+  musicProvider: MusicProvider;
 };
 
 /**
@@ -240,6 +241,7 @@ export type GatewayCapabilities = {
   network: NetworkInfo;
   available: SurfaceAvailability;
   audio: AudioCapabilities;
+  musicProvider: MusicProvider;
 };
 
 /**
@@ -407,6 +409,12 @@ export type MediaItemUpdate = {
  * like skip-15s-vs-skip-track and chapter UI.
  */
 export type MediaType = 'music' | 'podcast' | 'audioBook';
+
+/**
+ * Which music service the companion is currently logged into and
+ * driving on behalf of the user. `None` when no glue is attached.
+ */
+export type MusicProvider = 'none' | 'spotify' | 'appleMusic' | 'tidal';
 
 export type NetError =
   | { type: 'requestFailed'; data: { reason: string } }
@@ -883,6 +891,7 @@ export type SurfaceAvailability = {
   netFetch: boolean;
   netWs: boolean;
   audioTts: boolean;
+  lyrics: boolean;
 };
 
 /**

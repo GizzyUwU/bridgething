@@ -99,6 +99,8 @@ impl Harness {
     let (session_events_tx, mut session_events_rx) = mpsc::channel::<SessionEvent>(32);
 
     let (_hid_command_tx, hid_command_rx) = mpsc::channel(8);
+    let (_now_playing_command_tx, now_playing_command_rx) = mpsc::channel(8);
+    let (_telephony_command_tx, telephony_command_rx) = mpsc::channel(8);
     let session = Iap2Session::new(
       identification_config(),
       mfi,
@@ -106,6 +108,8 @@ impl Harness {
       link_events_rx,
       session_events_tx,
       hid_command_rx,
+      now_playing_command_rx,
+      telephony_command_rx,
     );
     tokio::spawn(session.run());
 

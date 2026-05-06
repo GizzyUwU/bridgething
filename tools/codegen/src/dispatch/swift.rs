@@ -81,7 +81,7 @@ fn swift_request_result_enum() -> String {
   r#"public enum RequestResult<R: Sendable, E: Sendable>: Sendable {
   case ok(R)
   case domain(E)
-  case protocolError(GatewayError)
+  case protocolError(WireError)
 }
 
 "#
@@ -173,7 +173,7 @@ fn push_request_stream(out: &mut String, r: &TypedRequestEntry, device_scope: bo
     ""
   };
   out.push_str(&format!(
-    "  /// Stream of typed inbound `{}` requests with handles for typed responses.\n  public var requests: AsyncStream<{stream_ty}> {{\n    AsyncStream {{ continuation in\n      let task = Task {{ [gateway] in\n        for await event in gateway.events {{\n          guard case .message(let deviceId, let message) = event else {{ continue }}\n{device_filter}          guard case .request = message.meta else {{ continue }}\n          guard case .{surface_camel}(let outer) = message.data else {{ continue }}\n          guard {inner_pat} = outer else {{ continue }}\n          let handle = {}Handle(gateway: gateway, deviceId: deviceId, requestId: message.id)\n          {yield_expr}\n        }}\n        continuation.finish()\n      }}\n      continuation.onTermination = {{ _ in task.cancel() }}\n    }}\n  }}\n\n",
+    "  /// Stream of typed inbound `{}` requests with handles for typed responses.\n  public var {req_variant_camel}Requests: AsyncStream<{stream_ty}> {{\n    AsyncStream {{ continuation in\n      let task = Task {{ [gateway] in\n        for await event in gateway.events {{\n          guard case .message(let deviceId, let message) = event else {{ continue }}\n{device_filter}          guard case .request = message.meta else {{ continue }}\n          guard case .{surface_camel}(let outer) = message.data else {{ continue }}\n          guard {inner_pat} = outer else {{ continue }}\n          let handle = {}Handle(gateway: gateway, deviceId: deviceId, requestId: message.id)\n          {yield_expr}\n        }}\n        continuation.finish()\n      }}\n      continuation.onTermination = {{ _ in task.cancel() }}\n    }}\n  }}\n\n",
     r.request, r.request
   ));
 }
@@ -470,7 +470,7 @@ fn swift_request_handle_class(r: &TypedRequestEntry) -> String {
       "  public func respondErr(_ error: {err_type}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{err_variant_camel}(error))\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }}\n\n"
     ));
   }
-  out.push_str("  public func respondProtocolErr(_ error: GatewayError) async throws {\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .error(error)\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }\n");
+  out.push_str("  public func respondProtocolErr(_ error: WireError) async throws {\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .error(error)\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }\n");
   out.push_str("}\n\n");
   out
 }

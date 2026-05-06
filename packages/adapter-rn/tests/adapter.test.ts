@@ -100,7 +100,7 @@ describe('ReactNativeAdapter', () => {
   test('send rejects when adapter not started', async () => {
     const transport = new FakeTransport();
     const adapter = new ReactNativeAdapter({ transport });
-    expect(await adapter.send(DEVICE.id, new Uint8Array([1]))).rejects.toThrow(/not started/);
+    await expect(adapter.send(DEVICE.id, new Uint8Array([1]))).rejects.toThrow(/not started/);
   });
 
   test('connect forwards device record from the transport', async () => {

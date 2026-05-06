@@ -70,6 +70,21 @@ pub struct SurfaceAvailability {
   pub net_fetch: bool,
   pub net_ws: bool,
   pub audio_tts: bool,
+  pub lyrics: bool,
+}
+
+/// Which music service the companion is currently logged into and
+/// driving on behalf of the user. `None` when no glue is attached.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum MusicProvider {
+  #[default]
+  None,
+  Spotify,
+  AppleMusic,
+  Tidal,
 }
 
 /// One TTS voice the companion's audio backend can speak as. `id` is
@@ -112,6 +127,7 @@ pub struct GatewayCapabilities {
   pub network: NetworkInfo,
   pub available: SurfaceAvailability,
   pub audio: AudioCapabilities,
+  pub music_provider: MusicProvider,
 }
 
 /// What the daemon advertises to webapps. `gateway: None` means no
@@ -130,4 +146,5 @@ pub struct Capabilities {
   pub uri_schemes: Vec<String>,
   pub network: NetworkInfo,
   pub audio: AudioCapabilities,
+  pub music_provider: MusicProvider,
 }

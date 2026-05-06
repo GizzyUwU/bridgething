@@ -97,7 +97,7 @@ fn push_imports(out: &mut String, surfaces: &[Surface]) {
     }
   }
   imports.insert("BridgeToGatewayMsg".to_string());
-  imports.insert("GatewayError".to_string());
+  imports.insert("WireError".to_string());
   imports.insert("GatewayToBridgeMsg".to_string());
   imports.insert("Priority".to_string());
 
@@ -112,7 +112,7 @@ fn push_imports(out: &mut String, surfaces: &[Surface]) {
 
 fn push_typed_request_result(out: &mut String) {
   out.push_str(
-    "export type TypedRequestResult<R, E> =\n  | { ok: true; response: R }\n  | { ok: false; kind: 'domain'; error: E }\n  | { ok: false; kind: 'protocol'; error: GatewayError };\n\n",
+    "export type TypedRequestResult<R, E> =\n  | { ok: true; response: R }\n  | { ok: false; kind: 'domain'; error: E }\n  | { ok: false; kind: 'protocol'; error: WireError };\n\n",
   );
 }
 
@@ -751,7 +751,7 @@ fn push_request_handle_class(out: &mut String, r: &TypedRequestEntry) {
       r.surface_disc, r.inner_tag, err_disc
     ));
   }
-  out.push_str("  async respondProtocolErr(error: GatewayError): Promise<void> {\n    const msg: GatewayToBridgeMsg = { id: newUuidBytes(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._gateway.send(this.deviceId, msg);\n  }\n");
+  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: GatewayToBridgeMsg = { id: newUuidBytes(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._gateway.send(this.deviceId, msg);\n  }\n");
   out.push_str("}\n\n");
 }
 

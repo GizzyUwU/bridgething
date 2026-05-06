@@ -158,6 +158,8 @@ export type BridgeToGatewayLibraryMsg =
   | { event: 'favoritesSet'; data: FavoritesSet }
   | { event: 'favoritesSetMany'; data: FavoritesSetMany };
 
+export type BridgeToGatewayLyricsMsg = { event: 'get'; data: LyricsRequest };
+
 /**
  * bridgething -> gateway
  * messages from bridgething to the gateway (mobile or desktop app).
@@ -172,6 +174,7 @@ export type BridgeToGatewayMsgData =
   | { type: 'audio'; data: BridgeToGatewayAudioMsg }
   | { type: 'geo'; data: BridgeToGatewayGeoMsg }
   | { type: 'library'; data: BridgeToGatewayLibraryMsg }
+  | { type: 'lyrics'; data: BridgeToGatewayLyricsMsg }
   | { type: 'net'; data: BridgeToGatewayNetMsg }
   | { type: 'notifications'; data: BridgeToGatewayNotificationsMsg }
   | { type: 'phone'; data: BridgeToGatewayPhoneMsg }
@@ -350,6 +353,10 @@ export type GatewayToBridgeLibraryMsg =
   | { event: 'libraryErrorReply'; data: LibraryErrorReply }
   | { event: 'favoriteChanged'; data: FavoriteChanged };
 
+export type GatewayToBridgeLyricsMsg =
+  | { event: 'lyricsReply'; data: LyricsReply }
+  | { event: 'lyricsErrorReply'; data: LyricsErrorReply };
+
 /**
  * gateway -> bridgething
  * messages from the gateway (mobile or desktop app) to bridgething.
@@ -366,6 +373,7 @@ export type GatewayToBridgeMsgData =
   | { type: 'chrome'; data: GatewayToBridgeChromeMsg }
   | { type: 'geo'; data: GatewayToBridgeGeoMsg }
   | { type: 'library'; data: GatewayToBridgeLibraryMsg }
+  | { type: 'lyrics'; data: GatewayToBridgeLyricsMsg }
   | { type: 'net'; data: GatewayToBridgeNetMsg }
   | { type: 'notifications'; data: GatewayToBridgeNotificationsMsg }
   | { type: 'phone'; data: GatewayToBridgePhoneMsg }
@@ -492,6 +500,22 @@ export type LibraryRecommendationsRequest = {
 };
 
 export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
+
+export type LyricLine = { startMs: number; text: string };
+
+export type Lyrics = { synced: Array<LyricLine> | null; plain: string | null; source: string };
+
+export type LyricsErrorReply = { message: string };
+
+/**
+ * Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
+ * to completion without a hit (e.g. lrclib 404, no fallback configured)
+ * and is distinct from `LyricsErrorReply` which signals a transient
+ * failure (network, parse, resolver-internal error).
+ */
+export type LyricsReply = { lyrics: Lyrics | null };
+
+export type LyricsRequest = { track: TrackIdentity };
 
 export type NetFetchErrorReply = { error: NetError };
 
@@ -683,6 +707,20 @@ export type SetSpeed = { speed: number };
 export type SetVolume = { level: number };
 
 export type SkipToIndex = { index: number };
+
+/**
+ * Identifies a track for lyrics lookup. Different resolvers consume
+ * different subsets: lrclib does signature lookup (artist + track +
+ * album + duration), other resolvers may use ISRC or platform-specific
+ * ids. Populate what's available; resolvers ignore the rest.
+ */
+export type TrackIdentity = {
+  artist: string;
+  track: string;
+  album: string | null;
+  durationMs: number | null;
+  isrc: string | null;
+};
 
 /**
  * Fire-and-forget TTS request. `id` is webapp-assigned (no request

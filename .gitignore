@@ -47,3 +47,7 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Local build-time overrides - never commit
+*.local.xcconfig
+gradle.properties.local

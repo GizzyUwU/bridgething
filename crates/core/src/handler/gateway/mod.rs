@@ -128,6 +128,12 @@ impl GatewayHandler {
           tokio::spawn(async move { LibraryHandler::new(handle).handle(event).await });
         }
       }
+      GatewayToBridgeMsgData::Lyrics(_) => {
+        tracing::warn!(
+          "({:?}) stray response-shape arrival on Lyrics surface with no matching pending request; dropping",
+          handle.address,
+        );
+      }
       GatewayToBridgeMsgData::Net(net_msg) => {
         tokio::spawn(async move { NetHandler::new(handle).handle(net_msg).await });
       }

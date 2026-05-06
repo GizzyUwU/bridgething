@@ -255,6 +255,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("library")
 	data class Library(val data: BridgeToGatewayLibraryMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("lyrics")
+	data class Lyrics(val data: BridgeToGatewayLyricsMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("net")
 	data class Net(val data: BridgeToGatewayNetMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -396,7 +399,8 @@ data class SurfaceAvailability (
 	val notifications: Boolean,
 	val netFetch: Boolean,
 	val netWs: Boolean,
-	val audioTts: Boolean
+	val audioTts: Boolean,
+	val lyrics: Boolean
 )
 
 @Serializable
@@ -420,6 +424,20 @@ data class NetworkInfo (
 	val metered: Boolean
 )
 
+/// Which music service the companion is currently logged into and
+/// driving on behalf of the user. `None` when no glue is attached.
+@Serializable
+enum class MusicProvider(val string: String) {
+	@SerialName("none")
+	None("none"),
+	@SerialName("spotify")
+	Spotify("spotify"),
+	@SerialName("appleMusic")
+	AppleMusic("appleMusic"),
+	@SerialName("tidal")
+	Tidal("tidal"),
+}
+
 /// What the daemon advertises to webapps. `gateway: None` means no
 /// companion is connected; webapps that depend on companion-routed
 /// surfaces (Library, Net, Notifications, etc.) should branch on this.
@@ -431,7 +449,8 @@ data class Capabilities (
 	val authority: List<CompanionAuthorityScope>,
 	val uriSchemes: List<String>,
 	val network: NetworkInfo,
-	val audio: AudioCapabilities
+	val audio: AudioCapabilities,
+	val musicProvider: MusicProvider
 )
 
 @Serializable
@@ -680,7 +699,8 @@ data class GatewayCapabilities (
 	val uriSchemes: List<String>,
 	val network: NetworkInfo,
 	val available: SurfaceAvailability,
-	val audio: AudioCapabilities
+	val audio: AudioCapabilities,
+	val musicProvider: MusicProvider
 )
 
 @Serializable(with = GatewayToBridgeMsgDataSerializer::class)
@@ -706,6 +726,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("library")
 	data class Library(val data: GatewayToBridgeLibraryMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("lyrics")
+	data class Lyrics(val data: GatewayToBridgeLyricsMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("net")
 	data class Net(val data: GatewayToBridgeNetMsg): GatewayToBridgeMsgData()
@@ -934,6 +957,51 @@ data class LogEntry (
 	val level: LogLevel,
 	val target: String,
 	val message: String
+)
+
+@Serializable
+data class LyricLine (
+	val startMs: UInt,
+	val text: String
+)
+
+@Serializable
+data class Lyrics (
+	val synced: List<LyricLine>? = null,
+	val plain: String? = null,
+	val source: String
+)
+
+@Serializable
+data class LyricsErrorReply (
+	val message: String
+)
+
+/// Reply to `LyricsRequest`. `lyrics: None` means the resolver chain ran
+/// to completion without a hit (e.g. lrclib 404, no fallback configured)
+/// and is distinct from `LyricsErrorReply` which signals a transient
+/// failure (network, parse, resolver-internal error).
+@Serializable
+data class LyricsReply (
+	val lyrics: Lyrics? = null
+)
+
+/// Identifies a track for lyrics lookup. Different resolvers consume
+/// different subsets: lrclib does signature lookup (artist + track +
+/// album + duration), other resolvers may use ISRC or platform-specific
+/// ids. Populate what's available; resolvers ignore the rest.
+@Serializable
+data class TrackIdentity (
+	val artist: String,
+	val track: String,
+	val album: String? = null,
+	val durationMs: UInt? = null,
+	val isrc: String? = null
+)
+
+@Serializable
+data class LyricsRequest (
+	val track: TrackIdentity
 )
 
 /// The kind of media currently playing. Multi-typed: an item can be
@@ -2476,6 +2544,13 @@ sealed class BridgeToGatewayLibraryMsg {
 	data class FavoritesSetMany(val data: dev.bridgething.schema.FavoritesSetMany): BridgeToGatewayLibraryMsg()
 }
 
+@Serializable(with = BridgeToGatewayLyricsMsgSerializer::class)
+sealed class BridgeToGatewayLyricsMsg {
+	@Serializable
+	@SerialName("get")
+	data class Get(val data: LyricsRequest): BridgeToGatewayLyricsMsg()
+}
+
 @Serializable(with = BridgeToGatewayNetMsgSerializer::class)
 sealed class BridgeToGatewayNetMsg {
 	@Serializable
@@ -2789,6 +2864,16 @@ sealed class GatewayToBridgeLibraryMsg {
 	@Serializable
 	@SerialName("favoriteChanged")
 	data class FavoriteChanged(val data: dev.bridgething.schema.FavoriteChanged): GatewayToBridgeLibraryMsg()
+}
+
+@Serializable(with = GatewayToBridgeLyricsMsgSerializer::class)
+sealed class GatewayToBridgeLyricsMsg {
+	@Serializable
+	@SerialName("lyricsReply")
+	data class LyricsReply(val data: dev.bridgething.schema.LyricsReply): GatewayToBridgeLyricsMsg()
+	@Serializable
+	@SerialName("lyricsErrorReply")
+	data class LyricsErrorReply(val data: dev.bridgething.schema.LyricsErrorReply): GatewayToBridgeLyricsMsg()
 }
 
 @Serializable(with = GatewayToBridgeNetMsgSerializer::class)

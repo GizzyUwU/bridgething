@@ -25,7 +25,6 @@ import {
   type FavoritesSetMany,
   type FavoritesToggle,
   type GatewayCapabilities,
-  type GatewayError,
   type GatewayToBridgeMsg,
   type GeoErrorReply,
   type GeoGetOnce,
@@ -37,6 +36,9 @@ import {
   type LibraryFavoritesListRequest,
   type LibraryRecommendationsRequest,
   type LibrarySearchRequest,
+  type LyricsErrorReply,
+  type LyricsReply,
+  type LyricsRequest,
   type NetFetchErrorReply,
   type NetFetchReply,
   type NetFetchRequestMsg,
@@ -119,6 +121,7 @@ import {
   type WebappList,
   type WebappSwitchTo,
   type WebappUninstall,
+  type WireError,
   newUuidBytes,
 } from '@bridgething/lib';
 import { BridgethingGateway, type GatewayEvent } from './index';
@@ -126,7 +129,7 @@ import { BridgethingGateway, type GatewayEvent } from './index';
 export type TypedRequestResult<R, E> =
   | { ok: true; response: R }
   | { ok: false; kind: 'domain'; error: E }
-  | { ok: false; kind: 'protocol'; error: GatewayError };
+  | { ok: false; kind: 'protocol'; error: WireError };
 
 export type AudioInboundHandlers = {
   volumeUp: (deviceId: string) => void;
@@ -2645,6 +2648,30 @@ export class WebappSurface {
   }
 }
 
+export class LyricsSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Typed inbound `LyricsRequest` request: handler is given a typed handle for the response. */
+  onGet(handler: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'lyrics') return;
+      const inner = data.data;
+      if (inner.event !== 'get') return;
+      const handle = new LyricsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onGet handler threw:', err);
+        });
+      }
+    });
+  }
+}
+
 export class AudioSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -4887,6 +4914,34 @@ export class WebappSurfaceForDevice {
   }
 }
 
+export class LyricsSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Typed inbound `LyricsRequest` request from this peer: handler is given a typed handle for the response. */
+  onGet(handler: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'lyrics') return;
+      const inner = data.data;
+      if (inner.event !== 'get') return;
+      const handle = new LyricsRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onGet handler threw:', err);
+        });
+      }
+    });
+  }
+}
+
 export type BridgeMessageHandlers = {
   audio: AudioInboundHandlers;
   geo: GeoInboundHandlers;
@@ -4899,6 +4954,7 @@ export type BridgeMessageHandlers = {
   voice: VoiceInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
+  lyrics: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageHandlers = {
@@ -4913,6 +4969,7 @@ export type PartialBridgeMessageHandlers = {
   voice?: Partial<VoiceInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
+  lyrics?: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
 };
 
 export type BridgeMessageDeviceHandlers = {
@@ -4927,6 +4984,7 @@ export type BridgeMessageDeviceHandlers = {
   voice: VoiceDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
+  lyrics: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
 };
 
 export type PartialBridgeMessageDeviceHandlers = {
@@ -4941,6 +4999,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   voice?: Partial<VoiceDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
+  lyrics?: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
 };
 
 declare module './index' {
@@ -4977,6 +5036,8 @@ declare module './index' {
     readonly time: TimeSurface;
     /** Methods scoped to the `Webapp` wire surface. */
     readonly webapp: WebappSurface;
+    /** Methods scoped to the `Lyrics` wire surface. */
+    readonly lyrics: LyricsSurface;
     /** Returns a per-device proxy with `deviceId` baked into every method and listener. */
     device(deviceId: string): BridgethingGatewayDevice;
     /** Exhaustive subscribe across every inbound wire surface (cross-peer). */
@@ -5010,7 +5071,7 @@ export class GeoGetOnceHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5045,7 +5106,7 @@ export class LibraryBrowseRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5080,7 +5141,7 @@ export class LibrarySearchRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5115,7 +5176,7 @@ export class LibraryRecommendationsRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5150,7 +5211,7 @@ export class LibraryFavoritesListRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5185,7 +5246,7 @@ export class LibraryFavoritesContainsRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5220,7 +5281,7 @@ export class NetFetchRequestMsgHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5255,7 +5316,7 @@ export class NetWsOpenHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5290,7 +5351,7 @@ export class NotificationsListRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5316,7 +5377,7 @@ export class PhoneStateGetHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5351,7 +5412,42 @@ export class AssetRequestHandle {
     await this._gateway.send(this.deviceId, msg);
   }
 
-  async respondProtocolErr(error: GatewayError): Promise<void> {
+  async respondProtocolErr(error: WireError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LyricsRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: Uint8Array,
+  ) {}
+
+  async respond(response: LyricsReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'lyrics', data: { event: 'lyricsReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LyricsErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuidBytes(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'lyrics', data: { event: 'lyricsErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuidBytes(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
@@ -5378,6 +5474,7 @@ type DeviceSurfaceCache = {
   chrome?: ChromeSurfaceForDevice;
   time?: TimeSurfaceForDevice;
   webapp?: WebappSurfaceForDevice;
+  lyrics?: LyricsSurfaceForDevice;
 };
 
 export class BridgethingGatewayDevice {
@@ -5435,6 +5532,9 @@ export class BridgethingGatewayDevice {
   get webapp(): WebappSurfaceForDevice {
     return (this._surfaces.webapp ??= new WebappSurfaceForDevice(this._gateway, this.deviceId));
   }
+  get lyrics(): LyricsSurfaceForDevice {
+    return (this._surfaces.lyrics ??= new LyricsSurfaceForDevice(this._gateway, this.deviceId));
+  }
 
   /** Exhaustive subscribe across every inbound wire surface from this peer. */
   subscribe(handlers: BridgeMessageDeviceHandlers): () => void {
@@ -5462,6 +5562,7 @@ type GatewaySurfaceCache = {
   chrome?: ChromeSurface;
   time?: TimeSurface;
   webapp?: WebappSurface;
+  lyrics?: LyricsSurface;
 };
 
 /**
@@ -5605,6 +5706,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): WebappSurface {
       const bucket = bucketFor(this);
       return (bucket.webapp ??= new WebappSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'lyrics', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): LyricsSurface {
+      const bucket = bucketFor(this);
+      return (bucket.lyrics ??= new LyricsSurface(this));
     },
   });
 
@@ -6139,6 +6248,19 @@ function outerSubscribeGateway(
           result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
         return;
       }
+      case 'lyrics': {
+        if (event.message.meta.kind !== 'request') return;
+        const handler = handlers.lyrics;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for lyrics');
+          return;
+        }
+        const handle = new LyricsRequestHandle(g, event.deviceId, event.message.id);
+        const result = handler(handle, data.data.data);
+        if (result && typeof result.then === 'function')
+          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+        return;
+      }
       default: {
         if (!partial) g.logger.warn('subscribe: no handler for unknown wire variant', data);
         return;
@@ -6652,6 +6774,19 @@ function outerSubscribeDevice(
           return;
         }
         const handle = new AssetRequestHandle(g, event.deviceId, event.message.id);
+        const result = handler(handle, data.data.data);
+        if (result && typeof result.then === 'function')
+          result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+        return;
+      }
+      case 'lyrics': {
+        if (event.message.meta.kind !== 'request') return;
+        const handler = handlers.lyrics;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for lyrics');
+          return;
+        }
+        const handle = new LyricsRequestHandle(g, event.deviceId, event.message.id);
         const result = handler(handle, data.data.data);
         if (result && typeof result.then === 'function')
           result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));

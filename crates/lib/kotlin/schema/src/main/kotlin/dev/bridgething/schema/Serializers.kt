@@ -94,8 +94,20 @@ public object GatewayToBridgeVoiceMsgSerializer :
         discriminator = "event"
     )
 
-public object GatewayErrorSerializer :
-    KSerializer<GatewayError> by AdjacentTaggedSerializer(GatewayError::class, discriminator = "type")
+public object BridgeToGatewayLyricsMsgSerializer :
+    KSerializer<BridgeToGatewayLyricsMsg> by AdjacentTaggedSerializer(
+        BridgeToGatewayLyricsMsg::class,
+        discriminator = "event"
+    )
+
+public object GatewayToBridgeLyricsMsgSerializer :
+    KSerializer<GatewayToBridgeLyricsMsg> by AdjacentTaggedSerializer(
+        GatewayToBridgeLyricsMsg::class,
+        discriminator = "event"
+    )
+
+public object WireErrorSerializer :
+    KSerializer<WireError> by AdjacentTaggedSerializer(WireError::class, discriminator = "type")
 
 public object WebappErrorSerializer :
     KSerializer<WebappError> by AdjacentTaggedSerializer(WebappError::class, discriminator = "type")

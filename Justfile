@@ -63,6 +63,10 @@ kotlin:
 codegen:
   cargo run -q -p bridgething-codegen -- all
 
+spotify-codegen:
+  swift build --package-path tools/spotify-codegen
+  bash tools/spotify-codegen/scripts/generate-kotlin.sh
+
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
 

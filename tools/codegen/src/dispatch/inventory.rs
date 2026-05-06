@@ -170,7 +170,11 @@ impl PayloadType {
   }
   pub fn swift(&self) -> String {
     match self {
-      Self::Named(n) => n.clone(),
+      Self::Named(n) => match n.as_str() {
+        // Disambiguate from Foundation.Notification.
+        "Notification" => "BridgethingSchema.Notification".to_string(),
+        _ => n.clone(),
+      },
       Self::Bytes => "Data".to_string(),
       Self::JsonValue => "Value".to_string(),
       Self::StringScalar => "String".to_string(),

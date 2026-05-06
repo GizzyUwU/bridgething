@@ -10,6 +10,7 @@ let package = Package(
   products: [
     .library(name: "BridgethingSchema", targets: ["BridgethingSchema"]),
     .library(name: "BridgethingGateway", targets: ["BridgethingGateway"]),
+    .library(name: "BridgethingGlue", targets: ["BridgethingGlue"]),
   ],
   dependencies: [
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
@@ -33,6 +34,11 @@ let package = Package(
       name: "BridgethingGatewayTests",
       dependencies: ["BridgethingGateway"],
       path: "packages/gateway/swift/Tests/BridgethingGatewayTests"
+    ),
+    .target(
+      name: "BridgethingGlue",
+      dependencies: ["BridgethingGateway"],
+      path: "packages/glue/swift/Sources/BridgethingGlue"
     ),
   ]
 )

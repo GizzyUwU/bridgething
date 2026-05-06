@@ -83,7 +83,7 @@ fn kotlin_request_result_class() -> String {
 public sealed class RequestResult<out R, out E> {
   public data class Ok<R>(val response: R): RequestResult<R, Nothing>()
   public data class DomainErr<E>(val error: E): RequestResult<Nothing, E>()
-  public data class ProtocolErr(val error: GatewayError): RequestResult<Nothing, Nothing>()
+  public data class ProtocolErr(val error: WireError): RequestResult<Nothing, Nothing>()
 }
 
 "#
@@ -264,10 +264,10 @@ fn push_query_method_gateway(out: &mut String, r: &TypedRequestEntry) {
       r.surface
     ));
   }
-  out.push_str("        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)\n");
+  out.push_str("        else -> RequestResult.ProtocolErr(WireError.Unsupported)\n");
   out.push_str("      }\n");
   out.push_str("      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)\n");
-  out.push_str("      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)\n");
+  out.push_str("      else -> RequestResult.ProtocolErr(WireError.Unsupported)\n");
   out.push_str("    }\n  }\n\n");
 }
 
@@ -279,6 +279,7 @@ fn push_request_flows(out: &mut String, s: &Surface, device_scope: bool) {
 
 fn push_request_flow(out: &mut String, r: &TypedRequestEntry, device_scope: bool) {
   let request_pascal = r.request_variant_pascal();
+  let request_camel = rename_camel(&request_pascal);
   let pair_type = if r.request_takes_payload {
     format!("Pair<{}Handle, {}>", r.request, r.request)
   } else {
@@ -296,7 +297,7 @@ fn push_request_flow(out: &mut String, r: &TypedRequestEntry, device_scope: bool
     "      handle\n"
   };
   out.push_str(&format!(
-    "  /** Stream of typed inbound `{}` requests. */\n  public val requests: Flow<{pair_type}> = gateway.events\n    .filterIsInstance<GatewayEvent.Message>()\n    .filter {{ it.message.meta is GatewayMsgMeta.Request }}\n{scope_filter}    .mapNotNull {{\n      val outer = it.message.data as? BridgeToGatewayMsgData.{} ?: return@mapNotNull null\n      val inner = outer.data as? BridgeToGateway{}Msg.{request_pascal} ?: return@mapNotNull null\n      val handle = {}Handle(gateway, it.deviceId, it.message.id)\n{yield_pair}    }}\n\n",
+    "  /** Stream of typed inbound `{}` requests. */\n  public val {request_camel}Requests: Flow<{pair_type}> = gateway.events\n    .filterIsInstance<GatewayEvent.Message>()\n    .filter {{ it.message.meta is GatewayMsgMeta.Request }}\n{scope_filter}    .mapNotNull {{\n      val outer = it.message.data as? BridgeToGatewayMsgData.{} ?: return@mapNotNull null\n      val inner = outer.data as? BridgeToGateway{}Msg.{request_pascal} ?: return@mapNotNull null\n      val handle = {}Handle(gateway, it.deviceId, it.message.id)\n{yield_pair}    }}\n\n",
     r.request, r.surface, r.surface, r.request
   ));
 }
@@ -453,10 +454,10 @@ fn push_query_method_device(out: &mut String, r: &TypedRequestEntry) {
       r.surface
     ));
   }
-  out.push_str("        else -> RequestResult.ProtocolErr(GatewayError.Unsupported)\n");
+  out.push_str("        else -> RequestResult.ProtocolErr(WireError.Unsupported)\n");
   out.push_str("      }\n");
   out.push_str("      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)\n");
-  out.push_str("      else -> RequestResult.ProtocolErr(GatewayError.Unsupported)\n");
+  out.push_str("      else -> RequestResult.ProtocolErr(WireError.Unsupported)\n");
   out.push_str("    }\n  }\n\n");
 }
 
@@ -497,7 +498,7 @@ fn kotlin_request_handle_class(r: &TypedRequestEntry) -> String {
       r.surface, r.surface
     ));
   }
-  out.push_str("  public suspend fun respondProtocolErr(error: GatewayError) {\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.Error(error),\n    )\n    gateway.send(deviceId, msg)\n  }\n");
+  out.push_str("  public suspend fun respondProtocolErr(error: WireError) {\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.Error(error),\n    )\n    gateway.send(deviceId, msg)\n  }\n");
   out.push_str("}\n\n");
   out
 }
