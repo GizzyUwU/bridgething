@@ -17,6 +17,7 @@ pub struct PlayerStateReply {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PlayerQueueReply {
+  pub current: Option<QueueItem>,
   pub items: Vec<QueueItem>,
 }
 

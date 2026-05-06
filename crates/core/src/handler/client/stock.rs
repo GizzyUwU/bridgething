@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use base64::Engine as _;
 use libbridgething::{
@@ -14,10 +14,15 @@ use libbridgething::{
 use serde_json::{Value, json};
 
 use super::{HandlerResult, MsgHandle};
-use crate::stock::{
-  GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
-  presets,
+use crate::{
+  asset::{AssetCacheEvent, CachedAsset},
+  stock::{
+    GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
+    presets,
+  },
 };
+
+const NOW_PLAYING_ART_WAIT: Duration = Duration::from_secs(30);
 
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
@@ -101,29 +106,71 @@ impl LegacyStockHandler {
   async fn serve_asset_to_stock(self, id: String) -> HandlerResult {
     tracing::debug!("({}) stock image lookup for id: {}", &self.handle.from, id);
     let stock_msg_id = self.handle.stock_msg_id;
-    match self.handle.state.assets.get(&id).await? {
-      Some(asset) => {
-        let image_data = base64::engine::general_purpose::STANDARD.encode(&asset.bytes);
-        self
-          .handle
-          .send_stock(StockInterAppSend::new(
-            stock_msg_id,
-            StockInterAppSendPayload::Image {
-              height: 0,
-              width: 0,
-              image_data,
-            },
-          ))
-          .await?;
-      }
-      None => {
-        tracing::trace!("({}) asset miss for stock image: {}", &self.handle.from, id);
-        self
-          .handle
-          .send_stock(StockInterAppSend::make_ack(stock_msg_id))
-          .await?;
-      }
+
+    let mut events = self.handle.state.assets.subscribe();
+
+    if let Some(asset) = self.handle.state.assets.get(&id).await? {
+      return self.send_stock_image(stock_msg_id, &asset).await;
     }
+
+    let is_now_playing = self.handle.state.player.current_artwork_id().await.as_deref() == Some(id.as_str());
+    if !is_now_playing {
+      tracing::trace!(
+        "({}) asset miss for stock image (not now-playing): {}",
+        &self.handle.from,
+        id
+      );
+      return self.send_empty_stock_image(stock_msg_id).await;
+    }
+
+    let waited = tokio::time::timeout(NOW_PLAYING_ART_WAIT, async {
+      loop {
+        match events.recv().await {
+          Ok(AssetCacheEvent::Ready { id: ready_id }) if ready_id == id => return true,
+          Ok(_) => continue,
+          Err(_) => return false,
+        }
+      }
+    })
+    .await
+    .unwrap_or(false);
+
+    if waited && let Some(asset) = self.handle.state.assets.get(&id).await? {
+      tracing::debug!("({}) now-playing art landed during wait: {}", &self.handle.from, id);
+      return self.send_stock_image(stock_msg_id, &asset).await;
+    }
+    tracing::trace!("({}) now-playing art wait timed out for: {}", &self.handle.from, id);
+    self.send_empty_stock_image(stock_msg_id).await
+  }
+
+  async fn send_stock_image(&self, stock_msg_id: Option<usize>, asset: &CachedAsset) -> HandlerResult {
+    let image_data = base64::engine::general_purpose::STANDARD.encode(&asset.bytes);
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        stock_msg_id,
+        StockInterAppSendPayload::Image {
+          height: 0,
+          width: 0,
+          image_data,
+        },
+      ))
+      .await?;
+    Ok(())
+  }
+
+  async fn send_empty_stock_image(&self, stock_msg_id: Option<usize>) -> HandlerResult {
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(
+        stock_msg_id,
+        StockInterAppSendPayload::Image {
+          height: 0,
+          width: 0,
+          image_data: String::new(),
+        },
+      ))
+      .await?;
     Ok(())
   }
 
@@ -233,13 +280,7 @@ impl LegacyStockHandler {
     let connection_type = match snapshot.network.kind {
       libbridgething::NetworkKind::Wifi | libbridgething::NetworkKind::Ethernet => StockConnectionType::Wlan,
       libbridgething::NetworkKind::Cellular => StockConnectionType::FourG,
-      libbridgething::NetworkKind::Unknown => {
-        if snapshot.gateway.is_some() {
-          StockConnectionType::Wlan
-        } else {
-          StockConnectionType::None
-        }
-      }
+      libbridgething::NetworkKind::Unknown => StockConnectionType::Wlan,
     };
     self
       .handle
@@ -248,8 +289,8 @@ impl LegacyStockHandler {
         StockInterAppSendPayload::SessionState {
           connection_type,
           is_in_forced_offline_mode: false,
-          is_logged_in: snapshot.gateway.is_some(),
-          is_offline: snapshot.gateway.is_none(),
+          is_logged_in: true,
+          is_offline: false,
         },
       ))
       .await?;

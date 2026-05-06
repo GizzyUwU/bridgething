@@ -1,9 +1,9 @@
 use base64::Engine as _;
 use libbridgething::{
-  BridgeThingMeta,
+  BridgeThingMeta, PhoneCallStatus,
   client::{
-    AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientHardwareMsg, BridgeToClientMsg, BridgeToClientMsgData,
-    BridgeToClientSystemMsg,
+    AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientAudioMsg, BridgeToClientHardwareMsg, BridgeToClientMsg,
+    BridgeToClientMsgData, BridgeToClientPhoneMsg, BridgeToClientSystemMsg, VolumeChanged,
   },
   transitive_from,
 };
@@ -128,13 +128,14 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
         StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
       }
     },
+    BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data),
+    BridgeToClientMsgData::Audio(data) => audio_event_to_stock(data, stock_msg_id),
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
 
     // Surfaces with no stock equivalent yet
-    BridgeToClientMsgData::Audio(_)
-    | BridgeToClientMsgData::Capabilities(_)
+    BridgeToClientMsgData::Capabilities(_)
     | BridgeToClientMsgData::Config(_)
     | BridgeToClientMsgData::Geo(_)
     | BridgeToClientMsgData::Hardware(_)
@@ -142,11 +143,57 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     | BridgeToClientMsgData::Net(_)
     | BridgeToClientMsgData::Notifications(_)
     | BridgeToClientMsgData::Peer(_)
-    | BridgeToClientMsgData::Phone(_)
     | BridgeToClientMsgData::Time(_)
     | BridgeToClientMsgData::Voice(_)
     | BridgeToClientMsgData::Webapp(_) => StockSendMsg::Unsupported,
   }
+}
+
+const STOCK_VOLUME_STEPS: u8 = 16;
+
+fn audio_event_to_stock(event: BridgeToClientAudioMsg, stock_msg_id: Option<usize>) -> StockSendMsg {
+  match event {
+    BridgeToClientAudioMsg::VolumeChanged(VolumeChanged { level, muted }) => {
+      let surfaced = if muted { 0.0 } else { f64::from(level).clamp(0.0, 1.0) };
+      StockSendMsg::InterApp(StockInterAppSend::new(
+        stock_msg_id,
+        StockInterAppSendPayload::VolumeState {
+          volume: surfaced,
+          volume_steps: STOCK_VOLUME_STEPS,
+        },
+      ))
+    }
+    BridgeToClientAudioMsg::TtsStarted(_) | BridgeToClientAudioMsg::TtsEnded(_) => StockSendMsg::Unsupported,
+  }
+}
+
+fn phone_event_to_stock(msg: BridgeToClientPhoneMsg) -> StockSendMsg {
+  let call = match msg {
+    BridgeToClientPhoneMsg::CallStarted(c) | BridgeToClientPhoneMsg::CallUpdated(c) => c,
+    BridgeToClientPhoneMsg::CallEnded(ended) => libbridgething::PhoneCall {
+      call_id: ended.call_id,
+      remote_id: String::new(),
+      display_name: String::new(),
+      status: PhoneCallStatus::Disconnected,
+      direction: libbridgething::PhoneCallDirection::Incoming,
+      started_at_unix_s: None,
+      label: None,
+      address_book_id: None,
+      service: None,
+      is_conferenced: None,
+      conference_group: None,
+    },
+    BridgeToClientPhoneMsg::CommunicationsChanged(_)
+    | BridgeToClientPhoneMsg::StateReply(_)
+    | BridgeToClientPhoneMsg::ErrorReply(_) => return StockSendMsg::Unsupported,
+  };
+  StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
+    remote_id: call.remote_id,
+    display_name: call.display_name,
+    status: call.status,
+    call_dir: call.direction,
+    call_id: call.call_id,
+  })
 }
 
 impl From<BridgeToClientSystemMsg> for StockSendMsg {

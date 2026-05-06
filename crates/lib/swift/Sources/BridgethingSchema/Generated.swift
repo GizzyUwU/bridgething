@@ -259,6 +259,12 @@ public enum CompanionAuthorityScope: String, Codable, Sendable {
 	/// source (microsecond-fresh playhead). On Android the companion is
 	/// the only source and always claims this.
 	case nowPlayingPlayback
+	/// Host audio output volume + mute. iAP2 has no inbound volume CSM
+	/// (HID step is one-way only), so without a companion claiming this
+	/// scope the daemon can't see real volume — it broadcasts a fixed
+	/// placeholder (0.5, unmuted) so the kiosk doesn't render a muted
+	/// state, and forwards HID Inc/Dec/Mute presses best-effort.
+	case volume
 }
 
 public struct AuthorityClaim: Codable, Sendable {

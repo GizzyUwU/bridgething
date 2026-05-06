@@ -656,7 +656,7 @@ export type PlayUri = { uri: string; context: PlayContext | null };
 
 export type PlayerErrorReply = { error: PlayerError };
 
-export type PlayerQueueReply = { items: Array<QueueItem> };
+export type PlayerQueueReply = { current: QueueItem | null; items: Array<QueueItem> };
 
 export type PlayerStateReply = { state: PlayerState };
 

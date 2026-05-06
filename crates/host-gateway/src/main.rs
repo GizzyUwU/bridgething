@@ -7,10 +7,12 @@
 mod chaos;
 mod conn;
 mod ota;
+mod webapp;
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use uuid::Uuid;
 
 use crate::chaos::ChaosConfig;
 
@@ -64,6 +66,14 @@ enum Command {
     #[arg(long)]
     manifest_url: Option<String>,
   },
+  /// Send `WebappSwitchTo` to flip the kiosk's active webapp. The
+  /// daemon rescans `/var/bridgething/webapps/` if the id is unknown,
+  /// so this is also the activation half of the dev-iter loop after
+  /// rsyncing a new bundle into place.
+  SwitchWebapp {
+    /// Webapp uuid (from the bundle's `manifest.json`).
+    id: Uuid,
+  },
 }
 
 #[tokio::main]
@@ -82,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
       let path = resolve_path(cli.fixture.as_deref(), &swu);
       ota::run_push_update(&cli.url, chaos, cli.chunk_size, path, manifest_url, None).await
     }
+    Command::SwitchWebapp { id } => webapp::run_switch(&cli.url, chaos, id).await,
   }
 }
 

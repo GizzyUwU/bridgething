@@ -1,19 +1,12 @@
 use std::sync::Arc;
 
-use bluer::{Adapter, AdapterEvent, AdapterProperty, Address, Device};
+use bluer::{Adapter, AdapterEvent, AdapterProperty, Address};
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
-use tokio::sync::RwLock;
 
 use super::BluetoothResult;
 use crate::{net::WireEventBus, peer::PeerTracker, state::DeviceStore, stock::StockSetupSend};
 
 pub type ProfileMan = Arc<ProfileManager>;
-
-// TODO: only say that device is "connected" if it is connected to avrcp profile
-#[derive(Debug, Default)]
-struct ProfileConnectionState {
-  pub device: Option<Device>,
-}
 
 #[derive(Debug)]
 pub struct ProfileManager {
@@ -21,8 +14,6 @@ pub struct ProfileManager {
   bus: WireEventBus,
   devices: DeviceStore,
   peers: PeerTracker,
-
-  profile_state: RwLock<ProfileConnectionState>,
 }
 
 impl ProfileManager {
@@ -34,8 +25,6 @@ impl ProfileManager {
       bus,
       devices,
       peers,
-
-      profile_state: RwLock::new(ProfileConnectionState::default()),
     }
   }
 
@@ -52,9 +41,8 @@ impl ProfileManager {
   pub async fn forget(&self, mac: &str) -> bluer::Result<()> {
     tracing::debug!("attempting to forget device with mac address {:?}", &mac);
 
-    let device = self.adapter.device(mac.parse()?)?;
-    device.set_trusted(false).await?;
-    device.disconnect().await?;
+    let address: Address = mac.parse()?;
+    self.adapter.remove_device(address).await?;
 
     Ok(())
   }
@@ -107,6 +95,8 @@ impl ProfileManager {
             )
             .await?;
 
+          self.peers.note_pin_shown(mac).await;
+
           Ok(())
         }
 
@@ -115,32 +105,48 @@ impl ProfileManager {
           tracing::info!("bluetooth device added with mac address: {:?}", &mac);
           let bluez_device = self.adapter.device(mac)?;
           if !bluez_device.is_paired().await.unwrap_or(false) {
-            tracing::trace!("device added but not yet paired; awaiting pair-complete event");
+            tracing::trace!("device added but not yet paired; awaiting Paired property change");
             return Ok(());
           }
           if let Err(err) = self
             .upsert_paired_device(mac, libbridgething::DeviceType::Unknown)
             .await
           {
-            tracing::warn!(?err, "failed to register newly-paired device");
+            tracing::warn!(?err, "failed to register cached paired device");
           }
           Ok(())
         }
         BluetoothConnectionEvent::DeviceRemoved { mac } => {
           tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
 
-          if self
-            .profile_state
-            .write()
-            .await
-            .device
-            .take_if(|d| d.address() == mac)
-            .is_some()
-          {
-            tracing::info!("current device with mac address {:?} has disconnected!", &mac);
-            let _ = self.peers.remove(mac).await;
+          if let Err(err) = self.peers.remove(mac).await {
+            tracing::warn!(?err, "failed to remove peer on DeviceRemoved");
+          }
+          if let Err(err) = self.devices.remove(mac.to_string()).await {
+            tracing::warn!(?err, "failed to remove device store entry on DeviceRemoved");
           }
 
+          Ok(())
+        }
+        BluetoothConnectionEvent::PairedChanged { mac, paired } => {
+          tracing::info!("bluetooth Paired property changed for mac {:?}: {}", &mac, paired);
+          if paired {
+            if let Err(err) = self
+              .upsert_paired_device(mac, libbridgething::DeviceType::Unknown)
+              .await
+            {
+              tracing::warn!(?err, "failed to register newly-paired device");
+            }
+          } else if let Err(err) = self.peers.set_paired(mac, false).await {
+            tracing::warn!(?err, "failed to mark peer unpaired");
+          }
+          Ok(())
+        }
+        BluetoothConnectionEvent::ConnectedChanged { mac, connected } => {
+          tracing::trace!("bluetooth Connected property changed for mac {:?}: {}", &mac, connected);
+          if connected && let Err(err) = self.peers.confirm_pairing(mac).await {
+            tracing::warn!(?err, "failed to confirm pairing on Connected=true");
+          }
           Ok(())
         }
         BluetoothConnectionEvent::AdapterPropertyChanged(property) => {
@@ -177,13 +183,9 @@ impl ProfileManager {
     }
     self.devices.set_last(mac_str).await?;
 
-    {
-      let mut profile_state = self.profile_state.write().await;
-      profile_state.device = Some(bluez);
-    }
-
     let _ = self.peers.upsert(mac, device.clone()).await;
     let _ = self.peers.set_paired(mac, true).await;
+    let _ = self.peers.confirm_pairing(mac).await;
 
     if new_device {
       self
@@ -209,6 +211,10 @@ pub enum BluetoothConnectionEvent {
   DeviceAdded { mac: Address },
   DeviceRemoved { mac: Address },
   AdapterPropertyChanged(AdapterProperty),
+
+  // per-device property changes (from device-level event watcher)
+  PairedChanged { mac: Address, paired: bool },
+  ConnectedChanged { mac: Address, connected: bool },
 }
 
 impl From<AdapterEvent> for BluetoothConnectionEvent {

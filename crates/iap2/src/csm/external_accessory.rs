@@ -11,11 +11,14 @@
 //!   accessory. Tears down a previously-opened stream. Reused
 //!   `session_id` values are allowed afterwards.
 //! - [`RequestAppLaunch`] (`0xEA02`) - accessory to iPhone. Asks iOS
-//!   to foreground the app with the given bundle id. Behaviour depends
-//!   on the app's `UISupportedExternalAccessoryProtocols` Info.plist
-//!   declaration and the protocol's `match_action` we declared at
-//!   identification time: the call is silently ignored if the app
-//!   isn't installed or doesn't list a matching EA protocol.
+//!   to foreground the app with the given bundle id. The call is
+//!   silently ignored if the app isn't installed or doesn't list the
+//!   matching EA protocol in `UISupportedExternalAccessoryProtocols`.
+//!   The [`AppLaunchMethod`] param is the only iAP2-side knob that
+//!   controls whether iOS shows the per-app "would like to communicate
+//!   with" permission prompt; we always send `WithoutUserAlert` so iOS
+//!   wakes the companion silently (background-mode if the device is
+//!   locked or another app is foreground).
 //! - [`StatusExternalAccessoryProtocolSession`] (`0xEA03`) - accessory
 //!   to iPhone. Reply to `StartES`. `Ok` (`0`) opens the stream;
 //!   `Close` (`1`) refuses (unknown `protocol_id`, capacity exhausted,
@@ -29,7 +32,7 @@
 
 use bytes::Bytes;
 
-use super::{Csm, CsmDecodeError, CsmFrame, CsmParam};
+use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldDecode, CsmParamFieldEncode};
 
 pub const SENT_BY_ACCESSORY: &[u16] = &[
   RequestAppLaunch::CSM_MSG_ID,
@@ -63,13 +66,80 @@ pub struct StopExternalAccessoryProtocolSession {
   pub session_id: u16,
 }
 
-/// `0xEA02` accessory -> iPhone. Bundle id is a UTF-8 + NUL string
-/// matching the iOS app's `CFBundleIdentifier`.
-#[derive(Csm, Debug, Clone, PartialEq, Eq)]
-#[csm(id = 0xEA02)]
+/// `AppLaunchMethod` enum (param 1 of `RequestAppLaunch`). Selects
+/// whether iOS shows the per-app permission prompt before foregrounding
+/// the matching app, or launches it silently (background-mode if the
+/// device is locked / another app is foreground). When the param is
+/// absent iOS defaults to [`WithUserAlert`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AppLaunchMethod {
+  WithUserAlert = 0,
+  WithoutUserAlert = 1,
+}
+
+impl AppLaunchMethod {
+  pub const fn as_u8(self) -> u8 {
+    self as u8
+  }
+
+  pub const fn from_u8(byte: u8) -> Option<Self> {
+    match byte {
+      0 => Some(Self::WithUserAlert),
+      1 => Some(Self::WithoutUserAlert),
+      _ => None,
+    }
+  }
+}
+
+/// `0xEA02` accessory -> iPhone. `bundle_id` is a UTF-8 + NUL string
+/// matching the iOS app's `CFBundleIdentifier`. `launch_method` is the
+/// only iAP2 knob that controls whether iOS shows the per-app
+/// "would like to communicate with" permission prompt; pass
+/// [`AppLaunchMethod::WithoutUserAlert`] to suppress it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestAppLaunch {
-  #[csm(param = 0)]
   pub bundle_id: String,
+  pub launch_method: AppLaunchMethod,
+}
+
+impl RequestAppLaunch {
+  pub const CSM_MSG_ID: u16 = 0xEA02;
+}
+
+impl From<RequestAppLaunch> for CsmFrame {
+  fn from(value: RequestAppLaunch) -> Self {
+    let mut params: Vec<CsmParam> = Vec::with_capacity(2);
+    value.bundle_id.encode_field(0, &mut params);
+    value.launch_method.as_u8().encode_field(1, &mut params);
+    Self {
+      msg_id: RequestAppLaunch::CSM_MSG_ID,
+      params,
+    }
+  }
+}
+
+impl TryFrom<CsmFrame> for RequestAppLaunch {
+  type Error = CsmDecodeError;
+
+  fn try_from(mut frame: CsmFrame) -> Result<Self, Self::Error> {
+    if frame.msg_id != Self::CSM_MSG_ID {
+      return Err(CsmDecodeError::WrongMsgId {
+        got: frame.msg_id,
+        expected: Self::CSM_MSG_ID,
+      });
+    }
+    let bundle_id = String::decode_field(0, &mut frame.params)?;
+    let method_byte = u8::decode_field(1, &mut frame.params)?;
+    let launch_method = AppLaunchMethod::from_u8(method_byte).ok_or(CsmDecodeError::ParamDecode {
+      param_id: 1,
+      detail: "AppLaunchMethod must be 0 (WithUserAlert) or 1 (WithoutUserAlert)",
+    })?;
+    Ok(Self {
+      bundle_id,
+      launch_method,
+    })
+  }
 }
 
 /// Status field of [`StatusExternalAccessoryProtocolSession`].
@@ -201,17 +271,52 @@ mod tests {
   fn request_app_launch_round_trips() {
     let csm = RequestAppLaunch {
       bundle_id: "com.bridgething.gateway".into(),
+      launch_method: AppLaunchMethod::WithoutUserAlert,
     };
     let frame: CsmFrame = csm.clone().into();
     assert_eq!(frame.msg_id, 0xEA02);
-    assert_eq!(frame.params.len(), 1);
+    assert_eq!(frame.params.len(), 2);
+    assert_eq!(frame.params[0].id, 0);
     assert_eq!(
       frame.params[0].payload.last(),
       Some(&0u8),
       "bundle id is NUL-terminated"
     );
+    assert_eq!(frame.params[1].id, 1);
+    assert_eq!(&frame.params[1].payload[..], &[0x01]);
     let back: RequestAppLaunch = frame.try_into().unwrap();
     assert_eq!(back, csm);
+  }
+
+  #[test]
+  fn request_app_launch_with_user_alert_round_trips() {
+    let csm = RequestAppLaunch {
+      bundle_id: "com.example.app".into(),
+      launch_method: AppLaunchMethod::WithUserAlert,
+    };
+    let frame: CsmFrame = csm.clone().into();
+    assert_eq!(&frame.params[1].payload[..], &[0x00]);
+    let back: RequestAppLaunch = frame.try_into().unwrap();
+    assert_eq!(back, csm);
+  }
+
+  #[test]
+  fn request_app_launch_rejects_unknown_method_byte() {
+    let frame = CsmFrame {
+      msg_id: 0xEA02,
+      params: vec![
+        CsmParam {
+          id: 0,
+          payload: Bytes::copy_from_slice(b"com.example.app\0"),
+        },
+        CsmParam {
+          id: 1,
+          payload: Bytes::copy_from_slice(&[0x05]),
+        },
+      ],
+    };
+    let err = RequestAppLaunch::try_from(frame).unwrap_err();
+    assert!(matches!(err, CsmDecodeError::ParamDecode { param_id: 1, .. }));
   }
 
   #[test]

@@ -71,8 +71,30 @@ impl Player {
     self.state.read().await.state_reply()
   }
 
+  pub async fn current_artwork_id(&self) -> Option<String> {
+    self.state.read().await.current_artwork_id()
+  }
+
   pub async fn queue_reply(&self) -> PlayerQueueReply {
     self.state.read().await.queue_reply()
+  }
+
+  pub async fn apply_transport_intent(&self, playing: bool) -> PlayerResult<()> {
+    let (state_reply, queue_reply) = {
+      let mut guard = self.state.write().await;
+      guard.set_transport_intent(playing);
+      (guard.state_reply(), guard.queue_reply())
+    };
+    self.broadcast_snapshot(state_reply, queue_reply).await
+  }
+
+  pub async fn apply_seek_intent(&self, position_ms: u32) -> PlayerResult<()> {
+    let (state_reply, queue_reply) = {
+      let mut guard = self.state.write().await;
+      guard.set_seek_intent(position_ms);
+      (guard.state_reply(), guard.queue_reply())
+    };
+    self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
   async fn broadcast_snapshot(&self, state: PlayerStateReply, queue: PlayerQueueReply) -> PlayerResult<()> {

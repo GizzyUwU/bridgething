@@ -4,6 +4,7 @@
 #
 #   - libusb-1.0, libdbus-1, pkg-config: required by bluer + adapter-node
 #     transitive deps
+#   - libasound2-dev: alsa-sys for the in-daemon mic capture surface
 #   - libswupdate.so.0.1: built here from the vendored swupdate submodule
 #     (just the IPC source files, no Kconfig - pure libc + pthread). The
 #     resulting .so satisfies `-lswupdate` at link time. At runtime on a
@@ -26,6 +27,7 @@ RUN dpkg --add-architecture arm64 && \
     apt-get install --assume-yes --no-install-recommends \
       libusb-1.0-0-dev:arm64 \
       libdbus-1-dev:arm64 \
+      libasound2-dev:arm64 \
       pkg-config:arm64 && \
     rm -rf /var/lib/apt/lists/*
 

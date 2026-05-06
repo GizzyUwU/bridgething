@@ -71,7 +71,10 @@ impl TelephonyManager {
 
   pub async fn apply_iap2_call_state(&self, update: Iap2CallStateUpdate) -> Result<(), TelephonyError> {
     let Some(call_id) = update.call_uuid.clone() else {
-      tracing::warn!(?update, "iap2 call-state update without CallUUID; ignoring");
+      tracing::debug!(
+        ?update,
+        "iap2 call-state update without CallUUID (no active call snapshot)"
+      );
       return Ok(());
     };
 

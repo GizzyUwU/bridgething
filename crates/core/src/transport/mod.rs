@@ -76,12 +76,18 @@ impl TransportController {
   }
 
   pub async fn play(&self) -> TransportResult<()> {
+    if let Err(err) = self.player.apply_transport_intent(true).await {
+      tracing::warn!(?err, "transport play: failed to broadcast optimistic intent");
+    }
     self
       .dispatch_player("play", BridgeToGatewayPlayerMsgCommand::Resume, hid_bit::PLAY_PAUSE)
       .await
   }
 
   pub async fn pause(&self) -> TransportResult<()> {
+    if let Err(err) = self.player.apply_transport_intent(false).await {
+      tracing::warn!(?err, "transport pause: failed to broadcast optimistic intent");
+    }
     self
       .dispatch_player("pause", BridgeToGatewayPlayerMsgCommand::Pause, hid_bit::PLAY_PAUSE)
       .await
@@ -169,6 +175,9 @@ impl TransportController {
 
   pub async fn seek_to(&self, position_ms: u32) -> TransportResult<()> {
     if self.companion_owns_playback() {
+      if let Err(err) = self.player.apply_seek_intent(position_ms).await {
+        tracing::warn!(?err, "transport seek_to: failed to broadcast optimistic intent");
+      }
       return self
         .send_player(BridgeToGatewayPlayerMsgCommand::SeekTo(GatewaySeekTo { position_ms }))
         .await;
@@ -177,6 +186,9 @@ impl TransportController {
     if snapshot.set_elapsed_time_available == Some(false) {
       tracing::warn!("transport seek_to({position_ms}): foreground app refuses absolute seek; ignoring");
       return Ok(());
+    }
+    if let Err(err) = self.player.apply_seek_intent(position_ms).await {
+      tracing::warn!(?err, "transport seek_to: failed to broadcast optimistic intent");
     }
     self
       .send_iap2_now_playing(NowPlayingCommand {
@@ -208,6 +220,10 @@ impl TransportController {
       .is_authoritative(CompanionAuthorityScope::NowPlayingPlayback)
   }
 
+  fn companion_owns_volume(&self) -> bool {
+    self.authority.is_authoritative(CompanionAuthorityScope::Volume)
+  }
+
   /// Common path for player verbs that map cleanly to both a companion
   /// gateway variant and a single HID press.
   async fn dispatch_player(
@@ -224,21 +240,17 @@ impl TransportController {
     self.send_iap2(HidCommand::Pulse(hid_mask)).await
   }
 
-  /// Common path for audio verbs (volume, mute). Audio is companion-side
-  /// only since the device has no speakers; the iAP2 HID fallback is the
-  /// AVRCP-via-HID path the iPhone honors regardless of who owns
-  /// `NowPlayingPlayback`.
   async fn dispatch_audio(
     &self,
     verb: &str,
     companion_msg: BridgeToGatewayAudioMsgCommand,
     hid_mask: u8,
   ) -> TransportResult<()> {
-    if self.companion_owns_playback() {
+    if self.companion_owns_volume() {
       tracing::debug!("transport {verb}: routing to companion (audio)");
       return self.send_audio(companion_msg).await;
     }
-    tracing::debug!("transport {verb}: routing to iAP2 HID");
+    tracing::debug!("transport {verb}: routing to iAP2 HID (best-effort)");
     self.send_iap2(HidCommand::Pulse(hid_mask)).await
   }
 

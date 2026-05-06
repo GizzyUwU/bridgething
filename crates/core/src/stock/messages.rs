@@ -31,17 +31,10 @@ pub async fn broadcast_stock_connection(
     .await?;
   bus.broadcast_stock(StockConfigurationSend::default()).await?;
 
-  let snapshot = capabilities.snapshot();
-  let connection_type = match snapshot.network.kind {
+  let connection_type = match capabilities.snapshot().network.kind {
     NetworkKind::Wifi | NetworkKind::Ethernet => StockConnectionType::Wlan,
     NetworkKind::Cellular => StockConnectionType::FourG,
-    NetworkKind::Unknown => {
-      if snapshot.gateway.is_some() {
-        StockConnectionType::Wlan
-      } else {
-        StockConnectionType::None
-      }
-    }
+    NetworkKind::Unknown => StockConnectionType::Wlan,
   };
   bus
     .broadcast_stock(StockInterAppSend {
@@ -49,8 +42,8 @@ pub async fn broadcast_stock_connection(
       data: StockInterAppSendPayload::SessionState {
         connection_type,
         is_in_forced_offline_mode: false,
-        is_logged_in: snapshot.gateway.is_some(),
-        is_offline: snapshot.gateway.is_none(),
+        is_logged_in: true,
+        is_offline: false,
       },
     })
     .await?;

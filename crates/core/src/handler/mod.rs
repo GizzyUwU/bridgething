@@ -7,8 +7,13 @@ pub use gateway::GatewayHandler;
 pub use iap2::Iap2EventRouter;
 
 use crate::{
-  asset::AssetError, bluetooth::BluetoothError, impl_broadcast_failure_from, net::WSError, player::PlayerError,
-  state::StateError, transport::TransportError,
+  asset::AssetError,
+  bluetooth::BluetoothError,
+  impl_broadcast_failure_from,
+  net::WSError,
+  player::PlayerError,
+  state::{AudioError, StateError},
+  transport::TransportError,
 };
 
 type HandlerResult = Result<(), HandlerError>;
@@ -31,6 +36,8 @@ pub enum HandlerError {
   Asset(#[from] AssetError),
   #[error(transparent)]
   Transport(#[from] TransportError),
+  #[error(transparent)]
+  Audio(#[from] AudioError),
 }
 
 impl_broadcast_failure_from!(HandlerError);

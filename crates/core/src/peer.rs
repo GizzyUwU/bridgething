@@ -12,12 +12,21 @@
 //! stock webapp keep working without it understanding the new state
 //! model.
 //!
+//! `PairingResult{success=true}` is fired separately via
+//! `confirm_pairing(mac)`, gated on a prior `note_pin_shown(mac)` from
+//! the BlueZ agent. This decouples PIN-clearing from `paired`
+//! transitions because BlueZ does not reliably toggle `Paired` during
+//! re-pair on a cached device.
+//!
 //! Internally a `RwLock<HashMap>` for now. The migration path to a
 //! dedicated mpsc-driven actor is mechanical and intentional - move
 //! the map behind a command channel, every public method becomes a
 //! oneshot send/await, no caller-side change.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::Arc,
+};
 
 use bluer::Address;
 use libbridgething::{
@@ -48,6 +57,14 @@ pub struct PeerTracker {
 #[derive(Debug)]
 struct Inner {
   peers: RwLock<HashMap<Address, Peer>>,
+  // Set of peer addresses for which a pairing PIN is currently being
+  // displayed by the stock webapp. Membership means "the next bonding-
+  // completion signal for this peer should fire `PairingResult` to
+  // clear that PIN." Decoupling PIN clearing from `paired` transitions
+  // is required because BlueZ does not always emit Paired=false during
+  // re-pair on a cached device, so a transition-only trigger misses
+  // the second pairing of the same MAC.
+  pin_pending: RwLock<HashSet<Address>>,
   bus: WireEventBus,
   player: Player,
   capabilities: CapabilitiesRegistry,
@@ -66,6 +83,7 @@ impl PeerTracker {
     Self {
       inner: Arc::new(Inner {
         peers: RwLock::new(HashMap::new()),
+        pin_pending: RwLock::new(HashSet::new()),
         bus,
         player,
         capabilities,
@@ -177,6 +195,7 @@ impl PeerTracker {
   }
 
   pub async fn remove(&self, mac: Address) -> PeerResult<()> {
+    self.inner.pin_pending.write().await.remove(&mac);
     let diff = {
       let mut peers = self.inner.peers.write().await;
       let prior = peers.remove(&mac);
@@ -186,6 +205,25 @@ impl PeerTracker {
       Diff::compute(mac, prior, None, &peers)
     };
     self.broadcast_diff(diff).await
+  }
+
+  pub async fn note_pin_shown(&self, mac: Address) {
+    self.inner.pin_pending.write().await.insert(mac);
+  }
+
+  pub async fn confirm_pairing(&self, mac: Address) -> PeerResult<()> {
+    let was_pending = self.inner.pin_pending.write().await.remove(&mac);
+    if !was_pending {
+      return Ok(());
+    }
+    self
+      .inner
+      .bus
+      .broadcast(
+        BridgeToClientBluetoothMsg::PairingResult(BluetoothPairingResult { success: true }),
+        MsgMeta::Event,
+      )
+      .await
   }
 
   async fn broadcast_diff(&self, diff: Diff) -> PeerResult<()> {
@@ -223,8 +261,9 @@ impl PeerTracker {
       }
     }
 
-    if diff.paired_transitioned_up
-      && let Err(errs) = self
+    if diff.paired_transitioned_up {
+      self.inner.pin_pending.write().await.remove(&diff.mac);
+      if let Err(errs) = self
         .inner
         .bus
         .broadcast(
@@ -232,8 +271,9 @@ impl PeerTracker {
           MsgMeta::Event,
         )
         .await
-    {
-      errors.extend(errs);
+      {
+        errors.extend(errs);
+      }
     }
 
     if diff.useful_link_transitioned_up {
@@ -349,6 +389,7 @@ impl PeerTracker {
 }
 
 struct Diff {
+  mac: Address,
   snapshot: HashMap<String, Peer>,
   paired_transitioned_up: bool,
   paired_set_changed: bool,
@@ -394,6 +435,7 @@ impl Diff {
       .collect();
 
     Self {
+      mac,
       snapshot,
       paired_transitioned_up: !was_paired && is_paired,
       paired_set_changed: was_paired != is_paired,

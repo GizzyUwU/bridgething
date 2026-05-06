@@ -97,9 +97,12 @@ pub enum PowerProvidingCapability {
   Advanced = 2,
 }
 
-/// `MatchAction` for an EA protocol entry; signals whether iOS should
-/// prompt to launch the matching app, launch silently, or do nothing.
-/// Values mirror cleanroom doc `protocol/30_control_session.md`.
+/// `MatchAction` for an EA protocol entry. Controls the iOS App
+/// Discovery / "Find compatible app for this accessory" flow that runs
+/// when no app declaring this protocol is installed; does NOT affect
+/// the per-app permission prompt iOS shows when an installed matching
+/// app is launched (that's `RequestAppLaunch.launch_method`). Values
+/// mirror cleanroom doc `protocol/30_control_session.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum EaProtocolMatchAction {
@@ -126,6 +129,45 @@ impl EaProtocol {
     self.name.encode_field(1, &mut params);
     (self.match_action as u8).encode_field(2, &mut params);
     self.native_transport_component_identifier.encode_field(3, &mut params);
+    encode_param_block(params)
+  }
+}
+
+/// `HIDComponentFunction` enum values for the function field in an
+/// `iAP2HIDComponent` group. Bridgething only emits `MediaPlaybackRemote`
+/// today; iAP2 supports several other functions for keyboards, gamepads,
+/// AssistiveTouch, and headsets, but none are wired in this codebase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HidComponentFunction {
+  Keyboard = 0,
+  MediaPlaybackRemote = 1,
+  AssistiveTouch = 2,
+  GamepadDeviceHolding = 4,
+  Gamepad = 6,
+  AssistiveSwitchControl = 7,
+  Headset = 8,
+  BrailleDisplayKeyboard = 10,
+}
+
+/// One iAP2 HID component entry. Encoded as a group-typed param (id 18
+/// inside `IdentificationInformation`). Required for `StartHID` /
+/// `AccessoryHIDReport` traffic to be honored by iOS — without this
+/// declaration, the iPhone parses the descriptor but silently drops every
+/// report we send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HidComponent {
+  pub id: u16,
+  pub name: String,
+  pub function: HidComponentFunction,
+}
+
+impl HidComponent {
+  fn into_group(self) -> Bytes {
+    let mut params: Vec<CsmParam> = Vec::with_capacity(3);
+    self.id.encode_field(0, &mut params);
+    self.name.encode_field(1, &mut params);
+    (self.function as u8).encode_field(2, &mut params);
     encode_param_block(params)
   }
 }
@@ -183,6 +225,7 @@ pub struct IdentificationConfig {
   pub current_language: String,
   pub supported_languages: Vec<String>,
   pub bluetooth_transport_components: Vec<BluetoothTransportComponent>,
+  pub hid_components: Vec<HidComponent>,
   pub additional_messages_sent_by_accessory: Vec<u16>,
   pub additional_messages_received_from_accessory: Vec<u16>,
 }
@@ -222,10 +265,15 @@ impl IdentificationConfig {
       current_language: "en".into(),
       supported_languages: vec!["en".into()],
       bluetooth_transport_components: vec![BluetoothTransportComponent {
-        id: 1,
+        id: super::hid::TRANSPORT_COMPONENT_ID,
         name: "Bridgething BT".into(),
         supports_iap2_connection: true,
         mac: args.bt_mac,
+      }],
+      hid_components: vec![HidComponent {
+        id: super::hid::TRANSPORT_COMPONENT_ID,
+        name: "Bridgething Transport".into(),
+        function: HidComponentFunction::MediaPlaybackRemote,
       }],
       additional_messages_sent_by_accessory: vec![],
       additional_messages_received_from_accessory: vec![],
@@ -300,6 +348,10 @@ impl From<IdentificationInformation> for CsmFrame {
       bt.into_group().encode_field(17, &mut params);
     }
 
+    for hid in cfg.hid_components {
+      hid.into_group().encode_field(18, &mut params);
+    }
+
     Self {
       msg_id: IdentificationInformation::CSM_MSG_ID,
       params,
@@ -347,6 +399,11 @@ mod tests {
         name: "Bridgething BT".into(),
         supports_iap2_connection: true,
         mac: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
+      }],
+      hid_components: vec![HidComponent {
+        id: crate::csm::hid::TRANSPORT_COMPONENT_ID,
+        name: "Bridgething Transport".into(),
+        function: HidComponentFunction::MediaPlaybackRemote,
       }],
       additional_messages_sent_by_accessory: vec![],
       additional_messages_received_from_accessory: vec![],
@@ -410,6 +467,7 @@ mod tests {
     assert!(ids.contains(&12));
     assert!(ids.contains(&13));
     assert!(ids.contains(&17));
+    assert!(ids.contains(&18));
     assert!(!ids.contains(&10));
     assert!(!ids.contains(&11));
   }

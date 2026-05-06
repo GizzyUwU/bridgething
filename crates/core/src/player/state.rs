@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
   PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, Track,
@@ -5,6 +7,9 @@ use libbridgething::{
 };
 
 use crate::authority::AuthorityRegistry;
+
+const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
+const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 
 /// Which producer fed an inbound `NowPlayingUpdate`. The merge stage
 /// uses this to route the partial fields into the right source-snapshot
@@ -29,6 +34,7 @@ pub struct PlayerState {
   pub context_title: String,
   pub context_id: Option<String>,
 
+  position_anchor: Option<Instant>,
   pub position_ms: usize,
   pub playback_speed: f64,
 
@@ -42,6 +48,20 @@ pub struct PlayerState {
   companion_playback: PlaybackUpdate,
 
   iap2_queue: Vec<QueueItem>,
+
+  transport_intent: Option<TransportIntent>,
+  seek_intent: Option<SeekIntent>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TransportIntent {
+  playing: bool,
+  expires: Instant,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SeekIntent {
+  expires: Instant,
 }
 
 impl PlayerState {
@@ -55,6 +75,7 @@ impl PlayerState {
       context_id: None,
 
       position_ms: 0,
+      position_anchor: None,
       playback_speed: 1.0,
 
       track: None,
@@ -67,7 +88,48 @@ impl PlayerState {
       companion_playback: PlaybackUpdate::default(),
 
       iap2_queue: Vec::new(),
+
+      transport_intent: None,
+      seek_intent: None,
     }
+  }
+
+  pub(crate) fn set_transport_intent(&mut self, playing: bool) {
+    self.position_ms = self.current_position_ms();
+    self.position_anchor = Some(Instant::now());
+    self.playing = playing;
+    self.transport_intent = Some(TransportIntent {
+      playing,
+      expires: Instant::now() + TRANSPORT_INTENT_WINDOW,
+    });
+  }
+
+  fn active_transport_intent(&self) -> Option<bool> {
+    let intent = self.transport_intent?;
+    (Instant::now() < intent.expires).then_some(intent.playing)
+  }
+
+  pub(crate) fn set_seek_intent(&mut self, position_ms: u32) {
+    self.position_ms = position_ms as usize;
+    self.position_anchor = Some(Instant::now());
+    self.seek_intent = Some(SeekIntent {
+      expires: Instant::now() + SEEK_INTENT_WINDOW,
+    });
+  }
+
+  fn current_position_ms(&self) -> usize {
+    if !self.playing {
+      return self.position_ms;
+    }
+    let Some(anchor) = self.position_anchor else {
+      return self.position_ms;
+    };
+    let elapsed = Instant::now().saturating_duration_since(anchor).as_millis() as usize;
+    self.position_ms.saturating_add(elapsed)
+  }
+
+  fn seek_intent_active(&self) -> bool {
+    self.seek_intent.is_some_and(|i| Instant::now() < i.expires)
   }
 
   pub(crate) fn replace_iap2_queue(&mut self, items: Vec<QueueItem>) {
@@ -87,6 +149,11 @@ impl PlayerState {
     };
 
     if let Some(media) = media_item {
+      if let Some(ref new_pid) = media.persistent_id
+        && meta_target.persistent_id.as_ref() != Some(new_pid)
+      {
+        *meta_target = MediaItemUpdate::default();
+      }
       accumulate_media(meta_target, media);
     }
     if let Some(play) = playback {
@@ -259,11 +326,32 @@ impl PlayerState {
     }
     self.track = Some(track);
 
+    let mut accept_position = true;
     if let Some(playing) = playback.playing {
-      self.playing = playing;
+      match self.active_transport_intent() {
+        Some(expected) if playing == expected => {
+          self.playing = playing;
+          self.transport_intent = None;
+        }
+        Some(_) => {
+          accept_position = false;
+        }
+        None => {
+          self.playing = playing;
+        }
+      }
+    } else if self.active_transport_intent().is_some() {
+      accept_position = false;
     }
-    if let Some(position) = playback.position_ms {
-      self.position_ms = position as usize;
+    if accept_position && let Some(position) = playback.position_ms {
+      if self.seek_intent_active() {
+        // Stale pre-seek position from iOS; hold the optimistic target
+        // until the window closes or iOS catches up on the next bump.
+      } else {
+        self.seek_intent = None;
+        self.position_ms = position as usize;
+        self.position_anchor = Some(Instant::now());
+      }
     }
     if let Some(shuffle) = playback.shuffle {
       self.options.shuffle = shuffle;
@@ -288,14 +376,14 @@ impl PlayerState {
     let merged_meta = self.merged_metadata();
     PlayerStateReply {
       state: WirePlayerState {
-        track: self.track.as_ref().map(|t| build_media_item(t, &merged_meta)),
+        track: self.effective_track().map(|t| build_media_item(t, &merged_meta)),
         playback: Playback {
           state: if self.playing {
             PlaybackState::Playing
           } else {
             PlaybackState::Paused
           },
-          position_ms: u32::try_from(self.position_ms).unwrap_or(u32::MAX),
+          position_ms: u32::try_from(self.current_position_ms()).unwrap_or(u32::MAX),
           shuffle: self.options.shuffle,
           shuffle_mode: merged.shuffle_mode,
           repeat: self.options.repeat,
@@ -317,14 +405,52 @@ impl PlayerState {
 
   pub fn queue_reply(&self) -> PlayerQueueReply {
     PlayerQueueReply {
+      current: self.current_queue_item(),
       items: self.merged_queue(),
     }
+  }
+
+  pub fn current_artwork_id(&self) -> Option<String> {
+    self.merged_metadata().artwork_id
+  }
+
+  fn effective_track(&self) -> Option<&Track> {
+    let track = self.track.as_ref()?;
+    if track.id.ends_with("0000000000000000") || track.name.is_empty() {
+      return None;
+    }
+    Some(track)
+  }
+
+  fn current_queue_item(&self) -> Option<QueueItem> {
+    let track = self.effective_track()?;
+    let merged = self.merged_metadata();
+    let artwork_id = if track.image_id.is_empty() {
+      None
+    } else {
+      Some(track.image_id.clone())
+    };
+    Some(QueueItem {
+      uri: track.id.clone(),
+      title: merged.title.or_else(|| Some(track.name.clone())),
+      artist: merged
+        .artist
+        .or_else(|| Some(track.artist.name.clone()))
+        .filter(|s| !s.is_empty()),
+      album: merged
+        .album
+        .or_else(|| Some(track.album.name.clone()))
+        .filter(|s| !s.is_empty()),
+      artwork_id,
+      duration_ms: merged.duration_ms.or(Some(track.duration_ms)),
+      persistent_id: Some(track.id.clone()),
+    })
   }
 }
 
 fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
   MediaItem {
-    uri: None,
+    uri: Some(track.id.clone()),
     persistent_id: Some(track.id.clone()),
     title: Some(track.name.clone()),
     album: Some(track.album.name.clone()),

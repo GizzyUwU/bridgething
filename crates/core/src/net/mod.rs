@@ -64,8 +64,8 @@ impl Server {
       .fallback(axum::routing::any(modern_handler))
       .with_state(modern_state);
 
-    let stock_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
-    let modern_listener = TcpListener::bind(format!("127.0.0.1:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
+    let stock_listener = TcpListener::bind(format!("0.0.0.0:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
+    let modern_listener = TcpListener::bind(format!("0.0.0.0:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
     tracing::info!(
       "listening on ports {} (stock) and {} (modern)",
       BRIDGETHING_STOCK_WS_PORT,
@@ -185,14 +185,30 @@ async fn resolve_active_webapp(state: &BridgeThingState) -> Option<PathBuf> {
 }
 
 async fn serve_from_dir(dir: PathBuf, req: Request<Body>) -> Response {
+  let path = req.uri().path().to_owned();
   let svc = ServeDir::new(dir).precompressed_gzip();
   match svc.oneshot(req).await {
-    Ok(resp) => resp.map(Body::new),
+    Ok(mut resp) => {
+      apply_cache_control(&mut resp, &path);
+      resp.map(Body::new)
+    }
     Err(err) => {
       tracing::error!("ServeDir error: {:?}", err);
       (StatusCode::INTERNAL_SERVER_ERROR, "serve error").into_response()
     }
   }
+}
+
+fn apply_cache_control<B>(resp: &mut axum::http::Response<B>, path: &str) {
+  let value = if path.starts_with("/assets/") {
+    "public, max-age=31536000, immutable"
+  } else {
+    "no-cache"
+  };
+  resp.headers_mut().insert(
+    axum::http::header::CACHE_CONTROL,
+    axum::http::HeaderValue::from_static(value),
+  );
 }
 
 pub type WSResult<T> = Result<T, WSError>;

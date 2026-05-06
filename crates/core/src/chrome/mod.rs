@@ -3,7 +3,7 @@ use std::{
   time::Duration,
 };
 
-use headless_chrome::{Browser, Tab};
+use headless_chrome::{Browser, Tab, protocol::cdp::Network};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
@@ -41,6 +41,7 @@ type ChromeRx = tokio::sync::mpsc::Receiver<ChromeCommand>;
 pub enum ChromeCommand {
   Navigate(String),
   Reload,
+  ClearHttpCache,
 }
 
 #[derive(Debug)]
@@ -118,6 +119,7 @@ impl ChromeWorker {
           match message {
             ChromeCommand::Navigate(url) => self.handle_navigate(url).await,
             ChromeCommand::Reload => self.handle_reload().await,
+            ChromeCommand::ClearHttpCache => self.handle_clear_http_cache().await,
           }
         }
         _ = self.cancel_token.cancelled() => {
@@ -139,6 +141,15 @@ impl ChromeWorker {
     tracing::debug!("navigating to {}", url);
     self
       .with_first_tab("navigate", |tab| tab.navigate_to(&url).map(|_| ()))
+      .await;
+  }
+
+  async fn handle_clear_http_cache(&mut self) {
+    tracing::debug!("clearing chromium http cache");
+    self
+      .with_first_tab("clear-http-cache", |tab| {
+        tab.call_method(Network::ClearBrowserCache(None)).map(|_| ())
+      })
       .await;
   }
 

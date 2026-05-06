@@ -29,14 +29,14 @@ use asset::AssetCache;
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothDeps, BluetoothManager};
 use capabilities::CapabilitiesRegistry;
-use chrome::ChromeCommand;
 use handler::{ClientHandler, GatewayHandler, Iap2EventRouter};
 use mic::{MicConfig, MicManager};
 use ota::OtaOrchestrator;
 use peer::PeerTracker;
 use player::Player;
 use state::{
-  AppState, AssembledState, DeviceStore, KvStore, MetaStore, RouteTable, TelephonyManager, TimeManager, WebappRegistry,
+  AppState, AssembledState, AudioManager, DeviceStore, KvStore, MetaStore, RouteTable, TelephonyManager, TimeManager,
+  WebappRegistry,
 };
 use systemd::Notify;
 use transfer::ChunkedTransfer;
@@ -94,11 +94,6 @@ async fn main() {
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
 
-  let is_restart = check_and_mark_restart();
-  if is_restart && let Err(e) = chrome.send(ChromeCommand::Reload).await {
-    tracing::warn!("failed to queue chrome reload on restart: {:?}", e);
-  }
-
   notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
   let bluetooth::BluetoothInit {
@@ -118,6 +113,7 @@ async fn main() {
 
   let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2_telephony_handle());
   let time = TimeManager::new(bus.clone());
+  let audio = AudioManager::new(authority.clone(), bus.clone());
 
   let (als, als_handle) = AlsManager::init(bus.clone(), AlsConfig::default())
     .await
@@ -141,6 +137,7 @@ async fn main() {
     peers,
     telephony,
     time,
+    audio,
     als,
     mic,
     devices,
@@ -254,23 +251,4 @@ fn trigger_reboot() {
       tracing::error!("ota reboot failed: {err}");
     }
   });
-}
-
-/// Marks the volatile-runtime path that signals "bridgething has run
-/// at least once during the current boot." Returns whether the marker
-/// was already present (i.e. this is a restart, not the first start
-/// since boot). Always leaves the marker in place for the next start.
-fn check_and_mark_restart() -> bool {
-  let path = paths::restart_marker_path();
-  let was_restart = path.exists();
-  if let Some(parent) = path.parent()
-    && let Err(e) = std::fs::create_dir_all(parent)
-  {
-    tracing::warn!("failed to create runtime dir {}: {}", parent.display(), e);
-    return false;
-  }
-  if let Err(e) = std::fs::write(&path, b"") {
-    tracing::warn!("failed to write restart marker {}: {}", path.display(), e);
-  }
-  was_restart
 }

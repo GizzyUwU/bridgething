@@ -56,6 +56,13 @@ impl WebappHandler {
   async fn switch_to(&self, req: WebappSwitchTo) -> HandlerResult {
     let WebappSwitchTo { id } = req;
     if self.handle.state.webapps.resolve(id).await.is_none() {
+      tracing::debug!(
+        "({:?}) webapp {id} not in registry; rescanning disk before refusing",
+        &self.handle.address
+      );
+      self.handle.state.webapps.rescan().await;
+    }
+    if self.handle.state.webapps.resolve(id).await.is_none() {
       tracing::warn!("({:?}) refusing switch to unknown webapp {id}", &self.handle.address);
       self
         .handle

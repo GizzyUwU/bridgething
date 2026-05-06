@@ -271,6 +271,8 @@ pub enum StockInterAppSendPayload {
     data: Option<serde_json::Value>,
     errors: Option<Vec<GraphqlError>>,
   },
+  #[serde(rename = "com.spotify.superbird.volume.volume_state")]
+  VolumeState { volume: f64, volume_steps: u8 },
 }
 
 #[serde_with::skip_serializing_none]
@@ -499,7 +501,7 @@ fn library_item_to_child(item: LibraryItem) -> ChildItem {
 pub fn player_queue_to_stock(reply: PlayerQueueReply) -> StockInterAppSendPayload {
   StockInterAppSendPayload::PlayerQueue {
     next: reply.items.into_iter().map(queue_item_to_stock).collect(),
-    current: StockQueueTrack::default(),
+    current: reply.current.map(queue_item_to_stock).unwrap_or_default(),
     previous: vec![],
   }
 }

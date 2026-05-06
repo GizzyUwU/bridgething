@@ -18,6 +18,7 @@ use crate::{
   transfer::{ChunkedTransfer, TransferError},
 };
 
+mod audio;
 pub mod meta;
 pub mod routes;
 pub mod storage;
@@ -25,6 +26,7 @@ mod telephony;
 mod time;
 mod webapps;
 
+pub use audio::{AudioError, AudioManager};
 pub use routes::RouteTable;
 pub use storage::{DeviceStore, KvStore, MetaStore};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
@@ -49,6 +51,7 @@ pub struct AppState {
   pub peers: PeerTracker,
   pub telephony: TelephonyManager,
   pub time: TimeManager,
+  pub audio: AudioManager,
   pub als: AlsManager,
   pub mic: MicManager,
   pub devices: DeviceStore,
@@ -81,6 +84,7 @@ impl AppState {
       peers,
       telephony,
       time,
+      audio,
       als,
       mic,
       devices,
@@ -108,6 +112,7 @@ impl AppState {
       peers,
       telephony,
       time,
+      audio,
       als,
       mic,
       devices,
@@ -159,6 +164,7 @@ pub struct AssembledState {
   pub peers: PeerTracker,
   pub telephony: TelephonyManager,
   pub time: TimeManager,
+  pub audio: AudioManager,
   pub als: AlsManager,
   pub mic: MicManager,
   pub devices: DeviceStore,

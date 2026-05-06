@@ -18,22 +18,30 @@ impl AudioHandler {
   }
 
   pub async fn handle(self, msg: GatewayToBridgeAudioMsgEvent) -> HandlerResult {
-    let event = match msg {
+    match msg {
       GatewayToBridgeAudioMsgEvent::TtsStarted(started) => {
-        BridgeToClientAudioMsgEvent::TtsStarted(ClientTtsStarted { id: started.id })
+        let event = BridgeToClientAudioMsgEvent::TtsStarted(ClientTtsStarted { id: started.id });
+        self.handle.state.bus.broadcast_event(event).await?;
       }
-      GatewayToBridgeAudioMsgEvent::TtsEnded(ended) => BridgeToClientAudioMsgEvent::TtsEnded(ClientTtsEnded {
-        id: ended.id,
-        completed: ended.completed,
-      }),
+      GatewayToBridgeAudioMsgEvent::TtsEnded(ended) => {
+        let event = BridgeToClientAudioMsgEvent::TtsEnded(ClientTtsEnded {
+          id: ended.id,
+          completed: ended.completed,
+        });
+        self.handle.state.bus.broadcast_event(event).await?;
+      }
       GatewayToBridgeAudioMsgEvent::VolumeChanged(vol) => {
-        BridgeToClientAudioMsgEvent::VolumeChanged(ClientVolumeChanged {
-          level: vol.level,
-          muted: vol.muted,
-        })
+        self
+          .handle
+          .state
+          .audio
+          .apply_companion(ClientVolumeChanged {
+            level: vol.level,
+            muted: vol.muted,
+          })
+          .await?;
       }
-    };
-    self.handle.state.bus.broadcast_event(event).await?;
+    }
     Ok(())
   }
 }

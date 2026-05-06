@@ -1,6 +1,7 @@
-use libbridgething::{DeviceType, PeerCompanionStatus, gateway::GatewayToBridgeCapabilitiesMsgEvent};
+use libbridgething::{Device, DeviceType, PeerCompanionStatus, gateway::GatewayToBridgeCapabilitiesMsgEvent};
 
 use super::{HandlerResult, MsgHandle};
+use crate::bluetooth::GatewayType;
 
 pub struct CapabilitiesHandler {
   handle: MsgHandle,
@@ -16,14 +17,29 @@ impl CapabilitiesHandler {
       GatewayToBridgeCapabilitiesMsgEvent::Announce(caps) => {
         if let Some(mac) = self.handle.address {
           let device_type = device_type_from_os(&caps.gateway.os_name);
-          if let Err(err) = self
-            .handle
-            .bluetooth
-            .profile_man
-            .upsert_paired_device(mac, device_type)
-            .await
-          {
-            tracing::warn!(?err, "failed to upsert paired device on capabilities announce");
+          match self.handle.protocol {
+            GatewayType::Network => {
+              let device = Device {
+                name: caps.gateway.name.clone(),
+                device_type,
+                mac: mac.to_string(),
+                default: false,
+              };
+              if let Err(err) = self.handle.state.peers.upsert(mac, device).await {
+                tracing::warn!(?err, "failed to upsert synthetic network peer on capabilities announce");
+              }
+            }
+            GatewayType::Rfcomm | GatewayType::Iap2Ea => {
+              if let Err(err) = self
+                .handle
+                .bluetooth
+                .profile_man
+                .upsert_paired_device(mac, device_type)
+                .await
+              {
+                tracing::warn!(?err, "failed to upsert paired device on capabilities announce");
+              }
+            }
           }
           let _ = self
             .handle

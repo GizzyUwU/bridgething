@@ -27,8 +27,8 @@ use crate::{
   csm::{
     CsmFrame,
     hid::{
-      DeviceHIDReport, HIDComponentUpdate, StartHID, StartNativeHID, StopHID, TRANSPORT_COMPONENT_ID,
-      TRANSPORT_DESCRIPTOR, transport_report,
+      DeviceHIDReport, HIDComponentUpdate, PRODUCT_ID, StartHID, StartNativeHID, StopHID, TRANSPORT_COMPONENT_ID,
+      TRANSPORT_DESCRIPTOR, VENDOR_ID, transport_report,
     },
   },
   error::Result,
@@ -131,6 +131,8 @@ impl HidFlow {
       tracing::debug!("iap2 hid: sending StartHID");
       let start = StartHID {
         component_id: TRANSPORT_COMPONENT_ID,
+        vendor_id: VENDOR_ID,
+        product_id: PRODUCT_ID,
         descriptor: Bytes::from_static(TRANSPORT_DESCRIPTOR),
       };
       send_csm(start, link_command_tx).await?;

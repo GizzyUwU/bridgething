@@ -154,7 +154,7 @@ export type CommunicationsState = {
  * Unknown scopes arriving at an older daemon are stored opaquely and
  * ignored.
  */
-export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback';
+export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback' | 'volume';
 
 /**
  * One key/value pair as exposed by config read APIs. `value` is always a

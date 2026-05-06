@@ -128,12 +128,23 @@ impl FileTransferFlow {
   }
 
   async fn handle_setup(&mut self, id: u8, mut rest: Bytes) -> Result<()> {
-    if rest.len() < 11 {
-      tracing::warn!(transfer_id = id, len = rest.len(), "file-transfer: short Setup payload");
-      return Ok(());
-    }
-    let declared_size = rest.get_u64() as usize;
-    let _reserved = rest.get_u8();
+    // Stock-observed traffic carries an extra reserved byte between size
+    // and type (`[u64 size][u8 reserved][u16 type]`, 11 bytes). Modern
+    // iOS has been observed shipping the 10-byte form without the reserved
+    // byte (`[u64 size][u16 type]`). Accept both rather than dropping the
+    // shorter shape on the floor.
+    let declared_size = match rest.len() {
+      11 => {
+        let size = rest.get_u64() as usize;
+        let _reserved = rest.get_u8();
+        size
+      }
+      10 => rest.get_u64() as usize,
+      _ => {
+        tracing::warn!(transfer_id = id, len = rest.len(), "file-transfer: short Setup payload");
+        return Ok(());
+      }
+    };
     let file_type = rest.get_u16();
 
     tracing::debug!(transfer_id = id, declared_size, file_type, "file-transfer: Setup");

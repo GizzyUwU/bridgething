@@ -65,6 +65,7 @@ impl GatewayHandler {
 
     let InboundGatewayMessage {
       address,
+      protocol,
       msg: GatewayToBridgeMsg { id, meta, data },
       ..
     } = data;
@@ -78,7 +79,7 @@ impl GatewayHandler {
       return Ok(());
     }
 
-    let handle = MsgHandle::new(self, id, meta, address);
+    let handle = MsgHandle::new(self, id, meta, address, protocol);
 
     match data {
       GatewayToBridgeMsgData::Asset(asset_msg) => {

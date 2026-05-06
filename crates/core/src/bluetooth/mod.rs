@@ -113,8 +113,11 @@ impl BluetoothManager {
     let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
 
     // start stream BEFORE device reconnection attempts
-    let _adapter_event_handle =
-      adapter::AdapterEventStream(Box::new(adapter.events().await?)).spawn(profile_man.clone());
+    let _adapter_event_handle = adapter::AdapterEventStream {
+      stream: Box::new(adapter.events().await?),
+      adapter: adapter.clone(),
+    }
+    .spawn(profile_man.clone());
 
     tracing::debug!("setting up bluetooth gateway manager");
     let gateway_man = GatewayMan::init(adapter.clone(), &session, &deps, tx.clone()).await?;

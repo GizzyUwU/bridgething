@@ -42,8 +42,8 @@ use crate::{
   csm::{
     CsmFrame,
     external_accessory::{
-      EaSessionStatus, RequestAppLaunch, StartExternalAccessoryProtocolSession, StatusExternalAccessoryProtocolSession,
-      StopExternalAccessoryProtocolSession,
+      AppLaunchMethod, EaSessionStatus, RequestAppLaunch, StartExternalAccessoryProtocolSession,
+      StatusExternalAccessoryProtocolSession, StopExternalAccessoryProtocolSession,
     },
   },
   error::Result,
@@ -170,6 +170,7 @@ impl EaFlow {
       send_csm(
         RequestAppLaunch {
           bundle_id: bundle_id.to_string(),
+          launch_method: AppLaunchMethod::WithoutUserAlert,
         },
         link_command_tx,
       )

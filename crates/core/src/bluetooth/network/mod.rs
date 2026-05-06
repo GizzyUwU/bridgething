@@ -37,7 +37,7 @@ use futures::{
   stream::{SplitSink, SplitStream},
 };
 use libbridgething::{
-  BRIDGETHING_NETWORK_GATEWAY_PORT, PeerCompanionStatus, Priority,
+  BRIDGETHING_NETWORK_GATEWAY_PORT, Device, DeviceType, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
   protocol::{encode_bridge_frame, parse_bridge_frame},
   wire::MsgMeta,
@@ -362,7 +362,7 @@ impl NetworkGateway {
               tracing::debug!("network connection closed: {address}");
               self.connections.remove(&address);
               self.peer_owners.unregister(address, GatewayType::Network);
-              let _ = self.peers.set_companion(address, PeerCompanionStatus::None).await;
+              let _ = self.peers.remove(address).await;
             }
             ConnectionMessage::Msg(msg) => {
               let inbound = InboundGatewayMessage::new(Some(address), GatewayType::Network, *msg);
@@ -423,6 +423,13 @@ impl NetworkGateway {
 
     self.connections.insert(address, connection);
     self.peer_owners.register(address, GatewayType::Network);
+    let placeholder = Device {
+      name: remote.to_string(),
+      device_type: DeviceType::Unknown,
+      mac: address.to_string(),
+      default: false,
+    };
+    let _ = self.peers.upsert(address, placeholder).await;
     let _ = self.peers.set_companion(address, PeerCompanionStatus::Pending).await;
   }
 }

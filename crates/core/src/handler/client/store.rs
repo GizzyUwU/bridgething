@@ -37,17 +37,12 @@ impl StorageHandler {
         &self.handle.from
       );
 
-      let payload = if self.handle.state.devices.last().await?.is_some() {
-        "finished"
-      } else {
-        ""
-      }
-      .to_owned();
+      let finished = self.handle.state.devices.last().await?.is_some();
+      let payload = if finished { "finished" } else { "" }.to_owned();
 
       self.handle.send_stock(StockSetupSend::Status { payload }).await?;
 
-      #[cfg(debug_assertions)]
-      {
+      if finished {
         value = Some("finished".to_string());
       }
     }
