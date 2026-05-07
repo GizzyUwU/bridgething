@@ -7,8 +7,8 @@ import Foundation
 /// representation; this wrapper rides as `Data` instead.
 ///
 /// JSON encoders see Codable's standard Data shape (base64 string).
-/// The bridgething JSON path goes through the local websocket — and
-/// the daemon's serde-json emits hyphenated UUID strings there — so
+/// The bridgething JSON path goes through the local websocket - and
+/// the daemon's serde-json emits hyphenated UUID strings there - so
 /// this wrapper is gateway-only by construction (the JSON path doesn't
 /// flow through schema structs that use it).
 @propertyWrapper
@@ -35,7 +35,7 @@ public struct MsgpackUuid: Codable, Sendable, Hashable {
       bytes[8], bytes[9], bytes[10], bytes[11],
       bytes[12], bytes[13], bytes[14], bytes[15]
     )
-    self.wrappedValue = UUID(uuid: tuple)
+    wrappedValue = UUID(uuid: tuple)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -58,7 +58,7 @@ public struct OptionalMsgpackUuid: Codable, Sendable, Hashable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.singleValueContainer()
     if container.decodeNil() {
-      self.wrappedValue = nil
+      wrappedValue = nil
       return
     }
     let data = try container.decode(Data.self)
@@ -75,7 +75,7 @@ public struct OptionalMsgpackUuid: Codable, Sendable, Hashable {
       bytes[8], bytes[9], bytes[10], bytes[11],
       bytes[12], bytes[13], bytes[14], bytes[15]
     )
-    self.wrappedValue = UUID(uuid: tuple)
+    wrappedValue = UUID(uuid: tuple)
   }
 
   public func encode(to encoder: Encoder) throws {

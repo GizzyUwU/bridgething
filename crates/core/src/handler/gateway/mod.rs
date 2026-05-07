@@ -90,7 +90,10 @@ impl GatewayHandler {
           tokio::spawn(async move { AssetHandler::new(handle).handle_request(req).await });
         } else if asset_msg.is_event_variant() {
           let ev = asset_msg.into_event().expect("checked above");
-          tokio::spawn(async move { AssetHandler::new(handle).handle_event(ev).await });
+          // fine to await here - asset events need to arrive in order, and handle_event just forwards
+          if let Err(err) = AssetHandler::new(handle).handle_event(ev).await {
+            tracing::error!(?err, "asset event handler failed");
+          }
         } else if let Some(cmd) = asset_msg.into_command() {
           tokio::spawn(async move { AssetHandler::new(handle).handle_command(cmd).await });
         } else {
@@ -161,7 +164,10 @@ impl GatewayHandler {
           tokio::spawn(async move { SystemHandler::new(handle, ota).handle_request(req).await });
         } else if system_msg.is_event_variant() {
           let ev = system_msg.into_event().expect("checked above");
-          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_event(ev).await });
+          // fine to await here - asset events need to arrive in order, and handle_event just forwards
+          if let Err(err) = SystemHandler::new(handle, ota).handle_event(ev).await {
+            tracing::error!(?err, "system event handler failed");
+          }
         } else if let Some(cmd) = system_msg.into_command() {
           tokio::spawn(async move { SystemHandler::new(handle, ota).handle_command(cmd).await });
         }

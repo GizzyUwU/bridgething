@@ -1,4 +1,4 @@
-//! Notifications surface — modeled on iAP2 Notification family / Apple
+//! Notifications surface - modeled on iAP2 Notification family / Apple
 //! ANCS. Android's richer notification model maps down to this floor.
 //! Two action slots (positive + negative), both optional; reply text
 //! input is out of scope for v1 (Phone surface owns that).
@@ -68,7 +68,7 @@ pub struct NotificationAction {
 
 /// One notification surfaced from the connected companion's notification
 /// center. `id` is companion-stable for the lifetime of the notification
-/// — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+/// - webapps pass it to `invokePositive`/`invokeNegative` and listen for
 /// `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
 /// optional because ANCS treats them as separate attribute fetches.
 #[typeshare]

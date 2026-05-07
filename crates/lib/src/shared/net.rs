@@ -1,4 +1,4 @@
-//! Net surface — webapp HTTP / WebSocket / Stream access proxied
+//! Net surface - webapp HTTP / WebSocket / Stream access proxied
 //! through the connected companion. The Car Thing has no network of
 //! its own; the daemon is a routing layer between webapp surfaces and
 //! the companion's network stack. TLS terminates at the gateway; the
@@ -136,7 +136,7 @@ pub struct StreamEnd {
   pub stream_id: Uuid,
 }
 
-/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// Stream failed mid-flight (or before the first byte). Terminal - the
 /// daemon clears its routing entry. The `error` shape is shared with
 /// `fetch` since the failure modes are identical.
 #[typeshare]

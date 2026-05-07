@@ -1,7 +1,7 @@
 //! Synchronous ALSA capture worker. Lives on a regular OS thread so
 //! the alsa-rs blocking reads stay off the tokio runtime; pushes
 //! captured PCM frames into the manager via a tokio mpsc using
-//! `blocking_send`. The cancel flag is the only graceful-stop path —
+//! `blocking_send`. The cancel flag is the only graceful-stop path -
 //! the worker checks it between frames and on every read error.
 
 use std::{

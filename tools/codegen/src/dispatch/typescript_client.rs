@@ -406,20 +406,20 @@ fn push_module_augmentation(out: &mut String, surfaces: &[Surface]) {
 
 fn push_request_handle_class(out: &mut String, r: &TypedRequestEntry) {
   out.push_str(&format!(
-    "export class {}Handle {{\n  constructor(\n    private readonly _client: BridgethingClient,\n    private readonly _requestId: string,\n  ) {{}}\n\n",
+    "export class {}Handle {{\n  constructor(\n    private readonly _client: BridgethingClient,\n    public readonly requestId: string,\n  ) {{}}\n\n",
     r.request
   ));
   out.push_str(&format!(
-    "  async respond(response: {}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
+    "  async respond(response: {}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this.requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
     r.response, r.surface_disc, r.inner_tag, r.response_disc
   ));
   if let (Some(err_type), Some(err_disc)) = (&r.error, &r.error_disc) {
     out.push_str(&format!(
-      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
+      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this.requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
       r.surface_disc, r.inner_tag, err_disc
     ));
   }
-  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: ClientToBridgeMsg = { id: newUuid(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._client.send(msg);\n  }\n");
+  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: ClientToBridgeMsg = { id: newUuid(), meta: { kind: 'response', data: { requestId: this.requestId } }, data: { type: 'error', data: error } };\n    await this._client.send(msg);\n  }\n");
   out.push_str("}\n\n");
 }
 

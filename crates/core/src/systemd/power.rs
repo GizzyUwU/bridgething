@@ -3,11 +3,13 @@
 //! suid dependency, structured errors, no shell process spawn per
 //! request.
 //!
-//! Two callers today: webapp-driven `Reboot` / `PowerOff` system
-//! commands (`handler::client::system`) and the OTA orchestrator's
-//! `RebootFn` thunk (`main::trigger_reboot`).
+//! Three callers today: webapp-driven `Reboot` / `PowerOff` system
+//! commands (`handler::client::system`), the OTA orchestrator's image
+//! reboot thunk, and the OTA orchestrator's daemon-kind restart thunk
+//! that calls `RestartUnit("bridgething.service")` after the binary
+//! swap.
 //!
-//! On-device gate: the call is short-circuited to a `tracing::warn`
+//! On-device gate: every call is short-circuited to a `tracing::warn`
 //! unless `/etc/superbird` exists. That symlink is written by
 //! `bridgething-init.service` on first boot, so its presence is a
 //! reliable "this is a real Car Thing" signal regardless of debug vs
@@ -25,6 +27,8 @@ use crate::paths::{ON_DEVICE_SENTINEL, is_on_device};
 trait SystemdManager {
   fn reboot(&self) -> zbus::Result<()>;
   fn power_off(&self) -> zbus::Result<()>;
+  fn reset_failed_unit(&self, name: &str) -> zbus::Result<()>;
+  fn restart_unit(&self, name: &str, mode: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +58,14 @@ pub async fn power_off() -> Result<(), PowerError> {
   invoke_power_off().await
 }
 
+pub async fn restart_self() -> Result<(), PowerError> {
+  if !is_on_device() {
+    tracing::warn!("restart_self requested but {ON_DEVICE_SENTINEL} is missing - no-op (off-device safety gate)");
+    return Ok(());
+  }
+  invoke_restart_self().await
+}
+
 #[cfg(feature = "systemd")]
 async fn invoke_reboot() -> Result<(), PowerError> {
   let conn = zbus::Connection::system().await?;
@@ -70,6 +82,20 @@ async fn invoke_power_off() -> Result<(), PowerError> {
   Ok(())
 }
 
+#[cfg(feature = "systemd")]
+async fn invoke_restart_self() -> Result<(), PowerError> {
+  let conn = zbus::Connection::system().await?;
+  let proxy = SystemdManagerProxy::new(&conn).await?;
+  if let Err(err) = proxy.reset_failed_unit("bridgething.service").await {
+    tracing::warn!(
+      ?err,
+      "reset-failed bridgething.service before restart failed (continuing)"
+    );
+  }
+  proxy.restart_unit("bridgething.service", "replace").await?;
+  Ok(())
+}
+
 #[cfg(not(feature = "systemd"))]
 async fn invoke_reboot() -> Result<(), PowerError> {
   Err(PowerError::Disabled)
@@ -77,5 +103,10 @@ async fn invoke_reboot() -> Result<(), PowerError> {
 
 #[cfg(not(feature = "systemd"))]
 async fn invoke_power_off() -> Result<(), PowerError> {
+  Err(PowerError::Disabled)
+}
+
+#[cfg(not(feature = "systemd"))]
+async fn invoke_restart_self() -> Result<(), PowerError> {
   Err(PowerError::Disabled)
 }

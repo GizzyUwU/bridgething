@@ -13,7 +13,7 @@
 //!
 //! Builds one `Plan` per `Protocol` (Gateway, Client) and emits per-
 //! language helper files. The TypeScript emitter has two entry points
-//! (one per protocol — gateway and client are both web/JS-consumable).
+//! (one per protocol - gateway and client are both web/JS-consumable).
 //! Kotlin and Swift emitters target the gateway protocol only (they're
 //! for native mobile apps).
 

@@ -3965,7 +3965,7 @@ extension BridgethingGateway {
 public final class GeoGetOnceHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4004,7 +4004,7 @@ public final class GeoGetOnceHandle: @unchecked Sendable {
 public final class LibraryBrowseRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4043,7 +4043,7 @@ public final class LibraryBrowseRequestHandle: @unchecked Sendable {
 public final class LibrarySearchRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4082,7 +4082,7 @@ public final class LibrarySearchRequestHandle: @unchecked Sendable {
 public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4121,7 +4121,7 @@ public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
 public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4160,7 +4160,7 @@ public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
 public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4199,7 +4199,7 @@ public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
 public final class NetFetchRequestMsgHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4238,7 +4238,7 @@ public final class NetFetchRequestMsgHandle: @unchecked Sendable {
 public final class NetWsOpenHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4277,7 +4277,7 @@ public final class NetWsOpenHandle: @unchecked Sendable {
 public final class PhoneStateGetHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4307,7 +4307,7 @@ public final class PhoneStateGetHandle: @unchecked Sendable {
 public final class OtaAssetRangeHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4346,7 +4346,7 @@ public final class OtaAssetRangeHandle: @unchecked Sendable {
 public final class TunnelOpenHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4385,7 +4385,7 @@ public final class TunnelOpenHandle: @unchecked Sendable {
 public final class AssetRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway
@@ -4424,7 +4424,7 @@ public final class AssetRequestHandle: @unchecked Sendable {
 public final class LyricsRequestHandle: @unchecked Sendable {
   private let gateway: BridgethingGateway
   public let deviceId: String
-  private let requestId: UUID
+  public let requestId: UUID
 
   init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
     self.gateway = gateway

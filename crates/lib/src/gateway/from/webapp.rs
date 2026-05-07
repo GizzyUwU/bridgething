@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-/// Marker struct for the `List` request — pairs with `BridgeToGatewayWebappMsg::Webapps`.
+/// Marker struct for the `List` request - pairs with `BridgeToGatewayWebappMsg::Webapps`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = GatewayToBridge,
@@ -16,7 +16,7 @@ use uuid::Uuid;
 )]
 pub struct ListWebapps;
 
-/// Marker struct for the `GetActive` request — pairs with `BridgeToGatewayWebappMsg::Active`.
+/// Marker struct for the `GetActive` request - pairs with `BridgeToGatewayWebappMsg::Active`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = GatewayToBridge,

@@ -1,20 +1,20 @@
 //! Proc-macro derives shared across the bridgething workspace.
 //!
-//! - `#[derive(Csm)]` — iAP2 control-session messages (see `csm.rs`).
-//! - `#[derive(BridgeEnum)]` — wire enums; per-bucket sibling enums +
+//! - `#[derive(Csm)]` - iAP2 control-session messages (see `csm.rs`).
+//! - `#[derive(BridgeEnum)]` - wire enums; per-bucket sibling enums +
 //!   marker impls + cross-enum response-validation modules. Direction
 //!   inferred from one of four parent-ident prefixes: `BridgeToGateway`,
 //!   `GatewayToBridge`, `BridgeToClient`, `ClientToBridge`. See
 //!   `bridge_enum.rs`.
-//! - `#[derive(BridgeOuterEnum)]` — outer wire data enums; per-variant
+//! - `#[derive(BridgeOuterEnum)]` - outer wire data enums; per-variant
 //!   `#[from]` opts in to a `From<T>` impl, with auto-boxing when the
 //!   variant payload is `Box<T>`. Replaces `derive_more::From` for the
 //!   four outer enums. See `outer_enum.rs`.
-//! - `#[derive(WireRequest)]` keyed off `#[wire_request(...)]` —
+//! - `#[derive(WireRequest)]` keyed off `#[wire_request(...)]` -
 //!   typed-request implementation + cross-enum compile-time validation.
 //!   See `request.rs`.
 //! - `#[derive(WireEvent)]` / `#[derive(WireCommand)]` /
-//!   `#[derive(WireUnicast)]` keyed off `#[wire(<Direction>, ...)]` —
+//!   `#[derive(WireUnicast)]` keyed off `#[wire(<Direction>, ...)]` -
 //!   marker derives for top-level outer-wire variant payload types
 //!   (e.g. `BridgeThingMeta`, `GatewayMeta`, `ForwardMessage`,
 //!   `NowPlayingUpdate`). See `markers.rs`.

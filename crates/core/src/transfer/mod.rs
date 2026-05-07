@@ -32,38 +32,17 @@ use tokio::{
 };
 use tokio_util::bytes::Bytes;
 
-/// Total `.partial` bytes across in-flight transfers. Sized to leave
-/// headroom on the device's 2 GiB data partition for webapps and the
-/// state DB. Begin requests with `expected_size` over this cap are
-/// rejected outright.
 pub const TRANSFER_DISK_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
-
-/// In-flight transfers untouched for this long are GC'd by the periodic
-/// sweep. A companion that crashed mid-push gets a clean slate after
-/// the window without manual `abandon`.
 const STALE_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Cadence of the stale-transfer GC pass.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
-
-/// Capacity of the actor command mailbox. Same default as the rest of
-/// the daemon's actor mailboxes.
 const COMMAND_MAILBOX_CAPACITY: usize = 16;
 
-/// Outcome of an `accept_chunk` call.
 #[derive(Debug)]
 pub enum ChunkOutcome {
-  /// Not the last chunk; bytes appended. `received` is the new total
-  /// for the transfer (next chunk's expected `offset`).
   Continue { received: u64 },
-  /// Last chunk; size + hash verified. The caller takes ownership of
-  /// the file at `path`: rename it into a final location, read it and
-  /// delete it, or pass it to a downstream consumer (libswupdate,
-  /// asset cache). The transfer is no longer tracked.
   Completed { path: PathBuf, sha256: String },
 }
 
-/// Cloneable handle to the transfer actor.
 #[derive(Debug, Clone)]
 pub struct ChunkedTransfer {
   inner: Arc<Inner>,
@@ -75,12 +54,10 @@ struct Inner {
 }
 
 impl ChunkedTransfer {
-  /// Open the on-disk transfers root, recover any in-flight state from
-  /// a previous run, and return the actor pending spawn.
   pub async fn init(transfers_dir: PathBuf) -> Result<ChunkedTransferPending, TransferError> {
     tokio::fs::create_dir_all(&transfers_dir).await?;
     let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_MAILBOX_CAPACITY);
-    let actor = ChunkedTransferActor::bootstrap(transfers_dir, cmd_rx).await?;
+    let actor = ChunkedTransferActor::bootstrap(transfers_dir, cmd_rx, cmd_tx.clone()).await?;
     Ok(ChunkedTransferPending {
       actor,
       handle: Self {
@@ -89,11 +66,6 @@ impl ChunkedTransfer {
     })
   }
 
-  /// Open or resume a transfer. Returns the offset the next chunk
-  /// should start at - 0 for fresh transfers, the recovered partial
-  /// length for an existing one (the meta's `expected_size` and
-  /// `expected_sha256` must match for resume to succeed; otherwise
-  /// `ConflictingBegin` and the caller must `abandon` first).
   pub async fn begin(
     &self,
     id: String,
@@ -115,10 +87,6 @@ impl ChunkedTransfer {
     rx.await.map_err(|_| TransferError::ActorClosed)?
   }
 
-  /// Append a chunk. `offset` must equal the transfer's current
-  /// `received` (chunks are strictly in-order). When `last:true` the
-  /// actor verifies size + sha256 and returns `Completed` with the
-  /// path to the now-orphaned partial file.
   pub async fn accept_chunk(
     &self,
     id: String,
@@ -142,7 +110,6 @@ impl ChunkedTransfer {
     rx.await.map_err(|_| TransferError::ActorClosed)?
   }
 
-  /// Drop a transfer's partial + meta. No-op if the id is unknown.
   pub async fn abandon(&self, id: String) -> Result<(), TransferError> {
     let (ack, rx) = oneshot::channel();
     self
@@ -155,8 +122,6 @@ impl ChunkedTransfer {
   }
 }
 
-/// Initialised but not-yet-running transfer actor. Call `spawn` once
-/// the daemon is ready to accept chunks.
 pub struct ChunkedTransferPending {
   actor: ChunkedTransferActor,
   handle: ChunkedTransfer,
@@ -169,8 +134,6 @@ impl ChunkedTransferPending {
   }
 }
 
-/// Hash an id into a filesystem-safe stem. The stem is unique per id
-/// (sha256 collision is the only failure mode and we accept that).
 fn safe_filename(id: &str) -> String {
   let mut h = Sha256::new();
   h.update(id.as_bytes());

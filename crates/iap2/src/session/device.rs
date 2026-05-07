@@ -5,7 +5,7 @@
 //! The accessory subscribes by listing each CSM ID in
 //! `IdentificationInformation.MessagesReceivedFromDevice`; iOS sends an
 //! initial push after `IdentificationAccepted` and again on change. No
-//! `Start*` / `Stop*` pair to drive — purely passive on the wire.
+//! `Start*` / `Stop*` pair to drive - purely passive on the wire.
 
 use tokio::sync::mpsc;
 

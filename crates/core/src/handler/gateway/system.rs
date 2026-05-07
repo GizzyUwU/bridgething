@@ -45,7 +45,8 @@ impl SystemHandler {
       req.expected_sha256,
       req.expected_size,
     );
-    match self.ota.begin(req).await {
+    let peer = self.handle.address;
+    match self.ota.begin(req, peer).await {
       Ok(ack) => self.handle.respond_to::<OtaBegin>(ack).await,
       Err(rej) => self.handle.respond_err::<OtaBegin>(rej).await,
     }

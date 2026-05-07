@@ -32,8 +32,8 @@ on the Car Thing.
 
 ## Layout
 
-- `src/App.tsx` — starter UI: subscribes to `client.player.onPlayerState`,
+- `src/App.tsx` - starter UI: subscribes to `client.player.onPlayerState`,
   fetches artwork via `client.asset.get`, exposes transport controls.
-- `src/index.css` — `@import "tailwindcss";` (Tailwind v4 CSS-first).
-- `vite.config.ts` — vite + tailwind plugin, `es2022` target.
-- `index.html` — 800x480 viewport, no overscroll, no tap highlight.
+- `src/index.css` - `@import "tailwindcss";` (Tailwind v4 CSS-first).
+- `vite.config.ts` - vite + tailwind plugin, `es2022` target.
+- `index.html` - 800x480 viewport, no overscroll, no tap highlight.

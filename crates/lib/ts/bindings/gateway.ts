@@ -27,6 +27,7 @@ import type {
   Notification,
   NowPlayingUpdate,
   OtaError,
+  OtaKind,
   OtaProgress,
   PhoneCall,
   PhoneCallService,
@@ -224,7 +225,7 @@ export type BridgeToGatewayPhoneMsg =
  * Bridge → gateway player verbs. The companion-side SDK dispatches each
  * to its native player integration (Spotify SDK, Apple Music SDK,
  * MediaSession). Routing for `Play(uri)` is gated on
- * `Capabilities.uri_schemes` — daemon never forwards a URI no
+ * `Capabilities.uri_schemes` - daemon never forwards a URI no
  * connected gateway claims.
  */
 export type BridgeToGatewayPlayerMsg =
@@ -289,7 +290,7 @@ export type CommunicationsSnapshot = { state: CommunicationsState };
 export type Earcon = { name: string };
 
 /**
- * Fired when the favorited / liked status of an item changes —
+ * Fired when the favorited / liked status of an item changes -
  * regardless of whether it was driven by the daemon (FavoritesToggle/Set
  * command) or by the user mutating it on the gateway-side app directly.
  */
@@ -308,7 +309,7 @@ export type FavoritesSet = { item: ItemRef; liked: boolean };
 /**
  * Bulk favorites mutation. `entries` are independent `FavoritesSet`
  * applications; gateway returns once it has issued each underlying
- * platform call. Per-entry errors are not surfaced — companion logs
+ * platform call. Per-entry errors are not surfaced - companion logs
  * and best-efforts the rest. Webapps observing partial success listen
  * for `FavoriteChanged` events.
  */
@@ -427,7 +428,7 @@ export type GatewayToBridgePhoneMsg =
  * Gateway → bridge player events. `Snapshot` is the initial-state event
  * fired at announce when the companion claims player authority;
  * `Delta` is the ongoing partial-update stream (the only delta-shaped
- * event in the wire protocol — every other surface uses snapshots).
+ * event in the wire protocol - every other surface uses snapshots).
  * `QueueChanged` fires when the queue mutates without a track change
  * (companion-side reorder, prefetch).
  */
@@ -448,7 +449,7 @@ export type GatewayToBridgeSystemMsg =
 /**
  * Companion-driven time surface. Companion sends `Snapshot` at announce
  * (announce-on-connect rule for any surface where companion claims
- * authority — Time always seeds) and again on tz / locale / clock-skew
+ * authority - Time always seeds) and again on tz / locale / clock-skew
  * changes.
  */
 export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
@@ -600,7 +601,7 @@ export type OtaAssetRangeAbandon = { requestId: string };
  * Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
  * the Bulk lane in order: parts in declaration order, chunks in
  * ascending `offset`. `offset` is absolute within the asset, not
- * within the part — matches what the daemon's HTTP-Range writer needs
+ * within the part - matches what the daemon's HTTP-Range writer needs
  * to feed libcurl. `last:true` only on the final chunk of the final
  * part for this `request_id`.
  */
@@ -632,24 +633,36 @@ export type OtaAssetRangeRejected = { reason: string };
 export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart> };
 
 /**
- * Companion-initiated OTA: opens or resumes a streaming push of a
- * `.swu` artifact identified by its sha256. The daemon responds with
+ * Companion-initiated OTA: opens or resumes a streaming push of an
+ * update artifact identified by its sha256. The daemon responds with
  * `OtaBeginAck { resume_from_offset }` (the byte offset the next
  * `OtaChunk` should start at, 0 for fresh pushes) or
  * `OtaBeginRejected { reason }` (already-running OTA, conflicting
  * in-flight update_id with mismatched size/sha, or budget exhausted).
  *
- * `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
- * so resume across daemon restarts and retries-after-failure both work
- * without companion-side state to track.
+ * `kind` selects the backend: `Image` for a `.swu` (libswupdate +
+ * slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
+ * (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
+ * systemctl restart). The streaming half is identical across kinds.
+ *
+ * `update_id` is the sha256 of the artifact, hex-encoded. Content-
+ * addressed so resume across daemon restarts and retries-after-failure
+ * both work without companion-side state to track.
  *
  * `update_url_base` is the server prefix the companion may refetch
  * the .zck delta from on cache miss, e.g.
  * `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
- * fetch from it — it's carried so the companion can self-recover its
+ * fetch from it - it's carried so the companion can self-recover its
  * cache while serving range requests during the Writing phase.
+ * Image-kind only; ignored for daemon-kind.
  */
-export type OtaBegin = { updateId: string; updateUrlBase: string | null; expectedSha256: string; expectedSize: number };
+export type OtaBegin = {
+  kind: OtaKind;
+  updateId: string;
+  updateUrlBase: string | null;
+  expectedSha256: string;
+  expectedSize: number;
+};
 
 /**
  * Successful response to `OtaBegin`. `resume_from_offset` is the byte

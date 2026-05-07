@@ -3159,7 +3159,7 @@ public fun BridgethingGateway.device(deviceId: String): BridgethingGatewayDevice
 public class GeoGetOnceHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: GeoGetOnceReply) {
     val msg = GatewayToBridgeMsg(
@@ -3192,7 +3192,7 @@ public class GeoGetOnceHandle internal constructor(
 public class LibraryBrowseRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: BrowseReply) {
     val msg = GatewayToBridgeMsg(
@@ -3225,7 +3225,7 @@ public class LibraryBrowseRequestHandle internal constructor(
 public class LibrarySearchRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: SearchReply) {
     val msg = GatewayToBridgeMsg(
@@ -3258,7 +3258,7 @@ public class LibrarySearchRequestHandle internal constructor(
 public class LibraryRecommendationsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: RecommendationsReply) {
     val msg = GatewayToBridgeMsg(
@@ -3291,7 +3291,7 @@ public class LibraryRecommendationsRequestHandle internal constructor(
 public class LibraryFavoritesListRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: FavoritesListReply) {
     val msg = GatewayToBridgeMsg(
@@ -3324,7 +3324,7 @@ public class LibraryFavoritesListRequestHandle internal constructor(
 public class LibraryFavoritesContainsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: FavoritesContainsReply) {
     val msg = GatewayToBridgeMsg(
@@ -3357,7 +3357,7 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
 public class NetFetchRequestMsgHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: NetFetchReply) {
     val msg = GatewayToBridgeMsg(
@@ -3390,7 +3390,7 @@ public class NetFetchRequestMsgHandle internal constructor(
 public class NetWsOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: NetWsOpenReply) {
     val msg = GatewayToBridgeMsg(
@@ -3423,7 +3423,7 @@ public class NetWsOpenHandle internal constructor(
 public class PhoneStateGetHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: PhoneStateReply) {
     val msg = GatewayToBridgeMsg(
@@ -3447,7 +3447,7 @@ public class PhoneStateGetHandle internal constructor(
 public class OtaAssetRangeHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: OtaAssetRangeReply) {
     val msg = GatewayToBridgeMsg(
@@ -3480,7 +3480,7 @@ public class OtaAssetRangeHandle internal constructor(
 public class TunnelOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: TunnelOpenReply) {
     val msg = GatewayToBridgeMsg(
@@ -3513,7 +3513,7 @@ public class TunnelOpenHandle internal constructor(
 public class AssetRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: AssetGotReply) {
     val msg = GatewayToBridgeMsg(
@@ -3546,7 +3546,7 @@ public class AssetRequestHandle internal constructor(
 public class LyricsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: UUID,
+  public val requestId: UUID,
 ) {
   public suspend fun respond(response: LyricsReply) {
     val msg = GatewayToBridgeMsg(

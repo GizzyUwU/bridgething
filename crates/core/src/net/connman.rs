@@ -57,7 +57,7 @@ impl ClientListener {
     Self { rx, client_man }
   }
 
-  /// cancel-safe. Loops past response-meta inbound messages — those
+  /// cancel-safe. Loops past response-meta inbound messages - those
   /// are routed straight to `ClientManager::complete_pending` to resolve
   /// pending daemon-initiated typed requests, and the caller never sees
   /// them. Stray responses (no matching pending request) are warn-logged

@@ -15,7 +15,7 @@
 //! Subscribe-by-presence pattern: the accessory sends `Start*` carrying
 //! one empty-payload TLV per param-id it wants the iPhone to push back.
 //! Stop family ends the subscription. Inbound `*Update` CSMs are
-//! delta-shaped — every field optional, iOS sends only what changed.
+//! delta-shaped - every field optional, iOS sends only what changed.
 //!
 //! Enum-valued params are decoded as `u8` here; the daemon's
 //! translation layer maps them to the `libbridgething` typed enums so

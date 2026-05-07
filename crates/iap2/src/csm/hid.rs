@@ -53,13 +53,13 @@ pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
 pub const TRANSPORT_COMPONENT_ID: u16 = 5353;
 
 /// USB VID emitted on `StartHID` param 1. iOS rejects HID enablement
-/// silently when these are absent — the param shape is not optional in
+/// silently when these are absent - the param shape is not optional in
 /// practice. `0x1D6B` is the Linux Foundation USB VID, openly published
 /// for open-source projects to use without registration.
 pub const VENDOR_ID: u16 = 0x1D6B;
 
 /// USB PID emitted on `StartHID` param 2. Bridgething-unique value;
-/// pairs with `VENDOR_ID` above. Not registered with anyone — iOS only
+/// pairs with `VENDOR_ID` above. Not registered with anyone - iOS only
 /// validates that param 2 is present and well-formed, not the value.
 pub const PRODUCT_ID: u16 = 0xB31D;
 
@@ -78,7 +78,7 @@ pub const PRODUCT_ID: u16 = 0xB31D;
 ///
 /// Wheel rotation, presets, and other physical inputs are NOT in this
 /// descriptor; they are captured by the on-device webapp and never sent
-/// to iOS. Volume / mute / shuffle / repeat are intentionally absent —
+/// to iOS. Volume / mute / shuffle / repeat are intentionally absent -
 /// iAP2-message HID descriptor shapes that go beyond a 3-bit transport
 /// remote have not been observed to actuate on iOS, so those verbs need
 /// a different surface (gateway companion, EA channel) when wired.
@@ -96,7 +96,7 @@ pub const TRANSPORT_DESCRIPTOR: &[u8] = &[
   0x81, 0x02, //   Input (Data,Var,Abs)
   0x75, 0x05, //   Report Size (5)
   0x95, 0x01, //   Report Count (1)
-  0x81, 0x03, //   Input (Const,Var,Abs) — padding
+  0x81, 0x03, //   Input (Const,Var,Abs) - padding
   0xC0, // End Collection
 ];
 
@@ -196,7 +196,7 @@ pub struct HIDComponentUpdate {
 /// Build an [`AccessoryHIDReport`] for the bridgething transport
 /// component. The single-byte payload is `[mask]` where `mask` is any
 /// combination of [`report_bit`] flags (the all-zero mask is a release
-/// frame, used to follow press frames). No leading Report ID byte —
+/// frame, used to follow press frames). No leading Report ID byte -
 /// the descriptor declares one report with no Report ID item.
 pub fn transport_report(mask: u8) -> AccessoryHIDReport {
   AccessoryHIDReport {

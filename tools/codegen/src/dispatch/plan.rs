@@ -19,7 +19,7 @@ pub struct DispatchEntry {
   pub outer_disc: String,
   /// Outer variant name in PascalCase (e.g. `"Asset"`).
   pub outer_variant: String,
-  /// Outer payload type — `None` for unit variants.
+  /// Outer payload type - `None` for unit variants.
   pub outer_payload: Option<PayloadType>,
   /// Inner enum variants (when `outer_payload` is a `Named` type that
   /// resolves to an adjacent-tagged enum). Empty otherwise.
@@ -56,7 +56,7 @@ pub struct InnerVariantPlan {
   pub disc: String,
   pub variant: String,
   pub payload: Option<PayloadType>,
-  /// Outbound codegen skips struct variants — payload would need full
+  /// Outbound codegen skips struct variants - payload would need full
   /// per-field args.
   pub is_struct: bool,
   /// Per-variant outbound bucket. Inferred from the variant's
@@ -75,7 +75,7 @@ pub struct Plan {
   pub inbound_requests: Vec<TypedRequestEntry>,
 }
 
-/// Per-language emitters consume `Surface`s — aggregations of
+/// Per-language emitters consume `Surface`s - aggregations of
 /// inbound + outbound entries for a single top-level wire variant
 /// (e.g. all `Asset`-related methods for the `<entry>.asset` namespace).
 #[derive(Debug, Clone)]
@@ -84,9 +84,9 @@ pub struct Surface {
   pub name: String,
   /// camelCase property name on the entry class (e.g. `"asset"`).
   pub prop: String,
-  /// Inbound dispatch entry — bridge → counterparty direction.
+  /// Inbound dispatch entry - bridge → counterparty direction.
   pub inbound: Option<DispatchEntry>,
-  /// Outbound dispatch entry — counterparty → bridge direction.
+  /// Outbound dispatch entry - counterparty → bridge direction.
   pub outbound: Option<DispatchEntry>,
   /// Counterparty → bridge typed requests scoped to this surface.
   pub outbound_queries: Vec<TypedRequestEntry>,
@@ -97,7 +97,7 @@ pub struct Surface {
 impl Surface {
   /// Inner variants of the inbound-side payload that should be exposed
   /// as event-shape callbacks. Excludes inner variants that map to a
-  /// typed inbound request — those are handled via the request-handle
+  /// typed inbound request - those are handled via the request-handle
   /// pattern. Filters by both payload type (the struct case) and
   /// variant name (the no-payload-marker case, e.g.
   /// `pub enum X { #[bridge_request] StateGet }` with marker struct

@@ -1,4 +1,4 @@
-//! Time surface — the device has no RTC backed by a battery, so wall
+//! Time surface - the device has no RTC backed by a battery, so wall
 //! clock authority lives with the connected companion or with iOS over
 //! iAP2's DeviceTimeUpdate. Initial snapshot arrives at announce; updates
 //! broadcast on tz / locale / clock skew.
@@ -8,7 +8,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 
 /// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
-/// (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+/// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
 /// reading time should use the device clock if any but use this as the
 /// trust anchor on first arrival.
 ///

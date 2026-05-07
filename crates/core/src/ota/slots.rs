@@ -45,7 +45,7 @@ pub enum Slot {
 }
 
 impl Slot {
-  /// "_a" / "_b" — matches the suffix of `slot_X_try` env vars and the
+  /// "_a" / "_b" - matches the suffix of `slot_X_try` env vars and the
   /// active_slot value.
   #[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
   pub fn suffix(self) -> &'static str {
@@ -55,7 +55,7 @@ impl Slot {
     }
   }
 
-  /// "slot_a" / "slot_b" — matches the sw-description selector key.
+  /// "slot_a" / "slot_b" - matches the sw-description selector key.
   pub fn selector(self) -> &'static str {
     match self {
       Slot::A => "slot_a",

@@ -7,9 +7,11 @@
   "modelName": "YX5H6679",
   "btMac": "30:E3:D6:03:96:1E",
   "serialNumber": "8558R481Q61R",
+  "channel": "dev",
+  "imageVariant": "dev",
+  "imageVersion": "0.1.0",
   "imageBuildId": "bridgething-0.1.0-20260428201145",
   "imageBuildDate": "2026-04-28T20:11:45Z",
   "imageDistro": "bridgething",
-  "imageDistroVersion": "0.1.0",
   "imageMachine": "superbird"
 }

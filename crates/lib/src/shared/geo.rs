@@ -1,4 +1,4 @@
-//! Geo surface — lat/lon position from the connected companion. Bespoke
+//! Geo surface - lat/lon position from the connected companion. Bespoke
 //! subscribe model (battery-sensitive); see surface enums for verbs.
 
 use serde::{Deserialize, Serialize};

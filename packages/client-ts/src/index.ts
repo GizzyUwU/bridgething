@@ -67,7 +67,7 @@ export type ClientOptions = {
 /**
  * Typed webapp-side facade over the on-device daemon's local WebSocket.
  *
- * Single-peer (the daemon), so no device proxy or broadcast machinery —
+ * Single-peer (the daemon), so no device proxy or broadcast machinery -
  * every method addresses the daemon implicitly. Holds one `WebSocket`
  * with auto-reconnect, JSON-encodes outbound `ClientToBridgeMsg`,
  * decodes inbound `BridgeToClientMsg`, and tracks in-flight requests so

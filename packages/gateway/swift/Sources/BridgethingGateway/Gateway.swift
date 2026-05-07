@@ -35,15 +35,22 @@ public actor BridgethingGateway {
   private var buffers: [String: FrameAccumulator] = [:]
   private var pendingRequests: [UUID: CheckedContinuation<BridgeToGatewayMsg, Error>] = [:]
 
-  public nonisolated let events: AsyncStream<GatewayEvent>
-  private let eventContinuation: AsyncStream<GatewayEvent>.Continuation
+  private let broadcaster = EventBroadcaster()
+
+  /// Async stream of gateway events. Each access returns a fresh stream
+  /// subscribed to the underlying broadcaster, so multiple consumers
+  /// (per-surface dispatch tasks, OTA poll-loop meta tracker, host-app
+  /// observers) each receive every event independently. AsyncStream is
+  /// unicast at the iterator level - a single underlying stream would
+  /// silently partition events across concurrent `for await` loops, so
+  /// the broadcaster fans yields out to each subscribed continuation.
+  public nonisolated var events: AsyncStream<GatewayEvent> {
+    broadcaster.subscribe()
+  }
 
   public init(adapter: any Adapter, codec: Codec = Codec()) {
     self.adapter = adapter
     self.codec = codec
-    let (stream, continuation) = AsyncStream.makeStream(of: GatewayEvent.self)
-    events = stream
-    eventContinuation = continuation
   }
 
   public func start() async throws {
@@ -67,7 +74,7 @@ public actor BridgethingGateway {
     }
     pendingRequests.removeAll()
     buffers.removeAll()
-    eventContinuation.finish()
+    broadcaster.finish()
   }
 
   public func disconnect(deviceId: String) async throws {
@@ -148,13 +155,13 @@ public actor BridgethingGateway {
 
   private func handleAdapterEvent(_ event: AdapterEvent) {
     switch event {
-    case .connected(let device):
+    case let .connected(device):
       buffers[device.id] = FrameAccumulator()
-      eventContinuation.yield(.connected(device))
-    case .disconnected(let id):
+      broadcaster.emit(.connected(device))
+    case let .disconnected(id):
       buffers.removeValue(forKey: id)
-      eventContinuation.yield(.disconnected(deviceId: id))
-    case .bytes(let id, let chunk):
+      broadcaster.emit(.disconnected(deviceId: id))
+    case let .bytes(id, chunk):
       ingest(deviceId: id, chunk: chunk)
     }
   }
@@ -165,15 +172,88 @@ public actor BridgethingGateway {
     do {
       while let frame = try accumulator.nextFrame() {
         let msg = try codec.decode(BridgeToGatewayMsg.self, from: frame)
-        if case .response(let r) = msg.meta, completePendingRequest(id: r.requestId, with: msg) {
+        if case let .response(r) = msg.meta, completePendingRequest(id: r.requestId, with: msg) {
           continue
         }
-        eventContinuation.yield(.message(deviceId: deviceId, msg))
+        broadcaster.emit(.message(deviceId: deviceId, msg))
       }
       buffers[deviceId] = accumulator
     } catch {
       buffers[deviceId] = FrameAccumulator()
-      eventContinuation.yield(.decodeError(deviceId: deviceId, description: String(describing: error)))
+      broadcaster.emit(.decodeError(deviceId: deviceId, description: String(describing: error)))
+    }
+  }
+}
+
+/// Multi-consumer fan-out for `GatewayEvent`s. Three jobs in one class:
+///
+/// 1. Each `subscribe()` returns a fresh `AsyncStream`; `emit()` yields
+///    every event to every active continuation. AsyncStream itself is
+///    unicast across iterators, so without this fan-out concurrent
+///    `for await event in gateway.events` loops would silently partition
+///    events between consumers.
+/// 2. The startup race - `consumerTask` may emit events before the
+///    companion's dispatcher tasks finish subscribing - is closed by
+///    a bounded replay cache. Each new subscriber receives the buffered
+///    history under the same lock that emit takes, so a concurrent
+///    emit can't interleave between the replay and going live.
+/// 3. The cache is capped at a small constant so a long-running
+///    session that grows new subscribers doesn't leak memory; in
+///    practice the bridgething companion subscribes its full dispatcher
+///    set at startup and adds nothing later.
+final class EventBroadcaster: @unchecked Sendable {
+  private static let replayCacheLimit = 256
+
+  private let lock = NSLock()
+  private var subscribers: [UUID: AsyncStream<GatewayEvent>.Continuation] = [:]
+  private var replay: [GatewayEvent] = []
+  private var finished = false
+
+  func subscribe() -> AsyncStream<GatewayEvent> {
+    AsyncStream { continuation in
+      let id = UUID()
+      lock.lock()
+      if finished {
+        lock.unlock()
+        continuation.finish()
+        return
+      }
+      for e in replay {
+        continuation.yield(e)
+      }
+      subscribers[id] = continuation
+      lock.unlock()
+      continuation.onTermination = { [weak self] _ in
+        guard let self else { return }
+        lock.lock()
+        subscribers.removeValue(forKey: id)
+        lock.unlock()
+      }
+    }
+  }
+
+  func emit(_ event: GatewayEvent) {
+    lock.lock()
+    replay.append(event)
+    if replay.count > Self.replayCacheLimit {
+      replay.removeFirst(replay.count - Self.replayCacheLimit)
+    }
+    let copies = Array(subscribers.values)
+    lock.unlock()
+    for c in copies {
+      c.yield(event)
+    }
+  }
+
+  func finish() {
+    lock.lock()
+    let copies = Array(subscribers.values)
+    subscribers.removeAll()
+    replay.removeAll()
+    finished = true
+    lock.unlock()
+    for c in copies {
+      c.finish()
     }
   }
 }

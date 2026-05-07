@@ -1,4 +1,4 @@
-//! System observability surface — diagnostics snapshot + log tailing.
+//! System observability surface - diagnostics snapshot + log tailing.
 //! `Diagnostics` is the one-shot health snapshot; `LogEntry` is the
 //! item flowing on subscribed log streams.
 

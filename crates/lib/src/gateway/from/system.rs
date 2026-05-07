@@ -5,24 +5,30 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::RangePart;
+use crate::{OtaKind, RangePart};
 
-/// Companion-initiated OTA: opens or resumes a streaming push of a
-/// `.swu` artifact identified by its sha256. The daemon responds with
+/// Companion-initiated OTA: opens or resumes a streaming push of an
+/// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
 /// `OtaChunk` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }` (already-running OTA, conflicting
 /// in-flight update_id with mismatched size/sha, or budget exhausted).
 ///
-/// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
-/// so resume across daemon restarts and retries-after-failure both work
-/// without companion-side state to track.
+/// `kind` selects the backend: `Image` for a `.swu` (libswupdate +
+/// slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
+/// (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
+/// systemctl restart). The streaming half is identical across kinds.
+///
+/// `update_id` is the sha256 of the artifact, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track.
 ///
 /// `update_url_base` is the server prefix the companion may refetch
 /// the .zck delta from on cache miss, e.g.
 /// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
-/// fetch from it — it's carried so the companion can self-recover its
+/// fetch from it - it's carried so the companion can self-recover its
 /// cache while serving range requests during the Writing phase.
+/// Image-kind only; ignored for daemon-kind.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -38,6 +44,7 @@ use crate::RangePart;
   error_variant = OtaBeginRejected,
 )]
 pub struct OtaBegin {
+  pub kind: OtaKind,
   pub update_id: String,
   pub update_url_base: Option<String>,
   pub expected_sha256: String,
@@ -111,7 +118,7 @@ pub struct OtaAssetRangeRejected {
 /// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
 /// the Bulk lane in order: parts in declaration order, chunks in
 /// ascending `offset`. `offset` is absolute within the asset, not
-/// within the part — matches what the daemon's HTTP-Range writer needs
+/// within the part - matches what the daemon's HTTP-Range writer needs
 /// to feed libcurl. `last:true` only on the final chunk of the final
 /// part for this `request_id`.
 #[typeshare]

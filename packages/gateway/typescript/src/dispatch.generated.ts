@@ -5378,13 +5378,13 @@ export class GeoGetOnceHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: GeoGetOnceReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'geo', data: { event: 'getOnceReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5393,7 +5393,7 @@ export class GeoGetOnceHandle {
   async respondErr(error: GeoErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'geo', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5402,7 +5402,7 @@ export class GeoGetOnceHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5413,13 +5413,13 @@ export class LibraryBrowseRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: BrowseReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'browseReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5428,7 +5428,7 @@ export class LibraryBrowseRequestHandle {
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5437,7 +5437,7 @@ export class LibraryBrowseRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5448,13 +5448,13 @@ export class LibrarySearchRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: SearchReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'searchReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5463,7 +5463,7 @@ export class LibrarySearchRequestHandle {
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5472,7 +5472,7 @@ export class LibrarySearchRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5483,13 +5483,13 @@ export class LibraryRecommendationsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: RecommendationsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'recommendationsReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5498,7 +5498,7 @@ export class LibraryRecommendationsRequestHandle {
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5507,7 +5507,7 @@ export class LibraryRecommendationsRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5518,13 +5518,13 @@ export class LibraryFavoritesListRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: FavoritesListReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'favoritesListReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5533,7 +5533,7 @@ export class LibraryFavoritesListRequestHandle {
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5542,7 +5542,7 @@ export class LibraryFavoritesListRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5553,13 +5553,13 @@ export class LibraryFavoritesContainsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: FavoritesContainsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'favoritesContainsReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5568,7 +5568,7 @@ export class LibraryFavoritesContainsRequestHandle {
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5577,7 +5577,7 @@ export class LibraryFavoritesContainsRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5588,13 +5588,13 @@ export class NetFetchRequestMsgHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: NetFetchReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'net', data: { event: 'fetchReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5603,7 +5603,7 @@ export class NetFetchRequestMsgHandle {
   async respondErr(error: NetFetchErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'net', data: { event: 'fetchErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5612,7 +5612,7 @@ export class NetFetchRequestMsgHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5623,13 +5623,13 @@ export class NetWsOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: NetWsOpenReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'net', data: { event: 'wsOpenReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5638,7 +5638,7 @@ export class NetWsOpenHandle {
   async respondErr(error: NetWsErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'net', data: { event: 'wsErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5647,7 +5647,7 @@ export class NetWsOpenHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5658,13 +5658,13 @@ export class PhoneStateGetHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: PhoneStateReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'phone', data: { event: 'stateReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5673,7 +5673,7 @@ export class PhoneStateGetHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5684,13 +5684,13 @@ export class OtaAssetRangeHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: OtaAssetRangeReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'system', data: { event: 'otaAssetRangeReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5699,7 +5699,7 @@ export class OtaAssetRangeHandle {
   async respondErr(error: OtaAssetRangeRejected): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'system', data: { event: 'otaAssetRangeRejected', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5708,7 +5708,7 @@ export class OtaAssetRangeHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5719,13 +5719,13 @@ export class TunnelOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: TunnelOpenReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'tunnel', data: { event: 'openReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5734,7 +5734,7 @@ export class TunnelOpenHandle {
   async respondErr(error: TunnelErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'tunnel', data: { event: 'errorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5743,7 +5743,7 @@ export class TunnelOpenHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5754,13 +5754,13 @@ export class AssetRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: AssetGotReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'asset', data: { event: 'got', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5769,7 +5769,7 @@ export class AssetRequestHandle {
   async respondErr(error: AssetNotFoundReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'asset', data: { event: 'notFound', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5778,7 +5778,7 @@ export class AssetRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5789,13 +5789,13 @@ export class LyricsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: string,
+    public readonly requestId: string,
   ) {}
 
   async respond(response: LyricsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'lyrics', data: { event: 'lyricsReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5804,7 +5804,7 @@ export class LyricsRequestHandle {
   async respondErr(error: LyricsErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'lyrics', data: { event: 'lyricsErrorReply', data: error } },
     };
     await this._gateway.send(this.deviceId, msg);
@@ -5813,7 +5813,7 @@ export class LyricsRequestHandle {
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
-      meta: { kind: 'response', data: { requestId: this._requestId } },
+      meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'error', data: error },
     };
     await this._gateway.send(this.deviceId, msg);

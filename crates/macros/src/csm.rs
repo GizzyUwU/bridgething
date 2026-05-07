@@ -1,4 +1,4 @@
-//! `#[derive(Csm)]` — generates `From<X> for CsmFrame` and
+//! `#[derive(Csm)]` - generates `From<X> for CsmFrame` and
 //! `TryFrom<CsmFrame> for X` for iAP2 control-session messages.
 //! Annotate a struct with `#[csm(id = 0x____)]`. Each field gets
 //! `#[csm(param = N)]` to fix its parameter id; without an override,

@@ -4,7 +4,7 @@
 //! Swap/Merge/Hold/Mute/DTMF) through the iAP2 manager when a session
 //! is identified.
 //!
-//! State is intentionally minimal — we hold what arrived but don't
+//! State is intentionally minimal - we hold what arrived but don't
 //! interpret it; webapps subscribed to the Phone SDK surface receive
 //! delta events and read the merged snapshot through `state.get`.
 
@@ -129,7 +129,7 @@ impl TelephonyManager {
   }
 
   /// Replace the active-call set with the companion's announce-time
-  /// snapshot. No per-call event is fanned out — webapps that connect
+  /// snapshot. No per-call event is fanned out - webapps that connect
   /// later read the merged state via `phone.stateGet`.
   pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
     let mut inner = self.inner.write().await;

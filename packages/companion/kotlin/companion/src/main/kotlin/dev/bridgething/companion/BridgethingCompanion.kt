@@ -50,6 +50,7 @@ class BridgethingCompanion(
     private val capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags(),
 ) {
     val gateway: BridgethingGateway = BridgethingGateway(adapter)
+    public val ota: OtaService = OtaService()
 
     private var activeGlue: BridgethingGlue? = null
 

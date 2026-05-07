@@ -1,4 +1,4 @@
-//! `#[derive(WireRequest)]` — emit a `WireRequest` impl for a request
+//! `#[derive(WireRequest)]` - emit a `WireRequest` impl for a request
 //! payload type, plus the `From<Self> for <Outbound>` lift and a
 //! cross-direction compile-time validation that the declared response
 //! variant exists, is tagged `#[bridge_response]`, and matches the
@@ -23,7 +23,7 @@
 //!
 //! `direction` is one of the four wire-direction prefixes recognized by
 //! `BridgeEnum`. Outbound and inbound wire data types are derived from
-//! the direction — request enters Outbound, response arrives on Inbound.
+//! the direction - request enters Outbound, response arrives on Inbound.
 //! The Outbound inner enum is `<Direction><Surface>Msg`; the response /
 //! error inner enum lives on the opposite-direction sibling
 //! `<OppositeDirection><Surface>Msg`.

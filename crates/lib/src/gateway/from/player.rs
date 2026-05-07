@@ -22,7 +22,7 @@ pub struct QueueSnapshot {
 /// Gateway → bridge player events. `Snapshot` is the initial-state event
 /// fired at announce when the companion claims player authority;
 /// `Delta` is the ongoing partial-update stream (the only delta-shaped
-/// event in the wire protocol — every other surface uses snapshots).
+/// event in the wire protocol - every other surface uses snapshots).
 /// `QueueChanged` fires when the queue mutates without a track change
 /// (companion-side reorder, prefetch).
 #[typeshare]

@@ -1,10 +1,10 @@
-//! `#[derive(BridgeOuterEnum)]` — auto-emit `From<T>` impls for the
+//! `#[derive(BridgeOuterEnum)]` - auto-emit `From<T>` impls for the
 //! four outer wire data enums (`BridgeToGatewayMsgData`,
 //! `GatewayToBridgeMsgData`, `BridgeToClientMsgData`,
 //! `ClientToBridgeMsgData`).
 //!
 //! Replaces `derive_more::From` so that boxed variants (`Variant(Box<T>)`)
-//! get a `From<T> for Self` impl that auto-boxes — the unboxed and
+//! get a `From<T> for Self` impl that auto-boxes - the unboxed and
 //! boxed call sites are identical (`payload.into()` works either way).
 //! Per-variant opt-in via `#[from]`, same as `derive_more::From`.
 

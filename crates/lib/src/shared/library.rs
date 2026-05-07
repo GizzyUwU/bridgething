@@ -1,4 +1,4 @@
-//! Library surface — typed shapes for browse/search/recommendations
+//! Library surface - typed shapes for browse/search/recommendations
 //! results, favorites, and queue items. Per-platform extras don't surface;
 //! gateways translate Spotify/Apple Music/MediaSession into these.
 
@@ -105,7 +105,7 @@ pub struct Station {
 }
 
 /// One playable / browsable item from the library. Lean per-variant
-/// payload — gateways translate platform-specific extras down to these
+/// payload - gateways translate platform-specific extras down to these
 /// fields, rare per-platform fields just don't surface. Forward-compat:
 /// adding new variants or fields is an additive change webapps can
 /// branch on.
@@ -159,7 +159,7 @@ pub struct BrowseFolder {
 /// Page of browse results. `total` is the count of items in the
 /// underlying collection when the gateway can cheaply expose it (None
 /// means indeterminate). `has_more` is the authoritative end-of-data
-/// signal — webapps paginate by raising `offset` until `has_more` is
+/// signal - webapps paginate by raising `offset` until `has_more` is
 /// false rather than relying on `total`.
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -189,7 +189,7 @@ pub struct SearchResult {
 
 /// Page of recommendation results. Gateway decides how seed + kind
 /// interact (Spotify uses radio-style seeding, Apple Music uses curated
-/// rails) — the daemon doesn't prescribe.
+/// rails) - the daemon doesn't prescribe.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

@@ -86,7 +86,7 @@ pub struct SetCrossfade {
 /// Bridge → gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` — daemon never forwards a URI no
+/// `Capabilities.uri_schemes` - daemon never forwards a URI no
 /// connected gateway claims.
 #[typeshare]
 #[serde_with::skip_serializing_none]

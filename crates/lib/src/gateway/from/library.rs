@@ -62,7 +62,7 @@ pub struct LibraryErrorReply {
   pub error: LibraryError,
 }
 
-/// Fired when the favorited / liked status of an item changes —
+/// Fired when the favorited / liked status of an item changes -
 /// regardless of whether it was driven by the daemon (FavoritesToggle/Set
 /// command) or by the user mutating it on the gateway-side app directly.
 #[typeshare]

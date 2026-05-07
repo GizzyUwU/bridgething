@@ -30,7 +30,13 @@ let package = Package(
         .product(name: "DMMessagePack", package: "msgpack-swift"),
         .product(name: "Gzip", package: "GzipSwift"),
       ],
-      path: "packages/gateway/swift/Sources/BridgethingGateway"
+      path: "packages/gateway/swift/Sources/BridgethingGateway",
+      linkerSettings: [
+        // IOBluetoothRFCOMMAdapter only compiles on macOS (gated by
+        // canImport(IOBluetooth)); link the framework when building
+        // for that platform so the symbols resolve.
+        .linkedFramework("IOBluetooth", .when(platforms: [.macOS])),
+      ]
     ),
     .testTarget(
       name: "BridgethingGatewayTests",

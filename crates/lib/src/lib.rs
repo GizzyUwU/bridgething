@@ -18,7 +18,7 @@ pub use shared::{
   ItemRef, LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry, LogLevel, LogSource, MediaItem,
   MediaItemUpdate, MediaType, MusicProvider, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
   Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationFlags, NowPlayingUpdate,
-  OtaError, OtaErrorCode, OtaPhase, OtaProgress, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
+  OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
   PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback,
   PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions,
   PlayerState, Playlist, PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RangePart, RangeSpec,

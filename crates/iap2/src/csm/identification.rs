@@ -152,7 +152,7 @@ pub enum HidComponentFunction {
 
 /// One iAP2 HID component entry. Encoded as a group-typed param (id 18
 /// inside `IdentificationInformation`). Required for `StartHID` /
-/// `AccessoryHIDReport` traffic to be honored by iOS — without this
+/// `AccessoryHIDReport` traffic to be honored by iOS - without this
 /// declaration, the iPhone parses the descriptor but silently drops every
 /// report we send.
 #[derive(Debug, Clone, PartialEq, Eq)]

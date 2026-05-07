@@ -1,4 +1,4 @@
-//! Hardware surface — the bits a webapp can drive on the device itself.
+//! Hardware surface - the bits a webapp can drive on the device itself.
 //! Wheel/button/touch input bypass the wire (chromium keypresses to the
 //! active webapp); the only on-wire hardware is display backlight and
 //! the ALS reading.
@@ -20,7 +20,7 @@ pub enum BrightnessMode {
 }
 
 /// Backlight state. `level` is the user-set value (only respected in
-/// `Manual`); `effective_level` is what's actually on the panel — equal
+/// `Manual`); `effective_level` is what's actually on the panel - equal
 /// to `level` in `Manual`, ALS-derived in `Auto`.
 #[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
@@ -50,7 +50,7 @@ pub struct HardwareState {
 pub enum HardwareError {
   /// The supplied level is outside `[0.0, 1.0]`.
   LevelOutOfRange,
-  /// `setLevel` was called while in `Auto` mode — ignored, switch to
+  /// `setLevel` was called while in `Auto` mode - ignored, switch to
   /// `Manual` first.
   ModeMismatch,
 }

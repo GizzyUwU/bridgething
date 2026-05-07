@@ -1,4 +1,4 @@
-//! Phone surface — telephony state from the connected companion (iAP2
+//! Phone surface - telephony state from the connected companion (iAP2
 //! call CSMs on iOS, Android via gateway). Replaces the loose
 //! `PhoneCallInfo`/`PhoneCallAccept`/`PhoneCallEnd` shapes that lived on
 //! `system.rs`.
@@ -68,7 +68,7 @@ pub struct PhoneCall {
 }
 
 /// Snapshot of every active call known to the gateway. Multi-call is
-/// possible (call-waiting, conference) — webapps rendering only one
+/// possible (call-waiting, conference) - webapps rendering only one
 /// active call typically pick the first non-Held entry.
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -93,7 +93,7 @@ pub enum CallEndReason {
   Failed { reason: String },
 }
 
-/// Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+/// Cellular registration state - populated from iAP2 `CommunicationsUpdate`
 /// or the companion's equivalent.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]

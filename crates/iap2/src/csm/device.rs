@@ -2,18 +2,18 @@
 //!
 //! Four inbound CSMs the iPhone pushes after subscription. The accessory
 //! subscribes by listing each ID in `IdentificationInformation.MessagesReceivedFromDevice`
-//! (param 7) — there is no `Start*` / `Stop*` pair for these. iOS sends
+//! (param 7) - there is no `Start*` / `Stop*` pair for these. iOS sends
 //! one initial push after `IdentificationAccepted` and again on change.
 //!
-//! - [`DeviceInformationUpdate`] (`0x4E09`) — the user-set device name
+//! - [`DeviceInformationUpdate`] (`0x4E09`) - the user-set device name
 //!   shown in iOS Settings (e.g. `"Joey's iPhone"`).
-//! - [`DeviceLanguageUpdate`] (`0x4E0A`) — ISO 639 language code (e.g.
+//! - [`DeviceLanguageUpdate`] (`0x4E0A`) - ISO 639 language code (e.g.
 //!   `"en"`).
-//! - [`DeviceTimeUpdate`] (`0x4E0B`) — wall clock as epoch seconds plus
+//! - [`DeviceTimeUpdate`] (`0x4E0B`) - wall clock as epoch seconds plus
 //!   timezone offset minutes plus DST offset minutes. There is no IANA
 //!   zone identifier on this path; build a clock display from the
 //!   numeric offsets.
-//! - [`DeviceUUIDUpdate`] (`0x4E0C`) — a stable per-device UUID iOS
+//! - [`DeviceUUIDUpdate`] (`0x4E0C`) - a stable per-device UUID iOS
 //!   keeps consistent across BR/EDR and BLE addresses for the same
 //!   physical device.
 
@@ -51,7 +51,7 @@ pub struct DeviceLanguageUpdate {
 /// `0x4E0B` device -> accessory. Wall clock plus zone offsets.
 ///
 /// `seconds_since_reference_date` is unix-epoch seconds (despite the
-/// name — Apple's "reference date" semantics for this CSM resolve to
+/// name - Apple's "reference date" semantics for this CSM resolve to
 /// 1970-01-01 GMT on the wire). `tz_offset_minutes` is signed minutes
 /// of offset from GMT; `dst_offset_minutes` is the DST adjustment in
 /// minutes.

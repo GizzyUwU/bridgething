@@ -8,7 +8,7 @@ use crate::TimeInfo;
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce
 /// (announce-on-connect rule for any surface where companion claims
-/// authority — Time always seeds) and again on tz / locale / clock-skew
+/// authority - Time always seeds) and again on tz / locale / clock-skew
 /// changes.
 #[typeshare]
 #[serde_with::skip_serializing_none]

@@ -81,7 +81,7 @@ impl AudioHandler {
   /// `volume_up/down/mute` send. When a companion holds Volume
   /// authority that broadcast carries the companion-reported value;
   /// otherwise it carries the placeholder, so the slider never flags a
-  /// mute condition. The `transport` actuation is best-effort — a
+  /// mute condition. The `transport` actuation is best-effort - a
   /// `NoTarget` error (no iAP2 link) is swallowed so the UI still
   /// updates.
   async fn actuate_volume(self, actuate: Result<(), crate::transport::TransportError>) -> HandlerResult {

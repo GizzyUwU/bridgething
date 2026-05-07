@@ -134,7 +134,7 @@ pub struct FavoritesSet {
 
 /// Bulk favorites mutation. `entries` are independent `FavoritesSet`
 /// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced — companion logs
+/// platform call. Per-entry errors are not surfaced - companion logs
 /// and best-efforts the rest. Webapps observing partial success listen
 /// for `FavoriteChanged` events.
 #[typeshare]

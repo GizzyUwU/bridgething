@@ -81,9 +81,12 @@ cross-build:
 # Cross-build then push the daemon to /opt/bridgething/daemon/ on the
 # device. The push script stops bridgething + bridgething-weston first
 # (chromium-kiosk cascades) so the 17 MB transfer over USB-CDC doesn't
-# OOM the running stack, then restarts both. /opt/bridgething is a
-# bind-mount from the settings partition so the dropped binary
-# survives bootslot swaps and OTA upgrades.
+# OOM the running stack, rotates the existing .current to .previous
+# (so the OnFailure rollback unit has something to promote if the new
+# binary refuses to come up), atomically swaps in the new binary at
+# .current, then restarts both. /opt/bridgething is a bind-mount from
+# the settings partition so the dropped binary survives bootslot swaps
+# and OTA upgrades.
 push: cross-build
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
 

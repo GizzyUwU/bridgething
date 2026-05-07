@@ -66,9 +66,9 @@ public enum AssetRetention: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case lru,
-			pinned,
-			ttl,
-			persistent
+		     pinned,
+		     ttl,
+		     persistent
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -105,7 +105,7 @@ public enum AssetRetention: Codable, Sendable {
 			try container.encode(CodingKeys.lru, forKey: .type)
 		case .pinned:
 			try container.encode(CodingKeys.pinned, forKey: .type)
-		case .ttl(let content):
+		case let .ttl(content):
 			try container.encode(CodingKeys.ttl, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .persistent:
@@ -148,7 +148,7 @@ public struct AssetPushAbandon: Codable, Sendable {
 /// `AssetPushChunk` should start at, 0 for fresh pushes) or
 /// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
 /// mismatched size/sha, budget exhausted, etc.).
-/// 
+///
 /// Required for any push with `retention = Persistent` and for any push
 /// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
 public struct AssetPushBegin: Codable, Sendable {
@@ -261,7 +261,7 @@ public enum CompanionAuthorityScope: String, Codable, Sendable {
 	case nowPlayingPlayback
 	/// Host audio output volume + mute. iAP2 has no inbound volume CSM
 	/// (HID step is one-way only), so without a companion claiming this
-	/// scope the daemon can't see real volume — it broadcasts a fixed
+	/// scope the daemon can't see real volume - it broadcasts a fixed
 	/// placeholder (0.5, unmuted) so the kiosk doesn't render a muted
 	/// state, and forwards HID Inc/Dec/Mute presses best-effort.
 	case volume
@@ -303,6 +303,8 @@ public struct BridgeThingMeta: Codable, Sendable {
 	public let bridgethingVersion: String
 	public let libbridgethingVersion: String
 	public let appName: String
+	/// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
+	/// the manifest's daemon-component version for OTA hot-swap decisions.
 	public let appVersion: String
 	public let osName: String
 	public let osVersion: String
@@ -312,15 +314,27 @@ public struct BridgeThingMeta: Codable, Sendable {
 	public let fccId: String
 	public let icId: String
 	public let modelName: String
+	/// OTA channel the running image was cut on, e.g. `stable` or `dev`.
+	/// The companion's poll loop only auto-pushes when its configured
+	/// channel matches; a mismatch surfaces a "channel switch needs full
+	/// flash" event rather than swapping channels in-band.
+	public let channel: String
+	/// Image variant the running image was cut as, e.g. `prod` or `dev`.
+	/// Maps to the yocto image recipe name `bridgething-<variant>-image`,
+	/// which is what the companion uses to construct the OTA artifact URL
+	/// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
+	public let imageVariant: String
+	/// Canonical image version (CalVer, e.g. `2026.05.0`). What the
+	/// companion compares to the manifest's image-component version.
+	public let imageVersion: String
 	public let imageBuildId: String
 	public let imageBuildDate: String
 	public let imageDistro: String
-	public let imageDistroVersion: String
 	public let imageMachine: String
 	public let discord: String
 	public let credits: String
 
-	public init(bridgethingVersion: String, libbridgethingVersion: String, appName: String, appVersion: String, osName: String, osVersion: String, osDescription: String, btMac: String, serialNumber: String, fccId: String, icId: String, modelName: String, imageBuildId: String, imageBuildDate: String, imageDistro: String, imageDistroVersion: String, imageMachine: String, discord: String, credits: String) {
+	public init(bridgethingVersion: String, libbridgethingVersion: String, appName: String, appVersion: String, osName: String, osVersion: String, osDescription: String, btMac: String, serialNumber: String, fccId: String, icId: String, modelName: String, channel: String, imageVariant: String, imageVersion: String, imageBuildId: String, imageBuildDate: String, imageDistro: String, imageMachine: String, discord: String, credits: String) {
 		self.bridgethingVersion = bridgethingVersion
 		self.libbridgethingVersion = libbridgethingVersion
 		self.appName = appName
@@ -333,10 +347,12 @@ public struct BridgeThingMeta: Codable, Sendable {
 		self.fccId = fccId
 		self.icId = icId
 		self.modelName = modelName
+		self.channel = channel
+		self.imageVariant = imageVariant
+		self.imageVersion = imageVersion
 		self.imageBuildId = imageBuildId
 		self.imageBuildDate = imageBuildDate
 		self.imageDistro = imageDistro
-		self.imageDistroVersion = imageDistroVersion
 		self.imageMachine = imageMachine
 		self.discord = discord
 		self.credits = credits
@@ -354,9 +370,9 @@ public enum MsgMeta: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case command,
-			event,
-			request,
-			response
+		     event,
+		     request,
+		     response
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -395,7 +411,7 @@ public enum MsgMeta: Codable, Sendable {
 			try container.encode(CodingKeys.event, forKey: .kind)
 		case .request:
 			try container.encode(CodingKeys.request, forKey: .kind)
-		case .response(let content):
+		case let .response(content):
 			try container.encode(CodingKeys.response, forKey: .kind)
 			try container.encode(content, forKey: .data)
 		}
@@ -426,23 +442,23 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case version,
-			asset,
-			audio,
-			geo,
-			library,
-			lyrics,
-			net,
-			notifications,
-			phone,
-			player,
-			system,
-			tunnel,
-			voice,
-			webapp,
-			forward,
-			error,
-			ack,
-			done
+		     asset,
+		     audio,
+		     geo,
+		     library,
+		     lyrics,
+		     net,
+		     notifications,
+		     phone,
+		     player,
+		     system,
+		     tunnel,
+		     voice,
+		     webapp,
+		     forward,
+		     error,
+		     ack,
+		     done
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -547,52 +563,52 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .version(let content):
+		case let .version(content):
 			try container.encode(CodingKeys.version, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .asset(let content):
+		case let .asset(content):
 			try container.encode(CodingKeys.asset, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .audio(let content):
+		case let .audio(content):
 			try container.encode(CodingKeys.audio, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .geo(let content):
+		case let .geo(content):
 			try container.encode(CodingKeys.geo, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .library(let content):
+		case let .library(content):
 			try container.encode(CodingKeys.library, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .lyrics(let content):
+		case let .lyrics(content):
 			try container.encode(CodingKeys.lyrics, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .net(let content):
+		case let .net(content):
 			try container.encode(CodingKeys.net, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .notifications(let content):
+		case let .notifications(content):
 			try container.encode(CodingKeys.notifications, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .phone(let content):
+		case let .phone(content):
 			try container.encode(CodingKeys.phone, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .player(let content):
+		case let .player(content):
 			try container.encode(CodingKeys.player, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .system(let content):
+		case let .system(content):
 			try container.encode(CodingKeys.system, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .tunnel(let content):
+		case let .tunnel(content):
 			try container.encode(CodingKeys.tunnel, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .voice(let content):
+		case let .voice(content):
 			try container.encode(CodingKeys.voice, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .webapp(let content):
+		case let .webapp(content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .forward(let content):
+		case let .forward(content):
 			try container.encode(CodingKeys.forward, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .error(let content):
+		case let .error(content):
 			try container.encode(CodingKeys.error, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .ack:
@@ -605,7 +621,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 
 /// bridgething -> gateway
 /// messages from bridgething to the gateway (mobile or desktop app).
-/// 
+///
 /// these messages will pass over bluetooth.
 public struct BridgeToGatewayMsg: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
@@ -627,7 +643,7 @@ public enum BrightnessMode: String, Codable, Sendable {
 }
 
 /// Backlight state. `level` is the user-set value (only respected in
-/// `Manual`); `effective_level` is what's actually on the panel — equal
+/// `Manual`); `effective_level` is what's actually on the panel - equal
 /// to `level` in `Manual`, ALS-derived in `Auto`.
 public struct BrightnessState: Codable, Sendable {
 	public let mode: BrightnessMode
@@ -649,7 +665,7 @@ public enum BrowseEntry: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case folder,
-			item
+		     item
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -678,10 +694,10 @@ public enum BrowseEntry: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .folder(let content):
+		case let .folder(content):
 			try container.encode(CodingKeys.folder, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .item(let content):
+		case let .item(content):
 			try container.encode(CodingKeys.item, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -717,7 +733,7 @@ public struct BrowseFolder: Codable, Sendable {
 /// Page of browse results. `total` is the count of items in the
 /// underlying collection when the gateway can cheaply expose it (None
 /// means indeterminate). `has_more` is the authoritative end-of-data
-/// signal — webapps paginate by raising `offset` until `has_more` is
+/// signal - webapps paginate by raising `offset` until `has_more` is
 /// false rather than relying on `total`.
 public struct BrowseResult: Codable, Sendable {
 	public let entries: [BrowseEntry]
@@ -849,7 +865,7 @@ public struct ChromeNavigate: Codable, Sendable {
 	}
 }
 
-/// Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+/// Cellular registration state - populated from iAP2 `CommunicationsUpdate`
 /// or the companion's equivalent.
 public enum RegistrationStatus: String, Codable, Sendable {
 	case unknown
@@ -1005,7 +1021,7 @@ public struct EnumField: Codable, Sendable {
 	}
 }
 
-/// Fired when the favorited / liked status of an item changes —
+/// Fired when the favorited / liked status of an item changes -
 /// regardless of whether it was driven by the daemon (FavoritesToggle/Set
 /// command) or by the user mutating it on the gateway-side app directly.
 public struct FavoriteChanged: Codable, Sendable {
@@ -1029,7 +1045,7 @@ public struct FavoritesContainsReply: Codable, Sendable {
 }
 
 /// One playable / browsable item from the library. Lean per-variant
-/// payload — gateways translate platform-specific extras down to these
+/// payload - gateways translate platform-specific extras down to these
 /// fields, rare per-platform fields just don't surface. Forward-compat:
 /// adding new variants or fields is an additive change webapps can
 /// branch on.
@@ -1044,12 +1060,12 @@ public enum LibraryItem: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case track,
-			album,
-			playlist,
-			podcastEpisode,
-			show,
-			artist,
-			station
+		     album,
+		     playlist,
+		     podcastEpisode,
+		     show,
+		     artist,
+		     station
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1103,25 +1119,25 @@ public enum LibraryItem: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .track(let content):
+		case let .track(content):
 			try container.encode(CodingKeys.track, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .album(let content):
+		case let .album(content):
 			try container.encode(CodingKeys.album, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .playlist(let content):
+		case let .playlist(content):
 			try container.encode(CodingKeys.playlist, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .podcastEpisode(let content):
+		case let .podcastEpisode(content):
 			try container.encode(CodingKeys.podcastEpisode, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .show(let content):
+		case let .show(content):
 			try container.encode(CodingKeys.show, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .artist(let content):
+		case let .artist(content):
 			try container.encode(CodingKeys.artist, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .station(let content):
+		case let .station(content):
 			try container.encode(CodingKeys.station, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -1191,7 +1207,7 @@ public struct FavoritesSet: Codable, Sendable {
 
 /// Bulk favorites mutation. `entries` are independent `FavoritesSet`
 /// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced — companion logs
+/// platform call. Per-entry errors are not surfaced - companion logs
 /// and best-efforts the rest. Webapps observing partial success listen
 /// for `FavoriteChanged` events.
 public struct FavoritesSetMany: Codable, Sendable {
@@ -1254,23 +1270,23 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case asset,
-			audio,
-			authority,
-			capabilities,
-			chrome,
-			geo,
-			library,
-			lyrics,
-			net,
-			notifications,
-			phone,
-			player,
-			system,
-			time,
-			tunnel,
-			voice,
-			webapp,
-			error
+		     audio,
+		     authority,
+		     capabilities,
+		     chrome,
+		     geo,
+		     library,
+		     lyrics,
+		     net,
+		     notifications,
+		     phone,
+		     player,
+		     system,
+		     time,
+		     tunnel,
+		     voice,
+		     webapp,
+		     error
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1379,58 +1395,58 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .asset(let content):
+		case let .asset(content):
 			try container.encode(CodingKeys.asset, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .audio(let content):
+		case let .audio(content):
 			try container.encode(CodingKeys.audio, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .authority(let content):
+		case let .authority(content):
 			try container.encode(CodingKeys.authority, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .capabilities(let content):
+		case let .capabilities(content):
 			try container.encode(CodingKeys.capabilities, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .chrome(let content):
+		case let .chrome(content):
 			try container.encode(CodingKeys.chrome, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .geo(let content):
+		case let .geo(content):
 			try container.encode(CodingKeys.geo, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .library(let content):
+		case let .library(content):
 			try container.encode(CodingKeys.library, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .lyrics(let content):
+		case let .lyrics(content):
 			try container.encode(CodingKeys.lyrics, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .net(let content):
+		case let .net(content):
 			try container.encode(CodingKeys.net, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .notifications(let content):
+		case let .notifications(content):
 			try container.encode(CodingKeys.notifications, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .phone(let content):
+		case let .phone(content):
 			try container.encode(CodingKeys.phone, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .player(let content):
+		case let .player(content):
 			try container.encode(CodingKeys.player, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .system(let content):
+		case let .system(content):
 			try container.encode(CodingKeys.system, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .time(let content):
+		case let .time(content):
 			try container.encode(CodingKeys.time, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .tunnel(let content):
+		case let .tunnel(content):
 			try container.encode(CodingKeys.tunnel, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .voice(let content):
+		case let .voice(content):
 			try container.encode(CodingKeys.voice, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .webapp(let content):
+		case let .webapp(content):
 			try container.encode(CodingKeys.webapp, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .error(let content):
+		case let .error(content):
 			try container.encode(CodingKeys.error, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -1439,7 +1455,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
-/// 
+///
 /// these messages will pass over bluetooth.
 public struct GatewayToBridgeMsg: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
@@ -1573,7 +1589,6 @@ public struct LibraryBrowseRequest: Codable, Sendable {
 	}
 }
 
-
 /// Generated type representing the anonymous struct variant `NotFound` of the `LibraryError` Rust enum
 public struct LibraryErrorNotFoundInner: Codable, Sendable {
 	public let uri: String
@@ -1591,6 +1606,7 @@ public struct LibraryErrorNotSupportedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 public enum LibraryError: Codable, Sendable {
 	/// The named uri or node id does not exist in the gateway's library.
 	case notFound(LibraryErrorNotFoundInner)
@@ -1604,9 +1620,9 @@ public enum LibraryError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case notFound,
-			notSupported,
-			unauthorized,
-			noGateway
+		     notSupported,
+		     unauthorized,
+		     noGateway
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1641,10 +1657,10 @@ public enum LibraryError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .notFound(let content):
+		case let .notFound(content):
 			try container.encode(CodingKeys.notFound, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .notSupported(let content):
+		case let .notSupported(content):
 			try container.encode(CodingKeys.notSupported, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .unauthorized:
@@ -1908,7 +1924,6 @@ public struct MediaItemUpdate: Codable, Sendable {
 	}
 }
 
-
 /// Generated type representing the anonymous struct variant `RequestFailed` of the `NetError` Rust enum
 public struct NetErrorRequestFailedInner: Codable, Sendable {
 	public let reason: String
@@ -1917,6 +1932,7 @@ public struct NetErrorRequestFailedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 public enum NetError: Codable, Sendable {
 	case requestFailed(NetErrorRequestFailedInner)
 	case timeout
@@ -1925,9 +1941,9 @@ public enum NetError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case requestFailed,
-			timeout,
-			unavailable,
-			noGateway
+		     timeout,
+		     unavailable,
+		     noGateway
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -1960,7 +1976,7 @@ public enum NetError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .requestFailed(let content):
+		case let .requestFailed(content):
 			try container.encode(CodingKeys.requestFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .timeout:
@@ -2088,7 +2104,6 @@ public struct NetWsClosed: Codable, Sendable {
 	}
 }
 
-
 /// Generated type representing the anonymous struct variant `ConnectFailed` of the `WsError` Rust enum
 public struct WsErrorConnectFailedInner: Codable, Sendable {
 	public let reason: String
@@ -2106,6 +2121,7 @@ public struct WsErrorProtocolErrorInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 public enum WsError: Codable, Sendable {
 	case connectFailed(WsErrorConnectFailedInner)
 	case frameTooLarge
@@ -2114,9 +2130,9 @@ public enum WsError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case connectFailed,
-			frameTooLarge,
-			gatewayDisconnected,
-			protocolError
+		     frameTooLarge,
+		     gatewayDisconnected,
+		     protocolError
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -2151,14 +2167,14 @@ public enum WsError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .connectFailed(let content):
+		case let .connectFailed(content):
 			try container.encode(CodingKeys.connectFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .frameTooLarge:
 			try container.encode(CodingKeys.frameTooLarge, forKey: .type)
 		case .gatewayDisconnected:
 			try container.encode(CodingKeys.gatewayDisconnected, forKey: .type)
-		case .protocolError(let content):
+		case let .protocolError(content):
 			try container.encode(CodingKeys.protocolError, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -2189,7 +2205,7 @@ public enum WsFrame: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case text,
-			binary
+		     binary
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -2218,10 +2234,10 @@ public enum WsFrame: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .text(let content):
+		case let .text(content):
 			try container.encode(CodingKeys.text, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .binary(let content):
+		case let .binary(content):
 			try container.encode(CodingKeys.binary, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -2329,7 +2345,7 @@ public struct NotificationAction: Codable, Sendable {
 
 /// One notification surfaced from the connected companion's notification
 /// center. `id` is companion-stable for the lifetime of the notification
-/// — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+/// - webapps pass it to `invokePositive`/`invokeNegative` and listen for
 /// `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
 /// optional because ANCS treats them as separate attribute fetches.
 public struct Notification: Codable, Sendable {
@@ -2409,7 +2425,7 @@ public enum RepeatMode: String, Codable, Sendable {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
-/// 
+///
 /// `set_elapsed_time_available` is the gate webapps must honor for
 /// scrub UI: when false, scrubbing is unsupported by the foreground
 /// app and the seek button must be disabled.
@@ -2541,7 +2557,7 @@ public struct OtaAssetRangeAbandon: Codable, Sendable {
 /// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
 /// the Bulk lane in order: parts in declaration order, chunks in
 /// ascending `offset`. `offset` is absolute within the asset, not
-/// within the part — matches what the daemon's HTTP-Range writer needs
+/// within the part - matches what the daemon's HTTP-Range writer needs
 /// to feed libcurl. `last:true` only on the final chunk of the final
 /// part for this `request_id`.
 public struct OtaAssetRangeChunk: Codable, Sendable {
@@ -2602,29 +2618,50 @@ public struct OtaAssetRangeReply: Codable, Sendable {
 	}
 }
 
-/// Companion-initiated OTA: opens or resumes a streaming push of a
-/// `.swu` artifact identified by its sha256. The daemon responds with
+/// What the streamed bytes are going to be applied as. Image kind
+/// streams a `.swu` and goes through libswupdate + slot flip + reboot;
+/// daemon kind streams a fresh aarch64 daemon binary and goes through
+/// the on-disk rotate (`.incoming` -> `.current`, prior `.current` ->
+/// `.previous`) followed by a `systemctl restart bridgething.service`.
+/// Companions key reboot expectations off this: image means the device
+/// power-cycles, daemon means the daemon process restarts and the
+/// gateway link drops and reconnects.
+public enum OtaKind: String, Codable, Sendable {
+	case image
+	case daemon
+}
+
+/// Companion-initiated OTA: opens or resumes a streaming push of an
+/// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
 /// `OtaChunk` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }` (already-running OTA, conflicting
 /// in-flight update_id with mismatched size/sha, or budget exhausted).
-/// 
-/// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
-/// so resume across daemon restarts and retries-after-failure both work
-/// without companion-side state to track.
-/// 
+///
+/// `kind` selects the backend: `Image` for a `.swu` (libswupdate +
+/// slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
+/// (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
+/// systemctl restart). The streaming half is identical across kinds.
+///
+/// `update_id` is the sha256 of the artifact, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track.
+///
 /// `update_url_base` is the server prefix the companion may refetch
 /// the .zck delta from on cache miss, e.g.
 /// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
-/// fetch from it — it's carried so the companion can self-recover its
+/// fetch from it - it's carried so the companion can self-recover its
 /// cache while serving range requests during the Writing phase.
+/// Image-kind only; ignored for daemon-kind.
 public struct OtaBegin: Codable, Sendable {
+	public let kind: OtaKind
 	public let updateId: String
 	public let updateUrlBase: String?
 	public let expectedSha256: String
 	public let expectedSize: UInt32
 
-	public init(updateId: String, updateUrlBase: String?, expectedSha256: String, expectedSize: UInt32) {
+	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, expectedSha256: String, expectedSize: UInt32) {
+		self.kind = kind
 		self.updateId = updateId
 		self.updateUrlBase = updateUrlBase
 		self.expectedSha256 = expectedSha256
@@ -2706,12 +2743,18 @@ public struct OtaError: Codable, Sendable {
 	}
 }
 
-/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
-/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
-/// the post-stream sha256 + size check; `Writing` streams the on-disk
-/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
-/// `Reboot` is the terminal stage emitted just before the daemon
-/// triggers the reboot.
+/// Stage of the OTA orchestrator. The phase set is shared between
+/// kinds, with daemon-kind emitting a subset.
+///
+/// Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
+/// -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
+/// try-counter) -> `Reboot` (systemd Reboot).
+///
+/// Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
+/// `.incoming` over `.current`, with prior `.current` rotated to
+/// `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
+/// `Confirming` is not emitted for daemon-kind: there is no slot
+/// try-counter to flip; the rename is the commit point.
 public enum OtaPhase: String, Codable, Sendable {
 	case streaming
 	case verifying
@@ -2749,8 +2792,8 @@ public enum PeerCompanionStatus: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case none,
-			pending,
-			connected
+		     pending,
+		     connected
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -2784,7 +2827,7 @@ public enum PeerCompanionStatus: Codable, Sendable {
 			try container.encode(CodingKeys.none, forKey: .type)
 		case .pending:
 			try container.encode(CodingKeys.pending, forKey: .type)
-		case .connected(let content):
+		case let .connected(content):
 			try container.encode(CodingKeys.connected, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -2896,7 +2939,6 @@ public struct PhoneCallAction: Codable, Sendable {
 	}
 }
 
-
 /// Generated type representing the anonymous struct variant `Failed` of the `CallEndReason` Rust enum
 public struct CallEndReasonFailedInner: Codable, Sendable {
 	public let reason: String
@@ -2905,6 +2947,7 @@ public struct CallEndReasonFailedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 /// Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
 /// platform-defined reason (network, busy, etc.).
 public enum CallEndReason: Codable, Sendable {
@@ -2916,10 +2959,10 @@ public enum CallEndReason: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case local,
-			remote,
-			missed,
-			declined,
-			failed
+		     remote,
+		     missed,
+		     declined,
+		     failed
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -2963,7 +3006,7 @@ public enum CallEndReason: Codable, Sendable {
 			try container.encode(CodingKeys.missed, forKey: .type)
 		case .declined:
 			try container.encode(CodingKeys.declined, forKey: .type)
-		case .failed(let content):
+		case let .failed(content):
 			try container.encode(CodingKeys.failed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -3054,7 +3097,7 @@ public struct PhoneMuteAction: Codable, Sendable {
 }
 
 /// Snapshot of every active call known to the gateway. Multi-call is
-/// possible (call-waiting, conference) — webapps rendering only one
+/// possible (call-waiting, conference) - webapps rendering only one
 /// active call typically pick the first non-Held entry.
 public struct PhoneState: Codable, Sendable {
 	public let activeCalls: [PhoneCall]
@@ -3115,7 +3158,7 @@ public enum PlaybackState: String, Codable, Sendable {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
-/// 
+///
 /// `set_elapsed_time_available` gates scrub UI: when false, the foreground
 /// app refuses absolute-position seeks and webapps must disable the scrub
 /// thumb. `None` means unknown (no signal received yet); webapps treat
@@ -3172,7 +3215,7 @@ public struct PlayerOptions: Codable, Sendable {
 	}
 }
 
-/// One row in the player queue. Lean cross-platform shape — gateways
+/// One row in the player queue. Lean cross-platform shape - gateways
 /// that have richer per-track data still surface what fields they have.
 /// `uri` is required because every queued item must be addressable for
 /// `skipToIndex`. `persistent_id` is the platform-stable id when
@@ -3278,8 +3321,8 @@ public enum QueuePosition: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case append,
-			next,
-			index
+		     next,
+		     index
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -3313,7 +3356,7 @@ public enum QueuePosition: Codable, Sendable {
 			try container.encode(CodingKeys.append, forKey: .type)
 		case .next:
 			try container.encode(CodingKeys.next, forKey: .type)
-		case .index(let content):
+		case let .index(content):
 			try container.encode(CodingKeys.index, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -3332,7 +3375,7 @@ public struct QueueUri: Codable, Sendable {
 
 /// Page of recommendation results. Gateway decides how seed + kind
 /// interact (Spotify uses radio-style seeding, Apple Music uses curated
-/// rails) — the daemon doesn't prescribe.
+/// rails) - the daemon doesn't prescribe.
 public struct RecommendationsResult: Codable, Sendable {
 	public let items: [LibraryItem]
 	public let total: UInt32?
@@ -3532,7 +3575,7 @@ public struct StreamEnd: Codable, Sendable {
 	}
 }
 
-/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// Stream failed mid-flight (or before the first byte). Terminal - the
 /// daemon clears its routing entry. The `error` shape is shared with
 /// `fetch` since the failure modes are identical.
 public struct StreamError: Codable, Sendable {
@@ -3564,10 +3607,10 @@ public struct StringField: Codable, Sendable {
 }
 
 /// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
-/// (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+/// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
 /// reading time should use the device clock if any but use this as the
 /// trust anchor on first arrival.
-/// 
+///
 /// Two zone-identification paths coexist: companion gateways send
 /// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
 /// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
@@ -3687,7 +3730,6 @@ public struct TunnelData: Codable, Sendable {
 	}
 }
 
-
 /// Generated type representing the anonymous struct variant `ConnectFailed` of the `TunnelError` Rust enum
 public struct TunnelErrorConnectFailedInner: Codable, Sendable {
 	public let reason: String
@@ -3696,6 +3738,7 @@ public struct TunnelErrorConnectFailedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 public enum TunnelError: Codable, Sendable {
 	/// Companion couldn't reach the host (DNS / TCP RST / network unreachable).
 	case connectFailed(TunnelErrorConnectFailedInner)
@@ -3706,8 +3749,8 @@ public enum TunnelError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case connectFailed,
-			permissionDenied,
-			unavailable
+		     permissionDenied,
+		     unavailable
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -3737,7 +3780,7 @@ public enum TunnelError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .connectFailed(let content):
+		case let .connectFailed(content):
 			try container.encode(CodingKeys.connectFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .permissionDenied:
@@ -3989,10 +4032,10 @@ public enum ConfigField: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case string,
-			number,
-			boolean,
-			`enum`,
-			secret
+		     number,
+		     boolean,
+		     `enum`,
+		     secret
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4036,19 +4079,19 @@ public enum ConfigField: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .string(let content):
+		case let .string(content):
 			try container.encode(CodingKeys.string, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .number(let content):
+		case let .number(content):
 			try container.encode(CodingKeys.number, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .boolean(let content):
+		case let .boolean(content):
 			try container.encode(CodingKeys.boolean, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .enum(let content):
+		case let .enum(content):
 			try container.encode(CodingKeys.enum, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .secret(let content):
+		case let .secret(content):
 			try container.encode(CodingKeys.secret, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -4148,8 +4191,8 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case request,
-			pushBeginAck,
-			pushBeginRejected
+		     pushBeginAck,
+		     pushBeginRejected
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4183,13 +4226,13 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .request(let content):
+		case let .request(content):
 			try container.encode(CodingKeys.request, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .pushBeginAck(let content):
+		case let .pushBeginAck(content):
 			try container.encode(CodingKeys.pushBeginAck, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .pushBeginRejected(let content):
+		case let .pushBeginRejected(content):
 			try container.encode(CodingKeys.pushBeginRejected, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4209,14 +4252,14 @@ public enum BridgeToGatewayAudioMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case volumeUp,
-			volumeDown,
-			setVolume,
-			muteToggle,
-			setMute,
-			tts,
-			ttsCancel,
-			ttsCancelAll,
-			earcon
+		     volumeDown,
+		     setVolume,
+		     muteToggle,
+		     setMute,
+		     tts,
+		     ttsCancel,
+		     ttsCancelAll,
+		     earcon
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4276,23 +4319,23 @@ public enum BridgeToGatewayAudioMsg: Codable, Sendable {
 			try container.encode(CodingKeys.volumeUp, forKey: .event)
 		case .volumeDown:
 			try container.encode(CodingKeys.volumeDown, forKey: .event)
-		case .setVolume(let content):
+		case let .setVolume(content):
 			try container.encode(CodingKeys.setVolume, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .muteToggle:
 			try container.encode(CodingKeys.muteToggle, forKey: .event)
-		case .setMute(let content):
+		case let .setMute(content):
 			try container.encode(CodingKeys.setMute, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .tts(let content):
+		case let .tts(content):
 			try container.encode(CodingKeys.tts, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .ttsCancel(let content):
+		case let .ttsCancel(content):
 			try container.encode(CodingKeys.ttsCancel, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .ttsCancelAll:
 			try container.encode(CodingKeys.ttsCancelAll, forKey: .event)
-		case .earcon(let content):
+		case let .earcon(content):
 			try container.encode(CodingKeys.earcon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4306,8 +4349,8 @@ public enum BridgeToGatewayGeoMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case watch,
-			unwatch,
-			getOnce
+		     unwatch,
+		     getOnce
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4339,12 +4382,12 @@ public enum BridgeToGatewayGeoMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .watch(let content):
+		case let .watch(content):
 			try container.encode(CodingKeys.watch, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .unwatch:
 			try container.encode(CodingKeys.unwatch, forKey: .event)
-		case .getOnce(let content):
+		case let .getOnce(content):
 			try container.encode(CodingKeys.getOnce, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4363,13 +4406,13 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browse,
-			search,
-			recommendations,
-			favoritesList,
-			favoritesContains,
-			favoritesToggle,
-			favoritesSet,
-			favoritesSetMany
+		     search,
+		     recommendations,
+		     favoritesList,
+		     favoritesContains,
+		     favoritesToggle,
+		     favoritesSet,
+		     favoritesSetMany
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4428,28 +4471,28 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .browse(let content):
+		case let .browse(content):
 			try container.encode(CodingKeys.browse, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .search(let content):
+		case let .search(content):
 			try container.encode(CodingKeys.search, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .recommendations(let content):
+		case let .recommendations(content):
 			try container.encode(CodingKeys.recommendations, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesList(let content):
+		case let .favoritesList(content):
 			try container.encode(CodingKeys.favoritesList, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesContains(let content):
+		case let .favoritesContains(content):
 			try container.encode(CodingKeys.favoritesContains, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesToggle(let content):
+		case let .favoritesToggle(content):
 			try container.encode(CodingKeys.favoritesToggle, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesSet(let content):
+		case let .favoritesSet(content):
 			try container.encode(CodingKeys.favoritesSet, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesSetMany(let content):
+		case let .favoritesSetMany(content):
 			try container.encode(CodingKeys.favoritesSetMany, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4484,7 +4527,7 @@ public enum BridgeToGatewayLyricsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .get(let content):
+		case let .get(content):
 			try container.encode(CodingKeys.get, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4501,11 +4544,11 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case fetch,
-			wsOpen,
-			wsClose,
-			wsSend,
-			streamOpen,
-			streamCancel
+		     wsOpen,
+		     wsClose,
+		     wsSend,
+		     streamOpen,
+		     streamCancel
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4554,22 +4597,22 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .fetch(let content):
+		case let .fetch(content):
 			try container.encode(CodingKeys.fetch, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsOpen(let content):
+		case let .wsOpen(content):
 			try container.encode(CodingKeys.wsOpen, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsClose(let content):
+		case let .wsClose(content):
 			try container.encode(CodingKeys.wsClose, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsSend(let content):
+		case let .wsSend(content):
 			try container.encode(CodingKeys.wsSend, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamOpen(let content):
+		case let .streamOpen(content):
 			try container.encode(CodingKeys.streamOpen, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamCancel(let content):
+		case let .streamCancel(content):
 			try container.encode(CodingKeys.streamCancel, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4582,7 +4625,7 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case invokePositive,
-			invokeNegative
+		     invokeNegative
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4611,10 +4654,10 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .invokePositive(let content):
+		case let .invokePositive(content):
 			try container.encode(CodingKeys.invokePositive, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .invokeNegative(let content):
+		case let .invokeNegative(content):
 			try container.encode(CodingKeys.invokeNegative, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4638,18 +4681,18 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case answer,
-			accept,
-			decline,
-			end,
-			endTyped,
-			hold,
-			unhold,
-			initiate,
-			swap,
-			merge,
-			mute,
-			dtmf,
-			stateGet
+		     accept,
+		     decline,
+		     end,
+		     endTyped,
+		     hold,
+		     unhold,
+		     initiate,
+		     swap,
+		     merge,
+		     mute,
+		     dtmf,
+		     stateGet
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4727,38 +4770,38 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .answer(let content):
+		case let .answer(content):
 			try container.encode(CodingKeys.answer, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .accept(let content):
+		case let .accept(content):
 			try container.encode(CodingKeys.accept, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .decline(let content):
+		case let .decline(content):
 			try container.encode(CodingKeys.decline, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .end(let content):
+		case let .end(content):
 			try container.encode(CodingKeys.end, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .endTyped(let content):
+		case let .endTyped(content):
 			try container.encode(CodingKeys.endTyped, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .hold(let content):
+		case let .hold(content):
 			try container.encode(CodingKeys.hold, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .unhold(let content):
+		case let .unhold(content):
 			try container.encode(CodingKeys.unhold, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .initiate(let content):
+		case let .initiate(content):
 			try container.encode(CodingKeys.initiate, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .swap:
 			try container.encode(CodingKeys.swap, forKey: .event)
 		case .merge:
 			try container.encode(CodingKeys.merge, forKey: .event)
-		case .mute(let content):
+		case let .mute(content):
 			try container.encode(CodingKeys.mute, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .dtmf(let content):
+		case let .dtmf(content):
 			try container.encode(CodingKeys.dtmf, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .stateGet:
@@ -4770,7 +4813,7 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 /// Bridge → gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` — daemon never forwards a URI no
+/// `Capabilities.uri_schemes` - daemon never forwards a URI no
 /// connected gateway claims.
 public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	case play(PlayUri)
@@ -4788,17 +4831,17 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case play,
-			queue,
-			pause,
-			resume,
-			skipNext,
-			skipPrev,
-			skipToIndex,
-			seekTo,
-			setShuffle,
-			setRepeat,
-			setSpeed,
-			setCrossfade
+		     queue,
+		     pause,
+		     resume,
+		     skipNext,
+		     skipPrev,
+		     skipToIndex,
+		     seekTo,
+		     setShuffle,
+		     setRepeat,
+		     setSpeed,
+		     setCrossfade
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4869,10 +4912,10 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .play(let content):
+		case let .play(content):
 			try container.encode(CodingKeys.play, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .queue(let content):
+		case let .queue(content):
 			try container.encode(CodingKeys.queue, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .pause:
@@ -4883,22 +4926,22 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			try container.encode(CodingKeys.skipNext, forKey: .event)
 		case .skipPrev:
 			try container.encode(CodingKeys.skipPrev, forKey: .event)
-		case .skipToIndex(let content):
+		case let .skipToIndex(content):
 			try container.encode(CodingKeys.skipToIndex, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .seekTo(let content):
+		case let .seekTo(content):
 			try container.encode(CodingKeys.seekTo, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .setShuffle(let content):
+		case let .setShuffle(content):
 			try container.encode(CodingKeys.setShuffle, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .setRepeat(let content):
+		case let .setRepeat(content):
 			try container.encode(CodingKeys.setRepeat, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .setSpeed(let content):
+		case let .setSpeed(content):
 			try container.encode(CodingKeys.setSpeed, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .setCrossfade(let content):
+		case let .setCrossfade(content):
 			try container.encode(CodingKeys.setCrossfade, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4915,11 +4958,11 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
-			otaError,
-			otaBeginAck,
-			otaBeginRejected,
-			otaAssetRange,
-			otaAssetRangeAbandon
+		     otaError,
+		     otaBeginAck,
+		     otaBeginRejected,
+		     otaAssetRange,
+		     otaAssetRangeAbandon
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4968,22 +5011,22 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .otaProgress(let content):
+		case let .otaProgress(content):
 			try container.encode(CodingKeys.otaProgress, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaError(let content):
+		case let .otaError(content):
 			try container.encode(CodingKeys.otaError, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaBeginAck(let content):
+		case let .otaBeginAck(content):
 			try container.encode(CodingKeys.otaBeginAck, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaBeginRejected(let content):
+		case let .otaBeginRejected(content):
 			try container.encode(CodingKeys.otaBeginRejected, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaAssetRange(let content):
+		case let .otaAssetRange(content):
 			try container.encode(CodingKeys.otaAssetRange, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaAssetRangeAbandon(let content):
+		case let .otaAssetRangeAbandon(content):
 			try container.encode(CodingKeys.otaAssetRangeAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -4997,8 +5040,8 @@ public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case open,
-			data,
-			close
+		     data,
+		     close
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5032,13 +5075,13 @@ public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .open(let content):
+		case let .open(content):
 			try container.encode(CodingKeys.open, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .data(let content):
+		case let .data(content):
 			try container.encode(CodingKeys.data, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .close(let content):
+		case let .close(content):
 			try container.encode(CodingKeys.close, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5052,8 +5095,8 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case streamOpen,
-			frame,
-			streamClose
+		     frame,
+		     streamClose
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5087,13 +5130,13 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .streamOpen(let content):
+		case let .streamOpen(content):
 			try container.encode(CodingKeys.streamOpen, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .frame(let content):
+		case let .frame(content):
 			try container.encode(CodingKeys.frame, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamClose(let content):
+		case let .streamClose(content):
 			try container.encode(CodingKeys.streamClose, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5121,15 +5164,15 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case webapps,
-			active,
-			switched,
-			installed,
-			uninstalled,
-			webappError,
-			icon,
-			configGet,
-			configList,
-			configAck
+		     active,
+		     switched,
+		     installed,
+		     uninstalled,
+		     webappError,
+		     icon,
+		     configGet,
+		     configList,
+		     configAck
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5198,34 +5241,34 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .webapps(let content):
+		case let .webapps(content):
 			try container.encode(CodingKeys.webapps, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .active(let content):
+		case let .active(content):
 			try container.encode(CodingKeys.active, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .switched(let content):
+		case let .switched(content):
 			try container.encode(CodingKeys.switched, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .installed(let content):
+		case let .installed(content):
 			try container.encode(CodingKeys.installed, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .uninstalled(let content):
+		case let .uninstalled(content):
 			try container.encode(CodingKeys.uninstalled, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .webappError(let content):
+		case let .webappError(content):
 			try container.encode(CodingKeys.webappError, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .icon(let content):
+		case let .icon(content):
 			try container.encode(CodingKeys.icon, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configGet(let content):
+		case let .configGet(content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configList(let content):
+		case let .configList(content):
 			try container.encode(CodingKeys.configList, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configAck(let content):
+		case let .configAck(content):
 			try container.encode(CodingKeys.configAck, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5239,8 +5282,8 @@ public enum ForwardMessage: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case text,
-			json,
-			binary
+		     json,
+		     binary
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5274,13 +5317,13 @@ public enum ForwardMessage: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .text(let content):
+		case let .text(content):
 			try container.encode(CodingKeys.text, forKey: .encoding)
 			try container.encode(content, forKey: .data)
-		case .json(let content):
+		case let .json(content):
 			try container.encode(CodingKeys.json, forKey: .encoding)
 			try container.encode(content, forKey: .data)
-		case .binary(let content):
+		case let .binary(content):
 			try container.encode(CodingKeys.binary, forKey: .encoding)
 			try container.encode(content, forKey: .data)
 		}
@@ -5298,12 +5341,12 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case push,
-			clear,
-			pushBegin,
-			pushChunk,
-			pushAbandon,
-			got,
-			notFound
+		     clear,
+		     pushBegin,
+		     pushChunk,
+		     pushAbandon,
+		     got,
+		     notFound
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5357,25 +5400,25 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .push(let content):
+		case let .push(content):
 			try container.encode(CodingKeys.push, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .clear(let content):
+		case let .clear(content):
 			try container.encode(CodingKeys.clear, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .pushBegin(let content):
+		case let .pushBegin(content):
 			try container.encode(CodingKeys.pushBegin, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .pushChunk(let content):
+		case let .pushChunk(content):
 			try container.encode(CodingKeys.pushChunk, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .pushAbandon(let content):
+		case let .pushAbandon(content):
 			try container.encode(CodingKeys.pushAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .got(let content):
+		case let .got(content):
 			try container.encode(CodingKeys.got, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .notFound(let content):
+		case let .notFound(content):
 			try container.encode(CodingKeys.notFound, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5389,8 +5432,8 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case ttsStarted,
-			ttsEnded,
-			volumeChanged
+		     ttsEnded,
+		     volumeChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5424,13 +5467,13 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .ttsStarted(let content):
+		case let .ttsStarted(content):
 			try container.encode(CodingKeys.ttsStarted, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .ttsEnded(let content):
+		case let .ttsEnded(content):
 			try container.encode(CodingKeys.ttsEnded, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .volumeChanged(let content):
+		case let .volumeChanged(content):
 			try container.encode(CodingKeys.volumeChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5447,7 +5490,7 @@ public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case claim,
-			release
+		     release
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5476,10 +5519,10 @@ public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .claim(let content):
+		case let .claim(content):
 			try container.encode(CodingKeys.claim, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .release(let content):
+		case let .release(content):
 			try container.encode(CodingKeys.release, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5519,7 +5562,7 @@ public enum GatewayToBridgeCapabilitiesMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .announce(let content):
+		case let .announce(content):
 			try container.encode(CodingKeys.announce, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5554,7 +5597,7 @@ public enum GatewayToBridgeChromeMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .navigate(let content):
+		case let .navigate(content):
 			try container.encode(CodingKeys.navigate, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5568,8 +5611,8 @@ public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case position,
-			getOnceReply,
-			errorReply
+		     getOnceReply,
+		     errorReply
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5603,13 +5646,13 @@ public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .position(let content):
+		case let .position(content):
 			try container.encode(CodingKeys.position, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .getOnceReply(let content):
+		case let .getOnceReply(content):
 			try container.encode(CodingKeys.getOnceReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .errorReply(let content):
+		case let .errorReply(content):
 			try container.encode(CodingKeys.errorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5627,12 +5670,12 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browseReply,
-			searchReply,
-			recommendationsReply,
-			favoritesListReply,
-			favoritesContainsReply,
-			libraryErrorReply,
-			favoriteChanged
+		     searchReply,
+		     recommendationsReply,
+		     favoritesListReply,
+		     favoritesContainsReply,
+		     libraryErrorReply,
+		     favoriteChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5686,25 +5729,25 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .browseReply(let content):
+		case let .browseReply(content):
 			try container.encode(CodingKeys.browseReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .searchReply(let content):
+		case let .searchReply(content):
 			try container.encode(CodingKeys.searchReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .recommendationsReply(let content):
+		case let .recommendationsReply(content):
 			try container.encode(CodingKeys.recommendationsReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesListReply(let content):
+		case let .favoritesListReply(content):
 			try container.encode(CodingKeys.favoritesListReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoritesContainsReply(let content):
+		case let .favoritesContainsReply(content):
 			try container.encode(CodingKeys.favoritesContainsReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .libraryErrorReply(let content):
+		case let .libraryErrorReply(content):
 			try container.encode(CodingKeys.libraryErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .favoriteChanged(let content):
+		case let .favoriteChanged(content):
 			try container.encode(CodingKeys.favoriteChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5717,7 +5760,7 @@ public enum GatewayToBridgeLyricsMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case lyricsReply,
-			lyricsErrorReply
+		     lyricsErrorReply
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5746,10 +5789,10 @@ public enum GatewayToBridgeLyricsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .lyricsReply(let content):
+		case let .lyricsReply(content):
 			try container.encode(CodingKeys.lyricsReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .lyricsErrorReply(let content):
+		case let .lyricsErrorReply(content):
 			try container.encode(CodingKeys.lyricsErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5771,16 +5814,16 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case fetchReply,
-			fetchErrorReply,
-			wsOpenReply,
-			wsErrorReply,
-			wsMessage,
-			wsClosed,
-			wsErrorEvent,
-			streamBegin,
-			streamChunk,
-			streamEnd,
-			streamError
+		     fetchErrorReply,
+		     wsOpenReply,
+		     wsErrorReply,
+		     wsMessage,
+		     wsClosed,
+		     wsErrorEvent,
+		     streamBegin,
+		     streamChunk,
+		     streamEnd,
+		     streamError
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5854,37 +5897,37 @@ public enum GatewayToBridgeNetMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .fetchReply(let content):
+		case let .fetchReply(content):
 			try container.encode(CodingKeys.fetchReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .fetchErrorReply(let content):
+		case let .fetchErrorReply(content):
 			try container.encode(CodingKeys.fetchErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsOpenReply(let content):
+		case let .wsOpenReply(content):
 			try container.encode(CodingKeys.wsOpenReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsErrorReply(let content):
+		case let .wsErrorReply(content):
 			try container.encode(CodingKeys.wsErrorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsMessage(let content):
+		case let .wsMessage(content):
 			try container.encode(CodingKeys.wsMessage, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsClosed(let content):
+		case let .wsClosed(content):
 			try container.encode(CodingKeys.wsClosed, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .wsErrorEvent(let content):
+		case let .wsErrorEvent(content):
 			try container.encode(CodingKeys.wsErrorEvent, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamBegin(let content):
+		case let .streamBegin(content):
 			try container.encode(CodingKeys.streamBegin, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamChunk(let content):
+		case let .streamChunk(content):
 			try container.encode(CodingKeys.streamChunk, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamEnd(let content):
+		case let .streamEnd(content):
 			try container.encode(CodingKeys.streamEnd, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .streamError(let content):
+		case let .streamError(content):
 			try container.encode(CodingKeys.streamError, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5898,8 +5941,8 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case posted,
-			updated,
-			removed
+		     updated,
+		     removed
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5933,13 +5976,13 @@ public enum GatewayToBridgeNotificationsMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .posted(let content):
+		case let .posted(content):
 			try container.encode(CodingKeys.posted, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .updated(let content):
+		case let .updated(content):
 			try container.encode(CodingKeys.updated, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .removed(let content):
+		case let .removed(content):
 			try container.encode(CodingKeys.removed, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -5956,11 +5999,11 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
-			communicationsSnapshot,
-			callStarted,
-			callUpdated,
-			callEnded,
-			stateReply
+		     communicationsSnapshot,
+		     callStarted,
+		     callUpdated,
+		     callEnded,
+		     stateReply
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6009,22 +6052,22 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .snapshot(let content):
+		case let .snapshot(content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .communicationsSnapshot(let content):
+		case let .communicationsSnapshot(content):
 			try container.encode(CodingKeys.communicationsSnapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .callStarted(let content):
+		case let .callStarted(content):
 			try container.encode(CodingKeys.callStarted, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .callUpdated(let content):
+		case let .callUpdated(content):
 			try container.encode(CodingKeys.callUpdated, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .callEnded(let content):
+		case let .callEnded(content):
 			try container.encode(CodingKeys.callEnded, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .stateReply(let content):
+		case let .stateReply(content):
 			try container.encode(CodingKeys.stateReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6034,7 +6077,7 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 /// Gateway → bridge player events. `Snapshot` is the initial-state event
 /// fired at announce when the companion claims player authority;
 /// `Delta` is the ongoing partial-update stream (the only delta-shaped
-/// event in the wire protocol — every other surface uses snapshots).
+/// event in the wire protocol - every other surface uses snapshots).
 /// `QueueChanged` fires when the queue mutates without a track change
 /// (companion-side reorder, prefetch).
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
@@ -6044,8 +6087,8 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
-			delta,
-			queueChanged
+		     delta,
+		     queueChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6079,13 +6122,13 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .snapshot(let content):
+		case let .snapshot(content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .delta(let content):
+		case let .delta(content):
 			try container.encode(CodingKeys.delta, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .queueChanged(let content):
+		case let .queueChanged(content):
 			try container.encode(CodingKeys.queueChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6103,12 +6146,12 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaBegin,
-			otaChunk,
-			otaAbandon,
-			cancelUpdate,
-			otaAssetRangeReply,
-			otaAssetRangeRejected,
-			otaAssetRangeChunk
+		     otaChunk,
+		     otaAbandon,
+		     cancelUpdate,
+		     otaAssetRangeReply,
+		     otaAssetRangeRejected,
+		     otaAssetRangeChunk
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6160,24 +6203,24 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .otaBegin(let content):
+		case let .otaBegin(content):
 			try container.encode(CodingKeys.otaBegin, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaChunk(let content):
+		case let .otaChunk(content):
 			try container.encode(CodingKeys.otaChunk, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaAbandon(let content):
+		case let .otaAbandon(content):
 			try container.encode(CodingKeys.otaAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .cancelUpdate:
 			try container.encode(CodingKeys.cancelUpdate, forKey: .event)
-		case .otaAssetRangeReply(let content):
+		case let .otaAssetRangeReply(content):
 			try container.encode(CodingKeys.otaAssetRangeReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaAssetRangeRejected(let content):
+		case let .otaAssetRangeRejected(content):
 			try container.encode(CodingKeys.otaAssetRangeRejected, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaAssetRangeChunk(let content):
+		case let .otaAssetRangeChunk(content):
 			try container.encode(CodingKeys.otaAssetRangeChunk, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6186,7 +6229,7 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce
 /// (announce-on-connect rule for any surface where companion claims
-/// authority — Time always seeds) and again on tz / locale / clock-skew
+/// authority - Time always seeds) and again on tz / locale / clock-skew
 /// changes.
 public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 	case snapshot(TimeInfo)
@@ -6216,7 +6259,7 @@ public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .snapshot(let content):
+		case let .snapshot(content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6231,9 +6274,9 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case openReply,
-			errorReply,
-			data,
-			closed
+		     errorReply,
+		     data,
+		     closed
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6272,16 +6315,16 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .openReply(let content):
+		case let .openReply(content):
 			try container.encode(CodingKeys.openReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .errorReply(let content):
+		case let .errorReply(content):
 			try container.encode(CodingKeys.errorReply, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .data(let content):
+		case let .data(content):
 			try container.encode(CodingKeys.data, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .closed(let content):
+		case let .closed(content):
 			try container.encode(CodingKeys.closed, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6294,7 +6337,7 @@ public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case micOpen,
-			micClose
+		     micClose
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6321,7 +6364,7 @@ public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .micOpen(let content):
+		case let .micOpen(content):
 			try container.encode(CodingKeys.micOpen, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .micClose:
@@ -6352,15 +6395,15 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case list,
-			getActive,
-			switchTo,
-			install,
-			uninstall,
-			icon,
-			configGet,
-			configList,
-			configSet,
-			configDelete
+		     getActive,
+		     switchTo,
+		     install,
+		     uninstall,
+		     icon,
+		     configGet,
+		     configList,
+		     configSet,
+		     configDelete
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6429,28 +6472,28 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 			try container.encode(CodingKeys.list, forKey: .event)
 		case .getActive:
 			try container.encode(CodingKeys.getActive, forKey: .event)
-		case .switchTo(let content):
+		case let .switchTo(content):
 			try container.encode(CodingKeys.switchTo, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .install(let content):
+		case let .install(content):
 			try container.encode(CodingKeys.install, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .uninstall(let content):
+		case let .uninstall(content):
 			try container.encode(CodingKeys.uninstall, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .icon(let content):
+		case let .icon(content):
 			try container.encode(CodingKeys.icon, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configGet(let content):
+		case let .configGet(content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configList(let content):
+		case let .configList(content):
 			try container.encode(CodingKeys.configList, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configSet(let content):
+		case let .configSet(content):
 			try container.encode(CodingKeys.configSet, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .configDelete(let content):
+		case let .configDelete(content):
 			try container.encode(CodingKeys.configDelete, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
@@ -6460,7 +6503,7 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 public enum HardwareError: String, Codable, Sendable {
 	/// The supplied level is outside `[0.0, 1.0]`.
 	case levelOutOfRange
-	/// `setLevel` was called while in `Auto` mode — ignored, switch to
+	/// `setLevel` was called while in `Auto` mode - ignored, switch to
 	/// `Manual` first.
 	case modeMismatch
 }
@@ -6471,7 +6514,7 @@ public enum Image: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case id,
-			bytes
+		     bytes
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6500,10 +6543,10 @@ public enum Image: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .id(let content):
+		case let .id(content):
 			try container.encode(CodingKeys.id, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .bytes(let content):
+		case let .bytes(content):
 			try container.encode(CodingKeys.bytes, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -6518,7 +6561,6 @@ public enum LogSource: String, Codable, Sendable {
 	case system
 	case all
 }
-
 
 /// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum
 public struct PhoneErrorCallNotFoundInner: Codable, Sendable {
@@ -6546,6 +6588,7 @@ public struct PhoneErrorUnavailableInner: Codable, Sendable {
 		self.verb = verb
 	}
 }
+
 public enum PhoneError: Codable, Sendable {
 	/// The supplied `call_id` is not in the daemon's active set.
 	case callNotFound(PhoneErrorCallNotFoundInner)
@@ -6560,9 +6603,9 @@ public enum PhoneError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case callNotFound,
-			actionRejected,
-			noTarget,
-			unavailable
+		     actionRejected,
+		     noTarget,
+		     unavailable
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6599,21 +6642,20 @@ public enum PhoneError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .callNotFound(let content):
+		case let .callNotFound(content):
 			try container.encode(CodingKeys.callNotFound, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .actionRejected(let content):
+		case let .actionRejected(content):
 			try container.encode(CodingKeys.actionRejected, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .noTarget:
 			try container.encode(CodingKeys.noTarget, forKey: .type)
-		case .unavailable(let content):
+		case let .unavailable(content):
 			try container.encode(CodingKeys.unavailable, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}
 }
-
 
 /// Generated type representing the anonymous struct variant `SchemeUnclaimed` of the `PlayerError` Rust enum
 public struct PlayerErrorSchemeUnclaimedInner: Codable, Sendable {
@@ -6641,6 +6683,7 @@ public struct PlayerErrorNotInQueueInner: Codable, Sendable {
 		self.index = index
 	}
 }
+
 public enum PlayerError: Codable, Sendable {
 	/// `play({uri})` was called with a scheme no connected gateway claims.
 	/// Returned synchronously by the daemon without round-tripping.
@@ -6654,9 +6697,9 @@ public enum PlayerError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case schemeUnclaimed,
-			playFailed,
-			noGateway,
-			notInQueue
+		     playFailed,
+		     noGateway,
+		     notInQueue
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6693,15 +6736,15 @@ public enum PlayerError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .schemeUnclaimed(let content):
+		case let .schemeUnclaimed(content):
 			try container.encode(CodingKeys.schemeUnclaimed, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .playFailed(let content):
+		case let .playFailed(content):
 			try container.encode(CodingKeys.playFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .noGateway:
 			try container.encode(CodingKeys.noGateway, forKey: .type)
-		case .notInQueue(let content):
+		case let .notInQueue(content):
 			try container.encode(CodingKeys.notInQueue, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
@@ -6712,7 +6755,6 @@ public enum Priority: String, Codable, Sendable {
 	case normal
 	case bulk
 }
-
 
 /// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum
 public struct WebappErrorWebappNotFoundInner: Codable, Sendable {
@@ -6769,6 +6811,7 @@ public struct WebappErrorInvalidConfigValueInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 public enum WebappError: Codable, Sendable {
 	/// No installed webapp matches this id.
 	case webappNotFound(WebappErrorWebappNotFoundInner)
@@ -6786,11 +6829,11 @@ public enum WebappError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case webappNotFound,
-			cannotUninstallBuiltin,
-			installFailed,
-			iconNotAvailable,
-			unknownConfigKey,
-			invalidConfigValue
+		     cannotUninstallBuiltin,
+		     installFailed,
+		     iconNotAvailable,
+		     unknownConfigKey,
+		     invalidConfigValue
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6839,28 +6882,27 @@ public enum WebappError: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .webappNotFound(let content):
+		case let .webappNotFound(content):
 			try container.encode(CodingKeys.webappNotFound, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .cannotUninstallBuiltin(let content):
+		case let .cannotUninstallBuiltin(content):
 			try container.encode(CodingKeys.cannotUninstallBuiltin, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .installFailed(let content):
+		case let .installFailed(content):
 			try container.encode(CodingKeys.installFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .iconNotAvailable(let content):
+		case let .iconNotAvailable(content):
 			try container.encode(CodingKeys.iconNotAvailable, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .unknownConfigKey(let content):
+		case let .unknownConfigKey(content):
 			try container.encode(CodingKeys.unknownConfigKey, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .invalidConfigValue(let content):
+		case let .invalidConfigValue(content):
 			try container.encode(CodingKeys.invalidConfigValue, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}
 	}
 }
-
 
 /// Generated type representing the anonymous struct variant `Malformed` of the `WireError` Rust enum
 public struct WireErrorMalformedInner: Codable, Sendable {
@@ -6879,10 +6921,11 @@ public struct WireErrorHandlerFailedInner: Codable, Sendable {
 		self.reason = reason
 	}
 }
+
 /// Protocol-level failure the responder ships when a request could not be
 /// reached or dispatched. Carried by the `Error` variant on every
 /// `*MsgData` enum.
-/// 
+///
 /// Domain-level errors (predictable, op-specific failures the caller may
 /// want to recover from) live inside the per-op response variant, not
 /// here.
@@ -6903,9 +6946,9 @@ public enum WireError: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case unsupported,
-			unimplemented,
-			malformed,
-			handlerFailed
+		     unimplemented,
+		     malformed,
+		     handlerFailed
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6944,10 +6987,10 @@ public enum WireError: Codable, Sendable {
 			try container.encode(CodingKeys.unsupported, forKey: .type)
 		case .unimplemented:
 			try container.encode(CodingKeys.unimplemented, forKey: .type)
-		case .malformed(let content):
+		case let .malformed(content):
 			try container.encode(CodingKeys.malformed, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .handlerFailed(let content):
+		case let .handlerFailed(content):
 			try container.encode(CodingKeys.handlerFailed, forKey: .type)
 			try container.encode(content, forKey: .data)
 		}

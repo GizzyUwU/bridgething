@@ -322,7 +322,7 @@ Anything above the single-frame asset cap **must** ship via
 surface). The same shape applies to OTA payloads (`OtaBegin` /
 `OtaChunk` / `OtaCommit`). Chunked transfers stream chunk-at-a-time to
 disk on the daemon side; do not try to build up a giant single-frame
-push and rely on the WS cap to "just work" — the daemon will reject it.
+push and rely on the WS cap to "just work" - the daemon will reject it.
 
 ## versioning
 
@@ -338,17 +338,17 @@ and held for future framing extensions.
 
 ## related references
 
-- `crates/lib/src/protocol/` — canonical codec implementation
+- `crates/lib/src/protocol/` - canonical codec implementation
   (`bridge.rs`, `gateway.rs`, `frame.rs`, `probe.rs`).
-- `crates/lib/src/wire.rs` — `MsgMeta`, `WireError`, `RequestError`,
+- `crates/lib/src/wire.rs` - `MsgMeta`, `WireError`, `RequestError`,
   marker traits.
-- `crates/lib/src/{client,gateway}/mod.rs` — outer envelope structs
+- `crates/lib/src/{client,gateway}/mod.rs` - outer envelope structs
   (`BridgeToGatewayMsg`, `ClientToBridgeMsg`, etc.) and the
   `BridgeOuterEnum`-derived surface enums.
-- `crates/lib/src/shared/priority.rs` — priority lane.
-- `crates/lib/ts/bindings/` — generated TS surface (regenerate with
+- `crates/lib/src/shared/priority.rs` - priority lane.
+- `crates/lib/ts/bindings/` - generated TS surface (regenerate with
   `just codegen`).
-- `crates/lib/swift/Sources/` and `crates/lib/kotlin/schema/` —
+- `crates/lib/swift/Sources/` and `crates/lib/kotlin/schema/` -
   generated Swift and Kotlin surfaces.
-- `docs/stock-webapp-gateway-contract.md` — populating the stock
+- `docs/stock-webapp-gateway-contract.md` - populating the stock
   Spotify webapp from a gateway.

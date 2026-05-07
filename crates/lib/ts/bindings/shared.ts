@@ -34,6 +34,10 @@ export type BridgeThingMeta = {
   bridgethingVersion: string;
   libbridgethingVersion: string;
   appName: string;
+  /**
+   * Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
+   * the manifest's daemon-component version for OTA hot-swap decisions.
+   */
   appVersion: string;
   osName: string;
   osVersion: string;
@@ -43,10 +47,28 @@ export type BridgeThingMeta = {
   fccId: string;
   icId: string;
   modelName: string;
+  /**
+   * OTA channel the running image was cut on, e.g. `stable` or `dev`.
+   * The companion's poll loop only auto-pushes when its configured
+   * channel matches; a mismatch surfaces a "channel switch needs full
+   * flash" event rather than swapping channels in-band.
+   */
+  channel: string;
+  /**
+   * Image variant the running image was cut as, e.g. `prod` or `dev`.
+   * Maps to the yocto image recipe name `bridgething-<variant>-image`,
+   * which is what the companion uses to construct the OTA artifact URL
+   * `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
+   */
+  imageVariant: string;
+  /**
+   * Canonical image version (CalVer, e.g. `2026.05.0`). What the
+   * companion compares to the manifest's image-component version.
+   */
+  imageVersion: string;
   imageBuildId: string;
   imageBuildDate: string;
   imageDistro: string;
-  imageDistroVersion: string;
   imageMachine: string;
   discord: string;
   credits: string;
@@ -56,7 +78,7 @@ export type BrightnessMode = 'auto' | 'manual';
 
 /**
  * Backlight state. `level` is the user-set value (only respected in
- * `Manual`); `effective_level` is what's actually on the panel — equal
+ * `Manual`); `effective_level` is what's actually on the panel - equal
  * to `level` in `Manual`, ALS-derived in `Auto`.
  */
 export type BrightnessState = { mode: BrightnessMode; level: number; effectiveLevel: number };
@@ -90,7 +112,7 @@ export type BrowseFolder = {
  * Page of browse results. `total` is the count of items in the
  * underlying collection when the gateway can cheaply expose it (None
  * means indeterminate). `has_more` is the authoritative end-of-data
- * signal — webapps paginate by raising `offset` until `has_more` is
+ * signal - webapps paginate by raising `offset` until `has_more` is
  * false rather than relying on `total`.
  */
 export type BrowseResult = { entries: Array<BrowseEntry>; total: number | null; hasMore: boolean };
@@ -319,7 +341,7 @@ export type LibraryError =
 
 /**
  * One playable / browsable item from the library. Lean per-variant
- * payload — gateways translate platform-specific extras down to these
+ * payload - gateways translate platform-specific extras down to these
  * fields, rare per-platform fields just don't surface. Forward-compat:
  * adding new variants or fields is an additive change webapps can
  * branch on.
@@ -445,7 +467,7 @@ export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
 /**
  * One notification surfaced from the connected companion's notification
  * center. `id` is companion-stable for the lifetime of the notification
- * — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+ * - webapps pass it to `invokePositive`/`invokeNegative` and listen for
  * `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
  * optional because ANCS treats them as separate attribute fetches.
  */
@@ -533,12 +555,30 @@ export type OtaErrorCode =
   | 'internal';
 
 /**
- * Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
- * push of the `.swu` from companion to daemon-disk; `Verifying` runs
- * the post-stream sha256 + size check; `Writing` streams the on-disk
- * `.swu` to libswupdate; `Confirming` flips slot try-counter state;
- * `Reboot` is the terminal stage emitted just before the daemon
- * triggers the reboot.
+ * What the streamed bytes are going to be applied as. Image kind
+ * streams a `.swu` and goes through libswupdate + slot flip + reboot;
+ * daemon kind streams a fresh aarch64 daemon binary and goes through
+ * the on-disk rotate (`.incoming` -> `.current`, prior `.current` ->
+ * `.previous`) followed by a `systemctl restart bridgething.service`.
+ * Companions key reboot expectations off this: image means the device
+ * power-cycles, daemon means the daemon process restarts and the
+ * gateway link drops and reconnects.
+ */
+export type OtaKind = 'image' | 'daemon';
+
+/**
+ * Stage of the OTA orchestrator. The phase set is shared between
+ * kinds, with daemon-kind emitting a subset.
+ *
+ * Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
+ * -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
+ * try-counter) -> `Reboot` (systemd Reboot).
+ *
+ * Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
+ * `.incoming` over `.current`, with prior `.current` rotated to
+ * `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
+ * `Confirming` is not emitted for daemon-kind: there is no slot
+ * try-counter to flip; the rename is the commit point.
  */
 export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
 
@@ -609,7 +649,7 @@ export type PhoneError =
 
 /**
  * Snapshot of every active call known to the gateway. Multi-call is
- * possible (call-waiting, conference) — webapps rendering only one
+ * possible (call-waiting, conference) - webapps rendering only one
  * active call typically pick the first non-Held entry.
  */
 export type PhoneState = { activeCalls: Array<PhoneCall> };
@@ -774,7 +814,7 @@ export type Position = {
 export type Priority = 'normal' | 'bulk';
 
 /**
- * One row in the player queue. Lean cross-platform shape — gateways
+ * One row in the player queue. Lean cross-platform shape - gateways
  * that have richer per-track data still surface what fields they have.
  * `uri` is required because every queued item must be addressable for
  * `skipToIndex`. `persistent_id` is the platform-stable id when
@@ -816,14 +856,14 @@ export type RangeSpec = { start: number; length: number };
 /**
  * Page of recommendation results. Gateway decides how seed + kind
  * interact (Spotify uses radio-style seeding, Apple Music uses curated
- * rails) — the daemon doesn't prescribe.
+ * rails) - the daemon doesn't prescribe.
  */
 export type RecommendationsResult = { items: Array<LibraryItem>; total: number | null; hasMore: boolean };
 
 export type RedirectPolicy = 'follow' | 'manual' | 'error';
 
 /**
- * Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+ * Cellular registration state - populated from iAP2 `CommunicationsUpdate`
  * or the companion's equivalent.
  */
 export type RegistrationStatus =
@@ -901,7 +941,7 @@ export type StreamChunk = { streamId: string; offset: number; bytes: Uint8Array 
 export type StreamEnd = { streamId: string };
 
 /**
- * Stream failed mid-flight (or before the first byte). Terminal — the
+ * Stream failed mid-flight (or before the first byte). Terminal - the
  * daemon clears its routing entry. The `error` shape is shared with
  * `fetch` since the failure modes are identical.
  */
@@ -933,7 +973,7 @@ export type SurfaceAvailability = {
 
 /**
  * Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
- * (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+ * (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
  * reading time should use the device clock if any but use this as the
  * trust anchor on first arrival.
  *

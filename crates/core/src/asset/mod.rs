@@ -24,12 +24,14 @@
 //! `subscribe()` for `Ready` / `Cleared` notifications.
 
 mod actor;
+pub mod ingest;
 pub mod storage;
 pub mod wait;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub use actor::AssetCacheEvent;
+pub use ingest::AssetIngest;
 use libbridgething::AssetRetention;
 use sea_orm::{DatabaseConnection, DbErr};
 use tokio::{
@@ -38,28 +40,12 @@ use tokio::{
 };
 use tokio_util::bytes::Bytes;
 
-/// Total in-memory bytes across `Lru` / `Pinned` / `Ttl` entries.
-/// Persistent entries don't sit in memory - their bound is
-/// `DISK_BUDGET_BYTES`.
 pub const MEMORY_BUDGET_BYTES: usize = 8 * 1024 * 1024;
-
-/// Total bytes for `Persistent` entries on disk.
 pub const DISK_BUDGET_BYTES: usize = 50 * 1024 * 1024;
-
-/// Periodic sweep cadence for `Ttl` expiry.
-const TTL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Capacity of `AssetCacheEvent` broadcast. Slow subscribers see lag
-/// as a missed event, never blocked publishes - the cache is fast-path.
+const TTL_SWEEP_INTERVAL: Duration = Duration::from_secs(15);
 const EVENT_BROADCAST_CAPACITY: usize = 64;
-
-/// Capacity of the actor command mailbox. Backpressure on the
-/// producer side; aligns with the rest of the daemon's mpsc(16) default.
 const COMMAND_MAILBOX_CAPACITY: usize = 16;
 
-/// Snapshot of an asset at the time of a `get` call. `bytes` is a
-/// refcount-cloned `Bytes` so passing it through the WS / iap2 paths
-/// is cheap.
 #[derive(Debug, Clone)]
 pub struct CachedAsset {
   pub bytes: Bytes,
@@ -67,8 +53,6 @@ pub struct CachedAsset {
   pub retention: AssetRetention,
 }
 
-/// Cloneable handle to the asset cache actor. Construct one via
-/// [`AssetCache::init`], spawn the owning task with [`AssetCachePending::spawn`].
 #[derive(Debug, Clone)]
 pub struct AssetCache {
   inner: Arc<AssetCacheInner>,
@@ -81,10 +65,6 @@ struct AssetCacheInner {
 }
 
 impl AssetCache {
-  /// Prepare the cache against a pre-opened, already-migrated database
-  /// connection. The returned [`AssetCachePending`] holds the actor
-  /// task; call [`AssetCachePending::spawn`] when the daemon is ready
-  /// to begin serving cache traffic.
   pub async fn init(db: DatabaseConnection, blobs_dir: PathBuf) -> Result<AssetCachePending, AssetError> {
     let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_MAILBOX_CAPACITY);
     let (events_tx, _) = broadcast::channel(EVENT_BROADCAST_CAPACITY);
@@ -100,10 +80,6 @@ impl AssetCache {
     })
   }
 
-  /// Memory-tier insert. `retention` must be `Lru` / `Pinned` / `Ttl`;
-  /// `Persistent` is rejected because the bytes-in-hand path is
-  /// memory-resident by definition. For Persistent assets use
-  /// [`AssetCache::insert_from_path`].
   pub async fn insert(
     &self,
     id: String,
@@ -127,10 +103,6 @@ impl AssetCache {
     rx.await.map_err(|_| AssetError::CacheClosed)?
   }
 
-  /// Disk-tier insert: the source file (typically a finalized
-  /// `ChunkedTransfer` partial) is renamed into the blobs dir for
-  /// `Persistent` retention, or read into a `Bytes` for memory tiers
-  /// then deleted. Either way the source path is consumed.
   pub async fn insert_from_path(
     &self,
     id: String,

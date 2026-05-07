@@ -2,11 +2,11 @@
 //!
 //! Output shape:
 //! - one `<Name>Surface` class per surface, accessed via
-//!   `gateway.<name>` — broadcast methods and cross-peer listeners.
+//!   `gateway.<name>` - broadcast methods and cross-peer listeners.
 //! - one `<Name>SurfaceForDevice` class per surface, accessed via
-//!   `gateway.device(id).<name>` — unicast methods and per-peer listeners.
+//!   `gateway.device(id).<name>` - unicast methods and per-peer listeners.
 //! - `BridgethingGatewayDevice` proxy class returned by `gateway.device(id)`.
-//! - typed-switch dispatch in the runtime — no string-keyed lookups,
+//! - typed-switch dispatch in the runtime - no string-keyed lookups,
 //!   no `as` casts in either generated dispatch or user code.
 
 use std::{collections::BTreeSet, path::Path};
@@ -184,7 +184,7 @@ fn push_inbound_methods_gateway(out: &mut String, s: &Surface) {
   let Some(e) = &s.inbound else {
     // No inbound dispatch entry, but we may still have typed inbound
     // requests (e.g. Asset surface where BridgeToGatewayAssetMsg holds
-    // only request/response variants — no event markers). Emit those.
+    // only request/response variants - no event markers). Emit those.
     for r in &s.inbound_requests {
       push_request_handler_method_gateway(out, r);
     }
@@ -288,7 +288,7 @@ fn push_subscribe_impl_gateway(out: &mut String, s: &Surface) {
     "        default: {{\n          if (!partial) this._gateway.logger.warn('{}: no handler for inner', inner);\n          return;\n        }}\n      }}\n    }});\n  }}\n\n",
     s.name
   ));
-  // We need to silence "case fallthrough" / exhaustiveness — for variants
+  // We need to silence "case fallthrough" / exhaustiveness - for variants
   // that aren't in handlers, the per-case still does `?.()` which is no-op
   // when missing. The `partial` flag controls warning only for default
   // (unknown variant from wire).
@@ -297,7 +297,7 @@ fn push_subscribe_impl_gateway(out: &mut String, s: &Surface) {
   // When `partial` is true, *missing* handlers do nothing silently per
   // the optional-chaining `?.`. When `partial` is false, the per-case
   // call still no-ops if undefined; the user contract is to provide all.
-  // We intentionally don't enforce no-undefined at runtime — TS does
+  // We intentionally don't enforce no-undefined at runtime - TS does
   // exhaustiveness statically via the `<S>InboundHandlers` type.
   let _ = out;
 }
@@ -738,20 +738,20 @@ fn push_module_augmentation(out: &mut String, surfaces: &[Surface]) {
 
 fn push_request_handle_class(out: &mut String, r: &TypedRequestEntry) {
   out.push_str(&format!(
-    "export class {}Handle {{\n  constructor(\n    private readonly _gateway: BridgethingGateway,\n    public readonly deviceId: string,\n    private readonly _requestId: string,\n  ) {{}}\n\n",
+    "export class {}Handle {{\n  constructor(\n    private readonly _gateway: BridgethingGateway,\n    public readonly deviceId: string,\n    public readonly requestId: string,\n  ) {{}}\n\n",
     r.request
   ));
   out.push_str(&format!(
-    "  async respond(response: {}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._gateway.send(this.deviceId, msg);\n  }}\n\n",
+    "  async respond(response: {}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this.requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._gateway.send(this.deviceId, msg);\n  }}\n\n",
     r.response, r.surface_disc, r.inner_tag, r.response_disc
   ));
   if let (Some(err_type), Some(err_disc)) = (&r.error, &r.error_disc) {
     out.push_str(&format!(
-      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._gateway.send(this.deviceId, msg);\n  }}\n\n",
+      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: GatewayToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this.requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._gateway.send(this.deviceId, msg);\n  }}\n\n",
       r.surface_disc, r.inner_tag, err_disc
     ));
   }
-  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: GatewayToBridgeMsg = { id: newUuid(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._gateway.send(this.deviceId, msg);\n  }\n");
+  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: GatewayToBridgeMsg = { id: newUuid(), meta: { kind: 'response', data: { requestId: this.requestId } }, data: { type: 'error', data: error } };\n    await this._gateway.send(this.deviceId, msg);\n  }\n");
   out.push_str("}\n\n");
 }
 

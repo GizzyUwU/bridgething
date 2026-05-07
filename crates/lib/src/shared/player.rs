@@ -276,7 +276,7 @@ pub enum QueuePosition {
   Index(u32),
 }
 
-/// One row in the player queue. Lean cross-platform shape — gateways
+/// One row in the player queue. Lean cross-platform shape - gateways
 /// that have richer per-track data still surface what fields they have.
 /// `uri` is required because every queued item must be addressable for
 /// `skipToIndex`. `persistent_id` is the platform-stable id when

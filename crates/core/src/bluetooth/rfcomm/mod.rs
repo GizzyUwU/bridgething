@@ -182,6 +182,7 @@ impl RfcommGateway {
       channel: Some(BRIDGETHING_RFCOMM_CHANNEL as u16),
       require_authentication: Some(false),
       require_authorization: Some(false),
+      service_record: Some(bridgething_service_record()),
       ..Default::default()
     };
 
@@ -288,4 +289,31 @@ impl RfcommGateway {
 
     Ok(())
   }
+}
+
+fn bridgething_service_record() -> String {
+  format!(
+    r#"<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+    <attribute id="0x0001"><sequence><uuid value="{uuid}" /></sequence></attribute>
+    <attribute id="0x0004"><sequence>
+        <sequence><uuid value="0x0100" /></sequence>
+        <sequence><uuid value="0x0003" /><uint8 value="0x{channel:02x}" /></sequence>
+    </sequence></attribute>
+    <attribute id="0x0005"><sequence><uuid value="0x1002" /></sequence></attribute>
+    <attribute id="0x0006"><sequence>
+        <uint16 value="0x656e" />
+        <uint16 value="0x006a" />
+        <uint16 value="0x0100" />
+    </sequence></attribute>
+    <attribute id="0x0008"><uint8 value="0xff" /></attribute>
+    <attribute id="0x0009"><sequence>
+        <sequence><uuid value="0x1101" /><uint16 value="0x0100" /></sequence>
+    </sequence></attribute>
+    <attribute id="0x0100"><text value="bridgething" /></attribute>
+</record>
+"#,
+    uuid = BRIDGETHING_PROFILE_UUID,
+    channel = BRIDGETHING_RFCOMM_CHANNEL,
+  )
 }

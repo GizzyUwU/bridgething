@@ -34,6 +34,10 @@ pub(super) enum Command {
     id: String,
     ack: oneshot::Sender<Result<(), TransferError>>,
   },
+  HashCompleted {
+    id: String,
+    result: Result<String, TransferError>,
+  },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,6 +48,12 @@ struct Meta {
   expected_sha256: Option<String>,
   received: u64,
   last_touched_unix: i64,
+}
+
+#[derive(Debug)]
+enum WriteOutcome {
+  Continue { received: u64 },
+  HashPending { partial_path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -62,12 +72,15 @@ pub(super) struct ChunkedTransferActor {
   transfers: HashMap<String, Transfer>,
   total_disk_bytes: u64,
   cmd_rx: mpsc::Receiver<Command>,
+  self_tx: mpsc::Sender<Command>,
+  pending_completions: HashMap<String, oneshot::Sender<Result<ChunkOutcome, TransferError>>>,
 }
 
 impl ChunkedTransferActor {
   pub(super) async fn bootstrap(
     transfers_dir: PathBuf,
     cmd_rx: mpsc::Receiver<Command>,
+    self_tx: mpsc::Sender<Command>,
   ) -> Result<Self, TransferError> {
     let mut transfers = HashMap::new();
     let mut total = 0u64;
@@ -114,6 +127,8 @@ impl ChunkedTransferActor {
       transfers,
       total_disk_bytes: total,
       cmd_rx,
+      self_tx,
+      pending_completions: HashMap::new(),
     })
   }
 
@@ -152,14 +167,12 @@ impl ChunkedTransferActor {
         bytes,
         last,
         ack,
-      } => {
-        let result = self.handle_chunk(id, offset, bytes, last).await;
-        let _ = ack.send(result);
-      }
+      } => self.handle_chunk(id, offset, bytes, last, ack).await,
       Command::Abandon { id, ack } => {
         let result = self.handle_abandon(id).await;
         let _ = ack.send(result);
       }
+      Command::HashCompleted { id, result } => self.handle_hash_completed(id, result).await,
     }
   }
 
@@ -174,6 +187,10 @@ impl ChunkedTransferActor {
         id,
         size: expected_size,
       });
+    }
+
+    if self.pending_completions.contains_key(&id) {
+      return Err(TransferError::ConflictingBegin { id });
     }
 
     if let Some(existing) = self.transfers.get_mut(&id) {
@@ -221,15 +238,41 @@ impl ChunkedTransferActor {
     offset: u64,
     bytes: Bytes,
     last: bool,
-  ) -> Result<ChunkOutcome, TransferError> {
+    ack: oneshot::Sender<Result<ChunkOutcome, TransferError>>,
+  ) {
+    match self.handle_chunk_write(&id, offset, bytes, last).await {
+      Ok(WriteOutcome::Continue { received }) => {
+        let _ = ack.send(Ok(ChunkOutcome::Continue { received }));
+      }
+      Ok(WriteOutcome::HashPending { partial_path }) => {
+        self.pending_completions.insert(id.clone(), ack);
+        let self_tx = self.self_tx.clone();
+        tokio::spawn(async move {
+          let result = hash_file(&partial_path).await;
+          let _ = self_tx.send(Command::HashCompleted { id, result }).await;
+        });
+      }
+      Err(err) => {
+        let _ = ack.send(Err(err));
+      }
+    }
+  }
+
+  async fn handle_chunk_write(
+    &mut self,
+    id: &str,
+    offset: u64,
+    bytes: Bytes,
+    last: bool,
+  ) -> Result<WriteOutcome, TransferError> {
     let transfer = self
       .transfers
-      .get_mut(&id)
-      .ok_or_else(|| TransferError::UnknownTransfer { id: id.clone() })?;
+      .get_mut(id)
+      .ok_or_else(|| TransferError::UnknownTransfer { id: id.to_string() })?;
 
     if offset != transfer.received {
       return Err(TransferError::OffsetMismatch {
-        id,
+        id: id.to_string(),
         expected: transfer.received,
         got: offset,
       });
@@ -237,7 +280,7 @@ impl ChunkedTransferActor {
     let chunk_len = bytes.len() as u64;
     if transfer.received.saturating_add(chunk_len) > transfer.expected_size {
       return Err(TransferError::SizeOverflow {
-        id,
+        id: id.to_string(),
         expected_size: transfer.expected_size,
         received: transfer.received,
         chunk_len,
@@ -253,40 +296,67 @@ impl ChunkedTransferActor {
     write_meta(&transfer.meta_path, &meta_from(transfer)).await?;
 
     if !last {
-      return Ok(ChunkOutcome::Continue {
+      return Ok(WriteOutcome::Continue {
         received: transfer.received,
       });
     }
 
     if transfer.received != transfer.expected_size {
       return Err(TransferError::SizeMismatch {
-        id,
+        id: id.to_string(),
         expected_size: transfer.expected_size,
         received: transfer.received,
       });
     }
 
-    let actual_sha = hash_file(&transfer.partial_path).await?;
-    if let Some(expected) = transfer.expected_sha256.as_deref()
+    Ok(WriteOutcome::HashPending {
+      partial_path: transfer.partial_path.clone(),
+    })
+  }
+
+  async fn handle_hash_completed(&mut self, id: String, result: Result<String, TransferError>) {
+    let Some(ack) = self.pending_completions.remove(&id) else {
+      tracing::debug!(%id, "hash completion arrived after abandon; discarding");
+      return;
+    };
+
+    let actual_sha = match result {
+      Ok(s) => s,
+      Err(err) => {
+        let _ = ack.send(Err(err));
+        return;
+      }
+    };
+
+    let Some(transfer_ref) = self.transfers.get(&id) else {
+      let _ = ack.send(Err(TransferError::UnknownTransfer { id }));
+      return;
+    };
+
+    if let Some(expected) = transfer_ref.expected_sha256.as_deref()
       && !actual_sha.eq_ignore_ascii_case(expected)
     {
-      return Err(TransferError::HashMismatch {
+      let _ = ack.send(Err(TransferError::HashMismatch {
         id,
         expected: expected.to_string(),
         actual: actual_sha,
-      });
+      }));
+      return;
     }
 
     let transfer = self.transfers.remove(&id).expect("present above");
     self.total_disk_bytes = self.total_disk_bytes.saturating_sub(transfer.received);
     let _ = tokio::fs::remove_file(&transfer.meta_path).await;
-    Ok(ChunkOutcome::Completed {
+    let _ = ack.send(Ok(ChunkOutcome::Completed {
       path: transfer.partial_path,
       sha256: actual_sha,
-    })
+    }));
   }
 
   async fn handle_abandon(&mut self, id: String) -> Result<(), TransferError> {
+    if let Some(ack) = self.pending_completions.remove(&id) {
+      let _ = ack.send(Err(TransferError::UnknownTransfer { id: id.clone() }));
+    }
     if let Some(transfer) = self.transfers.remove(&id) {
       self.total_disk_bytes = self.total_disk_bytes.saturating_sub(transfer.received);
       let _ = tokio::fs::remove_file(&transfer.partial_path).await;
@@ -295,10 +365,6 @@ impl ChunkedTransferActor {
     Ok(())
   }
 
-  /// Evict oldest-first until projected total fits the budget. Used
-  /// when a Begin would push the daemon over budget; the new transfer
-  /// has not yet been registered when this runs, so the eviction set
-  /// is exactly "everything currently in flight."
   async fn evict_until_under(&mut self, incoming_size: u64) {
     while self.total_disk_bytes.saturating_add(incoming_size) > TRANSFER_DISK_BUDGET_BYTES {
       let Some(victim_id) = self

@@ -21,48 +21,22 @@ use std::{
 };
 
 use bridgething_swupdate_sys as sys;
-use libbridgething::gateway::OtaPhase;
+use libbridgething::OtaPhase;
 use tokio::{
   sync::{mpsc, watch},
   task,
 };
 
 use super::{Error, Selector};
-
-/// Bytes per chunk handed to `ipc_send_data`. libswupdate streams
-/// these straight to its installer subprocess; smaller chunks give
-/// the install side more frequent progress ticks at the cost of
-/// IPC overhead.
 const CHUNK_SIZE: usize = 64 * 1024;
-
-/// Minimum interval between progress callback invocations within a
-/// single phase. libswupdate emits a progress message per zchunk
-/// finish (~10k for a 300 MB delta install), each of which would
-/// otherwise turn into a gzipped wire frame on the gateway. We
-/// dedupe identical (phase, percent) pairs and time-throttle the
-/// rest at this interval; phase transitions and terminal events
-/// always pass through unfiltered.
 const PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
-
-/// Default ctrl + progress socket paths swupdate listens on. These
-/// match the meta-swupdate recipe defaults (`SWUPDATE_SOCKET_CTRL_PATH`
-/// + `SWUPDATE_SOCKET_PROGRESS_PATH`). libswupdate's `get_ctrl_socket`
-/// otherwise resolves the ctrl path against `$RUNTIME_DIRECTORY`,
-/// which under our daemon's systemd unit points at /run/bridgething/
-/// (wrong namespace) - so we override the globals here, before the
-/// first IPC call, instead of leaning on the env var.
 const SWUPDATE_CTRL_SOCKET: &str = "/tmp/sockinstctrl";
 const SWUPDATE_PROGRESS_SOCKET: &str = "/tmp/swupdateprog";
 
-// SOCKET_CTRL_PATH is a public-linkage global in libswupdate's
-// network_ipc.c but isn't declared in any installed header. The
-// `swupdate-client` utility writes to it the same way.
 unsafe extern "C" {
   static mut SOCKET_CTRL_PATH: *mut c_char;
 }
 
-/// Pin libswupdate's ctrl + progress socket paths to swupdate's
-/// listeners, once per process. Runs before any IPC call.
 fn ensure_socket_paths() {
   static ONCE: Once = Once::new();
   ONCE.call_once(|| {
@@ -153,10 +127,6 @@ async fn wait_send(
   h.await
 }
 
-/// Returns true if a libswupdate progress tick should be forwarded
-/// to the orchestrator. Phase transitions and terminal events always
-/// pass; identical (phase, percent) pairs are deduped; everything
-/// else is throttled to one event per `PROGRESS_MIN_INTERVAL`.
 fn should_emit(last: &mut Option<(OtaPhase, u8, Instant)>, phase: OtaPhase, percent: u8, terminal: bool) -> bool {
   let now = Instant::now();
   let (phase_changed, dup, intervaled) = match last {
@@ -267,12 +237,6 @@ fn progress_reader(tx: mpsc::Sender<sys::progress_msg>) {
 }
 
 fn translate(msg: &sys::progress_msg) -> (OtaPhase, u8, Option<u32>) {
-  // libswupdate's full lifecycle (DOWNLOAD / START / RUN / PROGRESS /
-  // SUBPROCESS / IDLE / DONE / SUCCESS / FAILURE) runs entirely inside
-  // the orchestrator's Writing phase. Confirming and Reboot are emitted
-  // by the orchestrator after install_swu returns, so this translator
-  // never reaches into those phases - it only forwards percent within
-  // Writing. FAILURE is handled separately by the caller.
   let percent = (msg.cur_percent.min(100)) as u8;
   (OtaPhase::Writing, percent, None)
 }

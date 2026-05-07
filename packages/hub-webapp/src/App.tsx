@@ -1,4 +1,10 @@
-import { BridgethingClient, type WebappInfo } from '@bridgething/client';
+import {
+  BridgethingClient,
+  type OtaError as OtaErrorMsg,
+  type OtaPhase,
+  type OtaProgress,
+  type WebappInfo,
+} from '@bridgething/client';
 import { useEffect, useMemo, useState } from 'react';
 
 const client = new BridgethingClient();
@@ -8,10 +14,16 @@ type TileEntry = {
   iconUrl: string | null;
 };
 
+type OtaSnapshot = {
+  progress: OtaProgress | null;
+  error: OtaErrorMsg | null;
+};
+
 export default function App() {
   const [tiles, setTiles] = useState<TileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activating, setActivating] = useState<TileEntry | null>(null);
+  const [ota, setOta] = useState<OtaSnapshot>({ progress: null, error: null });
 
   useEffect(() => {
     client.connect();
@@ -50,6 +62,19 @@ export default function App() {
     return () => {
       cancelled = true;
       for (const url of revoke) URL.revokeObjectURL(url);
+    };
+  }, []);
+
+  useEffect(() => {
+    const offProgress = client.system.onOtaProgress(progress => {
+      setOta(prev => ({ progress, error: prev.error }));
+    });
+    const offError = client.system.onOtaError(err => {
+      setOta(prev => ({ progress: prev.progress, error: err }));
+    });
+    return () => {
+      offProgress();
+      offError();
     };
   }, []);
 
@@ -95,6 +120,50 @@ export default function App() {
         </div>
       </div>
       {activating && <ActivatingOverlay entry={activating} />}
+      <OtaOverlay snapshot={ota} onDismiss={() => setOta({ progress: null, error: null })} />
+    </div>
+  );
+}
+
+const OTA_PHASE_LABELS: Record<OtaPhase, string> = {
+  streaming: 'Receiving update',
+  verifying: 'Verifying',
+  writing: 'Installing',
+  confirming: 'Confirming',
+  reboot: 'Rebooting',
+};
+
+function OtaOverlay({ snapshot, onDismiss }: { snapshot: OtaSnapshot; onDismiss: () => void }) {
+  const { progress, error } = snapshot;
+  if (!progress && !error) return null;
+  return (
+    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-black/85 backdrop-blur-sm">
+      {error ? (
+        <>
+          <div className="text-base font-semibold text-red-300">Update failed</div>
+          <div className="max-w-[28rem] text-center text-xs text-neutral-300">
+            {error.code}: {error.msg}
+          </div>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="mt-2 rounded-full bg-neutral-800 px-4 py-1.5 text-xs text-neutral-100 active:scale-95">
+            Dismiss
+          </button>
+        </>
+      ) : progress ? (
+        <>
+          <div className="text-sm uppercase tracking-widest text-neutral-400">System update</div>
+          <div className="text-lg font-medium text-neutral-100">{OTA_PHASE_LABELS[progress.phase]}</div>
+          <div className="h-2 w-64 overflow-hidden rounded-full bg-neutral-800">
+            <div
+              className="h-full bg-neutral-200 transition-[width] duration-200"
+              style={{ width: `${Math.min(100, Math.max(0, progress.percent))}%` }}
+            />
+          </div>
+          <div className="text-xs text-neutral-500">{progress.percent}%</div>
+        </>
+      ) : null}
     </div>
   );
 }

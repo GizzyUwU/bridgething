@@ -6,7 +6,7 @@ use crate::{GeoError, Position};
 
 /// Watch handle. Webapps pass the token back as
 /// `ClientToBridgeGeoMsg::Unwatch { token }` to release the watch.
-/// Tokens are scoped to the webapp's WS connection — the daemon
+/// Tokens are scoped to the webapp's WS connection - the daemon
 /// auto-releases on disconnect.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

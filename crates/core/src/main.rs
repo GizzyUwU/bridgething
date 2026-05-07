@@ -27,13 +27,13 @@ mod stock;
 mod monitoring;
 
 use als::{AlsConfig, AlsManager};
-use asset::AssetCache;
+use asset::{AssetCache, AssetIngest};
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothDeps, BluetoothManager};
 use capabilities::CapabilitiesRegistry;
 use handler::{ClientHandler, GatewayHandler, Iap2EventRouter};
 use mic::{MicConfig, MicManager};
-use ota::OtaOrchestrator;
+use ota::{OtaOrchestrator, OtaTerminators, RangeProxy};
 use peer::PeerTracker;
 use player::Player;
 use state::{
@@ -80,6 +80,8 @@ async fn main() {
     .await
     .expect("failed to initialize chunked transfer manager");
   let (transfers, transfer_handle) = transfer_pending.spawn();
+
+  let (ingest, ingest_handle) = AssetIngest::spawn(transfers.clone(), assets.clone());
 
   let ws_routes = RouteTable::new();
   let stream_routes = RouteTable::new();
@@ -135,6 +137,19 @@ async fn main() {
     .await
     .expect("failed to initialize ANCS manager");
 
+  let range_proxy_handle = RangeProxy::spawn(bluetooth.clone(), libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT).await;
+
+  let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
+  let (ota, _ota_handle) = OtaOrchestrator::spawn(
+    transfers.clone(),
+    ota_events_tx,
+    OtaTerminators {
+      reboot: std::sync::Arc::new(trigger_reboot),
+      restart_self: std::sync::Arc::new(trigger_restart_self),
+    },
+    range_proxy_handle.proxy.clone(),
+  );
+
   let state = AppState::assemble(AssembledState {
     client_man: client_man.clone(),
     bus,
@@ -143,9 +158,9 @@ async fn main() {
     chrome,
     webapps,
     assets,
+    ingest,
     asset_wait,
     iap2_pending_art,
-    transfers,
     authority,
     capabilities,
     peers,
@@ -166,9 +181,12 @@ async fn main() {
     meta_store,
     asset_cache_handle,
     transfer_handle,
+    ingest_handle,
     als_handle,
     mic_handle,
   });
+
+  spawn_ota_event_forwarder(bluetooth.clone(), state.client_man.clone(), ota_events_rx);
 
   let transport = TransportController::new(
     state.authority.clone(),
@@ -192,16 +210,8 @@ async fn main() {
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 
-  let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
-  spawn_ota_event_forwarder(bluetooth.clone(), ota_events_rx);
-  let (ota, _ota_handle) = OtaOrchestrator::spawn(
-    state.transfers.clone(),
-    ota_events_tx,
-    std::sync::Arc::new(trigger_reboot),
-  );
-
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
-  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota.clone());
+  let gateway_handler = GatewayHandler::new(state.clone(), bluetooth.clone(), ota);
 
   let _input = input::InputManager::spawn(state.clone());
 
@@ -251,6 +261,7 @@ async fn main() {
   tracing::info!("shutting down...");
   state.chrome.shutdown().await;
   server.shutdown().await;
+  range_proxy_handle.cancel.cancel();
 
   tracing::info!("thank you for using bridgething!");
 }
@@ -264,11 +275,20 @@ async fn recv_iap2(rx: &mut Option<bluetooth::iap2::Iap2EventsRx>) -> Option<blu
 
 fn spawn_ota_event_forwarder(
   bluetooth: bluetooth::BluetoothMan,
+  client_man: net::ClientMan,
   mut rx: tokio::sync::mpsc::Receiver<libbridgething::gateway::BridgeToGatewaySystemMsgEvent>,
 ) {
+  use libbridgething::{client::BridgeToClientSystemMsgEvent, gateway::BridgeToGatewaySystemMsgEvent};
   tokio::spawn(async move {
     while let Some(event) = rx.recv().await {
+      let client_mirror = match &event {
+        BridgeToGatewaySystemMsgEvent::OtaProgress(p) => Some(BridgeToClientSystemMsgEvent::OtaProgress(*p)),
+        BridgeToGatewaySystemMsgEvent::OtaError(e) => Some(BridgeToClientSystemMsgEvent::OtaError(e.clone())),
+      };
       bluetooth.gateway_man.broadcast(event).await;
+      if let Some(mirror) = client_mirror {
+        let _ = client_man.broadcast_event(mirror).await;
+      }
     }
   });
 }
@@ -277,6 +297,14 @@ fn trigger_reboot() {
   tokio::spawn(async {
     if let Err(err) = systemd::power::reboot().await {
       tracing::error!("ota reboot failed: {err}");
+    }
+  });
+}
+
+fn trigger_restart_self() {
+  tokio::spawn(async {
+    if let Err(err) = systemd::power::restart_self().await {
+      tracing::error!("ota daemon restart failed: {err}");
     }
   });
 }

@@ -89,7 +89,7 @@ impl HidFlow {
   }
 
   /// Process one inbound HID-range CSM. The Car Thing's HID surface is
-  /// outbound-only — these inbound CSMs are decoded and logged, never
+  /// outbound-only - these inbound CSMs are decoded and logged, never
   /// acted on. Decoding still validates the wire shape, which surfaces
   /// peer protocol bugs early.
   pub(super) async fn handle(

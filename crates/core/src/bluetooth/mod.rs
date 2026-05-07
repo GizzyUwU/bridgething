@@ -459,7 +459,29 @@ impl GatewayMan {
     req: R,
     priority: Priority,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
-    let id = Uuid::now_v7();
+    self
+      .request_with_id_priority(Uuid::now_v7(), address, req, priority)
+      .await
+  }
+
+  pub async fn request_with_id<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
+    &self,
+    id: Uuid,
+    address: Option<Address>,
+    req: R,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
+    self.request_with_id_priority(id, address, req, Priority::Normal).await
+  }
+
+  async fn request_with_id_priority<
+    R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>,
+  >(
+    &self,
+    id: Uuid,
+    address: Option<Address>,
+    req: R,
+    priority: Priority,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
     let (tx, rx) = oneshot::channel();
     self
       .pending

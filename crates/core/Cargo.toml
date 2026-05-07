@@ -66,6 +66,7 @@ zbus = { version = "5.15.0", default-features = false, features = ["tokio"], opt
 evdev = { version = "0.13.2", features = ["tokio"], optional = true }
 libc = "0.2.186"
 btleplug = "0.12.0"
+async-stream = "0.3"
 
 [features]
 default = ["dev-linux-host"]

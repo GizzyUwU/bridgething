@@ -1,9 +1,9 @@
 //! Swift emitter for surface-namespaced gateway dispatch.
 //!
 //! Each surface gets two structs:
-//! - `<Name>Surface` — gateway-level: cross-peer AsyncStreams, broadcast
+//! - `<Name>Surface` - gateway-level: cross-peer AsyncStreams, broadcast
 //!   sends, typed queries with explicit deviceId parameter.
-//! - `<Name>SurfaceForDevice` — per-peer: filtered AsyncStreams, deviceId
+//! - `<Name>SurfaceForDevice` - per-peer: filtered AsyncStreams, deviceId
 //!   baked into sends and queries.
 //!
 //! `gateway.<surface>` is a nonisolated extension property returning a
@@ -461,7 +461,7 @@ fn swift_request_handle_class(r: &TypedRequestEntry) -> String {
   ));
   out.push_str("  private let gateway: BridgethingGateway\n");
   out.push_str("  public let deviceId: String\n");
-  out.push_str("  private let requestId: UUID\n\n");
+  out.push_str("  public let requestId: UUID\n\n");
   out.push_str(
     "  init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {\n    self.gateway = gateway\n    self.deviceId = deviceId\n    self.requestId = requestId\n  }\n\n",
   );

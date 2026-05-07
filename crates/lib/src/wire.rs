@@ -77,7 +77,7 @@ pub enum WireError {
 /// failures). `Protocol` is the universal `WireError` (request unsupported,
 /// payload malformed, handler hit an unexpected internal error).
 /// `ResponseMismatch` means the wire shape did not match what the request
-/// declared as its response — almost always a bug on one side.
+/// declared as its response - almost always a bug on one side.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestError<E> {
   Domain(E),

@@ -787,7 +787,7 @@ impl RecvMsgData {
 
       // SMS send has no companion path: iAP2 doesn't expose it and the
       // modern Phone surface has no message-send verb. Webapp's stub
-      // promise stays unresolved, which is fine — stock declares but
+      // promise stays unresolved, which is fine - stock declares but
       // never calls this in any captured build.
       StockInterAppRecv::PhoneCallMessage { .. } => RecvMsgData::Hole,
 

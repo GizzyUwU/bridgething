@@ -84,7 +84,7 @@ data class AssetPushAbandon (
 /// `AssetPushChunk` should start at, 0 for fresh pushes) or
 /// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
 /// mismatched size/sha, budget exhausted, etc.).
-/// 
+///
 /// Required for any push with `retention = Persistent` and for any push
 /// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
 @Serializable
@@ -168,7 +168,7 @@ enum class CompanionAuthorityScope(val string: String) {
 	NowPlayingPlayback("nowPlayingPlayback"),
 	/// Host audio output volume + mute. iAP2 has no inbound volume CSM
 	/// (HID step is one-way only), so without a companion claiming this
-	/// scope the daemon can't see real volume — it broadcasts a fixed
+	/// scope the daemon can't see real volume - it broadcasts a fixed
 	/// placeholder (0.5, unmuted) so the kiosk doesn't render a muted
 	/// state, and forwards HID Inc/Dec/Mute presses best-effort.
 	@SerialName("volume")
@@ -201,6 +201,8 @@ data class BridgeThingMeta (
 	val bridgethingVersion: String,
 	val libbridgethingVersion: String,
 	val appName: String,
+	/// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
+	/// the manifest's daemon-component version for OTA hot-swap decisions.
 	val appVersion: String,
 	val osName: String,
 	val osVersion: String,
@@ -210,10 +212,22 @@ data class BridgeThingMeta (
 	val fccId: String,
 	val icId: String,
 	val modelName: String,
+	/// OTA channel the running image was cut on, e.g. `stable` or `dev`.
+	/// The companion's poll loop only auto-pushes when its configured
+	/// channel matches; a mismatch surfaces a "channel switch needs full
+	/// flash" event rather than swapping channels in-band.
+	val channel: String,
+	/// Image variant the running image was cut as, e.g. `prod` or `dev`.
+	/// Maps to the yocto image recipe name `bridgething-<variant>-image`,
+	/// which is what the companion uses to construct the OTA artifact URL
+	/// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
+	val imageVariant: String,
+	/// Canonical image version (CalVer, e.g. `2026.05.0`). What the
+	/// companion compares to the manifest's image-component version.
+	val imageVersion: String,
 	val imageBuildId: String,
 	val imageBuildDate: String,
 	val imageDistro: String,
-	val imageDistroVersion: String,
 	val imageMachine: String,
 	val discord: String,
 	val credits: String
@@ -300,7 +314,7 @@ sealed class BridgeToGatewayMsgData {
 
 /// bridgething -> gateway
 /// messages from bridgething to the gateway (mobile or desktop app).
-/// 
+///
 /// these messages will pass over bluetooth.
 @Serializable
 data class BridgeToGatewayMsg (
@@ -320,7 +334,7 @@ enum class BrightnessMode(val string: String) {
 }
 
 /// Backlight state. `level` is the user-set value (only respected in
-/// `Manual`); `effective_level` is what's actually on the panel — equal
+/// `Manual`); `effective_level` is what's actually on the panel - equal
 /// to `level` in `Manual`, ALS-derived in `Auto`.
 @Serializable
 data class BrightnessState (
@@ -362,7 +376,7 @@ data class BrowseFolder (
 /// Page of browse results. `total` is the count of items in the
 /// underlying collection when the gateway can cheaply expose it (None
 /// means indeterminate). `has_more` is the authoritative end-of-data
-/// signal — webapps paginate by raising `offset` until `has_more` is
+/// signal - webapps paginate by raising `offset` until `has_more` is
 /// false rather than relying on `total`.
 @Serializable
 data class BrowseResult (
@@ -462,7 +476,7 @@ data class ChromeNavigate (
 	val url: String
 )
 
-/// Cellular registration state — populated from iAP2 `CommunicationsUpdate`
+/// Cellular registration state - populated from iAP2 `CommunicationsUpdate`
 /// or the companion's equivalent.
 @Serializable
 enum class RegistrationStatus(val string: String) {
@@ -580,7 +594,7 @@ data class EnumField (
 	val default: String? = null
 )
 
-/// Fired when the favorited / liked status of an item changes —
+/// Fired when the favorited / liked status of an item changes -
 /// regardless of whether it was driven by the daemon (FavoritesToggle/Set
 /// command) or by the user mutating it on the gateway-side app directly.
 @Serializable
@@ -597,7 +611,7 @@ data class FavoritesContainsReply (
 )
 
 /// One playable / browsable item from the library. Lean per-variant
-/// payload — gateways translate platform-specific extras down to these
+/// payload - gateways translate platform-specific extras down to these
 /// fields, rare per-platform fields just don't surface. Forward-compat:
 /// adding new variants or fields is an additive change webapps can
 /// branch on.
@@ -680,7 +694,7 @@ data class FavoritesSet (
 
 /// Bulk favorites mutation. `entries` are independent `FavoritesSet`
 /// applications; gateway returns once it has issued each underlying
-/// platform call. Per-entry errors are not surfaced — companion logs
+/// platform call. Per-entry errors are not surfaced - companion logs
 /// and best-efforts the rest. Webapps observing partial success listen
 /// for `FavoriteChanged` events.
 @Serializable
@@ -767,7 +781,7 @@ sealed class GatewayToBridgeMsgData {
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
-/// 
+///
 /// these messages will pass over bluetooth.
 @Serializable
 data class GatewayToBridgeMsg (
@@ -1318,7 +1332,7 @@ data class NotificationAction (
 
 /// One notification surfaced from the connected companion's notification
 /// center. `id` is companion-stable for the lifetime of the notification
-/// — webapps pass it to `invokePositive`/`invokeNegative` and listen for
+/// - webapps pass it to `invokePositive`/`invokeNegative` and listen for
 /// `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
 /// optional because ANCS treats them as separate attribute fetches.
 @Serializable
@@ -1391,7 +1405,7 @@ enum class RepeatMode(val string: String) {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
-/// 
+///
 /// `set_elapsed_time_available` is the gate webapps must honor for
 /// scrub UI: when false, scrubbing is unsupported by the foreground
 /// app and the seek button must be disabled.
@@ -1479,7 +1493,7 @@ data class OtaAssetRangeAbandon (
 /// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
 /// the Bulk lane in order: parts in declaration order, chunks in
 /// ascending `offset`. `offset` is absolute within the asset, not
-/// within the part — matches what the daemon's HTTP-Range writer needs
+/// within the part - matches what the daemon's HTTP-Range writer needs
 /// to feed libcurl. `last:true` only on the final chunk of the final
 /// part for this `request_id`.
 @Serializable
@@ -1522,24 +1536,47 @@ data class OtaAssetRangeReply (
 	val parts: List<RangePart>
 )
 
-/// Companion-initiated OTA: opens or resumes a streaming push of a
-/// `.swu` artifact identified by its sha256. The daemon responds with
+/// What the streamed bytes are going to be applied as. Image kind
+/// streams a `.swu` and goes through libswupdate + slot flip + reboot;
+/// daemon kind streams a fresh aarch64 daemon binary and goes through
+/// the on-disk rotate (`.incoming` -> `.current`, prior `.current` ->
+/// `.previous`) followed by a `systemctl restart bridgething.service`.
+/// Companions key reboot expectations off this: image means the device
+/// power-cycles, daemon means the daemon process restarts and the
+/// gateway link drops and reconnects.
+@Serializable
+enum class OtaKind(val string: String) {
+	@SerialName("image")
+	Image("image"),
+	@SerialName("daemon")
+	Daemon("daemon"),
+}
+
+/// Companion-initiated OTA: opens or resumes a streaming push of an
+/// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
 /// `OtaChunk` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }` (already-running OTA, conflicting
 /// in-flight update_id with mismatched size/sha, or budget exhausted).
-/// 
-/// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
-/// so resume across daemon restarts and retries-after-failure both work
-/// without companion-side state to track.
-/// 
+///
+/// `kind` selects the backend: `Image` for a `.swu` (libswupdate +
+/// slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
+/// (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
+/// systemctl restart). The streaming half is identical across kinds.
+///
+/// `update_id` is the sha256 of the artifact, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track.
+///
 /// `update_url_base` is the server prefix the companion may refetch
 /// the .zck delta from on cache miss, e.g.
 /// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
-/// fetch from it — it's carried so the companion can self-recover its
+/// fetch from it - it's carried so the companion can self-recover its
 /// cache while serving range requests during the Writing phase.
+/// Image-kind only; ignored for daemon-kind.
 @Serializable
 data class OtaBegin (
+	val kind: OtaKind,
 	val updateId: String,
 	val updateUrlBase: String? = null,
 	val expectedSha256: String,
@@ -1613,12 +1650,18 @@ data class OtaError (
 	val msg: String
 )
 
-/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
-/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
-/// the post-stream sha256 + size check; `Writing` streams the on-disk
-/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
-/// `Reboot` is the terminal stage emitted just before the daemon
-/// triggers the reboot.
+/// Stage of the OTA orchestrator. The phase set is shared between
+/// kinds, with daemon-kind emitting a subset.
+///
+/// Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
+/// -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
+/// try-counter) -> `Reboot` (systemd Reboot).
+///
+/// Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
+/// `.incoming` over `.current`, with prior `.current` rotated to
+/// `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
+/// `Confirming` is not emitted for daemon-kind: there is no slot
+/// try-counter to flip; the rename is the commit point.
 @Serializable
 enum class OtaPhase(val string: String) {
 	@SerialName("streaming")
@@ -1873,7 +1916,7 @@ data class PhoneMuteAction (
 )
 
 /// Snapshot of every active call known to the gateway. Multi-call is
-/// possible (call-waiting, conference) — webapps rendering only one
+/// possible (call-waiting, conference) - webapps rendering only one
 /// active call typically pick the first non-Held entry.
 @Serializable
 data class PhoneState (
@@ -1924,7 +1967,7 @@ enum class PlaybackState(val string: String) {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
-/// 
+///
 /// `set_elapsed_time_available` gates scrub UI: when false, the foreground
 /// app refuses absolute-position seeks and webapps must disable the scrub
 /// thumb. `None` means unknown (no signal received yet); webapps treat
@@ -1960,7 +2003,7 @@ data class PlayerOptions (
 	val crossfade_ms: UInt? = null
 )
 
-/// One row in the player queue. Lean cross-platform shape — gateways
+/// One row in the player queue. Lean cross-platform shape - gateways
 /// that have richer per-track data still surface what fields they have.
 /// `uri` is required because every queued item must be addressable for
 /// `skipToIndex`. `persistent_id` is the platform-stable id when
@@ -2047,7 +2090,7 @@ data class QueueUri (
 
 /// Page of recommendation results. Gateway decides how seed + kind
 /// interact (Spotify uses radio-style seeding, Apple Music uses curated
-/// rails) — the daemon doesn't prescribe.
+/// rails) - the daemon doesn't prescribe.
 @Serializable
 data class RecommendationsResult (
 	val items: List<LibraryItem>,
@@ -2176,7 +2219,7 @@ data class StreamEnd (
 	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID
 )
 
-/// Stream failed mid-flight (or before the first byte). Terminal — the
+/// Stream failed mid-flight (or before the first byte). Terminal - the
 /// daemon clears its routing entry. The `error` shape is shared with
 /// `fetch` since the failure modes are identical.
 @Serializable
@@ -2196,10 +2239,10 @@ data class StringField (
 )
 
 /// Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
-/// (or iAP2 device's) claimed "now" in unix-epoch seconds — webapps
+/// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
 /// reading time should use the device clock if any but use this as the
 /// trust anchor on first arrival.
-/// 
+///
 /// Two zone-identification paths coexist: companion gateways send
 /// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
 /// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
@@ -2714,7 +2757,7 @@ sealed class BridgeToGatewayPhoneMsg {
 /// Bridge → gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
-/// `Capabilities.uri_schemes` — daemon never forwards a URI no
+/// `Capabilities.uri_schemes` - daemon never forwards a URI no
 /// connected gateway claims.
 @Serializable(with = BridgeToGatewayPlayerMsgSerializer::class)
 sealed class BridgeToGatewayPlayerMsg {
@@ -3052,7 +3095,7 @@ sealed class GatewayToBridgePhoneMsg {
 /// Gateway → bridge player events. `Snapshot` is the initial-state event
 /// fired at announce when the companion claims player authority;
 /// `Delta` is the ongoing partial-update stream (the only delta-shaped
-/// event in the wire protocol — every other surface uses snapshots).
+/// event in the wire protocol - every other surface uses snapshots).
 /// `QueueChanged` fires when the queue mutates without a track change
 /// (companion-side reorder, prefetch).
 @Serializable(with = GatewayToBridgePlayerMsgSerializer::class)
@@ -3095,7 +3138,7 @@ sealed class GatewayToBridgeSystemMsg {
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce
 /// (announce-on-connect rule for any surface where companion claims
-/// authority — Time always seeds) and again on tz / locale / clock-skew
+/// authority - Time always seeds) and again on tz / locale / clock-skew
 /// changes.
 @Serializable(with = GatewayToBridgeTimeMsgSerializer::class)
 sealed class GatewayToBridgeTimeMsg {
@@ -3177,7 +3220,7 @@ enum class HardwareError(val string: String) {
 	/// The supplied level is outside `[0.0, 1.0]`.
 	@SerialName("levelOutOfRange")
 	LevelOutOfRange("levelOutOfRange"),
-	/// `setLevel` was called while in `Auto` mode — ignored, switch to
+	/// `setLevel` was called while in `Auto` mode - ignored, switch to
 	/// `Manual` first.
 	@SerialName("modeMismatch")
 	ModeMismatch("modeMismatch"),
@@ -3374,7 +3417,7 @@ data class WireErrorHandlerFailedInner (
 /// Protocol-level failure the responder ships when a request could not be
 /// reached or dispatched. Carried by the `Error` variant on every
 /// `*MsgData` enum.
-/// 
+///
 /// Domain-level errors (predictable, op-specific failures the caller may
 /// want to recover from) live inside the per-op response variant, not
 /// here.
@@ -3402,4 +3445,3 @@ sealed class WireError {
 	@SerialName("handlerFailed")
 	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()
 }
-

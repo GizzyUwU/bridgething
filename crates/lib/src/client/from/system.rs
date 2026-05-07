@@ -49,7 +49,7 @@ pub struct LogsTail {
 
 /// Open a streaming subscription. Daemon returns a `LogsSubscribeReply`
 /// with an opaque token; webapp passes the token to `LogsUnsubscribe`
-/// to release. Subscriptions are scoped to the WS connection — the
+/// to release. Subscriptions are scoped to the WS connection - the
 /// daemon auto-releases on disconnect.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]

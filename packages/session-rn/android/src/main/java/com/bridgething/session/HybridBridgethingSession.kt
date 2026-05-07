@@ -12,7 +12,7 @@ import com.margelo.nitro.core.Promise
  * on the iOS side: owns one `BridgethingCompanion` (`packages/companion/kotlin`),
  * which owns the gateway, the active glue, and every dispatcher.
  *
- * Implementation lands in a follow-up Android slice — the surface is here
+ * Implementation lands in a follow-up Android slice - the surface is here
  * so the iOS impl, the RN session SDK, and `mobile/App.tsx` can compile
  * end-to-end.
  */

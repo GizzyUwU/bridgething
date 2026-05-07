@@ -18,6 +18,8 @@ pub struct BridgeThingMeta {
   pub bridgething_version: String,
   pub libbridgething_version: String,
   pub app_name: String,
+  /// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
+  /// the manifest's daemon-component version for OTA hot-swap decisions.
   pub app_version: String,
   pub os_name: String,
   pub os_version: String,
@@ -27,10 +29,22 @@ pub struct BridgeThingMeta {
   pub fcc_id: String,
   pub ic_id: String,
   pub model_name: String,
+  /// OTA channel the running image was cut on, e.g. `stable` or `dev`.
+  /// The companion's poll loop only auto-pushes when its configured
+  /// channel matches; a mismatch surfaces a "channel switch needs full
+  /// flash" event rather than swapping channels in-band.
+  pub channel: String,
+  /// Image variant the running image was cut as, e.g. `prod` or `dev`.
+  /// Maps to the yocto image recipe name `bridgething-<variant>-image`,
+  /// which is what the companion uses to construct the OTA artifact URL
+  /// `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
+  pub image_variant: String,
+  /// Canonical image version (CalVer, e.g. `2026.05.0`). What the
+  /// companion compares to the manifest's image-component version.
+  pub image_version: String,
   pub image_build_id: String,
   pub image_build_date: String,
   pub image_distro: String,
-  pub image_distro_version: String,
   pub image_machine: String,
   pub discord: String,
   pub credits: String,
@@ -42,12 +56,35 @@ impl BridgeThingMeta {
   }
 }
 
-/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
-/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
-/// the post-stream sha256 + size check; `Writing` streams the on-disk
-/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
-/// `Reboot` is the terminal stage emitted just before the daemon
-/// triggers the reboot.
+/// What the streamed bytes are going to be applied as. Image kind
+/// streams a `.swu` and goes through libswupdate + slot flip + reboot;
+/// daemon kind streams a fresh aarch64 daemon binary and goes through
+/// the on-disk rotate (`.incoming` -> `.current`, prior `.current` ->
+/// `.previous`) followed by a `systemctl restart bridgething.service`.
+/// Companions key reboot expectations off this: image means the device
+/// power-cycles, daemon means the daemon process restarts and the
+/// gateway link drops and reconnects.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum OtaKind {
+  Image,
+  Daemon,
+}
+
+/// Stage of the OTA orchestrator. The phase set is shared between
+/// kinds, with daemon-kind emitting a subset.
+///
+/// Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
+/// -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
+/// try-counter) -> `Reboot` (systemd Reboot).
+///
+/// Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
+/// `.incoming` over `.current`, with prior `.current` rotated to
+/// `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
+/// `Confirming` is not emitted for daemon-kind: there is no slot
+/// try-counter to flip; the rename is the commit point.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

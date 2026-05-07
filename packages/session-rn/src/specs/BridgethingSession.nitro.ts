@@ -43,7 +43,7 @@ export type BridgethingAuthState = {
  *
  * Provider selection model: glues are registered by the host app's native
  * entry point at startup (one factory closure per provider id). RN calls
- * `setActiveProvider(id)` to switch — native instantiates the glue from
+ * `setActiveProvider(id)` to switch - native instantiates the glue from
  * the registry and hands it to the companion.
  */
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {

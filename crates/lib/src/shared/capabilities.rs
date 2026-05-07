@@ -1,4 +1,4 @@
-//! Capabilities surface — single broadcast struct describing what the
+//! Capabilities surface - single broadcast struct describing what the
 //! currently-connected companion (if any) can do, plus the daemon's
 //! authority view. The companion announces `GatewayCapabilities` at
 //! session-up; the daemon merges that with its own bits and re-emits

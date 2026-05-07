@@ -25,7 +25,7 @@ pub const GATEWAY_TO_BRIDGE: &str = "GatewayToBridgeMsgData";
 pub const BRIDGE_TO_CLIENT: &str = "BridgeToClientMsgData";
 pub const CLIENT_TO_BRIDGE: &str = "ClientToBridgeMsgData";
 
-/// Wire-direction tag — one per recognized parent-ident prefix.
+/// Wire-direction tag - one per recognized parent-ident prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
   BridgeToGateway,
@@ -109,7 +109,7 @@ pub enum MarkerKind {
 pub struct WireVariant {
   pub name: String,
   /// Single-field tuple-variant payload. `None` for unit variants AND
-  /// for struct-shaped variants — the latter are exposed only at the
+  /// for struct-shaped variants - the latter are exposed only at the
   /// parent enum level because per-language type-paths to them differ
   /// enough that codegen for the inner field set isn't worth the
   /// surface.
@@ -143,9 +143,9 @@ pub enum PayloadType {
   /// Named user type (struct or enum). Carries the bare ident
   /// (last path segment).
   Named(String),
-  /// `Vec<u8>` — translates to per-language bytes type.
+  /// `Vec<u8>` - translates to per-language bytes type.
   Bytes,
-  /// `serde_json::Value` — translates to per-language unstructured-json type.
+  /// `serde_json::Value` - translates to per-language unstructured-json type.
   JsonValue,
   /// Plain `String`.
   StringScalar,

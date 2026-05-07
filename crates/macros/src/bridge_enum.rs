@@ -1,4 +1,4 @@
-//! `#[derive(BridgeEnum)]` — split a wire enum into per-category sibling
+//! `#[derive(BridgeEnum)]` - split a wire enum into per-category sibling
 //! enums and emit the supporting trait infrastructure.
 //!
 //! Each variant is tagged with exactly one of `#[bridge_event]`,
@@ -21,13 +21,13 @@
 //!   `#[bridge_response]`, and matches the declared payload type. See
 //!   `request.rs` for the consumer side.
 //!
-//! Direction is inferred from the parent ident — one of the four
+//! Direction is inferred from the parent ident - one of the four
 //! recognized prefixes:
 //!
-//! - `BridgeToGateway*` — daemon → companion (Bluetooth gateway protocol)
-//! - `GatewayToBridge*` — companion → daemon (Bluetooth gateway protocol)
-//! - `BridgeToClient*`  — daemon → webapp (local WebSocket protocol)
-//! - `ClientToBridge*`  — webapp → daemon (local WebSocket protocol)
+//! - `BridgeToGateway*` - daemon → companion (Bluetooth gateway protocol)
+//! - `GatewayToBridge*` - companion → daemon (Bluetooth gateway protocol)
+//! - `BridgeToClient*`  - daemon → webapp (local WebSocket protocol)
+//! - `ClientToBridge*`  - webapp → daemon (local WebSocket protocol)
 
 use std::collections::BTreeMap;
 
@@ -384,7 +384,7 @@ fn emit_from_sibling_for_outer(parent: &Ident, bucket: Bucket, outer: &Path) -> 
 
 /// For each `Variant(Box<T>)` variant, emit `From<T>` impls that
 /// auto-box. The straight `From<Box<T>>` chain is already covered by
-/// `emit_from_sibling_for_parent` — these are the ergonomic
+/// `emit_from_sibling_for_parent` - these are the ergonomic
 /// counterparts so callers can write `meta.into()` instead of
 /// `Box::new(meta).into()`. The chain to the outer wire enum is also
 /// emitted when this enum has `#[bridge_enum(into = ...)]`.

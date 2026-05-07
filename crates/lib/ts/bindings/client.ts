@@ -77,7 +77,7 @@ export type AssetNotFound = { requestId: string; id: string };
  * Webapp hint to warm the daemon's asset cache. The daemon issues an
  * `AssetRequest` to the connected companion for each id that isn't
  * already cached, in parallel; subsequent `Get` calls hit cache.
- * Fire-and-forget — webapps observe completion via `Asset.Ready` events.
+ * Fire-and-forget - webapps observe completion via `Asset.Ready` events.
  */
 export type AssetPreload = { ids: Array<string> };
 
@@ -479,7 +479,7 @@ export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
 /**
  * Watch handle. Webapps pass the token back as
  * `ClientToBridgeGeoMsg::Unwatch { token }` to release the watch.
- * Tokens are scoped to the webapp's WS connection — the daemon
+ * Tokens are scoped to the webapp's WS connection - the daemon
  * auto-releases on disconnect.
  */
 export type GeoWatchReply = { token: string };
@@ -509,7 +509,7 @@ export type LibraryErrorReply = { error: LibraryError };
 
 /**
  * Batch "is each of these favorited?" lookup. Mirrors Spotify's
- * `GET /me/tracks/contains` — reply `liked` is index-aligned with the
+ * `GET /me/tracks/contains` - reply `liked` is index-aligned with the
  * request `uris`. Daemon caps `uris` at 50 per call.
  */
 export type LibraryFavoritesContains = { uris: Array<string> };
@@ -536,7 +536,7 @@ export type LibrarySearchReply = { result: SearchResult };
 /**
  * Open a streaming subscription. Daemon returns a `LogsSubscribeReply`
  * with an opaque token; webapp passes the token to `LogsUnsubscribe`
- * to release. Subscriptions are scoped to the WS connection — the
+ * to release. Subscriptions are scoped to the WS connection - the
  * daemon auto-releases on disconnect.
  */
 export type LogsSubscribe = { source: LogSource; levels: Array<LogLevel>; filter: string | null };

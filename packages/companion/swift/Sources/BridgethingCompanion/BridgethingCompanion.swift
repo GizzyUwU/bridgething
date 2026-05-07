@@ -63,6 +63,7 @@ public actor BridgethingCompanion {
     private var started = false
 
     private let netDispatcher: NetDispatcher
+    public let ota: OtaService
     #if canImport(CoreLocation)
         private let geoController: GeoController
     #endif
@@ -81,6 +82,7 @@ public actor BridgethingCompanion {
         capFlags = capabilities
         gateway = BridgethingGateway(adapter: adapter)
         netDispatcher = NetDispatcher()
+        ota = OtaService()
         #if canImport(CoreLocation)
             geoController = GeoController()
         #endif
@@ -121,6 +123,7 @@ public actor BridgethingCompanion {
             await geoController.stop()
         #endif
         await netDispatcher.stop()
+        await ota.stop()
 
         if let glue = activeGlue {
             await glue.detach()
@@ -198,6 +201,10 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in
             guard let self else { return }
             await netDispatcher.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            await ota.start(gateway: gateway)
         })
         #if canImport(CoreLocation)
             tasks.append(Task { [weak self] in

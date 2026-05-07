@@ -1,5 +1,5 @@
 //! Wall-clock authority. Holds the most recent `TimeInfo` snapshot
-//! the daemon has been told about — by the iAP2 control session
+//! the daemon has been told about - by the iAP2 control session
 //! (`DeviceTimeUpdate`) when an iPhone is connected, by the gateway
 //! companion (`GatewayToBridgeTimeMsg::Snapshot`) otherwise. Webapps
 //! query through the Time SDK surface; broadcast happens on every

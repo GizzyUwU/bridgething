@@ -66,7 +66,7 @@ pub struct SetCrossfade {
 }
 
 /// Webapp asks for the current `PlayerState` snapshot. Most webapps
-/// don't need this — the SDK auto-merges deltas into a cached state.
+/// don't need this - the SDK auto-merges deltas into a cached state.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = ClientToBridge,

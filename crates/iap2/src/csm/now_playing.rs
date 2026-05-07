@@ -387,7 +387,7 @@ impl PlaybackAttributes {
 /// CsmParam entry; the entry's id position carries no information for
 /// us (Apple uses it as a slot tag we ignore). Per-element decode is
 /// best-effort: malformed entries are dropped with a warn rather than
-/// aborting the whole parse — a partially-decoded queue is more useful
+/// aborting the whole parse - a partially-decoded queue is more useful
 /// than no queue.
 pub fn decode_queue_snapshot(blob: Bytes) -> Result<Vec<MediaItemAttributes>, CsmDecodeError> {
   let entries = decode_param_block(blob)?;
@@ -616,7 +616,7 @@ fn take_optional_be_u64(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Opt
 
 /// Presence-only marker: empty payload = present, omission = absent.
 /// Different from `take_optional_presence_bool` because the marker
-/// carries no truth value beyond its presence — an explicit `()` rather
+/// carries no truth value beyond its presence - an explicit `()` rather
 /// than a `bool`.
 fn take_optional_presence_marker(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<()>, CsmDecodeError> {
   let Some(payload) = take_optional(param_id, params)? else {

@@ -85,7 +85,7 @@ pub struct LibraryFavoritesList {
 }
 
 /// Batch "is each of these favorited?" lookup. Mirrors Spotify's
-/// `GET /me/tracks/contains` — reply `liked` is index-aligned with the
+/// `GET /me/tracks/contains` - reply `liked` is index-aligned with the
 /// request `uris`. Daemon caps `uris` at 50 per call.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]

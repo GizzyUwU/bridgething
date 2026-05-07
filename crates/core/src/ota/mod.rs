@@ -1,20 +1,26 @@
-//! OTA orchestrator. Drives a `.swu` from "first chunk arriving on
-//! the wire" to "device rebooted onto the new slot", emitting
-//! `OtaProgress` events at every phase transition and an `OtaError`
-//! on terminal failure.
+//! OTA orchestrator. Drives an update from "first chunk arriving on
+//! the wire" to "the new bits are live", emitting `OtaProgress` events
+//! at every phase transition and an `OtaError` on terminal failure.
 //!
-//! Phase machine:
+//! Two kinds, one phase machine:
+//!
+//! Image (`.swu`):
 //!
 //!     Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
-//!                                                       |
-//!                                       [hash/size ok]  |
-//!                                                       v
-//!                                                    Writing --[ok]--> Confirming --> Reboot
+//!         --> Writing (libswupdate) --> Confirming --> Reboot
 //!
-//! Cancellation is honored through `Writing`; once we hit `Confirming`
-//! the slot flip is committed and we don't roll back. `CancelUpdate`
-//! keeps the partial on disk for a future resume; `OtaAbandon` is the
-//! explicit clean-up path.
+//! Daemon (raw aarch64 binary):
+//!
+//!     Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
+//!         --> Writing (atomic rename) --> Reboot
+//!
+//! `Confirming` is image-only (slot try-counter flip). `Reboot` is
+//! universal: image fires systemd Reboot, daemon fires `systemctl
+//! restart bridgething.service`.
+//!
+//! Cancellation: image is cancelable through `Writing` (libswupdate
+//! honors mid-install cancel). Daemon is cancelable through `Streaming`
+//! only - the rename is one syscall with no half-state.
 //!
 //! Single-instance: a fresh `OtaBegin` arriving while an OTA is
 //! actively writing rejects with `OtaBeginRejected`. A new `OtaBegin`
@@ -23,18 +29,23 @@
 //! new one.
 //!
 //! Bytes never accumulate in memory: chunks land on
-//! `<runtime_dir>/transfers/<id>.partial` via `ChunkedTransfer`, and
-//! libswupdate consumes from that on-disk file at write time.
+//! `<state_dir>/transfers/<id>.partial` via `ChunkedTransfer`, and
+//! the kind-specific backend consumes from that on-disk file at write
+//! time.
 
+mod daemon_swap;
+mod range_proxy;
 mod slots;
 mod swupdate;
 
 use std::{path::PathBuf, sync::Arc};
 
+use bluer::Address;
 use libbridgething::{
-  OtaError, OtaErrorCode, OtaPhase, OtaProgress,
-  gateway::{BridgeToGatewaySystemMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk},
+  OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress,
+  gateway::{BridgeToGatewaySystemMsgEvent, OtaAssetRangeChunk, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk},
 };
+pub use range_proxy::RangeProxy;
 use tokio::{
   sync::{mpsc, oneshot, watch},
   task::JoinHandle,
@@ -49,9 +60,11 @@ pub type OtaEventTx = mpsc::Sender<BridgeToGatewaySystemMsgEvent>;
 enum Command {
   Begin {
     req: OtaBegin,
+    peer: Option<Address>,
     ack: oneshot::Sender<Result<OtaBeginAck, OtaBeginRejected>>,
   },
   Chunk(OtaChunk),
+  AssetRangeChunk(OtaAssetRangeChunk),
   Abandon {
     update_id: String,
   },
@@ -59,10 +72,22 @@ enum Command {
   WriteFinished,
 }
 
-/// Thunk the orchestrator calls when entering the terminal `Reboot`
-/// phase. Production wires this to systemd's `Reboot` D-Bus method;
-/// tests can pass a no-op.
-pub type RebootFn = Arc<dyn Fn() + Send + Sync + 'static>;
+pub type TerminatorFn = Arc<dyn Fn() + Send + Sync + 'static>;
+
+#[derive(Clone)]
+pub struct OtaTerminators {
+  pub reboot: TerminatorFn,
+  pub restart_self: TerminatorFn,
+}
+
+impl OtaTerminators {
+  fn for_kind(&self, kind: OtaKind) -> &TerminatorFn {
+    match kind {
+      OtaKind::Image => &self.reboot,
+      OtaKind::Daemon => &self.restart_self,
+    }
+  }
+}
 
 #[derive(Clone)]
 pub struct OtaOrchestrator {
@@ -76,12 +101,18 @@ impl std::fmt::Debug for OtaOrchestrator {
 }
 
 impl OtaOrchestrator {
-  pub fn spawn(transfers: ChunkedTransfer, events_tx: OtaEventTx, reboot: RebootFn) -> (Self, JoinHandle<()>) {
+  pub fn spawn(
+    transfers: ChunkedTransfer,
+    events_tx: OtaEventTx,
+    terminators: OtaTerminators,
+    range_proxy: RangeProxy,
+  ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let actor = OtaActor {
       transfers,
       events_tx,
-      reboot,
+      terminators,
+      range_proxy,
       self_tx: cmd_tx.clone(),
       cmd_rx,
       state: OtaState::Idle,
@@ -90,9 +121,9 @@ impl OtaOrchestrator {
     (Self { cmd_tx }, handle)
   }
 
-  pub async fn begin(&self, req: OtaBegin) -> Result<OtaBeginAck, OtaBeginRejected> {
+  pub async fn begin(&self, req: OtaBegin, peer: Option<Address>) -> Result<OtaBeginAck, OtaBeginRejected> {
     let (ack, rx) = oneshot::channel();
-    if self.cmd_tx.send(Command::Begin { req, ack }).await.is_err() {
+    if self.cmd_tx.send(Command::Begin { req, peer, ack }).await.is_err() {
       return Err(OtaBeginRejected {
         reason: "ota orchestrator mailbox closed".into(),
       });
@@ -122,39 +153,43 @@ impl OtaOrchestrator {
     }
   }
 
-  pub async fn asset_range_chunk(&self, chunk: libbridgething::gateway::OtaAssetRangeChunk) {
-    tracing::warn!(
-      request_id = %chunk.request_id,
-      part = chunk.part_index,
-      offset = chunk.offset,
-      len = chunk.bytes.len(),
-      "OtaAssetRangeChunk arrived but range proxy is not yet wired; dropping",
-    );
+  pub async fn asset_range_chunk(&self, chunk: OtaAssetRangeChunk) {
+    if let Err(err) = self.cmd_tx.send(Command::AssetRangeChunk(chunk)).await {
+      tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaAssetRangeChunk");
+    }
   }
 }
 
 enum OtaState {
-  /// No OTA in flight. Begin opens a transfer, transitions to Streaming.
   Idle,
-  /// Companion is pushing chunks. Last chunk transitions to Writing
-  /// (via the post-stream Verifying phase, which collapses to a single
-  /// progress event since the chunk loop already verified per-chunk
-  /// against expected_size + offset; we re-hash at completion).
-  Streaming { update_id: String, expected_size: u64 },
-  /// libswupdate is consuming the file. Cancel signaller is live;
-  /// new OtaBegin is rejected.
+  Streaming {
+    kind: OtaKind,
+    update_id: String,
+    expected_size: u64,
+    peer: Option<Address>,
+  },
   Writing {
+    kind: OtaKind,
     update_id: String,
     cancel_tx: watch::Sender<bool>,
+    peer: Option<Address>,
   },
+}
+
+impl OtaState {
+  fn pinned_peer(&self) -> Option<Option<Address>> {
+    match self {
+      OtaState::Idle => None,
+      OtaState::Streaming { peer, .. } | OtaState::Writing { peer, .. } => Some(*peer),
+    }
+  }
 }
 
 struct OtaActor {
   transfers: ChunkedTransfer,
   events_tx: OtaEventTx,
-  reboot: RebootFn,
-  /// Self-send channel for the spawned write task to post `WriteFinished`
-  /// so `state` is cleared back through the actor without sharing state.
+  terminators: OtaTerminators,
+  range_proxy: RangeProxy,
   self_tx: mpsc::Sender<Command>,
   cmd_rx: mpsc::Receiver<Command>,
   state: OtaState,
@@ -165,22 +200,40 @@ impl OtaActor {
     tracing::info!("ota orchestrator started");
     while let Some(cmd) = self.cmd_rx.recv().await {
       match cmd {
-        Command::Begin { req, ack } => self.handle_begin(req, ack).await,
+        Command::Begin { req, peer, ack } => self.handle_begin(req, peer, ack).await,
         Command::Chunk(chunk) => self.handle_chunk(chunk).await,
+        Command::AssetRangeChunk(chunk) => {
+          self.range_proxy.route_chunk(chunk).await;
+        }
         Command::Abandon { update_id } => self.handle_abandon(update_id).await,
         Command::Cancel => self.handle_cancel().await,
         Command::WriteFinished => {
           self.state = OtaState::Idle;
+          self.range_proxy.deactivate().await;
         }
       }
     }
     tracing::info!("ota orchestrator exiting");
   }
 
-  async fn handle_begin(&mut self, req: OtaBegin, ack: oneshot::Sender<Result<OtaBeginAck, OtaBeginRejected>>) {
+  async fn handle_begin(
+    &mut self,
+    req: OtaBegin,
+    peer: Option<Address>,
+    ack: oneshot::Sender<Result<OtaBeginAck, OtaBeginRejected>>,
+  ) {
     if let OtaState::Writing { update_id, .. } = &self.state {
       let _ = ack.send(Err(OtaBeginRejected {
         reason: format!("ota write of {update_id} in progress; cancel or wait first"),
+      }));
+      return;
+    }
+
+    if let Some(pinned) = self.state.pinned_peer()
+      && pinned != peer
+    {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "ota in progress, pinned to a different companion".into(),
       }));
       return;
     }
@@ -197,8 +250,10 @@ impl OtaActor {
       );
       let _ = self.transfers.abandon(existing.clone()).await;
       self.state = OtaState::Idle;
+      self.range_proxy.deactivate().await;
     }
 
+    let kind = req.kind;
     let result = self
       .transfers
       .begin(
@@ -216,9 +271,15 @@ impl OtaActor {
           None,
         )
         .await;
+        let update_id = req.update_id.clone();
+        if matches!(kind, OtaKind::Image) {
+          self.range_proxy.activate(update_id.clone(), peer).await;
+        }
         self.state = OtaState::Streaming {
-          update_id: req.update_id,
+          kind,
+          update_id,
           expected_size: req.expected_size as u64,
+          peer,
         };
         let _ = ack.send(Ok(OtaBeginAck {
           resume_from_offset: resume_from_offset as u32,
@@ -233,11 +294,13 @@ impl OtaActor {
   }
 
   async fn handle_chunk(&mut self, chunk: OtaChunk) {
-    let (current_id, expected_size) = match &self.state {
+    let (kind, current_id, expected_size, peer) = match &self.state {
       OtaState::Streaming {
+        kind,
         update_id,
         expected_size,
-      } => (update_id.clone(), *expected_size),
+        peer,
+      } => (*kind, update_id.clone(), *expected_size, *peer),
       _ => {
         tracing::warn!(
           update_id = %chunk.update_id,
@@ -284,13 +347,14 @@ impl OtaActor {
       Ok(ChunkOutcome::Completed { path, .. }) => {
         emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
         emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
-        self.spawn_write(current_id, path).await;
+        self.spawn_write(kind, current_id, peer, path).await;
       }
       Err(err) => {
         let code = transfer_error_code(&err);
         emit_error(&self.events_tx, code, format!("ota chunk: {err}")).await;
         let _ = self.transfers.abandon(current_id).await;
         self.state = OtaState::Idle;
+        self.range_proxy.deactivate().await;
       }
     }
   }
@@ -303,6 +367,7 @@ impl OtaActor {
       && streaming == &update_id
     {
       self.state = OtaState::Idle;
+      self.range_proxy.deactivate().await;
     }
   }
 
@@ -312,35 +377,46 @@ impl OtaActor {
       OtaState::Streaming { update_id, .. } => {
         tracing::info!(%update_id, "cancel during streaming; partial retained for resume");
         self.state = OtaState::Idle;
+        self.range_proxy.deactivate().await;
       }
-      OtaState::Writing { cancel_tx, .. } => {
-        tracing::info!("cancel during write; signalling in-flight write");
-        let _ = cancel_tx.send(true);
-      }
+      OtaState::Writing { kind, cancel_tx, .. } => match kind {
+        OtaKind::Image => {
+          tracing::info!("cancel during image write; signalling libswupdate");
+          let _ = cancel_tx.send(true);
+        }
+        OtaKind::Daemon => {
+          tracing::info!("cancel during daemon swap; rename is atomic, ignoring");
+        }
+      },
     }
   }
 
-  async fn spawn_write(&mut self, update_id: String, swu_path: PathBuf) {
+  async fn spawn_write(&mut self, kind: OtaKind, update_id: String, peer: Option<Address>, payload: PathBuf) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     self.state = OtaState::Writing {
+      kind,
       update_id: update_id.clone(),
       cancel_tx,
+      peer,
     };
 
     let events_tx = self.events_tx.clone();
-    let reboot = self.reboot.clone();
+    let terminator = self.terminators.for_kind(kind).clone();
     let self_tx = self.self_tx.clone();
 
     tokio::spawn(async move {
-      let outcome = run_write_and_confirm(&events_tx, &swu_path, cancel_rx).await;
-      let _ = tokio::fs::remove_file(&swu_path).await;
+      let outcome = match kind {
+        OtaKind::Image => run_image_write(&events_tx, &payload, cancel_rx).await,
+        OtaKind::Daemon => run_daemon_swap(&events_tx, &payload, cancel_rx).await,
+      };
+      let _ = tokio::fs::remove_file(&payload).await;
       match outcome {
         Ok(()) => {
-          tracing::info!(%update_id, "ota write+confirm complete; triggering reboot");
-          (reboot)();
+          tracing::info!(%update_id, ?kind, "ota write complete; firing terminator");
+          (terminator)();
         }
         Err(err) => {
-          tracing::warn!(?err, "ota write terminated with error");
+          tracing::warn!(?err, ?kind, "ota write terminated with error");
           emit_error(&events_tx, err.code, err.msg).await;
         }
       }
@@ -356,12 +432,12 @@ async fn emit_error(events_tx: &OtaEventTx, code: OtaErrorCode, msg: String) {
 }
 
 #[derive(Debug)]
-struct WriteError {
-  code: OtaErrorCode,
-  msg: String,
+pub(crate) struct WriteError {
+  pub(crate) code: OtaErrorCode,
+  pub(crate) msg: String,
 }
 
-async fn run_write_and_confirm(
+async fn run_image_write(
   events_tx: &OtaEventTx,
   swu_path: &std::path::Path,
   mut cancel_rx: watch::Receiver<bool>,
@@ -416,7 +492,30 @@ async fn run_write_and_confirm(
   Ok(())
 }
 
-fn check_cancel(rx: &mut watch::Receiver<bool>) -> bool {
+async fn run_daemon_swap(
+  events_tx: &OtaEventTx,
+  binary_path: &std::path::Path,
+  mut cancel_rx: watch::Receiver<bool>,
+) -> Result<(), WriteError> {
+  if check_cancel(&mut cancel_rx) {
+    return Err(WriteError {
+      code: OtaErrorCode::Cancelled,
+      msg: "cancelled before swap".into(),
+    });
+  }
+
+  emit_progress(events_tx, OtaPhase::Writing, 0, None).await;
+  daemon_swap::swap(binary_path).await.map_err(|err| WriteError {
+    code: OtaErrorCode::WriteFailed,
+    msg: format!("daemon swap failed: {err}"),
+  })?;
+  emit_progress(events_tx, OtaPhase::Writing, 100, None).await;
+
+  emit_progress(events_tx, OtaPhase::Reboot, 0, None).await;
+  Ok(())
+}
+
+pub(crate) fn check_cancel(rx: &mut watch::Receiver<bool>) -> bool {
   *rx.borrow_and_update()
 }
 
@@ -478,6 +577,7 @@ mod tests {
     ota: OtaOrchestrator,
     events: mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
     reboot_calls: Arc<AtomicUsize>,
+    restart_self_calls: Arc<AtomicUsize>,
     _root: PathBuf,
   }
 
@@ -487,15 +587,23 @@ mod tests {
     let (transfers, _xfer_handle) = pending.spawn();
     let (events_tx, events) = mpsc::channel(64);
     let reboot_calls = Arc::new(AtomicUsize::new(0));
-    let calls = reboot_calls.clone();
-    let reboot: RebootFn = Arc::new(move || {
-      calls.fetch_add(1, Ordering::SeqCst);
-    });
-    let (ota, _ota_handle) = OtaOrchestrator::spawn(transfers, events_tx, reboot);
+    let restart_self_calls = Arc::new(AtomicUsize::new(0));
+    let reboot_counter = reboot_calls.clone();
+    let restart_counter = restart_self_calls.clone();
+    let terminators = OtaTerminators {
+      reboot: Arc::new(move || {
+        reboot_counter.fetch_add(1, Ordering::SeqCst);
+      }),
+      restart_self: Arc::new(move || {
+        restart_counter.fetch_add(1, Ordering::SeqCst);
+      }),
+    };
+    let (ota, _ota_handle) = OtaOrchestrator::spawn(transfers, events_tx, terminators, range_proxy::noop_proxy());
     Harness {
       ota,
       events,
       reboot_calls,
+      restart_self_calls,
       _root: root,
     }
   }
@@ -524,12 +632,16 @@ mod tests {
 
     let ack = h
       .ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .expect("begin ok");
     assert_eq!(ack.resume_from_offset, 0);
@@ -559,12 +671,16 @@ mod tests {
     let mut h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
     h.ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size + 1,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size + 1,
+        },
+        None,
+      )
       .await
       .expect("begin ok");
 
@@ -593,12 +709,16 @@ mod tests {
     let (bytes, _sha, size) = fixture_bytes();
     let bogus_sha = "0".repeat(64);
     h.ota
-      .begin(OtaBegin {
-        update_id: bogus_sha.clone(),
-        update_url_base: None,
-        expected_sha256: bogus_sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: bogus_sha.clone(),
+          update_url_base: None,
+          expected_sha256: bogus_sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .expect("begin ok");
     h.ota
@@ -625,12 +745,16 @@ mod tests {
     let mut h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
     h.ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .expect("first begin ok");
     h.ota
@@ -645,12 +769,16 @@ mod tests {
     h.ota.cancel().await;
     let ack = h
       .ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .expect("resume begin ok");
     assert_eq!(ack.resume_from_offset, 10);
@@ -677,12 +805,16 @@ mod tests {
     let mut h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
     h.ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .unwrap();
     h.ota
@@ -702,12 +834,16 @@ mod tests {
 
     let err = h
       .ota
-      .begin(OtaBegin {
-        update_id: "deadbeef".repeat(8),
-        update_url_base: None,
-        expected_sha256: "deadbeef".repeat(8),
-        expected_size: 32,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: "deadbeef".repeat(8),
+          update_url_base: None,
+          expected_sha256: "deadbeef".repeat(8),
+          expected_size: 32,
+        },
+        None,
+      )
       .await
       .unwrap_err();
     assert!(err.reason.contains("in progress"), "got reason: {}", err.reason);
@@ -715,15 +851,19 @@ mod tests {
 
   #[tokio::test]
   async fn abandon_clears_streaming_state() {
-    let mut h = boot().await;
+    let h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
     h.ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha.clone(),
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .unwrap();
     h.ota
@@ -737,14 +877,249 @@ mod tests {
     h.ota.abandon(sha.clone()).await;
     let ack = h
       .ota
-      .begin(OtaBegin {
-        update_id: sha.clone(),
-        update_url_base: None,
-        expected_sha256: sha,
-        expected_size: size,
-      })
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha,
+          expected_size: size,
+        },
+        None,
+      )
       .await
       .expect("begin after abandon");
     assert_eq!(ack.resume_from_offset, 0);
+  }
+
+  #[tokio::test]
+  async fn second_begin_from_different_peer_is_rejected() {
+    let h = boot().await;
+    let (_bytes, sha, size) = fixture_bytes();
+    let peer_a: Address = "AA:BB:CC:DD:EE:01".parse().unwrap();
+    let peer_b: Address = "AA:BB:CC:DD:EE:02".parse().unwrap();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        Some(peer_a),
+      )
+      .await
+      .expect("first begin ok");
+
+    let err = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha,
+          update_url_base: None,
+          expected_sha256: "deadbeef".repeat(8),
+          expected_size: size,
+        },
+        Some(peer_b),
+      )
+      .await
+      .unwrap_err();
+    assert!(
+      err.reason.contains("pinned to a different companion"),
+      "got reason: {}",
+      err.reason,
+    );
+  }
+
+  // Daemon-kind. The on-device atomic-rename + systemctl restart path
+  // is gated behind /etc/superbird in `daemon_swap::swap`, so the host
+  // test rig sees the swap thunk no-op cleanly and the orchestrator
+  // proceeds to fire the restart_self terminator. That's the contract
+  // we test here: phase sequence is correct and the right terminator
+  // fires.
+
+  #[tokio::test]
+  async fn daemon_happy_path_emits_subset_phases_and_restarts() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("daemon begin ok");
+
+    h.ota
+      .chunk(OtaChunk {
+        update_id: sha,
+        offset: 0,
+        bytes,
+        last: true,
+      })
+      .await;
+
+    let mut saw_writing_done = false;
+    let mut saw_reboot = false;
+    let deadline = Duration::from_secs(5);
+    timeout(deadline, async {
+      while !(saw_writing_done && saw_reboot) {
+        let ev = h.events.recv().await.expect("event channel closed");
+        match ev {
+          BridgeToGatewaySystemMsgEvent::OtaProgress(p) => match p.phase {
+            OtaPhase::Confirming => panic!("daemon-kind must not emit Confirming"),
+            OtaPhase::Writing if p.percent == 100 => saw_writing_done = true,
+            OtaPhase::Reboot => saw_reboot = true,
+            _ => {}
+          },
+          BridgeToGatewaySystemMsgEvent::OtaError(e) => panic!("unexpected error during happy path: {e:?}"),
+        }
+      }
+    })
+    .await
+    .expect("daemon happy path timed out");
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      1,
+      "restart_self thunk should fire once on daemon-kind success"
+    );
+    assert_eq!(
+      h.reboot_calls.load(Ordering::SeqCst),
+      0,
+      "reboot thunk must not fire for daemon-kind"
+    );
+  }
+
+  #[tokio::test]
+  async fn daemon_size_mismatch_emits_size_mismatch() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size + 1,
+        },
+        None,
+      )
+      .await
+      .expect("daemon begin ok");
+
+    h.ota
+      .chunk(OtaChunk {
+        update_id: sha,
+        offset: 0,
+        bytes,
+        last: true,
+      })
+      .await;
+
+    let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
+    assert_eq!(e.code, OtaErrorCode::SizeMismatch);
+    assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
+  }
+
+  #[tokio::test]
+  async fn daemon_hash_mismatch_emits_hash_mismatch() {
+    let mut h = boot().await;
+    let (bytes, _sha, size) = fixture_bytes();
+    let bogus_sha = "0".repeat(64);
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: bogus_sha.clone(),
+          update_url_base: None,
+          expected_sha256: bogus_sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("daemon begin ok");
+    h.ota
+      .chunk(OtaChunk {
+        update_id: bogus_sha,
+        offset: 0,
+        bytes,
+        last: true,
+      })
+      .await;
+
+    let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
+    assert_eq!(e.code, OtaErrorCode::HashMismatch);
+    assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
+  }
+
+  #[tokio::test]
+  async fn daemon_cancel_during_streaming_keeps_partial() {
+    let h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("daemon begin ok");
+    h.ota
+      .chunk(OtaChunk {
+        update_id: sha.clone(),
+        offset: 0,
+        bytes: bytes[..10].to_vec(),
+        last: false,
+      })
+      .await;
+    h.ota.cancel().await;
+
+    let ack = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Daemon,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha,
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("resume begin ok");
+    assert_eq!(ack.resume_from_offset, 10, "partial should survive cancel");
+    assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
   }
 }

@@ -1,9 +1,9 @@
 //! Kotlin emitter for surface-namespaced gateway dispatch.
 //!
 //! Each surface gets two classes:
-//! - `<Name>Surface` — gateway-level: cross-peer Flows, broadcast sends,
+//! - `<Name>Surface` - gateway-level: cross-peer Flows, broadcast sends,
 //!   typed queries with explicit deviceId parameter.
-//! - `<Name>SurfaceForDevice` — per-peer: filtered Flows with no deviceId
+//! - `<Name>SurfaceForDevice` - per-peer: filtered Flows with no deviceId
 //!   in the pair, deviceId-baked sends, deviceId-baked typed queries.
 //!
 //! `BridgethingGateway.<surface>` extension property returns a fresh
@@ -484,7 +484,7 @@ fn kotlin_request_handle_class(r: &TypedRequestEntry) -> String {
   let mut out = String::new();
   let response_pascal = r.response_variant_pascal();
   out.push_str(&format!(
-    "public class {}Handle internal constructor(\n  private val gateway: BridgethingGateway,\n  public val deviceId: String,\n  private val requestId: UUID,\n) {{\n",
+    "public class {}Handle internal constructor(\n  private val gateway: BridgethingGateway,\n  public val deviceId: String,\n  public val requestId: UUID,\n) {{\n",
     r.request
   ));
   out.push_str(&format!(
