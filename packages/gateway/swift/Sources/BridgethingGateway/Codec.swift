@@ -103,9 +103,9 @@ public struct FrameHeader: Sendable, Equatable {
 /// Encode: `T` → msgpack/json (encoding) → gzip/raw (compression) → 16-byte header + body.
 /// Decode: header → body → gunzip/raw → msgpack/json → `T`.
 ///
-/// UUID fields on the wire are 16-byte msgpack `bin`. Use `UUID(data:)` /
-/// `Data(uuid:)` (provided as extensions on `UUID`) to translate at field
-/// boundaries.
+/// UUID fields on the wire are 16-byte msgpack `bin`. The schema-generated
+/// types expose them as `Foundation.UUID`; `MsgpackUuid` in BridgethingSchema
+/// bridges the bin shape via a Codable property wrapper.
 public struct Codec: Sendable {
   public let defaultCompression: Compression
   public let defaultEncoding: Encoding

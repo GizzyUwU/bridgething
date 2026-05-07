@@ -151,7 +151,12 @@ fn push_request_streams(out: &mut String, s: &Surface, device_scope: bool) {
 
 fn push_request_stream(out: &mut String, r: &TypedRequestEntry, device_scope: bool) {
   let surface_camel = swift_ident(&rename_camel(&r.surface));
-  let req_variant_camel = swift_ident(&rename_camel(&r.request_disc));
+  let req_variant_camel_raw = rename_camel(&r.request_disc);
+  let req_variant_camel = swift_ident(&req_variant_camel_raw);
+  // The `<x>Requests` property name is a composite identifier; if `<x>`
+  // happens to be a Swift keyword we don't want to escape it because
+  // `\`x\`Requests` parses as two tokens, not one.
+  let req_stream_prop = format!("{req_variant_camel_raw}Requests");
   let stream_ty = if r.request_takes_payload {
     format!("(handle: {}Handle, req: {})", r.request, r.request)
   } else {
@@ -173,7 +178,7 @@ fn push_request_stream(out: &mut String, r: &TypedRequestEntry, device_scope: bo
     ""
   };
   out.push_str(&format!(
-    "  /// Stream of typed inbound `{}` requests with handles for typed responses.\n  public var {req_variant_camel}Requests: AsyncStream<{stream_ty}> {{\n    AsyncStream {{ continuation in\n      let task = Task {{ [gateway] in\n        for await event in gateway.events {{\n          guard case .message(let deviceId, let message) = event else {{ continue }}\n{device_filter}          guard case .request = message.meta else {{ continue }}\n          guard case .{surface_camel}(let outer) = message.data else {{ continue }}\n          guard {inner_pat} = outer else {{ continue }}\n          let handle = {}Handle(gateway: gateway, deviceId: deviceId, requestId: message.id)\n          {yield_expr}\n        }}\n        continuation.finish()\n      }}\n      continuation.onTermination = {{ _ in task.cancel() }}\n    }}\n  }}\n\n",
+    "  /// Stream of typed inbound `{}` requests with handles for typed responses.\n  public var {req_stream_prop}: AsyncStream<{stream_ty}> {{\n    AsyncStream {{ continuation in\n      let task = Task {{ [gateway] in\n        for await event in gateway.events {{\n          guard case .message(let deviceId, let message) = event else {{ continue }}\n{device_filter}          guard case .request = message.meta else {{ continue }}\n          guard case .{surface_camel}(let outer) = message.data else {{ continue }}\n          guard {inner_pat} = outer else {{ continue }}\n          let handle = {}Handle(gateway: gateway, deviceId: deviceId, requestId: message.id)\n          {yield_expr}\n        }}\n        continuation.finish()\n      }}\n      continuation.onTermination = {{ _ in task.cancel() }}\n    }}\n  }}\n\n",
     r.request, r.request
   ));
 }
@@ -190,11 +195,11 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     let device_param = if e.unicast { "deviceId: String, " } else { "" };
     let body = if e.unicast {
       format!(
-        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
+        "    let msg = GatewayToBridgeMsg(id: UUID(), meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
       )
     } else {
       format!(
-        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
+        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID(), meta: {entry_meta}, data: .{outer_camel}(payload))\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -222,11 +227,11 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     let variant_meta = iv.category.map(swift_meta).unwrap_or(entry_meta);
     let body = if e.unicast {
       format!(
-        "    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
+        "    let msg = GatewayToBridgeMsg(id: UUID(), meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)"
       )
     } else {
       format!(
-        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
+        "    let ids = await gateway.connectedDeviceIds()\n    try await withThrowingTaskGroup(of: Void.self) {{ [gateway] group in\n      for deviceId in ids {{\n        group.addTask {{\n          let msg = GatewayToBridgeMsg(id: UUID(), meta: {variant_meta}, data: {data_expr})\n          try await gateway.send(deviceId: deviceId, msg, priority: priority)\n        }}\n      }}\n      try await group.waitForAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -350,7 +355,7 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
   if leaf && e.outer_payload.is_some() {
     let payload_swift = e.outer_payload.as_ref().map(|p| p.swift()).unwrap();
     out.push_str(&format!(
-      "  /// Send a `{}` event to this peer.\n  public func send(_ payload: {payload_swift}, priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
+      "  /// Send a `{}` event to this peer.\n  public func send(_ payload: {payload_swift}, priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID(), meta: {entry_meta}, data: .{outer_camel}(payload))\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
       s.name
     ));
     return;
@@ -368,7 +373,7 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
     let data_expr = format!(".{outer_camel}(.{inner_camel}{inner_arg})");
     let variant_meta = iv.category.map(swift_meta).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /// Send `{}::{}` to this peer.\n  public func {method}({param}priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID().data, meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
+      "  /// Send `{}::{}` to this peer.\n  public func {method}({param}priority: Priority = .normal) async throws {{\n    let msg = GatewayToBridgeMsg(id: UUID(), meta: {variant_meta}, data: {data_expr})\n    try await gateway.send(deviceId: deviceId, msg, priority: priority)\n  }}\n\n",
       s.name, iv.variant
     ));
   }
@@ -456,21 +461,21 @@ fn swift_request_handle_class(r: &TypedRequestEntry) -> String {
   ));
   out.push_str("  private let gateway: BridgethingGateway\n");
   out.push_str("  public let deviceId: String\n");
-  out.push_str("  private let requestId: Data\n\n");
+  out.push_str("  private let requestId: UUID\n\n");
   out.push_str(
-    "  init(gateway: BridgethingGateway, deviceId: String, requestId: Data) {\n    self.gateway = gateway\n    self.deviceId = deviceId\n    self.requestId = requestId\n  }\n\n",
+    "  init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {\n    self.gateway = gateway\n    self.deviceId = deviceId\n    self.requestId = requestId\n  }\n\n",
   );
   out.push_str(&format!(
-    "  public func respond(_ response: {}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{resp_variant_camel}(response))\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }}\n\n",
+    "  public func respond(_ response: {}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID(),\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{resp_variant_camel}(response))\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }}\n\n",
     r.response
   ));
   if let (Some(err_type), Some(err_disc)) = (&r.error, &r.error_disc) {
     let err_variant_camel = swift_ident(err_disc);
     out.push_str(&format!(
-      "  public func respondErr(_ error: {err_type}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{err_variant_camel}(error))\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }}\n\n"
+      "  public func respondErr(_ error: {err_type}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID(),\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{err_variant_camel}(error))\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }}\n\n"
     ));
   }
-  out.push_str("  public func respondProtocolErr(_ error: WireError) async throws {\n    let msg = GatewayToBridgeMsg(\n      id: UUID().data,\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .error(error)\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }\n");
+  out.push_str("  public func respondProtocolErr(_ error: WireError) async throws {\n    let msg = GatewayToBridgeMsg(\n      id: UUID(),\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .error(error)\n    )\n    try await gateway.send(deviceId: deviceId, msg)\n  }\n");
   out.push_str("}\n\n");
   out
 }

@@ -24,7 +24,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct GatewayToBridgeMsg {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: MsgMeta,
@@ -83,7 +83,7 @@ pub enum GatewayToBridgeMsgData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "gateway.ts")]
 pub struct BridgeToGatewayMsg {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub meta: MsgMeta,

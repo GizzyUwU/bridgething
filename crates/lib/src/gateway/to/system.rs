@@ -1,76 +1,11 @@
-use bridgething_macros::BridgeEnum;
+use bridgething_macros::{BridgeEnum, WireRequest};
 use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
+use uuid::Uuid;
 
-/// Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
-/// push of the `.swu` from companion to daemon-disk; `Verifying` runs
-/// the post-stream sha256 + size check; `Writing` streams the on-disk
-/// `.swu` to libswupdate; `Confirming` flips slot try-counter state;
-/// `Reboot` is the terminal stage emitted just before the daemon
-/// triggers the reboot.
-#[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum OtaPhase {
-  Streaming,
-  Verifying,
-  Writing,
-  Confirming,
-  Reboot,
-}
-
-/// Per-phase progress tick. `percent` is 0-100 within the current
-/// phase, not the overall flow. `eta_ms` is best-effort remaining time
-/// for the phase when the orchestrator can compute it.
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct OtaProgress {
-  pub phase: OtaPhase,
-  pub percent: u8,
-  pub eta_ms: Option<u32>,
-}
-
-/// Terminal error from the OTA orchestrator. After an `OtaError` the
-/// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
-#[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum OtaErrorCode {
-  /// Companion sent chunks for an `update_id` that was never begun
-  /// (or was abandoned mid-stream).
-  UnknownUpdate,
-  /// `OtaChunk.offset` did not match the daemon's `received`.
-  OffsetMismatch,
-  /// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
-  HashMismatch,
-  /// Streamed total's byte length did not match `OtaBegin.expected_size`.
-  SizeMismatch,
-  /// `CancelUpdate` arrived during a cancelable phase.
-  Cancelled,
-  /// libswupdate rejected the .swu (parse / handler / I/O failure).
-  WriteFailed,
-  /// Slot-flip / try-counter reset failed after a successful write.
-  ConfirmFailed,
-  /// Anything else (transfer-cache I/O, internal channel close, etc.).
-  Internal,
-}
-
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct OtaError {
-  pub code: OtaErrorCode,
-  pub msg: String,
-}
+use crate::{OtaError, OtaProgress, RangeSpec};
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte
 /// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
@@ -96,6 +31,46 @@ pub struct OtaBeginRejected {
   pub reason: String,
 }
 
+/// Daemon asks the pinned companion to serve byte ranges from an asset
+/// it should have cached (and can refetch from `OtaBegin.update_url_base`
+/// on cache miss). Triggered by an inbound HTTP-Range request from
+/// libswupdate's delta downloader hitting the daemon's loopback proxy.
+/// `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = BridgeToGateway,
+  surface = System,
+  request_variant = OtaAssetRange,
+  response = crate::gateway::OtaAssetRangeReply,
+  response_variant = OtaAssetRangeReply,
+  error = crate::gateway::OtaAssetRangeRejected,
+  error_variant = OtaAssetRangeRejected,
+)]
+pub struct OtaAssetRange {
+  pub update_id: String,
+  pub asset: String,
+  pub ranges: Vec<RangeSpec>,
+}
+
+/// Daemon-side cancel for an in-flight range request: libcurl gave up
+/// (timeout, OTA failed, daemon is shutting down). Companion stops
+/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
+/// resources it held open.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaAssetRangeAbandon {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub request_id: Uuid,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -111,4 +86,8 @@ pub enum BridgeToGatewaySystemMsg {
   OtaBeginAck(OtaBeginAck),
   #[bridge_response]
   OtaBeginRejected(OtaBeginRejected),
+  #[bridge_request]
+  OtaAssetRange(OtaAssetRange),
+  #[bridge_command]
+  OtaAssetRangeAbandon(OtaAssetRangeAbandon),
 }

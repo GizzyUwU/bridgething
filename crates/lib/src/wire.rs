@@ -24,7 +24,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "wire.ts")]
 pub struct ResponseMeta {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub request_id: Uuid,
 }

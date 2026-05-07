@@ -1,7 +1,7 @@
 package dev.bridgething.gateway
 
 import dev.bridgething.schema.BridgeToGatewayMsg
-import dev.bridgething.schema.GatewayMsgMeta
+import dev.bridgething.schema.MsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.Priority
@@ -106,7 +106,7 @@ public class BridgethingGateway(
 
   /**
    * Encode and ship a fully-formed message. Caller is responsible for picking
-   * `meta` ([GatewayMsgMeta.Command], [GatewayMsgMeta.Event], etc.). For
+   * `meta` ([MsgMeta.Command], [MsgMeta.Event], etc.). For
    * request/response, prefer [request] which handles id generation and
    * awaiting the matching response.
    *
@@ -142,8 +142,8 @@ public class BridgethingGateway(
   ): BridgeToGatewayMsg {
     val id = UUID.randomUUID()
     val msg = GatewayToBridgeMsg(
-      id = id.toBytes(),
-      meta = GatewayMsgMeta.Request,
+      id = id,
+      meta = MsgMeta.Request,
       data = data,
     )
     val deferred = CompletableDeferred<BridgeToGatewayMsg>()
@@ -194,10 +194,9 @@ public class BridgethingGateway(
         outboundEvents.send(GatewayEvent.DecodeError(deviceId, e.message ?: e.toString()))
         continue
       }
-      val resp = msg.meta as? GatewayMsgMeta.Response
+      val resp = msg.meta as? MsgMeta.Response
       val resolved = if (resp != null) {
-        val requestId = uuidFromBytes(resp.data.requestId)
-        val deferred = mutex.withLock { pendingRequests.remove(requestId) }
+        val deferred = mutex.withLock { pendingRequests.remove(resp.data.requestId) }
         deferred?.complete(msg) ?: false
       } else {
         false

@@ -112,8 +112,8 @@ public class AudioSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsStarted(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -129,8 +129,8 @@ public class AudioSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsEnded(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -146,8 +146,8 @@ public class AudioSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.VolumeChanged(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -185,8 +185,8 @@ public class GeoSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -198,7 +198,7 @@ public class GeoSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `GeoGetOnce` requests. */
   public val getOnceRequests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayGeoMsg.GetOnce ?: return@mapNotNull null
@@ -244,8 +244,8 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoriteChanged(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -257,7 +257,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LibraryBrowseRequest` requests. */
   public val browseRequests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.Browse ?: return@mapNotNull null
@@ -268,7 +268,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LibrarySearchRequest` requests. */
   public val searchRequests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.Search ?: return@mapNotNull null
@@ -279,7 +279,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
   public val recommendationsRequests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.Recommendations ?: return@mapNotNull null
@@ -290,7 +290,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
   public val favoritesListRequests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesList ?: return@mapNotNull null
@@ -301,7 +301,7 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
   public val favoritesContainsRequests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.FavoritesContains ?: return@mapNotNull null
@@ -356,8 +356,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsMessage(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -373,8 +373,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsClosed(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -390,8 +390,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -407,8 +407,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamBegin(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -424,8 +424,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamChunk(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -441,8 +441,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamEnd(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -458,8 +458,8 @@ public class NetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamError(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -471,7 +471,7 @@ public class NetSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `NetFetchRequestMsg` requests. */
   public val fetchRequests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayNetMsg.Fetch ?: return@mapNotNull null
@@ -482,7 +482,7 @@ public class NetSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `NetWsOpen` requests. */
   public val wsOpenRequests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayNetMsg.WsOpen ?: return@mapNotNull null
@@ -519,8 +519,8 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Posted(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -536,8 +536,8 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Updated(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -553,8 +553,8 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Removed(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -682,8 +682,8 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -699,8 +699,8 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CommunicationsSnapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -716,8 +716,8 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallStarted(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -733,8 +733,8 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallUpdated(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -750,8 +750,8 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallEnded(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -763,7 +763,7 @@ public class PhoneSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `PhoneStateGet` requests. */
   public val stateGetRequests: Flow<PhoneStateGetHandle> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayPhoneMsg.StateGet ?: return@mapNotNull null
@@ -890,8 +890,8 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Snapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -907,8 +907,8 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -924,8 +924,8 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -974,6 +974,15 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `System::OtaAssetRangeAbandon` messages. */
+  public val otaAssetRangeAbandon: Flow<Pair<String, OtaAssetRangeAbandon>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaAssetRangeAbandon ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `System::OtaChunk` to every connected peer (broadcast). */
   public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -981,8 +990,8 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -998,8 +1007,8 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1015,9 +1024,26 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `System::OtaAssetRangeChunk` to every connected peer (broadcast). */
+  public suspend fun otaAssetRangeChunk(payload: OtaAssetRangeChunk, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeChunk(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1039,6 +1065,17 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+  /** Stream of typed inbound `OtaAssetRange` requests. */
+  public val otaAssetRangeRequests: Flow<Pair<OtaAssetRangeHandle, OtaAssetRange>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaAssetRange ?: return@mapNotNull null
+      val handle = OtaAssetRangeHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -1069,8 +1106,8 @@ public class TunnelSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1086,8 +1123,8 @@ public class TunnelSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Closed(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1099,7 +1136,7 @@ public class TunnelSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `TunnelOpen` requests. */
   public val openRequests: Flow<Pair<TunnelOpenHandle, TunnelOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayTunnelMsg.Open ?: return@mapNotNull null
@@ -1145,8 +1182,8 @@ public class VoiceSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicOpen(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1162,8 +1199,8 @@ public class VoiceSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
           )
           gateway.send(deviceId, msg, priority)
@@ -1214,8 +1251,8 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1231,8 +1268,8 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1248,8 +1285,8 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1265,8 +1302,8 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1293,7 +1330,7 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `AssetRequest` requests. */
   public val requestRequests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayAssetMsg.Request ?: return@mapNotNull null
@@ -1312,8 +1349,8 @@ public class AuthoritySurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Claim(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1329,8 +1366,8 @@ public class AuthoritySurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Release(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1350,8 +1387,8 @@ public class CapabilitiesSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Capabilities(GatewayToBridgeCapabilitiesMsg.Announce(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1371,8 +1408,8 @@ public class ChromeSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Command,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.Chrome(GatewayToBridgeChromeMsg.Navigate(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1392,8 +1429,8 @@ public class TimeSurface(private val gateway: BridgethingGateway) {
       ids.map { deviceId ->
         async {
           val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID().toBytes(),
-            meta = GatewayMsgMeta.Event,
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
           )
           gateway.send(deviceId, msg, priority)
@@ -1561,7 +1598,7 @@ public class LyricsSurface(private val gateway: BridgethingGateway) {
   /** Stream of typed inbound `LyricsRequest` requests. */
   public val getRequests: Flow<Pair<LyricsRequestHandle, LyricsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Lyrics ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLyricsMsg.Get ?: return@mapNotNull null
@@ -1669,8 +1706,8 @@ public class AudioSurfaceForDevice(
   /** Send `Audio::TtsStarted` to this peer. */
   public suspend fun ttsStarted(payload: TtsStarted, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsStarted(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1679,8 +1716,8 @@ public class AudioSurfaceForDevice(
   /** Send `Audio::TtsEnded` to this peer. */
   public suspend fun ttsEnded(payload: TtsEnded, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.TtsEnded(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1689,8 +1726,8 @@ public class AudioSurfaceForDevice(
   /** Send `Audio::VolumeChanged` to this peer. */
   public suspend fun volumeChanged(payload: VolumeChanged, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Audio(GatewayToBridgeAudioMsg.VolumeChanged(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1726,8 +1763,8 @@ public class GeoSurfaceForDevice(
   /** Send `Geo::Position` to this peer. */
   public suspend fun position(payload: Position, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.Position(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1736,7 +1773,7 @@ public class GeoSurfaceForDevice(
   /** Stream of typed inbound `GeoGetOnce` requests. */
   public val getOnceRequests: Flow<Pair<GeoGetOnceHandle, GeoGetOnce>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Geo ?: return@mapNotNull null
@@ -1785,8 +1822,8 @@ public class LibrarySurfaceForDevice(
   /** Send `Library::FavoriteChanged` to this peer. */
   public suspend fun favoriteChanged(payload: FavoriteChanged, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoriteChanged(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1795,7 +1832,7 @@ public class LibrarySurfaceForDevice(
   /** Stream of typed inbound `LibraryBrowseRequest` requests. */
   public val browseRequests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
@@ -1807,7 +1844,7 @@ public class LibrarySurfaceForDevice(
   /** Stream of typed inbound `LibrarySearchRequest` requests. */
   public val searchRequests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
@@ -1819,7 +1856,7 @@ public class LibrarySurfaceForDevice(
   /** Stream of typed inbound `LibraryRecommendationsRequest` requests. */
   public val recommendationsRequests: Flow<Pair<LibraryRecommendationsRequestHandle, LibraryRecommendationsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
@@ -1831,7 +1868,7 @@ public class LibrarySurfaceForDevice(
   /** Stream of typed inbound `LibraryFavoritesListRequest` requests. */
   public val favoritesListRequests: Flow<Pair<LibraryFavoritesListRequestHandle, LibraryFavoritesListRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
@@ -1843,7 +1880,7 @@ public class LibrarySurfaceForDevice(
   /** Stream of typed inbound `LibraryFavoritesContainsRequest` requests. */
   public val favoritesContainsRequests: Flow<Pair<LibraryFavoritesContainsRequestHandle, LibraryFavoritesContainsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
@@ -1902,8 +1939,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::WsMessage` to this peer. */
   public suspend fun wsMessage(payload: NetWsMessage, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsMessage(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1912,8 +1949,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::WsClosed` to this peer. */
   public suspend fun wsClosed(payload: NetWsClosed, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsClosed(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1922,8 +1959,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::WsErrorEvent` to this peer. */
   public suspend fun wsErrorEvent(payload: NetWsErrorEvent, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorEvent(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1932,8 +1969,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::StreamBegin` to this peer. */
   public suspend fun streamBegin(payload: StreamBegin, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamBegin(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1942,8 +1979,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::StreamChunk` to this peer. */
   public suspend fun streamChunk(payload: StreamChunk, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamChunk(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1952,8 +1989,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::StreamEnd` to this peer. */
   public suspend fun streamEnd(payload: StreamEnd, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamEnd(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1962,8 +1999,8 @@ public class NetSurfaceForDevice(
   /** Send `Net::StreamError` to this peer. */
   public suspend fun streamError(payload: StreamError, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.StreamError(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -1972,7 +2009,7 @@ public class NetSurfaceForDevice(
   /** Stream of typed inbound `NetFetchRequestMsg` requests. */
   public val fetchRequests: Flow<Pair<NetFetchRequestMsgHandle, NetFetchRequestMsg>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
@@ -1984,7 +2021,7 @@ public class NetSurfaceForDevice(
   /** Stream of typed inbound `NetWsOpen` requests. */
   public val wsOpenRequests: Flow<Pair<NetWsOpenHandle, NetWsOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Net ?: return@mapNotNull null
@@ -2023,8 +2060,8 @@ public class NotificationsSurfaceForDevice(
   /** Send `Notifications::Posted` to this peer. */
   public suspend fun posted(payload: Notification, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Posted(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2033,8 +2070,8 @@ public class NotificationsSurfaceForDevice(
   /** Send `Notifications::Updated` to this peer. */
   public suspend fun updated(payload: Notification, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Updated(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2043,8 +2080,8 @@ public class NotificationsSurfaceForDevice(
   /** Send `Notifications::Removed` to this peer. */
   public suspend fun removed(payload: NotificationRemoved, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Notifications(GatewayToBridgeNotificationsMsg.Removed(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2180,8 +2217,8 @@ public class PhoneSurfaceForDevice(
   /** Send `Phone::Snapshot` to this peer. */
   public suspend fun snapshot(payload: PhoneStateReply, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.Snapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2190,8 +2227,8 @@ public class PhoneSurfaceForDevice(
   /** Send `Phone::CommunicationsSnapshot` to this peer. */
   public suspend fun communicationsSnapshot(payload: CommunicationsSnapshot, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CommunicationsSnapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2200,8 +2237,8 @@ public class PhoneSurfaceForDevice(
   /** Send `Phone::CallStarted` to this peer. */
   public suspend fun callStarted(payload: PhoneCall, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallStarted(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2210,8 +2247,8 @@ public class PhoneSurfaceForDevice(
   /** Send `Phone::CallUpdated` to this peer. */
   public suspend fun callUpdated(payload: PhoneCall, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallUpdated(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2220,8 +2257,8 @@ public class PhoneSurfaceForDevice(
   /** Send `Phone::CallEnded` to this peer. */
   public suspend fun callEnded(payload: PhoneCallEnded, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.CallEnded(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2230,7 +2267,7 @@ public class PhoneSurfaceForDevice(
   /** Stream of typed inbound `PhoneStateGet` requests. */
   public val stateGetRequests: Flow<PhoneStateGetHandle> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Phone ?: return@mapNotNull null
@@ -2369,8 +2406,8 @@ public class PlayerSurfaceForDevice(
   /** Send `Player::Snapshot` to this peer. */
   public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Snapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2379,8 +2416,8 @@ public class PlayerSurfaceForDevice(
   /** Send `Player::Delta` to this peer. */
   public suspend fun delta(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2389,8 +2426,8 @@ public class PlayerSurfaceForDevice(
   /** Send `Player::QueueChanged` to this peer. */
   public suspend fun queueChanged(payload: QueueSnapshot, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2443,11 +2480,21 @@ public class SystemSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `System::OtaAssetRangeAbandon` from this peer. */
+  public val otaAssetRangeAbandon: Flow<OtaAssetRangeAbandon> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaAssetRangeAbandon ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `System::OtaChunk` to this peer. */
   public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2456,8 +2503,8 @@ public class SystemSurfaceForDevice(
   /** Send `System::OtaAbandon` to this peer. */
   public suspend fun otaAbandon(payload: OtaAbandon, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2466,9 +2513,19 @@ public class SystemSurfaceForDevice(
   /** Send `System::CancelUpdate` to this peer. */
   public suspend fun cancelUpdate(priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `System::OtaAssetRangeChunk` to this peer. */
+  public suspend fun otaAssetRangeChunk(payload: OtaAssetRangeChunk, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeChunk(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2487,6 +2544,18 @@ public class SystemSurfaceForDevice(
       else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
+
+  /** Stream of typed inbound `OtaAssetRange` requests. */
+  public val otaAssetRangeRequests: Flow<Pair<OtaAssetRangeHandle, OtaAssetRange>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.OtaAssetRange ?: return@mapNotNull null
+      val handle = OtaAssetRangeHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
 
 }
 
@@ -2518,8 +2587,8 @@ public class TunnelSurfaceForDevice(
   /** Send `Tunnel::Data` to this peer. */
   public suspend fun data(payload: TunnelData, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Data(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2528,8 +2597,8 @@ public class TunnelSurfaceForDevice(
   /** Send `Tunnel::Closed` to this peer. */
   public suspend fun closed(payload: TunnelClosed, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.Closed(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2538,7 +2607,7 @@ public class TunnelSurfaceForDevice(
   /** Stream of typed inbound `TunnelOpen` requests. */
   public val openRequests: Flow<Pair<TunnelOpenHandle, TunnelOpen>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Tunnel ?: return@mapNotNull null
@@ -2587,8 +2656,8 @@ public class VoiceSurfaceForDevice(
   /** Send `Voice::MicOpen` to this peer. */
   public suspend fun micOpen(payload: VoiceMicOpen, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicOpen(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2597,8 +2666,8 @@ public class VoiceSurfaceForDevice(
   /** Send `Voice::MicClose` to this peer. */
   public suspend fun micClose(priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
     )
     gateway.send(deviceId, msg, priority)
@@ -2651,8 +2720,8 @@ public class AssetSurfaceForDevice(
   /** Send `Asset::Push` to this peer. */
   public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2661,8 +2730,8 @@ public class AssetSurfaceForDevice(
   /** Send `Asset::Clear` to this peer. */
   public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2671,8 +2740,8 @@ public class AssetSurfaceForDevice(
   /** Send `Asset::PushChunk` to this peer. */
   public suspend fun pushChunk(payload: AssetPushChunk, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2681,8 +2750,8 @@ public class AssetSurfaceForDevice(
   /** Send `Asset::PushAbandon` to this peer. */
   public suspend fun pushAbandon(payload: AssetPushAbandon, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2706,7 +2775,7 @@ public class AssetSurfaceForDevice(
   /** Stream of typed inbound `AssetRequest` requests. */
   public val requestRequests: Flow<Pair<AssetRequestHandle, AssetRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Asset ?: return@mapNotNull null
@@ -2725,8 +2794,8 @@ public class AuthoritySurfaceForDevice(
   /** Send `Authority::Claim` to this peer. */
   public suspend fun claim(payload: AuthorityClaim, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Claim(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2735,8 +2804,8 @@ public class AuthoritySurfaceForDevice(
   /** Send `Authority::Release` to this peer. */
   public suspend fun release(payload: AuthorityRelease, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Authority(GatewayToBridgeAuthorityMsg.Release(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2752,8 +2821,8 @@ public class CapabilitiesSurfaceForDevice(
   /** Send `Capabilities::Announce` to this peer. */
   public suspend fun announce(payload: GatewayCapabilities, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Capabilities(GatewayToBridgeCapabilitiesMsg.Announce(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2769,8 +2838,8 @@ public class ChromeSurfaceForDevice(
   /** Send `Chrome::Navigate` to this peer. */
   public suspend fun navigate(payload: ChromeNavigate, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Chrome(GatewayToBridgeChromeMsg.Navigate(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2786,8 +2855,8 @@ public class TimeSurfaceForDevice(
   /** Send `Time::Snapshot` to this peer. */
   public suspend fun snapshot(payload: TimeInfo, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
     )
     gateway.send(deviceId, msg, priority)
@@ -2958,7 +3027,7 @@ public class LyricsSurfaceForDevice(
   /** Stream of typed inbound `LyricsRequest` requests. */
   public val getRequests: Flow<Pair<LyricsRequestHandle, LyricsRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.message.meta is GatewayMsgMeta.Request }
+    .filter { it.message.meta is MsgMeta.Request }
     .filter { it.deviceId == deviceId }
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Lyrics ?: return@mapNotNull null
@@ -3090,12 +3159,12 @@ public fun BridgethingGateway.device(deviceId: String): BridgethingGatewayDevice
 public class GeoGetOnceHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: GeoGetOnceReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.GetOnceReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3103,8 +3172,8 @@ public class GeoGetOnceHandle internal constructor(
 
   public suspend fun respondErr(error: GeoErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3112,8 +3181,8 @@ public class GeoGetOnceHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3123,12 +3192,12 @@ public class GeoGetOnceHandle internal constructor(
 public class LibraryBrowseRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: BrowseReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.BrowseReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3136,8 +3205,8 @@ public class LibraryBrowseRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LibraryErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3145,8 +3214,8 @@ public class LibraryBrowseRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3156,12 +3225,12 @@ public class LibraryBrowseRequestHandle internal constructor(
 public class LibrarySearchRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: SearchReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.SearchReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3169,8 +3238,8 @@ public class LibrarySearchRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LibraryErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3178,8 +3247,8 @@ public class LibrarySearchRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3189,12 +3258,12 @@ public class LibrarySearchRequestHandle internal constructor(
 public class LibraryRecommendationsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: RecommendationsReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.RecommendationsReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3202,8 +3271,8 @@ public class LibraryRecommendationsRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LibraryErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3211,8 +3280,8 @@ public class LibraryRecommendationsRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3222,12 +3291,12 @@ public class LibraryRecommendationsRequestHandle internal constructor(
 public class LibraryFavoritesListRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: FavoritesListReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesListReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3235,8 +3304,8 @@ public class LibraryFavoritesListRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LibraryErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3244,8 +3313,8 @@ public class LibraryFavoritesListRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3255,12 +3324,12 @@ public class LibraryFavoritesListRequestHandle internal constructor(
 public class LibraryFavoritesContainsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: FavoritesContainsReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesContainsReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3268,8 +3337,8 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LibraryErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3277,8 +3346,8 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3288,12 +3357,12 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
 public class NetFetchRequestMsgHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: NetFetchReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3301,8 +3370,8 @@ public class NetFetchRequestMsgHandle internal constructor(
 
   public suspend fun respondErr(error: NetFetchErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3310,8 +3379,8 @@ public class NetFetchRequestMsgHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3321,12 +3390,12 @@ public class NetFetchRequestMsgHandle internal constructor(
 public class NetWsOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: NetWsOpenReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpenReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3334,8 +3403,8 @@ public class NetWsOpenHandle internal constructor(
 
   public suspend fun respondErr(error: NetWsErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3343,8 +3412,8 @@ public class NetWsOpenHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3354,12 +3423,12 @@ public class NetWsOpenHandle internal constructor(
 public class PhoneStateGetHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: PhoneStateReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.StateReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3367,8 +3436,41 @@ public class PhoneStateGetHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class OtaAssetRangeHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  private val requestId: UUID,
+) {
+  public suspend fun respond(response: OtaAssetRangeReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: OtaAssetRangeRejected) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeRejected(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: WireError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3378,12 +3480,12 @@ public class PhoneStateGetHandle internal constructor(
 public class TunnelOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: TunnelOpenReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.OpenReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3391,8 +3493,8 @@ public class TunnelOpenHandle internal constructor(
 
   public suspend fun respondErr(error: TunnelErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.ErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3400,8 +3502,8 @@ public class TunnelOpenHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3411,12 +3513,12 @@ public class TunnelOpenHandle internal constructor(
 public class AssetRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: AssetGotReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Got(response)),
     )
     gateway.send(deviceId, msg)
@@ -3424,8 +3526,8 @@ public class AssetRequestHandle internal constructor(
 
   public suspend fun respondErr(error: AssetNotFoundReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.NotFound(error)),
     )
     gateway.send(deviceId, msg)
@@ -3433,8 +3535,8 @@ public class AssetRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)
@@ -3444,12 +3546,12 @@ public class AssetRequestHandle internal constructor(
 public class LyricsRequestHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
-  private val requestId: ByteArray,
+  private val requestId: UUID,
 ) {
   public suspend fun respond(response: LyricsReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Lyrics(GatewayToBridgeLyricsMsg.LyricsReply(response)),
     )
     gateway.send(deviceId, msg)
@@ -3457,8 +3559,8 @@ public class LyricsRequestHandle internal constructor(
 
   public suspend fun respondErr(error: LyricsErrorReply) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Lyrics(GatewayToBridgeLyricsMsg.LyricsErrorReply(error)),
     )
     gateway.send(deviceId, msg)
@@ -3466,8 +3568,8 @@ public class LyricsRequestHandle internal constructor(
 
   public suspend fun respondProtocolErr(error: WireError) {
     val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Error(error),
     )
     gateway.send(deviceId, msg)

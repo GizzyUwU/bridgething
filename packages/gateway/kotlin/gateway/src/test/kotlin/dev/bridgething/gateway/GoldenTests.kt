@@ -3,7 +3,7 @@ package dev.bridgething.gateway
 import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.ForwardMessage
-import dev.bridgething.schema.GatewayMsgMeta
+import dev.bridgething.schema.MsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.Priority
@@ -46,37 +46,37 @@ class GoldenTests {
     when (fixture.direction) {
       Direction.BRIDGE_TO_GATEWAY -> {
         val msg = codec.decode(BridgeToGatewayMsg.serializer(), frame)
-        assertEquals(FIXED_ID, uuidFromBytes(msg.id), "id mismatch on ${fixture.name}")
+        assertEquals(FIXED_ID, msg.id, "id mismatch on ${fixture.name}")
         assertMetaMatches(msg.meta, expectedMetaKind, fixture.name)
 
         val reEncoded = codec.encode(BridgeToGatewayMsg.serializer(), msg, priority = fixture.expectedPriority)
         val reHeader = FrameHeader.parse(reEncoded)
         assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
         val reDecoded = codec.decode(BridgeToGatewayMsg.serializer(), reEncoded)
-        assertArrayEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
+        assertEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
       Direction.GATEWAY_TO_BRIDGE -> {
         val msg = codec.decode(GatewayToBridgeMsg.serializer(), frame)
-        assertEquals(FIXED_ID, uuidFromBytes(msg.id), "id mismatch on ${fixture.name}")
+        assertEquals(FIXED_ID, msg.id, "id mismatch on ${fixture.name}")
         assertMetaMatches(msg.meta, expectedMetaKind, fixture.name)
 
         val reEncoded = codec.encode(GatewayToBridgeMsg.serializer(), msg, priority = fixture.expectedPriority)
         val reHeader = FrameHeader.parse(reEncoded)
         assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
         val reDecoded = codec.decode(GatewayToBridgeMsg.serializer(), reEncoded)
-        assertArrayEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
+        assertEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
     }
   }
 
-  private fun assertMetaMatches(meta: GatewayMsgMeta, expectedKind: String, name: String) {
+  private fun assertMetaMatches(meta: MsgMeta, expectedKind: String, name: String) {
     when (meta) {
-      is GatewayMsgMeta.Command -> assertEquals("command", expectedKind, "meta kind mismatch on $name")
-      is GatewayMsgMeta.Event -> assertEquals("event", expectedKind, "meta kind mismatch on $name")
-      is GatewayMsgMeta.Request -> assertEquals("request", expectedKind, "meta kind mismatch on $name")
-      is GatewayMsgMeta.Response -> {
+      is MsgMeta.Command -> assertEquals("command", expectedKind, "meta kind mismatch on $name")
+      is MsgMeta.Event -> assertEquals("event", expectedKind, "meta kind mismatch on $name")
+      is MsgMeta.Request -> assertEquals("request", expectedKind, "meta kind mismatch on $name")
+      is MsgMeta.Response -> {
         assertEquals("response", expectedKind, "meta kind mismatch on $name")
-        assertEquals(FIXED_REQUEST_ID, uuidFromBytes(meta.data.requestId), "requestId mismatch on $name")
+        assertEquals(FIXED_REQUEST_ID, meta.data.requestId, "requestId mismatch on $name")
       }
     }
   }
@@ -131,15 +131,15 @@ class GoldenTests {
   fun `gzip end-to-end round-trip`() {
     val gzipCodec = Codec(defaultCompression = Compression.GZIP, defaultEncoding = Encoding.MSGPACK)
     val original = BridgeToGatewayMsg(
-      id = FIXED_ID.toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = FIXED_REQUEST_ID.toBytes())),
+      id = FIXED_ID,
+      meta = MsgMeta.Response(ResponseMeta(requestId = FIXED_REQUEST_ID)),
       data = BridgeToGatewayMsgData.Ack,
     )
     val frame = gzipCodec.encode(BridgeToGatewayMsg.serializer(), original)
     val decoded = gzipCodec.decode(BridgeToGatewayMsg.serializer(), frame)
-    assertArrayEquals(original.id, decoded.id)
-    val resp = decoded.meta as GatewayMsgMeta.Response
-    assertArrayEquals(FIXED_REQUEST_ID.toBytes(), resp.data.requestId)
+    assertEquals(original.id, decoded.id)
+    val resp = decoded.meta as MsgMeta.Response
+    assertEquals(FIXED_REQUEST_ID, resp.data.requestId)
     assertTrue(decoded.data is BridgeToGatewayMsgData.Ack)
   }
 

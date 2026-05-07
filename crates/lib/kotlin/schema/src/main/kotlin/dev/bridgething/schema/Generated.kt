@@ -6,6 +6,7 @@ package dev.bridgething.schema
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import java.util.UUID
 
 @Serializable
 data class Album (
@@ -126,7 +127,7 @@ data class AssetPushChunk (
 @Serializable
 data class AssetRequest (
 	val id: String,
-	val requestId: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
 )
 
 /// One TTS voice the companion's audio backend can speak as. `id` is
@@ -303,7 +304,7 @@ sealed class BridgeToGatewayMsgData {
 /// these messages will pass over bluetooth.
 @Serializable
 data class BridgeToGatewayMsg (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val meta: MsgMeta,
 	val data: BridgeToGatewayMsgData
 )
@@ -770,7 +771,7 @@ sealed class GatewayToBridgeMsgData {
 /// these messages will pass over bluetooth.
 @Serializable
 data class GatewayToBridgeMsg (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val meta: MsgMeta,
 	val data: GatewayToBridgeMsgData
 )
@@ -1161,25 +1162,25 @@ data class NetFetchRequestMsg (
 
 @Serializable
 data class NetStreamCancel (
-	val streamId: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID
 )
 
 @Serializable
 data class NetStreamOpen (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val request: NetFetchRequest
 )
 
 @Serializable
 data class NetWsClose (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val code: UShort? = null,
 	val reason: String? = null
 )
 
 @Serializable
 data class NetWsClosed (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val code: UShort,
 	val reason: String
 )
@@ -1214,7 +1215,7 @@ sealed class WsError {
 
 @Serializable
 data class NetWsErrorEvent (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val error: WsError
 )
 
@@ -1235,13 +1236,13 @@ sealed class WsFrame {
 
 @Serializable
 data class NetWsMessage (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val frame: WsFrame
 )
 
 @Serializable
 data class NetWsOpen (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val url: String,
 	val protocols: List<String>? = null,
 	val headers: List<HttpHeader>? = null
@@ -1254,7 +1255,7 @@ data class NetWsOpenReply (
 
 @Serializable
 data class NetWsSend (
-	val connectionId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val connectionId: UUID,
 	val frame: WsFrame
 )
 
@@ -1442,6 +1443,85 @@ data class OtaAbandon (
 	val updateId: String
 )
 
+/// Half-open byte range the daemon's range proxy asks the companion
+/// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
+/// inclusive, `length` bytes. Up to 10 ranges per `OtaAssetRange`
+/// matches libswupdate's `DEFAULT_MAX_RANGES`. Offsets are u32 because
+/// OTA artifacts are bounded at 4 GiB end-to-end (matches
+/// `OtaBegin.expected_size`).
+@Serializable
+data class RangeSpec (
+	val start: UInt,
+	val length: UInt
+)
+
+/// Daemon asks the pinned companion to serve byte ranges from an asset
+/// it should have cached (and can refetch from `OtaBegin.update_url_base`
+/// on cache miss). Triggered by an inbound HTTP-Range request from
+/// libswupdate's delta downloader hitting the daemon's loopback proxy.
+/// `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+@Serializable
+data class OtaAssetRange (
+	val updateId: String,
+	val asset: String,
+	val ranges: List<RangeSpec>
+)
+
+/// Daemon-side cancel for an in-flight range request: libcurl gave up
+/// (timeout, OTA failed, daemon is shutting down). Companion stops
+/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
+/// resources it held open.
+@Serializable
+data class OtaAssetRangeAbandon (
+	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
+)
+
+/// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
+/// the Bulk lane in order: parts in declaration order, chunks in
+/// ascending `offset`. `offset` is absolute within the asset, not
+/// within the part — matches what the daemon's HTTP-Range writer needs
+/// to feed libcurl. `last:true` only on the final chunk of the final
+/// part for this `request_id`.
+@Serializable
+data class OtaAssetRangeChunk (
+	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID,
+	val partIndex: UInt,
+	val offset: UInt,
+	val bytes: ByteArray,
+	val last: Boolean
+)
+
+/// Domain-error response to `OtaAssetRange`: the companion can't serve
+/// the requested ranges (asset unknown for this `update_id`, refetch
+/// from `update_url_base` failed, sha mismatch on refetched asset, etc).
+/// The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
+/// the running OTA fails.
+@Serializable
+data class OtaAssetRangeRejected (
+	val reason: String
+)
+
+/// Resolved range the companion is about to stream. `start` and `length`
+/// echo the corresponding `RangeSpec`; the bytes follow as
+/// `OtaAssetRangeChunk` events on the Bulk lane.
+@Serializable
+data class RangePart (
+	val start: UInt,
+	val length: UInt
+)
+
+/// Successful response to `OtaAssetRange`. The companion has the asset
+/// (or refetched it from `update_url_base`) and is about to stream the
+/// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
+/// `parts` echoes the resolved ranges in the order they will be sent;
+/// `total_size` is the asset's full byte length (for `Content-Range`
+/// totals).
+@Serializable
+data class OtaAssetRangeReply (
+	val totalSize: UInt,
+	val parts: List<RangePart>
+)
+
 /// Companion-initiated OTA: opens or resumes a streaming push of a
 /// `.swu` artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
@@ -1452,10 +1532,16 @@ data class OtaAbandon (
 /// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
 /// so resume across daemon restarts and retries-after-failure both work
 /// without companion-side state to track.
+/// 
+/// `update_url_base` is the server prefix the companion may refetch
+/// the .zck delta from on cache miss, e.g.
+/// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
+/// fetch from it — it's carried so the companion can self-recover its
+/// cache while serving range requests during the Writing phase.
 @Serializable
 data class OtaBegin (
 	val updateId: String,
-	val manifestUrl: String? = null,
+	val updateUrlBase: String? = null,
 	val expectedSha256: String,
 	val expectedSize: UInt
 )
@@ -1978,7 +2064,7 @@ data class RecommendationsReply (
 /// pending future can resolve.
 @Serializable
 data class ResponseMeta (
-	val requestId: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
 )
 
 /// Page of search results. `kinds` is the constrained kinds the search
@@ -2068,7 +2154,7 @@ data class Station (
 /// for the same `stream_id` follow.
 @Serializable
 data class StreamBegin (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val status: UShort,
 	val headers: List<HttpHeader>,
 	val totalSize: UInt? = null
@@ -2078,7 +2164,7 @@ data class StreamBegin (
 /// position of `bytes[0]` within the full body.
 @Serializable
 data class StreamChunk (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val offset: UInt,
 	val bytes: ByteArray
 )
@@ -2087,7 +2173,7 @@ data class StreamChunk (
 /// are valid and the daemon clears its routing entry.
 @Serializable
 data class StreamEnd (
-	val streamId: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID
 )
 
 /// Stream failed mid-flight (or before the first byte). Terminal — the
@@ -2095,7 +2181,7 @@ data class StreamEnd (
 /// `fetch` since the failure modes are identical.
 @Serializable
 data class StreamError (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val error: NetError
 )
 
@@ -2151,14 +2237,14 @@ data class TtlRetention (
 /// `AudioCapabilities.voices`; `None` uses the gateway's default.
 @Serializable
 data class Tts (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val text: String,
 	val voice: String? = null
 )
 
 @Serializable
 data class TtsCancel (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 /// Fired when the TTS request finished. `completed` is true when the
@@ -2166,7 +2252,7 @@ data class TtsCancel (
 /// companion dropped it.
 @Serializable
 data class TtsEnded (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val completed: Boolean
 )
 
@@ -2175,18 +2261,18 @@ data class TtsEnded (
 /// before speech started); webapps should treat both as best-effort.
 @Serializable
 data class TtsStarted (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable
 data class TunnelClosed (
-	val tunnelId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val tunnelId: UUID,
 	val reason: String? = null
 )
 
 @Serializable
 data class TunnelData (
-	val tunnelId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val tunnelId: UUID,
 	val bytes: ByteArray
 )
 
@@ -2219,7 +2305,7 @@ data class TunnelErrorReply (
 
 @Serializable
 data class TunnelOpen (
-	val tunnelId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val tunnelId: UUID,
 	val host: String,
 	val port: UShort
 )
@@ -2243,7 +2329,7 @@ data class VoiceFormat (
 /// the companion should treat them as silence rather than retransmit.
 @Serializable
 data class VoiceFrame (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val seq: UInt,
 	val pcm: ByteArray
 )
@@ -2281,7 +2367,7 @@ enum class VoiceCloseReason(val string: String) {
 
 @Serializable
 data class VoiceStreamClose (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val reason: VoiceCloseReason
 )
 
@@ -2290,7 +2376,7 @@ data class VoiceStreamClose (
 /// for that id arrives.
 @Serializable
 data class VoiceStreamOpen (
-	val streamId: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val streamId: UUID,
 	val format: VoiceFormat
 )
 
@@ -2318,13 +2404,13 @@ data class WebappConfigAck (
 
 @Serializable
 data class WebappConfigDelete (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val key: String
 )
 
 @Serializable
 data class WebappConfigGet (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val key: String
 )
 
@@ -2336,7 +2422,7 @@ data class WebappConfigGetReply (
 
 @Serializable
 data class WebappConfigList (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable
@@ -2346,7 +2432,7 @@ data class WebappConfigListReply (
 
 @Serializable
 data class WebappConfigSet (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val key: String,
 	val value: String
 )
@@ -2355,7 +2441,7 @@ data class WebappConfigSet (
 /// the bundle directory and returns the bytes + mime.
 @Serializable
 data class WebappIcon (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable
@@ -2408,7 +2494,7 @@ sealed class ConfigField {
 
 @Serializable
 data class WebappInfo (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val name: String,
 	val source: WebappSource,
 	val role: WebappRole,
@@ -2438,7 +2524,7 @@ data class WebappList (
 /// the wire.
 @Serializable
 data class WebappManifest (
-	val id: ByteArray,
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
 	val name: String,
 	val version: String,
 	val description: String? = null,
@@ -2450,12 +2536,12 @@ data class WebappManifest (
 
 @Serializable
 data class WebappSwitchTo (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable
 data class WebappUninstall (
-	val id: ByteArray
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
@@ -2684,6 +2770,12 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("otaBeginRejected")
 	data class OtaBeginRejected(val data: dev.bridgething.schema.OtaBeginRejected): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("otaAssetRange")
+	data class OtaAssetRange(val data: dev.bridgething.schema.OtaAssetRange): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("otaAssetRangeAbandon")
+	data class OtaAssetRangeAbandon(val data: dev.bridgething.schema.OtaAssetRangeAbandon): BridgeToGatewaySystemMsg()
 }
 
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
@@ -2990,6 +3082,15 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("cancelUpdate")
 	object CancelUpdate: GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("otaAssetRangeReply")
+	data class OtaAssetRangeReply(val data: dev.bridgething.schema.OtaAssetRangeReply): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("otaAssetRangeRejected")
+	data class OtaAssetRangeRejected(val data: dev.bridgething.schema.OtaAssetRangeRejected): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("otaAssetRangeChunk")
+	data class OtaAssetRangeChunk(val data: dev.bridgething.schema.OtaAssetRangeChunk): GatewayToBridgeSystemMsg()
 }
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce

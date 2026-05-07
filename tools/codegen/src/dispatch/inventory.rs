@@ -15,7 +15,7 @@
 //! The plan layer groups results by `Protocol` and emits per-protocol
 //! per-language helper files.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{Context, Result};
 use syn::{Attribute, Fields, GenericArgument, Item, ItemEnum, ItemStruct, Meta, PathArguments, Type, Variant};
@@ -212,6 +212,11 @@ pub struct Inventory {
   pub enums: HashMap<String, EnumDef>,
   pub markers: HashMap<String, MarkerSet>,
   pub typed_requests: Vec<TypedRequest>,
+  /// camelCase names of every struct field whose Rust type is `Uuid`.
+  /// Per-language codecs use this to bridge the on-wire representation
+  /// (msgpack 16-byte `bin` on the gateway, JSON hyphenated string on
+  /// the local websocket) and the SDK-surface UUID type.
+  pub uuid_field_names: BTreeSet<String>,
 }
 
 /// A single typed-request declaration, captured in structured form.
@@ -237,6 +242,7 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
   let mut enums = HashMap::new();
   let mut markers: HashMap<String, MarkerSet> = HashMap::new();
   let mut typed_requests: Vec<TypedRequest> = Vec::new();
+  let mut uuid_field_names: BTreeSet<String> = BTreeSet::new();
 
   for entry in walkdir::WalkDir::new(lib_src) {
     let entry = entry.context("walk lib_src")?;
@@ -261,6 +267,7 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
       &mut enums,
       &mut markers,
       &mut typed_requests,
+      &mut uuid_field_names,
     );
   }
 
@@ -269,6 +276,7 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
     enums,
     markers,
     typed_requests,
+    uuid_field_names,
   })
 }
 
@@ -278,6 +286,7 @@ fn walk_items(
   enums: &mut HashMap<String, EnumDef>,
   markers: &mut HashMap<String, MarkerSet>,
   typed_requests: &mut Vec<TypedRequest>,
+  uuid_field_names: &mut BTreeSet<String>,
 ) {
   for item in items {
     match item {
@@ -319,10 +328,11 @@ fn walk_items(
         {
           typed_requests.push(req);
         }
+        collect_uuid_field_names(s, uuid_field_names);
       }
       Item::Mod(m) => {
         if let Some((_, sub_items)) = &m.content {
-          walk_items(sub_items, wire_enums, enums, markers, typed_requests);
+          walk_items(sub_items, wire_enums, enums, markers, typed_requests, uuid_field_names);
         }
       }
       _ => {}
@@ -559,6 +569,56 @@ fn variant_single_payload(fields: &Fields) -> Option<PayloadType> {
     Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => Some(payload_type(&unnamed.unnamed[0].ty)),
     _ => None,
   }
+}
+
+/// Walk a struct's named fields and add the camelCase form of every
+/// `Uuid`-typed field to `out`. Wrappers like `Option<Uuid>` are
+/// recognized; anything else is skipped.
+fn collect_uuid_field_names(s: &ItemStruct, out: &mut BTreeSet<String>) {
+  let Fields::Named(named) = &s.fields else {
+    return;
+  };
+  for field in &named.named {
+    let Some(ident) = &field.ident else { continue };
+    if !is_uuid_type(&field.ty) {
+      continue;
+    }
+    out.insert(snake_to_camel(&ident.to_string()));
+  }
+}
+
+fn is_uuid_type(ty: &Type) -> bool {
+  let Type::Path(p) = ty else { return false };
+  let Some(seg) = p.path.segments.last() else {
+    return false;
+  };
+  let name = seg.ident.to_string();
+  if name == "Uuid" {
+    return true;
+  }
+  if name == "Option"
+    && let PathArguments::AngleBracketed(args) = &seg.arguments
+    && let Some(GenericArgument::Type(inner)) = args.args.first()
+  {
+    return is_uuid_type(inner);
+  }
+  false
+}
+
+fn snake_to_camel(s: &str) -> String {
+  let mut out = String::with_capacity(s.len());
+  let mut upper_next = false;
+  for ch in s.chars() {
+    if ch == '_' {
+      upper_next = true;
+    } else if upper_next {
+      out.extend(ch.to_uppercase());
+      upper_next = false;
+    } else {
+      out.push(ch);
+    }
+  }
+  out
 }
 
 fn payload_type(ty: &Type) -> PayloadType {

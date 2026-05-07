@@ -6,7 +6,7 @@ import {
   type GatewayToBridgeMsgData,
   Logger,
   LogLevel,
-  newUuidBytes,
+  newUuid,
   type Priority,
 } from '@bridgething/lib';
 
@@ -174,22 +174,21 @@ export class BridgethingGateway {
     data: GatewayToBridgeMsgData,
     timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<BridgeToGatewayMsg> {
-    const id = newUuidBytes();
-    const key = bytesKey(id);
+    const id = newUuid();
     const message: GatewayToBridgeMsg = { id, meta: { kind: 'request' }, data };
 
     return new Promise<BridgeToGatewayMsg>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        if (this.pending.delete(key)) {
-          reject(new GatewayError(`request ${key} timed out`, 'request-timed-out'));
+        if (this.pending.delete(id)) {
+          reject(new GatewayError(`request ${id} timed out`, 'request-timed-out'));
         }
       }, timeoutMs);
-      this.pending.set(key, { resolve, reject, timeout });
+      this.pending.set(id, { resolve, reject, timeout });
 
       this.send(deviceId, message).catch(err => {
-        if (this.pending.delete(key)) {
+        if (this.pending.delete(id)) {
           clearTimeout(timeout);
-          reject(new GatewayError(`failed to send request ${key}`, 'send-failed', err));
+          reject(new GatewayError(`failed to send request ${id}`, 'send-failed', err));
         }
       });
     });
@@ -246,11 +245,10 @@ export class BridgethingGateway {
     }
   }
 
-  private completePending(requestId: Uint8Array, msg: BridgeToGatewayMsg): boolean {
-    const key = bytesKey(requestId);
-    const pending = this.pending.get(key);
+  private completePending(requestId: string, msg: BridgeToGatewayMsg): boolean {
+    const pending = this.pending.get(requestId);
     if (!pending) return false;
-    this.pending.delete(key);
+    this.pending.delete(requestId);
     clearTimeout(pending.timeout);
     pending.resolve(msg);
     return true;
@@ -266,15 +264,6 @@ export class BridgethingGateway {
       }
     }
   }
-}
-
-function bytesKey(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const h = bytes[i].toString(16);
-    s += h.length === 1 ? '0' + h : h;
-  }
-  return s;
 }
 
 function errorMessage(err: unknown): string {

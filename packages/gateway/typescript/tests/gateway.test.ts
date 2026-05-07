@@ -1,10 +1,4 @@
-import {
-  type BridgeToGatewayMsg,
-  Codec,
-  type GatewayMeta,
-  type GatewayToBridgeMsg,
-  newUuidBytes,
-} from '@bridgething/lib';
+import { type BridgeToGatewayMsg, Codec, type GatewayMeta, type GatewayToBridgeMsg, newUuid } from '@bridgething/lib';
 import { describe, expect, test } from 'bun:test';
 import {
   type Adapter,
@@ -83,7 +77,7 @@ describe('BridgethingGateway', () => {
     await gateway.start();
 
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'version', data: meta },
     };
@@ -105,7 +99,7 @@ describe('BridgethingGateway', () => {
     adapter.emit({ type: 'connected', device: DEVICE });
 
     const msg: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'ack' },
     };
@@ -133,7 +127,7 @@ describe('BridgethingGateway', () => {
       while (adapter.sentFrames.length === 0) await Bun.sleep(1);
       const sent = new Codec().decode<GatewayToBridgeMsg>(adapter.sentFrames[0].frame);
       const response: BridgeToGatewayMsg = {
-        id: newUuidBytes(),
+        id: newUuid(),
         meta: { kind: 'response', data: { requestId: sent.id } },
         data: { type: 'ack' },
       };
@@ -208,7 +202,7 @@ describe('BridgethingGateway', () => {
     adapter.emit({ type: 'connected', device: DEVICE });
 
     const pause: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'pause' } },
     };
@@ -234,14 +228,14 @@ describe('BridgethingGateway', () => {
     adapter.emit({ type: 'connected', device: DEVICE });
 
     const asset: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'request' },
-      data: { type: 'asset', data: { event: 'request', data: { id: 'x', requestId: newUuidBytes() } } },
+      data: { type: 'asset', data: { event: 'request', data: { id: 'x', requestId: newUuid() } } },
     };
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(asset) });
 
     const player: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'pause' } },
     };
@@ -263,7 +257,7 @@ describe('BridgethingGateway', () => {
       while (adapter.sentFrames.length === 0) await new Promise(r => setTimeout(r, 5));
       const sent = new Codec().decode<GatewayToBridgeMsg>(adapter.sentFrames[0].frame);
       const response: BridgeToGatewayMsg = {
-        id: newUuidBytes(),
+        id: newUuid(),
         meta: { kind: 'response', data: { requestId: sent.id } },
         data: { type: 'webapp', data: { event: 'switched', data: { name: 'newapp' } } },
       };
@@ -287,7 +281,7 @@ describe('BridgethingGateway', () => {
       while (adapter.sentFrames.length === 0) await new Promise(r => setTimeout(r, 5));
       const sent = new Codec().decode<GatewayToBridgeMsg>(adapter.sentFrames[0].frame);
       const response: BridgeToGatewayMsg = {
-        id: newUuidBytes(),
+        id: newUuid(),
         meta: { kind: 'response', data: { requestId: sent.id } },
         data: {
           type: 'webapp',
@@ -320,7 +314,7 @@ describe('BridgethingGateway', () => {
       if (sent.data.type !== 'webapp') throw new Error();
       expect(sent.data.data.event).toBe('list');
       const response: BridgeToGatewayMsg = {
-        id: newUuidBytes(),
+        id: newUuid(),
         meta: { kind: 'response', data: { requestId: sent.id } },
         data: { type: 'webapp', data: { event: 'webapps', data: { webapps: [] } } },
       };
@@ -345,13 +339,13 @@ describe('BridgethingGateway', () => {
     await gateway.start();
     adapter.emit({ type: 'connected', device: DEVICE });
 
-    const requestId = newUuidBytes();
+    const requestId = newUuid();
     const incoming: BridgeToGatewayMsg = {
       id: requestId,
       meta: { kind: 'request' },
       data: {
         type: 'asset',
-        data: { event: 'request', data: { id: 'spotify/track/abc/image', requestId: newUuidBytes() } },
+        data: { event: 'request', data: { id: 'spotify/track/abc/image', requestId: newUuid() } },
       },
     };
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(incoming) });
@@ -379,11 +373,11 @@ describe('BridgethingGateway', () => {
     adapter.emit({ type: 'connected', device: DEVICE });
 
     const incoming: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'request' },
       data: {
         type: 'asset',
-        data: { event: 'request', data: { id: 'missing', requestId: newUuidBytes() } },
+        data: { event: 'request', data: { id: 'missing', requestId: newUuid() } },
       },
     };
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Codec().encode(incoming) });
@@ -410,7 +404,7 @@ describe('BridgethingGateway', () => {
 
     // After resync, a real frame should decode.
     const msg: BridgeToGatewayMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'ack' },
     };

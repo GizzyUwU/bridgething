@@ -57,6 +57,11 @@ import {
   type NotificationRemoved,
   type NowPlayingUpdate,
   type OtaAbandon,
+  type OtaAssetRange,
+  type OtaAssetRangeAbandon,
+  type OtaAssetRangeChunk,
+  type OtaAssetRangeRejected,
+  type OtaAssetRangeReply,
   type OtaBegin,
   type OtaBeginAck,
   type OtaBeginRejected,
@@ -124,7 +129,7 @@ import {
   type WebappSwitchTo,
   type WebappUninstall,
   type WireError,
-  newUuidBytes,
+  newUuid,
 } from '@bridgething/lib';
 import { BridgethingGateway, type GatewayEvent } from './index';
 
@@ -298,6 +303,8 @@ export type SystemInboundHandlers = {
   otaError: (deviceId: string, msg: OtaError) => void;
   otaBeginAck: (deviceId: string, msg: OtaBeginAck) => void;
   otaBeginRejected: (deviceId: string, msg: OtaBeginRejected) => void;
+  otaAssetRangeAbandon: (deviceId: string, msg: OtaAssetRangeAbandon) => void;
+  otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
 export type SystemDeviceInboundHandlers = {
@@ -305,6 +312,8 @@ export type SystemDeviceInboundHandlers = {
   otaError: (msg: OtaError) => void;
   otaBeginAck: (msg: OtaBeginAck) => void;
   otaBeginRejected: (msg: OtaBeginRejected) => void;
+  otaAssetRangeAbandon: (msg: OtaAssetRangeAbandon) => void;
+  otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
 export type TunnelInboundHandlers = {
@@ -521,7 +530,7 @@ export class AudioSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'audio', data: { event: 'ttsStarted', data: payload } },
         };
@@ -536,7 +545,7 @@ export class AudioSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'audio', data: { event: 'ttsEnded', data: payload } },
         };
@@ -551,7 +560,7 @@ export class AudioSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'audio', data: { event: 'volumeChanged', data: payload } },
         };
@@ -661,7 +670,7 @@ export class GeoSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'geo', data: { event: 'position', data: payload } },
         };
@@ -936,7 +945,7 @@ export class LibrarySurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'library', data: { event: 'favoriteChanged', data: payload } },
         };
@@ -1112,7 +1121,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'wsMessage', data: payload } },
         };
@@ -1127,7 +1136,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'wsClosed', data: payload } },
         };
@@ -1142,7 +1151,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
         };
@@ -1157,7 +1166,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'streamBegin', data: payload } },
         };
@@ -1172,7 +1181,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'streamChunk', data: payload } },
         };
@@ -1187,7 +1196,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'streamEnd', data: payload } },
         };
@@ -1202,7 +1211,7 @@ export class NetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'net', data: { event: 'streamError', data: payload } },
         };
@@ -1278,7 +1287,7 @@ export class NotificationsSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'notifications', data: { event: 'posted', data: payload } },
         };
@@ -1293,7 +1302,7 @@ export class NotificationsSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'notifications', data: { event: 'updated', data: payload } },
         };
@@ -1308,7 +1317,7 @@ export class NotificationsSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'notifications', data: { event: 'removed', data: payload } },
         };
@@ -1578,7 +1587,7 @@ export class PhoneSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'snapshot', data: payload } },
         };
@@ -1593,7 +1602,7 @@ export class PhoneSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'communicationsSnapshot', data: payload } },
         };
@@ -1608,7 +1617,7 @@ export class PhoneSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'callStarted', data: payload } },
         };
@@ -1623,7 +1632,7 @@ export class PhoneSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'callUpdated', data: payload } },
         };
@@ -1638,7 +1647,7 @@ export class PhoneSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'phone', data: { event: 'callEnded', data: payload } },
         };
@@ -1874,7 +1883,7 @@ export class PlayerSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'snapshot', data: payload } },
         };
@@ -1889,7 +1898,7 @@ export class PlayerSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'delta', data: payload } },
         };
@@ -1904,7 +1913,7 @@ export class PlayerSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'queueChanged', data: payload } },
         };
@@ -1965,6 +1974,38 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::OtaAssetRangeAbandon` across all peers. */
+  onOtaAssetRangeAbandon(handler: (deviceId: string, msg: OtaAssetRangeAbandon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaAssetRangeAbandon') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Typed inbound `OtaAssetRange` request: handler is given a typed handle for the response. */
+  onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaAssetRange') return;
+      const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onOtaAssetRange handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants. */
   subscribe(handlers: SystemInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1998,6 +2039,24 @@ export class SystemSurface {
           handlers.otaBeginRejected?.(event.deviceId, inner.data);
           return;
         }
+        case 'otaAssetRangeAbandon': {
+          handlers.otaAssetRangeAbandon?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'otaAssetRange': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.otaAssetRange;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('System: no handler for inner', 'otaAssetRange');
+            return;
+          }
+          const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
           return;
@@ -2012,7 +2071,7 @@ export class SystemSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'system', data: { event: 'otaChunk', data: payload } },
         };
@@ -2027,7 +2086,7 @@ export class SystemSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
         };
@@ -2042,9 +2101,24 @@ export class SystemSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'system', data: { event: 'cancelUpdate' } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `System::OtaAssetRangeChunk` to every connected peer (broadcast). */
+  async otaAssetRangeChunk(payload: OtaAssetRangeChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'system', data: { event: 'otaAssetRangeChunk', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2170,7 +2244,7 @@ export class TunnelSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'tunnel', data: { event: 'data', data: payload } },
         };
@@ -2185,7 +2259,7 @@ export class TunnelSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'tunnel', data: { event: 'closed', data: payload } },
         };
@@ -2277,7 +2351,7 @@ export class VoiceSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'voice', data: { event: 'micOpen', data: payload } },
         };
@@ -2292,7 +2366,7 @@ export class VoiceSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'voice', data: { event: 'micClose' } },
         };
@@ -2408,7 +2482,7 @@ export class AssetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'asset', data: { event: 'push', data: payload } },
         };
@@ -2423,7 +2497,7 @@ export class AssetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'asset', data: { event: 'clear', data: payload } },
         };
@@ -2438,7 +2512,7 @@ export class AssetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
         };
@@ -2453,7 +2527,7 @@ export class AssetSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
         };
@@ -2490,7 +2564,7 @@ export class AuthoritySurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'authority', data: { event: 'claim', data: payload } },
         };
@@ -2505,7 +2579,7 @@ export class AuthoritySurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'authority', data: { event: 'release', data: payload } },
         };
@@ -2524,7 +2598,7 @@ export class CapabilitiesSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'capabilities', data: { event: 'announce', data: payload } },
         };
@@ -2543,7 +2617,7 @@ export class ChromeSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'chrome', data: { event: 'navigate', data: payload } },
         };
@@ -2562,7 +2636,7 @@ export class TimeSurface {
     await Promise.all(
       ids.map(deviceId => {
         const msg: GatewayToBridgeMsg = {
-          id: newUuidBytes(),
+          id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'time', data: { event: 'snapshot', data: payload } },
         };
@@ -2961,7 +3035,7 @@ export class AudioSurfaceForDevice {
   /** Send `Audio::TtsStarted` to this peer. */
   async ttsStarted(payload: TtsStarted, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'audio', data: { event: 'ttsStarted', data: payload } },
     };
@@ -2971,7 +3045,7 @@ export class AudioSurfaceForDevice {
   /** Send `Audio::TtsEnded` to this peer. */
   async ttsEnded(payload: TtsEnded, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'audio', data: { event: 'ttsEnded', data: payload } },
     };
@@ -2981,7 +3055,7 @@ export class AudioSurfaceForDevice {
   /** Send `Audio::VolumeChanged` to this peer. */
   async volumeChanged(payload: VolumeChanged, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'audio', data: { event: 'volumeChanged', data: payload } },
     };
@@ -3093,7 +3167,7 @@ export class GeoSurfaceForDevice {
   /** Send `Geo::Position` to this peer. */
   async position(payload: Position, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'geo', data: { event: 'position', data: payload } },
     };
@@ -3375,7 +3449,7 @@ export class LibrarySurfaceForDevice {
   /** Send `Library::FavoriteChanged` to this peer. */
   async favoriteChanged(payload: FavoriteChanged, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'library', data: { event: 'favoriteChanged', data: payload } },
     };
@@ -3556,7 +3630,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::WsMessage` to this peer. */
   async wsMessage(payload: NetWsMessage, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'wsMessage', data: payload } },
     };
@@ -3566,7 +3640,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::WsClosed` to this peer. */
   async wsClosed(payload: NetWsClosed, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'wsClosed', data: payload } },
     };
@@ -3576,7 +3650,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::WsErrorEvent` to this peer. */
   async wsErrorEvent(payload: NetWsErrorEvent, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'wsErrorEvent', data: payload } },
     };
@@ -3586,7 +3660,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::StreamBegin` to this peer. */
   async streamBegin(payload: StreamBegin, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'streamBegin', data: payload } },
     };
@@ -3596,7 +3670,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::StreamChunk` to this peer. */
   async streamChunk(payload: StreamChunk, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'streamChunk', data: payload } },
     };
@@ -3606,7 +3680,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::StreamEnd` to this peer. */
   async streamEnd(payload: StreamEnd, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'streamEnd', data: payload } },
     };
@@ -3616,7 +3690,7 @@ export class NetSurfaceForDevice {
   /** Send `Net::StreamError` to this peer. */
   async streamError(payload: StreamError, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'net', data: { event: 'streamError', data: payload } },
     };
@@ -3693,7 +3767,7 @@ export class NotificationsSurfaceForDevice {
   /** Send `Notifications::Posted` to this peer. */
   async posted(payload: Notification, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'notifications', data: { event: 'posted', data: payload } },
     };
@@ -3703,7 +3777,7 @@ export class NotificationsSurfaceForDevice {
   /** Send `Notifications::Updated` to this peer. */
   async updated(payload: Notification, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'notifications', data: { event: 'updated', data: payload } },
     };
@@ -3713,7 +3787,7 @@ export class NotificationsSurfaceForDevice {
   /** Send `Notifications::Removed` to this peer. */
   async removed(payload: NotificationRemoved, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'notifications', data: { event: 'removed', data: payload } },
     };
@@ -3995,7 +4069,7 @@ export class PhoneSurfaceForDevice {
   /** Send `Phone::Snapshot` to this peer. */
   async snapshot(payload: PhoneStateReply, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'snapshot', data: payload } },
     };
@@ -4005,7 +4079,7 @@ export class PhoneSurfaceForDevice {
   /** Send `Phone::CommunicationsSnapshot` to this peer. */
   async communicationsSnapshot(payload: CommunicationsSnapshot, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'communicationsSnapshot', data: payload } },
     };
@@ -4015,7 +4089,7 @@ export class PhoneSurfaceForDevice {
   /** Send `Phone::CallStarted` to this peer. */
   async callStarted(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'callStarted', data: payload } },
     };
@@ -4025,7 +4099,7 @@ export class PhoneSurfaceForDevice {
   /** Send `Phone::CallUpdated` to this peer. */
   async callUpdated(payload: PhoneCall, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'callUpdated', data: payload } },
     };
@@ -4035,7 +4109,7 @@ export class PhoneSurfaceForDevice {
   /** Send `Phone::CallEnded` to this peer. */
   async callEnded(payload: PhoneCallEnded, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'phone', data: { event: 'callEnded', data: payload } },
     };
@@ -4282,7 +4356,7 @@ export class PlayerSurfaceForDevice {
   /** Send `Player::Snapshot` to this peer. */
   async snapshot(payload: PlayerState, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'snapshot', data: payload } },
     };
@@ -4292,7 +4366,7 @@ export class PlayerSurfaceForDevice {
   /** Send `Player::Delta` to this peer. */
   async delta(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'delta', data: payload } },
     };
@@ -4302,7 +4376,7 @@ export class PlayerSurfaceForDevice {
   /** Send `Player::QueueChanged` to this peer. */
   async queueChanged(payload: QueueSnapshot, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'queueChanged', data: payload } },
     };
@@ -4368,6 +4442,40 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `System::OtaAssetRangeAbandon` from this peer. */
+  onOtaAssetRangeAbandon(handler: (msg: OtaAssetRangeAbandon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaAssetRangeAbandon') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Typed inbound `OtaAssetRange` request from this peer: handler is given a typed handle for the response. */
+  onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaAssetRange') return;
+      const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onOtaAssetRange handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants from this peer. */
   subscribe(handlers: SystemDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -4402,6 +4510,24 @@ export class SystemSurfaceForDevice {
           handlers.otaBeginRejected?.(inner.data);
           return;
         }
+        case 'otaAssetRangeAbandon': {
+          handlers.otaAssetRangeAbandon?.(inner.data);
+          return;
+        }
+        case 'otaAssetRange': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.otaAssetRange;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('System: no handler for inner', 'otaAssetRange');
+            return;
+          }
+          const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('System: no handler for inner', inner);
           return;
@@ -4413,7 +4539,7 @@ export class SystemSurfaceForDevice {
   /** Send `System::OtaChunk` to this peer. */
   async otaChunk(payload: OtaChunk, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'system', data: { event: 'otaChunk', data: payload } },
     };
@@ -4423,7 +4549,7 @@ export class SystemSurfaceForDevice {
   /** Send `System::OtaAbandon` to this peer. */
   async otaAbandon(payload: OtaAbandon, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
     };
@@ -4433,9 +4559,19 @@ export class SystemSurfaceForDevice {
   /** Send `System::CancelUpdate` to this peer. */
   async cancelUpdate(options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'cancelUpdate' } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `System::OtaAssetRangeChunk` to this peer. */
+  async otaAssetRangeChunk(payload: OtaAssetRangeChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'system', data: { event: 'otaAssetRangeChunk', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -4562,7 +4698,7 @@ export class TunnelSurfaceForDevice {
   /** Send `Tunnel::Data` to this peer. */
   async data(payload: TunnelData, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'tunnel', data: { event: 'data', data: payload } },
     };
@@ -4572,7 +4708,7 @@ export class TunnelSurfaceForDevice {
   /** Send `Tunnel::Closed` to this peer. */
   async closed(payload: TunnelClosed, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'tunnel', data: { event: 'closed', data: payload } },
     };
@@ -4666,7 +4802,7 @@ export class VoiceSurfaceForDevice {
   /** Send `Voice::MicOpen` to this peer. */
   async micOpen(payload: VoiceMicOpen, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'micOpen', data: payload } },
     };
@@ -4676,7 +4812,7 @@ export class VoiceSurfaceForDevice {
   /** Send `Voice::MicClose` to this peer. */
   async micClose(options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'micClose' } },
     };
@@ -4798,7 +4934,7 @@ export class AssetSurfaceForDevice {
   /** Send `Asset::Push` to this peer. */
   async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'asset', data: { event: 'push', data: payload } },
     };
@@ -4808,7 +4944,7 @@ export class AssetSurfaceForDevice {
   /** Send `Asset::Clear` to this peer. */
   async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'asset', data: { event: 'clear', data: payload } },
     };
@@ -4818,7 +4954,7 @@ export class AssetSurfaceForDevice {
   /** Send `Asset::PushChunk` to this peer. */
   async pushChunk(payload: AssetPushChunk, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
     };
@@ -4828,7 +4964,7 @@ export class AssetSurfaceForDevice {
   /** Send `Asset::PushAbandon` to this peer. */
   async pushAbandon(payload: AssetPushAbandon, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
     };
@@ -4862,7 +4998,7 @@ export class AuthoritySurfaceForDevice {
   /** Send `Authority::Claim` to this peer. */
   async claim(payload: AuthorityClaim, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'authority', data: { event: 'claim', data: payload } },
     };
@@ -4872,7 +5008,7 @@ export class AuthoritySurfaceForDevice {
   /** Send `Authority::Release` to this peer. */
   async release(payload: AuthorityRelease, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'authority', data: { event: 'release', data: payload } },
     };
@@ -4889,7 +5025,7 @@ export class CapabilitiesSurfaceForDevice {
   /** Send `Capabilities::Announce` to this peer. */
   async announce(payload: GatewayCapabilities, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'capabilities', data: { event: 'announce', data: payload } },
     };
@@ -4906,7 +5042,7 @@ export class ChromeSurfaceForDevice {
   /** Send `Chrome::Navigate` to this peer. */
   async navigate(payload: ChromeNavigate, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'chrome', data: { event: 'navigate', data: payload } },
     };
@@ -4923,7 +5059,7 @@ export class TimeSurfaceForDevice {
   /** Send `Time::Snapshot` to this peer. */
   async snapshot(payload: TimeInfo, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'time', data: { event: 'snapshot', data: payload } },
     };
@@ -5242,12 +5378,12 @@ export class GeoGetOnceHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: GeoGetOnceReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'geo', data: { event: 'getOnceReply', data: response } },
     };
@@ -5256,7 +5392,7 @@ export class GeoGetOnceHandle {
 
   async respondErr(error: GeoErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'geo', data: { event: 'errorReply', data: error } },
     };
@@ -5265,7 +5401,7 @@ export class GeoGetOnceHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5277,12 +5413,12 @@ export class LibraryBrowseRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: BrowseReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'browseReply', data: response } },
     };
@@ -5291,7 +5427,7 @@ export class LibraryBrowseRequestHandle {
 
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
@@ -5300,7 +5436,7 @@ export class LibraryBrowseRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5312,12 +5448,12 @@ export class LibrarySearchRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: SearchReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'searchReply', data: response } },
     };
@@ -5326,7 +5462,7 @@ export class LibrarySearchRequestHandle {
 
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
@@ -5335,7 +5471,7 @@ export class LibrarySearchRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5347,12 +5483,12 @@ export class LibraryRecommendationsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: RecommendationsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'recommendationsReply', data: response } },
     };
@@ -5361,7 +5497,7 @@ export class LibraryRecommendationsRequestHandle {
 
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
@@ -5370,7 +5506,7 @@ export class LibraryRecommendationsRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5382,12 +5518,12 @@ export class LibraryFavoritesListRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: FavoritesListReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'favoritesListReply', data: response } },
     };
@@ -5396,7 +5532,7 @@ export class LibraryFavoritesListRequestHandle {
 
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
@@ -5405,7 +5541,7 @@ export class LibraryFavoritesListRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5417,12 +5553,12 @@ export class LibraryFavoritesContainsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: FavoritesContainsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'favoritesContainsReply', data: response } },
     };
@@ -5431,7 +5567,7 @@ export class LibraryFavoritesContainsRequestHandle {
 
   async respondErr(error: LibraryErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
     };
@@ -5440,7 +5576,7 @@ export class LibraryFavoritesContainsRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5452,12 +5588,12 @@ export class NetFetchRequestMsgHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: NetFetchReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'net', data: { event: 'fetchReply', data: response } },
     };
@@ -5466,7 +5602,7 @@ export class NetFetchRequestMsgHandle {
 
   async respondErr(error: NetFetchErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'net', data: { event: 'fetchErrorReply', data: error } },
     };
@@ -5475,7 +5611,7 @@ export class NetFetchRequestMsgHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5487,12 +5623,12 @@ export class NetWsOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: NetWsOpenReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'net', data: { event: 'wsOpenReply', data: response } },
     };
@@ -5501,7 +5637,7 @@ export class NetWsOpenHandle {
 
   async respondErr(error: NetWsErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'net', data: { event: 'wsErrorReply', data: error } },
     };
@@ -5510,7 +5646,7 @@ export class NetWsOpenHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5522,12 +5658,12 @@ export class PhoneStateGetHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: PhoneStateReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'phone', data: { event: 'stateReply', data: response } },
     };
@@ -5536,7 +5672,42 @@ export class PhoneStateGetHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class OtaAssetRangeHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    private readonly _requestId: string,
+  ) {}
+
+  async respond(response: OtaAssetRangeReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'system', data: { event: 'otaAssetRangeReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: OtaAssetRangeRejected): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this._requestId } },
+      data: { type: 'system', data: { event: 'otaAssetRangeRejected', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: WireError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5548,12 +5719,12 @@ export class TunnelOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: TunnelOpenReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'tunnel', data: { event: 'openReply', data: response } },
     };
@@ -5562,7 +5733,7 @@ export class TunnelOpenHandle {
 
   async respondErr(error: TunnelErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'tunnel', data: { event: 'errorReply', data: error } },
     };
@@ -5571,7 +5742,7 @@ export class TunnelOpenHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5583,12 +5754,12 @@ export class AssetRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: AssetGotReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'asset', data: { event: 'got', data: response } },
     };
@@ -5597,7 +5768,7 @@ export class AssetRequestHandle {
 
   async respondErr(error: AssetNotFoundReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'asset', data: { event: 'notFound', data: error } },
     };
@@ -5606,7 +5777,7 @@ export class AssetRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -5618,12 +5789,12 @@ export class LyricsRequestHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
     public readonly deviceId: string,
-    private readonly _requestId: Uint8Array,
+    private readonly _requestId: string,
   ) {}
 
   async respond(response: LyricsReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'lyrics', data: { event: 'lyricsReply', data: response } },
     };
@@ -5632,7 +5803,7 @@ export class LyricsRequestHandle {
 
   async respondErr(error: LyricsErrorReply): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'lyrics', data: { event: 'lyricsErrorReply', data: error } },
     };
@@ -5641,7 +5812,7 @@ export class LyricsRequestHandle {
 
   async respondProtocolErr(error: WireError): Promise<void> {
     const msg: GatewayToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'response', data: { requestId: this._requestId } },
       data: { type: 'error', data: error },
     };
@@ -6369,6 +6540,23 @@ function outerSubscribeGateway(
             innerHandlers.otaBeginRejected?.(event.deviceId, inner.data);
             return;
           }
+          case 'otaAssetRangeAbandon': {
+            innerHandlers.otaAssetRangeAbandon?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'otaAssetRange': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.otaAssetRange;
+            if (!handler) {
+              if (!partial) g.logger.warn('System: no handler for inner', 'otaAssetRange');
+              return;
+            }
+            const handle = new OtaAssetRangeHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
             return;
@@ -6920,6 +7108,23 @@ function outerSubscribeDevice(
           }
           case 'otaBeginRejected': {
             innerHandlers.otaBeginRejected?.(inner.data);
+            return;
+          }
+          case 'otaAssetRangeAbandon': {
+            innerHandlers.otaAssetRangeAbandon?.(inner.data);
+            return;
+          }
+          case 'otaAssetRange': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.otaAssetRange;
+            if (!handler) {
+              if (!partial) g.logger.warn('System: no handler for inner', 'otaAssetRange');
+              return;
+            }
+            const handle = new OtaAssetRangeHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
             return;
           }
           default: {

@@ -81,6 +81,8 @@ import {
   type NotificationInvoke,
   type NotificationRemoved,
   type NowPlayingUpdate,
+  type OtaError,
+  type OtaProgress,
   type PairBluetooth,
   type PairedDevicesMap,
   type PeerSnapshotMap,
@@ -135,7 +137,7 @@ import {
   type WebappListReply,
   type WebappUninstalled,
   type WireError,
-  newUuidBytes,
+  newUuid,
 } from '@bridgething/lib';
 import { BridgethingClient, type ClientEvent } from './index';
 
@@ -244,6 +246,8 @@ export type SystemInboundHandlers = {
   logsTailReply: (msg: LogsTailReply) => void;
   logsSubscribeReply: (msg: LogsSubscribeReply) => void;
   logEntry: (msg: LogEntry) => void;
+  otaProgress: (msg: OtaProgress) => void;
+  otaError: (msg: OtaError) => void;
 };
 
 export type TimeInboundHandlers = {
@@ -369,7 +373,7 @@ export class AssetSurface {
   /** Send `Asset::Preload` to the daemon. */
   async preload(payload: AssetPreload): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'asset', data: { event: 'preload', data: payload } },
     };
@@ -470,7 +474,7 @@ export class AudioSurface {
   /** Send `Audio::VolumeUp` to the daemon. */
   async volumeUp(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'volumeUp' } },
     };
@@ -480,7 +484,7 @@ export class AudioSurface {
   /** Send `Audio::VolumeDown` to the daemon. */
   async volumeDown(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'volumeDown' } },
     };
@@ -490,7 +494,7 @@ export class AudioSurface {
   /** Send `Audio::SetVolume` to the daemon. */
   async setVolume(payload: SetVolume): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'setVolume', data: payload } },
     };
@@ -500,7 +504,7 @@ export class AudioSurface {
   /** Send `Audio::MuteToggle` to the daemon. */
   async muteToggle(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'muteToggle' } },
     };
@@ -510,7 +514,7 @@ export class AudioSurface {
   /** Send `Audio::SetMute` to the daemon. */
   async setMute(payload: SetMute): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'setMute', data: payload } },
     };
@@ -520,7 +524,7 @@ export class AudioSurface {
   /** Send `Audio::Tts` to the daemon. */
   async tts(payload: Tts): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'tts', data: payload } },
     };
@@ -530,7 +534,7 @@ export class AudioSurface {
   /** Send `Audio::TtsCancel` to the daemon. */
   async ttsCancel(payload: TtsCancel): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'ttsCancel', data: payload } },
     };
@@ -540,7 +544,7 @@ export class AudioSurface {
   /** Send `Audio::TtsCancelAll` to the daemon. */
   async ttsCancelAll(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'ttsCancelAll' } },
     };
@@ -550,7 +554,7 @@ export class AudioSurface {
   /** Send `Audio::Earcon` to the daemon. */
   async earcon(payload: Earcon): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'audio', data: { event: 'earcon', data: payload } },
     };
@@ -685,7 +689,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::Connect` to the daemon. */
   async connect(payload: ConnectBluetooth): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'connect', data: payload } },
     };
@@ -695,7 +699,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::Scan` to the daemon. */
   async scan(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'scan' } },
     };
@@ -705,7 +709,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::EnableDiscoverable` to the daemon. */
   async enableDiscoverable(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'enableDiscoverable' } },
     };
@@ -715,7 +719,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::DisableDiscoverable` to the daemon. */
   async disableDiscoverable(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'disableDiscoverable' } },
     };
@@ -725,7 +729,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::Pair` to the daemon. */
   async pair(payload: PairBluetooth): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'pair', data: payload } },
     };
@@ -735,7 +739,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::Forget` to the daemon. */
   async forget(payload: ForgetBluetooth): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'forget', data: payload } },
     };
@@ -745,7 +749,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::EnablePan` to the daemon. */
   async enablePan(payload: EnablePan): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'enablePan', data: payload } },
     };
@@ -755,7 +759,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::DisablePan` to the daemon. */
   async disablePan(payload: DisablePan): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'disablePan', data: payload } },
     };
@@ -765,7 +769,7 @@ export class BluetoothSurface {
   /** Send `Bluetooth::SetAlias` to the daemon. */
   async setAlias(payload: SetBluetoothAlias): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'setAlias', data: payload } },
     };
@@ -1058,7 +1062,7 @@ export class GeoSurface {
   /** Send `Geo::Unwatch` to the daemon. */
   async unwatch(payload: GeoUnwatch): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'geo', data: { event: 'unwatch', data: payload } },
     };
@@ -1179,7 +1183,7 @@ export class HardwareSurface {
   /** Send `Hardware::DisplaySetMode` to the daemon. */
   async displaySetMode(payload: DisplaySetMode): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'hardware', data: { event: 'displaySetMode', data: payload } },
     };
@@ -1189,7 +1193,7 @@ export class HardwareSurface {
   /** Send `Hardware::DisplaySetLevel` to the daemon. */
   async displaySetLevel(payload: DisplaySetLevel): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'hardware', data: { event: 'displaySetLevel', data: payload } },
     };
@@ -1353,7 +1357,7 @@ export class LibrarySurface {
   /** Send `Library::FavoritesToggle` to the daemon. */
   async favoritesToggle(payload: FavoritesToggle): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'library', data: { event: 'favoritesToggle', data: payload } },
     };
@@ -1363,7 +1367,7 @@ export class LibrarySurface {
   /** Send `Library::FavoritesSet` to the daemon. */
   async favoritesSet(payload: FavoritesSet): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'library', data: { event: 'favoritesSet', data: payload } },
     };
@@ -1373,7 +1377,7 @@ export class LibrarySurface {
   /** Send `Library::FavoritesSetMany` to the daemon. */
   async favoritesSetMany(payload: FavoritesSetMany): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'library', data: { event: 'favoritesSetMany', data: payload } },
     };
@@ -1673,7 +1677,7 @@ export class NetSurface {
   /** Send `Net::WsClose` to the daemon. */
   async wsClose(payload: NetWsClose): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'net', data: { event: 'wsClose', data: payload } },
     };
@@ -1683,7 +1687,7 @@ export class NetSurface {
   /** Send `Net::WsSend` to the daemon. */
   async wsSend(payload: NetWsSend): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'net', data: { event: 'wsSend', data: payload } },
     };
@@ -1693,7 +1697,7 @@ export class NetSurface {
   /** Send `Net::StreamOpen` to the daemon. */
   async streamOpen(payload: NetStreamOpen): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'net', data: { event: 'streamOpen', data: payload } },
     };
@@ -1703,7 +1707,7 @@ export class NetSurface {
   /** Send `Net::StreamCancel` to the daemon. */
   async streamCancel(payload: NetStreamCancel): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'net', data: { event: 'streamCancel', data: payload } },
     };
@@ -1824,7 +1828,7 @@ export class NotificationsSurface {
   /** Send `Notifications::InvokePositive` to the daemon. */
   async invokePositive(payload: NotificationInvoke): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'notifications', data: { event: 'invokePositive', data: payload } },
     };
@@ -1834,7 +1838,7 @@ export class NotificationsSurface {
   /** Send `Notifications::InvokeNegative` to the daemon. */
   async invokeNegative(payload: NotificationInvoke): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'notifications', data: { event: 'invokeNegative', data: payload } },
     };
@@ -1985,7 +1989,7 @@ export class PhoneSurface {
   /** Send `Phone::Answer` to the daemon. */
   async answer(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'answer', data: payload } },
     };
@@ -1995,7 +1999,7 @@ export class PhoneSurface {
   /** Send `Phone::Accept` to the daemon. */
   async accept(payload: PhoneAcceptAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'accept', data: payload } },
     };
@@ -2005,7 +2009,7 @@ export class PhoneSurface {
   /** Send `Phone::Decline` to the daemon. */
   async decline(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'decline', data: payload } },
     };
@@ -2015,7 +2019,7 @@ export class PhoneSurface {
   /** Send `Phone::End` to the daemon. */
   async end(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'end', data: payload } },
     };
@@ -2025,7 +2029,7 @@ export class PhoneSurface {
   /** Send `Phone::EndTyped` to the daemon. */
   async endTyped(payload: PhoneEndAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'endTyped', data: payload } },
     };
@@ -2035,7 +2039,7 @@ export class PhoneSurface {
   /** Send `Phone::Hold` to the daemon. */
   async hold(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'hold', data: payload } },
     };
@@ -2045,7 +2049,7 @@ export class PhoneSurface {
   /** Send `Phone::Unhold` to the daemon. */
   async unhold(payload: PhoneCallAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'unhold', data: payload } },
     };
@@ -2055,7 +2059,7 @@ export class PhoneSurface {
   /** Send `Phone::Initiate` to the daemon. */
   async initiate(payload: PhoneInitiateAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'initiate', data: payload } },
     };
@@ -2065,7 +2069,7 @@ export class PhoneSurface {
   /** Send `Phone::Swap` to the daemon. */
   async swap(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'swap' } },
     };
@@ -2075,7 +2079,7 @@ export class PhoneSurface {
   /** Send `Phone::Merge` to the daemon. */
   async merge(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'merge' } },
     };
@@ -2085,7 +2089,7 @@ export class PhoneSurface {
   /** Send `Phone::Mute` to the daemon. */
   async mute(payload: PhoneMuteAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'mute', data: payload } },
     };
@@ -2095,7 +2099,7 @@ export class PhoneSurface {
   /** Send `Phone::Dtmf` to the daemon. */
   async dtmf(payload: PhoneDtmfAction): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'phone', data: { event: 'dtmf', data: payload } },
     };
@@ -2243,7 +2247,7 @@ export class PlayerSurface {
   /** Send `Player::Play` to the daemon. */
   async play(payload: PlayUri): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'play', data: payload } },
     };
@@ -2253,7 +2257,7 @@ export class PlayerSurface {
   /** Send `Player::Queue` to the daemon. */
   async queue(payload: QueueUri): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'queue', data: payload } },
     };
@@ -2263,7 +2267,7 @@ export class PlayerSurface {
   /** Send `Player::Pause` to the daemon. */
   async pause(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'pause' } },
     };
@@ -2273,7 +2277,7 @@ export class PlayerSurface {
   /** Send `Player::Resume` to the daemon. */
   async resume(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'resume' } },
     };
@@ -2283,7 +2287,7 @@ export class PlayerSurface {
   /** Send `Player::SkipNext` to the daemon. */
   async skipNext(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'skipNext' } },
     };
@@ -2293,7 +2297,7 @@ export class PlayerSurface {
   /** Send `Player::SkipPrev` to the daemon. */
   async skipPrev(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'skipPrev' } },
     };
@@ -2303,7 +2307,7 @@ export class PlayerSurface {
   /** Send `Player::SkipToIndex` to the daemon. */
   async skipToIndex(payload: SkipToIndex): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'skipToIndex', data: payload } },
     };
@@ -2313,7 +2317,7 @@ export class PlayerSurface {
   /** Send `Player::SeekTo` to the daemon. */
   async seekTo(payload: SeekTo): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'seekTo', data: payload } },
     };
@@ -2323,7 +2327,7 @@ export class PlayerSurface {
   /** Send `Player::SetShuffle` to the daemon. */
   async setShuffle(payload: SetShuffle): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'setShuffle', data: payload } },
     };
@@ -2333,7 +2337,7 @@ export class PlayerSurface {
   /** Send `Player::SetRepeat` to the daemon. */
   async setRepeat(payload: SetRepeat): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'setRepeat', data: payload } },
     };
@@ -2343,7 +2347,7 @@ export class PlayerSurface {
   /** Send `Player::SetSpeed` to the daemon. */
   async setSpeed(payload: SetSpeed): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'setSpeed', data: payload } },
     };
@@ -2353,7 +2357,7 @@ export class PlayerSurface {
   /** Send `Player::SetCrossfade` to the daemon. */
   async setCrossfade(payload: SetCrossfade): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'player', data: { event: 'setCrossfade', data: payload } },
     };
@@ -2450,6 +2454,30 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::OtaProgress` from the daemon. */
+  onOtaProgress(handler: (msg: OtaProgress) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaProgress') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::OtaError` from the daemon. */
+  onOtaError(handler: (msg: OtaError) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'otaError') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants. */
   subscribe(handlers: SystemInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2487,6 +2515,14 @@ export class SystemSurface {
           handlers.logEntry?.(inner.data);
           return;
         }
+        case 'otaProgress': {
+          handlers.otaProgress?.(inner.data);
+          return;
+        }
+        case 'otaError': {
+          handlers.otaError?.(inner.data);
+          return;
+        }
         default: {
           if (!partial) this._client.logger.warn('System: no handler for inner', inner);
           return;
@@ -2498,7 +2534,7 @@ export class SystemSurface {
   /** Send `System::LogsUnsubscribe` to the daemon. */
   async logsUnsubscribe(payload: LogsUnsubscribe): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'logsUnsubscribe', data: payload } },
     };
@@ -2508,7 +2544,7 @@ export class SystemSurface {
   /** Send `System::Reboot` to the daemon. */
   async reboot(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'reboot' } },
     };
@@ -2518,7 +2554,7 @@ export class SystemSurface {
   /** Send `System::PowerOff` to the daemon. */
   async powerOff(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'powerOff' } },
     };
@@ -2528,7 +2564,7 @@ export class SystemSurface {
   /** Send `System::FactoryReset` to the daemon. */
   async factoryReset(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'factoryReset' } },
     };
@@ -2728,7 +2764,7 @@ export class VoiceSurface {
   /** Send `Voice::Cancel` to the daemon. */
   async cancel(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'cancel' } },
     };
@@ -2738,7 +2774,7 @@ export class VoiceSurface {
   /** Send `Voice::PushToTalk` to the daemon. */
   async pushToTalk(): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'pushToTalk' } },
     };
@@ -2748,7 +2784,7 @@ export class VoiceSurface {
   /** Send `Voice::MuteMic` to the daemon. */
   async muteMic(payload: MicMute): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'muteMic', data: payload } },
     };
@@ -2758,7 +2794,7 @@ export class VoiceSurface {
   /** Send `Voice::UnmuteMic` to the daemon. */
   async unmuteMic(payload: MicUnmute): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'unmuteMic', data: payload } },
     };
@@ -3091,7 +3127,7 @@ export class ForwardSurface {
   /** Send `Forward::Text` to the daemon. */
   async text(payload: string): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'forward', data: { encoding: 'text', data: payload } },
     };
@@ -3101,7 +3137,7 @@ export class ForwardSurface {
   /** Send `Forward::Json` to the daemon. */
   async json(payload: unknown): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'forward', data: { encoding: 'json', data: payload } },
     };
@@ -3111,7 +3147,7 @@ export class ForwardSurface {
   /** Send `Forward::Binary` to the daemon. */
   async binary(payload: Uint8Array): Promise<void> {
     const msg: ClientToBridgeMsg = {
-      id: newUuidBytes(),
+      id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'forward', data: { encoding: 'binary', data: payload } },
     };
@@ -3897,6 +3933,14 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'logEntry': {
             innerHandlers.logEntry?.(inner.data);
+            return;
+          }
+          case 'otaProgress': {
+            innerHandlers.otaProgress?.(inner.data);
+            return;
+          }
+          case 'otaError': {
+            innerHandlers.otaError?.(inner.data);
             return;
           }
           default: {

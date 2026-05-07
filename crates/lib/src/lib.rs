@@ -17,12 +17,13 @@ pub use shared::{
   GeoError, HardwareError, HardwareState, HttpHeader, HttpMethod, IMAGE_SIZE, Image, InitiateCallType, ItemKind,
   ItemRef, LIBBRIDGETHING_VERSION, LibraryError, LibraryItem, LogEntry, LogLevel, LogSource, MediaItem,
   MediaItemUpdate, MediaType, MusicProvider, NetError, NetFetchRequest, NetFetchResponse, NetworkInfo, NetworkKind,
-  Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationFlags, NowPlayingUpdate, Peer,
-  PeerCompanionStatus, PeerIap2Status, PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneError,
-  PhoneState, PlayContext, Playback, PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackState,
-  PlaybackUpdate, PlayerError, PlayerOptions, PlayerState, Playlist, PodcastEpisode, Position, Priority, QueueItem,
-  QueuePosition, RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station,
-  StreamBegin, StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention,
+  Notification, NotificationAction, NotificationApp, NotificationCategory, NotificationFlags, NowPlayingUpdate,
+  OtaError, OtaErrorCode, OtaPhase, OtaProgress, Peer, PeerCompanionStatus, PeerIap2Status, PhoneCall,
+  PhoneCallDirection, PhoneCallService, PhoneCallStatus, PhoneError, PhoneState, PlayContext, Playback,
+  PlaybackOptions, PlaybackQueue, PlaybackRestrictions, PlaybackState, PlaybackUpdate, PlayerError, PlayerOptions,
+  PlayerState, Playlist, PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RangePart, RangeSpec,
+  RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station, StreamBegin,
+  StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention,
   TunnelClosed, TunnelData, TunnelError, VoiceDescriptor, WebappInfo, WebappManifest, WebappRole, WebappSource,
   WsError, WsFrame, to_slug,
 };
@@ -35,3 +36,7 @@ pub const BRIDGETHING_STOCK_WS_PORT: u16 = 8890;
 pub const BRIDGETHING_WS_MODERN_PORT: u16 = 8891;
 pub const BRIDGETHING_FILE_SERVE_PORT: u16 = 8891;
 pub const BRIDGETHING_NETWORK_GATEWAY_PORT: u16 = 8892;
+/// Loopback HTTP-Range proxy that libswupdate's delta downloader hits
+/// for `.zck` byte ranges. Bound to `127.0.0.1`; the daemon translates
+/// each request into a wire `OtaAssetRange` to the pinned companion.
+pub const BRIDGETHING_OTA_RANGE_PROXY_PORT: u16 = 8893;

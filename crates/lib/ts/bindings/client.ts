@@ -32,6 +32,8 @@ import type {
   NetFetchResponse,
   Notification,
   NowPlayingUpdate,
+  OtaError,
+  OtaProgress,
   Peer,
   PhoneCall,
   PhoneCallService,
@@ -158,7 +160,7 @@ export type BridgeToClientLibraryMsg =
  *
  * these messages travel over the local websocket on port 8891.
  */
-export type BridgeToClientMsg = { id: Uint8Array; meta: MsgMeta; data: BridgeToClientMsgData };
+export type BridgeToClientMsg = { id: string; meta: MsgMeta; data: BridgeToClientMsgData };
 
 export type BridgeToClientMsgData =
   | { type: 'asset'; data: BridgeToClientAssetMsg }
@@ -234,7 +236,9 @@ export type BridgeToClientSystemMsg =
   | { event: 'diagnosticsReply'; data: DiagnosticsReply }
   | { event: 'logsTailReply'; data: LogsTailReply }
   | { event: 'logsSubscribeReply'; data: LogsSubscribeReply }
-  | { event: 'logEntry'; data: LogEntry };
+  | { event: 'logEntry'; data: LogEntry }
+  | { event: 'otaProgress'; data: OtaProgress }
+  | { event: 'otaError'; data: OtaError };
 
 export type BridgeToClientTimeMsg =
   | { event: 'changed'; data: TimeSnapshot }
@@ -315,7 +319,7 @@ export type ClientToBridgeLibraryMsg =
  *
  * these messages travel over the local websocket on port 8891.
  */
-export type ClientToBridgeMsg = { id: Uint8Array; meta: MsgMeta; data: ClientToBridgeMsgData };
+export type ClientToBridgeMsg = { id: string; meta: MsgMeta; data: ClientToBridgeMsgData };
 
 export type ClientToBridgeMsgData =
   | { type: 'asset'; data: ClientToBridgeAssetMsg }

@@ -33,7 +33,7 @@ public actor BridgethingGateway {
 
   private var consumerTask: Task<Void, Never>?
   private var buffers: [String: FrameAccumulator] = [:]
-  private var pendingRequests: [Data: CheckedContinuation<BridgeToGatewayMsg, Error>] = [:]
+  private var pendingRequests: [UUID: CheckedContinuation<BridgeToGatewayMsg, Error>] = [:]
 
   public nonisolated let events: AsyncStream<GatewayEvent>
   private let eventContinuation: AsyncStream<GatewayEvent>.Continuation
@@ -110,7 +110,7 @@ public actor BridgethingGateway {
     _ data: GatewayToBridgeMsgData,
     timeout: Duration = .seconds(30)
   ) async throws -> BridgeToGatewayMsg {
-    let id = UUID().data
+    let id = UUID()
     let msg = GatewayToBridgeMsg(id: id, meta: .request, data: data)
     let frame = try codec.encode(msg)
 
@@ -134,13 +134,13 @@ public actor BridgethingGateway {
 
   // MARK: - private
 
-  private func failPendingRequest(id: Data, with error: Error) {
+  private func failPendingRequest(id: UUID, with error: Error) {
     if let cont = pendingRequests.removeValue(forKey: id) {
       cont.resume(throwing: error)
     }
   }
 
-  private func completePendingRequest(id: Data, with msg: BridgeToGatewayMsg) -> Bool {
+  private func completePendingRequest(id: UUID, with msg: BridgeToGatewayMsg) -> Bool {
     guard let cont = pendingRequests.removeValue(forKey: id) else { return false }
     cont.resume(returning: msg)
     return true

@@ -22,7 +22,7 @@ use uuid::Uuid;
 )]
 pub struct AssetRequest {
   pub id: String,
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub request_id: Uuid,
 }

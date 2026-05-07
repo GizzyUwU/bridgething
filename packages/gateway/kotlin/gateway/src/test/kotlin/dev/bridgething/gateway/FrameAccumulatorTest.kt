@@ -2,7 +2,7 @@ package dev.bridgething.gateway
 
 import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
-import dev.bridgething.schema.GatewayMsgMeta
+import dev.bridgething.schema.MsgMeta
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -113,8 +113,8 @@ class FrameAccumulatorTest {
 
   private fun makeAckFrame(): ByteArray {
     val msg = BridgeToGatewayMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = BridgeToGatewayMsgData.Ack,
     )
     return codec.encode(BridgeToGatewayMsg.serializer(), msg)

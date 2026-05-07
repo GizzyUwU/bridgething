@@ -26,6 +26,8 @@ import type {
   NetFetchResponse,
   Notification,
   NowPlayingUpdate,
+  OtaError,
+  OtaProgress,
   PhoneCall,
   PhoneCallService,
   PhoneState,
@@ -34,6 +36,8 @@ import type {
   Position,
   QueueItem,
   QueuePosition,
+  RangePart,
+  RangeSpec,
   RecommendationsResult,
   RepeatMode,
   SearchResult,
@@ -122,7 +126,7 @@ export type AssetPushBeginRejected = { reason: string };
  */
 export type AssetPushChunk = { id: string; offset: number; bytes: Uint8Array; last: boolean };
 
-export type AssetRequest = { id: string; requestId: Uint8Array };
+export type AssetRequest = { id: string; requestId: string };
 
 export type AuthorityClaim = { scope: CompanionAuthorityScope };
 
@@ -167,7 +171,7 @@ export type BridgeToGatewayLyricsMsg = { event: 'get'; data: LyricsRequest };
  *
  * these messages will pass over bluetooth.
  */
-export type BridgeToGatewayMsg = { id: Uint8Array; meta: MsgMeta; data: BridgeToGatewayMsgData };
+export type BridgeToGatewayMsg = { id: string; meta: MsgMeta; data: BridgeToGatewayMsgData };
 
 export type BridgeToGatewayMsgData =
   | { type: 'version'; data: BridgeThingMeta }
@@ -241,7 +245,9 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
   | { event: 'otaError'; data: OtaError }
   | { event: 'otaBeginAck'; data: OtaBeginAck }
-  | { event: 'otaBeginRejected'; data: OtaBeginRejected };
+  | { event: 'otaBeginRejected'; data: OtaBeginRejected }
+  | { event: 'otaAssetRange'; data: OtaAssetRange }
+  | { event: 'otaAssetRangeAbandon'; data: OtaAssetRangeAbandon };
 
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
@@ -369,7 +375,7 @@ export type GatewayToBridgeLyricsMsg =
  *
  * these messages will pass over bluetooth.
  */
-export type GatewayToBridgeMsg = { id: Uint8Array; meta: MsgMeta; data: GatewayToBridgeMsgData };
+export type GatewayToBridgeMsg = { id: string; meta: MsgMeta; data: GatewayToBridgeMsgData };
 
 export type GatewayToBridgeMsgData =
   | { type: 'asset'; data: GatewayToBridgeAssetMsg }
@@ -434,7 +440,10 @@ export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
   | { event: 'otaChunk'; data: OtaChunk }
   | { event: 'otaAbandon'; data: OtaAbandon }
-  | { event: 'cancelUpdate' };
+  | { event: 'cancelUpdate' }
+  | { event: 'otaAssetRangeReply'; data: OtaAssetRangeReply }
+  | { event: 'otaAssetRangeRejected'; data: OtaAssetRangeRejected }
+  | { event: 'otaAssetRangeChunk'; data: OtaAssetRangeChunk };
 
 /**
  * Companion-driven time surface. Companion sends `Snapshot` at announce
@@ -534,22 +543,22 @@ export type NetFetchReply = { response: NetFetchResponse };
 
 export type NetFetchRequestMsg = { request: NetFetchRequest };
 
-export type NetStreamCancel = { streamId: Uint8Array };
+export type NetStreamCancel = { streamId: string };
 
-export type NetStreamOpen = { streamId: Uint8Array; request: NetFetchRequest };
+export type NetStreamOpen = { streamId: string; request: NetFetchRequest };
 
-export type NetWsClose = { connectionId: Uint8Array; code: number | null; reason: string | null };
+export type NetWsClose = { connectionId: string; code: number | null; reason: string | null };
 
-export type NetWsClosed = { connectionId: Uint8Array; code: number; reason: string };
+export type NetWsClosed = { connectionId: string; code: number; reason: string };
 
-export type NetWsErrorEvent = { connectionId: Uint8Array; error: WsError };
+export type NetWsErrorEvent = { connectionId: string; error: WsError };
 
 export type NetWsErrorReply = { error: WsError };
 
-export type NetWsMessage = { connectionId: Uint8Array; frame: WsFrame };
+export type NetWsMessage = { connectionId: string; frame: WsFrame };
 
 export type NetWsOpen = {
-  connectionId: Uint8Array;
+  connectionId: string;
   url: string;
   protocols: Array<string> | null;
   headers: Array<HttpHeader> | null;
@@ -557,7 +566,7 @@ export type NetWsOpen = {
 
 export type NetWsOpenReply = { acceptedProtocol: string | null };
 
-export type NetWsSend = { connectionId: Uint8Array; frame: WsFrame };
+export type NetWsSend = { connectionId: string; frame: WsFrame };
 
 export type NotificationInvoke = { id: string };
 
@@ -571,6 +580,58 @@ export type NotificationRemoved = { id: string; reason: DismissReason };
 export type OtaAbandon = { updateId: string };
 
 /**
+ * Daemon asks the pinned companion to serve byte ranges from an asset
+ * it should have cached (and can refetch from `OtaBegin.update_url_base`
+ * on cache miss). Triggered by an inbound HTTP-Range request from
+ * libswupdate's delta downloader hitting the daemon's loopback proxy.
+ * `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+ */
+export type OtaAssetRange = { updateId: string; asset: string; ranges: Array<RangeSpec> };
+
+/**
+ * Daemon-side cancel for an in-flight range request: libcurl gave up
+ * (timeout, OTA failed, daemon is shutting down). Companion stops
+ * sending `OtaAssetRangeChunk` events for `request_id` and frees any
+ * resources it held open.
+ */
+export type OtaAssetRangeAbandon = { requestId: string };
+
+/**
+ * Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
+ * the Bulk lane in order: parts in declaration order, chunks in
+ * ascending `offset`. `offset` is absolute within the asset, not
+ * within the part — matches what the daemon's HTTP-Range writer needs
+ * to feed libcurl. `last:true` only on the final chunk of the final
+ * part for this `request_id`.
+ */
+export type OtaAssetRangeChunk = {
+  requestId: string;
+  partIndex: number;
+  offset: number;
+  bytes: Uint8Array;
+  last: boolean;
+};
+
+/**
+ * Domain-error response to `OtaAssetRange`: the companion can't serve
+ * the requested ranges (asset unknown for this `update_id`, refetch
+ * from `update_url_base` failed, sha mismatch on refetched asset, etc).
+ * The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
+ * the running OTA fails.
+ */
+export type OtaAssetRangeRejected = { reason: string };
+
+/**
+ * Successful response to `OtaAssetRange`. The companion has the asset
+ * (or refetched it from `update_url_base`) and is about to stream the
+ * requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
+ * `parts` echoes the resolved ranges in the order they will be sent;
+ * `total_size` is the asset's full byte length (for `Content-Range`
+ * totals).
+ */
+export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart> };
+
+/**
  * Companion-initiated OTA: opens or resumes a streaming push of a
  * `.swu` artifact identified by its sha256. The daemon responds with
  * `OtaBeginAck { resume_from_offset }` (the byte offset the next
@@ -581,8 +642,14 @@ export type OtaAbandon = { updateId: string };
  * `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
  * so resume across daemon restarts and retries-after-failure both work
  * without companion-side state to track.
+ *
+ * `update_url_base` is the server prefix the companion may refetch
+ * the .zck delta from on cache miss, e.g.
+ * `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
+ * fetch from it — it's carried so the companion can self-recover its
+ * cache while serving range requests during the Writing phase.
  */
-export type OtaBegin = { updateId: string; manifestUrl: string | null; expectedSha256: string; expectedSize: number };
+export type OtaBegin = { updateId: string; updateUrlBase: string | null; expectedSha256: string; expectedSize: number };
 
 /**
  * Successful response to `OtaBegin`. `resume_from_offset` is the byte
@@ -607,39 +674,6 @@ export type OtaBeginRejected = { reason: string };
  * phase progress events.
  */
 export type OtaChunk = { updateId: string; offset: number; bytes: Uint8Array; last: boolean };
-
-export type OtaError = { code: OtaErrorCode; msg: string };
-
-/**
- * Terminal error from the OTA orchestrator. After an `OtaError` the
- * orchestrator is back to idle and a fresh `OtaBegin` may be sent.
- */
-export type OtaErrorCode =
-  | 'unknownUpdate'
-  | 'offsetMismatch'
-  | 'hashMismatch'
-  | 'sizeMismatch'
-  | 'cancelled'
-  | 'writeFailed'
-  | 'confirmFailed'
-  | 'internal';
-
-/**
- * Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
- * push of the `.swu` from companion to daemon-disk; `Verifying` runs
- * the post-stream sha256 + size check; `Writing` streams the on-disk
- * `.swu` to libswupdate; `Confirming` flips slot try-counter state;
- * `Reboot` is the terminal stage emitted just before the daemon
- * triggers the reboot.
- */
-export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
-
-/**
- * Per-phase progress tick. `percent` is 0-100 within the current
- * phase, not the overall flow. `eta_ms` is best-effort remaining time
- * for the phase when the orchestrator can compute it.
- */
-export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
 
 export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
 
@@ -733,23 +767,23 @@ export type TrackIdentity = {
  * `TtsStarted`/`TtsEnded` events. `voice` selects from
  * `AudioCapabilities.voices`; `None` uses the gateway's default.
  */
-export type Tts = { id: Uint8Array; text: string; voice: string | null };
+export type Tts = { id: string; text: string; voice: string | null };
 
-export type TtsCancel = { id: Uint8Array };
+export type TtsCancel = { id: string };
 
 /**
  * Fired when the TTS request finished. `completed` is true when the
  * full text was spoken; false when preempted, cancelled, or the
  * companion dropped it.
  */
-export type TtsEnded = { id: Uint8Array; completed: boolean };
+export type TtsEnded = { id: string; completed: boolean };
 
 /**
  * Fired when the companion has begun speaking the TTS request with this
  * id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
  * before speech started); webapps should treat both as best-effort.
  */
-export type TtsStarted = { id: Uint8Array };
+export type TtsStarted = { id: string };
 
 export type TunnelErrorReply = { error: TunnelError };
 
@@ -772,7 +806,7 @@ export type VoiceFormat = { sampleRateHz: number; channels: number; bitsPerSampl
  * from 0; gaps mean the daemon dropped frames under backpressure and
  * the companion should treat them as silence rather than retransmit.
  */
-export type VoiceFrame = { streamId: Uint8Array; seq: number; pcm: Uint8Array };
+export type VoiceFrame = { streamId: string; seq: number; pcm: Uint8Array };
 
 /**
  * Why the gateway is opening the mic. The daemon currently treats every
@@ -784,14 +818,14 @@ export type VoiceIntent = 'pushToTalk' | 'assistant' | 'wakeWord';
 
 export type VoiceMicOpen = { intent: VoiceIntent };
 
-export type VoiceStreamClose = { streamId: Uint8Array; reason: VoiceCloseReason };
+export type VoiceStreamClose = { streamId: string; reason: VoiceCloseReason };
 
 /**
  * Daemon opens a capture session. The companion is expected to begin
  * consuming `Frame`s with the same `stream_id` until a `StreamClose`
  * for that id arrives.
  */
-export type VoiceStreamOpen = { streamId: Uint8Array; format: VoiceFormat };
+export type VoiceStreamOpen = { streamId: string; format: VoiceFormat };
 
 /**
  * Volume / mute snapshot. Fired on any change to either; webapps treat

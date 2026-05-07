@@ -24,9 +24,9 @@ public actor NetDispatcher {
     private var streamCancelTask: Task<Void, Never>?
 
     #if canImport(Darwin)
-        private var wsConnections: [Data: URLSessionWebSocketTask] = [:]
-        private var wsReceiveLoops: [Data: Task<Void, Never>] = [:]
-        private var streams: [Data: Task<Void, Never>] = [:]
+        private var wsConnections: [UUID: URLSessionWebSocketTask] = [:]
+        private var wsReceiveLoops: [UUID: Task<Void, Never>] = [:]
+        private var streams: [UUID: Task<Void, Never>] = [:]
     #endif
 
     public init(urlSession: URLSession = .shared) {
@@ -156,7 +156,7 @@ public actor NetDispatcher {
     }
 
     #if canImport(Darwin)
-        private func runWsReceive(connId: Data, task: URLSessionWebSocketTask, gateway: BridgethingGateway) async {
+        private func runWsReceive(connId: UUID, task: URLSessionWebSocketTask, gateway: BridgethingGateway) async {
             while !Task.isCancelled {
                 do {
                     let message = try await task.receive()
@@ -179,7 +179,7 @@ public actor NetDispatcher {
         }
     #endif
 
-    private func handleWsClose(connectionId: Data, code: UInt16?, reason: String?) async {
+    private func handleWsClose(connectionId: UUID, code: UInt16?, reason: String?) async {
         #if canImport(Darwin)
             guard let task = wsConnections[connectionId] else { return }
             let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: Int(code ?? 1000)) ?? .normalClosure
@@ -188,7 +188,7 @@ public actor NetDispatcher {
         #endif
     }
 
-    private func handleWsSend(connectionId: Data, frame: WsFrame) async {
+    private func handleWsSend(connectionId: UUID, frame: WsFrame) async {
         #if canImport(Darwin)
             guard let task = wsConnections[connectionId] else { return }
             let message: URLSessionWebSocketTask.Message = switch frame {
@@ -200,7 +200,7 @@ public actor NetDispatcher {
     }
 
     #if canImport(Darwin)
-        private func closeWs(connId: Data) async {
+        private func closeWs(connId: UUID) async {
             wsConnections.removeValue(forKey: connId)
             wsReceiveLoops.removeValue(forKey: connId)?.cancel()
         }
@@ -208,7 +208,7 @@ public actor NetDispatcher {
 
     // MARK: - Stream
 
-    private func handleStreamOpen(streamId: Data, req: NetFetchRequest, gateway: BridgethingGateway) async {
+    private func handleStreamOpen(streamId: UUID, req: NetFetchRequest, gateway: BridgethingGateway) async {
         #if canImport(Darwin)
             let session = urlSession
             let task = Task { [weak self] in
@@ -223,7 +223,7 @@ public actor NetDispatcher {
     }
 
     #if canImport(Darwin)
-        private func runStream(streamId: Data, req: NetFetchRequest, session: URLSession, gateway: BridgethingGateway) async {
+        private func runStream(streamId: UUID, req: NetFetchRequest, session: URLSession, gateway: BridgethingGateway) async {
             guard let url = URL(string: req.url) else {
                 try? await gateway.net.streamError(StreamError(
                     streamId: streamId, error: .requestFailed(.init(reason: "invalid url"))
@@ -281,12 +281,12 @@ public actor NetDispatcher {
             await streamFinished(id: streamId)
         }
 
-        private func streamFinished(id: Data) async {
+        private func streamFinished(id: UUID) async {
             streams.removeValue(forKey: id)
         }
     #endif
 
-    private func handleStreamCancel(streamId: Data) async {
+    private func handleStreamCancel(streamId: UUID) async {
         #if canImport(Darwin)
             if let task = streams[streamId] {
                 task.cancel()

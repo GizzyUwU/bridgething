@@ -1,6 +1,6 @@
 use libbridgething::gateway::{
   GatewayToBridgeSystemMsgCommand, GatewayToBridgeSystemMsgEvent, GatewayToBridgeSystemMsgRequest, OtaAbandon,
-  OtaBegin, OtaChunk,
+  OtaAssetRangeChunk, OtaBegin, OtaChunk,
 };
 
 use super::handle::MsgHandle;
@@ -27,6 +27,7 @@ impl SystemHandler {
   pub async fn handle_event(self, ev: GatewayToBridgeSystemMsgEvent) -> HandlerResult {
     match ev {
       GatewayToBridgeSystemMsgEvent::OtaChunk(chunk) => self.ota_chunk(chunk).await,
+      GatewayToBridgeSystemMsgEvent::OtaAssetRangeChunk(chunk) => self.ota_asset_range_chunk(chunk).await,
     }
   }
 
@@ -73,6 +74,20 @@ impl SystemHandler {
   async fn cancel_update(self) -> HandlerResult {
     tracing::info!("({:?}) CancelUpdate received", &self.handle.address);
     self.ota.cancel().await;
+    Ok(())
+  }
+
+  async fn ota_asset_range_chunk(self, chunk: OtaAssetRangeChunk) -> HandlerResult {
+    tracing::trace!(
+      "({:?}) OtaAssetRangeChunk request_id={} part={} offset={} len={} last={}",
+      &self.handle.address,
+      chunk.request_id,
+      chunk.part_index,
+      chunk.offset,
+      chunk.bytes.len(),
+      chunk.last,
+    );
+    self.ota.asset_range_chunk(chunk).await;
     Ok(())
   }
 }

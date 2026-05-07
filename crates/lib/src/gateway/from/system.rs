@@ -3,6 +3,9 @@ use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
+use uuid::Uuid;
+
+use crate::RangePart;
 
 /// Companion-initiated OTA: opens or resumes a streaming push of a
 /// `.swu` artifact identified by its sha256. The daemon responds with
@@ -14,6 +17,12 @@ use typeshare::typeshare;
 /// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
 /// so resume across daemon restarts and retries-after-failure both work
 /// without companion-side state to track.
+///
+/// `update_url_base` is the server prefix the companion may refetch
+/// the .zck delta from on cache miss, e.g.
+/// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
+/// fetch from it — it's carried so the companion can self-recover its
+/// cache while serving range requests during the Writing phase.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -30,7 +39,7 @@ use typeshare::typeshare;
 )]
 pub struct OtaBegin {
   pub update_id: String,
-  pub manifest_url: Option<String>,
+  pub update_url_base: Option<String>,
   pub expected_sha256: String,
   pub expected_size: u32,
 }
@@ -69,6 +78,61 @@ pub struct OtaAbandon {
   pub update_id: String,
 }
 
+/// Successful response to `OtaAssetRange`. The companion has the asset
+/// (or refetched it from `update_url_base`) and is about to stream the
+/// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
+/// `parts` echoes the resolved ranges in the order they will be sent;
+/// `total_size` is the asset's full byte length (for `Content-Range`
+/// totals).
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaAssetRangeReply {
+  pub total_size: u32,
+  pub parts: Vec<RangePart>,
+}
+
+/// Domain-error response to `OtaAssetRange`: the companion can't serve
+/// the requested ranges (asset unknown for this `update_id`, refetch
+/// from `update_url_base` failed, sha mismatch on refetched asset, etc).
+/// The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
+/// the running OTA fails.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaAssetRangeRejected {
+  pub reason: String,
+}
+
+/// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
+/// the Bulk lane in order: parts in declaration order, chunks in
+/// ascending `offset`. `offset` is absolute within the asset, not
+/// within the part — matches what the daemon's HTTP-Range writer needs
+/// to feed libcurl. `last:true` only on the final chunk of the final
+/// part for this `request_id`.
+#[typeshare]
+#[serde_with::serde_as]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaAssetRangeChunk {
+  #[ts(type = "string")]
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub request_id: Uuid,
+  pub part_index: u32,
+  pub offset: u32,
+  #[debug(skip)]
+  #[serde_as(as = "serde_with::Bytes")]
+  #[ts(type = "Uint8Array")]
+  pub bytes: Vec<u8>,
+  pub last: bool,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -84,4 +148,10 @@ pub enum GatewayToBridgeSystemMsg {
   OtaAbandon(OtaAbandon),
   #[bridge_command]
   CancelUpdate,
+  #[bridge_response]
+  OtaAssetRangeReply(OtaAssetRangeReply),
+  #[bridge_response]
+  OtaAssetRangeRejected(OtaAssetRangeRejected),
+  #[bridge_event]
+  OtaAssetRangeChunk(OtaAssetRangeChunk),
 }

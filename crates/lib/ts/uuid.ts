@@ -8,9 +8,9 @@ export function uuidFromString(value: string): Uint8Array {
   return parse(value);
 }
 
-/** Time-ordered UUIDv7 as 16 bytes; matches the daemon's `Uuid::now_v7()`. */
-export function newUuidBytes(): Uint8Array {
-  return parse(v7());
+/** Time-ordered UUIDv7 as a hyphenated string; matches the daemon's `Uuid::now_v7()`. */
+export function newUuid(): string {
+  return v7();
 }
 
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {

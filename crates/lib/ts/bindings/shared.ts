@@ -516,6 +516,39 @@ export type NumberField = {
   default: number | null;
 };
 
+export type OtaError = { code: OtaErrorCode; msg: string };
+
+/**
+ * Terminal error from the OTA orchestrator. After an `OtaError` the
+ * orchestrator is back to idle and a fresh `OtaBegin` may be sent.
+ */
+export type OtaErrorCode =
+  | 'unknownUpdate'
+  | 'offsetMismatch'
+  | 'hashMismatch'
+  | 'sizeMismatch'
+  | 'cancelled'
+  | 'writeFailed'
+  | 'confirmFailed'
+  | 'internal';
+
+/**
+ * Stage of the OTA orchestrator. `Streaming` covers the chunk-by-chunk
+ * push of the `.swu` from companion to daemon-disk; `Verifying` runs
+ * the post-stream sha256 + size check; `Writing` streams the on-disk
+ * `.swu` to libswupdate; `Confirming` flips slot try-counter state;
+ * `Reboot` is the terminal stage emitted just before the daemon
+ * triggers the reboot.
+ */
+export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
+
+/**
+ * Per-phase progress tick. `percent` is 0-100 within the current
+ * phase, not the overall flow. `eta_ms` is best-effort remaining time
+ * for the phase when the orchestrator can compute it.
+ */
+export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
+
 export type Peer = {
   device: Device;
   paired: boolean;
@@ -762,6 +795,23 @@ export type QueueItem = {
  * goes at the end; `Next` is play-next; `Index` is an explicit position.
  */
 export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'index'; data: number };
+
+/**
+ * Resolved range the companion is about to stream. `start` and `length`
+ * echo the corresponding `RangeSpec`; the bytes follow as
+ * `OtaAssetRangeChunk` events on the Bulk lane.
+ */
+export type RangePart = { start: number; length: number };
+
+/**
+ * Half-open byte range the daemon's range proxy asks the companion
+ * to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
+ * inclusive, `length` bytes. Up to 10 ranges per `OtaAssetRange`
+ * matches libswupdate's `DEFAULT_MAX_RANGES`. Offsets are u32 because
+ * OTA artifacts are bounded at 4 GiB end-to-end (matches
+ * `OtaBegin.expected_size`).
+ */
+export type RangeSpec = { start: number; length: number };
 
 /**
  * Page of recommendation results. Gateway decides how seed + kind

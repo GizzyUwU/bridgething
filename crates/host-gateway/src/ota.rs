@@ -12,9 +12,10 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use libbridgething::{
+  OtaPhase,
   gateway::{
     BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, GatewayToBridgeMsgData, GatewayToBridgeSystemMsg, OtaBegin,
-    OtaChunk, OtaPhase,
+    OtaChunk,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
@@ -31,7 +32,7 @@ pub async fn run_push_update(
   chaos: ChaosConfig,
   chunk_size: usize,
   swu: PathBuf,
-  manifest_url: Option<String>,
+  update_url_base: Option<String>,
   _asset_id_override: Option<String>,
 ) -> Result<()> {
   let metadata = tokio::fs::metadata(&swu)
@@ -49,7 +50,7 @@ pub async fn run_push_update(
   tracing::info!("opening OtaBegin");
   let begin = OtaBegin {
     update_id: sha256.clone(),
-    manifest_url,
+    update_url_base,
     expected_sha256: sha256.clone(),
     expected_size: size,
   };

@@ -13,7 +13,7 @@ mod ffi;
 
 use std::path::Path;
 
-use libbridgething::gateway::OtaPhase;
+use libbridgething::OtaPhase;
 use tokio::sync::watch;
 
 /// `software_set` + `running_mode` selector libswupdate hands to the

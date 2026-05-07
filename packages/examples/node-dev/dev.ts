@@ -6,7 +6,7 @@ import {
   LIB_VERSION,
   LIBBRIDGETHING_VERSION,
   LogLevel,
-  newUuidBytes,
+  newUuid,
 } from '@bridgething/lib';
 import { sleep } from 'bun';
 
@@ -16,7 +16,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
   switch (msg.data.type) {
     case 'version':
       await gateway.send(deviceId, {
-        id: newUuidBytes(),
+        id: newUuid(),
         meta: { kind: 'event' },
         data: { type: 'version', data: makeGatewayMeta() },
       });
@@ -35,7 +35,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
         case 'text':
           console.log('>> got forwarded text:', forward.data);
           await gateway.send(deviceId, {
-            id: newUuidBytes(),
+            id: newUuid(),
             meta: { kind: 'event' },
             data: {
               type: 'forward',
@@ -46,7 +46,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
         case 'json':
           console.log('>> got forwarded json:', forward.data);
           await gateway.send(deviceId, {
-            id: newUuidBytes(),
+            id: newUuid(),
             meta: { kind: 'event' },
             data: {
               type: 'forward',
@@ -57,7 +57,7 @@ const handleMessage = async (deviceId: string, msg: BridgeToGatewayMsg) => {
         case 'binary':
           console.log('>> got forwarded binary:', forward.data);
           await gateway.send(deviceId, {
-            id: newUuidBytes(),
+            id: newUuid(),
             meta: { kind: 'event' },
             data: {
               type: 'forward',
@@ -111,7 +111,7 @@ const pushAssets = async (deviceId: string) => {
 const sendNavigate = async (deviceId: string) => {
   console.log('>> navigating to index.html');
   await gateway.send(deviceId, {
-    id: newUuidBytes(),
+    id: newUuid(),
     meta: { kind: 'command' },
     data: {
       type: 'chrome',

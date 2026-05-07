@@ -31,7 +31,7 @@ pub struct SetMute {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct Tts {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
   pub text: String,
@@ -43,7 +43,7 @@ pub struct Tts {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct TtsCancel {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub id: Uuid,
 }

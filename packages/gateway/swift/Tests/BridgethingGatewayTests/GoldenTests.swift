@@ -30,7 +30,7 @@ final class GoldenTests: XCTestCase {
     switch fixture.direction {
     case .bridgeToGateway:
       let decoded = try codec.decode(BridgeToGatewayMsg.self, from: frame)
-      XCTAssertEqual(UUID(data: decoded.id), fixedID, "id mismatch on \(fixture.name)")
+      XCTAssertEqual(decoded.id, fixedID, "id mismatch on \(fixture.name)")
       try assertMetaMatches(decoded.meta, fixture: fixture)
 
       let reEncoded = try codec.encode(decoded, priority: fixture.priority)
@@ -41,7 +41,7 @@ final class GoldenTests: XCTestCase {
 
     case .gatewayToBridge:
       let decoded = try codec.decode(GatewayToBridgeMsg.self, from: frame)
-      XCTAssertEqual(UUID(data: decoded.id), fixedID, "id mismatch on \(fixture.name)")
+      XCTAssertEqual(decoded.id, fixedID, "id mismatch on \(fixture.name)")
       try assertMetaMatches(decoded.meta, fixture: fixture)
 
       let reEncoded = try codec.encode(decoded, priority: fixture.priority)
@@ -59,7 +59,7 @@ final class GoldenTests: XCTestCase {
       break
     case let (.response(payload), "response"):
       XCTAssertEqual(
-        UUID(data: payload.requestId), fixedRequestID,
+        payload.requestId, fixedRequestID,
         "requestId mismatch on \(fixture.name)"
       )
     default:
@@ -119,15 +119,15 @@ final class GoldenTests: XCTestCase {
   func testGzipFrameRoundTrip() throws {
     let codec = Codec(compression: .gzip, encoding: .msgpack)
     let original = BridgeToGatewayMsg(
-      id: fixedID.data,
-      meta: .response(ResponseMeta(requestId: fixedRequestID.data)),
+      id: fixedID,
+      meta: .response(ResponseMeta(requestId: fixedRequestID)),
       data: .ack
     )
     let frame = try codec.encode(original)
     let decoded = try codec.decode(BridgeToGatewayMsg.self, from: frame)
     XCTAssertEqual(decoded.id, original.id)
     if case let .response(r) = decoded.meta {
-      XCTAssertEqual(r.requestId, fixedRequestID.data)
+      XCTAssertEqual(r.requestId, fixedRequestID)
     } else {
       XCTFail("expected .response meta, got \(decoded.meta)")
     }

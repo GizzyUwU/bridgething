@@ -61,10 +61,11 @@ enum Command {
     /// Path to the `.swu`. Relative paths resolve against `--fixture`
     /// when set, otherwise CWD.
     swu: PathBuf,
-    /// Optional manifest URL to record in `OtaBegin.manifest_url`
-    /// (telemetry only - the daemon does not fetch).
+    /// Optional update-URL base recorded in `OtaBegin.update_url_base`
+    /// (server prefix the companion may refetch the .zck delta from on
+    /// cache miss; daemon does not fetch).
     #[arg(long)]
-    manifest_url: Option<String>,
+    update_url_base: Option<String>,
   },
   /// Send `WebappSwitchTo` to flip the kiosk's active webapp. The
   /// daemon rescans `/var/bridgething/webapps/` if the id is unknown,
@@ -88,9 +89,9 @@ async fn main() -> anyhow::Result<()> {
 
   match cli.cmd {
     Command::Connect => conn::run_connect(&cli.url, chaos).await,
-    Command::PushUpdate { swu, manifest_url } => {
+    Command::PushUpdate { swu, update_url_base } => {
       let path = resolve_path(cli.fixture.as_deref(), &swu);
-      ota::run_push_update(&cli.url, chaos, cli.chunk_size, path, manifest_url, None).await
+      ota::run_push_update(&cli.url, chaos, cli.chunk_size, path, update_url_base, None).await
     }
     Command::SwitchWebapp { id } => webapp::run_switch(&cli.url, chaos, id).await,
   }

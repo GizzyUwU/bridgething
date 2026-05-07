@@ -36,7 +36,7 @@ final class GatewayTests: XCTestCase {
     adapter.simulate(.connected(testDevice))
 
     let original = BridgeToGatewayMsg(
-      id: UUID().data,
+      id: UUID(),
       meta: .event,
       data: .forward(.text("hello, gateway"))
     )
@@ -66,7 +66,7 @@ final class GatewayTests: XCTestCase {
     adapter.simulate(.connected(testDevice))
 
     let original = BridgeToGatewayMsg(
-      id: UUID().data,
+      id: UUID(),
       meta: .command,
       data: .ack
     )
@@ -91,7 +91,7 @@ final class GatewayTests: XCTestCase {
     try await gateway.start()
 
     let outbound = GatewayToBridgeMsg(
-      id: UUID().data,
+      id: UUID(),
       meta: .command,
       data: .webapp(.list)
     )
@@ -131,7 +131,7 @@ final class GatewayTests: XCTestCase {
     }
 
     let response = BridgeToGatewayMsg(
-      id: UUID().data,
+      id: UUID(),
       meta: .response(ResponseMeta(requestId: request.id)),
       data: .ack
     )

@@ -227,7 +227,9 @@ impl From<BridgeToClientSystemMsg> for StockSendMsg {
       BridgeToClientSystemMsg::DiagnosticsReply(_)
       | BridgeToClientSystemMsg::LogsTailReply(_)
       | BridgeToClientSystemMsg::LogsSubscribeReply(_)
-      | BridgeToClientSystemMsg::LogEntry(_) => StockSendMsg::Unsupported,
+      | BridgeToClientSystemMsg::LogEntry(_)
+      | BridgeToClientSystemMsg::OtaProgress(_)
+      | BridgeToClientSystemMsg::OtaError(_) => StockSendMsg::Unsupported,
     }
   }
 }

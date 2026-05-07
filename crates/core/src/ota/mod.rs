@@ -31,9 +31,9 @@ mod swupdate;
 
 use std::{path::PathBuf, sync::Arc};
 
-use libbridgething::gateway::{
-  BridgeToGatewaySystemMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk, OtaError, OtaErrorCode, OtaPhase,
-  OtaProgress,
+use libbridgething::{
+  OtaError, OtaErrorCode, OtaPhase, OtaProgress,
+  gateway::{BridgeToGatewaySystemMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk},
 };
 use tokio::{
   sync::{mpsc, oneshot, watch},
@@ -120,6 +120,16 @@ impl OtaOrchestrator {
     if let Err(err) = self.cmd_tx.send(Command::Cancel).await {
       tracing::error!(?err, "ota orchestrator mailbox closed; dropping CancelUpdate");
     }
+  }
+
+  pub async fn asset_range_chunk(&self, chunk: libbridgething::gateway::OtaAssetRangeChunk) {
+    tracing::warn!(
+      request_id = %chunk.request_id,
+      part = chunk.part_index,
+      offset = chunk.offset,
+      len = chunk.bytes.len(),
+      "OtaAssetRangeChunk arrived but range proxy is not yet wired; dropping",
+    );
   }
 }
 
@@ -516,7 +526,7 @@ mod tests {
       .ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size,
       })
@@ -551,7 +561,7 @@ mod tests {
     h.ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size + 1,
       })
@@ -585,7 +595,7 @@ mod tests {
     h.ota
       .begin(OtaBegin {
         update_id: bogus_sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: bogus_sha.clone(),
         expected_size: size,
       })
@@ -617,7 +627,7 @@ mod tests {
     h.ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size,
       })
@@ -637,7 +647,7 @@ mod tests {
       .ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size,
       })
@@ -669,7 +679,7 @@ mod tests {
     h.ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size,
       })
@@ -694,7 +704,7 @@ mod tests {
       .ota
       .begin(OtaBegin {
         update_id: "deadbeef".repeat(8),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: "deadbeef".repeat(8),
         expected_size: 32,
       })
@@ -710,7 +720,7 @@ mod tests {
     h.ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha.clone(),
         expected_size: size,
       })
@@ -729,7 +739,7 @@ mod tests {
       .ota
       .begin(OtaBegin {
         update_id: sha.clone(),
-        manifest_url: None,
+        update_url_base: None,
         expected_sha256: sha,
         expected_size: size,
       })

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use libbridgething::gateway::OtaPhase;
+use libbridgething::OtaPhase;
 use tokio::{sync::watch, time::Duration};
 
 use super::Error;

@@ -98,8 +98,9 @@ public data class FrameHeader(
  * Encode: `T` → msgpack/json (encoding) → gzip/raw (compression) → 16-byte header + body.
  * Decode: header → body → gunzip/raw → msgpack/json → `T`.
  *
- * UUID fields on the wire are 16-byte msgpack `bin` (`ByteArray` in the schema).
- * Use [uuidFromBytes] / [uuidToBytes] to translate at field boundaries.
+ * UUID fields on the wire are 16-byte msgpack `bin`. The schema-generated
+ * types expose them as `java.util.UUID`; `MsgpackUuidSerializer` in the
+ * schema package bridges the bin shape via `@Serializable(with = ...)`.
  */
 public class Codec(
   public val defaultCompression: Compression = Compression.NONE,

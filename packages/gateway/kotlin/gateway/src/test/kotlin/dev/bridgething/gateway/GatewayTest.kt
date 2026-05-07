@@ -3,7 +3,7 @@ package dev.bridgething.gateway
 import dev.bridgething.schema.BridgeToGatewayMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.ForwardMessage
-import dev.bridgething.schema.GatewayMsgMeta
+import dev.bridgething.schema.MsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.GatewayToBridgeWebappMsg
@@ -49,8 +49,8 @@ class GatewayTest {
     gateway.start()
 
     val original = BridgeToGatewayMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Event,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
       data = BridgeToGatewayMsgData.Forward(ForwardMessage.Text("hello, gateway")),
     )
     val frame = codec.encode(BridgeToGatewayMsg.serializer(), original)
@@ -63,7 +63,7 @@ class GatewayTest {
     assertTrue(received[0] is GatewayEvent.Connected)
     val msgEvent = received[1] as GatewayEvent.Message
     assertEquals(testDevice.id, msgEvent.deviceId)
-    assertArrayEquals(original.id, msgEvent.message.id)
+    assertEquals(original.id, msgEvent.message.id)
     val forward = (msgEvent.message.data as BridgeToGatewayMsgData.Forward).data as ForwardMessage.Text
     assertEquals("hello, gateway", forward.data)
 
@@ -77,8 +77,8 @@ class GatewayTest {
     gateway.start()
 
     val original = BridgeToGatewayMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = BridgeToGatewayMsgData.Ack,
     )
     val frame = codec.encode(BridgeToGatewayMsg.serializer(), original)
@@ -90,7 +90,7 @@ class GatewayTest {
 
     val received = withTimeout(2.seconds) { gateway.events.take(2).toList() }
     val msgEvent = received[1] as GatewayEvent.Message
-    assertArrayEquals(original.id, msgEvent.message.id)
+    assertEquals(original.id, msgEvent.message.id)
 
     gateway.stop()
   }
@@ -102,8 +102,8 @@ class GatewayTest {
     gateway.start()
 
     val outbound = GatewayToBridgeMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Command,
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List),
     )
     gateway.send(testDevice.id, outbound)
@@ -111,7 +111,7 @@ class GatewayTest {
     val (deviceId, sentFrame) = withTimeout(2.seconds) { adapter.sentFrames.receive() }
     assertEquals(testDevice.id, deviceId)
     val decoded = codec.decode(GatewayToBridgeMsg.serializer(), sentFrame)
-    assertArrayEquals(outbound.id, decoded.id)
+    assertEquals(outbound.id, decoded.id)
 
     gateway.stop()
   }
@@ -133,11 +133,11 @@ class GatewayTest {
     val (sentDevice, sentFrame) = withTimeout(2.seconds) { adapter.sentFrames.receive() }
     assertEquals(testDevice.id, sentDevice)
     val request = codec.decode(GatewayToBridgeMsg.serializer(), sentFrame)
-    assertTrue(request.meta is GatewayMsgMeta.Request)
+    assertTrue(request.meta is MsgMeta.Request)
 
     val response = BridgeToGatewayMsg(
-      id = UUID.randomUUID().toBytes(),
-      meta = GatewayMsgMeta.Response(ResponseMeta(request.id)),
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(request.id)),
       data = BridgeToGatewayMsgData.Ack,
     )
     adapter.simulate(
@@ -145,8 +145,8 @@ class GatewayTest {
     )
 
     val result = pending.await()
-    val resp = result.meta as GatewayMsgMeta.Response
-    assertArrayEquals(request.id, resp.data.requestId)
+    val resp = result.meta as MsgMeta.Response
+    assertEquals(request.id, resp.data.requestId)
 
     gateway.stop()
   }

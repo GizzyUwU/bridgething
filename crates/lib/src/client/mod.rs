@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "client.ts")]
 pub struct ClientToBridgeMsg {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   pub id: Uuid,
   pub meta: MsgMeta,
   pub data: ClientToBridgeMsgData,
@@ -83,7 +83,7 @@ pub enum ClientToBridgeMsgData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "client.ts")]
 pub struct BridgeToClientMsg {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   pub id: Uuid,
   pub meta: MsgMeta,
   pub data: BridgeToClientMsgData,

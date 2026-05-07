@@ -17,9 +17,14 @@ const STOCK_DIR_NAME: &str = "stock";
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
 pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
 const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID, HUB_WEBAPP_ID];
+const DEV_SHADOW_NAMESPACE: Uuid = Uuid::from_u128(0x019759e0_dec0_5ade_8000_b71d6e7de5af);
 
 fn is_reserved(id: Uuid) -> bool {
   RESERVED_BUILTIN_IDS.contains(&id)
+}
+
+fn dev_shadow_id(reserved: Uuid) -> Uuid {
+  Uuid::new_v5(&DEV_SHADOW_NAMESPACE, reserved.as_bytes())
 }
 
 #[derive(Debug, Clone)]
@@ -75,17 +80,14 @@ impl WebappRegistry {
     }
     for path in scan_root(&self.installed_root).await {
       if let Some(bundle) = load_bundle(&path, WebappSource::Installed).await {
-        if is_reserved(bundle.manifest.id) {
-          tracing::warn!(
-            "installed bundle at {} claims reserved uuid {}; refusing to load",
-            bundle.path.display(),
-            bundle.manifest.id
-          );
-          continue;
-        }
+        let bundle = if is_reserved(bundle.manifest.id) {
+          remap_to_dev_shadow(bundle)
+        } else {
+          bundle
+        };
         if let Some(prev) = bundles.insert(bundle.manifest.id, bundle.clone()) {
           tracing::debug!(
-            "installed webapp '{}' shadows builtin at {}",
+            "installed webapp '{}' shadows existing entry at {}",
             bundle.path.display(),
             prev.path.display()
           );
@@ -185,13 +187,11 @@ impl WebappRegistry {
       }
     };
 
-    if is_reserved(bundle.manifest.id) {
-      let _ = fs::remove_dir_all(&staging).await;
-      return Err(InstallError::Validation(format!(
-        "manifest id {} is reserved for a system builtin",
-        bundle.manifest.id
-      )));
-    }
+    let bundle = if is_reserved(bundle.manifest.id) {
+      remap_to_dev_shadow(bundle)
+    } else {
+      bundle
+    };
 
     let final_dir_name = bundle.manifest.id.simple().to_string();
     let final_path = self.installed_root.join(&final_dir_name);
@@ -298,27 +298,27 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     return None;
   }
 
-  let manifest = match fs::read(path.join("manifest.json")).await {
-    Ok(bytes) => match serde_json::from_slice::<WebappManifest>(&bytes) {
-      Ok(m) => match validate_manifest(&m) {
-        Ok(()) => m,
+  let manifest = if dir_name == STOCK_DIR_NAME && matches!(source, WebappSource::Builtin) {
+    stock_manifest()
+  } else {
+    match fs::read(path.join("manifest.json")).await {
+      Ok(bytes) => match serde_json::from_slice::<WebappManifest>(&bytes) {
+        Ok(m) => match validate_manifest(&m) {
+          Ok(()) => m,
+          Err(e) => {
+            tracing::warn!("webapp '{dir_name}' manifest invalid ({e}); skipping");
+            return None;
+          }
+        },
         Err(e) => {
-          tracing::warn!("webapp '{dir_name}' manifest invalid ({e}); skipping");
+          tracing::warn!("webapp '{dir_name}' manifest.json failed to parse ({e}); skipping");
           return None;
         }
       },
-      Err(e) => {
-        tracing::warn!("webapp '{dir_name}' manifest.json failed to parse ({e}); skipping");
+      Err(_) => {
+        tracing::warn!("webapp '{dir_name}' has no manifest.json; skipping");
         return None;
       }
-    },
-    Err(_) if dir_name == STOCK_DIR_NAME && matches!(source, WebappSource::Builtin) => {
-      tracing::debug!("synthesizing manifest for the stock webapp (no manifest.json on disk)");
-      stock_manifest()
-    }
-    Err(_) => {
-      tracing::warn!("webapp '{dir_name}' has no manifest.json; skipping");
-      return None;
     }
   };
 
@@ -477,6 +477,26 @@ fn guess_mime_from_ext(name: &str) -> String {
     _ => "application/octet-stream",
   }
   .to_string()
+}
+
+fn remap_to_dev_shadow(bundle: WebappBundle) -> WebappBundle {
+  let original_id = bundle.manifest.id;
+  let shadow_id = dev_shadow_id(original_id);
+  let mut manifest = (*bundle.manifest).clone();
+  manifest.id = shadow_id;
+  if matches!(manifest.role, WebappRole::Launcher) {
+    manifest.role = WebappRole::Standard;
+  }
+  tracing::info!(
+    "installed bundle at {} claims reserved id {}; mapped to dev shadow {}",
+    bundle.path.display(),
+    original_id,
+    shadow_id,
+  );
+  WebappBundle {
+    manifest: Arc::new(manifest),
+    ..bundle
+  }
 }
 
 fn bundle_to_info(b: &WebappBundle) -> WebappInfo {

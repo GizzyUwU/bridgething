@@ -112,7 +112,7 @@ final class FrameAccumulatorTests: XCTestCase {
 
   private func makeAckFrame() throws -> Data {
     let msg = BridgeToGatewayMsg(
-      id: UUID().data,
+      id: UUID(),
       meta: .command,
       data: .ack
     )

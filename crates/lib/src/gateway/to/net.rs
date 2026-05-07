@@ -40,7 +40,7 @@ pub struct NetFetchRequestMsg {
   error_variant = WsErrorReply,
 )]
 pub struct NetWsOpen {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub url: String,
@@ -54,7 +54,7 @@ pub struct NetWsOpen {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsClose {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub code: Option<u16>,
@@ -66,7 +66,7 @@ pub struct NetWsClose {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsSend {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub frame: WsFrame,
@@ -77,7 +77,7 @@ pub struct NetWsSend {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetStreamOpen {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub request: NetFetchRequest,
@@ -88,7 +88,7 @@ pub struct NetStreamOpen {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetStreamCancel {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
 }

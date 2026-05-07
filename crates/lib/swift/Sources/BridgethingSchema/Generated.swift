@@ -209,9 +209,9 @@ public struct AssetPushChunk: Codable, Sendable {
 
 public struct AssetRequest: Codable, Sendable {
 	public let id: String
-	public let requestId: Data
+	@MsgpackUuid public var requestId: UUID
 
-	public init(id: String, requestId: Data) {
+	public init(id: String, requestId: UUID) {
 		self.id = id
 		self.requestId = requestId
 	}
@@ -608,11 +608,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 /// 
 /// these messages will pass over bluetooth.
 public struct BridgeToGatewayMsg: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let meta: MsgMeta
 	public let data: BridgeToGatewayMsgData
 
-	public init(id: Data, meta: MsgMeta, data: BridgeToGatewayMsgData) {
+	public init(id: UUID, meta: MsgMeta, data: BridgeToGatewayMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -1442,11 +1442,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 /// 
 /// these messages will pass over bluetooth.
 public struct GatewayToBridgeMsg: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let meta: MsgMeta
 	public let data: GatewayToBridgeMsgData
 
-	public init(id: Data, meta: MsgMeta, data: GatewayToBridgeMsgData) {
+	public init(id: UUID, meta: MsgMeta, data: GatewayToBridgeMsgData) {
 		self.id = id
 		self.meta = meta
 		self.data = data
@@ -2047,29 +2047,29 @@ public struct NetFetchRequestMsg: Codable, Sendable {
 }
 
 public struct NetStreamCancel: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 
-	public init(streamId: Data) {
+	public init(streamId: UUID) {
 		self.streamId = streamId
 	}
 }
 
 public struct NetStreamOpen: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let request: NetFetchRequest
 
-	public init(streamId: Data, request: NetFetchRequest) {
+	public init(streamId: UUID, request: NetFetchRequest) {
 		self.streamId = streamId
 		self.request = request
 	}
 }
 
 public struct NetWsClose: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let code: UInt16?
 	public let reason: String?
 
-	public init(connectionId: Data, code: UInt16?, reason: String?) {
+	public init(connectionId: UUID, code: UInt16?, reason: String?) {
 		self.connectionId = connectionId
 		self.code = code
 		self.reason = reason
@@ -2077,11 +2077,11 @@ public struct NetWsClose: Codable, Sendable {
 }
 
 public struct NetWsClosed: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let code: UInt16
 	public let reason: String
 
-	public init(connectionId: Data, code: UInt16, reason: String) {
+	public init(connectionId: UUID, code: UInt16, reason: String) {
 		self.connectionId = connectionId
 		self.code = code
 		self.reason = reason
@@ -2166,10 +2166,10 @@ public enum WsError: Codable, Sendable {
 }
 
 public struct NetWsErrorEvent: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let error: WsError
 
-	public init(connectionId: Data, error: WsError) {
+	public init(connectionId: UUID, error: WsError) {
 		self.connectionId = connectionId
 		self.error = error
 	}
@@ -2229,22 +2229,22 @@ public enum WsFrame: Codable, Sendable {
 }
 
 public struct NetWsMessage: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let frame: WsFrame
 
-	public init(connectionId: Data, frame: WsFrame) {
+	public init(connectionId: UUID, frame: WsFrame) {
 		self.connectionId = connectionId
 		self.frame = frame
 	}
 }
 
 public struct NetWsOpen: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let url: String
 	public let protocols: [String]?
 	public let headers: [HttpHeader]?
 
-	public init(connectionId: Data, url: String, protocols: [String]?, headers: [HttpHeader]?) {
+	public init(connectionId: UUID, url: String, protocols: [String]?, headers: [HttpHeader]?) {
 		self.connectionId = connectionId
 		self.url = url
 		self.protocols = protocols
@@ -2261,10 +2261,10 @@ public struct NetWsOpenReply: Codable, Sendable {
 }
 
 public struct NetWsSend: Codable, Sendable {
-	public let connectionId: Data
+	@MsgpackUuid public var connectionId: UUID
 	public let frame: WsFrame
 
-	public init(connectionId: Data, frame: WsFrame) {
+	public init(connectionId: UUID, frame: WsFrame) {
 		self.connectionId = connectionId
 		self.frame = frame
 	}
@@ -2493,6 +2493,115 @@ public struct OtaAbandon: Codable, Sendable {
 	}
 }
 
+/// Half-open byte range the daemon's range proxy asks the companion
+/// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
+/// inclusive, `length` bytes. Up to 10 ranges per `OtaAssetRange`
+/// matches libswupdate's `DEFAULT_MAX_RANGES`. Offsets are u32 because
+/// OTA artifacts are bounded at 4 GiB end-to-end (matches
+/// `OtaBegin.expected_size`).
+public struct RangeSpec: Codable, Sendable {
+	public let start: UInt32
+	public let length: UInt32
+
+	public init(start: UInt32, length: UInt32) {
+		self.start = start
+		self.length = length
+	}
+}
+
+/// Daemon asks the pinned companion to serve byte ranges from an asset
+/// it should have cached (and can refetch from `OtaBegin.update_url_base`
+/// on cache miss). Triggered by an inbound HTTP-Range request from
+/// libswupdate's delta downloader hitting the daemon's loopback proxy.
+/// `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+public struct OtaAssetRange: Codable, Sendable {
+	public let updateId: String
+	public let asset: String
+	public let ranges: [RangeSpec]
+
+	public init(updateId: String, asset: String, ranges: [RangeSpec]) {
+		self.updateId = updateId
+		self.asset = asset
+		self.ranges = ranges
+	}
+}
+
+/// Daemon-side cancel for an in-flight range request: libcurl gave up
+/// (timeout, OTA failed, daemon is shutting down). Companion stops
+/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
+/// resources it held open.
+public struct OtaAssetRangeAbandon: Codable, Sendable {
+	@MsgpackUuid public var requestId: UUID
+
+	public init(requestId: UUID) {
+		self.requestId = requestId
+	}
+}
+
+/// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
+/// the Bulk lane in order: parts in declaration order, chunks in
+/// ascending `offset`. `offset` is absolute within the asset, not
+/// within the part — matches what the daemon's HTTP-Range writer needs
+/// to feed libcurl. `last:true` only on the final chunk of the final
+/// part for this `request_id`.
+public struct OtaAssetRangeChunk: Codable, Sendable {
+	@MsgpackUuid public var requestId: UUID
+	public let partIndex: UInt32
+	public let offset: UInt32
+	public let bytes: Data
+	public let last: Bool
+
+	public init(requestId: UUID, partIndex: UInt32, offset: UInt32, bytes: Data, last: Bool) {
+		self.requestId = requestId
+		self.partIndex = partIndex
+		self.offset = offset
+		self.bytes = bytes
+		self.last = last
+	}
+}
+
+/// Domain-error response to `OtaAssetRange`: the companion can't serve
+/// the requested ranges (asset unknown for this `update_id`, refetch
+/// from `update_url_base` failed, sha mismatch on refetched asset, etc).
+/// The daemon surfaces this to libswupdate as a `502 Bad Gateway` and
+/// the running OTA fails.
+public struct OtaAssetRangeRejected: Codable, Sendable {
+	public let reason: String
+
+	public init(reason: String) {
+		self.reason = reason
+	}
+}
+
+/// Resolved range the companion is about to stream. `start` and `length`
+/// echo the corresponding `RangeSpec`; the bytes follow as
+/// `OtaAssetRangeChunk` events on the Bulk lane.
+public struct RangePart: Codable, Sendable {
+	public let start: UInt32
+	public let length: UInt32
+
+	public init(start: UInt32, length: UInt32) {
+		self.start = start
+		self.length = length
+	}
+}
+
+/// Successful response to `OtaAssetRange`. The companion has the asset
+/// (or refetched it from `update_url_base`) and is about to stream the
+/// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
+/// `parts` echoes the resolved ranges in the order they will be sent;
+/// `total_size` is the asset's full byte length (for `Content-Range`
+/// totals).
+public struct OtaAssetRangeReply: Codable, Sendable {
+	public let totalSize: UInt32
+	public let parts: [RangePart]
+
+	public init(totalSize: UInt32, parts: [RangePart]) {
+		self.totalSize = totalSize
+		self.parts = parts
+	}
+}
+
 /// Companion-initiated OTA: opens or resumes a streaming push of a
 /// `.swu` artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
@@ -2503,15 +2612,21 @@ public struct OtaAbandon: Codable, Sendable {
 /// `update_id` is the sha256 of the .swu, hex-encoded. Content-addressed
 /// so resume across daemon restarts and retries-after-failure both work
 /// without companion-side state to track.
+/// 
+/// `update_url_base` is the server prefix the companion may refetch
+/// the .zck delta from on cache miss, e.g.
+/// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
+/// fetch from it — it's carried so the companion can self-recover its
+/// cache while serving range requests during the Writing phase.
 public struct OtaBegin: Codable, Sendable {
 	public let updateId: String
-	public let manifestUrl: String?
+	public let updateUrlBase: String?
 	public let expectedSha256: String
 	public let expectedSize: UInt32
 
-	public init(updateId: String, manifestUrl: String?, expectedSha256: String, expectedSize: UInt32) {
+	public init(updateId: String, updateUrlBase: String?, expectedSha256: String, expectedSize: UInt32) {
 		self.updateId = updateId
-		self.manifestUrl = manifestUrl
+		self.updateUrlBase = updateUrlBase
 		self.expectedSha256 = expectedSha256
 		self.expectedSize = expectedSize
 	}
@@ -3241,9 +3356,9 @@ public struct RecommendationsReply: Codable, Sendable {
 /// Correlation handle the responder echoes back so the requester's
 /// pending future can resolve.
 public struct ResponseMeta: Codable, Sendable {
-	public let requestId: Data
+	@MsgpackUuid public var requestId: UUID
 
-	public init(requestId: Data) {
+	public init(requestId: UUID) {
 		self.requestId = requestId
 	}
 }
@@ -3380,12 +3495,12 @@ public struct Station: Codable, Sendable {
 /// or display progress. Subsequent `StreamChunk` and `StreamEnd` events
 /// for the same `stream_id` follow.
 public struct StreamBegin: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let status: UInt16
 	public let headers: [HttpHeader]
 	public let totalSize: UInt32?
 
-	public init(streamId: Data, status: UInt16, headers: [HttpHeader], totalSize: UInt32?) {
+	public init(streamId: UUID, status: UInt16, headers: [HttpHeader], totalSize: UInt32?) {
 		self.streamId = streamId
 		self.status = status
 		self.headers = headers
@@ -3396,11 +3511,11 @@ public struct StreamBegin: Codable, Sendable {
 /// One body chunk. Chunks arrive in order; `offset` is the byte
 /// position of `bytes[0]` within the full body.
 public struct StreamChunk: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let offset: UInt32
 	public let bytes: Data
 
-	public init(streamId: Data, offset: UInt32, bytes: Data) {
+	public init(streamId: UUID, offset: UInt32, bytes: Data) {
 		self.streamId = streamId
 		self.offset = offset
 		self.bytes = bytes
@@ -3410,9 +3525,9 @@ public struct StreamChunk: Codable, Sendable {
 /// Terminates a stream. After `End` no further chunks for `stream_id`
 /// are valid and the daemon clears its routing entry.
 public struct StreamEnd: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 
-	public init(streamId: Data) {
+	public init(streamId: UUID) {
 		self.streamId = streamId
 	}
 }
@@ -3421,10 +3536,10 @@ public struct StreamEnd: Codable, Sendable {
 /// daemon clears its routing entry. The `error` shape is shared with
 /// `fetch` since the failure modes are identical.
 public struct StreamError: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let error: NetError
 
-	public init(streamId: Data, error: NetError) {
+	public init(streamId: UUID, error: NetError) {
 		self.streamId = streamId
 		self.error = error
 	}
@@ -3509,11 +3624,11 @@ public struct TtlRetention: Codable, Sendable {
 /// `TtsStarted`/`TtsEnded` events. `voice` selects from
 /// `AudioCapabilities.voices`; `None` uses the gateway's default.
 public struct Tts: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let text: String
 	public let voice: String?
 
-	public init(id: Data, text: String, voice: String?) {
+	public init(id: UUID, text: String, voice: String?) {
 		self.id = id
 		self.text = text
 		self.voice = voice
@@ -3521,9 +3636,9 @@ public struct Tts: Codable, Sendable {
 }
 
 public struct TtsCancel: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
@@ -3532,10 +3647,10 @@ public struct TtsCancel: Codable, Sendable {
 /// full text was spoken; false when preempted, cancelled, or the
 /// companion dropped it.
 public struct TtsEnded: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let completed: Bool
 
-	public init(id: Data, completed: Bool) {
+	public init(id: UUID, completed: Bool) {
 		self.id = id
 		self.completed = completed
 	}
@@ -3545,28 +3660,28 @@ public struct TtsEnded: Codable, Sendable {
 /// id. May arrive after `TtsEnded` is dropped (e.g. companion preempted
 /// before speech started); webapps should treat both as best-effort.
 public struct TtsStarted: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
 
 public struct TunnelClosed: Codable, Sendable {
-	public let tunnelId: Data
+	@MsgpackUuid public var tunnelId: UUID
 	public let reason: String?
 
-	public init(tunnelId: Data, reason: String?) {
+	public init(tunnelId: UUID, reason: String?) {
 		self.tunnelId = tunnelId
 		self.reason = reason
 	}
 }
 
 public struct TunnelData: Codable, Sendable {
-	public let tunnelId: Data
+	@MsgpackUuid public var tunnelId: UUID
 	public let bytes: Data
 
-	public init(tunnelId: Data, bytes: Data) {
+	public init(tunnelId: UUID, bytes: Data) {
 		self.tunnelId = tunnelId
 		self.bytes = bytes
 	}
@@ -3642,11 +3757,11 @@ public struct TunnelErrorReply: Codable, Sendable {
 }
 
 public struct TunnelOpen: Codable, Sendable {
-	public let tunnelId: Data
+	@MsgpackUuid public var tunnelId: UUID
 	public let host: String
 	public let port: UInt16
 
-	public init(tunnelId: Data, host: String, port: UInt16) {
+	public init(tunnelId: UUID, host: String, port: UInt16) {
 		self.tunnelId = tunnelId
 		self.host = host
 		self.port = port
@@ -3677,11 +3792,11 @@ public struct VoiceFormat: Codable, Sendable {
 /// from 0; gaps mean the daemon dropped frames under backpressure and
 /// the companion should treat them as silence rather than retransmit.
 public struct VoiceFrame: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let seq: UInt32
 	public let pcm: Data
 
-	public init(streamId: Data, seq: UInt32, pcm: Data) {
+	public init(streamId: UUID, seq: UInt32, pcm: Data) {
 		self.streamId = streamId
 		self.seq = seq
 		self.pcm = pcm
@@ -3714,10 +3829,10 @@ public enum VoiceCloseReason: String, Codable, Sendable {
 }
 
 public struct VoiceStreamClose: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let reason: VoiceCloseReason
 
-	public init(streamId: Data, reason: VoiceCloseReason) {
+	public init(streamId: UUID, reason: VoiceCloseReason) {
 		self.streamId = streamId
 		self.reason = reason
 	}
@@ -3727,10 +3842,10 @@ public struct VoiceStreamClose: Codable, Sendable {
 /// consuming `Frame`s with the same `stream_id` until a `StreamClose`
 /// for that id arrives.
 public struct VoiceStreamOpen: Codable, Sendable {
-	public let streamId: Data
+	@MsgpackUuid public var streamId: UUID
 	public let format: VoiceFormat
 
-	public init(streamId: Data, format: VoiceFormat) {
+	public init(streamId: UUID, format: VoiceFormat) {
 		self.streamId = streamId
 		self.format = format
 	}
@@ -3749,10 +3864,10 @@ public struct VolumeChanged: Codable, Sendable {
 }
 
 public struct WebappActive: Codable, Sendable {
-	public let id: Data?
+	@OptionalMsgpackUuid public var id: UUID?
 	public let name: String?
 
-	public init(id: Data?, name: String?) {
+	public init(id: UUID?, name: String?) {
 		self.id = id
 		self.name = name
 	}
@@ -3771,20 +3886,20 @@ public struct WebappConfigAck: Codable, Sendable {
 }
 
 public struct WebappConfigDelete: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let key: String
 
-	public init(id: Data, key: String) {
+	public init(id: UUID, key: String) {
 		self.id = id
 		self.key = key
 	}
 }
 
 public struct WebappConfigGet: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let key: String
 
-	public init(id: Data, key: String) {
+	public init(id: UUID, key: String) {
 		self.id = id
 		self.key = key
 	}
@@ -3801,9 +3916,9 @@ public struct WebappConfigGetReply: Codable, Sendable {
 }
 
 public struct WebappConfigList: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
@@ -3817,11 +3932,11 @@ public struct WebappConfigListReply: Codable, Sendable {
 }
 
 public struct WebappConfigSet: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let key: String
 	public let value: String
 
-	public init(id: Data, key: String, value: String) {
+	public init(id: UUID, key: String, value: String) {
 		self.id = id
 		self.key = key
 		self.value = value
@@ -3831,9 +3946,9 @@ public struct WebappConfigSet: Codable, Sendable {
 /// Icon byte fetch. Daemon reads the icon declared by the manifest from
 /// the bundle directory and returns the bytes + mime.
 public struct WebappIcon: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
@@ -3941,7 +4056,7 @@ public enum ConfigField: Codable, Sendable {
 }
 
 public struct WebappInfo: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let name: String
 	public let source: WebappSource
 	public let role: WebappRole
@@ -3952,7 +4067,7 @@ public struct WebappInfo: Codable, Sendable {
 	public let config: [ConfigField]
 	public let permissions: [String]
 
-	public init(id: Data, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String]) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String]) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -3989,7 +4104,7 @@ public struct WebappList: Codable, Sendable {
 /// and validated; the resulting metadata projects to `WebappInfo` for
 /// the wire.
 public struct WebappManifest: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 	public let name: String
 	public let version: String
 	public let description: String?
@@ -3998,7 +4113,7 @@ public struct WebappManifest: Codable, Sendable {
 	public let config: [ConfigField]?
 	public let permissions: [String]?
 
-	public init(id: Data, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -4011,17 +4126,17 @@ public struct WebappManifest: Codable, Sendable {
 }
 
 public struct WebappSwitchTo: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
 
 public struct WebappUninstall: Codable, Sendable {
-	public let id: Data
+	@MsgpackUuid public var id: UUID
 
-	public init(id: Data) {
+	public init(id: UUID) {
 		self.id = id
 	}
 }
@@ -4795,12 +4910,16 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case otaError(OtaError)
 	case otaBeginAck(OtaBeginAck)
 	case otaBeginRejected(OtaBeginRejected)
+	case otaAssetRange(OtaAssetRange)
+	case otaAssetRangeAbandon(OtaAssetRangeAbandon)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
 			otaError,
 			otaBeginAck,
-			otaBeginRejected
+			otaBeginRejected,
+			otaAssetRange,
+			otaAssetRangeAbandon
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4831,6 +4950,16 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 					self = .otaBeginRejected(content)
 					return
 				}
+			case .otaAssetRange:
+				if let content = try? container.decode(OtaAssetRange.self, forKey: .data) {
+					self = .otaAssetRange(content)
+					return
+				}
+			case .otaAssetRangeAbandon:
+				if let content = try? container.decode(OtaAssetRangeAbandon.self, forKey: .data) {
+					self = .otaAssetRangeAbandon(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewaySystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewaySystemMsg"))
@@ -4850,6 +4979,12 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .otaBeginRejected(let content):
 			try container.encode(CodingKeys.otaBeginRejected, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaAssetRange(let content):
+			try container.encode(CodingKeys.otaAssetRange, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaAssetRangeAbandon(let content):
+			try container.encode(CodingKeys.otaAssetRangeAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5962,12 +6097,18 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	case otaChunk(OtaChunk)
 	case otaAbandon(OtaAbandon)
 	case cancelUpdate
+	case otaAssetRangeReply(OtaAssetRangeReply)
+	case otaAssetRangeRejected(OtaAssetRangeRejected)
+	case otaAssetRangeChunk(OtaAssetRangeChunk)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaBegin,
 			otaChunk,
 			otaAbandon,
-			cancelUpdate
+			cancelUpdate,
+			otaAssetRangeReply,
+			otaAssetRangeRejected,
+			otaAssetRangeChunk
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5996,6 +6137,21 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			case .cancelUpdate:
 				self = .cancelUpdate
 				return
+			case .otaAssetRangeReply:
+				if let content = try? container.decode(OtaAssetRangeReply.self, forKey: .data) {
+					self = .otaAssetRangeReply(content)
+					return
+				}
+			case .otaAssetRangeRejected:
+				if let content = try? container.decode(OtaAssetRangeRejected.self, forKey: .data) {
+					self = .otaAssetRangeRejected(content)
+					return
+				}
+			case .otaAssetRangeChunk:
+				if let content = try? container.decode(OtaAssetRangeChunk.self, forKey: .data) {
+					self = .otaAssetRangeChunk(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeSystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeSystemMsg"))
@@ -6015,6 +6171,15 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .cancelUpdate:
 			try container.encode(CodingKeys.cancelUpdate, forKey: .event)
+		case .otaAssetRangeReply(let content):
+			try container.encode(CodingKeys.otaAssetRangeReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaAssetRangeRejected(let content):
+			try container.encode(CodingKeys.otaAssetRangeRejected, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .otaAssetRangeChunk(let content):
+			try container.encode(CodingKeys.otaAssetRangeChunk, forKey: .event)
+			try container.encode(content, forKey: .data)
 		}
 	}
 }

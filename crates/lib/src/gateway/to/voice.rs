@@ -26,7 +26,7 @@ pub struct VoiceFormat {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceStreamOpen {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub format: VoiceFormat,
@@ -42,7 +42,7 @@ pub struct VoiceStreamOpen {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceFrame {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub seq: u32,
@@ -69,7 +69,7 @@ pub enum VoiceCloseReason {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceStreamClose {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub stream_id: Uuid,
   pub reason: VoiceCloseReason,

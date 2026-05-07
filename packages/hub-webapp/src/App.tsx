@@ -1,8 +1,6 @@
 import { BridgethingClient, type WebappInfo } from '@bridgething/client';
 import { useEffect, useMemo, useState } from 'react';
 
-const HUB_UUID = '019693c0-5c6a-71f0-a89d-7e2a4d9c0a01';
-
 const client = new BridgethingClient();
 
 type TileEntry = {
@@ -13,6 +11,7 @@ type TileEntry = {
 export default function App() {
   const [tiles, setTiles] = useState<TileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activating, setActivating] = useState<TileEntry | null>(null);
 
   useEffect(() => {
     client.connect();
@@ -21,18 +20,20 @@ export default function App() {
 
     (async () => {
       try {
-        const result = await client.webapp.list();
-        if (!result.ok) {
+        const [listResult, currentResult] = await Promise.all([client.webapp.list(), client.webapp.current()]);
+        if (!listResult.ok) {
           setError('failed to list webapps');
           return;
         }
-        const visible = result.response.webapps.filter(w => w.id !== HUB_UUID);
+        const selfId = currentResult.ok ? currentResult.response.id : null;
+        const visible = listResult.response.webapps.filter(w => w.id !== selfId);
         const entries: TileEntry[] = await Promise.all(
           visible.map(async info => {
             if (!info.iconAvailable) return { info, iconUrl: null };
             const iconResult = await client.webapp.icon({ id: info.id });
             if (!iconResult.ok) return { info, iconUrl: null };
-            const blob = new Blob([iconResult.response.bytes], {
+            const bytes = new Uint8Array(iconResult.response.bytes as unknown as number[]);
+            const blob = new Blob([bytes], {
               type: iconResult.response.mime ?? 'application/octet-stream',
             });
             const url = URL.createObjectURL(blob);
@@ -76,42 +77,77 @@ export default function App() {
     );
   }
 
+  const onActivate = async (entry: TileEntry) => {
+    if (activating) return;
+    setActivating(entry);
+    const r = await client.webapp.activate({ id: entry.info.id });
+    if (!r.ok) setActivating(null);
+  };
+
   return (
-    <div className="flex h-full w-full flex-col px-6 py-5">
-      <div className="mb-4 text-xs uppercase tracking-widest text-neutral-500">Apps</div>
-      <div className="grid flex-1 grid-cols-4 gap-4 overflow-y-auto">
-        {tiles.map(t => (
-          <Tile key={t.info.id} entry={t} />
-        ))}
+    <div className="relative flex h-full w-full flex-col px-4 py-3">
+      <div className="mb-2 text-xs uppercase tracking-widest text-neutral-500">Apps</div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-[43rem] flex-wrap content-start justify-center gap-3">
+          {tiles.map(t => (
+            <Tile key={t.info.id} entry={t} onActivate={onActivate} disabled={activating !== null} />
+          ))}
+        </div>
       </div>
+      {activating && <ActivatingOverlay entry={activating} />}
     </div>
   );
 }
 
-function Tile({ entry }: { entry: TileEntry }) {
+function Tile({
+  entry,
+  onActivate,
+  disabled,
+}: {
+  entry: TileEntry;
+  onActivate: (entry: TileEntry) => void;
+  disabled: boolean;
+}) {
   const { info, iconUrl } = entry;
   const fallback = useMemo(() => fallbackStyle(info), [info]);
-
-  const onActivate = async () => {
-    await client.webapp.activate({ id: info.id });
-  };
 
   return (
     <button
       type="button"
-      onClick={onActivate}
-      className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-neutral-900 p-4 active:scale-95 transition-transform">
+      onClick={() => onActivate(entry)}
+      disabled={disabled}
+      className="flex w-32 flex-col items-center justify-center gap-2 rounded-2xl bg-neutral-900 p-3 transition-transform active:scale-95 disabled:opacity-60">
       <div
-        className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl"
+        className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl"
         style={iconUrl ? undefined : { background: fallback.background, color: fallback.foreground }}>
         {iconUrl ? (
           <img src={iconUrl} alt="" className="h-full w-full object-contain" draggable={false} />
         ) : (
-          <span className="text-3xl font-semibold">{fallback.letter}</span>
+          <span className="text-2xl font-semibold">{fallback.letter}</span>
         )}
       </div>
-      <span className="line-clamp-1 text-sm font-medium text-neutral-100">{info.name}</span>
+      <span className="line-clamp-1 w-full text-center text-sm font-medium text-neutral-100">{info.name}</span>
     </button>
+  );
+}
+
+function ActivatingOverlay({ entry }: { entry: TileEntry }) {
+  const { info, iconUrl } = entry;
+  const fallback = useMemo(() => fallbackStyle(info), [info]);
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black">
+      <div
+        className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl"
+        style={iconUrl ? undefined : { background: fallback.background, color: fallback.foreground }}>
+        {iconUrl ? (
+          <img src={iconUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+        ) : (
+          <span className="text-4xl font-semibold">{fallback.letter}</span>
+        )}
+      </div>
+      <div className="text-lg font-medium text-neutral-100">{info.name}</div>
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-200" />
+    </div>
   );
 }
 

@@ -15,7 +15,7 @@ export type MsgMeta =
  * Correlation handle the responder echoes back so the requester's
  * pending future can resolve.
  */
-export type ResponseMeta = { requestId: Uint8Array };
+export type ResponseMeta = { requestId: string };
 
 /**
  * Protocol-level failure the responder ships when a request could not be

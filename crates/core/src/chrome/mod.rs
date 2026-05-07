@@ -140,7 +140,17 @@ impl ChromeWorker {
   async fn handle_navigate(&mut self, url: String) {
     tracing::debug!("navigating to {}", url);
     self
-      .with_first_tab("navigate", |tab| tab.navigate_to(&url).map(|_| ()))
+      .with_first_tab("navigate", |tab| {
+        // Page.navigate to the URL chrome is already on is a silent
+        // no-op; it does not refetch. Active-webapp switches between
+        // two webapps that both serve at `/` hit this path. Use
+        // Page.reload(ignoreCache) to force a real fetch in that case.
+        if url_matches_current(&tab.get_url(), &url) {
+          tab.reload(true, None).map(|_| ())
+        } else {
+          tab.navigate_to(&url).map(|_| ())
+        }
+      })
       .await;
   }
 
@@ -252,6 +262,11 @@ impl ChromeWorker {
       }
     }
   }
+}
+
+fn url_matches_current(current: &str, target: &str) -> bool {
+  let normalize = |s: &str| s.trim_end_matches('/').to_string();
+  normalize(current) == normalize(target)
 }
 
 fn safe_call<F, R>(label: &str, f: F) -> anyhow::Result<R>

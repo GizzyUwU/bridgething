@@ -4,7 +4,7 @@ import {
   type ClientToBridgeMsgData,
   Logger,
   LogLevel,
-  newUuidBytes,
+  newUuid,
 } from '@bridgething/lib';
 
 const DEFAULT_URL = 'ws://127.0.0.1:8891/';
@@ -46,6 +46,12 @@ type PendingRequest = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
+type QueuedSend = {
+  text: string;
+  resolve: () => void;
+  reject: (err: Error) => void;
+};
+
 export type ClientOptions = {
   /** WebSocket URL. Defaults to `ws://127.0.0.1:8891/` (the on-device daemon). */
   url?: string;
@@ -76,6 +82,7 @@ export class BridgethingClient {
   public readonly url: string;
   private readonly listeners: Set<ClientListener> = new Set();
   private readonly pending: Map<string, PendingRequest> = new Map();
+  private readonly sendQueue: QueuedSend[] = [];
   private readonly websocketCtor: typeof WebSocket;
   private readonly reconnectEnabled: boolean;
 
@@ -145,23 +152,35 @@ export class BridgethingClient {
       pending.reject(shutdown);
     }
     this.pending.clear();
+    while (this.sendQueue.length > 0) this.sendQueue.shift()!.reject(shutdown);
   }
 
   /**
    * Encode and ship a fully-formed message. Caller is responsible for
    * picking `meta` (`command`, `event`, etc.). For request/response,
    * prefer `request` or one of the codegen-emitted typed query methods.
+   *
+   * Sends issued before the socket finishes opening are queued and
+   * flushed in order on `open`. Once `intentionalClose` flips true (via
+   * `close()`), queued sends reject with `'shutdown'`.
    */
   async send(message: ClientToBridgeMsg): Promise<void> {
-    if (!this.socket || this.state !== 'open') {
+    this.logger.trace('send', message);
+    const text = JSON.stringify(message);
+    if (this.socket && this.state === 'open') {
+      try {
+        this.socket.send(text);
+      } catch (err) {
+        throw new ClientError('failed to send message', 'send-failed', err);
+      }
+      return;
+    }
+    if (this.intentionalClose || this.state === 'closing') {
       throw new ClientError('client not connected', 'not-connected');
     }
-    this.logger.trace('send', message);
-    try {
-      this.socket.send(JSON.stringify(serialize(message)));
-    } catch (err) {
-      throw new ClientError('failed to send message', 'send-failed', err);
-    }
+    return new Promise<void>((resolve, reject) => {
+      this.sendQueue.push({ text, resolve, reject });
+    });
   }
 
   /**
@@ -170,22 +189,21 @@ export class BridgethingClient {
    * on the way back.
    */
   request(data: ClientToBridgeMsgData, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<BridgeToClientMsg> {
-    const id = newUuidBytes();
-    const key = bytesKey(id);
+    const id = newUuid();
     const message: ClientToBridgeMsg = { id, meta: { kind: 'request' }, data };
 
     return new Promise<BridgeToClientMsg>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        if (this.pending.delete(key)) {
-          reject(new ClientError(`request ${key} timed out`, 'request-timed-out'));
+        if (this.pending.delete(id)) {
+          reject(new ClientError(`request ${id} timed out`, 'request-timed-out'));
         }
       }, timeoutMs);
-      this.pending.set(key, { resolve, reject, timeout });
+      this.pending.set(id, { resolve, reject, timeout });
 
       this.send(message).catch(err => {
-        if (this.pending.delete(key)) {
+        if (this.pending.delete(id)) {
           clearTimeout(timeout);
-          reject(new ClientError(`failed to send request ${key}`, 'send-failed', err));
+          reject(new ClientError(`failed to send request ${id}`, 'send-failed', err));
         }
       });
     });
@@ -209,6 +227,7 @@ export class BridgethingClient {
     socket.addEventListener('open', () => {
       this.state = 'open';
       this.reconnectAttempt = 0;
+      this.flushSendQueue();
       this.emit({ type: 'open' });
     });
 
@@ -249,17 +268,9 @@ export class BridgethingClient {
       return;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      this.emit({ type: 'decodeError', description: errorMessage(err) });
-      return;
-    }
-
     let msg: BridgeToClientMsg;
     try {
-      msg = deserialize(parsed) as BridgeToClientMsg;
+      msg = JSON.parse(text) as BridgeToClientMsg;
     } catch (err) {
       this.emit({ type: 'decodeError', description: errorMessage(err) });
       return;
@@ -271,11 +282,26 @@ export class BridgethingClient {
     this.emit({ type: 'message', message: msg });
   }
 
-  private completePending(requestId: Uint8Array, msg: BridgeToClientMsg): boolean {
-    const key = bytesKey(requestId);
-    const pending = this.pending.get(key);
+  private flushSendQueue(): void {
+    while (this.sendQueue.length > 0) {
+      const queued = this.sendQueue.shift()!;
+      if (!this.socket || this.state !== 'open') {
+        queued.reject(new ClientError('client not connected', 'not-connected'));
+        continue;
+      }
+      try {
+        this.socket.send(queued.text);
+        queued.resolve();
+      } catch (err) {
+        queued.reject(new ClientError('failed to send message', 'send-failed', err));
+      }
+    }
+  }
+
+  private completePending(requestId: string, msg: BridgeToClientMsg): boolean {
+    const pending = this.pending.get(requestId);
     if (!pending) return false;
-    this.pending.delete(key);
+    this.pending.delete(requestId);
     clearTimeout(pending.timeout);
     pending.resolve(msg);
     return true;
@@ -291,69 +317,6 @@ export class BridgethingClient {
       }
     }
   }
-}
-
-/**
- * Recursively walk a value and convert `Uint8Array` to a base64 string
- * tagged with a sentinel so the daemon's serde-msgpack-bytes-handling
- * stays compatible with JSON transport. The on-device daemon's WS
- * connection layer expects UUIDs as 16-element byte arrays, so we ship
- * them as plain JSON arrays of integers.
- */
-function serialize(value: unknown): unknown {
-  if (value instanceof Uint8Array) {
-    return Array.from(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map(serialize);
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = serialize(v);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * Inverse of `serialize`: walk the parsed object and turn any 16-element
- * number array under a known UUID-shaped key back into `Uint8Array`. We
- * only target the well-known UUID-bearing fields (`id`, `requestId`)
- * because there's no general way to distinguish a byte array from a
- * numeric array by inspection.
- */
-function deserialize(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(deserialize);
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (
-        (k === 'id' || k === 'requestId') &&
-        Array.isArray(v) &&
-        v.length === 16 &&
-        v.every(n => typeof n === 'number')
-      ) {
-        out[k] = Uint8Array.from(v as number[]);
-      } else {
-        out[k] = deserialize(v);
-      }
-    }
-    return out;
-  }
-  return value;
-}
-
-function bytesKey(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const h = bytes[i].toString(16);
-    s += h.length === 1 ? '0' + h : h;
-  }
-  return s;
 }
 
 function errorMessage(err: unknown): string {

@@ -46,7 +46,7 @@ pub struct NetWsErrorReply {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsMessage {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub frame: WsFrame,
@@ -57,7 +57,7 @@ pub struct NetWsMessage {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsClosed {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub code: u16,
@@ -69,7 +69,7 @@ pub struct NetWsClosed {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct NetWsErrorEvent {
-  #[ts(type = "Uint8Array")]
+  #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub connection_id: Uuid,
   pub error: WsError,

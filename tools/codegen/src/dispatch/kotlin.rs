@@ -161,12 +161,12 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     let device_param = if e.unicast { "deviceId: String, " } else { "" };
     let body = if e.unicast {
       format!(
-        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)",
+        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)",
         e.outer_variant
       )
     } else {
       format!(
-        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {entry_meta},\n            data = GatewayToBridgeMsgData.{}(payload),\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}",
+        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID(),\n            meta = {entry_meta},\n            data = GatewayToBridgeMsgData.{}(payload),\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}",
         e.outer_variant
       )
     };
@@ -201,11 +201,11 @@ fn push_outbound_methods_gateway(out: &mut String, s: &Surface) {
     let variant_meta = iv.category.map(kotlin_meta).unwrap_or(entry_meta);
     let body = if e.unicast {
       format!(
-        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)"
+        "    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)"
       )
     } else {
       format!(
-        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID().toBytes(),\n            meta = {variant_meta},\n            data = {data_expr},\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}"
+        "    val ids = gateway.connectedDeviceIds()\n    coroutineScope {{\n      ids.map {{ deviceId ->\n        async {{\n          val msg = GatewayToBridgeMsg(\n            id = UUID.randomUUID(),\n            meta = {variant_meta},\n            data = {data_expr},\n          )\n          gateway.send(deviceId, msg, priority)\n        }}\n      }}.awaitAll()\n    }}"
       )
     };
     let doc = if e.unicast {
@@ -297,7 +297,7 @@ fn push_request_flow(out: &mut String, r: &TypedRequestEntry, device_scope: bool
     "      handle\n"
   };
   out.push_str(&format!(
-    "  /** Stream of typed inbound `{}` requests. */\n  public val {request_camel}Requests: Flow<{pair_type}> = gateway.events\n    .filterIsInstance<GatewayEvent.Message>()\n    .filter {{ it.message.meta is GatewayMsgMeta.Request }}\n{scope_filter}    .mapNotNull {{\n      val outer = it.message.data as? BridgeToGatewayMsgData.{} ?: return@mapNotNull null\n      val inner = outer.data as? BridgeToGateway{}Msg.{request_pascal} ?: return@mapNotNull null\n      val handle = {}Handle(gateway, it.deviceId, it.message.id)\n{yield_pair}    }}\n\n",
+    "  /** Stream of typed inbound `{}` requests. */\n  public val {request_camel}Requests: Flow<{pair_type}> = gateway.events\n    .filterIsInstance<GatewayEvent.Message>()\n    .filter {{ it.message.meta is MsgMeta.Request }}\n{scope_filter}    .mapNotNull {{\n      val outer = it.message.data as? BridgeToGatewayMsgData.{} ?: return@mapNotNull null\n      val inner = outer.data as? BridgeToGateway{}Msg.{request_pascal} ?: return@mapNotNull null\n      val handle = {}Handle(gateway, it.deviceId, it.message.id)\n{yield_pair}    }}\n\n",
     r.request, r.surface, r.surface, r.request
   ));
 }
@@ -371,7 +371,7 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
   if leaf && e.outer_payload.is_some() {
     let payload_kt = e.outer_payload.as_ref().map(|p| p.kotlin()).unwrap();
     out.push_str(&format!(
-      "  /** Send a `{}` event to this peer. */\n  public suspend fun send(payload: {payload_kt}, priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
+      "  /** Send a `{}` event to this peer. */\n  public suspend fun send(payload: {payload_kt}, priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = {entry_meta},\n      data = GatewayToBridgeMsgData.{}(payload),\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
       s.name, e.outer_variant
     ));
     return;
@@ -395,7 +395,7 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
     let data_expr = format!("GatewayToBridgeMsgData.{}({inner_expr})", e.outer_variant);
     let variant_meta = iv.category.map(kotlin_meta).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /** Send `{}::{}` to this peer. */\n  public suspend fun {method}({param}priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
+      "  /** Send `{}::{}` to this peer. */\n  public suspend fun {method}({param}priority: Priority = Priority.Normal) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = {variant_meta},\n      data = {data_expr},\n    )\n    gateway.send(deviceId, msg, priority)\n  }}\n\n",
       s.name, iv.variant
     ));
   }
@@ -403,9 +403,9 @@ fn push_outbound_methods_device(out: &mut String, s: &Surface) {
 
 fn kotlin_meta(c: EntryCategory) -> &'static str {
   match c {
-    EntryCategory::Event => "GatewayMsgMeta.Event",
-    EntryCategory::Command => "GatewayMsgMeta.Command",
-    EntryCategory::Skip => "GatewayMsgMeta.Event",
+    EntryCategory::Event => "MsgMeta.Event",
+    EntryCategory::Command => "MsgMeta.Command",
+    EntryCategory::Skip => "MsgMeta.Event",
   }
 }
 
@@ -484,21 +484,21 @@ fn kotlin_request_handle_class(r: &TypedRequestEntry) -> String {
   let mut out = String::new();
   let response_pascal = r.response_variant_pascal();
   out.push_str(&format!(
-    "public class {}Handle internal constructor(\n  private val gateway: BridgethingGateway,\n  public val deviceId: String,\n  private val requestId: ByteArray,\n) {{\n",
+    "public class {}Handle internal constructor(\n  private val gateway: BridgethingGateway,\n  public val deviceId: String,\n  private val requestId: UUID,\n) {{\n",
     r.request
   ));
   out.push_str(&format!(
-    "  public suspend fun respond(response: {}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{response_pascal}(response)),\n    )\n    gateway.send(deviceId, msg)\n  }}\n\n",
+    "  public suspend fun respond(response: {}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{response_pascal}(response)),\n    )\n    gateway.send(deviceId, msg)\n  }}\n\n",
     r.response, r.surface, r.surface
   ));
   if let Some(err_type) = &r.error {
     let err_pascal = r.error_variant_pascal().unwrap_or_default();
     out.push_str(&format!(
-      "  public suspend fun respondErr(error: {err_type}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{err_pascal}(error)),\n    )\n    gateway.send(deviceId, msg)\n  }}\n\n",
+      "  public suspend fun respondErr(error: {err_type}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{err_pascal}(error)),\n    )\n    gateway.send(deviceId, msg)\n  }}\n\n",
       r.surface, r.surface
     ));
   }
-  out.push_str("  public suspend fun respondProtocolErr(error: WireError) {\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID().toBytes(),\n      meta = GatewayMsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.Error(error),\n    )\n    gateway.send(deviceId, msg)\n  }\n");
+  out.push_str("  public suspend fun respondProtocolErr(error: WireError) {\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.Error(error),\n    )\n    gateway.send(deviceId, msg)\n  }\n");
   out.push_str("}\n\n");
   out
 }

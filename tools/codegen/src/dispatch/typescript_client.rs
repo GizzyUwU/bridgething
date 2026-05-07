@@ -94,7 +94,7 @@ fn push_imports(out: &mut String, surfaces: &[Surface]) {
   for name in &imports {
     out.push_str(&format!("  type {name},\n"));
   }
-  out.push_str("  newUuidBytes,\n");
+  out.push_str("  newUuid,\n");
   out.push_str("} from '@bridgething/lib';\n");
   out.push_str("import { BridgethingClient, type ClientEvent } from './index';\n\n");
 }
@@ -266,7 +266,7 @@ fn push_outbound_methods(out: &mut String, s: &Surface) {
   if leaf_outbound && e.outer_payload.is_some() {
     let payload_ts = e.outer_payload.as_ref().map(|p| p.ts()).unwrap();
     out.push_str(&format!(
-      "  /** Send a `{}` event to the daemon. */\n  async send(payload: {payload_ts}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{entry_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._client.send(msg);\n  }}\n\n",
+      "  /** Send a `{}` event to the daemon. */\n  async send(payload: {payload_ts}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: '{entry_meta}' }}, data: {{ type: '{}', data: payload }} }};\n    await this._client.send(msg);\n  }}\n\n",
       s.name, e.outer_disc
     ));
     return;
@@ -287,7 +287,7 @@ fn push_outbound_methods(out: &mut String, s: &Surface) {
     };
     let variant_meta = iv.category.map(|c| c.meta_kind()).unwrap_or(entry_meta);
     out.push_str(&format!(
-      "  /** Send `{}::{}` to the daemon. */\n  async {method}({arg_list}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: '{variant_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._client.send(msg);\n  }}\n\n",
+      "  /** Send `{}::{}` to the daemon. */\n  async {method}({arg_list}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: '{variant_meta}' }}, data: {{ type: '{}', data: {inner_object} }} }};\n    await this._client.send(msg);\n  }}\n\n",
       s.name, iv.variant, e.outer_disc
     ));
   }
@@ -406,20 +406,20 @@ fn push_module_augmentation(out: &mut String, surfaces: &[Surface]) {
 
 fn push_request_handle_class(out: &mut String, r: &TypedRequestEntry) {
   out.push_str(&format!(
-    "export class {}Handle {{\n  constructor(\n    private readonly _client: BridgethingClient,\n    private readonly _requestId: Uint8Array,\n  ) {{}}\n\n",
+    "export class {}Handle {{\n  constructor(\n    private readonly _client: BridgethingClient,\n    private readonly _requestId: string,\n  ) {{}}\n\n",
     r.request
   ));
   out.push_str(&format!(
-    "  async respond(response: {}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
+    "  async respond(response: {}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: response }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
     r.response, r.surface_disc, r.inner_tag, r.response_disc
   ));
   if let (Some(err_type), Some(err_disc)) = (&r.error, &r.error_disc) {
     out.push_str(&format!(
-      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuidBytes(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
+      "  async respondErr(error: {err_type}): Promise<void> {{\n    const msg: ClientToBridgeMsg = {{ id: newUuid(), meta: {{ kind: 'response', data: {{ requestId: this._requestId }} }}, data: {{ type: '{}', data: {{ {}: '{}', data: error }} }} }};\n    await this._client.send(msg);\n  }}\n\n",
       r.surface_disc, r.inner_tag, err_disc
     ));
   }
-  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: ClientToBridgeMsg = { id: newUuidBytes(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._client.send(msg);\n  }\n");
+  out.push_str("  async respondProtocolErr(error: WireError): Promise<void> {\n    const msg: ClientToBridgeMsg = { id: newUuid(), meta: { kind: 'response', data: { requestId: this._requestId } }, data: { type: 'error', data: error } };\n    await this._client.send(msg);\n  }\n");
   out.push_str("}\n\n");
 }
 

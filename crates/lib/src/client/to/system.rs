@@ -2,7 +2,7 @@ use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{BridgeThingMeta, Diagnostics, LogEntry};
+use crate::{BridgeThingMeta, Diagnostics, LogEntry, OtaError, OtaProgress};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -41,4 +41,8 @@ pub enum BridgeToClientSystemMsg {
   LogsSubscribeReply(LogsSubscribeReply),
   #[bridge_event]
   LogEntry(LogEntry),
+  #[bridge_event]
+  OtaProgress(OtaProgress),
+  #[bridge_event]
+  OtaError(OtaError),
 }
