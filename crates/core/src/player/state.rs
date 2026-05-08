@@ -508,7 +508,7 @@ impl PlayerState {
 
   fn effective_track(&self) -> Option<&Track> {
     let track = self.track.as_ref()?;
-    if track.id.ends_with("0000000000000000") || track.name.is_empty() {
+    if track.id.ends_with("0000000000000000") && track.name.is_empty() {
       return None;
     }
     Some(track)
@@ -714,6 +714,7 @@ mod tests {
       NowPlayingUpdate {
         media_item: Some(MediaItemUpdate {
           persistent_id: Some("iap2:track:0000000000000000".to_string()),
+          title: Some(String::new()),
           ..MediaItemUpdate::default()
         }),
         playback: None,
@@ -721,6 +722,24 @@ mod tests {
     );
     assert!(state.state_reply().state.track.is_none());
     assert_eq!(state.current_artwork_id(), None);
+  }
+
+  #[test]
+  fn pid_zero_with_real_title_emits_track() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_track(
+        "iap2:track:0000000000000000",
+        "99.9% Of Elden Ring Players CAN'T Beat This Mod",
+      ),
+    );
+    let track = state.state_reply().state.track.expect("track present");
+    assert_eq!(
+      track.title.as_deref(),
+      Some("99.9% Of Elden Ring Players CAN'T Beat This Mod")
+    );
+    assert_eq!(track.persistent_id.as_deref(), Some("iap2:track:0000000000000000"));
   }
 
   #[test]
@@ -778,6 +797,7 @@ mod tests {
       NowPlayingUpdate {
         media_item: Some(MediaItemUpdate {
           persistent_id: Some("iap2:track:0000000000000000".to_string()),
+          title: Some(String::new()),
           ..MediaItemUpdate::default()
         }),
         playback: None,

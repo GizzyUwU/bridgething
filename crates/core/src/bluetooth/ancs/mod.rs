@@ -1,14 +1,59 @@
 //! Apple Notification Center Service (ANCS) GATT client. Subscribes
-//! over the same paired BLE connection BlueZ already maintains for an
-//! iPhone, surfaces iOS notifications to webapps, and forwards
+//! over the LE link to an iPhone that has been LE-paired to bridgething,
+//! surfaces iOS notifications to webapps, and forwards
 //! `notifications.invokePositive` / `invokeNegative` back as
 //! PerformNotificationAction writes on the Control Point.
 //!
-//! Lifecycle is tied to iAP2 link state. `attach(addr)` kicks off after
-//! `Iap2EventRouter` sees `LinkEstablished` (iPhone is paired and
-//! connected at the BlueZ level by then, so btleplug enumerates it
-//! immediately). `detach(addr)` runs on `LinkDown`. On disconnect /
-//! GATT error the inner task exits and waits for the next attach.
+//! ## How iOS gates ANCS
+//!
+//! iOS exposes ANCS over an LE-bonded link only, and content access
+//! is further gated on a per-bond authorization decision. The first
+//! ANCS access that requires it pops the "Allow X to access
+//! notifications" prompt; after accept, a "Share System Notifications"
+//! toggle appears in the iPhone's Bluetooth Settings entry for the
+//! peer.
+//!
+//! Without an LE bond, iOS responds to Control Point writes either
+//! with ATT error 0xA2 or with a Write Response followed by no DS
+//! delivery; the Notification Source CCCD subscribe still works
+//! because that's a descriptor write, not gated on the authorization
+//! decision.
+//!
+//! ## Why the bridgething BR/EDR bond is not enough
+//!
+//! iAP2 pairs over BR/EDR. iOS performs SSP-with-Secure-Connections
+//! and produces a P-256 LinkKey, but does not initiate
+//! SMP-over-BR/EDR Cross-Transport Key Derivation against the
+//! existing bond, regardless of what the accessory does later. There
+//! is also no host-side path (BlueZ DBus, mgmt API, debugfs on SC
+//! controllers) to drive that derivation retroactively. So a
+//! BR/EDR-only bond does not give us an LE LTK, and ANCS stays
+//! gated.
+//!
+//! ## Bring-up path
+//!
+//! Documented in `notes/ancs-bringup.md`. Daemon side:
+//!
+//! 1. Register a tiny LE GATT service (see `pair_trigger.rs`) with
+//!    one read-only characteristic flagged `encrypt-read`. Reads on
+//!    an unbonded link bounce back as InsufficientAuthentication,
+//!    triggering iOS-side SMP.
+//! 2. Advertise the LE peripheral with ANCS in the SolicitUUIDs and
+//!    the pair-trigger service in the ServiceUUIDs (see
+//!    `advertise.rs`). The companion app filters its CoreBluetooth
+//!    scan on the pair-trigger UUID.
+//! 3. When the iOS companion app LE-connects and reads the
+//!    pair-trigger characteristic, BlueZ rejects, iOS pops the LE
+//!    pair prompt, the bond completes. iOS then exposes ANCS on the
+//!    new LE-bonded link; first NS subscribe pops the notification
+//!    authorization prompt; from there, ANCS works.
+//!
+//! Lifecycle: the LE solicitation advertisement and the pair-trigger
+//! GATT service are both registered for the lifetime of `AncsManager`
+//! (the daemon's whole runtime). The per-peer session task starts on
+//! iAP2 `LinkEstablished` and drives the GATT client side; if the LE
+//! bond is missing it will idle on long backoff and surface log
+//! guidance directing the user toward the companion-app pair flow.
 //!
 //! Wire mapping: every ANCS notification surfaces with id
 //! `"ancs:<NotificationUID>"`. The notifications handler peels that
@@ -17,16 +62,23 @@
 
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 
-use bluer::Address;
-use btleplug::{
-  api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, WriteType},
-  platform::{Adapter, Manager, Peripheral, PeripheralId},
+use bluer::{
+  Adapter, Address, Session,
+  gatt::{
+    WriteOp,
+    remote::{Characteristic, CharacteristicWriteRequest, Service},
+  },
 };
+
+mod advertise;
+mod pair_trigger;
+use advertise::AncsAdvertisement;
 use futures::StreamExt;
 use libbridgething::{
   DismissReason, Notification, NotificationApp, NotificationCategory, NotificationFlags,
   client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved},
 };
+use pair_trigger::PairTrigger;
 use tokio::{
   sync::{Mutex, mpsc},
   task::JoinHandle,
@@ -72,8 +124,13 @@ const MESSAGE_MAX: u16 = 1024;
 const PENDING_QUEUE_CAP: usize = 64;
 const COMMAND_MAILBOX_CAP: usize = 16;
 const ATTRIBUTE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
-const CONNECT_RETRY_DELAY: Duration = Duration::from_secs(2);
+const ATTRIBUTE_AUTH_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+const ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD: u32 = 3;
 const ANCS_ID_PREFIX: &str = "ancs:";
+const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
+const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
+const UNAUTHORIZED_BACKOFF_INITIAL: Duration = Duration::from_secs(60);
+const UNAUTHORIZED_BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 enum AncsCommand {
@@ -89,13 +146,42 @@ pub struct AncsManager {
 
 impl AncsManager {
   pub async fn spawn(bus: WireEventBus) -> AncsResult<(Self, JoinHandle<()>)> {
-    let adapter = Arc::new(init_adapter().await?);
+    let session = Session::new().await?;
+    let adapter = session.default_adapter().await?;
+    let adapter_dbus_path = format!("/org/bluez/{}", adapter.name());
+    let pair_trigger = match PairTrigger::register(&adapter).await {
+      Ok(handle) => Some(handle),
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "ANCS pair-trigger GATT register failed; companion-app LE pair will not work"
+        );
+        None
+      }
+    };
+    let advertisement = match AncsAdvertisement::register(&adapter_dbus_path, ANCS_SERVICE).await {
+      Ok(handle) => {
+        tracing::info!(
+          "ANCS LE advertisement registered; companion app drives LE pair via CoreBluetooth or AccessorySetupKit"
+        );
+        Some(handle)
+      }
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "ANCS LE advertisement register failed; iOS notifications will not be available"
+        );
+        None
+      }
+    };
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
     let dispatcher = AncsDispatcher {
-      adapter,
+      adapter: Arc::new(adapter),
       bus,
       rx,
       session: None,
+      _advertisement: advertisement,
+      _pair_trigger: pair_trigger,
     };
     let handle = tokio::spawn(dispatcher.run());
     Ok((Self { tx }, handle))
@@ -141,12 +227,8 @@ struct AncsDispatcher {
   bus: WireEventBus,
   rx: mpsc::Receiver<AncsCommand>,
   session: Option<ActiveSession>,
-}
-
-async fn init_adapter() -> AncsResult<Adapter> {
-  let manager = Manager::new().await?;
-  let adapters = manager.adapters().await?;
-  adapters.into_iter().next().ok_or(AncsError::NoAdapter)
+  _advertisement: Option<AncsAdvertisement>,
+  _pair_trigger: Option<PairTrigger>,
 }
 
 #[derive(Debug)]
@@ -229,6 +311,10 @@ impl AncsSessionTask {
       cancel,
     } = self;
 
+    let mut transient_backoff = TRANSIENT_BACKOFF_INITIAL;
+    let mut unauthorized_backoff = UNAUTHORIZED_BACKOFF_INITIAL;
+    let mut prior_state = SessionState::FreshAttach;
+
     loop {
       if cancel.is_cancelled() {
         return;
@@ -240,14 +326,68 @@ impl AncsSessionTask {
           return;
         }
         Err(err) => {
-          tracing::warn!(%address, ?err, "ANCS session ended; will retry");
+          let outcome = classify_error(&err);
+          let delay = match outcome {
+            ErrorClass::Unauthorized => {
+              if !matches!(prior_state, SessionState::Unauthorized) {
+                tracing::warn!(
+                  %address,
+                  ?err,
+                  "ANCS unavailable — open the companion iOS app and run the \"Enable \
+                  notifications\" flow to LE-pair the device and authorize ANCS"
+                );
+              } else {
+                tracing::debug!(%address, ?err, "ANCS still unavailable; long backoff");
+              }
+              prior_state = SessionState::Unauthorized;
+              let d = unauthorized_backoff;
+              unauthorized_backoff = (unauthorized_backoff * 2).min(UNAUTHORIZED_BACKOFF_MAX);
+              d
+            }
+            ErrorClass::Transient => {
+              if !matches!(prior_state, SessionState::Transient) {
+                tracing::warn!(%address, ?err, "ANCS session ended; will retry");
+              } else {
+                tracing::debug!(%address, ?err, "ANCS retry");
+              }
+              prior_state = SessionState::Transient;
+              unauthorized_backoff = UNAUTHORIZED_BACKOFF_INITIAL;
+              let d = transient_backoff;
+              transient_backoff = (transient_backoff * 2).min(TRANSIENT_BACKOFF_MAX);
+              d
+            }
+          };
           tokio::select! {
             _ = cancel.cancelled() => return,
-            _ = tokio::time::sleep(CONNECT_RETRY_DELAY) => {}
+            _ = tokio::time::sleep(delay) => {}
           }
         }
       }
     }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SessionState {
+  FreshAttach,
+  Transient,
+  Unauthorized,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ErrorClass {
+  Transient,
+  Unauthorized,
+}
+
+fn classify_error(err: &AncsError) -> ErrorClass {
+  match err {
+    AncsError::AncsServiceHidden => ErrorClass::Unauthorized,
+    AncsError::Bluer(e) => match e.kind {
+      bluer::ErrorKind::NotAuthorized | bluer::ErrorKind::AuthenticationRejected => ErrorClass::Unauthorized,
+      _ => ErrorClass::Transient,
+    },
+    _ => ErrorClass::Transient,
   }
 }
 
@@ -258,97 +398,103 @@ async fn attempt_session(
   invoke_rx: &mut mpsc::Receiver<(u32, u8)>,
   cancel: &CancellationToken,
 ) -> AncsResult<()> {
-  let peripheral = find_peripheral(adapter, address).await?;
-  if !peripheral.is_connected().await? {
-    peripheral.connect().await?;
-  }
-  peripheral.discover_services().await?;
-  let chars = locate_characteristics(&peripheral)?;
+  let device = adapter.device(address)?;
+  let pre_connected = device.is_connected().await.unwrap_or(false);
+  let pre_paired = device.is_paired().await.unwrap_or(false);
+  let pre_resolved = device.is_services_resolved().await.unwrap_or(false);
+  tracing::debug!(
+    %address,
+    connected = pre_connected,
+    paired = pre_paired,
+    services_resolved = pre_resolved,
+    "ANCS attempt: pre-discover state"
+  );
 
-  peripheral.subscribe(&chars.notification_source).await?;
-  peripheral.subscribe(&chars.data_source).await?;
+  let services = device.services().await?;
+  let ancs = find_ancs_service(&services).await;
+  let Some(ancs) = ancs else {
+    return Err(AncsError::AncsServiceHidden);
+  };
+  let chars = locate_characteristics(&ancs).await?;
+
+  let ns_stream = chars.notification_source.notify().await?;
+  let ds_stream = chars.data_source.notify().await?;
+  tokio::pin!(ns_stream);
+  tokio::pin!(ds_stream);
   tracing::info!(%address, "ANCS subscribed");
-
-  let mut notifications = peripheral.notifications().await?;
 
   let pending = Arc::new(Mutex::new(VecDeque::<PendingNotification>::with_capacity(
     PENDING_QUEUE_CAP,
   )));
   let in_flight = Arc::new(Mutex::new(None::<PendingNotification>));
   let mut ds_buffer: Vec<u8> = Vec::with_capacity(2048);
+  let mut consecutive_timeouts: u32 = 0;
+  let mut last_auth_probe = tokio::time::Instant::now();
 
   loop {
-    if !cancel.is_cancelled() && in_flight.lock().await.is_none() {
-      pump_next(&peripheral, &chars, &pending, &in_flight).await?;
+    let pump_allowed = !cancel.is_cancelled()
+      && in_flight.lock().await.is_none()
+      && (consecutive_timeouts < ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD
+        || last_auth_probe.elapsed() >= ATTRIBUTE_AUTH_PROBE_INTERVAL);
+    if pump_allowed
+      && pump_next(&chars.control_point, &pending, &in_flight).await?
+      && (consecutive_timeouts >= ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD)
+    {
+      last_auth_probe = tokio::time::Instant::now();
     }
 
     tokio::select! {
       _ = cancel.cancelled() => {
-        let _ = peripheral.disconnect().await;
+        let _ = device.disconnect().await;
         return Ok(());
       }
       cmd = invoke_rx.recv() => {
         let Some((uid, action)) = cmd else { return Ok(()); };
-        if let Err(err) = write_perform_action(&peripheral, &chars.control_point, uid, action).await {
+        if let Err(err) = write_perform_action(&chars.control_point, uid, action).await {
           tracing::warn!(%address, uid, action, ?err, "ANCS perform-action write failed");
         }
       }
-      Some(notif) = notifications.next() => {
-        match notif.uuid {
-          u if u == NOTIFICATION_SOURCE => {
-            handle_ns_frame(&pending, bus, &notif.value).await;
-          }
-          u if u == DATA_SOURCE => {
-            ds_buffer.extend_from_slice(&notif.value);
-            try_drain_ds(&mut ds_buffer, &in_flight, bus).await;
-          }
-          other => {
-            tracing::trace!(uuid = %other, "ANCS notify on unexpected characteristic");
-          }
+      Some(value) = ns_stream.next() => {
+        handle_ns_frame(&pending, bus, &value).await;
+      }
+      Some(value) = ds_stream.next() => {
+        ds_buffer.extend_from_slice(&value);
+        let drained = try_drain_ds(&mut ds_buffer, &in_flight, bus).await;
+        if drained {
+          consecutive_timeouts = 0;
         }
       }
       _ = tokio::time::sleep(ATTRIBUTE_FETCH_TIMEOUT), if in_flight.lock().await.is_some() => {
         let stale = in_flight.lock().await.take();
         if let Some(p) = stale {
-          tracing::warn!(uid = p.uid, "ANCS attribute fetch timed out; emitting partial");
-          emit_notification(bus, &p, NotificationFields::default()).await;
+          consecutive_timeouts = consecutive_timeouts.saturating_add(1);
           ds_buffer.clear();
+          if consecutive_timeouts == ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
+            tracing::warn!(
+              %address,
+              "ANCS notifications arriving but iOS is dropping or rejecting content reads — \
+               iPhone has no LE-bond ANCS authorization for this peer. Run the companion \
+               iOS app's \"Enable notifications\" flow to LE-pair the device and accept the \
+               ANCS prompt"
+            );
+          } else {
+            tracing::debug!(uid = p.uid, consecutive_timeouts, "ANCS attribute fetch timed out");
+          }
         }
       }
     }
   }
 }
 
-async fn find_peripheral(adapter: &Adapter, address: Address) -> AncsResult<Peripheral> {
-  // Already-connected peripherals show up in `peripherals()` immediately.
-  for p in adapter.peripherals().await? {
-    if peripheral_matches(&p, address).await {
-      return Ok(p);
+async fn find_ancs_service(services: &[Service]) -> Option<Service> {
+  for svc in services {
+    match svc.uuid().await {
+      Ok(u) if u == ANCS_SERVICE => return Some(svc.clone()),
+      Ok(_) => {}
+      Err(err) => tracing::trace!(?err, "ANCS service UUID read failed"),
     }
   }
-  // Otherwise wait for a `DeviceConnected` event for our address.
-  let mut events = adapter.events().await?;
-  while let Some(event) = events.next().await {
-    if let CentralEvent::DeviceConnected(id) = event
-      && let Some(p) = peripheral_for_id(adapter, &id).await
-      && peripheral_matches(&p, address).await
-    {
-      return Ok(p);
-    }
-  }
-  Err(AncsError::PeripheralNotFound { address })
-}
-
-async fn peripheral_matches(peripheral: &Peripheral, address: Address) -> bool {
-  peripheral.address() == bluer_address_to_btleplug(address)
-}
-
-async fn peripheral_for_id(adapter: &Adapter, id: &PeripheralId) -> Option<Peripheral> {
-  adapter.peripheral(id).await.ok()
-}
-
-fn bluer_address_to_btleplug(address: Address) -> btleplug::api::BDAddr {
-  btleplug::api::BDAddr::from(address.0)
+  None
 }
 
 #[derive(Debug)]
@@ -358,21 +504,17 @@ struct AncsCharacteristics {
   data_source: Characteristic,
 }
 
-fn locate_characteristics(peripheral: &Peripheral) -> AncsResult<AncsCharacteristics> {
+async fn locate_characteristics(service: &Service) -> AncsResult<AncsCharacteristics> {
   let mut ns = None;
   let mut cp = None;
   let mut ds = None;
-  for service in peripheral.services() {
-    if service.uuid != ANCS_SERVICE {
-      continue;
-    }
-    for ch in service.characteristics {
-      match ch.uuid {
-        u if u == NOTIFICATION_SOURCE => ns = Some(ch),
-        u if u == CONTROL_POINT => cp = Some(ch),
-        u if u == DATA_SOURCE => ds = Some(ch),
-        _ => {}
-      }
+  for ch in service.characteristics().await? {
+    match ch.uuid().await {
+      Ok(u) if u == NOTIFICATION_SOURCE => ns = Some(ch),
+      Ok(u) if u == CONTROL_POINT => cp = Some(ch),
+      Ok(u) if u == DATA_SOURCE => ds = Some(ch),
+      Ok(_) => {}
+      Err(err) => tracing::trace!(?err, "ANCS characteristic UUID read failed"),
     }
   }
   Ok(AncsCharacteristics {
@@ -430,25 +572,30 @@ async fn handle_ns_frame(pending: &Arc<Mutex<VecDeque<PendingNotification>>>, bu
 }
 
 async fn pump_next(
-  peripheral: &Peripheral,
-  chars: &AncsCharacteristics,
+  control_point: &Characteristic,
   pending: &Arc<Mutex<VecDeque<PendingNotification>>>,
   in_flight: &Arc<Mutex<Option<PendingNotification>>>,
-) -> AncsResult<()> {
+) -> AncsResult<bool> {
   let next = pending.lock().await.pop_front();
   let Some(item) = next else {
-    return Ok(());
+    return Ok(false);
   };
   let cmd = build_get_attributes(item.uid);
-  if let Err(err) = peripheral
-    .write(&chars.control_point, &cmd, WriteType::WithResponse)
+  if let Err(err) = control_point
+    .write_ext(
+      &cmd,
+      &CharacteristicWriteRequest {
+        op_type: WriteOp::Request,
+        ..Default::default()
+      },
+    )
     .await
   {
     tracing::warn!(uid = item.uid, ?err, "ANCS GNA write failed; dropping");
-    return Ok(());
+    return Ok(false);
   }
   *in_flight.lock().await = Some(item);
-  Ok(())
+  Ok(true)
 }
 
 fn build_get_attributes(uid: u32) -> Vec<u8> {
@@ -468,17 +615,20 @@ fn build_get_attributes(uid: u32) -> Vec<u8> {
   cmd
 }
 
-async fn write_perform_action(
-  peripheral: &Peripheral,
-  control_point: &Characteristic,
-  uid: u32,
-  action: u8,
-) -> AncsResult<()> {
+async fn write_perform_action(control_point: &Characteristic, uid: u32, action: u8) -> AncsResult<()> {
   let mut cmd = Vec::with_capacity(6);
   cmd.push(COMMAND_PERFORM_NOTIFICATION_ACTION);
   cmd.extend_from_slice(&uid.to_le_bytes());
   cmd.push(action);
-  peripheral.write(control_point, &cmd, WriteType::WithResponse).await?;
+  control_point
+    .write_ext(
+      &cmd,
+      &CharacteristicWriteRequest {
+        op_type: WriteOp::Request,
+        ..Default::default()
+      },
+    )
+    .await?;
   Ok(())
 }
 
@@ -493,17 +643,23 @@ struct NotificationFields {
   negative_label: Option<String>,
 }
 
-async fn try_drain_ds(buffer: &mut Vec<u8>, in_flight: &Arc<Mutex<Option<PendingNotification>>>, bus: &WireEventBus) {
+async fn try_drain_ds(
+  buffer: &mut Vec<u8>,
+  in_flight: &Arc<Mutex<Option<PendingNotification>>>,
+  bus: &WireEventBus,
+) -> bool {
+  let mut drained = false;
   loop {
     let Some(meta) = in_flight.lock().await.clone() else {
-      return;
+      return drained;
     };
     let Some((fields, consumed)) = parse_gna_response(buffer) else {
-      return;
+      return drained;
     };
     buffer.drain(..consumed);
     *in_flight.lock().await = None;
     emit_notification(bus, &meta, fields).await;
+    drained = true;
   }
 }
 
@@ -634,12 +790,10 @@ pub type AncsResult<T> = Result<T, AncsError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AncsError {
-  #[error("no bluetooth adapter available")]
-  NoAdapter,
-  #[error("peripheral {address} not present in btleplug enumeration")]
-  PeripheralNotFound { address: Address },
+  #[error("ANCS service not exposed in iPhone GATT db (notifications likely disabled by user)")]
+  AncsServiceHidden,
   #[error("ANCS characteristic {0} not found")]
   CharacteristicMissing(Uuid),
   #[error(transparent)]
-  Btleplug(#[from] btleplug::Error),
+  Bluer(#[from] bluer::Error),
 }
