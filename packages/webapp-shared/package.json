@@ -18,6 +18,7 @@
   },
   "files": [
     "dist",
+    "fonts",
     "tsconfig.json",
     "gitignore",
     "styles.css"

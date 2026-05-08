@@ -1,32 +1,67 @@
 # bridgething
 
-This project was created to allow for Bluetooth support for the Spotify Car Thing after discontinuation date. It currently works, but only on Linux. If you connect an iPhone to bridgething on a Car Thing running the stock UI, it will allow basic playback control. The gateways are the only things not implemented.
+**the thing. fully open. all yours.**
 
-I no longer have the time to work on bridgething. I would love it if someone used this project to complete the restoration of the Spotify Car Thing.
+bridgething is the bridge layer that lets the thing remain itself while
+opening up to anything you build for it. It runs on a fully custom Linux
+distro designed specifically for the Car Thing and replaces Spotify's
+stock `qt-superbird-app` with a Rust daemon, a kiosk web runtime, and a
+phone-side gateway, so the Car Thing keeps being a Car Thing on your
+own terms.
 
-## Data Flow Diagram
+## What's in here
 
-```none
-      "client"
-┌──────────────────┐
-│                  │
-│    native app/   │
-│      webapp/     │
-│   anything else  │
-│                  │
-└───────▲───┬──────┘
-      websocket
-┌───────┴───▼──────┐           ┌──────────────────┐
-│                  │           │                  │
-│    bridgething   ┼───────────►      phone/      │
-│      daemon      │ bluetooth │    deskthing     │
-│                  ◄───────────┼                  │
-└──────────────────┘           └──────────────────┘
-      "daemon"                      "gateway"
+| path                                       | what it is                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------- |
+| `crates/lib`                               | `libbridgething` - the wire-protocol crate. DTOs, codec, framing. |
+| `crates/core`                              | `bridgething` - the daemon                                        |
+| `crates/client-rs`                         | Rust client of `libbridgething`.                                  |
+| `crates/mfi`, `crates/mfi-proxy`           | iAP2 / MFi link layer                                             |
+| `crates/swupdate-sys`                      | FFI to libswupdate for in-band system OTA                         |
+| `packages/gateway`, `packages/companion`   | Phone-side gateway (TS + native)                                  |
+| `packages/client-ts`, `packages/adapter-*` | Generated SDKs                                                    |
+| `packages/hub-webapp`                      | The built-in launcher webapp                                      |
+| `packages/create-bridgething`              | `bun create bridgething`                                          |
+| `packages/examples`                        | Sample webapps                                                    |
+| `mobile/`                                  | Phone-side app                                                    |
+| `docs/protocol.md`                         | Wire-protocol reference                                           |
+
+## Dataflow
+
+```text
+     webapp                       daemon                  gateway
+┌─────────────────┐    ws    ┌──────────────┐   bt    ┌──────────────┐
+│  hub / stock /  │◄────────►│  bridgething │◄───────►│   phone +    │
+│  your own app   │ ws,asset │              │ msgpack │   companion  │
+└─────────────────┘          └──────────────┘         └──────────────┘
+    device kiosk                the thing               phone-side
 ```
 
-## Notes
+The webapp talks to the daemon over a local WebSocket on `127.0.0.1:8891`.
+The daemon talks to the phone-side gateway over Bluetooth RFCOMM, with
+an iAP2 link layer for iOS. The gateway sources playback, streams audio
+out, and proxies arbitrary HTTP/WS via the `Tunnel` surface. Everything
+that crosses a boundary is typed in `libbridgething`; SDKs in TS,
+Swift, and Kotlin are generated from those types.
 
-For development, the bridgething host device needs to have the bluetooth class `0x7c0000`. This can be set by running `sudo hciconfig hci0 class 0x7c0000` (where `hci0` is the bluetooth adapter).
+## Build a webapp
 
-BridgeThing expects a `chromium` instance with `--remote-debugging-port=9222` to be running. You don't need it running, but BridgeThing will be a little confused without it.
+```bash
+bun create bridgething
+```
+
+Creates a Vite + React + Tailwind project wired to the bridgething
+client. The manifest schema is in `crates/lib/src/shared/webapp.rs`;
+permissions, config primitives, and the KV namespace are documented in
+`crates/core/src/state/webapps.rs` and `docs/protocol.md`.
+
+## On-device dev
+
+The image, OTA pipeline, and BSP live in
+[`yocto-superbird`](https://github.com/JoeyEamigh/yocto-superbird).
+Webapps push with `bun run push` from each webapp package.
+`bun create bridgething` comes with scripts for pushing to the device.
+
+For host-side dev, the daemon expects `chromium --remote-debugging-port=9223`
+running and a Bluetooth adapter with class `0x7c0000`
+(`sudo hciconfig hci0 class 0x7c0000`).

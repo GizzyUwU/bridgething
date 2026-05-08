@@ -150,6 +150,10 @@ impl WebappRegistry {
 
   pub async fn default_id(&self) -> Option<Uuid> {
     let bundles = self.bundles.read().await;
+    if bundles.contains_key(&HUB_WEBAPP_ID) {
+      return Some(HUB_WEBAPP_ID);
+    }
+
     if bundles.contains_key(&STOCK_WEBAPP_ID) {
       return Some(STOCK_WEBAPP_ID);
     }

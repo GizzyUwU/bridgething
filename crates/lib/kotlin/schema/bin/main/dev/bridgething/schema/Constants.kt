@@ -4,8 +4,8 @@ import java.util.UUID
 
 /**
  * Wire-protocol identifiers shared by every bridgething peer (daemon + every
- * gateway language). Mirrors the Rust `pub const`s in `lib/src/lib.rs` and
- * the TS exports in `lib/ts/index.ts`. Not codegenned because typeshare
+ * gateway language). Mirrors the Rust `pub const`s in `crates/lib/src/lib.rs`
+ * and the TS exports in `crates/lib/ts/index.ts`. Not codegenned because typeshare
  * doesn't emit `const` items - keep these in lockstep with the Rust source by
  * hand, the values are stable wire identifiers and effectively never change.
  */
