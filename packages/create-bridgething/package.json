@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "dev": "tsdown --watch"
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/uuid": "^11.0.0",

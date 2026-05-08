@@ -1,4 +1,4 @@
-const LogLevel = {
+const LogVerbosity = {
   Trace: 5,
   Debug: 4,
   Log: 3,
@@ -6,23 +6,24 @@ const LogLevel = {
   Error: 1,
   Silent: 0,
 } as const;
-type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
+type LogVerbosity = (typeof LogVerbosity)[keyof typeof LogVerbosity];
 
 class Logger {
   constructor(
     private readonly name: string,
-    private readonly logLevel: LogLevel,
+    private readonly logLevel: LogVerbosity,
   ) {}
 
   trace = (...data: unknown[]) =>
-    this.logLevel >= LogLevel.Trace ? console.log(`${this.name} TRACE >>`, ...data) : null;
+    this.logLevel >= LogVerbosity.Trace ? console.log(`${this.name} TRACE >>`, ...data) : null;
   debug = (...data: unknown[]) =>
-    this.logLevel >= LogLevel.Debug ? console.log(`${this.name} DEBUG >>`, ...data) : null;
-  log = (...data: unknown[]) => (this.logLevel >= LogLevel.Log ? console.log(`${this.name} LOG   >>`, ...data) : null);
+    this.logLevel >= LogVerbosity.Debug ? console.log(`${this.name} DEBUG >>`, ...data) : null;
+  log = (...data: unknown[]) =>
+    this.logLevel >= LogVerbosity.Log ? console.log(`${this.name} LOG   >>`, ...data) : null;
   warn = (...data: unknown[]) =>
-    this.logLevel >= LogLevel.Warn ? console.warn(`${this.name} WARN  >>`, ...data) : null;
+    this.logLevel >= LogVerbosity.Warn ? console.warn(`${this.name} WARN  >>`, ...data) : null;
   error = (...data: unknown[]) =>
-    this.logLevel >= LogLevel.Error ? console.error(`${this.name} ERROR >>`, ...data) : null;
+    this.logLevel >= LogVerbosity.Error ? console.error(`${this.name} ERROR >>`, ...data) : null;
 }
 
-export { LogLevel, Logger };
+export { LogVerbosity, Logger };

@@ -42,6 +42,8 @@
   "scripts": {
     "nitro:codegen": "nitrogen",
     "build": "bob build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "clean": "rm -rf lib nitrogen/generated"
   },
   "keywords": [

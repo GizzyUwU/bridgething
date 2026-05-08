@@ -2,33 +2,62 @@
   "name": "@bridgething/lib",
   "version": "0.1.0",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.mts",
-        "default": "./dist/index.mjs"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/bindings/client.d.ts",
+      "default": "./dist/bindings/client.js"
+    },
+    "./gateway": {
+      "types": "./dist/bindings/gateway.d.ts",
+      "default": "./dist/bindings/gateway.js"
+    },
+    "./shared": {
+      "types": "./dist/bindings/shared.d.ts",
+      "default": "./dist/bindings/shared.js"
+    },
+    "./stock": {
+      "types": "./dist/bindings/stock.d.ts",
+      "default": "./dist/bindings/stock.js"
+    },
+    "./wire": {
+      "types": "./dist/bindings/wire.d.ts",
+      "default": "./dist/bindings/wire.js"
+    },
+    "./codec": {
+      "types": "./dist/codec.d.ts",
+      "default": "./dist/codec.js"
+    },
+    "./framing": {
+      "types": "./dist/framing.d.ts",
+      "default": "./dist/framing.js"
+    },
+    "./uuid": {
+      "types": "./dist/uuid.d.ts",
+      "default": "./dist/uuid.js"
+    },
+    "./logger": {
+      "types": "./dist/logger.d.ts",
+      "default": "./dist/logger.js"
     }
   },
+  "files": ["dist"],
   "scripts": {
-    "dev": "tsdown --watch",
-    "prebuild": "bun run version",
-    "build": "tsdown",
+    "prebuild": "bun run version && rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit",
     "version": "bun run gv && bun run ./scripts/set-version.ts",
     "gv": "genversion --esm --semi ts/version.ts"
   },
   "devDependencies": {
     "@types/pako": "^2.0.4",
     "@types/uuid": "^11.0.0",
-    "genversion": "3.2.0",
-    "tsdown": "^0.21.10"
+    "genversion": "3.2.0"
   },
   "peerDependencies": {
     "typescript": "^6.0.3"

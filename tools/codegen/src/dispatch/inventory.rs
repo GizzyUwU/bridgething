@@ -629,6 +629,12 @@ fn payload_type(ty: &Type) -> PayloadType {
     return PayloadType::Named("_".to_string());
   };
   let name = seg.ident.to_string();
+  if name == "Box"
+    && let PathArguments::AngleBracketed(args) = &seg.arguments
+    && let Some(GenericArgument::Type(inner)) = args.args.first()
+  {
+    return payload_type(inner);
+  }
   if name == "Vec"
     && let PathArguments::AngleBracketed(args) = &seg.arguments
     && let Some(GenericArgument::Type(Type::Path(inner))) = args.args.first()

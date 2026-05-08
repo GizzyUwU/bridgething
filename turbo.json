@@ -8,10 +8,18 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": ["dist/**", "native/**", "lib/**"]
     },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "ts/**", "scripts/**", "tsconfig*.json", "package.json"],
+      "outputs": []
+    },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "ts/**", "scripts/**", "eslint.config.*", "tsconfig*.json", "package.json"],
+      "outputs": []
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     }

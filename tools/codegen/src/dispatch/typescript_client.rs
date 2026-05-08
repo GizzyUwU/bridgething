@@ -5,7 +5,10 @@
 //! WebSocket protocol always has exactly one peer (the daemon), so
 //! every `on*` listener and outbound send is implicitly addressed.
 
-use std::{collections::BTreeSet, path::Path};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  path::Path,
+};
 
 use anyhow::{Context, Result};
 
@@ -16,11 +19,17 @@ use super::{
 
 const TS_OUTPUT: &str = "packages/client-ts/src/dispatch.generated.ts";
 
-pub fn emit_typescript_client(plan: &Plan) -> Result<()> {
+#[derive(Clone, Copy)]
+pub(super) enum BindingProtocol {
+  Client,
+  Gateway,
+}
+
+pub fn emit_typescript_client(plan: &Plan, binding_locations: &BTreeMap<String, BTreeSet<String>>) -> Result<()> {
   let surfaces = surfaces(plan);
   let mut out = String::new();
   push_header(&mut out);
-  push_imports(&mut out, &surfaces);
+  push_imports(&mut out, &surfaces, binding_locations);
   push_typed_request_result(&mut out);
 
   for s in &surfaces {
@@ -33,7 +42,7 @@ pub fn emit_typescript_client(plan: &Plan) -> Result<()> {
 
   push_outer_handlers_types(&mut out, &surfaces);
 
-  push_module_augmentation(&mut out, &surfaces);
+  push_surfaces_interface(&mut out, &surfaces);
 
   for s in &surfaces {
     for r in &s.inbound_requests {
@@ -53,7 +62,7 @@ fn push_header(out: &mut String) {
   out.push_str("// Re-generate with `just codegen` (or `just typescript`).\n\n");
 }
 
-fn push_imports(out: &mut String, surfaces: &[Surface]) {
+fn push_imports(out: &mut String, surfaces: &[Surface], binding_locations: &BTreeMap<String, BTreeSet<String>>) {
   let mut imports: BTreeSet<String> = BTreeSet::new();
   for s in surfaces {
     if let Some(e) = &s.inbound {
@@ -90,13 +99,52 @@ fn push_imports(out: &mut String, surfaces: &[Surface]) {
   imports.insert("ClientToBridgeMsg".to_string());
   imports.insert("WireError".to_string());
 
-  out.push_str("import {\n");
-  for name in &imports {
-    out.push_str(&format!("  type {name},\n"));
-  }
-  out.push_str("  newUuid,\n");
-  out.push_str("} from '@bridgething/lib';\n");
+  emit_grouped_imports(out, &imports, binding_locations, BindingProtocol::Client);
+  out.push_str("import { newUuid } from '@bridgething/lib/uuid';\n");
   out.push_str("import { BridgethingClient, type ClientEvent } from './index';\n\n");
+}
+
+pub(super) fn emit_grouped_imports(
+  out: &mut String,
+  names: &BTreeSet<String>,
+  locations: &BTreeMap<String, BTreeSet<String>>,
+  protocol: BindingProtocol,
+) {
+  let mut by_subpath: BTreeMap<String, Vec<String>> = BTreeMap::new();
+  for name in names {
+    let subpath = subpath_for(name, locations, protocol);
+    by_subpath.entry(subpath).or_default().push(name.clone());
+  }
+  for (subpath, mut names) in by_subpath {
+    names.sort_unstable();
+    out.push_str(&format!("import type {{ {} }} from '{}';\n", names.join(", "), subpath));
+  }
+}
+
+fn subpath_for(name: &str, locations: &BTreeMap<String, BTreeSet<String>>, protocol: BindingProtocol) -> String {
+  let Some(files) = locations.get(name) else {
+    return "@bridgething/lib".to_string();
+  };
+  let preferred = match protocol {
+    BindingProtocol::Client => "client.ts",
+    BindingProtocol::Gateway => "gateway.ts",
+  };
+  if files.contains(preferred) {
+    return match protocol {
+      BindingProtocol::Client => "@bridgething/lib/client".to_string(),
+      BindingProtocol::Gateway => "@bridgething/lib/gateway".to_string(),
+    };
+  }
+  if files.contains("shared.ts") || files.contains("wire.ts") || files.contains("stock.ts") {
+    return "@bridgething/lib".to_string();
+  }
+  if files.contains("client.ts") {
+    return "@bridgething/lib/client".to_string();
+  }
+  if files.contains("gateway.ts") {
+    return "@bridgething/lib/gateway".to_string();
+  }
+  panic!("unexpected binding files for type `{name}`: {files:?}");
 }
 
 fn push_typed_request_result(out: &mut String) {
@@ -353,30 +401,20 @@ fn push_outer_handlers_types(out: &mut String, surfaces: &[Surface]) {
 }
 
 fn outer_value(s: &Surface) -> Option<String> {
-  let has_event_inner = !s.inbound_event_variants().is_empty();
-  let has_typed_req = !s.inbound_requests.is_empty();
-  if !has_event_inner && !has_typed_req {
+  let entries = inbound_handler_entries(s);
+  if entries.is_empty() {
     return None;
+  }
+  if entries.len() == 1 {
+    return Some(entries.into_iter().next().unwrap().1);
   }
   if let Some(e) = &s.inbound
     && e.inner_variants.is_empty()
     && e.outer_payload.is_some()
-    && !has_typed_req
+    && s.inbound_requests.is_empty()
   {
     let p = e.outer_payload.as_ref().map(|p| p.ts()).unwrap();
     return Some(format!("(msg: {p}) => void"));
-  }
-  if !has_event_inner && s.inbound_requests.len() == 1 {
-    let r = &s.inbound_requests[0];
-    let payload_arg = if r.request_takes_payload {
-      format!(", req: {}", r.request)
-    } else {
-      String::new()
-    };
-    return Some(format!(
-      "(handle: {}Handle{payload_arg}) => Promise<void> | void",
-      r.request
-    ));
   }
   Some(format!("{}InboundHandlers", s.name))
 }
@@ -389,19 +427,24 @@ fn partialize(ty: &str) -> String {
   }
 }
 
-fn push_module_augmentation(out: &mut String, surfaces: &[Surface]) {
-  out.push_str("declare module './index' {\n");
-  out.push_str("  interface BridgethingClient {\n");
+fn push_surfaces_interface(out: &mut String, surfaces: &[Surface]) {
+  out.push_str("/**\n");
+  out.push_str(" * Codegen-emitted shape applied to `BridgethingClient` at runtime via\n");
+  out.push_str(" * `applyDispatch()`. `index.ts` declares `interface BridgethingClient\n");
+  out.push_str(" * extends ClientSurfaces {}` so class+interface merging picks these up\n");
+  out.push_str(" * for consumers regardless of how the published `.d.ts` is bundled.\n");
+  out.push_str(" */\n");
+  out.push_str("export interface ClientSurfaces {\n");
   for s in surfaces {
     out.push_str(&format!(
-      "    /** Methods scoped to the `{}` wire surface. */\n    readonly {}: {}Surface;\n",
+      "  /** Methods scoped to the `{}` wire surface. */\n  readonly {}: {}Surface;\n",
       s.name, s.prop, s.name
     ));
   }
-  out.push_str("    /** Exhaustive subscribe across every inbound wire surface. */\n");
-  out.push_str("    subscribe(handlers: ClientMessageHandlers): () => void;\n");
-  out.push_str("    subscribePartial(handlers: PartialClientMessageHandlers): () => void;\n");
-  out.push_str("  }\n}\n\n");
+  out.push_str("  /** Exhaustive subscribe across every inbound wire surface. */\n");
+  out.push_str("  subscribe(handlers: ClientMessageHandlers): () => void;\n");
+  out.push_str("  subscribePartial(handlers: PartialClientMessageHandlers): () => void;\n");
+  out.push_str("}\n\n");
 }
 
 fn push_request_handle_class(out: &mut String, r: &TypedRequestEntry) {
@@ -467,23 +510,23 @@ fn push_outer_case(out: &mut String, s: &Surface) {
     .map(|e| e.inner_variants.is_empty() && e.outer_payload.is_some())
     .unwrap_or(false);
   let has_typed_req = !s.inbound_requests.is_empty();
-  let single_request_only = s.inbound_event_variants().is_empty() && s.inbound_requests.len() == 1;
+  let event_variants = s.inbound_event_variants();
+  let single_event_only = event_variants.len() == 1 && !has_typed_req;
+  let single_request_only = event_variants.is_empty() && s.inbound_requests.len() == 1;
   if leaf_only && !has_typed_req {
     out.push_str(&format!(
       "      case '{prop}': {{\n        const handler = handlers.{prop};\n        if (!handler) {{ if (!partial) c.logger.warn('subscribe: no handler for {prop}'); return; }}\n        handler(data.data);\n        return;\n      }}\n"
     ));
     return;
   }
-  if single_request_only {
-    let r = &s.inbound_requests[0];
-    let payload_pass = if r.request_takes_payload {
-      ", data.data.data".to_string()
-    } else {
-      String::new()
+  if single_event_only {
+    let iv = &event_variants[0];
+    let payload_pass = match &iv.payload {
+      Some(_) => "data.data.data",
+      None => "",
     };
     out.push_str(&format!(
-      "      case '{prop}': {{\n        if (event.message.meta.kind !== 'request') return;\n        const handler = handlers.{prop};\n        if (!handler) {{ if (!partial) c.logger.warn('subscribe: no handler for {prop}'); return; }}\n        const handle = new {}Handle(c, event.message.id);\n        const result = handler(handle{payload_pass});\n        if (result && typeof result.then === 'function') result.catch((err: unknown) => c.logger.error('subscribe handler threw:', err));\n        return;\n      }}\n",
-      r.request
+      "      case '{prop}': {{\n        const handler = handlers.{prop};\n        if (!handler) {{ if (!partial) c.logger.warn('subscribe: no handler for {prop}'); return; }}\n        handler({payload_pass});\n        return;\n      }}\n"
     ));
     return;
   }
@@ -492,6 +535,19 @@ fn push_outer_case(out: &mut String, s: &Surface) {
     .as_ref()
     .and_then(|e| e.inner_tag_field.as_deref())
     .unwrap_or("event");
+  if single_request_only {
+    let r = &s.inbound_requests[0];
+    let payload_pass = if r.request_takes_payload {
+      ", inner.data".to_string()
+    } else {
+      String::new()
+    };
+    out.push_str(&format!(
+      "      case '{prop}': {{\n        if (event.message.meta.kind !== 'request') return;\n        const inner = data.data;\n        if (inner.{inner_tag} !== '{}') return;\n        const handler = handlers.{prop};\n        if (!handler) {{ if (!partial) c.logger.warn('subscribe: no handler for {prop}'); return; }}\n        const handle = new {}Handle(c, event.message.id);\n        const result = handler(handle{payload_pass});\n        if (result && typeof result.then === 'function') result.catch((err: unknown) => c.logger.error('subscribe handler threw:', err));\n        return;\n      }}\n",
+      r.request_disc, r.request
+    ));
+    return;
+  }
   out.push_str(&format!(
     "      case '{prop}': {{\n        const innerHandlers = handlers.{prop};\n        if (!innerHandlers) {{ if (!partial) c.logger.warn('subscribe: no handler for {prop}'); return; }}\n        const inner = data.data;\n        switch (inner.{inner_tag}) {{\n"
   ));

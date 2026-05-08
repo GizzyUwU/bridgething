@@ -31,7 +31,7 @@ const COMPRESSION_NONE = 0x00;
 const ENCODING_MSGPACK = 0x00;
 const PRIORITY_NORMAL = 0x00;
 
-function writeFrameHeader(payloadLength: number): Uint8Array {
+function writeFrameHeader(payloadLength: number): Uint8Array<ArrayBuffer> {
   const buf = new Uint8Array(FRAME_HEADER_LENGTH);
   const view = new DataView(buf.buffer);
   view.setUint16(0, FRAME_MAGIC, false);
@@ -43,7 +43,7 @@ function writeFrameHeader(payloadLength: number): Uint8Array {
   return buf;
 }
 
-function frame(message: unknown): Uint8Array {
+function frame(message: unknown): Uint8Array<ArrayBuffer> {
   const body = msgpackEncode(message);
   const header = writeFrameHeader(body.length);
   const out = new Uint8Array(header.length + body.length);

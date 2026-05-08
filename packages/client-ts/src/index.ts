@@ -1,11 +1,12 @@
-import {
-  type BridgeToClientMsg,
-  type ClientToBridgeMsg,
-  type ClientToBridgeMsgData,
-  Logger,
-  LogLevel,
-  newUuid,
-} from '@bridgething/lib';
+import { Logger, LogVerbosity } from '@bridgething/lib';
+import type { BridgeToClientMsg, ClientToBridgeMsg, ClientToBridgeMsgData } from '@bridgething/lib/client';
+import { newUuid } from '@bridgething/lib/uuid';
+
+import type { ClientSurfaces } from './dispatch.generated';
+
+export * from '@bridgething/lib';
+export * from '@bridgething/lib/client';
+export type { ClientSurfaces } from './dispatch.generated';
 
 const DEFAULT_URL = 'ws://127.0.0.1:8891/';
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -55,7 +56,7 @@ type QueuedSend = {
 export type ClientOptions = {
   /** WebSocket URL. Defaults to `ws://127.0.0.1:8891/` (the on-device daemon). */
   url?: string;
-  logLevel?: LogLevel;
+  logLevel?: LogVerbosity;
   /** Auto-connect on construct. Defaults to `true`. */
   autoConnect?: boolean;
   /** Auto-reconnect on close with exponential backoff. Defaults to `true`. */
@@ -77,6 +78,8 @@ export type ClientOptions = {
  * are emitted by codegen into `dispatch.generated.ts` and applied to the
  * prototype at module-load via `applyDispatch()`.
  */
+export interface BridgethingClient extends ClientSurfaces {}
+
 export class BridgethingClient {
   public readonly logger: Logger;
   public readonly url: string;
@@ -93,7 +96,7 @@ export class BridgethingClient {
   private intentionalClose = false;
 
   constructor(options: ClientOptions = {}) {
-    this.logger = new Logger('Client', options.logLevel ?? LogLevel.Log);
+    this.logger = new Logger('Client', options.logLevel ?? LogVerbosity.Log);
     this.url = options.url ?? DEFAULT_URL;
     this.reconnectEnabled = options.reconnect ?? true;
     this.websocketCtor =
@@ -323,8 +326,6 @@ function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
-
-export { LogLevel } from '@bridgething/lib';
 
 import { applyDispatch } from './dispatch.generated';
 applyDispatch();

@@ -1,4 +1,6 @@
-import { type BridgeToGatewayMsg, Codec, type GatewayMeta, type GatewayToBridgeMsg, newUuid } from '@bridgething/lib';
+import { Codec } from '@bridgething/lib';
+import type { BridgeToGatewayMsg, GatewayMeta, GatewayToBridgeMsg } from '@bridgething/lib/gateway';
+import { newUuid } from '@bridgething/lib/uuid';
 import { describe, expect, test } from 'bun:test';
 import {
   type Adapter,

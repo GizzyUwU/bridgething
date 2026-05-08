@@ -1,5 +1,3 @@
-export * from './bindings/client';
-export * from './bindings/gateway';
 export * from './bindings/shared';
 export * from './bindings/stock';
 export * from './bindings/wire';
@@ -7,6 +5,7 @@ export * from './bindings/wire';
 export * from './codec';
 export * from './framing';
 export * from './uuid';
+export * from './logger';
 
 export const BRIDGETHING_PROFILE_UUID = 'dead0000-854d-408e-81f0-fb6147f918fd';
 export const BRIDGETHING_RFCOMM_CHANNEL = 1;
@@ -16,8 +15,6 @@ export const BRIDGETHING_MANUFACTURER_ID = 0xdead;
 
 export const BRIDGETHING_WS_PORT = 8891;
 export const BRIDGETHING_FILE_PORT = 8891;
-
-export * from './logger';
 
 import { version } from './version';
 export const LIB_VERSION = `v${version}`;

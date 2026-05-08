@@ -1,5 +1,5 @@
 use std::{
-  collections::BTreeSet,
+  collections::{BTreeMap, BTreeSet},
   path::{Path, PathBuf},
   process::Command,
 };
@@ -60,11 +60,14 @@ fn gen_typescript() -> Result<()> {
     inv.uuid_field_names.len(),
   );
   let plans = dispatch::build_plans(&inv).context("dispatch plans")?;
+  let binding_locations = scan_binding_type_locations(TS_BINDINGS_DIR).context("scan ts bindings")?;
   for plan in &plans {
     match plan.protocol {
-      dispatch::Protocol::Gateway => dispatch::emit_typescript(plan).context("emit gateway typescript dispatch")?,
+      dispatch::Protocol::Gateway => {
+        dispatch::emit_typescript(plan, &binding_locations).context("emit gateway typescript dispatch")?
+      }
       dispatch::Protocol::Client => {
-        dispatch::emit_typescript_client(plan).context("emit client typescript dispatch")?
+        dispatch::emit_typescript_client(plan, &binding_locations).context("emit client typescript dispatch")?
       }
     }
   }
@@ -82,6 +85,40 @@ fn gen_typescript() -> Result<()> {
     ],
   )?;
   Ok(())
+}
+
+/// Scan `ts/bindings/*.ts` and build a `name -> {files}` map (`AssetGet
+/// -> {"client.ts"}`, `Priority -> {"shared.ts"}`, `WebappError ->
+/// {"client.ts", "gateway.ts"}` for the genuinely-distinct case). The
+/// dispatch emitters consult this to route per-type imports into the
+/// right `@bridgething/lib` subpath, preferring the protocol-matching
+/// file when a name is defined in both client.ts and gateway.ts.
+fn scan_binding_type_locations(dir: &str) -> Result<BTreeMap<String, BTreeSet<String>>> {
+  let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+  for entry in std::fs::read_dir(dir).with_context(|| format!("read_dir {dir}"))? {
+    let entry = entry?;
+    let path = entry.path();
+    if path.extension().and_then(|s| s.to_str()) != Some("ts") {
+      continue;
+    }
+    let file_name = path
+      .file_name()
+      .and_then(|s| s.to_str())
+      .unwrap_or_default()
+      .to_string();
+    let content = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    for line in content.lines() {
+      let trimmed = line.trim_start();
+      let prefix = "export type ";
+      if let Some(rest) = trimmed.strip_prefix(prefix) {
+        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if !name.is_empty() {
+          map.entry(name).or_default().insert(file_name.clone());
+        }
+      }
+    }
+  }
+  Ok(map)
 }
 
 fn emit_ts_uuid_fields(names: &BTreeSet<String>) -> Result<()> {

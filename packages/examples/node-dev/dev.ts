@@ -1,13 +1,7 @@
 import { NodeAdapter } from '@bridgething/adapter-node';
-import {
-  BRIDGETHING_FILE_PORT,
-  type BridgeToGatewayMsg,
-  type GatewayMeta,
-  LIB_VERSION,
-  LIBBRIDGETHING_VERSION,
-  LogLevel,
-  newUuid,
-} from '@bridgething/lib';
+import { BRIDGETHING_FILE_PORT, LIB_VERSION, LIBBRIDGETHING_VERSION, LogVerbosity } from '@bridgething/lib';
+import type { BridgeToGatewayMsg, GatewayMeta } from '@bridgething/lib/gateway';
+import { newUuid } from '@bridgething/lib/uuid';
 import { sleep } from 'bun';
 
 import { BridgethingGateway, type GatewayEvent } from '../src';
@@ -153,7 +147,7 @@ const adapter = new NodeAdapter({
   adapterName: 'hci2',
   logLevelDirective: 'bridgething_adapter=trace,libbridgething=trace',
 });
-const gateway = new BridgethingGateway(adapter, { logLevel: LogLevel.Trace });
+const gateway = new BridgethingGateway(adapter, { logLevel: LogVerbosity.Trace });
 gateway.on(handleEvent);
 
 await gateway.start();

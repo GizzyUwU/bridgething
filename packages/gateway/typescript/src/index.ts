@@ -1,16 +1,14 @@
-import {
-  type BridgeToGatewayMsg,
-  Codec,
-  FrameAccumulator,
-  type GatewayToBridgeMsg,
-  type GatewayToBridgeMsgData,
-  Logger,
-  LogLevel,
-  newUuid,
-  type Priority,
-} from '@bridgething/lib';
+import { Codec, FrameAccumulator, Logger, LogVerbosity, type Priority } from '@bridgething/lib';
+import type { BridgeToGatewayMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData } from '@bridgething/lib/gateway';
+import { newUuid } from '@bridgething/lib/uuid';
+
+import type { GatewaySurfaces } from './dispatch.generated';
 
 import { version } from './version';
+
+export * from '@bridgething/lib';
+export * from '@bridgething/lib/gateway';
+export type { GatewaySurfaces } from './dispatch.generated';
 
 export type Device = {
   id: string;
@@ -71,7 +69,7 @@ type PendingRequest = {
 };
 
 export type GatewayOptions = {
-  logLevel?: LogLevel;
+  logLevel?: LogVerbosity;
   codec?: Codec;
 };
 
@@ -85,6 +83,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * shared `Codec`, and tracks in-flight requests so callers can `await` a
  * matching response by id.
  */
+export interface BridgethingGateway extends GatewaySurfaces {}
+
 export class BridgethingGateway {
   public readonly logger: Logger;
   private readonly codec: Codec;
@@ -98,7 +98,7 @@ export class BridgethingGateway {
     private readonly adapter: Adapter,
     options: GatewayOptions = {},
   ) {
-    this.logger = new Logger('Gateway', options.logLevel ?? LogLevel.Log);
+    this.logger = new Logger('Gateway', options.logLevel ?? LogVerbosity.Log);
     this.codec = options.codec ?? new Codec();
     this.adapterListener = event => this.handleAdapterEvent(event);
   }
