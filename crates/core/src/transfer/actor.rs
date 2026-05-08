@@ -65,6 +65,7 @@ struct Transfer {
   last_touched_unix: i64,
   partial_path: PathBuf,
   meta_path: PathBuf,
+  file: Option<File>,
 }
 
 pub(super) struct ChunkedTransferActor {
@@ -216,7 +217,11 @@ impl ChunkedTransferActor {
     let meta_path = self.transfers_dir.join(format!("{stem}.meta"));
 
     let _ = tokio::fs::remove_file(&partial_path).await;
-    File::create(&partial_path).await?;
+    let file = OpenOptions::new()
+      .create_new(true)
+      .append(true)
+      .open(&partial_path)
+      .await?;
 
     let transfer = Transfer {
       id: id.clone(),
@@ -226,6 +231,7 @@ impl ChunkedTransferActor {
       last_touched_unix: unix_now(),
       partial_path,
       meta_path: meta_path.clone(),
+      file: Some(file),
     };
     write_meta(&meta_path, &meta_from(&transfer)).await?;
     self.transfers.insert(id, transfer);
@@ -287,9 +293,11 @@ impl ChunkedTransferActor {
       });
     }
 
-    let mut file = OpenOptions::new().append(true).open(&transfer.partial_path).await?;
+    if transfer.file.is_none() {
+      transfer.file = Some(OpenOptions::new().append(true).open(&transfer.partial_path).await?);
+    }
+    let file = transfer.file.as_mut().expect("file opened above");
     file.write_all(&bytes).await?;
-    drop(file);
     transfer.received += chunk_len;
     transfer.last_touched_unix = unix_now();
     self.total_disk_bytes = self.total_disk_bytes.saturating_add(chunk_len);
@@ -307,6 +315,10 @@ impl ChunkedTransferActor {
         expected_size: transfer.expected_size,
         received: transfer.received,
       });
+    }
+
+    if let Some(mut file) = transfer.file.take() {
+      file.flush().await?;
     }
 
     Ok(WriteOutcome::HashPending {
@@ -428,6 +440,7 @@ async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, T
     last_touched_unix: meta.last_touched_unix,
     partial_path: expected_partial,
     meta_path: meta_path.to_path_buf(),
+    file: None,
   }))
 }
 
