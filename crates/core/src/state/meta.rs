@@ -33,25 +33,28 @@ impl SuperbirdMeta {
     #[cfg(not(debug_assertions))]
     let meta_path = PathBuf::from("/etc/superbird");
 
-    if meta_path.exists() {
-      let Ok(data) = tokio::fs::read(&meta_path).await else {
-        tracing::warn!(
-          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
-        );
-        return Self::default();
-      };
+    if !meta_path.exists() {
+      tracing::warn!(
+        path = %meta_path.display(),
+        "superbird metadata missing; bridgething is only officially supported on bridgethingOS"
+      );
+      return Self::default();
+    }
 
-      if let Ok(meta) = serde_json::from_slice(&data) {
-        meta
-      } else {
-        tracing::warn!(
-          "could not find superbird metadata! bridgething is only officially supported on nixos-superbird."
-        );
+    let data = match tokio::fs::read(&meta_path).await {
+      Ok(data) => data,
+      Err(err) => {
+        tracing::warn!(path = %meta_path.display(), %err, "could not read superbird metadata; falling back to defaults");
+        return Self::default();
+      }
+    };
+
+    match serde_json::from_slice(&data) {
+      Ok(meta) => meta,
+      Err(err) => {
+        tracing::warn!(path = %meta_path.display(), %err, "could not parse superbird metadata; struct shape may have drifted from the on-disk template");
         Self::default()
       }
-    } else {
-      tracing::warn!("could not find superbird metadata! bridgething is only officially supported on nixos-superbird.");
-      Self::default()
     }
   }
 }

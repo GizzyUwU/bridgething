@@ -111,7 +111,10 @@ fn scan_binding_type_locations(dir: &str) -> Result<BTreeMap<String, BTreeSet<St
       let trimmed = line.trim_start();
       let prefix = "export type ";
       if let Some(rest) = trimmed.strip_prefix(prefix) {
-        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        let name: String = rest
+          .chars()
+          .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+          .collect();
         if !name.is_empty() {
           map.entry(name).or_default().insert(file_name.clone());
         }
