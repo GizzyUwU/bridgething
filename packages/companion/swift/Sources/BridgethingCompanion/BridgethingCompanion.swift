@@ -52,7 +52,7 @@ public struct CompanionCapabilityFlags: Sendable {
 /// Net (fetch/ws/stream) via URLSession, Geo via CoreLocation, Volume
 /// via AVAudioSession.
 public actor BridgethingCompanion {
-    public let gateway: BridgethingGateway
+    public nonisolated let gateway: BridgethingGateway
 
     private let host: HostInfo
     private let lyricsResolver: any LyricsResolver
@@ -61,6 +61,9 @@ public actor BridgethingCompanion {
     private var activeGlue: (any BridgethingGlue)?
     private var tasks: [Task<Void, Never>] = []
     private var started = false
+    private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
+    private var ancsAuthStateObserver: (@Sendable (AncsAuthState) -> Void)?
+    private var ancsAuthState: AncsAuthState = .unknown
 
     private let netDispatcher: NetDispatcher
     public let ota: OtaService
@@ -137,9 +140,13 @@ public actor BridgethingCompanion {
     public func setActive(_ glue: (any BridgethingGlue)?) async throws {
         if let activeGlue {
             await activeGlue.detach()
+            nowPlayingObserver?(nil)
         }
         activeGlue = glue
         if let glue {
+            if let observer = nowPlayingObserver {
+                await glue.setNowPlayingObserver(observer)
+            }
             try await glue.attach(gateway: gateway)
         }
         await announceCapabilities()
@@ -148,6 +155,52 @@ public actor BridgethingCompanion {
     public func current() -> (any BridgethingGlue)? {
         activeGlue
     }
+
+    /// Subscribe to NowPlaying mirror updates from whichever glue is
+    /// active. Replacing the observer takes effect immediately for the
+    /// active glue and persists across `setActive` swaps.
+    public func setNowPlayingObserver(_ observer: (@Sendable (GlueNowPlaying?) -> Void)?) async {
+        nowPlayingObserver = observer
+        if let glue = activeGlue {
+            await glue.setNowPlayingObserver(observer ?? { _ in })
+        }
+    }
+
+    /// Subscribe to ANCS authorization-state transitions reported by the
+    /// daemon. iOS-only signal; on Android the observer never fires.
+    public func setAncsAuthStateObserver(_ observer: (@Sendable (AncsAuthState) -> Void)?) {
+        ancsAuthStateObserver = observer
+    }
+
+    /// Last daemon-reported ANCS auth state. `unknown` until the daemon
+    /// emits one (no iAP2 link yet, or session task hasn't probed).
+    public func currentAncsAuthState() -> AncsAuthState {
+        ancsAuthState
+    }
+
+    /// Drive the AccessorySetupKit pair flow that creates the LE bond
+    /// the daemon needs before iOS will expose ANCS. iOS 18+ only;
+    /// returns `unsupported` on Android / earlier iOS.
+    public func enableAncsNotifications() async -> AncsSetupResult {
+        #if os(iOS)
+            let coordinator = await makeOrReuseCoordinator()
+            await coordinator.setLastAuthState(ancsAuthState)
+            return await coordinator.pair()
+        #else
+            return AncsSetupResult(kind: .unsupported, authState: ancsAuthState)
+        #endif
+    }
+
+    #if os(iOS)
+        private var ancsCoordinator: AncsPairCoordinator?
+
+        private func makeOrReuseCoordinator() async -> AncsPairCoordinator {
+            if let existing = ancsCoordinator { return existing }
+            let coordinator = await MainActor.run { AncsPairCoordinator() }
+            ancsCoordinator = coordinator
+            return coordinator
+        }
+    #endif
 
     public func setCapabilityFlags(_ flags: CompanionCapabilityFlags) async {
         capFlags = flags
@@ -198,6 +251,7 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in await self?.runPlayerDispatch() })
         tasks.append(Task { [weak self] in await self?.runAssetDispatch() })
         tasks.append(Task { [weak self] in await self?.runLyricsDispatch() })
+        tasks.append(Task { [weak self] in await self?.runAncsAuthDispatch() })
         tasks.append(Task { [weak self] in
             guard let self else { return }
             await netDispatcher.start(gateway: gateway)
@@ -249,6 +303,7 @@ public actor BridgethingCompanion {
             case let .setRepeat(r): try await glue.setRepeat(r.mode)
             case let .setSpeed(s): try await glue.setSpeed(s.speed)
             case let .setCrossfade(s): try await glue.setCrossfade(s.durationMs)
+            case let .hint(h): await glue.handlePlaybackHint(h)
             case .queue: throw GlueError.notImplemented
             }
         } catch {
@@ -282,6 +337,23 @@ public actor BridgethingCompanion {
         for await (handle, req) in gateway.lyrics.getRequests {
             await handleLyrics(handle: handle, req: req)
         }
+    }
+
+    private func runAncsAuthDispatch() async {
+        for await update in gateway.notifications.ancsAuthStateChanged {
+            await handleAncsAuthState(update.msg)
+        }
+    }
+
+    private func handleAncsAuthState(_ next: AncsAuthState) async {
+        guard ancsAuthState != next else { return }
+        ancsAuthState = next
+        #if os(iOS)
+            if let coordinator = ancsCoordinator {
+                await coordinator.setLastAuthState(next)
+            }
+        #endif
+        ancsAuthStateObserver?(next)
     }
 
     private func handleLyrics(handle: LyricsRequestHandle, req: LyricsRequest) async {

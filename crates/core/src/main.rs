@@ -133,7 +133,7 @@ async fn main() {
     .await
     .spawn();
 
-  let (ancs, _ancs_handle) = bluetooth::ancs::AncsManager::spawn(bus.clone())
+  let (ancs, _ancs_handle) = bluetooth::ancs::AncsManager::spawn(bus.clone(), bluetooth.clone())
     .await
     .expect("failed to initialize ANCS manager");
 
@@ -198,6 +198,7 @@ async fn main() {
   let iap2_router = bluetooth.iap2_reconnect_handle().map(|reconnect| {
     std::sync::Arc::new(Iap2EventRouter::new(
       state.clone(),
+      bluetooth.clone(),
       bluetooth.profile_man.clone(),
       bluetooth.gateway_man.iap2_ea_handle(),
       reconnect,

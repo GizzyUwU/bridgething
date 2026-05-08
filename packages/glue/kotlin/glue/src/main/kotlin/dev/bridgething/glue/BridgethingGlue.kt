@@ -4,6 +4,7 @@ import dev.bridgething.gateway.BridgethingGateway
 import dev.bridgething.lyrics.Lyrics
 import dev.bridgething.lyrics.TrackIdentity
 import dev.bridgething.schema.MusicProvider
+import dev.bridgething.schema.NowPlayingUpdate
 import dev.bridgething.schema.PlayUri
 import dev.bridgething.schema.RepeatMode
 
@@ -58,7 +59,27 @@ interface BridgethingGlue {
      * companion's injected `LyricsResolver` (lrclib by default).
      */
     suspend fun lyrics(track: TrackIdentity): Lyrics? = null
+
+    /**
+     * Subscribe to NowPlaying mirror updates. The active glue invokes the
+     * observer with deltas alongside its outbound `gateway.player.delta`
+     * events; the companion forwards these to the phone-side UI shell.
+     * `null` means "nothing playing / source went away". Default impl is
+     * no-op for stub glues.
+     */
+    suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) {}
 }
+
+/**
+ * NowPlaying snapshot the active glue surfaces to the companion. Wraps
+ * the wire `NowPlayingUpdate` with the raw artwork URL so phone-side UI
+ * can load directly from the provider's CDN, bypassing the on-device
+ * asset-cache indirection.
+ */
+data class GlueNowPlaying(
+    val update: NowPlayingUpdate,
+    val artworkUrl: String? = null,
+)
 
 /** Bytes payload returned from `BridgethingGlue.asset(id)`. */
 data class AssetBytes(

@@ -3,6 +3,7 @@ package dev.bridgething.companion
 import dev.bridgething.gateway.Adapter
 import dev.bridgething.gateway.BridgethingGateway
 import dev.bridgething.glue.BridgethingGlue
+import dev.bridgething.glue.GlueNowPlaying
 import dev.bridgething.lyrics.LyricsResolver
 
 /**
@@ -69,6 +70,14 @@ class BridgethingCompanion(
     fun current(): BridgethingGlue? = activeGlue
 
     suspend fun setCapabilityFlags(flags: CompanionCapabilityFlags) {
+        TODO("Android implementation pending")
+    }
+
+    /**
+     * Subscribe to NowPlaying mirror updates from whichever glue is
+     * active. Mirror of the Swift companion's `setNowPlayingObserver`.
+     */
+    suspend fun setNowPlayingObserver(observer: ((GlueNowPlaying?) -> Unit)?) {
         TODO("Android implementation pending")
     }
 }

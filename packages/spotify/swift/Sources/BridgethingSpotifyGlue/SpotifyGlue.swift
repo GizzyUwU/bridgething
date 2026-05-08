@@ -12,6 +12,9 @@ public typealias WireRepeat = BridgethingSchema.RepeatMode
 private typealias SpotinyRepeat = Spotiny.RepeatMode
 
 private let assetIdPrefix = "spotify/img/"
+private let hintDebounceNanos: UInt64 = 250_000_000
+private let pollIntervalNanos: UInt64 = 60_000_000_000
+private let spotifyAppBundle = "com.spotify.client"
 
 public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public static let name: String = "spotify"
@@ -42,6 +45,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var client: SpotinyClient?
     private var gateway: BridgethingGateway?
     private var authorityHeld: Bool = false
+    private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
+    private var hintFetchTask: Task<Void, Never>?
+    private var baselinePollTask: Task<Void, Never>?
 
     public init(
         authenticator: any OAuthAuthenticator,
@@ -74,14 +80,26 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     public func detach() async {
+        hintFetchTask?.cancel()
+        hintFetchTask = nil
+        baselinePollTask?.cancel()
+        baselinePollTask = nil
+
         if let gw = gateway, authorityHeld {
             try? await gw.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
             try? await gw.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
         }
         authorityHeld = false
 
+        nowPlayingObserver?(nil)
+        nowPlayingObserver = nil
+
         client = nil
         gateway = nil
+    }
+
+    public func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async {
+        nowPlayingObserver = observer
     }
 
     // MARK: - inbound dispatch
@@ -138,6 +156,19 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         await client.player.setRepeatMode(mapped)
     }
 
+    public func handlePlaybackHint(_ hint: PlaybackHint) async {
+        // Filter for Spotify-app activity only. Other-app hints are not
+        // ours to react to. Hints with an unset bundle (rare) also drop.
+        guard hint.appBundle == spotifyAppBundle else { return }
+
+        hintFetchTask?.cancel()
+        hintFetchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: hintDebounceNanos)
+            if Task.isCancelled { return }
+            await self?.fetchAndDispatch()
+        }
+    }
+
     public func asset(id: String) async throws -> AssetBytes? {
         guard id.hasPrefix(assetIdPrefix) else { return nil }
         let encoded = String(id.dropFirst(assetIdPrefix.count))
@@ -148,11 +179,23 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         return AssetBytes(bytes: data, mime: mime)
     }
 
+    /// Pull the canonical playback state from `/v1/me/player` and route
+    /// it through the same path dealer-WS pushes take. Both hint-driven
+    /// and baseline-poll fetches funnel here.
+    fileprivate func fetchAndDispatch() async {
+        guard let client else { return }
+        guard let state = await client.player.getPlaybackState() else { return }
+        handleStateUpdate(state)
+    }
+
     // MARK: - outbound
 
     fileprivate func handleStateUpdate(_ state: Spotiny.PlayerState) {
         guard let gateway else { return }
         let update = Self.makeUpdate(from: state)
+        let artworkUrl = state.item.flatMap(Self.rawArtworkURL(for:))
+        nowPlayingObserver?(GlueNowPlaying(update: update, artworkUrl: artworkUrl))
+
         let nowPlaying = state.is_playing
         Task { [weak self] in
             try? await gateway.player.delta(update)
@@ -161,21 +204,41 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingPlayback))
                 try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingMetadata))
                 authorityHeld = true
+                startBaselinePollIfNeeded()
             } else if authorityHeld {
                 try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
                 try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
                 authorityHeld = false
+                stopBaselinePoll()
             }
         }
     }
 
     fileprivate func handleSocketDown() {
+        nowPlayingObserver?(nil)
+        stopBaselinePoll()
         guard let gateway, authorityHeld else { return }
         authorityHeld = false
         Task {
             try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
             try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
         }
+    }
+
+    private func startBaselinePollIfNeeded() {
+        guard baselinePollTask == nil else { return }
+        baselinePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: pollIntervalNanos)
+                if Task.isCancelled { return }
+                await self?.fetchAndDispatch()
+            }
+        }
+    }
+
+    private func stopBaselinePoll() {
+        baselinePollTask?.cancel()
+        baselinePollTask = nil
     }
 
     private static func makeUpdate(from state: Spotiny.PlayerState) -> NowPlayingUpdate {
@@ -226,15 +289,18 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     private static func artworkId(for item: PlayerItem) -> String? {
-        let urls = item.imageUrl
-        let pick = !urls.large.isEmpty ? urls.large
-            : !urls.medium.isEmpty ? urls.medium
-            : !urls.small.isEmpty ? urls.small
-            : nil
-        guard let pick,
+        guard let pick = rawArtworkURL(for: item),
               let encoded = pick.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
         else { return nil }
         return assetIdPrefix + encoded
+    }
+
+    fileprivate static func rawArtworkURL(for item: PlayerItem) -> String? {
+        let urls = item.imageUrl
+        if !urls.large.isEmpty { return urls.large }
+        if !urls.medium.isEmpty { return urls.medium }
+        if !urls.small.isEmpty { return urls.small }
+        return nil
     }
 
     private static func mapRepeat(_ mode: SpotinyRepeat) -> WireRepeat {

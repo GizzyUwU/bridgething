@@ -712,6 +712,23 @@ public struct NotificationsSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Notifications::AncsAuthStateChanged` messages.
+  public var ancsAuthStateChanged: AsyncStream<(deviceId: String, msg: AncsAuthState)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .notifications(let outer) = message.data,
+             case .ancsAuthStateChanged(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Notifications::Posted` to every connected peer (broadcast).
   public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1253,6 +1270,23 @@ public struct PlayerSurface: Sendable {
           if case .message(let deviceId, let message) = event,
              case .player(let outer) = message.data,
              case .setCrossfade(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Player::Hint` messages.
+  public var hint: AsyncStream<(deviceId: String, msg: PlaybackHint)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .player(let outer) = message.data,
+             case .hint(let inner) = outer {
             continuation.yield((deviceId: deviceId, msg: inner))
           }
         }
@@ -2722,6 +2756,24 @@ public struct NotificationsSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Notifications::AncsAuthStateChanged` from this peer.
+  public var ancsAuthStateChanged: AsyncStream<AncsAuthState> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .notifications(let outer) = message.data,
+             case .ancsAuthStateChanged(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Notifications::Posted` to this peer.
   public func posted(_ payload: BridgethingSchema.Notification, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .notifications(.posted(payload)))
@@ -3226,6 +3278,24 @@ public struct PlayerSurfaceForDevice: Sendable {
              evDeviceId == deviceId,
              case .player(let outer) = message.data,
              case .setCrossfade(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Player::Hint` from this peer.
+  public var hint: AsyncStream<PlaybackHint> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .player(let outer) = message.data,
+             case .hint(let inner) = outer {
             continuation.yield(inner)
           }
         }

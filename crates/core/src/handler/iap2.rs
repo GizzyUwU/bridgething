@@ -6,7 +6,11 @@
 //! `Iap2EventRouter::route` for each event. State mutation lives here,
 //! one variant per arm.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+  collections::HashMap,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use bluer::Address;
 use bridgething_iap2::{
@@ -19,11 +23,13 @@ use bridgething_iap2::{
 use libbridgething::{
   AssetRetention, DeviceType, MediaItemUpdate, MediaType as LibMediaType, NowPlayingUpdate, PeerIap2Status,
   PlaybackUpdate, QueueItem, ShuffleMode as LibShuffleMode,
+  gateway::{BridgeToGatewayPlayerMsgEvent, PlaybackHint},
 };
 use tokio::sync::Mutex;
 
 use crate::{
   bluetooth::{
+    BluetoothMan,
     iap2::{Iap2EaGatewayHandle, Iap2Event, Iap2ReconnectHandle, StreamClosed, StreamOpened},
     profiles::ProfileMan,
   },
@@ -31,9 +37,18 @@ use crate::{
 };
 
 const IDLE_PID_HEX: &str = "0000000000000000";
+const HINT_DEBOUNCE: Duration = Duration::from_millis(250);
 
-/// Per-session NowPlaying context. Each iPhone reports `persistent_id`
-type LastPidMap = Mutex<HashMap<Address, String>>;
+#[derive(Debug, Default, Clone)]
+struct HintCheckpoint {
+  pid_hex: Option<String>,
+  playing: Option<bool>,
+  app_bundle: Option<String>,
+  duration_ms: Option<u32>,
+  last_emit: Option<Instant>,
+}
+
+type HintStateMap = Mutex<HashMap<Address, HintCheckpoint>>;
 
 #[derive(Debug, Default)]
 struct QueueContext {
@@ -86,17 +101,19 @@ impl Iap2PendingArt {
 #[derive(Debug)]
 pub struct Iap2EventRouter {
   state: State,
+  bluetooth: BluetoothMan,
   profile_man: ProfileMan,
   ea_gateway: Iap2EaGatewayHandle,
   reconnect: Iap2ReconnectHandle,
   pending_art: Iap2PendingArt,
-  last_pid_hex: LastPidMap,
+  hint_state: HintStateMap,
   queue_ctx: QueueContextMap,
 }
 
 impl Iap2EventRouter {
   pub fn new(
     state: State,
+    bluetooth: BluetoothMan,
     profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
     reconnect: Iap2ReconnectHandle,
@@ -104,11 +121,12 @@ impl Iap2EventRouter {
   ) -> Self {
     Self {
       state,
+      bluetooth,
       profile_man,
       ea_gateway,
       reconnect,
       pending_art,
-      last_pid_hex: Mutex::new(HashMap::new()),
+      hint_state: Mutex::new(HashMap::new()),
       queue_ctx: Mutex::new(HashMap::new()),
     }
   }
@@ -143,18 +161,19 @@ impl Iap2EventRouter {
       }
       SessionEvent::NowPlayingUpdate(update) => {
         let pid_hex = {
-          let mut guard = self.last_pid_hex.lock().await;
+          let mut guard = self.hint_state.lock().await;
+          let entry = guard.entry(address).or_default();
           if let Some(pid) = update.media_item.as_ref().and_then(|m| m.persistent_id) {
             let hex = format!("{pid:016x}");
-            let track_changed = guard.get(&address) != Some(&hex);
-            guard.insert(address, hex.clone());
+            let track_changed = entry.pid_hex.as_deref() != Some(&hex);
+            entry.pid_hex = Some(hex.clone());
             drop(guard);
             if track_changed {
               self.pending_art.clear(address).await;
             }
             Some(hex)
           } else {
-            guard.get(&address).cloned()
+            entry.pid_hex.clone()
           }
         };
         if let Some(pid_hex) = pid_hex.as_deref()
@@ -170,6 +189,7 @@ impl Iap2EventRouter {
           .and_then(|p| p.queue_list_avail.map(|avail| (avail, p.queue_list_transfer_id)));
         let lib_update = translate_now_playing(update, pid_hex.as_deref());
         tracing::debug!(%address, ?lib_update, "iAP2 now-playing delta");
+        let hint = self.evaluate_hint(address, &lib_update).await;
         if let Err(err) = self
           .state
           .player
@@ -177,6 +197,14 @@ impl Iap2EventRouter {
           .await
         {
           tracing::warn!(%address, ?err, "failed to apply iAP2 now-playing delta");
+        }
+        if let Some(hint) = hint {
+          tracing::debug!(%address, ?hint, "emitting iAP2 playback hint");
+          self
+            .bluetooth
+            .gateway_man
+            .broadcast(BridgeToGatewayPlayerMsgEvent::Hint(hint))
+            .await;
         }
         if let Some((avail, transfer_id)) = queue_avail_change {
           let cleared_queue = {
@@ -334,7 +362,7 @@ impl Iap2EventRouter {
         tracing::info!(%address, %reason, "iAP2 link down");
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
         self.state.ancs.detach(address).await;
-        self.last_pid_hex.lock().await.remove(&address);
+        self.hint_state.lock().await.remove(&address);
         self.queue_ctx.lock().await.remove(&address);
         self.pending_art.clear(address).await;
         if let Err(err) = self.state.player.apply_iap2_queue(Vec::new()).await {
@@ -344,6 +372,61 @@ impl Iap2EventRouter {
       }
     }
   }
+
+  async fn evaluate_hint(&self, address: Address, update: &NowPlayingUpdate) -> Option<PlaybackHint> {
+    let mut guard = self.hint_state.lock().await;
+    let entry = guard.entry(address).or_default();
+    evaluate_hint_against(entry, update, Instant::now())
+  }
+}
+
+fn evaluate_hint_against(entry: &mut HintCheckpoint, update: &NowPlayingUpdate, now: Instant) -> Option<PlaybackHint> {
+  let incoming_pid = update.media_item.as_ref().and_then(|m| m.persistent_id.clone());
+  if let Some(pid) = incoming_pid.as_deref()
+    && pid_is_idle(pid)
+  {
+    return None;
+  }
+
+  let incoming_playing = update.playback.as_ref().and_then(|p| p.playing);
+  let incoming_bundle = update.playback.as_ref().and_then(|p| p.app_bundle.clone());
+  let incoming_duration = update.media_item.as_ref().and_then(|m| m.duration_ms);
+
+  let pid_for_emit = incoming_pid.clone().or_else(|| entry.pid_hex.clone());
+  let playing_for_emit = incoming_playing.or(entry.playing);
+  let bundle_for_emit = incoming_bundle.clone().or_else(|| entry.app_bundle.clone());
+  let duration_for_emit = incoming_duration.or(entry.duration_ms);
+
+  let pid_changed = incoming_pid.is_some() && entry.pid_hex != incoming_pid;
+  let playing_changed = incoming_playing.is_some() && incoming_playing != entry.playing;
+  let bundle_changed = incoming_bundle.is_some() && incoming_bundle != entry.app_bundle;
+
+  if !(pid_changed || playing_changed || bundle_changed) {
+    return None;
+  }
+  if let Some(last) = entry.last_emit
+    && now.duration_since(last) < HINT_DEBOUNCE
+  {
+    // Suppressed for debounce
+    return None;
+  }
+
+  entry.pid_hex = pid_for_emit.clone();
+  entry.playing = playing_for_emit;
+  entry.app_bundle = bundle_for_emit.clone();
+  entry.duration_ms = duration_for_emit;
+  entry.last_emit = Some(now);
+
+  Some(PlaybackHint {
+    app_bundle: bundle_for_emit,
+    persistent_id: pid_for_emit,
+    playing: playing_for_emit,
+    duration_ms: duration_for_emit,
+  })
+}
+
+fn pid_is_idle(pid: &str) -> bool {
+  pid == IDLE_PID_HEX || pid.ends_with(&format!(":{IDLE_PID_HEX}"))
 }
 
 fn translate_now_playing(update: Iap2NowPlayingUpdate, persistent_hex: Option<&str>) -> NowPlayingUpdate {
@@ -492,5 +575,201 @@ mod tests {
     pending.clear(addr()).await;
     assert!(!pending.is_pending("iap2/art/abcd/5").await);
     assert_eq!(pending.take_if_matches(addr(), 5).await, None);
+  }
+
+  fn track_update(pid_hex: &str, playing: bool, app_bundle: &str) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(format!("iap2:track:{pid_hex}")),
+        title: None,
+        album: None,
+        album_artist: None,
+        artist: None,
+        liked: None,
+        artwork_id: None,
+        duration_ms: Some(180_000),
+        media_types: None,
+        track_number: None,
+        track_count: None,
+        is_like_supported: None,
+        is_ban_supported: None,
+        is_banned: None,
+        is_resident_on_device: None,
+        chapter_count: None,
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(playing),
+        position_ms: None,
+        shuffle: None,
+        shuffle_mode: None,
+        repeat: None,
+        app_bundle: Some(app_bundle.to_string()),
+        app_display_name: None,
+        queue_index: None,
+        queue_count: None,
+        queue_chapter_index: None,
+        playback_speed: None,
+        set_elapsed_time_available: None,
+        queue_list_avail: None,
+        apple_music_radio_ad: None,
+        apple_music_radio_station_name: None,
+      }),
+    }
+  }
+
+  fn playback_only(playing: bool) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing: Some(playing),
+        position_ms: None,
+        shuffle: None,
+        shuffle_mode: None,
+        repeat: None,
+        app_bundle: None,
+        app_display_name: None,
+        queue_index: None,
+        queue_count: None,
+        queue_chapter_index: None,
+        playback_speed: None,
+        set_elapsed_time_available: None,
+        queue_list_avail: None,
+        apple_music_radio_ad: None,
+        apple_music_radio_station_name: None,
+      }),
+    }
+  }
+
+  fn bundle_only(app_bundle: &str) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing: None,
+        position_ms: None,
+        shuffle: None,
+        shuffle_mode: None,
+        repeat: None,
+        app_bundle: Some(app_bundle.to_string()),
+        app_display_name: None,
+        queue_index: None,
+        queue_count: None,
+        queue_chapter_index: None,
+        playback_speed: None,
+        set_elapsed_time_available: None,
+        queue_list_avail: None,
+        apple_music_radio_ad: None,
+        apple_music_radio_station_name: None,
+      }),
+    }
+  }
+
+  #[test]
+  fn track_change_emits_hint() {
+    let mut entry = HintCheckpoint::default();
+    let now = Instant::now();
+    let hint = evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), now)
+      .expect("track change emits hint");
+    assert_eq!(hint.persistent_id.as_deref(), Some("iap2:track:aa"));
+    assert_eq!(hint.playing, Some(true));
+    assert_eq!(hint.app_bundle.as_deref(), Some("com.spotify.client"));
+    assert_eq!(hint.duration_ms, Some(180_000));
+  }
+
+  #[test]
+  fn play_state_flip_emits_hint() {
+    let mut entry = HintCheckpoint::default();
+    let t0 = Instant::now();
+    evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).unwrap();
+    let t1 = t0 + HINT_DEBOUNCE;
+    let hint = evaluate_hint_against(&mut entry, &playback_only(false), t1).expect("flip emits hint");
+    assert_eq!(hint.playing, Some(false));
+    assert_eq!(hint.persistent_id.as_deref(), Some("iap2:track:aa"));
+  }
+
+  #[test]
+  fn app_bundle_change_emits_hint() {
+    let mut entry = HintCheckpoint::default();
+    let t0 = Instant::now();
+    evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).unwrap();
+    let t1 = t0 + HINT_DEBOUNCE;
+    let hint = evaluate_hint_against(&mut entry, &bundle_only("com.apple.Music"), t1).expect("bundle emits hint");
+    assert_eq!(hint.app_bundle.as_deref(), Some("com.apple.Music"));
+  }
+
+  #[test]
+  fn debounce_collapses_back_to_back_changes() {
+    let mut entry = HintCheckpoint::default();
+    let t0 = Instant::now();
+    let first =
+      evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).expect("first emits");
+    assert_eq!(first.persistent_id.as_deref(), Some("iap2:track:aa"));
+
+    // 100ms later, track changes again. Inside 250ms window: suppressed,
+    // checkpoint left at the announced state ("aa") so the next post-window
+    // delta still notices the change.
+    let t1 = t0 + Duration::from_millis(100);
+    assert!(evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t1).is_none());
+    assert_eq!(entry.pid_hex.as_deref(), Some("iap2:track:aa"));
+
+    // 300ms after the first emit, the new track is announced.
+    let t2 = t0 + Duration::from_millis(300);
+    let post = evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t2)
+      .expect("post-window emits");
+    assert_eq!(post.persistent_id.as_deref(), Some("iap2:track:bb"));
+  }
+
+  #[test]
+  fn idle_pid_suppresses_emit() {
+    let mut entry = HintCheckpoint::default();
+    assert!(
+      evaluate_hint_against(
+        &mut entry,
+        &track_update(IDLE_PID_HEX, false, "com.spotify.client"),
+        Instant::now()
+      )
+      .is_none()
+    );
+    assert!(entry.pid_hex.is_none());
+  }
+
+  #[test]
+  fn no_change_no_emit() {
+    let mut entry = HintCheckpoint::default();
+    let t0 = Instant::now();
+    evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).unwrap();
+    let t1 = t0 + HINT_DEBOUNCE;
+    assert!(
+      evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t1).is_none(),
+      "identical state must not re-emit"
+    );
+  }
+
+  #[test]
+  fn position_only_delta_does_not_emit() {
+    let mut entry = HintCheckpoint::default();
+    let t0 = Instant::now();
+    evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).unwrap();
+    let t1 = t0 + HINT_DEBOUNCE;
+    let position_delta = NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing: None,
+        position_ms: Some(45_000),
+        shuffle: None,
+        shuffle_mode: None,
+        repeat: None,
+        app_bundle: None,
+        app_display_name: None,
+        queue_index: None,
+        queue_count: None,
+        queue_chapter_index: None,
+        playback_speed: None,
+        set_elapsed_time_available: None,
+        queue_list_avail: None,
+        apple_music_radio_ad: None,
+        apple_music_radio_station_name: None,
+      }),
+    };
+    assert!(evaluate_hint_against(&mut entry, &position_delta, t1).is_none());
   }
 }

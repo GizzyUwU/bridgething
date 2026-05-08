@@ -53,13 +53,13 @@
 
     /// Standard bridgething RFCOMM service UUID, mirrors the constant
     /// `BRIDGETHING_PROFILE_UUID` in `crates/lib`.
-    public static let bridgethingUUID: IOBluetoothSDPUUID = {
+    nonisolated(unsafe) public static let bridgethingUUID: IOBluetoothSDPUUID = {
       var bytes: [UInt8] = [
         0xDE, 0xAD, 0x00, 0x00, 0x85, 0x4D, 0x40, 0x8E,
         0x81, 0xF0, 0xFB, 0x61, 0x47, 0xF9, 0x18, 0xFD,
       ]
       return bytes.withUnsafeBufferPointer { buf in
-        IOBluetoothSDPUUID(bytes: buf.baseAddress, length: UInt8(buf.count))
+        IOBluetoothSDPUUID(bytes: buf.baseAddress, length: buf.count)
       }
     }()
 
@@ -162,7 +162,7 @@
       let records = device.services as? [IOBluetoothSDPServiceRecord] ?? []
       var matchedChannel: BluetoothRFCOMMChannelID?
       for record in records {
-        guard record.hasServiceFromArray([serviceUUID]) else { continue }
+        guard record.hasService(from: [serviceUUID]) else { continue }
         var channelID: BluetoothRFCOMMChannelID = 0
         if record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess {
           matchedChannel = channelID

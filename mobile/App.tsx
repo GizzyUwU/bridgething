@@ -2,12 +2,21 @@ import './global.css';
 
 import {
   BridgethingSession,
+  type BridgethingAncsAuthStatus,
   type BridgethingAuthState,
   type BridgethingProviderInfo,
   type BridgethingSessionPeer,
 } from '@bridgething/session-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 type LogEntry = { id: number; text: string };
@@ -26,6 +35,9 @@ export default function App() {
   const [peers, setPeers] = useState<Record<string, BridgethingSessionPeer>>(
     {},
   );
+  const [ancsAuthStatus, setAncsAuthStatus] =
+    useState<BridgethingAncsAuthStatus>('unknown');
+  const [ancsBusy, setAncsBusy] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const appendLog = (text: string) => {
@@ -59,6 +71,10 @@ export default function App() {
           });
           appendLog(`-- peer ${event.peerId}`);
           break;
+        case 'ancsAuthStatusChanged':
+          setAncsAuthStatus(event.status);
+          appendLog(`ancs ${event.status}`);
+          break;
         case 'log':
           appendLog(`[${event.level}] ${event.message}`);
           break;
@@ -76,6 +92,8 @@ export default function App() {
       setProviders(list);
       const current = await session.currentProvider();
       setActiveProvider(current);
+      const ancs = await session.ancsAuthStatus();
+      setAncsAuthStatus(ancs);
       appendLog('++ session started');
     } catch (err) {
       appendLog(`!! start failed: ${errMsg(err)}`);
@@ -100,6 +118,32 @@ export default function App() {
       await session.setActiveProvider(id);
     } catch (err) {
       appendLog(`!! set provider failed: ${errMsg(err)}`);
+    }
+  };
+
+  const enableAncs = async () => {
+    if (ancsBusy) return;
+    setAncsBusy(true);
+    try {
+      const result = await session.enableAncsNotifications();
+      appendLog(
+        `ancs setup ${result.kind}${result.message ? `: ${result.message}` : ''}`,
+      );
+      if (result.kind === 'unsupported') {
+        Alert.alert(
+          'iOS notifications unavailable',
+          'AccessorySetupKit requires iOS 18 or later.',
+        );
+      } else if (result.kind === 'failed') {
+        Alert.alert(
+          'Pairing failed',
+          result.message ?? 'AccessorySetupKit reported an error.',
+        );
+      }
+    } catch (err) {
+      appendLog(`!! ancs failed: ${errMsg(err)}`);
+    } finally {
+      setAncsBusy(false);
     }
   };
 
@@ -182,6 +226,28 @@ export default function App() {
           )}
         </Section>
 
+        <Section
+          title={`iOS notifications · ${ancsStatusLabel(ancsAuthStatus)}`}
+        >
+          <Pressable
+            onPress={enableAncs}
+            disabled={!running || ancsBusy || ancsAuthStatus === 'authorized'}
+            className={
+              'mb-1.5 flex-row items-center justify-between rounded-md bg-secondary px-3 py-2 ' +
+              (!running || ancsBusy || ancsAuthStatus === 'authorized'
+                ? 'opacity-50'
+                : '')
+            }
+          >
+            <Text className="text-sm font-semibold">
+              {ancsAuthStatus === 'authorized'
+                ? 'Enabled on Car Thing'
+                : 'Enable on Car Thing'}
+            </Text>
+            {ancsBusy && <ActivityIndicator size="small" />}
+          </Pressable>
+        </Section>
+
         <Section title={`connected (${peerList.length})`}>
           {peerList.length === 0 ? (
             <Empty>no Car Things connected</Empty>
@@ -245,4 +311,17 @@ function Empty({ children }: { children: React.ReactNode }) {
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+function ancsStatusLabel(status: BridgethingAncsAuthStatus): string {
+  switch (status) {
+    case 'authorized':
+      return 'authorized';
+    case 'unauthorized':
+      return 'not authorized';
+    case 'probing':
+      return 'checking…';
+    case 'unknown':
+      return 'idle';
+  }
 }

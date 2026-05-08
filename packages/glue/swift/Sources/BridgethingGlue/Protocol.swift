@@ -26,6 +26,13 @@ public protocol BridgethingGlue: Sendable {
     func attach(gateway: BridgethingGateway) async throws
     func detach() async
 
+    /// Subscribe to NowPlaying mirror updates. The active glue invokes the
+    /// observer with deltas alongside its outbound `gateway.player.delta`
+    /// events; the companion forwards these to the phone-side UI shell.
+    /// `nil` means "nothing playing / source went away". Default impl is
+    /// no-op for stub glues.
+    func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
+
     /// Inbound transport-control verbs. Default impls throw
     /// `GlueError.notImplemented`; concrete glues override the verbs they
     /// support. The companion's central dispatcher routes inbound
@@ -41,6 +48,16 @@ public protocol BridgethingGlue: Sendable {
     func setRepeat(_ mode: BridgethingSchema.RepeatMode) async throws
     func setSpeed(_ speed: Float) async throws
     func setCrossfade(_ durationMs: UInt32?) async throws
+
+    /// Daemon-observed iAP2 playback hint. Fires when the daemon notices
+    /// the iPhone's NowPlaying state changed in a way the companion can't
+    /// see directly (track change, play-state flip, app switch). The hint
+    /// itself is not authoritative state - the glue is expected to react
+    /// by fetching from its own data source (e.g. Spotify Web API) and
+    /// pushing the result back via `gateway.player.delta`. Filter on
+    /// `appBundle` so other-app hints don't trigger spurious fetches.
+    /// Default impl is no-op.
+    func handlePlaybackHint(_ hint: PlaybackHint) async
 
     /// Bytes for an asset id this glue produced (e.g.
     /// `"spotify/img/<base64url>"`). Return nil if the id isn't this
@@ -64,8 +81,24 @@ public extension BridgethingGlue {
     func setRepeat(_: BridgethingSchema.RepeatMode) async throws { throw GlueError.notImplemented }
     func setSpeed(_: Float) async throws { throw GlueError.notImplemented }
     func setCrossfade(_: UInt32?) async throws { throw GlueError.notImplemented }
+    func handlePlaybackHint(_: PlaybackHint) async {}
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
+    func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
+}
+
+/// NowPlaying snapshot the active glue surfaces to the companion. Wraps
+/// the wire `NowPlayingUpdate` with the raw artwork URL so phone-side UI
+/// can load directly from the provider's CDN, bypassing the on-device
+/// asset-cache indirection.
+public struct GlueNowPlaying: Sendable {
+    public let update: NowPlayingUpdate
+    public let artworkUrl: String?
+
+    public init(update: NowPlayingUpdate, artworkUrl: String? = nil) {
+        self.update = update
+        self.artworkUrl = artworkUrl
+    }
 }
 
 /// Bytes payload returned from `BridgethingGlue.asset(id:)`. The companion

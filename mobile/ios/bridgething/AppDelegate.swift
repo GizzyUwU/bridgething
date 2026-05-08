@@ -14,7 +14,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    Bridgething.installBridgething()
+    BridgethingApp.installBridgething()
 
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)

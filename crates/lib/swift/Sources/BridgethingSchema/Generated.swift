@@ -3192,6 +3192,27 @@ public struct Playback: Codable, Sendable {
 	}
 }
 
+/// Invalidation signal fired when the daemon observes an iAP2 NowPlaying
+/// state change the companion can't see directly. Carries enough context
+/// for the companion to filter ("is this for the app I care about?") and
+/// dedupe ("did the track actually change?"). The companion is expected
+/// to react with its own data fetch (e.g. Spotify Web API) - the hint
+/// itself is not a state source. `persistent_id` is iAP2's opaque hex
+/// identifier; do not treat it as a service URI.
+public struct PlaybackHint: Codable, Sendable {
+	public let appBundle: String?
+	public let persistentId: String?
+	public let playing: Bool?
+	public let durationMs: UInt32?
+
+	public init(appBundle: String?, persistentId: String?, playing: Bool?, durationMs: UInt32?) {
+		self.appBundle = appBundle
+		self.persistentId = persistentId
+		self.playing = playing
+		self.durationMs = durationMs
+	}
+}
+
 public struct PlaybackOptions: Codable, Sendable {
 	public let `repeat`: RepeatMode
 	public let shuffle: Bool
@@ -4185,6 +4206,23 @@ public struct WebappUninstall: Codable, Sendable {
 	}
 }
 
+/// Daemon-observed state of the ANCS GATT-client session against the
+/// connected iPhone. iOS-only; emitted on transitions so the companion
+/// app can confirm the LE-pair + ANCS authorization handshake completed.
+/// 
+/// State machine:
+/// - `Unknown`: pre-boot only (no iAP2 has ever attached this session).
+/// - `Probing`: a session task is running but no determination yet,
+/// OR iAP2 just detached and we expect to re-probe on reconnect.
+/// - `Authorized`: ANCS attribute fetches are succeeding.
+/// - `Unauthorized`: ANCS service hidden, or auth-gate detected.
+public enum AncsAuthState: String, Codable, Sendable {
+	case unknown
+	case probing
+	case authorized
+	case unauthorized
+}
+
 public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 	case request(AssetRequest)
 	case pushBeginAck(AssetPushBeginAck)
@@ -4623,10 +4661,16 @@ public enum BridgeToGatewayNetMsg: Codable, Sendable {
 public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 	case invokePositive(NotificationInvoke)
 	case invokeNegative(NotificationInvoke)
+	/// iOS-only: daemon has observed the ANCS GATT session transition
+	/// to a new authorization state. Companion app uses this to confirm
+	/// the AccessorySetupKit pair flow drove the iPhone to expose ANCS
+	/// over the new LE bond.
+	case ancsAuthStateChanged(AncsAuthState)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case invokePositive,
-			invokeNegative
+			invokeNegative,
+			ancsAuthStateChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4647,6 +4691,11 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 					self = .invokeNegative(content)
 					return
 				}
+			case .ancsAuthStateChanged:
+				if let content = try? container.decode(AncsAuthState.self, forKey: .data) {
+					self = .ancsAuthStateChanged(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayNotificationsMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayNotificationsMsg"))
@@ -4660,6 +4709,9 @@ public enum BridgeToGatewayNotificationsMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .invokeNegative(let content):
 			try container.encode(CodingKeys.invokeNegative, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .ancsAuthStateChanged(let content):
+			try container.encode(CodingKeys.ancsAuthStateChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -4829,6 +4881,7 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	case setRepeat(SetRepeat)
 	case setSpeed(SetSpeed)
 	case setCrossfade(SetCrossfade)
+	case hint(PlaybackHint)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case play,
@@ -4842,7 +4895,8 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			setShuffle,
 			setRepeat,
 			setSpeed,
-			setCrossfade
+			setCrossfade,
+			hint
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4905,6 +4959,11 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 					self = .setCrossfade(content)
 					return
 				}
+			case .hint:
+				if let content = try? container.decode(PlaybackHint.self, forKey: .data) {
+					self = .hint(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayPlayerMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayPlayerMsg"))
@@ -4944,6 +5003,9 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .setCrossfade(let content):
 			try container.encode(CodingKeys.setCrossfade, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .hint(let content):
+			try container.encode(CodingKeys.hint, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

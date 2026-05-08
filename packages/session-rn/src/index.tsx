@@ -1,14 +1,24 @@
 import type {
+  BridgethingAncsAuthStatus,
+  BridgethingAncsSetupResult,
   BridgethingAuthState,
+  BridgethingNowPlaying,
   BridgethingProviderInfo,
   BridgethingSessionPeer,
   BridgethingSession as NativeBridgethingSession,
 } from './specs/BridgethingSession.nitro';
 
 export type {
+  BridgethingAncsAuthStatus,
+  BridgethingAncsSetupKind,
+  BridgethingAncsSetupResult,
   BridgethingAuthKind,
   BridgethingAuthState,
+  BridgethingNowPlaying,
+  BridgethingNowPlayingPlayback,
+  BridgethingNowPlayingTrack,
   BridgethingProviderInfo,
+  BridgethingRepeatMode,
   BridgethingSessionPeer,
 } from './specs/BridgethingSession.nitro';
 
@@ -19,6 +29,8 @@ export type SessionEvent =
   | { type: 'authStateChanged'; state: BridgethingAuthState }
   | { type: 'peerConnected'; peer: BridgethingSessionPeer }
   | { type: 'peerDisconnected'; peerId: string }
+  | { type: 'nowPlayingChanged'; nowPlaying: BridgethingNowPlaying | null }
+  | { type: 'ancsAuthStatusChanged'; status: BridgethingAncsAuthStatus }
   | { type: 'log'; level: string; message: string };
 
 export type BridgethingSessionOptions = {
@@ -29,8 +41,8 @@ export type BridgethingSessionOptions = {
 /**
  * TS-side facade over the Nitro `BridgethingSession`. Centralizes the
  * native callback setters into a single `on(listener) -> off` pattern and
- * caches the latest provider / auth / peer snapshots so consumers don't
- * have to bookkeep them manually.
+ * caches the latest provider / auth / peer / NowPlaying snapshots so
+ * consumers don't have to bookkeep them manually.
  */
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
@@ -39,6 +51,8 @@ export class BridgethingSession {
   private currentProviderCache: BridgethingProviderInfo | null = null;
   private authStateCache: BridgethingAuthState = { kind: 'idle' };
   private peers: Map<string, BridgethingSessionPeer> = new Map();
+  private nowPlayingCache: BridgethingNowPlaying | null = null;
+  private ancsAuthStatusCache: BridgethingAncsAuthStatus = 'unknown';
 
   constructor(options: BridgethingSessionOptions = {}) {
     this.native = options.native ?? createNativeSession();
@@ -68,12 +82,38 @@ export class BridgethingSession {
     await this.native.setActiveProvider(id);
   }
 
+  async cancelAuth(): Promise<void> {
+    await this.native.cancelAuth();
+  }
+
+  async signOut(): Promise<void> {
+    await this.native.signOut();
+  }
+
   async currentProvider(): Promise<BridgethingProviderInfo | null> {
     return this.native.currentProvider();
   }
 
   async connectedPeers(): Promise<BridgethingSessionPeer[]> {
     return this.native.connectedPeers();
+  }
+
+  async currentNowPlaying(): Promise<BridgethingNowPlaying | null> {
+    return this.native.currentNowPlaying();
+  }
+
+  /**
+   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond
+   * required for ANCS. Resolves once the picker-side outcome is known;
+   * the daemon-observed `authStatus` may transition asynchronously after
+   * — listen via `on(...)` for `ancsAuthStatusChanged` events.
+   */
+  async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
+    return this.native.enableAncsNotifications();
+  }
+
+  async ancsAuthStatus(): Promise<BridgethingAncsAuthStatus> {
+    return this.native.ancsAuthStatus();
   }
 
   /** Latest cached active provider; null if none or before first event. */
@@ -89,6 +129,16 @@ export class BridgethingSession {
   /** Snapshot of currently-cached connected peers. */
   get cachedPeers(): BridgethingSessionPeer[] {
     return Array.from(this.peers.values());
+  }
+
+  /** Latest cached NowPlaying mirror; null if nothing playing. */
+  get cachedNowPlaying(): BridgethingNowPlaying | null {
+    return this.nowPlayingCache;
+  }
+
+  /** Latest cached daemon-reported ANCS auth status. */
+  get cachedAncsAuthStatus(): BridgethingAncsAuthStatus {
+    return this.ancsAuthStatusCache;
   }
 
   private wire(): void {
@@ -107,6 +157,14 @@ export class BridgethingSession {
     this.native.setOnPeerDisconnected(peerId => {
       this.peers.delete(peerId);
       this.dispatch({ type: 'peerDisconnected', peerId });
+    });
+    this.native.setOnNowPlayingChanged(nowPlaying => {
+      this.nowPlayingCache = nowPlaying;
+      this.dispatch({ type: 'nowPlayingChanged', nowPlaying });
+    });
+    this.native.setOnAncsAuthStatusChanged(status => {
+      this.ancsAuthStatusCache = status;
+      this.dispatch({ type: 'ancsAuthStatusChanged', status });
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });

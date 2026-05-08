@@ -2,6 +2,7 @@
 // Re-generate with `just codegen` (or `just typescript`).
 
 import type {
+  AncsAuthState,
   BridgeThingMeta,
   GatewayCapabilities,
   Notification,
@@ -93,6 +94,7 @@ import type {
   PhoneMuteAction,
   PhoneStateReply,
   PlayUri,
+  PlaybackHint,
   QueueSnapshot,
   QueueUri,
   RecommendationsReply,
@@ -232,11 +234,13 @@ export type NetDeviceInboundHandlers = {
 export type NotificationsInboundHandlers = {
   invokePositive: (deviceId: string, msg: NotificationInvoke) => void;
   invokeNegative: (deviceId: string, msg: NotificationInvoke) => void;
+  ancsAuthStateChanged: (deviceId: string, msg: AncsAuthState) => void;
 };
 
 export type NotificationsDeviceInboundHandlers = {
   invokePositive: (msg: NotificationInvoke) => void;
   invokeNegative: (msg: NotificationInvoke) => void;
+  ancsAuthStateChanged: (msg: AncsAuthState) => void;
 };
 
 export type PhoneInboundHandlers = {
@@ -284,6 +288,7 @@ export type PlayerInboundHandlers = {
   setRepeat: (deviceId: string, msg: SetRepeat) => void;
   setSpeed: (deviceId: string, msg: SetSpeed) => void;
   setCrossfade: (deviceId: string, msg: SetCrossfade) => void;
+  hint: (deviceId: string, msg: PlaybackHint) => void;
 };
 
 export type PlayerDeviceInboundHandlers = {
@@ -299,6 +304,7 @@ export type PlayerDeviceInboundHandlers = {
   setRepeat: (msg: SetRepeat) => void;
   setSpeed: (msg: SetSpeed) => void;
   setCrossfade: (msg: SetCrossfade) => void;
+  hint: (msg: PlaybackHint) => void;
 };
 
 export type SystemInboundHandlers = {
@@ -1265,6 +1271,18 @@ export class NotificationsSurface {
     });
   }
 
+  /** Subscribe to `Notifications::AncsAuthStateChanged` across all peers. */
+  onAncsAuthStateChanged(handler: (deviceId: string, msg: AncsAuthState) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'ancsAuthStateChanged') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Notifications` variants. */
   subscribe(handlers: NotificationsInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1288,6 +1306,10 @@ export class NotificationsSurface {
         }
         case 'invokeNegative': {
           handlers.invokeNegative?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'ancsAuthStateChanged': {
+          handlers.ancsAuthStateChanged?.(event.deviceId, inner.data);
           return;
         }
         default: {
@@ -1821,6 +1843,18 @@ export class PlayerSurface {
     });
   }
 
+  /** Subscribe to `Player::Hint` across all peers. */
+  onHint(handler: (deviceId: string, msg: PlaybackHint) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'hint') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Player` variants. */
   subscribe(handlers: PlayerInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -1884,6 +1918,10 @@ export class PlayerSurface {
         }
         case 'setCrossfade': {
           handlers.setCrossfade?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'hint': {
+          handlers.hint?.(event.deviceId, inner.data);
           return;
         }
         default: {
@@ -3765,6 +3803,19 @@ export class NotificationsSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Notifications::AncsAuthStateChanged` from this peer. */
+  onAncsAuthStateChanged(handler: (msg: AncsAuthState) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'notifications') return;
+      const inner = data.data;
+      if (inner.event !== 'ancsAuthStateChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Notifications` variants from this peer. */
   subscribe(handlers: NotificationsDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -3789,6 +3840,10 @@ export class NotificationsSurfaceForDevice {
         }
         case 'invokeNegative': {
           handlers.invokeNegative?.(inner.data);
+          return;
+        }
+        case 'ancsAuthStateChanged': {
+          handlers.ancsAuthStateChanged?.(inner.data);
           return;
         }
         default: {
@@ -4314,6 +4369,19 @@ export class PlayerSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Player::Hint` from this peer. */
+  onHint(handler: (msg: PlaybackHint) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'player') return;
+      const inner = data.data;
+      if (inner.event !== 'hint') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Player` variants from this peer. */
   subscribe(handlers: PlayerDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -4378,6 +4446,10 @@ export class PlayerSurfaceForDevice {
         }
         case 'setCrossfade': {
           handlers.setCrossfade?.(inner.data);
+          return;
+        }
+        case 'hint': {
+          handlers.hint?.(inner.data);
           return;
         }
         default: {
@@ -6427,6 +6499,10 @@ function outerSubscribeGateway(
             innerHandlers.invokeNegative?.(event.deviceId, inner.data);
             return;
           }
+          case 'ancsAuthStateChanged': {
+            innerHandlers.ancsAuthStateChanged?.(event.deviceId, inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
             return;
@@ -6562,6 +6638,10 @@ function outerSubscribeGateway(
           }
           case 'setCrossfade': {
             innerHandlers.setCrossfade?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'hint': {
+            innerHandlers.hint?.(event.deviceId, inner.data);
             return;
           }
           default: {
@@ -7001,6 +7081,10 @@ function outerSubscribeDevice(
             innerHandlers.invokeNegative?.(inner.data);
             return;
           }
+          case 'ancsAuthStateChanged': {
+            innerHandlers.ancsAuthStateChanged?.(inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('Notifications: no handler for inner', inner);
             return;
@@ -7136,6 +7220,10 @@ function outerSubscribeDevice(
           }
           case 'setCrossfade': {
             innerHandlers.setCrossfade?.(inner.data);
+            return;
+          }
+          case 'hint': {
+            innerHandlers.hint?.(inner.data);
             return;
           }
           default: {

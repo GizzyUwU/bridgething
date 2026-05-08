@@ -23,6 +23,30 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - BridgethingSession (0.1.0):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - FBLazyVector (0.85.2)
   - hermes-engine (250829098.0.10):
     - hermes-engine/Pre-built (= 250829098.0.10)
@@ -1409,7 +1433,7 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-  - react-native-safe-area-context (5.6.2):
+  - react-native-safe-area-context (5.7.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1421,8 +1445,8 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-safe-area-context/common (= 5.6.2)
-    - react-native-safe-area-context/fabric (= 5.6.2)
+    - react-native-safe-area-context/common (= 5.7.0)
+    - react-native-safe-area-context/fabric (= 5.7.0)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1433,7 +1457,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context/common (5.6.2):
+  - react-native-safe-area-context/common (5.7.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1455,7 +1479,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context/fabric (5.6.2):
+  - react-native-safe-area-context/fabric (5.7.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1937,6 +1961,53 @@ PODS:
     - ReactNativeDependencies
     - RNWorklets
     - Yoga
+  - RNScreens (4.24.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-RCTImage
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - RNScreens/common (= 4.24.0)
+    - Yoga
+  - RNScreens/common (4.24.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-RCTImage
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RNWorklets (0.8.1):
     - hermes-engine
     - RCTRequired
@@ -2012,6 +2083,7 @@ PODS:
 
 DEPENDENCIES:
   - "BridgethingAdapter (from `../../node_modules/@bridgething/adapter-react-native`)"
+  - "BridgethingSession (from `../../node_modules/@bridgething/session-react-native`)"
   - FBLazyVector (from `../../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - NitroModules (from `../../node_modules/react-native-nitro-modules`)
@@ -2088,12 +2160,15 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
   - RNReanimated (from `../../node_modules/react-native-reanimated`)
+  - RNScreens (from `../../node_modules/react-native-screens`)
   - RNWorklets (from `../../node_modules/react-native-worklets`)
   - Yoga (from `../../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
   BridgethingAdapter:
     :path: "../../node_modules/@bridgething/adapter-react-native"
+  BridgethingSession:
+    :path: "../../node_modules/@bridgething/session-react-native"
   FBLazyVector:
     :path: "../../node_modules/react-native/Libraries/FBLazyVector"
   hermes-engine:
@@ -2245,6 +2320,8 @@ EXTERNAL SOURCES:
     :podspec: "../../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
   RNReanimated:
     :path: "../../node_modules/react-native-reanimated"
+  RNScreens:
+    :path: "../../node_modules/react-native-screens"
   RNWorklets:
     :path: "../../node_modules/react-native-worklets"
   Yoga:
@@ -2252,6 +2329,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   BridgethingAdapter: 07ea8dee30d38621c83dc6f81dd362d2738107da
+  BridgethingSession: 53bd4de31582efdba58a3c50d5bf0213e74fcdef
   FBLazyVector: 26fd21c75314e101f280d401e97f27d54f3f7064
   hermes-engine: db4e5ff280bc2d1edae7a0fdba431bf78c8db63e
   NitroModules: 8146b7b58cd5a478a21485fc2a0d542076f9f1ba
@@ -2291,7 +2369,7 @@ SPEC CHECKSUMS:
   React-logger: 2c87840a9f6322a1226d0df337d9662f44ea6094
   React-Mapbuffer: 1fc10d873f00aa895836c316a9737ce7d43875ce
   React-microtasksnativemodule: 85ac7286ff84e8fc8e1956233748b8d4b2a6dcea
-  react-native-safe-area-context: 91a90d98c310adcc90a511e5aeb6046d7c19d885
+  react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
   React-NativeModulesApple: 993744f42aab769eb02bf5d256b6767c546d0bb5
   React-networking: 251bfddc651caca5e3039d1afa1d2eca890d0c56
   React-oscompat: ed8fa636665935e962d4091180ba6f07dcad7ea9
@@ -2327,9 +2405,10 @@ SPEC CHECKSUMS:
   ReactCommon: a804bb8d1dcf3ecdec3a77eb8bba19b7863bbbdb
   ReactNativeDependencies: c45bedbbf94474b7dc851aafe9b95760007bb6d7
   RNReanimated: 02e2dda9da41885a4a50f91f225d808fac86cb8a
+  RNScreens: 01b065ded2dfe7987bcce770ff3a196be417ff41
   RNWorklets: 996ccc52b3280acc4798ded64d3b4771358ddce2
   Yoga: 04bb4bfeb02c0000b940c1e6e89e856cd8de5a71
 
-PODFILE CHECKSUM: 8e2dab9ab72fd58bd03aee1b02b652bd47a6a895
+PODFILE CHECKSUM: a9d53e9419190945ecd72e6246762fdb37c5fa5a
 
 COCOAPODS: 1.16.2

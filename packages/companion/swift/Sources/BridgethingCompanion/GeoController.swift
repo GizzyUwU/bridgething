@@ -11,8 +11,8 @@
     /// `BridgethingCompanion` reaches in via `await`.
     @MainActor
     public final class GeoController {
-        private let manager: CLLocationManager
-        private let delegate: Delegate
+        private var manager: CLLocationManager?
+        private var delegate: Delegate?
 
         private var watchTask: Task<Void, Never>?
         private var unwatchTask: Task<Void, Never>?
@@ -22,14 +22,21 @@
         private var watching: Bool = false
         private var oneShotConts: [CheckedContinuation<CLLocation, Error>] = []
 
-        public nonisolated init() {
-            manager = CLLocationManager()
-            delegate = Delegate()
-            manager.delegate = delegate
+        public nonisolated init() {}
+
+        private func ensureSetup() -> CLLocationManager {
+            if let manager { return manager }
+            let m = CLLocationManager()
+            let d = Delegate()
+            d.owner = self
+            m.delegate = d
+            manager = m
+            delegate = d
+            return m
         }
 
         public func start(gateway: BridgethingGateway) async {
-            delegate.owner = self
+            _ = ensureSetup()
             gatewayRef = gateway
 
             watchTask = Task { [weak self] in
@@ -54,7 +61,7 @@
             unwatchTask?.cancel(); unwatchTask = nil
             getOnceTask?.cancel(); getOnceTask = nil
 
-            if watching {
+            if watching, let manager {
                 manager.stopUpdatingLocation()
                 watching = false
             }
@@ -62,13 +69,14 @@
                 cont.resume(throwing: GeoControllerError.cancelled)
             }
             oneShotConts.removeAll()
-            delegate.owner = nil
+            delegate?.owner = nil
             gatewayRef = nil
         }
 
         // MARK: - watch / unwatch
 
         private func handleWatch(_ watch: GeoWatch) async {
+            let manager = ensureSetup()
             ensureAuthorized()
             manager.desiredAccuracy = Self.accuracy(for: watch.accuracy)
             if !watching {
@@ -78,7 +86,7 @@
         }
 
         private func handleUnwatch() async {
-            if watching {
+            if watching, let manager {
                 manager.stopUpdatingLocation()
                 watching = false
             }
@@ -87,6 +95,7 @@
         // MARK: - get-once
 
         private func handleGetOnce(handle: GeoGetOnceHandle, req: GeoGetOnce) async {
+            let manager = ensureSetup()
             ensureAuthorized()
             manager.desiredAccuracy = Self.accuracy(for: req.accuracy)
             do {
@@ -128,6 +137,7 @@
         // MARK: - helpers
 
         private func ensureAuthorized() {
+            guard let manager else { return }
             let status = manager.authorizationStatus
             if status == .notDetermined {
                 manager.requestWhenInUseAuthorization()

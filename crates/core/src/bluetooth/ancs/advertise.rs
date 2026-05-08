@@ -1,16 +1,19 @@
-//! LE advertisement registration for ANCS solicitation. Written
-//! against zbus rather than going through bluer's `Adapter::advertise`
-//! because bluer 0.17 doesn't expose every BlueZ property we want to
-//! pin (LocalName + Includes + tx-power live on different paths in
-//! the wrapper).
+//! LE advertisement registration for the ANCS pair-trigger service.
+//! Written against zbus rather than bluer's `Adapter::advertise` because
+//! bluer 0.17 doesn't expose every BlueZ property we want to pin
+//! (LocalName + Includes + tx-power live on different paths in the
+//! wrapper).
 //!
-//! Carries SolicitUUIDs = [ANCS] so iOS knows this peripheral wants
-//! ANCS exposed to it once an LE bond exists, plus LocalName + Flags
-//! + tx-power Includes per accessory guidelines. Total adv bytes are
-//!   near the 31-byte legacy limit; adding additional UUIDs here
-//!   overflows even after BlueZ's automatic SCAN_RSP split. The
-//!   companion-app filter is "soliciting ANCS AND name starts with
-//!   Bridgething."
+//! Carries `ServiceUUIDs = [PAIR_TRIGGER_SERVICE]` so the iOS companion
+//! app's `AccessorySetupKit` picker (and CoreBluetooth's
+//! `scanForPeripherals(withServices:)` filter) can find us — both match
+//! against advertised service UUIDs, not the LE Service-Solicitation AD
+//! type. The legacy 31-byte ADV PDU can't fit a second 128-bit UUID
+//! alongside Flags + LocalName + tx-power; we drop ANCS solicit
+//! deliberately. ANCS is exposed by iOS to any LE-bonded peer that
+//! holds the per-bond authorization, regardless of solicit history;
+//! the app issues `connect(_, options: [CBConnectPeripheralOptionRequiresANCS: true])`
+//! to drive iOS to surface the ANCS authorization prompt after pair.
 
 use std::collections::HashMap;
 
@@ -38,7 +41,7 @@ trait LEAdvertisingManager {
 }
 
 struct AncsLeAdvertisement {
-  solicit_uuids: Vec<String>,
+  service_uuids: Vec<String>,
 }
 
 #[zbus::interface(name = "org.bluez.LEAdvertisement1")]
@@ -48,9 +51,9 @@ impl AncsLeAdvertisement {
     "peripheral"
   }
 
-  #[zbus(property, name = "SolicitUUIDs")]
-  fn solicit_uuids(&self) -> Vec<String> {
-    self.solicit_uuids.clone()
+  #[zbus(property, name = "ServiceUUIDs")]
+  fn service_uuids(&self) -> Vec<String> {
+    self.service_uuids.clone()
   }
 
   #[zbus(property, name = "Discoverable")]
@@ -90,7 +93,7 @@ pub struct AncsAdvertisement {
 }
 
 impl AncsAdvertisement {
-  pub async fn register(adapter_dbus_path: &str, ancs_service_uuid: Uuid) -> Result<Self, AdvertiseError> {
+  pub async fn register(adapter_dbus_path: &str, advertised_service_uuid: Uuid) -> Result<Self, AdvertiseError> {
     let conn = Connection::system().await?;
     let path: OwnedObjectPath = ObjectPath::try_from(ADV_OBJECT_PATH)?.into();
 
@@ -99,7 +102,7 @@ impl AncsAdvertisement {
       .at(
         &path,
         AncsLeAdvertisement {
-          solicit_uuids: vec![ancs_service_uuid.to_string()],
+          service_uuids: vec![advertised_service_uuid.to_string()],
         },
       )
       .await?;

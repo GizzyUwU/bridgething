@@ -8,6 +8,20 @@ export type AcceptCallAction = 'accept' | 'endAndAccept';
 
 export type Album = { id: string; name: string };
 
+/**
+ * Daemon-observed state of the ANCS GATT-client session against the
+ * connected iPhone. iOS-only; emitted on transitions so the companion
+ * app can confirm the LE-pair + ANCS authorization handshake completed.
+ *
+ * State machine:
+ * - `Unknown`: pre-boot only (no iAP2 has ever attached this session).
+ * - `Probing`: a session task is running but no determination yet,
+ *   OR iAP2 just detached and we expect to re-probe on reconnect.
+ * - `Authorized`: ANCS attribute fetches are succeeding.
+ * - `Unauthorized`: ANCS service hidden, or auth-gate detected.
+ */
+export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized';
+
 export type Artist = { id: string; name: string };
 
 export type AssetRetention =

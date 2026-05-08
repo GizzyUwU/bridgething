@@ -83,6 +83,25 @@ pub struct SetCrossfade {
   pub duration_ms: Option<u32>,
 }
 
+/// Invalidation signal fired when the daemon observes an iAP2 NowPlaying
+/// state change the companion can't see directly. Carries enough context
+/// for the companion to filter ("is this for the app I care about?") and
+/// dedupe ("did the track actually change?"). The companion is expected
+/// to react with its own data fetch (e.g. Spotify Web API) - the hint
+/// itself is not a state source. `persistent_id` is iAP2's opaque hex
+/// identifier; do not treat it as a service URI.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct PlaybackHint {
+  pub app_bundle: Option<String>,
+  pub persistent_id: Option<String>,
+  pub playing: Option<bool>,
+  pub duration_ms: Option<u32>,
+}
+
 /// Bridge → gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
@@ -119,4 +138,6 @@ pub enum BridgeToGatewayPlayerMsg {
   SetSpeed(SetSpeed),
   #[bridge_command]
   SetCrossfade(SetCrossfade),
+  #[bridge_event]
+  Hint(PlaybackHint),
 }

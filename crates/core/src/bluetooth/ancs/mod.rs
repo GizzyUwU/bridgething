@@ -35,18 +35,19 @@
 //! Documented in `notes/ancs-bringup.md`. Daemon side:
 //!
 //! 1. Register a tiny LE GATT service (see `pair_trigger.rs`) with
-//!    one read-only characteristic flagged `encrypt-read`. Reads on
-//!    an unbonded link bounce back as InsufficientAuthentication,
-//!    triggering iOS-side SMP.
-//! 2. Advertise the LE peripheral with ANCS in the SolicitUUIDs and
-//!    the pair-trigger service in the ServiceUUIDs (see
-//!    `advertise.rs`). The companion app filters its CoreBluetooth
-//!    scan on the pair-trigger UUID.
-//! 3. When the iOS companion app LE-connects and reads the
-//!    pair-trigger characteristic, BlueZ rejects, iOS pops the LE
-//!    pair prompt, the bond completes. iOS then exposes ANCS on the
-//!    new LE-bonded link; first NS subscribe pops the notification
-//!    authorization prompt; from there, ANCS works.
+//!    one read-only characteristic flagged `encrypt-read`. The service
+//!    UUID is what the LE adv carries in `ServiceUUIDs`; AccessorySetupKit's
+//!    descriptor + CoreBluetooth's `withServices:` filter both match
+//!    against advertised service UUIDs, not the LE solicit AD type.
+//! 2. Advertise the LE peripheral with the pair-trigger service in
+//!    `ServiceUUIDs` plus LocalName "Bridgething" (see `advertise.rs`).
+//! 3. The iOS companion app's `AccessorySetupKit` picker pairs LE in
+//!    the picker process itself. After `accessoryAdded` fires, the
+//!    app's CBCentralManager retrieves the peripheral by
+//!    `bluetoothIdentifier` and calls
+//!    `connect(_, options: [CBConnectPeripheralOptionRequiresANCS: true])`,
+//!    which prompts iOS to surface the ANCS authorization dialog
+//!    while the app is foreground. From there, ANCS works.
 //!
 //! Lifecycle: the LE solicitation advertisement and the pair-trigger
 //! GATT service are both registered for the lifetime of `AncsManager`
@@ -75,10 +76,11 @@ mod pair_trigger;
 use advertise::AncsAdvertisement;
 use futures::StreamExt;
 use libbridgething::{
-  DismissReason, Notification, NotificationApp, NotificationCategory, NotificationFlags,
+  AncsAuthState, DismissReason, Notification, NotificationApp, NotificationCategory, NotificationFlags,
   client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved},
+  gateway::BridgeToGatewayNotificationsMsgEvent,
 };
-use pair_trigger::PairTrigger;
+use pair_trigger::{PAIR_TRIGGER_SERVICE, PairTrigger};
 use tokio::{
   sync::{Mutex, mpsc},
   task::JoinHandle,
@@ -86,7 +88,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::net::WireEventBus;
+use crate::{bluetooth::BluetoothMan, net::WireEventBus};
 
 const ANCS_SERVICE: Uuid = Uuid::from_u128(0x7905F431_B5CE_4E99_A40F_4B1E122D00D0);
 const NOTIFICATION_SOURCE: Uuid = Uuid::from_u128(0x9FBF120D_6301_42D9_8C58_25E699A21DBD);
@@ -145,7 +147,7 @@ pub struct AncsManager {
 }
 
 impl AncsManager {
-  pub async fn spawn(bus: WireEventBus) -> AncsResult<(Self, JoinHandle<()>)> {
+  pub async fn spawn(bus: WireEventBus, bluetooth: BluetoothMan) -> AncsResult<(Self, JoinHandle<()>)> {
     let session = Session::new().await?;
     let adapter = session.default_adapter().await?;
     let adapter_dbus_path = format!("/org/bluez/{}", adapter.name());
@@ -159,11 +161,9 @@ impl AncsManager {
         None
       }
     };
-    let advertisement = match AncsAdvertisement::register(&adapter_dbus_path, ANCS_SERVICE).await {
+    let advertisement = match AncsAdvertisement::register(&adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
       Ok(handle) => {
-        tracing::info!(
-          "ANCS LE advertisement registered; companion app drives LE pair via CoreBluetooth or AccessorySetupKit"
-        );
+        tracing::info!("ANCS LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
         Some(handle)
       }
       Err(err) => {
@@ -175,11 +175,13 @@ impl AncsManager {
       }
     };
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
+    let auth_reporter = AuthStateReporter::new(bluetooth);
     let dispatcher = AncsDispatcher {
       adapter: Arc::new(adapter),
       bus,
       rx,
       session: None,
+      auth_reporter,
       _advertisement: advertisement,
       _pair_trigger: pair_trigger,
     };
@@ -227,8 +229,38 @@ struct AncsDispatcher {
   bus: WireEventBus,
   rx: mpsc::Receiver<AncsCommand>,
   session: Option<ActiveSession>,
+  auth_reporter: AuthStateReporter,
   _advertisement: Option<AncsAdvertisement>,
   _pair_trigger: Option<PairTrigger>,
+}
+
+#[derive(Clone)]
+struct AuthStateReporter {
+  bluetooth: BluetoothMan,
+  state: Arc<Mutex<AncsAuthState>>,
+}
+
+impl AuthStateReporter {
+  fn new(bluetooth: BluetoothMan) -> Self {
+    Self {
+      bluetooth,
+      state: Arc::new(Mutex::new(AncsAuthState::Unknown)),
+    }
+  }
+
+  async fn report(&self, next: AncsAuthState) {
+    let mut guard = self.state.lock().await;
+    if *guard == next {
+      return;
+    }
+    *guard = next;
+    drop(guard);
+    self
+      .bluetooth
+      .gateway_man
+      .broadcast(BridgeToGatewayNotificationsMsgEvent::AncsAuthStateChanged(next))
+      .await;
+  }
 }
 
 #[derive(Debug)]
@@ -255,12 +287,14 @@ impl AncsDispatcher {
       tracing::debug!(prev = %existing.address, new = %address, "ANCS replacing active session");
       existing.cancel.cancel();
     }
+    self.auth_reporter.report(AncsAuthState::Probing).await;
     let cancel = CancellationToken::new();
     let (invoke_tx, invoke_rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
     let task = AncsSessionTask {
       address,
       adapter: self.adapter.clone(),
       bus: self.bus.clone(),
+      auth_reporter: self.auth_reporter.clone(),
       invoke_rx,
       cancel: cancel.clone(),
     };
@@ -277,6 +311,7 @@ impl AncsDispatcher {
     if let Some(session) = self.session.take_if(|s| s.address == address) {
       tracing::debug!(%address, "ANCS detaching session");
       session.cancel.cancel();
+      self.auth_reporter.report(AncsAuthState::Probing).await;
     } else {
       tracing::trace!(%address, "ANCS detach for non-active address; ignoring");
     }
@@ -297,6 +332,7 @@ struct AncsSessionTask {
   address: Address,
   adapter: Arc<Adapter>,
   bus: WireEventBus,
+  auth_reporter: AuthStateReporter,
   invoke_rx: mpsc::Receiver<(u32, u8)>,
   cancel: CancellationToken,
 }
@@ -307,6 +343,7 @@ impl AncsSessionTask {
       address,
       adapter,
       bus,
+      auth_reporter,
       mut invoke_rx,
       cancel,
     } = self;
@@ -319,7 +356,7 @@ impl AncsSessionTask {
       if cancel.is_cancelled() {
         return;
       }
-      match attempt_session(&adapter, address, &bus, &mut invoke_rx, &cancel).await {
+      match attempt_session(&adapter, address, &bus, &auth_reporter, &mut invoke_rx, &cancel).await {
         Ok(()) => return,
         Err(err) if cancel.is_cancelled() => {
           tracing::debug!(%address, ?err, "ANCS session ended after detach");
@@ -340,6 +377,7 @@ impl AncsSessionTask {
                 tracing::debug!(%address, ?err, "ANCS still unavailable; long backoff");
               }
               prior_state = SessionState::Unauthorized;
+              auth_reporter.report(AncsAuthState::Unauthorized).await;
               let d = unauthorized_backoff;
               unauthorized_backoff = (unauthorized_backoff * 2).min(UNAUTHORIZED_BACKOFF_MAX);
               d
@@ -395,6 +433,7 @@ async fn attempt_session(
   adapter: &Adapter,
   address: Address,
   bus: &WireEventBus,
+  auth_reporter: &AuthStateReporter,
   invoke_rx: &mut mpsc::Receiver<(u32, u8)>,
   cancel: &CancellationToken,
 ) -> AncsResult<()> {
@@ -462,6 +501,7 @@ async fn attempt_session(
         let drained = try_drain_ds(&mut ds_buffer, &in_flight, bus).await;
         if drained {
           consecutive_timeouts = 0;
+          auth_reporter.report(AncsAuthState::Authorized).await;
         }
       }
       _ = tokio::time::sleep(ATTRIBUTE_FETCH_TIMEOUT), if in_flight.lock().await.is_some() => {
@@ -477,6 +517,7 @@ async fn attempt_session(
                iOS app's \"Enable notifications\" flow to LE-pair the device and accept the \
                ANCS prompt"
             );
+            auth_reporter.report(AncsAuthState::Unauthorized).await;
           } else {
             tracing::debug!(uid = p.uid, consecutive_timeouts, "ANCS attribute fetch timed out");
           }

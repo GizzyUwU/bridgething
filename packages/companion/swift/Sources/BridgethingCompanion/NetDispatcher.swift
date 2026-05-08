@@ -135,11 +135,10 @@ public actor NetDispatcher {
             for header in req.headers ?? [] {
                 request.addValue(header.value, forHTTPHeaderField: header.name)
             }
-            let task: URLSessionWebSocketTask = if let protocols = req.protocols, !protocols.isEmpty {
-                urlSession.webSocketTask(with: request, protocols: protocols)
-            } else {
-                urlSession.webSocketTask(with: request)
+            if let protocols = req.protocols, !protocols.isEmpty {
+                request.setValue(protocols.joined(separator: ", "), forHTTPHeaderField: "Sec-WebSocket-Protocol")
             }
+            let task: URLSessionWebSocketTask = urlSession.webSocketTask(with: request)
             let connId = req.connectionId
             wsConnections[connId] = task
             task.resume()
@@ -147,7 +146,8 @@ public actor NetDispatcher {
             try? await handle.respond(NetWsOpenReply(acceptedProtocol: nil))
 
             let loop = Task { [weak self] in
-                await self?.runWsReceive(connId: connId, task: task, gateway: gateway)
+                guard let self else { return }
+                await runWsReceive(connId: connId, task: task, gateway: gateway)
             }
             wsReceiveLoops[connId] = loop
         #else
@@ -212,7 +212,8 @@ public actor NetDispatcher {
         #if canImport(Darwin)
             let session = urlSession
             let task = Task { [weak self] in
-                await self?.runStream(streamId: streamId, req: req, session: session, gateway: gateway)
+                guard let self else { return }
+                await runStream(streamId: streamId, req: req, session: session, gateway: gateway)
             }
             streams[streamId] = task
         #else
@@ -246,7 +247,10 @@ public actor NetDispatcher {
                     guard let key = k as? String, let val = v as? String else { return nil }
                     return HttpHeader(name: key, value: val)
                 }
-                let totalSize = http?.expectedContentLength.flatMap { $0 >= 0 ? UInt32(clamping: $0) : nil }
+                let totalSize: UInt32? = {
+                    guard let len = http?.expectedContentLength, len >= 0 else { return nil }
+                    return UInt32(clamping: len)
+                }()
                 try? await gateway.net.streamBegin(StreamBegin(
                     streamId: streamId, status: status, headers: headers, totalSize: totalSize
                 ))

@@ -13,6 +13,8 @@ let package = Package(
     .library(name: "BridgethingLyrics", targets: ["BridgethingLyrics"]),
     .library(name: "BridgethingGlue", targets: ["BridgethingGlue"]),
     .library(name: "BridgethingCompanion", targets: ["BridgethingCompanion"]),
+    .library(name: "BridgethingAppleMusicGlue", targets: ["BridgethingAppleMusicGlue"]),
+    .library(name: "BridgethingTidalGlue", targets: ["BridgethingTidalGlue"]),
   ],
   dependencies: [
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
@@ -61,6 +63,16 @@ let package = Package(
       name: "BridgethingCompanion",
       dependencies: ["BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema"],
       path: "packages/companion/swift/Sources/BridgethingCompanion"
+    ),
+    .target(
+      name: "BridgethingAppleMusicGlue",
+      dependencies: ["BridgethingGlue", "BridgethingGateway", "BridgethingSchema"],
+      path: "packages/apple-music/swift/Sources/BridgethingAppleMusicGlue"
+    ),
+    .target(
+      name: "BridgethingTidalGlue",
+      dependencies: ["BridgethingGlue", "BridgethingGateway", "BridgethingSchema"],
+      path: "packages/tidal/swift/Sources/BridgethingTidalGlue"
     ),
   ]
 )

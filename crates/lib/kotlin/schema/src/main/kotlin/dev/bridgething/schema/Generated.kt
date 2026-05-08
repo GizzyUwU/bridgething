@@ -1988,6 +1988,21 @@ data class Playback (
 	val appleMusicRadioAd: Boolean? = null
 )
 
+/// Invalidation signal fired when the daemon observes an iAP2 NowPlaying
+/// state change the companion can't see directly. Carries enough context
+/// for the companion to filter ("is this for the app I care about?") and
+/// dedupe ("did the track actually change?"). The companion is expected
+/// to react with its own data fetch (e.g. Spotify Web API) - the hint
+/// itself is not a state source. `persistent_id` is iAP2's opaque hex
+/// identifier; do not treat it as a service URI.
+@Serializable
+data class PlaybackHint (
+	val appBundle: String? = null,
+	val persistentId: String? = null,
+	val playing: Boolean? = null,
+	val durationMs: UInt? = null
+)
+
 @Serializable
 data class PlaybackOptions (
 	val repeat: RepeatMode,
@@ -2588,6 +2603,28 @@ data class WebappUninstall (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
+/// Daemon-observed state of the ANCS GATT-client session against the
+/// connected iPhone. iOS-only; emitted on transitions so the companion
+/// app can confirm the LE-pair + ANCS authorization handshake completed.
+/// 
+/// State machine:
+/// - `Unknown`: pre-boot only (no iAP2 has ever attached this session).
+/// - `Probing`: a session task is running but no determination yet,
+/// OR iAP2 just detached and we expect to re-probe on reconnect.
+/// - `Authorized`: ANCS attribute fetches are succeeding.
+/// - `Unauthorized`: ANCS service hidden, or auth-gate detected.
+@Serializable
+enum class AncsAuthState(val string: String) {
+	@SerialName("unknown")
+	Unknown("unknown"),
+	@SerialName("probing")
+	Probing("probing"),
+	@SerialName("authorized")
+	Authorized("authorized"),
+	@SerialName("unauthorized")
+	Unauthorized("unauthorized"),
+}
+
 @Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
 sealed class BridgeToGatewayAssetMsg {
 	@Serializable
@@ -2710,6 +2747,13 @@ sealed class BridgeToGatewayNotificationsMsg {
 	@Serializable
 	@SerialName("invokeNegative")
 	data class InvokeNegative(val data: NotificationInvoke): BridgeToGatewayNotificationsMsg()
+	/// iOS-only: daemon has observed the ANCS GATT session transition
+	/// to a new authorization state. Companion app uses this to confirm
+	/// the AccessorySetupKit pair flow drove the iPhone to expose ANCS
+	/// over the new LE bond.
+	@Serializable
+	@SerialName("ancsAuthStateChanged")
+	data class AncsAuthStateChanged(val data: AncsAuthState): BridgeToGatewayNotificationsMsg()
 }
 
 @Serializable(with = BridgeToGatewayPhoneMsgSerializer::class)
@@ -2798,6 +2842,9 @@ sealed class BridgeToGatewayPlayerMsg {
 	@Serializable
 	@SerialName("setCrossfade")
 	data class SetCrossfade(val data: dev.bridgething.schema.SetCrossfade): BridgeToGatewayPlayerMsg()
+	@Serializable
+	@SerialName("hint")
+	data class Hint(val data: PlaybackHint): BridgeToGatewayPlayerMsg()
 }
 
 @Serializable(with = BridgeToGatewaySystemMsgSerializer::class)

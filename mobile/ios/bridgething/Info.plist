@@ -33,8 +33,24 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAccessorySetupKitSupports</key>
+	<array>
+		<string>Bluetooth</string>
+	</array>
+	<key>NSAccessorySetupBluetoothServices</key>
+	<array>
+		<string>B12BE732-C1D0-4001-8001-BB1D6E7A1C01</string>
+	</array>
+	<key>NSAccessorySetupBluetoothNames</key>
+	<array>
+		<string>Bridgething</string>
+	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>bridgething uses Bluetooth to connect to your Car Thing.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>bridgething forwards your location to Car Thing webapps that ask for it (weather, navigation, and similar).</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIBackgroundModes</key>

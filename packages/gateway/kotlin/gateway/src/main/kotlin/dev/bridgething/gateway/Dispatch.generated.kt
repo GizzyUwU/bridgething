@@ -524,6 +524,15 @@ public class NotificationsSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Notifications::AncsAuthStateChanged` messages. */
+  public val ancsAuthStateChanged: Flow<Pair<String, AncsAuthState>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.AncsAuthStateChanged ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `Notifications::Posted` to every connected peer (broadcast). */
   public suspend fun posted(payload: Notification, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -892,6 +901,15 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayPlayerMsg.SetCrossfade ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Player::Hint` messages. */
+  public val hint: Flow<Pair<String, PlaybackHint>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Hint ?: return@mapNotNull null
       it.deviceId to inner.data
     }
 
@@ -2085,6 +2103,16 @@ public class NotificationsSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Notifications::AncsAuthStateChanged` from this peer. */
+  public val ancsAuthStateChanged: Flow<AncsAuthState> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Notifications ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayNotificationsMsg.AncsAuthStateChanged ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `Notifications::Posted` to this peer. */
   public suspend fun posted(payload: Notification, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2428,6 +2456,16 @@ public class PlayerSurfaceForDevice(
     .mapNotNull {
       val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayPlayerMsg.SetCrossfade ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Player::Hint` from this peer. */
+  public val hint: Flow<PlaybackHint> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayPlayerMsg.Hint ?: return@mapNotNull null
       inner.data
     }
 

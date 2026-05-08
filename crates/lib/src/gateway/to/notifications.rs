@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
+use crate::AncsAuthState;
+
 #[typeshare]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -23,4 +25,6 @@ pub enum BridgeToGatewayNotificationsMsg {
   InvokePositive(NotificationInvoke),
   #[bridge_command]
   InvokeNegative(NotificationInvoke),
+  #[bridge_event]
+  AncsAuthStateChanged(AncsAuthState),
 }

@@ -101,3 +101,25 @@ pub enum DismissReason {
   Acted,
   RemoteDismissed,
 }
+
+/// Daemon-observed state of the ANCS GATT-client session against the
+/// connected iPhone. iOS-only; emitted on transitions so the companion
+/// app can confirm the LE-pair + ANCS authorization handshake completed.
+///
+/// State machine:
+/// - `Unknown`: pre-boot only (no iAP2 has ever attached this session).
+/// - `Probing`: a session task is running but no determination yet,
+///   OR iAP2 just detached and we expect to re-probe on reconnect.
+/// - `Authorized`: ANCS attribute fetches are succeeding.
+/// - `Unauthorized`: ANCS service hidden, or auth-gate detected.
+#[typeshare]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub enum AncsAuthState {
+  #[default]
+  Unknown,
+  Probing,
+  Authorized,
+  Unauthorized,
+}

@@ -2,6 +2,7 @@
   "name": "@bridgething/session-react-native",
   "version": "0.1.0",
   "description": "bridgething companion session module for react native",
+  "homepage": "https://github.com/JoeyEamigh/bridgething#readme",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",

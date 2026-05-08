@@ -7,63 +7,76 @@ import BridgethingTidalGlue
 import Foundation
 import Spotiny
 
-/// Wires the bridgething Nitro session module's static registry before
-/// React Native starts. AppDelegate calls `installBridgething()` from
+/// Wires the bridgething Nitro session module's static registry and
+/// installs the real session backend before React Native starts.
+/// AppDelegate calls `installBridgething()` from
 /// `application(_:didFinishLaunchingWithOptions:)`.
 ///
 /// The host-app's Info.plist supplies `BRIDGETHING_DEVICE_CLIENT_ID`
-/// (gitignored xcconfig); when present the Spotify glue defaults to the
-/// device-code authenticator, otherwise to the WebView PKCE flow against
-/// a bridgething-owned client (set `BRIDGETHING_PKCE_CLIENT_ID`).
-enum Bridgething {
+/// (gitignored xcconfig); when present the Spotify glue uses the
+/// device-code authenticator (system browser via SFSafariViewController),
+/// otherwise falls back to the WebView PKCE flow against a
+/// bridgething-owned client (`BRIDGETHING_PKCE_CLIENT_ID`).
+enum BridgethingApp {
     static let appName: String = "bridgething"
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
+    private static let spotifyTokenStore = TokenStore(service: "dev.bridgething.spotify")
+
     static func installBridgething() {
-        HybridBridgethingSession.hostInfo = HostInfo(
+        HybridBridgethingSessionImpl.hostInfo = HostInfo(
             appName: appName,
             appVersion: appVersion,
             osName: "iOS"
         )
-        HybridBridgethingSession.lyricsResolver = LrclibResolver()
-        HybridBridgethingSession.eaProtocolString = "com.bridgething.gateway"
+        HybridBridgethingSessionImpl.lyricsResolver = LrclibResolver()
+        HybridBridgethingSessionImpl.eaProtocolString = "com.bridgething.gateway"
 
-        HybridBridgethingSession.registry = [
-            HybridBridgethingSession.ProviderRegistration(
+        HybridBridgethingSessionImpl.registry = [
+            HybridBridgethingSessionImpl.ProviderRegistration(
                 id: SpotifyGlue.name,
                 displayName: SpotifyGlue.displayName,
-                available: true
-            ) { makeSpotifyGlue() },
-            HybridBridgethingSession.ProviderRegistration(
+                available: true,
+                factory: { context in makeSpotifyGlue(context: context) },
+                signOut: { spotifyTokenStore.clear() }
+            ),
+            HybridBridgethingSessionImpl.ProviderRegistration(
                 id: AppleMusicGlue.name,
                 displayName: AppleMusicGlue.displayName,
-                available: false
-            ) { AppleMusicGlue() },
-            HybridBridgethingSession.ProviderRegistration(
+                available: false,
+                factory: { _ in AppleMusicGlue() },
+                signOut: {}
+            ),
+            HybridBridgethingSessionImpl.ProviderRegistration(
                 id: TidalGlue.name,
                 displayName: TidalGlue.displayName,
-                available: false
-            ) { TidalGlue() },
+                available: false,
+                factory: { _ in TidalGlue() },
+                signOut: {}
+            ),
         ]
+
+        HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl())
     }
 
-    private static func makeSpotifyGlue() -> SpotifyGlue {
-        let authenticator = makeSpotifyAuthenticator()
-        let store = TokenStore(service: "dev.bridgething.spotify")
-        let initial = store.load()
+    private static func makeSpotifyGlue(context: HybridBridgethingSessionImpl.BackendContext) -> SpotifyGlue {
+        let authenticator = makeSpotifyAuthenticator(emitAuth: context.emitAuth)
+        let initial = spotifyTokenStore.load()
         return SpotifyGlue(
             authenticator: authenticator,
             accessToken: initial.access ?? "",
             refreshToken: initial.refresh ?? "",
             onTokensRefreshed: { access, refresh in
-                store.save(access: access, refresh: refresh)
+                spotifyTokenStore.save(access: access, refresh: refresh)
             }
         )
     }
 
-    private static func makeSpotifyAuthenticator() -> any OAuthAuthenticator {
+    private static func makeSpotifyAuthenticator(
+        emitAuth: @escaping @Sendable (BridgethingAuthState) -> Void
+    ) -> any OAuthAuthenticator {
         let scopes: [String] = [
             "user-read-playback-state",
             "user-modify-playback-state",
@@ -94,7 +107,15 @@ enum Bridgething {
                 clientID: clientID,
                 scopes: scopes
             )
-            return DeviceCodeAuthenticator(configuration: configuration) { _ in }
+            return DeviceCodeAuthenticator(configuration: configuration) { prompt in
+                emitAuth(BridgethingAuthState(
+                    kind: .pending,
+                    userCode: prompt.userCode,
+                    verificationUrl: prompt.verificationURL.absoluteString,
+                    verificationUrlComplete: prompt.verificationURLPrefilled.absoluteString,
+                    message: nil
+                ))
+            }
         }
 
         let pkceClientID = (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String) ?? ""
@@ -132,6 +153,11 @@ private final class TokenStore: @unchecked Sendable {
         write(account: "refresh", value: refresh)
     }
 
+    func clear() {
+        delete(account: "access")
+        delete(account: "refresh")
+    }
+
     private func read(account: String) -> String? {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -163,5 +189,14 @@ private final class TokenStore: @unchecked Sendable {
             insert.merge(attrs) { _, b in b }
             SecItemAdd(insert as CFDictionary, nil)
         }
+    }
+
+    private func delete(account: String) {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(q as CFDictionary)
     }
 }
