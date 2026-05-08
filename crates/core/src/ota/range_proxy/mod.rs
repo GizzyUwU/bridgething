@@ -34,7 +34,6 @@ mod server;
 
 const BROKER_MAILBOX: usize = 64;
 const CHUNK_QUEUE: usize = 16;
-pub const MAX_RANGES_PER_REQUEST: usize = 10;
 
 #[derive(Clone)]
 pub struct RangeProxy {

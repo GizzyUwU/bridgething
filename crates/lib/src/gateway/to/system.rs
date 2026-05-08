@@ -35,7 +35,8 @@ pub struct OtaBeginRejected {
 /// it should have cached (and can refetch from `OtaBegin.update_url_base`
 /// on cache miss). Triggered by an inbound HTTP-Range request from
 /// libswupdate's delta downloader hitting the daemon's loopback proxy.
-/// `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+/// Range count is bounded daemon-side; companions just serve whatever
+/// arrives.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]

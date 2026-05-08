@@ -585,7 +585,8 @@ export type OtaAbandon = { updateId: string };
  * it should have cached (and can refetch from `OtaBegin.update_url_base`
  * on cache miss). Triggered by an inbound HTTP-Range request from
  * libswupdate's delta downloader hitting the daemon's loopback proxy.
- * `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+ * Range count is bounded daemon-side; companions just serve whatever
+ * arrives.
  */
 export type OtaAssetRange = { updateId: string; asset: string; ranges: Array<RangeSpec> };
 

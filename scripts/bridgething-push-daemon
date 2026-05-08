@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Atomically replace the daemon binary on the device, with rollback safety.
 #
-# Stops bridgething.service and bridgething-weston.service first (the latter
-# cascades chromium-kiosk shutdown via PartOf), uploads via scp to a temp
+# Stops bridgething.service, uploads via scp to a temp
 # file, rotates the existing .current to .previous (so a bad push has
 # something to roll back to), atomically renames the new binary into
 # .current, then restarts both. Stopping the consumers up front is what
@@ -29,8 +28,7 @@ usage: bridgething-push-daemon <local-path>
 
 Pushes <local-path> to /opt/bridgething/daemon/bridgething.current on the
 device. Rotates the existing .current to .previous for rollback safety,
-stops bridgething + weston (and chromium-kiosk via cascade), atomically
-swaps the binary, then restarts both.
+stops bridgething, atomically swaps the binary, then restarts.
 EOF
     exit 2
 fi
@@ -52,8 +50,8 @@ SSH_OPTS=(-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLeve
 
 ssh_dev() { ssh "${SSH_OPTS[@]}" "root@${HOST}" "$@"; }
 
-echo "[push-daemon] stopping bridgething + bridgething-weston"
-ssh_dev "systemctl stop bridgething-weston.service bridgething.service"
+echo "[push-daemon] stopping bridgething"
+ssh_dev "systemctl stop bridgething.service"
 
 echo "[push-daemon] uploading $(basename "$LOCAL") ($(du -h "$LOCAL" | cut -f1)) to ${HOST}:${TMP}"
 scp -C "${SSH_OPTS[@]}" -q "$LOCAL" "root@${HOST}:${TMP}"
@@ -69,7 +67,7 @@ ssh_dev "
     systemctl reset-failed bridgething.service 2>/dev/null || true
 "
 
-echo "[push-daemon] restarting bridgething + bridgething-weston"
-ssh_dev "systemctl start bridgething.service bridgething-weston.service"
+echo "[push-daemon] restarting bridgething"
+ssh_dev "systemctl start bridgething.service"
 
 echo "[push-daemon] done."

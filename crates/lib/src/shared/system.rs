@@ -149,10 +149,10 @@ pub struct OtaError {
 
 /// Half-open byte range the daemon's range proxy asks the companion
 /// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
-/// inclusive, `length` bytes. Up to 10 ranges per `OtaAssetRange`
-/// matches libswupdate's `DEFAULT_MAX_RANGES`. Offsets are u32 because
-/// OTA artifacts are bounded at 4 GiB end-to-end (matches
-/// `OtaBegin.expected_size`).
+/// inclusive, `length` bytes. The proxy caps the multi-range count at
+/// the daemon edge (loopback) - companions see whatever swupdate's
+/// delta downloader emits. Offsets are u32 because OTA artifacts are
+/// bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

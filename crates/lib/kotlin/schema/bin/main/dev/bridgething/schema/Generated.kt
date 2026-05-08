@@ -1459,10 +1459,10 @@ data class OtaAbandon (
 
 /// Half-open byte range the daemon's range proxy asks the companion
 /// to serve. Mirrors HTTP `Range: bytes=start-end` semantics: `start`
-/// inclusive, `length` bytes. Up to 10 ranges per `OtaAssetRange`
-/// matches libswupdate's `DEFAULT_MAX_RANGES`. Offsets are u32 because
-/// OTA artifacts are bounded at 4 GiB end-to-end (matches
-/// `OtaBegin.expected_size`).
+/// inclusive, `length` bytes. The proxy caps the multi-range count at
+/// the daemon edge (loopback) - companions see whatever swupdate's
+/// delta downloader emits. Offsets are u32 because OTA artifacts are
+/// bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
 @Serializable
 data class RangeSpec (
 	val start: UInt,
@@ -1473,7 +1473,8 @@ data class RangeSpec (
 /// it should have cached (and can refetch from `OtaBegin.update_url_base`
 /// on cache miss). Triggered by an inbound HTTP-Range request from
 /// libswupdate's delta downloader hitting the daemon's loopback proxy.
-/// `ranges.len() <= 10` matches libswupdate's `DEFAULT_MAX_RANGES`.
+/// Range count is bounded daemon-side; companions just serve whatever
+/// arrives.
 @Serializable
 data class OtaAssetRange (
 	val updateId: String,

@@ -21,7 +21,7 @@ use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{BeginRangeError, MAX_RANGES_PER_REQUEST, RangeProxy};
+use super::{BeginRangeError, RangeProxy};
 use crate::bluetooth::BluetoothMan;
 
 /// Multipart/byteranges separator. RFC 7233 §4.1 requires a unique boundary string
@@ -77,11 +77,8 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
     Ok(r) => r,
     Err(reason) => return error_response(StatusCode::RANGE_NOT_SATISFIABLE, reason),
   };
-  if ranges.is_empty() || ranges.len() > MAX_RANGES_PER_REQUEST {
-    return error_response(
-      StatusCode::RANGE_NOT_SATISFIABLE,
-      "0 or too many ranges (max 10 per request)",
-    );
+  if ranges.is_empty() {
+    return error_response(StatusCode::RANGE_NOT_SATISFIABLE, "Range header parsed to 0 ranges");
   }
 
   tracing::debug!(%asset, range_count = ranges.len(), "handling OTA range request");
