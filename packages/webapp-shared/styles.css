@@ -44,6 +44,5 @@
 
 @utility bt-wordmark {
   font-family: var(--font-display);
-  font-feature-settings: "ss01";
   letter-spacing: -0.02em;
 }
