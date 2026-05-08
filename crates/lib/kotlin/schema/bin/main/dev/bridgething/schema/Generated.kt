@@ -84,7 +84,7 @@ data class AssetPushAbandon (
 /// `AssetPushChunk` should start at, 0 for fresh pushes) or
 /// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
 /// mismatched size/sha, budget exhausted, etc.).
-///
+/// 
 /// Required for any push with `retention = Persistent` and for any push
 /// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
 @Serializable
@@ -314,7 +314,7 @@ sealed class BridgeToGatewayMsgData {
 
 /// bridgething -> gateway
 /// messages from bridgething to the gateway (mobile or desktop app).
-///
+/// 
 /// these messages will pass over bluetooth.
 @Serializable
 data class BridgeToGatewayMsg (
@@ -781,7 +781,7 @@ sealed class GatewayToBridgeMsgData {
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
-///
+/// 
 /// these messages will pass over bluetooth.
 @Serializable
 data class GatewayToBridgeMsg (
@@ -1405,7 +1405,7 @@ enum class RepeatMode(val string: String) {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
-///
+/// 
 /// `set_elapsed_time_available` is the gate webapps must honor for
 /// scrub UI: when false, scrubbing is unsupported by the foreground
 /// app and the seek button must be disabled.
@@ -1558,16 +1558,16 @@ enum class OtaKind(val string: String) {
 /// `OtaChunk` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }` (already-running OTA, conflicting
 /// in-flight update_id with mismatched size/sha, or budget exhausted).
-///
+/// 
 /// `kind` selects the backend: `Image` for a `.swu` (libswupdate +
 /// slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
 /// (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
 /// systemctl restart). The streaming half is identical across kinds.
-///
+/// 
 /// `update_id` is the sha256 of the artifact, hex-encoded. Content-
 /// addressed so resume across daemon restarts and retries-after-failure
 /// both work without companion-side state to track.
-///
+/// 
 /// `update_url_base` is the server prefix the companion may refetch
 /// the .zck delta from on cache miss, e.g.
 /// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
@@ -1652,11 +1652,11 @@ data class OtaError (
 
 /// Stage of the OTA orchestrator. The phase set is shared between
 /// kinds, with daemon-kind emitting a subset.
-///
+/// 
 /// Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
 /// -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
 /// try-counter) -> `Reboot` (systemd Reboot).
-///
+/// 
 /// Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
 /// `.incoming` over `.current`, with prior `.current` rotated to
 /// `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
@@ -1967,7 +1967,7 @@ enum class PlaybackState(val string: String) {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
-///
+/// 
 /// `set_elapsed_time_available` gates scrub UI: when false, the foreground
 /// app refuses absolute-position seeks and webapps must disable the scrub
 /// thumb. `None` means unknown (no signal received yet); webapps treat
@@ -2242,7 +2242,7 @@ data class StringField (
 /// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
 /// reading time should use the device clock if any but use this as the
 /// trust anchor on first arrival.
-///
+/// 
 /// Two zone-identification paths coexist: companion gateways send
 /// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
 /// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
@@ -3417,7 +3417,7 @@ data class WireErrorHandlerFailedInner (
 /// Protocol-level failure the responder ships when a request could not be
 /// reached or dispatched. Carried by the `Error` variant on every
 /// `*MsgData` enum.
-///
+/// 
 /// Domain-level errors (predictable, op-specific failures the caller may
 /// want to recover from) live inside the per-op response variant, not
 /// here.
@@ -3445,3 +3445,4 @@ sealed class WireError {
 	@SerialName("handlerFailed")
 	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()
 }
+

@@ -387,7 +387,7 @@ async fn broadcast_state(bus: &WireEventBus, state: &Arc<RwLock<State>>) {
 pub(crate) struct CapturedFrame {
   pub stream_id: Uuid,
   pub seq: u32,
-  pub pcm: Vec<u8>,
+  pub pcm: bytes::Bytes,
 }
 
 #[derive(Debug)]

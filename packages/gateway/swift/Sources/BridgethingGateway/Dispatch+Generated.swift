@@ -10,6 +10,28 @@ public enum RequestResult<R: Sendable, E: Sendable>: Sendable {
   case protocolError(WireError)
 }
 
+/// Cross-peer methods for the `Version` wire surface.
+public struct VersionSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Version` messages.
+  public var all: AsyncStream<(deviceId: String, msg: BridgeThingMeta)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .version(let payload) = message.data {
+            continuation.yield((deviceId: deviceId, msg: payload))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Audio` wire surface.
 public struct AudioSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -2059,6 +2081,30 @@ public struct LyricsSurface: Sendable {
 
 }
 
+/// Per-peer methods for the `Version` wire surface (deviceId is baked in).
+public struct VersionSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Version` messages from this peer.
+  public var all: AsyncStream<BridgeThingMeta> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .version(let payload) = message.data {
+            continuation.yield(payload)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+}
+
 /// Per-peer methods for the `Audio` wire surface (deviceId is baked in).
 public struct AudioSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -3881,6 +3927,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public let gateway: BridgethingGateway
   public let deviceId: String
 
+  /// Per-peer methods for the `Version` wire surface.
+  public var version: VersionSurfaceForDevice { VersionSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Audio` wire surface.
   public var audio: AudioSurfaceForDevice { AudioSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Geo` wire surface.
@@ -3920,6 +3968,8 @@ public struct BridgethingGatewayDevice: Sendable {
 }
 
 extension BridgethingGateway {
+  /// Methods scoped to the `Version` wire surface.
+  public nonisolated var version: VersionSurface { VersionSurface(gateway: self) }
   /// Methods scoped to the `Audio` wire surface.
   public nonisolated var audio: AudioSurface { AudioSurface(gateway: self) }
   /// Methods scoped to the `Geo` wire surface.

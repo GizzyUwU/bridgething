@@ -137,8 +137,7 @@ impl TransportController {
         .send_player(BridgeToGatewayPlayerMsgCommand::SetShuffle(GatewaySetShuffle { on }))
         .await;
     }
-    let snapshot = self.player.iap2_playback_snapshot().await;
-    match snapshot.shuffle {
+    match self.player.iap2_shuffle().await {
       None => {
         tracing::warn!("transport set_shuffle({on}): iap2 shuffle state unknown; refusing toggle");
         Ok(())
@@ -154,8 +153,7 @@ impl TransportController {
         .send_player(BridgeToGatewayPlayerMsgCommand::SetRepeat(GatewaySetRepeat { mode }))
         .await;
     }
-    let snapshot = self.player.iap2_playback_snapshot().await;
-    match snapshot.repeat {
+    match self.player.iap2_repeat_mode().await {
       None => {
         tracing::warn!("transport set_repeat({mode:?}): iap2 repeat state unknown; refusing toggle");
         Ok(())
@@ -182,8 +180,7 @@ impl TransportController {
         .send_player(BridgeToGatewayPlayerMsgCommand::SeekTo(GatewaySeekTo { position_ms }))
         .await;
     }
-    let snapshot = self.player.iap2_playback_snapshot().await;
-    if snapshot.set_elapsed_time_available == Some(false) {
+    if self.player.iap2_set_elapsed_time_available().await == Some(false) {
       tracing::warn!("transport seek_to({position_ms}): foreground app refuses absolute seek; ignoring");
       return Ok(());
     }

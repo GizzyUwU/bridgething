@@ -10,12 +10,13 @@ use std::{
   sync::{Arc, RwLock},
 };
 
+use bytes::Bytes;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum TunnelInbound {
-  Data(Vec<u8>),
+  Data(Bytes),
   Closed(Option<String>),
 }
 

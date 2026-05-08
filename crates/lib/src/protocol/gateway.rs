@@ -69,17 +69,18 @@ impl Decoder for GatewayEndec {
     }
 
     src.advance(HEADER_LEN);
-    let data = src.split_to(state.length as usize).to_vec();
-    let payload = if state.compression == Compression::Gzip {
+    let body = src.split_to(state.length as usize);
+
+    let mut decompressed: Vec<u8> = Vec::new();
+    let payload: &[u8] = if state.compression == Compression::Gzip {
       tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "decompressing gzip data");
-      let mut decoder = GzDecoder::new(Cursor::new(data));
-      let mut buf = Vec::new();
-      decoder.read_to_end(&mut buf)?;
-      tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "decompressed {} bytes", buf.len());
-      buf
+      let mut decoder = GzDecoder::new(Cursor::new(&body[..]));
+      decoder.read_to_end(&mut decompressed)?;
+      tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "decompressed {} bytes", decompressed.len());
+      &decompressed
     } else {
       tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "using uncompressed data");
-      data
+      &body
     };
 
     tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "deserializing message with {} bytes", payload.len());
@@ -95,21 +96,21 @@ impl Decoder for GatewayEndec {
     self.state = None;
 
     let msg: BridgeToGatewayMsg = match encoding {
-      Encoding::Msgpack => match rmp_serde::from_slice(&payload) {
+      Encoding::Msgpack => match rmp_serde::from_slice(payload) {
         Ok(m) => m,
         Err(err) => {
           return Err(EndecError::TypedDecode {
             error: TypedDecodeError::Rmp(err),
-            probe: try_probe_envelope_msgpack(&payload),
+            probe: try_probe_envelope_msgpack(payload),
           });
         }
       },
-      Encoding::Json => match serde_json::from_slice(&payload) {
+      Encoding::Json => match serde_json::from_slice(payload) {
         Ok(m) => m,
         Err(err) => {
           return Err(EndecError::TypedDecode {
             error: TypedDecodeError::Json(err),
-            probe: try_probe_envelope_json(&payload),
+            probe: try_probe_envelope_json(payload),
           });
         }
       },

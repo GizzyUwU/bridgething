@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use libbridgething::{
   AssetRetention,
   client::{
@@ -7,6 +9,7 @@ use libbridgething::{
   gateway::AssetRequest,
   wire::RequestError,
 };
+use tokio::sync::Semaphore;
 use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
@@ -17,7 +20,9 @@ use crate::asset::{
 };
 
 const PRELOAD_IDS_MAX: usize = 64;
+const PRELOAD_PARALLELISM: usize = 16;
 const IAP2_ART_PREFIX: &str = "iap2/art/";
+static PRELOAD_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(PRELOAD_PARALLELISM));
 
 #[derive(Debug)]
 pub struct AssetHandler {
@@ -162,6 +167,7 @@ impl AssetHandler {
         let _ = state
           .asset_wait
           .fetch_or_wait(&id, move || async move {
+            let _permit = PRELOAD_GATE.acquire().await;
             let req = AssetRequest {
               id: id_owned.clone(),
               request_id: Uuid::now_v7(),

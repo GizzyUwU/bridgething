@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 mod state;
 
-use libbridgething::client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply};
+use libbridgething::{
+  RepeatMode,
+  client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
+};
 pub use state::NowPlayingSource;
 use state::*;
 use tokio::sync::RwLock;
@@ -27,10 +30,7 @@ impl Player {
   }
 
   pub async fn send_state(&self) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
-      let guard = self.state.read().await;
-      (guard.state_reply(), guard.queue_reply())
-    };
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
@@ -39,33 +39,41 @@ impl Player {
     source: NowPlayingSource,
     update: libbridgething::NowPlayingUpdate,
   ) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
+    {
       let mut guard = self.state.write().await;
       guard.apply_now_playing(source, update);
-      (guard.state_reply(), guard.queue_reply())
-    };
+    }
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
   pub async fn apply_artwork_id(&self, source: NowPlayingSource, asset_id: String) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
+    {
       let mut guard = self.state.write().await;
       guard.apply_artwork_id(source, asset_id);
-      (guard.state_reply(), guard.queue_reply())
-    };
+    }
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
-  pub async fn iap2_playback_snapshot(&self) -> libbridgething::PlaybackUpdate {
-    self.state.read().await.iap2_playback_snapshot()
+  pub async fn iap2_shuffle(&self) -> Option<bool> {
+    self.state.read().await.iap2_shuffle()
+  }
+
+  pub async fn iap2_repeat_mode(&self) -> Option<RepeatMode> {
+    self.state.read().await.iap2_repeat_mode()
+  }
+
+  pub async fn iap2_set_elapsed_time_available(&self) -> Option<bool> {
+    self.state.read().await.iap2_set_elapsed_time_available()
   }
 
   pub async fn apply_iap2_queue(&self, items: Vec<libbridgething::QueueItem>) -> PlayerResult<()> {
-    let queue_reply = {
+    {
       let mut guard = self.state.write().await;
       guard.replace_iap2_queue(items);
-      guard.queue_reply()
-    };
+    }
+    let queue_reply = self.state.read().await.queue_reply();
     self
       .bus
       .broadcast(
@@ -77,11 +85,11 @@ impl Player {
   }
 
   pub async fn apply_companion_queue(&self, items: Vec<libbridgething::QueueItem>) -> PlayerResult<()> {
-    let queue_reply = {
+    {
       let mut guard = self.state.write().await;
       guard.replace_companion_queue(items);
-      guard.queue_reply()
-    };
+    }
+    let queue_reply = self.state.read().await.queue_reply();
     self
       .bus
       .broadcast(
@@ -93,11 +101,11 @@ impl Player {
   }
 
   pub async fn apply_companion_snapshot(&self, snapshot: libbridgething::PlayerState) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
+    {
       let mut guard = self.state.write().await;
       guard.apply_companion_snapshot(snapshot);
-      (guard.state_reply(), guard.queue_reply())
-    };
+    }
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
@@ -114,20 +122,20 @@ impl Player {
   }
 
   pub async fn apply_transport_intent(&self, playing: bool) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
+    {
       let mut guard = self.state.write().await;
       guard.set_transport_intent(playing);
-      (guard.state_reply(), guard.queue_reply())
-    };
+    }
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 
   pub async fn apply_seek_intent(&self, position_ms: u32) -> PlayerResult<()> {
-    let (state_reply, queue_reply) = {
+    {
       let mut guard = self.state.write().await;
       guard.set_seek_intent(position_ms);
-      (guard.state_reply(), guard.queue_reply())
-    };
+    }
+    let (state_reply, queue_reply) = self.state.read().await.replies();
     self.broadcast_snapshot(state_reply, queue_reply).await
   }
 

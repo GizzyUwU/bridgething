@@ -17,6 +17,7 @@ use alsa::{
   Direction, ValueOr,
   pcm::{Access, Format, HwParams, PCM},
 };
+use bytes::{BufMut, BytesMut};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -72,8 +73,11 @@ fn run(
   cancel: Arc<AtomicBool>,
 ) -> alsa::Result<()> {
   let io = pcm.io_i16()?;
-  let frame_samples = (config.format.frame_samples as usize) * (config.format.channels as usize);
-  let mut buf = vec![0i16; frame_samples];
+  let channels = config.format.channels as usize;
+  let frame_samples = (config.format.frame_samples as usize) * channels;
+  let frame_byte_len = frame_samples * 2;
+  let mut samples = vec![0i16; frame_samples];
+  let mut bytes_buf = BytesMut::with_capacity(frame_byte_len);
   let mut seq: u32 = 0;
 
   loop {
@@ -81,13 +85,17 @@ fn run(
       let _ = pcm.drop();
       return Ok(());
     }
-    match io.readi(&mut buf) {
+    bytes_buf.reserve(frame_byte_len);
+    match io.readi(&mut samples) {
       Ok(read) if read == config.format.frame_samples as usize => {
-        let bytes = pcm_to_bytes(&buf[..read * config.format.channels as usize]);
+        let take = read * channels;
+        for sample in &samples[..take] {
+          bytes_buf.put_i16_le(*sample);
+        }
         let frame = CapturedFrame {
           stream_id,
           seq,
-          pcm: bytes,
+          pcm: bytes_buf.split().freeze(),
         };
         if frames.blocking_send(frame).is_err() {
           let _ = pcm.drop();
@@ -104,12 +112,4 @@ fn run(
       }
     }
   }
-}
-
-fn pcm_to_bytes(samples: &[i16]) -> Vec<u8> {
-  let mut bytes = Vec::with_capacity(samples.len() * 2);
-  for sample in samples {
-    bytes.extend_from_slice(&sample.to_le_bytes());
-  }
-  bytes
 }

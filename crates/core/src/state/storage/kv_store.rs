@@ -29,6 +29,46 @@ impl KvStore {
     self.delete_raw(&data_namespace_key(app_id, key)).await
   }
 
+  pub async fn data_list_prefix(&self, app_id: Uuid, key_prefix: &str) -> StateResult<Vec<(String, String)>> {
+    let full_prefix = format!("{}:data:{key_prefix}", app_id.simple());
+    let pattern = format!("{full_prefix}%");
+    let rows = KvEntity::find()
+      .filter(KvColumn::Key.like(&pattern))
+      .all(&self.db)
+      .await
+      .map_err(StateError::from)?;
+    Ok(
+      rows
+        .into_iter()
+        .filter_map(|m| m.key.strip_prefix(&full_prefix).map(|k| (k.to_string(), m.value)))
+        .collect(),
+    )
+  }
+
+  pub async fn data_set_many(
+    &self,
+    app_id: Uuid,
+    items: impl IntoIterator<Item = (String, String)>,
+  ) -> StateResult<()> {
+    let tx = self.db.begin().await?;
+    for (key, value) in items {
+      let model = super::kv_storage::ActiveModel {
+        key: Set(data_namespace_key(app_id, &key)),
+        value: Set(value),
+      };
+      KvEntity::insert(model)
+        .on_conflict(
+          sea_orm::sea_query::OnConflict::column(KvColumn::Key)
+            .update_column(KvColumn::Value)
+            .to_owned(),
+        )
+        .exec(&tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+  }
+
   pub async fn config_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
     self.read_raw(&config_namespace_key(app_id, key)).await
   }

@@ -37,7 +37,6 @@ pub struct VoiceStreamOpen {
 /// from 0; gaps mean the daemon dropped frames under backpressure and
 /// the companion should treat them as silence rather than retransmit.
 #[typeshare]
-#[serde_with::serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
@@ -47,9 +46,9 @@ pub struct VoiceFrame {
   pub stream_id: Uuid,
   pub seq: u32,
   #[debug(skip)]
-  #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
-  pub pcm: Vec<u8>,
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub pcm: bytes::Bytes,
 }
 
 #[typeshare]

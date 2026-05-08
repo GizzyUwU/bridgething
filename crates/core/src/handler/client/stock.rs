@@ -377,17 +377,18 @@ impl LegacyStockHandler {
   }
 
   async fn spotify_set_preset(&self, requests: Vec<StockSetPreset>) -> HandlerResult {
-    for req in requests {
-      let preset = StockPreset {
+    let to_write: Vec<StockPreset> = requests
+      .into_iter()
+      .map(|req| StockPreset {
         context_uri: req.context_uri,
         image_url: None,
         slot_index: req.slot_index,
         name: None,
         description: None,
-      };
-      if let Err(err) = presets::upsert(&self.handle.state.kv, &preset).await {
-        tracing::warn!(?err, "stock set_preset write failed");
-      }
+      })
+      .collect();
+    if let Err(err) = presets::upsert_many(&self.handle.state.kv, &to_write).await {
+      tracing::warn!(?err, "stock set_preset write failed");
     }
     let result = presets::list(&self.handle.state.kv).await.unwrap_or_default();
     self

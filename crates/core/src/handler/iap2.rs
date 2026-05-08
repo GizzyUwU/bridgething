@@ -209,7 +209,7 @@ impl Iap2EventRouter {
           .assets
           .insert(
             asset_id.clone(),
-            tokio_util::bytes::Bytes::copy_from_slice(&bytes),
+            bytes,
             Some("image/jpeg".to_string()),
             AssetRetention::Lru,
           )

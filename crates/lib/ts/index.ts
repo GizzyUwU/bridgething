@@ -4,8 +4,8 @@ export * from './bindings/wire';
 
 export * from './codec';
 export * from './framing';
-export * from './uuid';
 export * from './logger';
+export * from './uuid';
 
 export const BRIDGETHING_PROFILE_UUID = 'dead0000-854d-408e-81f0-fb6147f918fd';
 export const BRIDGETHING_RFCOMM_CHANNEL = 1;

@@ -22,6 +22,18 @@ public sealed class RequestResult<out R, out E> {
   public data class ProtocolErr(val error: WireError): RequestResult<Nothing, Nothing>()
 }
 
+/** Cross-peer methods for the `Version` wire surface. */
+public class VersionSurface(private val gateway: BridgethingGateway) {
+  /** Stream of `Version` messages, paired with the originating device id. */
+  public val all: Flow<Pair<String, BridgeThingMeta>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val data = it.message.data as? BridgeToGatewayMsgData.Version ?: return@mapNotNull null
+      it.deviceId to data.data
+    }
+
+}
+
 /** Cross-peer methods for the `Audio` wire surface. */
 public class AudioSurface(private val gateway: BridgethingGateway) {
   /** Cross-peer stream of `Audio::VolumeUp` messages. */
@@ -1608,6 +1620,22 @@ public class LyricsSurface(private val gateway: BridgethingGateway) {
 
 }
 
+/** Per-peer methods for the `Version` wire surface (deviceId is baked in). */
+public class VersionSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Version` messages from this peer. */
+  public val all: Flow<BridgeThingMeta> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val data = it.message.data as? BridgeToGatewayMsgData.Version ?: return@mapNotNull null
+      data.data
+    }
+
+}
+
 /** Per-peer methods for the `Audio` wire surface (deviceId is baked in). */
 public class AudioSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -3043,6 +3071,8 @@ public class BridgethingGatewayDevice(
   public val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
+  /** Per-peer methods for the `Version` wire surface. */
+  public val version: VersionSurfaceForDevice get() = VersionSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Audio` wire surface. */
   public val audio: AudioSurfaceForDevice get() = AudioSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Geo` wire surface. */
@@ -3080,6 +3110,10 @@ public class BridgethingGatewayDevice(
   /** Per-peer methods for the `Lyrics` wire surface. */
   public val lyrics: LyricsSurfaceForDevice get() = LyricsSurfaceForDevice(gateway, deviceId)
 }
+
+/** Methods scoped to the `Version` wire surface. */
+public val BridgethingGateway.version: VersionSurface
+  get() = VersionSurface(this)
 
 /** Methods scoped to the `Audio` wire surface. */
 public val BridgethingGateway.audio: AudioSurface

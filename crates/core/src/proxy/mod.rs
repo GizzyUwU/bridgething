@@ -19,6 +19,7 @@ use std::{
   time::Duration,
 };
 
+use bytes::BytesMut;
 use libbridgething::{
   TunnelClosed, TunnelData, TunnelError,
   gateway::{BridgeToGatewayTunnelMsgCommand, TunnelErrorReply, TunnelOpen},
@@ -255,12 +256,13 @@ async fn bridge(
   let bt_for_outbound = bluetooth.clone();
   let outbound_tunnel_id = tunnel_id;
   let outbound_task = tokio::spawn(async move {
-    let mut buf = vec![0u8; READ_CHUNK_BYTES];
+    let mut buf = BytesMut::with_capacity(READ_CHUNK_BYTES);
     loop {
-      match socks_read.read(&mut buf).await {
+      buf.reserve(READ_CHUNK_BYTES);
+      match socks_read.read_buf(&mut buf).await {
         Ok(0) => return,
-        Ok(n) => {
-          let bytes = buf[..n].to_vec();
+        Ok(_) => {
+          let bytes = buf.split().freeze();
           let cmd = BridgeToGatewayTunnelMsgCommand::Data(TunnelData {
             tunnel_id: outbound_tunnel_id,
             bytes,

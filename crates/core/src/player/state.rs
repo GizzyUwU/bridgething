@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
-  PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, Track,
+  PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, RepeatMode, Track,
   client::{PlayerQueueReply, PlayerStateReply},
 };
 
@@ -11,17 +11,9 @@ use crate::authority::AuthorityRegistry;
 const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 
-/// Which producer fed an inbound `NowPlayingUpdate`. The merge stage
-/// uses this to route the partial fields into the right source-snapshot
-/// before recomputing the merged surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NowPlayingSource {
-  /// iAP2 control session - iOS-side ground truth, always available
-  /// when an iPhone is connected and Identified.
   Iap2,
-  /// bridgething companion app over RFCOMM (Android) or iAP2 EA (iOS).
-  /// Authority over a scope is tracked separately in
-  /// `AuthorityRegistry`.
   Companion,
 }
 
@@ -441,47 +433,71 @@ impl PlayerState {
     }
   }
 
-  pub fn iap2_playback_snapshot(&self) -> PlaybackUpdate {
-    self.iap2_playback.clone()
+  pub fn iap2_shuffle(&self) -> Option<bool> {
+    self.iap2_playback.shuffle
+  }
+
+  pub fn iap2_repeat_mode(&self) -> Option<RepeatMode> {
+    self.iap2_playback.repeat
+  }
+
+  pub fn iap2_set_elapsed_time_available(&self) -> Option<bool> {
+    self.iap2_playback.set_elapsed_time_available
+  }
+
+  pub fn replies(&self) -> (PlayerStateReply, PlayerQueueReply) {
+    let merged_meta = self.merged_metadata();
+    let merged_play = self.merged_playback();
+    let merged_queue = self.merged_queue();
+    let effective = self.effective_track();
+
+    let media_item = effective.map(|t| build_media_item(t, &merged_meta));
+    let playback = Playback {
+      state: if self.playing {
+        PlaybackState::Playing
+      } else {
+        PlaybackState::Paused
+      },
+      position_ms: u32::try_from(self.current_position_ms()).unwrap_or(u32::MAX),
+      shuffle: self.options.shuffle,
+      shuffle_mode: merged_play.shuffle_mode,
+      repeat: self.options.repeat,
+      queue_index: merged_play.queue_index,
+      queue_count: merged_play.queue_count,
+      queue_chapter_index: merged_play.queue_chapter_index,
+      set_elapsed_time_available: merged_play.set_elapsed_time_available,
+      queue_list_avail: merged_play.queue_list_avail,
+      apple_music_radio_ad: merged_play.apple_music_radio_ad,
+    };
+    let options = PlayerOptions {
+      speed: merged_play.playback_speed.unwrap_or(self.playback_speed as f32),
+      crossfade_ms: None,
+    };
+    let queue_current = effective.map(|t| build_queue_item(t, merged_meta));
+
+    let state = PlayerStateReply {
+      state: WirePlayerState {
+        track: media_item,
+        playback,
+        queue: merged_queue.clone(),
+        options,
+      },
+    };
+
+    let queue = PlayerQueueReply {
+      current: queue_current,
+      items: merged_queue,
+    };
+
+    (state, queue)
   }
 
   pub fn state_reply(&self) -> PlayerStateReply {
-    let merged = self.merged_playback();
-    let merged_meta = self.merged_metadata();
-    PlayerStateReply {
-      state: WirePlayerState {
-        track: self.effective_track().map(|t| build_media_item(t, &merged_meta)),
-        playback: Playback {
-          state: if self.playing {
-            PlaybackState::Playing
-          } else {
-            PlaybackState::Paused
-          },
-          position_ms: u32::try_from(self.current_position_ms()).unwrap_or(u32::MAX),
-          shuffle: self.options.shuffle,
-          shuffle_mode: merged.shuffle_mode,
-          repeat: self.options.repeat,
-          queue_index: merged.queue_index,
-          queue_count: merged.queue_count,
-          queue_chapter_index: merged.queue_chapter_index,
-          set_elapsed_time_available: merged.set_elapsed_time_available,
-          queue_list_avail: merged.queue_list_avail,
-          apple_music_radio_ad: merged.apple_music_radio_ad,
-        },
-        queue: self.merged_queue(),
-        options: PlayerOptions {
-          speed: merged.playback_speed.unwrap_or(self.playback_speed as f32),
-          crossfade_ms: None,
-        },
-      },
-    }
+    self.replies().0
   }
 
   pub fn queue_reply(&self) -> PlayerQueueReply {
-    PlayerQueueReply {
-      current: self.current_queue_item(),
-      items: self.merged_queue(),
-    }
+    self.replies().1
   }
 
   pub fn current_artwork_id(&self) -> Option<String> {
@@ -497,30 +513,28 @@ impl PlayerState {
     }
     Some(track)
   }
+}
 
-  fn current_queue_item(&self) -> Option<QueueItem> {
-    let track = self.effective_track()?;
-    let merged = self.merged_metadata();
-    let artwork_id = if track.image_id.is_empty() {
-      None
-    } else {
-      Some(track.image_id.clone())
-    };
-    Some(QueueItem {
-      uri: track.id.clone(),
-      title: merged.title.or_else(|| Some(track.name.clone())),
-      artist: merged
-        .artist
-        .or_else(|| Some(track.artist.name.clone()))
-        .filter(|s| !s.is_empty()),
-      album: merged
-        .album
-        .or_else(|| Some(track.album.name.clone()))
-        .filter(|s| !s.is_empty()),
-      artwork_id,
-      duration_ms: merged.duration_ms.or(Some(track.duration_ms)),
-      persistent_id: Some(track.id.clone()),
-    })
+fn build_queue_item(track: &Track, merged: MediaItemUpdate) -> QueueItem {
+  let artwork_id = if track.image_id.is_empty() {
+    None
+  } else {
+    Some(track.image_id.clone())
+  };
+  QueueItem {
+    uri: track.id.clone(),
+    title: merged.title.or_else(|| Some(track.name.clone())),
+    artist: merged
+      .artist
+      .or_else(|| Some(track.artist.name.clone()))
+      .filter(|s| !s.is_empty()),
+    album: merged
+      .album
+      .or_else(|| Some(track.album.name.clone()))
+      .filter(|s| !s.is_empty()),
+    artwork_id,
+    duration_ms: merged.duration_ms.or(Some(track.duration_ms)),
+    persistent_id: Some(track.id.clone()),
   }
 }
 

@@ -5,13 +5,13 @@
 //! per-active-webapp `net.proxy` manifest permission at SOCKS handshake
 //! time before opening the gateway-side `TunnelOpen` request.
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
 #[typeshare]
-#[serde_with::serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
@@ -19,9 +19,9 @@ pub struct TunnelData {
   #[ts(type = "string")]
   #[typeshare(serialized_as = "Vec<u8>")]
   pub tunnel_id: Uuid,
-  #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
-  pub bytes: Vec<u8>,
+  #[typeshare(serialized_as = "Vec<u8>")]
+  pub bytes: Bytes,
 }
 
 #[typeshare]

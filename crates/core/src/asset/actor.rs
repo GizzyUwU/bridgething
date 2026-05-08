@@ -1,5 +1,5 @@
 use std::{
-  collections::HashMap,
+  collections::{HashMap, HashSet},
   path::{Path, PathBuf},
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,9 +15,6 @@ use super::{
   storage::{AssetActiveModel, AssetColumn, AssetEntity},
 };
 
-/// Notifications broadcast on every cache mutation. Webapps and SDK
-/// consumers subscribe through their existing WS event stream;
-/// in-process consumers (e.g. iap2 art writer) can subscribe directly.
 #[derive(Debug, Clone)]
 pub enum AssetCacheEvent {
   Ready { id: String },
@@ -53,11 +50,6 @@ pub(super) enum Command {
   },
 }
 
-/// Storage backing for an in-flight cache entry. `Memory` holds the
-/// payload as a refcount-cloneable `Bytes` (covers Lru / Pinned / Ttl).
-/// `PersistentFile` carries only the on-disk path; `Get` reads from
-/// the file each time, so Persistent entries cost ~zero memory until
-/// a consumer asks for them.
 #[derive(Debug)]
 enum EntryStorage {
   Memory(Bytes),
@@ -69,12 +61,7 @@ struct Entry {
   retention: AssetRetention,
   mime: Option<String>,
   byte_len: usize,
-  /// Wall-clock unix seconds; persists into the assets table so disk
-  /// LRU survives daemon restart.
   accessed_at: i64,
-  /// Monotonic counter bumped on every insert/access. Used purely for
-  /// in-memory LRU victim selection - distinguishes inserts that fall
-  /// in the same wall-clock second.
   lru_seq: u64,
   ttl_deadline: Option<Instant>,
   storage: EntryStorage,
@@ -85,8 +72,8 @@ pub(super) struct AssetActor {
   entries: HashMap<String, Entry>,
   memory_byte_total: usize,
   disk_byte_total: usize,
-  /// Monotonic LRU counter. Bumped before each Entry assigns it.
   lru_clock: u64,
+  dirty_persist: HashSet<String>,
   db: DatabaseConnection,
   cmd_rx: mpsc::Receiver<Command>,
   events_tx: broadcast::Sender<AssetCacheEvent>,
@@ -105,6 +92,7 @@ impl AssetActor {
       memory_byte_total: 0,
       disk_byte_total: 0,
       lru_clock: 0,
+      dirty_persist: HashSet::new(),
       db,
       cmd_rx,
       events_tx,
@@ -168,7 +156,10 @@ impl AssetActor {
             return;
           }
         },
-        _ = sweep.tick() => self.ttl_sweep(),
+        _ = sweep.tick() => {
+          self.ttl_sweep();
+          self.flush_persist_touches().await;
+        }
       }
     }
   }
@@ -210,10 +201,6 @@ impl AssetActor {
     }
   }
 
-  /// Memory-tier insert: caller hands a `Bytes` and one of
-  /// Lru/Pinned/Ttl. Persistent is rejected here - it must come in
-  /// via `InsertFromPath` so we never accumulate a persistent payload
-  /// in memory just to copy it to disk.
   async fn handle_insert_memory(
     &mut self,
     id: String,
@@ -254,10 +241,6 @@ impl AssetActor {
     Ok(())
   }
 
-  /// Disk-tier insert: caller hands a path to a finalized file (the
-  /// chunked-transfer partial after `last:true` verify). For
-  /// Persistent retention the file is renamed into `blobs_dir`; for
-  /// memory retentions it's read into a `Bytes` then deleted.
   async fn handle_insert_from_path(
     &mut self,
     id: String,
@@ -328,7 +311,7 @@ impl AssetActor {
     let now = unix_now();
     let lru_seq = self.next_lru_seq();
 
-    let (path, mime, retention, is_persistent) = {
+    let (path, mime, retention) = {
       let entry = self.entries.get_mut(&id)?;
       entry.accessed_at = now;
       entry.lru_seq = lru_seq;
@@ -342,7 +325,7 @@ impl AssetActor {
             retention,
           });
         }
-        EntryStorage::PersistentFile(p) => (p.clone(), mime, retention, true),
+        EntryStorage::PersistentFile(p) => (p.clone(), mime, retention),
       }
     };
 
@@ -354,9 +337,7 @@ impl AssetActor {
       }
     };
 
-    if is_persistent {
-      let _ = self.touch_persist(&id, now).await;
-    }
+    self.dirty_persist.insert(id);
 
     Some(CachedAsset {
       bytes: Bytes::from(raw),
@@ -382,9 +363,6 @@ impl AssetActor {
     Ok(())
   }
 
-  /// Drop one entry, updating byte counters and removing from disk if
-  /// the entry was persistent. Does not broadcast `Cleared`; callers
-  /// decide whether the eviction is user-visible.
   async fn evict_entry(&mut self, id: &str) -> bool {
     let Some(entry) = self.entries.remove(id) else {
       return false;
@@ -395,6 +373,7 @@ impl AssetActor {
       }
       EntryStorage::PersistentFile(path) => {
         self.disk_byte_total = self.disk_byte_total.saturating_sub(entry.byte_len);
+        self.dirty_persist.remove(id);
         let _ = tokio::fs::remove_file(path).await;
         if let Err(err) = AssetEntity::delete_by_id(id.to_string()).exec(&self.db).await {
           tracing::warn!(?err, id = %id, "asset cache: failed to delete persistent row");
@@ -452,9 +431,6 @@ impl AssetActor {
     }
   }
 
-  /// Eviction order across memory: oldest `Lru` first, then oldest
-  /// `Ttl`, then oldest `Pinned`. `Persistent` is never memory-evicted -
-  /// its bytes aren't in memory to begin with.
   fn pick_memory_victim(&self) -> Option<String> {
     let mut best_lru: Option<(&str, u64)> = None;
     let mut best_ttl: Option<(&str, u64)> = None;
@@ -546,28 +522,29 @@ impl AssetActor {
     Ok(())
   }
 
-  async fn touch_persist(&self, id: &str, now: i64) -> Result<(), AssetError> {
-    AssetEntity::update_many()
+  async fn flush_persist_touches(&mut self) {
+    if self.dirty_persist.is_empty() {
+      return;
+    }
+    let ids: Vec<String> = self.dirty_persist.drain().collect();
+    let now = unix_now();
+    if let Err(err) = AssetEntity::update_many()
       .col_expr(AssetColumn::AccessedAt, sea_orm::sea_query::Expr::value(now))
-      .filter(AssetColumn::Id.eq(id))
+      .filter(AssetColumn::Id.is_in(ids))
       .exec(&self.db)
-      .await?;
-    Ok(())
+      .await
+    {
+      tracing::warn!(?err, "asset cache: failed to flush persistent accessed_at batch");
+    }
   }
 }
 
-/// Stable per-id filename for the on-disk blob. Hash-encoded so any
-/// id (including ones with `/`) is filesystem-safe; sha256 collision
-/// is the only failure mode and we accept that.
 fn safe_blob_name(id: &str) -> String {
   let mut h = Sha256::new();
   h.update(id.as_bytes());
   hex::encode(h.finalize())
 }
 
-/// Try to rename source → dest; fall back to copy+remove for
-/// cross-device cases (e.g. transfers_dir on tmpfs vs blobs_dir on
-/// the data partition - rare but possible).
 async fn rename_or_copy(source: &Path, dest: &Path) -> Result<(), AssetError> {
   match tokio::fs::rename(source, dest).await {
     Ok(()) => Ok(()),
