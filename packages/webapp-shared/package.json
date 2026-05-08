@@ -27,7 +27,6 @@
     "@msgpack/msgpack": "*",
     "@tailwindcss/vite": "*",
     "@vitejs/plugin-react": "*",
-    "babel-plugin-react-compiler": "*",
     "tailwindcss": "*",
     "typescript": "*",
     "vite": "*"

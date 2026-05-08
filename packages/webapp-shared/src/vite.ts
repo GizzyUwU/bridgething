@@ -10,15 +10,7 @@ export type BridgethingViteOverrides = {
 
 export function defineBridgethingConfig(overrides: BridgethingViteOverrides = {}): UserConfig {
   return defineConfig({
-    plugins: [
-      react({
-        babel: {
-          plugins: [['babel-plugin-react-compiler', { target: '19' }]],
-        },
-      }),
-      tailwindcss(),
-      ...(overrides.plugins ?? []),
-    ],
+    plugins: [react(), tailwindcss(), ...(overrides.plugins ?? [])],
     build: {
       target: 'es2022',
       sourcemap: true,
