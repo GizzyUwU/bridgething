@@ -55,6 +55,7 @@ const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 const RECONNECT_KICK_CAPACITY: usize = 16;
+const SESSION_DEAD_CAPACITY: usize = 16;
 
 /// Custom SDP record advertised for the iAP2 RFCOMM listener. iOS does
 /// not engage iAP2 on the auto-generated record bluez emits when only
@@ -103,6 +104,7 @@ pub type Iap2EventsRx = mpsc::Receiver<Iap2Event>;
 
 #[derive(Debug)]
 struct ActiveSession {
+  generation: u64,
   hid_tx: mpsc::Sender<HidCommand>,
   np_tx: mpsc::Sender<NowPlayingCommand>,
   tel_tx: mpsc::Sender<TelephonyCommand>,
@@ -200,6 +202,9 @@ pub struct Iap2Manager {
   transport_rx: mpsc::Receiver<Iap2TransportCommand>,
   telephony_rx: mpsc::Receiver<TelephonyCommand>,
   events_tx: mpsc::Sender<Iap2Event>,
+  next_generation: u64,
+  session_dead_tx: mpsc::Sender<(Address, u64)>,
+  session_dead_rx: mpsc::Receiver<(Address, u64)>,
 }
 
 pub struct Iap2InitOutput {
@@ -262,6 +267,7 @@ impl Iap2Manager {
     let telephony = Iap2TelephonyHandle { tx: telephony_tx };
 
     let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
+    let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
     let active_sessions = Iap2ActiveSessions::default();
 
     let manager = Self {
@@ -277,6 +283,9 @@ impl Iap2Manager {
       transport_rx,
       telephony_rx,
       events_tx,
+      next_generation: 0,
+      session_dead_tx,
+      session_dead_rx,
     };
 
     Ok(Some(Iap2InitOutput {
@@ -309,7 +318,10 @@ impl Iap2Manager {
           }
         }
         Some(mac) = self.reconnect_rx.recv() => {
-          self.spawn_reconnect(mac);
+          self.spawn_reconnect(mac).await;
+        }
+        Some((mac, generation)) = self.session_dead_rx.recv() => {
+          self.handle_session_dead(mac, generation).await;
         }
         Some(cmd) = self.transport_rx.recv() => {
           self.dispatch_transport(cmd).await;
@@ -334,6 +346,9 @@ impl Iap2Manager {
     self.sessions.remove(&address);
     self.active_sessions.remove(&address).await;
     self.cancel_reconnect(&address);
+
+    let generation = self.next_generation;
+    self.next_generation = self.next_generation.wrapping_add(1);
 
     let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(IAP2_CHANNEL_CAPACITY);
     let (link_events_tx, link_events_rx) = mpsc::channel::<Iap2InternalEvent>(IAP2_CHANNEL_CAPACITY);
@@ -361,14 +376,17 @@ impl Iap2Manager {
 
     let _shovel_handle = tokio::spawn(shovel_session_events(
       address,
+      generation,
       session_events_rx,
       self.events_tx.clone(),
+      self.session_dead_tx.clone(),
     ));
 
     self.active_sessions.insert(address).await;
     self.sessions.insert(
       address,
       ActiveSession {
+        generation,
         hid_tx,
         np_tx,
         tel_tx,
@@ -419,9 +437,7 @@ impl Iap2Manager {
       }
     };
     for mac in addresses {
-      if self.peer_advertises_iap2(mac).await {
-        self.spawn_reconnect(mac);
-      }
+      self.spawn_reconnect(mac).await;
     }
   }
 
@@ -440,7 +456,11 @@ impl Iap2Manager {
       .is_some_and(|set| set.contains(&IAP2_DEVICE_UUID))
   }
 
-  fn spawn_reconnect(&mut self, mac: Address) {
+  async fn spawn_reconnect(&mut self, mac: Address) {
+    if !self.peer_advertises_iap2(mac).await {
+      tracing::trace!(%mac, "iAP2 reconnect skipped: peer does not advertise iAP2");
+      return;
+    }
     if self.sessions.contains_key(&mac) {
       tracing::trace!(%mac, "iAP2 session already active; skipping reconnect kick");
       return;
@@ -461,6 +481,25 @@ impl Iap2Manager {
     if let Some(handle) = self.reconnects.remove(mac) {
       handle.abort();
     }
+  }
+
+  async fn handle_session_dead(&mut self, mac: Address, generation: u64) {
+    match self.sessions.get(&mac) {
+      Some(active) if active.generation == generation => {}
+      Some(_) => {
+        tracing::trace!(%mac, generation, "ignoring stale iAP2 session-dead signal");
+        return;
+      }
+      None => {
+        tracing::trace!(%mac, generation, "ignoring iAP2 session-dead signal: no active session");
+        return;
+      }
+    }
+
+    tracing::info!(%mac, "iAP2 session ended; cleaning up and re-arming reconnect");
+    self.sessions.remove(&mac);
+    self.active_sessions.remove(&mac).await;
+    self.spawn_reconnect(mac).await;
   }
 }
 
@@ -514,12 +553,21 @@ async fn still_should_reconnect(adapter: &Adapter, active_sessions: &Iap2ActiveS
   true
 }
 
-async fn shovel_session_events(address: Address, mut rx: mpsc::Receiver<SessionEvent>, tx: mpsc::Sender<Iap2Event>) {
+async fn shovel_session_events(
+  address: Address,
+  generation: u64,
+  mut rx: mpsc::Receiver<SessionEvent>,
+  tx: mpsc::Sender<Iap2Event>,
+  dead_tx: mpsc::Sender<(Address, u64)>,
+) {
   while let Some(event) = rx.recv().await {
     if tx.send(Iap2Event { address, event }).await.is_err() {
       tracing::debug!(%address, "iap2 events channel closed; dropping shovel");
-      return;
+      break;
     }
+  }
+  if dead_tx.send((address, generation)).await.is_err() {
+    tracing::trace!(%address, generation, "iap2 session-dead channel closed; manager exited");
   }
 }
 

@@ -138,6 +138,10 @@ impl BluetoothManager {
         }
       };
 
+    if let Some(handle) = &iap2_reconnect {
+      profile_man.set_iap2_reconnect(handle.clone());
+    }
+
     let manager = Arc::new(Self {
       _adapter: adapter,
 

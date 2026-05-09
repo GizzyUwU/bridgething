@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bluer::{Adapter, AdapterEvent, AdapterProperty, Address};
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
 
-use super::BluetoothResult;
+use super::{BluetoothResult, iap2::Iap2ReconnectHandle};
 use crate::{net::WireEventBus, peer::PeerTracker, state::DeviceStore, stock::StockSetupSend};
 
 pub type ProfileMan = Arc<ProfileManager>;
@@ -14,6 +14,7 @@ pub struct ProfileManager {
   bus: WireEventBus,
   devices: DeviceStore,
   peers: PeerTracker,
+  iap2_reconnect: OnceLock<Iap2ReconnectHandle>,
 }
 
 impl ProfileManager {
@@ -25,6 +26,13 @@ impl ProfileManager {
       bus,
       devices,
       peers,
+      iap2_reconnect: OnceLock::new(),
+    }
+  }
+
+  pub fn set_iap2_reconnect(&self, handle: Iap2ReconnectHandle) {
+    if self.iap2_reconnect.set(handle).is_err() {
+      tracing::warn!("iAP2 reconnect handle already set on ProfileManager; ignoring");
     }
   }
 
@@ -144,8 +152,13 @@ impl ProfileManager {
         }
         BluetoothConnectionEvent::ConnectedChanged { mac, connected } => {
           tracing::trace!("bluetooth Connected property changed for mac {:?}: {}", &mac, connected);
-          if connected && let Err(err) = self.peers.confirm_pairing(mac).await {
-            tracing::warn!(?err, "failed to confirm pairing on Connected=true");
+          if connected {
+            if let Err(err) = self.peers.confirm_pairing(mac).await {
+              tracing::warn!(?err, "failed to confirm pairing on Connected=true");
+            }
+            if let Some(handle) = self.iap2_reconnect.get() {
+              handle.kick(mac).await;
+            }
           }
           Ok(())
         }
