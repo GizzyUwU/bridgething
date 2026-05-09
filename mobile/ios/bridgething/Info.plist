@@ -24,6 +24,10 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>BRIDGETHING_DEVICE_CLIENT_ID</key>
+	<string>$(BRIDGETHING_DEVICE_CLIENT_ID)</string>
+	<key>BRIDGETHING_PKCE_CLIENT_ID</key>
+	<string>$(BRIDGETHING_PKCE_CLIENT_ID)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

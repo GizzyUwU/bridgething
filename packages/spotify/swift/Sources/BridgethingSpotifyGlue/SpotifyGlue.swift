@@ -70,9 +70,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
         let client = SpotinyClient(
             authenticator: authenticator,
+            delegate: self,
             accessToken: initialAccessToken,
-            refreshToken: initialRefreshToken,
-            delegate: self
+            refreshToken: initialRefreshToken
         )
         self.client = client
 
@@ -315,6 +315,10 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 extension SpotifyGlue: SpotinyDelegate {
     public func authDidRefresh(accessToken: String, refreshToken: String) {
         onTokensRefreshed?(accessToken, refreshToken)
+    }
+
+    public func authDidFail() {
+        handleSocketDown()
     }
 
     public func socketDidConnect() {}

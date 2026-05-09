@@ -52,13 +52,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public static var registry: [ProviderRegistration] = []
     public static var hostInfo: HostInfo = .init(appName: "bridgething", appVersion: "0.0.0", osName: "iOS")
     public static var lyricsResolver: any LyricsResolver = LrclibResolver()
-    public static var capabilityFlags: CompanionCapabilityFlags = .init()
     public static var eaProtocolString: String = "com.bridgething.gateway"
 
     private let stateLock = NSLock()
     private var companion: BridgethingCompanion?
     private var eventsTask: Task<Void, Never>?
     private var authTask: Task<Void, Never>?
+    private var otaEventsTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
 
@@ -69,6 +69,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
     private var onAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
     private var onLog: (@Sendable (String, String) -> Void)?
+    private var onWebappsChanged: (@Sendable (String) -> Void)?
+    private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
+    private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
 
     public init() {}
 
@@ -80,7 +83,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             adapter: adapter,
             lyricsResolver: Self.lyricsResolver,
             host: Self.hostInfo,
-            capabilities: Self.capabilityFlags
+            capabilities: CapabilityFlagsStore.load()
         )
         stateLock.lock(); self.companion = companion; stateLock.unlock()
 
@@ -93,27 +96,45 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
         try await companion.start()
 
+        // Restore any previously-saved OTA poll config.
+        let ota = await companion.ota
+        if let storedPoll = OtaPollConfigStore.load() {
+            await ota.setPollConfig(storedPoll)
+        }
+
         let events = companion.gateway.events
         let task = Task { [weak self] in
             for await event in events {
                 self?.handleGatewayEvent(event)
             }
         }
-        stateLock.lock(); eventsTask = task; stateLock.unlock()
+        let otaStream = ota.events
+        let otaTask = Task { [weak self] in
+            for await event in otaStream {
+                self?.emitOtaEvent(toRNOtaEvent(event))
+            }
+        }
+        stateLock.lock()
+        eventsTask = task
+        otaEventsTask = otaTask
+        stateLock.unlock()
     }
 
     public func stop() async {
         stateLock.lock()
         let auth = authTask
         let events = eventsTask
+        let ota = otaEventsTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
+        otaEventsTask = nil
         authTask = nil
         stateLock.unlock()
 
         auth?.cancel()
         events?.cancel()
+        ota?.cancel()
 
         await dismissPresentedSafari()
         await companion?.stop()
@@ -224,6 +245,196 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         return toRNAncsAuthStatus(await companion.currentAncsAuthState())
     }
 
+    // MARK: - Device naming
+
+    public func setDeviceNickname(deviceId: String, nickname: String?) async {
+        let trimmed = nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        DeviceNicknameStore.set(deviceId: deviceId, nickname: normalized)
+        // Re-emit the peer with the merged nickname so RN re-renders.
+        let updated: BridgethingSessionPeer? = stateLock.withLock {
+            guard var peer = peers[deviceId] else { return nil }
+            peer = BridgethingSessionPeer(id: peer.id, name: peer.name, nickname: normalized)
+            peers[deviceId] = peer
+            return peer
+        }
+        if let updated {
+            emitPeerConnected(updated)
+        }
+    }
+
+    public func getDeviceNickname(deviceId: String) async -> String? {
+        DeviceNicknameStore.get(deviceId: deviceId)
+    }
+
+    // MARK: - Webapps (per-device)
+
+    public func listWebapps(deviceId: String) async throws -> [BridgethingWebappInfo] {
+        let companion = try requirePeerConnected(deviceId)
+        let result = try await companion.gateway.webapp.list(deviceId: deviceId)
+        let value = try unwrapVoidErr(result, label: "listWebapps")
+        return value.webapps
+            .filter { $0.role != .launcher }
+            .map(Self.toRNWebappInfo)
+    }
+
+    public func currentWebapp(deviceId: String) async throws -> BridgethingActiveWebapp? {
+        let companion = try requirePeerConnected(deviceId)
+        let result = try await companion.gateway.webapp.getActive(deviceId: deviceId)
+        let value = try unwrapVoidErr(result, label: "currentWebapp")
+        guard let id = value.id else { return nil }
+        return BridgethingActiveWebapp(id: id.uuidString.lowercased(), name: value.name)
+    }
+
+    public func installWebappFromUrl(deviceId: String, url: String) async throws -> BridgethingWebappInfo {
+        guard let parsed = URL(string: url) else {
+            throw SessionError.invalidUrl(url)
+        }
+        let (data, response) = try await URLSession.shared.data(from: parsed)
+        if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
+            throw SessionError.installDownloadFailed(status: http.statusCode)
+        }
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappInstall(archive: data)
+        let result = try await companion.gateway.webapp.install(deviceId: deviceId, req)
+        let info = try unwrapWebappErr(result, label: "installWebapp")
+        emitWebappsChanged(deviceId)
+        return Self.toRNWebappInfo(info)
+    }
+
+    public func uninstallWebapp(deviceId: String, id: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappUninstall(id: uuid)
+        let result = try await companion.gateway.webapp.uninstall(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "uninstallWebapp")
+        emitWebappsChanged(deviceId)
+    }
+
+    public func switchWebapp(deviceId: String, id: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappSwitchTo(id: uuid)
+        let result = try await companion.gateway.webapp.switchTo(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "switchWebapp")
+        emitWebappsChanged(deviceId)
+    }
+
+    public func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon? {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappIcon(id: uuid)
+        let result = try await companion.gateway.webapp.icon(deviceId: deviceId, req)
+        switch result {
+        case let .ok(reply):
+            return BridgethingWebappIcon(
+                base64: reply.bytes.base64EncodedString(),
+                mime: reply.mime
+            )
+        case let .domain(err):
+            if case .iconNotAvailable = err { return nil }
+            throw SessionError.webappError(err)
+        case let .protocolError(err):
+            throw SessionError.protocolError(err)
+        }
+    }
+
+    public func listWebappConfig(deviceId: String, id: String) async throws -> [BridgethingConfigEntry] {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappConfigList(id: uuid)
+        let result = try await companion.gateway.webapp.configList(deviceId: deviceId, req)
+        let reply = try unwrapWebappErr(result, label: "listWebappConfig")
+        return reply.entries.map { BridgethingConfigEntry(key: $0.key, value: $0.value) }
+    }
+
+    public func setWebappConfigField(deviceId: String, id: String, key: String, value: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappConfigSet(id: uuid, key: key, value: value)
+        let result = try await companion.gateway.webapp.configSet(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "setWebappConfigField")
+    }
+
+    public func deleteWebappConfigField(deviceId: String, id: String, key: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappConfigDelete(id: uuid, key: key)
+        let result = try await companion.gateway.webapp.configDelete(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "deleteWebappConfigField")
+    }
+
+    // MARK: - Capability flags
+
+    public func getCapabilityFlags() async -> BridgethingCapabilityFlags {
+        let flags = CapabilityFlagsStore.load()
+        return BridgethingCapabilityFlags(
+            geo: flags.geo,
+            notifications: flags.notifications,
+            netFetch: flags.netFetch,
+            netWs: flags.netWs,
+            audioTts: flags.audioTts
+        )
+    }
+
+    public func setCapabilityFlags(flags: BridgethingCapabilityFlags) async {
+        let companionFlags = CompanionCapabilityFlags(
+            geo: flags.geo,
+            notifications: flags.notifications,
+            netFetch: flags.netFetch,
+            netWs: flags.netWs,
+            audioTts: flags.audioTts
+        )
+        CapabilityFlagsStore.save(companionFlags)
+        let companion = stateLock.withLock { self.companion }
+        await companion?.setCapabilityFlags(companionFlags)
+    }
+
+    // MARK: - OTA
+
+    public func setOtaPollConfig(config: BridgethingOtaPollConfig?) async {
+        let companion = stateLock.withLock { self.companion }
+        let ota = await companion?.ota
+        if let config {
+            let mapped = OtaPollConfig(
+                rootURL: config.rootUrl.flatMap(URL.init(string:)) ?? URL(string: "https://ota.bridgething.com")!,
+                channel: config.channel,
+                intervalSeconds: max(60, config.intervalSeconds),
+                cacheDirectory: nil,
+                autoPush: config.autoPush
+            )
+            OtaPollConfigStore.save(mapped)
+            await ota?.setPollConfig(mapped)
+        } else {
+            OtaPollConfigStore.clear()
+            await ota?.setPollConfig(nil)
+        }
+    }
+
+    public func getOtaPollConfig() async -> BridgethingOtaPollConfig? {
+        guard let stored = OtaPollConfigStore.load() else { return nil }
+        return BridgethingOtaPollConfig(
+            channel: stored.channel,
+            intervalSeconds: stored.intervalSeconds,
+            autoPush: stored.autoPush,
+            rootUrl: stored.rootURL.absoluteString
+        )
+    }
+
+    public func pollOtaNow() async {
+        let companion = stateLock.withLock { self.companion }
+        let ota = await companion?.ota
+        await ota?.pollNow()
+    }
+
+    public func deviceMeta(deviceId: String) async -> BridgethingDeviceMeta? {
+        let companion = stateLock.withLock { self.companion }
+        guard let companion else { return nil }
+        let ota = await companion.ota
+        guard let meta = await ota.meta(deviceId: deviceId) else { return nil }
+        return Self.toRNDeviceMeta(meta)
+    }
+
     // MARK: - Callback setters
 
     public func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void) {
@@ -252,6 +463,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void) {
         stateLock.withLock { onLog = callback }
+    }
+
+    public func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void) {
+        stateLock.withLock { onWebappsChanged = callback }
+    }
+
+    public func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void) {
+        stateLock.withLock { onDeviceMetaChanged = callback }
+    }
+
+    public func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void) {
+        stateLock.withLock { onOtaEvent = callback }
     }
 
     // MARK: - Internal
@@ -299,14 +522,21 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private func handleGatewayEvent(_ event: GatewayEvent) {
         switch event {
         case let .connected(device):
-            let peer = BridgethingSessionPeer(id: device.id, name: device.name)
+            let nickname = DeviceNicknameStore.get(deviceId: device.id)
+            let peer = BridgethingSessionPeer(
+                id: device.id,
+                name: device.name,
+                nickname: nickname
+            )
             stateLock.withLock { peers[device.id] = peer }
             emitPeerConnected(peer)
         case let .disconnected(id):
             stateLock.withLock { _ = peers.removeValue(forKey: id) }
             emitPeerDisconnected(id)
-        case .message:
-            break
+        case let .message(deviceId, msg):
+            if case let .version(meta) = msg.data {
+                emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
+            }
         case let .decodeError(id, description):
             emitLog("warn", "[\(id)] decode error: \(description)")
         }
@@ -326,6 +556,43 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             displayName: registration?.displayName ?? type(of: glue).displayName,
             available: registration?.available ?? true
         )
+    }
+
+    private func requirePeerConnected(_ deviceId: String) throws -> BridgethingCompanion {
+        let (companion, connected) = stateLock.withLock { (self.companion, peers[deviceId] != nil) }
+        guard let companion else { throw SessionError.notStarted }
+        guard connected else { throw SessionError.noPeerConnected(deviceId) }
+        return companion
+    }
+
+    private func parseUuid(_ id: String) throws -> UUID {
+        guard let uuid = UUID(uuidString: id) else {
+            throw SessionError.invalidUuid(id)
+        }
+        return uuid
+    }
+
+    private func unwrapVoidErr<T>(_ result: RequestResult<T, Never>, label: String) throws -> T {
+        switch result {
+        case let .ok(value):
+            return value
+        case .domain:
+            // Never is uninhabited; this branch is unreachable.
+            fatalError("RequestResult<_, Never>.domain is uninhabited")
+        case let .protocolError(err):
+            throw SessionError.protocolError(err)
+        }
+    }
+
+    private func unwrapWebappErr<T>(_ result: RequestResult<T, WebappError>, label: String) throws -> T {
+        switch result {
+        case let .ok(value):
+            return value
+        case let .domain(err):
+            throw SessionError.webappError(err)
+        case let .protocolError(err):
+            throw SessionError.protocolError(err)
+        }
     }
 
     // MARK: - Emit helpers
@@ -356,6 +623,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private func emitLog(_ level: String, _ message: String) {
         stateLock.withLock { onLog }?(level, message)
+    }
+
+    private func emitWebappsChanged(_ deviceId: String) {
+        stateLock.withLock { onWebappsChanged }?(deviceId)
+    }
+
+    private func emitDeviceMetaChanged(_ deviceId: String, _ meta: BridgethingDeviceMeta) {
+        stateLock.withLock { onDeviceMetaChanged }?(deviceId, meta)
+    }
+
+    private func emitOtaEvent(_ event: BridgethingOtaEvent) {
+        stateLock.withLock { onOtaEvent }?(event)
     }
 
     // MARK: - SFSafariViewController plumbing
@@ -419,6 +698,219 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         )
         return BridgethingNowPlaying(track: track, playback: playback, appName: pb?.appDisplayName)
     }
+
+    private static func toRNDeviceMeta(_ meta: BridgeThingMeta) -> BridgethingDeviceMeta {
+        BridgethingDeviceMeta(
+            daemonVersion: meta.appVersion,
+            appName: meta.appName,
+            osName: meta.osName,
+            osVersion: meta.osVersion,
+            channel: meta.channel,
+            modelName: meta.modelName,
+            serialNumber: meta.serialNumber
+        )
+    }
+
+    private static func toRNWebappInfo(_ info: BridgethingSchema.WebappInfo) -> BridgethingWebappInfo {
+        BridgethingWebappInfo(
+            id: info.id.uuidString.lowercased(),
+            name: info.name,
+            source: info.source == .builtin ? .builtin : .installed,
+            role: info.role == .launcher ? .launcher : .standard,
+            version: info.version,
+            description: info.description,
+            iconAvailable: info.iconAvailable,
+            iconMime: info.iconMime,
+            config: info.config.map(toRNConfigField),
+            permissions: info.permissions
+        )
+    }
+
+    private static func toRNConfigField(_ field: ConfigField) -> BridgethingConfigField {
+        switch field {
+        case let .string(f):
+            return BridgethingConfigField(
+                kind: .string,
+                key: f.key,
+                label: f.label,
+                pattern: f.pattern,
+                minLength: f.minLength.map(Double.init),
+                maxLength: f.maxLength.map(Double.init),
+                min: nil,
+                max: nil,
+                step: nil,
+                choices: nil,
+                defaultValue: f.default
+            )
+        case let .secret(f):
+            return BridgethingConfigField(
+                kind: .secret,
+                key: f.key,
+                label: f.label,
+                pattern: f.pattern,
+                minLength: f.minLength.map(Double.init),
+                maxLength: f.maxLength.map(Double.init),
+                min: nil,
+                max: nil,
+                step: nil,
+                choices: nil,
+                defaultValue: f.default
+            )
+        case let .number(f):
+            return BridgethingConfigField(
+                kind: .number,
+                key: f.key,
+                label: f.label,
+                pattern: nil,
+                minLength: nil,
+                maxLength: nil,
+                min: f.min,
+                max: f.max,
+                step: f.step,
+                choices: nil,
+                defaultValue: f.default.map { "\($0)" }
+            )
+        case let .boolean(f):
+            return BridgethingConfigField(
+                kind: .boolean,
+                key: f.key,
+                label: f.label,
+                pattern: nil,
+                minLength: nil,
+                maxLength: nil,
+                min: nil,
+                max: nil,
+                step: nil,
+                choices: nil,
+                defaultValue: f.default.map { $0 ? "true" : "false" }
+            )
+        case let .enum(f):
+            return BridgethingConfigField(
+                kind: .enum,
+                key: f.key,
+                label: f.label,
+                pattern: nil,
+                minLength: nil,
+                maxLength: nil,
+                min: nil,
+                max: nil,
+                step: nil,
+                choices: f.choices,
+                defaultValue: f.default
+            )
+        }
+    }
+}
+
+// MARK: - Persisted-defaults helpers
+
+private enum DeviceNicknameStore {
+    private static let defaults = UserDefaults.standard
+    private static let key = "dev.bridgething.deviceNicknames"
+
+    static func get(deviceId: String) -> String? {
+        load()[deviceId]
+    }
+
+    static func set(deviceId: String, nickname: String?) {
+        var map = load()
+        if let nickname { map[deviceId] = nickname } else { map.removeValue(forKey: deviceId) }
+        if let data = try? JSONEncoder().encode(map) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    private static func load() -> [String: String] {
+        guard let data = defaults.data(forKey: key),
+              let map = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return map
+    }
+}
+
+private enum CapabilityFlagsStore {
+    private static let defaults = UserDefaults.standard
+    private static let key = "dev.bridgething.capabilityFlags"
+
+    static func load() -> CompanionCapabilityFlags {
+        guard let data = defaults.data(forKey: key),
+              let stored = try? JSONDecoder().decode(StoredFlags.self, from: data)
+        else {
+            return CompanionCapabilityFlags()
+        }
+        return CompanionCapabilityFlags(
+            geo: stored.geo,
+            notifications: stored.notifications,
+            netFetch: stored.netFetch,
+            netWs: stored.netWs,
+            audioTts: stored.audioTts
+        )
+    }
+
+    static func save(_ flags: CompanionCapabilityFlags) {
+        let stored = StoredFlags(
+            geo: flags.geo,
+            notifications: flags.notifications,
+            netFetch: flags.netFetch,
+            netWs: flags.netWs,
+            audioTts: flags.audioTts
+        )
+        if let data = try? JSONEncoder().encode(stored) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    private struct StoredFlags: Codable {
+        let geo: Bool
+        let notifications: Bool
+        let netFetch: Bool
+        let netWs: Bool
+        let audioTts: Bool
+    }
+}
+
+private enum OtaPollConfigStore {
+    private static let defaults = UserDefaults.standard
+    private static let key = "dev.bridgething.otaPollConfig"
+
+    static func load() -> OtaPollConfig? {
+        guard let data = defaults.data(forKey: key),
+              let stored = try? JSONDecoder().decode(StoredConfig.self, from: data),
+              let url = URL(string: stored.rootUrl)
+        else {
+            return nil
+        }
+        return OtaPollConfig(
+            rootURL: url,
+            channel: stored.channel,
+            intervalSeconds: stored.intervalSeconds,
+            cacheDirectory: nil,
+            autoPush: stored.autoPush
+        )
+    }
+
+    static func save(_ config: OtaPollConfig) {
+        let stored = StoredConfig(
+            channel: config.channel,
+            intervalSeconds: config.intervalSeconds,
+            autoPush: config.autoPush,
+            rootUrl: config.rootURL.absoluteString
+        )
+        if let data = try? JSONEncoder().encode(stored) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    static func clear() {
+        defaults.removeObject(forKey: key)
+    }
+
+    private struct StoredConfig: Codable {
+        let channel: String
+        let intervalSeconds: TimeInterval
+        let autoPush: Bool
+        let rootUrl: String
+    }
 }
 
 private enum SessionError: Error {
@@ -426,6 +918,12 @@ private enum SessionError: Error {
     case cancelled
     case notStarted
     case unknownProvider(String)
+    case noPeerConnected(String)
+    case invalidUrl(String)
+    case invalidUuid(String)
+    case installDownloadFailed(status: Int)
+    case webappError(WebappError)
+    case protocolError(WireError)
 }
 
 private extension BridgethingAuthState {
@@ -474,4 +972,83 @@ private func toRNAncsSetupResult(_ result: AncsSetupResult) -> BridgethingAncsSe
         authStatus: toRNAncsAuthStatus(result.authState),
         message: message
     )
+}
+
+private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
+    switch event {
+    case let .manifestPolled(updatedAt):
+        return BridgethingOtaEvent(
+            kind: .manifestpolled,
+            updatedAt: updatedAt,
+            reason: nil, deviceId: nil, otaKind: nil,
+            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    case let .manifestPollFailed(reason):
+        return BridgethingOtaEvent(
+            kind: .manifestpollfailed,
+            updatedAt: nil, reason: reason, deviceId: nil, otaKind: nil,
+            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    case let .channelMismatch(deviceId, deviceChannel, configuredChannel):
+        return BridgethingOtaEvent(
+            kind: .channelmismatch,
+            updatedAt: nil,
+            reason: "device on \(deviceChannel), companion configured for \(configuredChannel)",
+            deviceId: deviceId, otaKind: nil,
+            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
+            deviceChannel: deviceChannel, configuredChannel: configuredChannel
+        )
+    case let .updateAvailable(deviceId, kind, fromVersion, toVersion):
+        return BridgethingOtaEvent(
+            kind: .updateavailable,
+            updatedAt: nil, reason: nil, deviceId: deviceId,
+            otaKind: kind == .image ? .image : .daemon,
+            fromVersion: fromVersion, toVersion: toVersion,
+            phase: nil, percent: nil,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    case let .progress(deviceId, kind, snapshot):
+        let (phase, percent, reason): (BridgethingOtaPhase, Double, String?) = {
+            switch snapshot {
+            case .idle: return (.idle, 0, nil)
+            case let .streaming(p): return (.streaming, Double(p), nil)
+            case let .applying(phase: ph, percent: p):
+                let mapped: BridgethingOtaPhase = switch ph {
+                case .streaming: .streaming
+                case .verifying: .verifying
+                case .writing: .writing
+                case .confirming: .confirming
+                case .reboot: .reboot
+                }
+                return (mapped, Double(p), nil)
+            case .completed: return (.completed, 100, nil)
+            case let .failed(r): return (.failed, 0, r)
+            }
+        }()
+        return BridgethingOtaEvent(
+            kind: .progress,
+            updatedAt: nil, reason: reason, deviceId: deviceId,
+            otaKind: kind == .image ? .image : .daemon,
+            fromVersion: nil, toVersion: nil, phase: phase, percent: percent,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    case let .updated(deviceId, kind, version):
+        return BridgethingOtaEvent(
+            kind: .updated,
+            updatedAt: nil, reason: nil, deviceId: deviceId,
+            otaKind: kind == .image ? .image : .daemon,
+            fromVersion: nil, toVersion: version, phase: nil, percent: nil,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    case let .failed(deviceId, kind, reason):
+        return BridgethingOtaEvent(
+            kind: .failed,
+            updatedAt: nil, reason: reason, deviceId: deviceId,
+            otaKind: kind == .image ? .image : .daemon,
+            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
+            deviceChannel: nil, configuredChannel: nil
+        )
+    }
 }
