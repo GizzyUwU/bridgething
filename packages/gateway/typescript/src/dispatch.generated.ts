@@ -20,6 +20,7 @@ import type {
   TimeInfo,
   TunnelClosed,
   TunnelData,
+  WebappError,
   WebappInfo,
   WireError,
 } from '@bridgething/lib';
@@ -39,6 +40,9 @@ import type {
   BrowseReply,
   ChromeNavigate,
   CommunicationsSnapshot,
+  DeviceNicknameRejected,
+  DeviceNicknameReply,
+  DeviceSetNickname,
   Earcon,
   FavoriteChanged,
   FavoritesContainsReply,
@@ -127,10 +131,13 @@ import type {
   WebappConfigList,
   WebappConfigListReply,
   WebappConfigSet,
-  WebappError,
   WebappIcon,
   WebappIconReply,
-  WebappInstall,
+  WebappInstallAbandon,
+  WebappInstallBegin,
+  WebappInstallBeginAck,
+  WebappInstallChunk,
+  WebappInstallFailed,
   WebappList,
   WebappSwitchTo,
   WebappUninstall,
@@ -313,6 +320,9 @@ export type SystemInboundHandlers = {
   otaBeginAck: (deviceId: string, msg: OtaBeginAck) => void;
   otaBeginRejected: (deviceId: string, msg: OtaBeginRejected) => void;
   otaAssetRangeAbandon: (deviceId: string, msg: OtaAssetRangeAbandon) => void;
+  deviceNickname: (deviceId: string, msg: DeviceNicknameReply) => void;
+  deviceNicknameRejected: (deviceId: string, msg: DeviceNicknameRejected) => void;
+  deviceNicknameChanged: (deviceId: string, msg: DeviceNicknameReply) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
@@ -322,6 +332,9 @@ export type SystemDeviceInboundHandlers = {
   otaBeginAck: (msg: OtaBeginAck) => void;
   otaBeginRejected: (msg: OtaBeginRejected) => void;
   otaAssetRangeAbandon: (msg: OtaAssetRangeAbandon) => void;
+  deviceNickname: (msg: DeviceNicknameReply) => void;
+  deviceNicknameRejected: (msg: DeviceNicknameRejected) => void;
+  deviceNicknameChanged: (msg: DeviceNicknameReply) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
@@ -347,6 +360,36 @@ export type VoiceDeviceInboundHandlers = {
   streamOpen: (msg: VoiceStreamOpen) => void;
   frame: (msg: VoiceFrame) => void;
   streamClose: (msg: VoiceStreamClose) => void;
+};
+
+export type WebappInboundHandlers = {
+  webapps: (deviceId: string, msg: WebappList) => void;
+  active: (deviceId: string, msg: WebappActive) => void;
+  switched: (deviceId: string, msg: WebappActive) => void;
+  installBeginAck: (deviceId: string, msg: WebappInstallBeginAck) => void;
+  uninstalled: (deviceId: string, msg: WebappActive) => void;
+  webappError: (deviceId: string, msg: WebappError) => void;
+  icon: (deviceId: string, msg: WebappIconReply) => void;
+  configGet: (deviceId: string, msg: WebappConfigGetReply) => void;
+  configList: (deviceId: string, msg: WebappConfigListReply) => void;
+  configAck: (deviceId: string, msg: WebappConfigAck) => void;
+  webappInstalled: (deviceId: string, msg: WebappInfo) => void;
+  webappInstallFailed: (deviceId: string, msg: WebappInstallFailed) => void;
+};
+
+export type WebappDeviceInboundHandlers = {
+  webapps: (msg: WebappList) => void;
+  active: (msg: WebappActive) => void;
+  switched: (msg: WebappActive) => void;
+  installBeginAck: (msg: WebappInstallBeginAck) => void;
+  uninstalled: (msg: WebappActive) => void;
+  webappError: (msg: WebappError) => void;
+  icon: (msg: WebappIconReply) => void;
+  configGet: (msg: WebappConfigGetReply) => void;
+  configList: (msg: WebappConfigListReply) => void;
+  configAck: (msg: WebappConfigAck) => void;
+  webappInstalled: (msg: WebappInfo) => void;
+  webappInstallFailed: (msg: WebappInstallFailed) => void;
 };
 
 export type ForwardInboundHandlers = {
@@ -2041,6 +2084,42 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::DeviceNickname` across all peers. */
+  onDeviceNickname(handler: (deviceId: string, msg: DeviceNicknameReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNickname') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::DeviceNicknameRejected` across all peers. */
+  onDeviceNicknameRejected(handler: (deviceId: string, msg: DeviceNicknameRejected) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNicknameRejected') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::DeviceNicknameChanged` across all peers. */
+  onDeviceNicknameChanged(handler: (deviceId: string, msg: DeviceNicknameReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNicknameChanged') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Typed inbound `OtaAssetRange` request: handler is given a typed handle for the response. */
   onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -2096,6 +2175,18 @@ export class SystemSurface {
         }
         case 'otaAssetRangeAbandon': {
           handlers.otaAssetRangeAbandon?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'deviceNickname': {
+          handlers.deviceNickname?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'deviceNicknameRejected': {
+          handlers.deviceNicknameRejected?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'deviceNicknameChanged': {
+          handlers.deviceNicknameChanged?.(event.deviceId, inner.data);
           return;
         }
         case 'otaAssetRange': {
@@ -2193,6 +2284,40 @@ export class SystemSurface {
       const inner = d.data;
       if (inner.event === 'otaBeginAck') return { ok: true, response: inner.data };
       if (inner.event === 'otaBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async deviceGetNickname(
+    deviceId: string,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<DeviceNicknameReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'deviceGetNickname' } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async deviceSetNickname(
+    deviceId: string,
+    req: DeviceSetNickname,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<DeviceNicknameReply, DeviceNicknameRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'deviceSetNickname', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
+      if (inner.event === 'deviceNicknameRejected') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -2428,6 +2553,430 @@ export class VoiceSurface {
         return this._gateway.send(deviceId, msg, options);
       }),
     );
+  }
+}
+
+export class WebappSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Webapp::Webapps` across all peers. */
+  onWebapps(handler: (deviceId: string, msg: WebappList) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webapps') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Active` across all peers. */
+  onActive(handler: (deviceId: string, msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'active') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Switched` across all peers. */
+  onSwitched(handler: (deviceId: string, msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'switched') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::InstallBeginAck` across all peers. */
+  onInstallBeginAck(handler: (deviceId: string, msg: WebappInstallBeginAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'installBeginAck') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Uninstalled` across all peers. */
+  onUninstalled(handler: (deviceId: string, msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'uninstalled') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappError` across all peers. */
+  onWebappError(handler: (deviceId: string, msg: WebappError) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappError') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Icon` across all peers. */
+  onIcon(handler: (deviceId: string, msg: WebappIconReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'icon') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigGet` across all peers. */
+  onConfigGet(handler: (deviceId: string, msg: WebappConfigGetReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configGet') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigList` across all peers. */
+  onConfigList(handler: (deviceId: string, msg: WebappConfigListReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configList') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigAck` across all peers. */
+  onConfigAck(handler: (deviceId: string, msg: WebappConfigAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configAck') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappInstalled` across all peers. */
+  onWebappInstalled(handler: (deviceId: string, msg: WebappInfo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappInstalled') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappInstallFailed` across all peers. */
+  onWebappInstallFailed(handler: (deviceId: string, msg: WebappInstallFailed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappInstallFailed') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Webapp` variants. */
+  subscribe(handlers: WebappInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<WebappInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<WebappInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'webapps': {
+          handlers.webapps?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'active': {
+          handlers.active?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'switched': {
+          handlers.switched?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'installBeginAck': {
+          handlers.installBeginAck?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'uninstalled': {
+          handlers.uninstalled?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'webappError': {
+          handlers.webappError?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'icon': {
+          handlers.icon?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'configGet': {
+          handlers.configGet?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'configList': {
+          handlers.configList?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'configAck': {
+          handlers.configAck?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'webappInstalled': {
+          handlers.webappInstalled?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'webappInstallFailed': {
+          handlers.webappInstallFailed?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Webapp: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Webapp::InstallChunk` to every connected peer (broadcast). */
+  async installChunk(payload: WebappInstallChunk, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Webapp::InstallAbandon` to every connected peer (broadcast). */
+  async installAbandon(payload: WebappInstallAbandon, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'command' },
+          data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async list(deviceId: string, options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappList, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'list' } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'webapps') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async getActive(
+    deviceId: string,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActive, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getActive' } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'active') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async switchTo(
+    deviceId: string,
+    req: WebappSwitchTo,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'switchTo', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'switched') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async installBegin(
+    deviceId: string,
+    req: WebappInstallBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async uninstall(
+    deviceId: string,
+    req: WebappUninstall,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async icon(
+    deviceId: string,
+    req: WebappIcon,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configGet(
+    deviceId: string,
+    req: WebappConfigGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configList(
+    deviceId: string,
+    req: WebappConfigList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configSet(
+    deviceId: string,
+    req: WebappConfigSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async configDelete(
+    deviceId: string,
+    req: WebappConfigDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -2698,183 +3247,6 @@ export class TimeSurface {
         return this._gateway.send(deviceId, msg, options);
       }),
     );
-  }
-}
-
-export class WebappSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async list(deviceId: string, options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappList, never>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'list' } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'webapps') return { ok: true, response: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async getActive(
-    deviceId: string,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActive, never>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getActive' } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'active') return { ok: true, response: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async switchTo(
-    deviceId: string,
-    req: WebappSwitchTo,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'switchTo', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'switched') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async install(
-    deviceId: string,
-    req: WebappInstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInfo, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'install', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installed') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async uninstall(
-    deviceId: string,
-    req: WebappUninstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async icon(
-    deviceId: string,
-    req: WebappIcon,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'icon') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async configGet(
-    deviceId: string,
-    req: WebappConfigGet,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configGet') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async configList(
-    deviceId: string,
-    req: WebappConfigList,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configList') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async configSet(
-    deviceId: string,
-    req: WebappConfigSet,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configAck') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async configDelete(
-    deviceId: string,
-    req: WebappConfigDelete,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configAck') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -4562,6 +4934,45 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `System::DeviceNickname` from this peer. */
+  onDeviceNickname(handler: (msg: DeviceNicknameReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNickname') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::DeviceNicknameRejected` from this peer. */
+  onDeviceNicknameRejected(handler: (msg: DeviceNicknameRejected) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNicknameRejected') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::DeviceNicknameChanged` from this peer. */
+  onDeviceNicknameChanged(handler: (msg: DeviceNicknameReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNicknameChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Typed inbound `OtaAssetRange` request from this peer: handler is given a typed handle for the response. */
   onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -4619,6 +5030,18 @@ export class SystemSurfaceForDevice {
         }
         case 'otaAssetRangeAbandon': {
           handlers.otaAssetRangeAbandon?.(inner.data);
+          return;
+        }
+        case 'deviceNickname': {
+          handlers.deviceNickname?.(inner.data);
+          return;
+        }
+        case 'deviceNicknameRejected': {
+          handlers.deviceNicknameRejected?.(inner.data);
+          return;
+        }
+        case 'deviceNicknameChanged': {
+          handlers.deviceNicknameChanged?.(inner.data);
           return;
         }
         case 'otaAssetRange': {
@@ -4695,6 +5118,36 @@ export class SystemSurfaceForDevice {
       const inner = d.data;
       if (inner.event === 'otaBeginAck') return { ok: true, response: inner.data };
       if (inner.event === 'otaBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async deviceGetNickname(options?: { timeoutMs?: number }): Promise<TypedRequestResult<DeviceNicknameReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'deviceGetNickname' } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async deviceSetNickname(
+    req: DeviceSetNickname,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<DeviceNicknameReply, DeviceNicknameRejected>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'deviceSetNickname', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
+      if (inner.event === 'deviceNicknameRejected') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -4924,6 +5377,425 @@ export class VoiceSurfaceForDevice {
       data: { type: 'voice', data: { event: 'micClose' } },
     };
     await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class WebappSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Webapp::Webapps` from this peer. */
+  onWebapps(handler: (msg: WebappList) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webapps') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Active` from this peer. */
+  onActive(handler: (msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'active') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Switched` from this peer. */
+  onSwitched(handler: (msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'switched') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::InstallBeginAck` from this peer. */
+  onInstallBeginAck(handler: (msg: WebappInstallBeginAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'installBeginAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Uninstalled` from this peer. */
+  onUninstalled(handler: (msg: WebappActive) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'uninstalled') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappError` from this peer. */
+  onWebappError(handler: (msg: WebappError) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappError') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::Icon` from this peer. */
+  onIcon(handler: (msg: WebappIconReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'icon') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigGet` from this peer. */
+  onConfigGet(handler: (msg: WebappConfigGetReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configGet') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigList` from this peer. */
+  onConfigList(handler: (msg: WebappConfigListReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configList') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::ConfigAck` from this peer. */
+  onConfigAck(handler: (msg: WebappConfigAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'configAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappInstalled` from this peer. */
+  onWebappInstalled(handler: (msg: WebappInfo) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappInstalled') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappInstallFailed` from this peer. */
+  onWebappInstallFailed(handler: (msg: WebappInstallFailed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappInstallFailed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Webapp` variants from this peer. */
+  subscribe(handlers: WebappDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<WebappDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<WebappDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'webapps': {
+          handlers.webapps?.(inner.data);
+          return;
+        }
+        case 'active': {
+          handlers.active?.(inner.data);
+          return;
+        }
+        case 'switched': {
+          handlers.switched?.(inner.data);
+          return;
+        }
+        case 'installBeginAck': {
+          handlers.installBeginAck?.(inner.data);
+          return;
+        }
+        case 'uninstalled': {
+          handlers.uninstalled?.(inner.data);
+          return;
+        }
+        case 'webappError': {
+          handlers.webappError?.(inner.data);
+          return;
+        }
+        case 'icon': {
+          handlers.icon?.(inner.data);
+          return;
+        }
+        case 'configGet': {
+          handlers.configGet?.(inner.data);
+          return;
+        }
+        case 'configList': {
+          handlers.configList?.(inner.data);
+          return;
+        }
+        case 'configAck': {
+          handlers.configAck?.(inner.data);
+          return;
+        }
+        case 'webappInstalled': {
+          handlers.webappInstalled?.(inner.data);
+          return;
+        }
+        case 'webappInstallFailed': {
+          handlers.webappInstallFailed?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Webapp: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Send `Webapp::InstallChunk` to this peer. */
+  async installChunk(payload: WebappInstallChunk, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Webapp::InstallAbandon` to this peer. */
+  async installAbandon(payload: WebappInstallAbandon, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async list(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappList, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'list' } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'webapps') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async getActive(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappActive, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getActive' } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'active') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async switchTo(
+    req: WebappSwitchTo,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'switchTo', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'switched') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async installBegin(
+    req: WebappInstallBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async uninstall(
+    req: WebappUninstall,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async icon(
+    req: WebappIcon,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configGet(
+    req: WebappConfigGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configList(
+    req: WebappConfigList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configSet(
+    req: WebappConfigSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async configDelete(
+    req: WebappConfigDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -5174,175 +6046,6 @@ export class TimeSurfaceForDevice {
   }
 }
 
-export class WebappSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async list(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappList, never>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'list' } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'webapps') return { ok: true, response: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async getActive(options?: { timeoutMs?: number }): Promise<TypedRequestResult<WebappActive, never>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'getActive' } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'active') return { ok: true, response: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async switchTo(
-    req: WebappSwitchTo,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'switchTo', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'switched') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async install(
-    req: WebappInstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInfo, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'install', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installed') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async uninstall(
-    req: WebappUninstall,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActive, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'uninstall', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'uninstalled') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async icon(
-    req: WebappIcon,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'icon') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async configGet(
-    req: WebappConfigGet,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigGetReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configGet', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configGet') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async configList(
-    req: WebappConfigList,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigListReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configList', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configList') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async configSet(
-    req: WebappConfigSet,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configSet', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configAck') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async configDelete(
-    req: WebappConfigDelete,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappConfigAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'configDelete', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'configAck') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-}
-
 export class LyricsSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -5382,6 +6085,7 @@ export type BridgeMessageHandlers = {
   system: SystemInboundHandlers;
   tunnel: TunnelInboundHandlers;
   voice: VoiceInboundHandlers;
+  webapp: WebappInboundHandlers;
   forward: ForwardInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   lyrics: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
@@ -5398,6 +6102,7 @@ export type PartialBridgeMessageHandlers = {
   system?: Partial<SystemInboundHandlers>;
   tunnel?: Partial<TunnelInboundHandlers>;
   voice?: Partial<VoiceInboundHandlers>;
+  webapp?: Partial<WebappInboundHandlers>;
   forward?: Partial<ForwardInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   lyrics?: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
@@ -5414,6 +6119,7 @@ export type BridgeMessageDeviceHandlers = {
   system: SystemDeviceInboundHandlers;
   tunnel: TunnelDeviceInboundHandlers;
   voice: VoiceDeviceInboundHandlers;
+  webapp: WebappDeviceInboundHandlers;
   forward: ForwardDeviceInboundHandlers;
   asset: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   lyrics: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
@@ -5430,6 +6136,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   system?: Partial<SystemDeviceInboundHandlers>;
   tunnel?: Partial<TunnelDeviceInboundHandlers>;
   voice?: Partial<VoiceDeviceInboundHandlers>;
+  webapp?: Partial<WebappDeviceInboundHandlers>;
   forward?: Partial<ForwardDeviceInboundHandlers>;
   asset?: (handle: AssetRequestHandle, req: AssetRequest) => Promise<void> | void;
   lyrics?: (handle: LyricsRequestHandle, req: LyricsRequest) => Promise<void> | void;
@@ -5464,6 +6171,8 @@ export interface GatewaySurfaces {
   readonly tunnel: TunnelSurface;
   /** Methods scoped to the `Voice` wire surface. */
   readonly voice: VoiceSurface;
+  /** Methods scoped to the `Webapp` wire surface. */
+  readonly webapp: WebappSurface;
   /** Methods scoped to the `Forward` wire surface. */
   readonly forward: ForwardSurface;
   /** Methods scoped to the `Asset` wire surface. */
@@ -5476,8 +6185,6 @@ export interface GatewaySurfaces {
   readonly chrome: ChromeSurface;
   /** Methods scoped to the `Time` wire surface. */
   readonly time: TimeSurface;
-  /** Methods scoped to the `Webapp` wire surface. */
-  readonly webapp: WebappSurface;
   /** Methods scoped to the `Lyrics` wire surface. */
   readonly lyrics: LyricsSurface;
   /** Returns a per-device proxy with `deviceId` baked into every method and listener. */
@@ -5945,13 +6652,13 @@ type DeviceSurfaceCache = {
   system?: SystemSurfaceForDevice;
   tunnel?: TunnelSurfaceForDevice;
   voice?: VoiceSurfaceForDevice;
+  webapp?: WebappSurfaceForDevice;
   forward?: ForwardSurfaceForDevice;
   asset?: AssetSurfaceForDevice;
   authority?: AuthoritySurfaceForDevice;
   capabilities?: CapabilitiesSurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
   time?: TimeSurfaceForDevice;
-  webapp?: WebappSurfaceForDevice;
   lyrics?: LyricsSurfaceForDevice;
 };
 
@@ -5995,6 +6702,9 @@ export class BridgethingGatewayDevice {
   get voice(): VoiceSurfaceForDevice {
     return (this._surfaces.voice ??= new VoiceSurfaceForDevice(this._gateway, this.deviceId));
   }
+  get webapp(): WebappSurfaceForDevice {
+    return (this._surfaces.webapp ??= new WebappSurfaceForDevice(this._gateway, this.deviceId));
+  }
   get forward(): ForwardSurfaceForDevice {
     return (this._surfaces.forward ??= new ForwardSurfaceForDevice(this._gateway, this.deviceId));
   }
@@ -6012,9 +6722,6 @@ export class BridgethingGatewayDevice {
   }
   get time(): TimeSurfaceForDevice {
     return (this._surfaces.time ??= new TimeSurfaceForDevice(this._gateway, this.deviceId));
-  }
-  get webapp(): WebappSurfaceForDevice {
-    return (this._surfaces.webapp ??= new WebappSurfaceForDevice(this._gateway, this.deviceId));
   }
   get lyrics(): LyricsSurfaceForDevice {
     return (this._surfaces.lyrics ??= new LyricsSurfaceForDevice(this._gateway, this.deviceId));
@@ -6041,13 +6748,13 @@ type GatewaySurfaceCache = {
   system?: SystemSurface;
   tunnel?: TunnelSurface;
   voice?: VoiceSurface;
+  webapp?: WebappSurface;
   forward?: ForwardSurface;
   asset?: AssetSurface;
   authority?: AuthoritySurface;
   capabilities?: CapabilitiesSurface;
   chrome?: ChromeSurface;
   time?: TimeSurface;
-  webapp?: WebappSurface;
   lyrics?: LyricsSurface;
 };
 
@@ -6154,6 +6861,14 @@ export function applyDispatch(): void {
       return (bucket.voice ??= new VoiceSurface(this));
     },
   });
+  Object.defineProperty(BridgethingGateway.prototype, 'webapp', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): WebappSurface {
+      const bucket = bucketFor(this);
+      return (bucket.webapp ??= new WebappSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingGateway.prototype, 'forward', {
     configurable: true,
     enumerable: true,
@@ -6200,14 +6915,6 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): TimeSurface {
       const bucket = bucketFor(this);
       return (bucket.time ??= new TimeSurface(this));
-    },
-  });
-  Object.defineProperty(BridgethingGateway.prototype, 'webapp', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): WebappSurface {
-      const bucket = bucketFor(this);
-      return (bucket.webapp ??= new WebappSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'lyrics', {
@@ -6678,6 +7385,18 @@ function outerSubscribeGateway(
             innerHandlers.otaAssetRangeAbandon?.(event.deviceId, inner.data);
             return;
           }
+          case 'deviceNickname': {
+            innerHandlers.deviceNickname?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'deviceNicknameRejected': {
+            innerHandlers.deviceNicknameRejected?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'deviceNicknameChanged': {
+            innerHandlers.deviceNicknameChanged?.(event.deviceId, inner.data);
+            return;
+          }
           case 'otaAssetRange': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.otaAssetRange;
@@ -6754,6 +7473,68 @@ function outerSubscribeGateway(
           }
           default: {
             if (!partial) g.logger.warn('Voice: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'webapp': {
+        const innerHandlers = handlers.webapp;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for webapp');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'webapps': {
+            innerHandlers.webapps?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'active': {
+            innerHandlers.active?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'switched': {
+            innerHandlers.switched?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'installBeginAck': {
+            innerHandlers.installBeginAck?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'uninstalled': {
+            innerHandlers.uninstalled?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'webappError': {
+            innerHandlers.webappError?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'icon': {
+            innerHandlers.icon?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'configGet': {
+            innerHandlers.configGet?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'configList': {
+            innerHandlers.configList?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'configAck': {
+            innerHandlers.configAck?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'webappInstalled': {
+            innerHandlers.webappInstalled?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'webappInstallFailed': {
+            innerHandlers.webappInstallFailed?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Webapp: no handler for inner', inner);
             return;
           }
         }
@@ -7260,6 +8041,18 @@ function outerSubscribeDevice(
             innerHandlers.otaAssetRangeAbandon?.(inner.data);
             return;
           }
+          case 'deviceNickname': {
+            innerHandlers.deviceNickname?.(inner.data);
+            return;
+          }
+          case 'deviceNicknameRejected': {
+            innerHandlers.deviceNicknameRejected?.(inner.data);
+            return;
+          }
+          case 'deviceNicknameChanged': {
+            innerHandlers.deviceNicknameChanged?.(inner.data);
+            return;
+          }
           case 'otaAssetRange': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.otaAssetRange;
@@ -7336,6 +8129,68 @@ function outerSubscribeDevice(
           }
           default: {
             if (!partial) g.logger.warn('Voice: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'webapp': {
+        const innerHandlers = handlers.webapp;
+        if (!innerHandlers) {
+          if (!partial) g.logger.warn('subscribe: no handler for webapp');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'webapps': {
+            innerHandlers.webapps?.(inner.data);
+            return;
+          }
+          case 'active': {
+            innerHandlers.active?.(inner.data);
+            return;
+          }
+          case 'switched': {
+            innerHandlers.switched?.(inner.data);
+            return;
+          }
+          case 'installBeginAck': {
+            innerHandlers.installBeginAck?.(inner.data);
+            return;
+          }
+          case 'uninstalled': {
+            innerHandlers.uninstalled?.(inner.data);
+            return;
+          }
+          case 'webappError': {
+            innerHandlers.webappError?.(inner.data);
+            return;
+          }
+          case 'icon': {
+            innerHandlers.icon?.(inner.data);
+            return;
+          }
+          case 'configGet': {
+            innerHandlers.configGet?.(inner.data);
+            return;
+          }
+          case 'configList': {
+            innerHandlers.configList?.(inner.data);
+            return;
+          }
+          case 'configAck': {
+            innerHandlers.configAck?.(inner.data);
+            return;
+          }
+          case 'webappInstalled': {
+            innerHandlers.webappInstalled?.(inner.data);
+            return;
+          }
+          case 'webappInstallFailed': {
+            innerHandlers.webappInstallFailed?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Webapp: no handler for inner', inner);
             return;
           }
         }

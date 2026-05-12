@@ -31,6 +31,29 @@ pub struct OtaBeginRejected {
   pub reason: String,
 }
 
+/// Current device nickname. Reply to `DeviceGetNickname` and
+/// `DeviceSetNickname`, plus the event payload for
+/// `DeviceNicknameChanged` broadcasts.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct DeviceNicknameReply {
+  pub nickname: Option<String>,
+}
+
+/// Domain-error response to `DeviceSetNickname`: nickname rejected at
+/// the daemon edge (too long, contains nul, etc).
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct DeviceNicknameRejected {
+  pub reason: String,
+}
+
 /// Daemon asks the pinned companion to serve byte ranges from an asset
 /// it should have cached (and can refetch from `OtaBegin.update_url_base`
 /// on cache miss). Triggered by an inbound HTTP-Range request from
@@ -91,4 +114,11 @@ pub enum BridgeToGatewaySystemMsg {
   OtaAssetRange(OtaAssetRange),
   #[bridge_command]
   OtaAssetRangeAbandon(OtaAssetRangeAbandon),
+  #[bridge_response]
+  DeviceNickname(DeviceNicknameReply),
+  #[bridge_response]
+  DeviceNicknameRejected(DeviceNicknameRejected),
+  /// event broadcast when the nickname changes
+  #[bridge_event]
+  DeviceNicknameChanged(DeviceNicknameReply),
 }

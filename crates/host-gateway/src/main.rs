@@ -7,6 +7,7 @@
 mod chaos;
 mod conn;
 mod ota;
+mod install;
 mod webapp;
 
 use std::path::PathBuf;
@@ -91,6 +92,16 @@ enum Command {
     /// Webapp uuid (from the bundle's `manifest.json`).
     id: Uuid,
   },
+  /// Open `WebappInstallBegin` for a chunked webapp install, stream the
+  /// `.zip` via `WebappInstallChunk` events on the Bulk lane, and watch
+  /// for the terminal `WebappInstalled` / `WebappInstallFailed` event.
+  /// The bundle's manifest.id determines where the daemon installs it;
+  /// reserved-uuid bundles (stock/hub/launcher) are hard-rejected.
+  Install {
+    /// Path to the bundle `.zip`. Relative paths resolve against
+    /// `--fixture` when set, otherwise CWD.
+    bundle: PathBuf,
+  },
 }
 
 #[tokio::main]
@@ -137,6 +148,10 @@ async fn main() -> anyhow::Result<()> {
       .await
     }
     Command::SwitchWebapp { id } => webapp::run_switch(&cli.url, chaos, id).await,
+    Command::Install { bundle } => {
+      let bundle_path = resolve_path(cli.fixture.as_deref(), &bundle);
+      install::run_install(&cli.url, chaos, cli.chunk_size, bundle_path).await
+    }
   }
 }
 

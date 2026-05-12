@@ -15,6 +15,8 @@ import type {
   StreamChunk,
   StreamEnd,
   StreamError,
+  WebappError,
+  WebappInfo,
   WireError,
 } from '@bridgething/lib';
 import type {
@@ -37,6 +39,7 @@ import type {
   ConfigListReply,
   ConnectBluetooth,
   ConnectedDevice,
+  DeviceNicknameReply,
   DiagnosticsReply,
   DisablePan,
   DisplaySetLevel,
@@ -131,11 +134,13 @@ import type {
   WebappActiveChanged,
   WebappActiveReply,
   WebappCurrentReply,
-  WebappErrorReply,
   WebappIcon,
   WebappIconReply,
-  WebappInstallProgress,
-  WebappInstalledReply,
+  WebappInstallAbandon,
+  WebappInstallBegin,
+  WebappInstallBeginAck,
+  WebappInstallChunk,
+  WebappInstallFailed,
   WebappListReply,
   WebappUninstalled,
 } from '@bridgething/lib/client';
@@ -249,6 +254,8 @@ export type SystemInboundHandlers = {
   logEntry: (msg: LogEntry) => void;
   otaProgress: (msg: OtaProgress) => void;
   otaError: (msg: OtaError) => void;
+  deviceNickname: (msg: DeviceNicknameReply) => void;
+  deviceNicknameChanged: (msg: DeviceNicknameReply) => void;
 };
 
 export type TimeInboundHandlers = {
@@ -265,11 +272,12 @@ export type WebappInboundHandlers = {
   listReply: (msg: WebappListReply) => void;
   currentReply: (msg: WebappCurrentReply) => void;
   activeReply: (msg: WebappActiveReply) => void;
-  errorReply: (msg: WebappErrorReply) => void;
   iconReply: (msg: WebappIconReply) => void;
+  installBeginAck: (msg: WebappInstallBeginAck) => void;
+  webappError: (msg: WebappError) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
-  webappInstalled: (msg: WebappInstalledReply) => void;
-  installProgress: (msg: WebappInstallProgress) => void;
+  webappInstalled: (msg: WebappInfo) => void;
+  webappInstallFailed: (msg: WebappInstallFailed) => void;
   webappUninstalled: (msg: WebappUninstalled) => void;
 };
 
@@ -2479,6 +2487,30 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::DeviceNickname` from the daemon. */
+  onDeviceNickname(handler: (msg: DeviceNicknameReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNickname') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::DeviceNicknameChanged` from the daemon. */
+  onDeviceNicknameChanged(handler: (msg: DeviceNicknameReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'deviceNicknameChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants. */
   subscribe(handlers: SystemInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2522,6 +2554,14 @@ export class SystemSurface {
         }
         case 'otaError': {
           handlers.otaError?.(inner.data);
+          return;
+        }
+        case 'deviceNickname': {
+          handlers.deviceNickname?.(inner.data);
+          return;
+        }
+        case 'deviceNicknameChanged': {
+          handlers.deviceNicknameChanged?.(inner.data);
           return;
         }
         default: {
@@ -2622,6 +2662,19 @@ export class SystemSurface {
     if (d.type === 'system') {
       const inner = d.data;
       if (inner.event === 'logsSubscribeReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async deviceGetNickname(options?: { timeoutMs?: number }): Promise<TypedRequestResult<DeviceNicknameReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'system', data: { event: 'deviceGetNickname' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -2855,18 +2908,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::ErrorReply` from the daemon. */
-  onErrorReply(handler: (msg: WebappErrorReply) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'errorReply') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::IconReply` from the daemon. */
   onIconReply(handler: (msg: WebappIconReply) => void): () => void {
     return this._client.on(event => {
@@ -2875,6 +2916,30 @@ export class WebappSurface {
       if (data.type !== 'webapp') return;
       const inner = data.data;
       if (inner.event !== 'iconReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::InstallBeginAck` from the daemon. */
+  onInstallBeginAck(handler: (msg: WebappInstallBeginAck) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'installBeginAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::WebappError` from the daemon. */
+  onWebappError(handler: (msg: WebappError) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'webappError') return;
       handler(inner.data);
     });
   }
@@ -2892,7 +2957,7 @@ export class WebappSurface {
   }
 
   /** Subscribe to `Webapp::WebappInstalled` from the daemon. */
-  onWebappInstalled(handler: (msg: WebappInstalledReply) => void): () => void {
+  onWebappInstalled(handler: (msg: WebappInfo) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
@@ -2903,14 +2968,14 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::InstallProgress` from the daemon. */
-  onInstallProgress(handler: (msg: WebappInstallProgress) => void): () => void {
+  /** Subscribe to `Webapp::WebappInstallFailed` from the daemon. */
+  onWebappInstallFailed(handler: (msg: WebappInstallFailed) => void): () => void {
     return this._client.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'webapp') return;
       const inner = data.data;
-      if (inner.event !== 'installProgress') return;
+      if (inner.event !== 'webappInstallFailed') return;
       handler(inner.data);
     });
   }
@@ -2956,12 +3021,16 @@ export class WebappSurface {
           handlers.activeReply?.(inner.data);
           return;
         }
-        case 'errorReply': {
-          handlers.errorReply?.(inner.data);
-          return;
-        }
         case 'iconReply': {
           handlers.iconReply?.(inner.data);
+          return;
+        }
+        case 'installBeginAck': {
+          handlers.installBeginAck?.(inner.data);
+          return;
+        }
+        case 'webappError': {
+          handlers.webappError?.(inner.data);
           return;
         }
         case 'activeChanged': {
@@ -2972,8 +3041,8 @@ export class WebappSurface {
           handlers.webappInstalled?.(inner.data);
           return;
         }
-        case 'installProgress': {
-          handlers.installProgress?.(inner.data);
+        case 'webappInstallFailed': {
+          handlers.webappInstallFailed?.(inner.data);
           return;
         }
         case 'webappUninstalled': {
@@ -2986,6 +3055,26 @@ export class WebappSurface {
         }
       }
     });
+  }
+
+  /** Send `Webapp::InstallChunk` to the daemon. */
+  async installChunk(payload: WebappInstallChunk): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
+    };
+    await this._client.send(msg);
+  }
+
+  /** Send `Webapp::InstallAbandon` to the daemon. */
+  async installAbandon(payload: WebappInstallAbandon): Promise<void> {
+    const msg: ClientToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
+    };
+    await this._client.send(msg);
   }
 
   /** Typed request to the daemon: webapp sends, daemon responds. */
@@ -3018,14 +3107,14 @@ export class WebappSurface {
   async activate(
     req: WebappActivate,
     options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappActiveReply, WebappErrorReply>> {
+  ): Promise<TypedRequestResult<WebappActiveReply, WebappError>> {
     const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'activate', data: req } };
     const response = await this._client.request(wireData, options?.timeoutMs);
     const d = response.data;
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'activeReply') return { ok: true, response: inner.data };
-      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -3035,14 +3124,31 @@ export class WebappSurface {
   async icon(
     req: WebappIcon,
     options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappIconReply, WebappErrorReply>> {
+  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
     const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
     const response = await this._client.request(wireData, options?.timeoutMs);
     const d = response.data;
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'iconReply') return { ok: true, response: inner.data };
-      if (inner.event === 'errorReply') return { ok: false, kind: 'domain', error: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async installBegin(
+    req: WebappInstallBegin,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -3939,6 +4045,14 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.otaError?.(inner.data);
             return;
           }
+          case 'deviceNickname': {
+            innerHandlers.deviceNickname?.(inner.data);
+            return;
+          }
+          case 'deviceNicknameChanged': {
+            innerHandlers.deviceNicknameChanged?.(inner.data);
+            return;
+          }
           default: {
             if (!partial) c.logger.warn('System: no handler for inner', inner);
             return;
@@ -4009,12 +4123,16 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.activeReply?.(inner.data);
             return;
           }
-          case 'errorReply': {
-            innerHandlers.errorReply?.(inner.data);
-            return;
-          }
           case 'iconReply': {
             innerHandlers.iconReply?.(inner.data);
+            return;
+          }
+          case 'installBeginAck': {
+            innerHandlers.installBeginAck?.(inner.data);
+            return;
+          }
+          case 'webappError': {
+            innerHandlers.webappError?.(inner.data);
             return;
           }
           case 'activeChanged': {
@@ -4025,8 +4143,8 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
             innerHandlers.webappInstalled?.(inner.data);
             return;
           }
-          case 'installProgress': {
-            innerHandlers.installProgress?.(inner.data);
+          case 'webappInstallFailed': {
+            innerHandlers.webappInstallFailed?.(inner.data);
             return;
           }
           case 'webappUninstalled': {

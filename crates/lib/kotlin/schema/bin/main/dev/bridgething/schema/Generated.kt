@@ -201,6 +201,10 @@ data class BridgeThingMeta (
 	val bridgethingVersion: String,
 	val libbridgethingVersion: String,
 	val appName: String,
+	/// User-set display name for this device. None when the user hasn't
+	/// set one yet; consumers fall back to `model_name` / `serial_number`.
+	/// Set via the gateway-side `system.device.setNickname` surface.
+	val nickname: String? = null,
 	/// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
 	/// the manifest's daemon-component version for OTA hot-swap decisions.
 	val appVersion: String,
@@ -560,6 +564,36 @@ data class Device (
 	val type: DeviceType,
 	val mac: String,
 	val default: Boolean
+)
+
+/// Gateway-side read of the device nickname. Returns the current value
+/// (or None when unset). Daemon also broadcasts `DeviceNicknameChanged`
+/// to gateway peers on mutation so the companion stays in sync without
+/// polling.
+@Serializable
+object DeviceGetNickname
+
+/// Domain-error response to `DeviceSetNickname`: nickname rejected at
+/// the daemon edge (too long, contains nul, etc).
+@Serializable
+data class DeviceNicknameRejected (
+	val reason: String
+)
+
+/// Current device nickname. Reply to `DeviceGetNickname` and
+/// `DeviceSetNickname`, plus the event payload for
+/// `DeviceNicknameChanged` broadcasts.
+@Serializable
+data class DeviceNicknameReply (
+	val nickname: String? = null
+)
+
+/// Set the device nickname. Empty string clears (treated as None). The
+/// daemon broadcasts `DeviceNicknameChanged` to gateway + client peers
+/// after writing the KV slot. Length-capped at 64 chars.
+@Serializable
+data class DeviceSetNickname (
+	val nickname: String
 )
 
 /// Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.
@@ -2565,12 +2599,203 @@ data class WebappInfo (
 	val permissions: List<String>
 )
 
+/// Drop the daemon-side partial for `install_id`. The chunked-transfer
+/// subsystem also runs a 24h stale GC for partials that were never
+/// abandoned, so this is an explicit cleanup, not a correctness gate.
 @Serializable
-data class WebappInstall (
-	/// zip archive whose top-level entries become the bundle contents.
-	/// Must include an `index.html` and a valid `manifest.json` at the
-	/// archive root. The bundle's identity comes from the manifest's id.
-	val archive: ByteArray
+data class WebappInstallAbandon (
+	val installId: String
+)
+
+/// Companion-initiated chunked webapp install: opens or resumes a
+/// streaming push of a zip bundle. Daemon responds with
+/// `WebappInstallBeginAck { resume_from_offset }` (the byte offset the
+/// next `WebappInstallChunk` should start at, 0 for fresh pushes) or a
+/// `WebappError` variant (already-running install, mismatched size/sha
+/// on conflicting in-flight install_id, etc).
+/// 
+/// `install_id` is the sha256 of the .zip, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track. The terminal
+/// outcome - `WebappInstalled(WebappInfo)` event on success or
+/// `WebappInstallFailed { install_id, error }` event on failure -
+/// arrives asynchronously after the last chunk lands; between the last
+/// `WebappInstallChunk` ack and the terminal event the install is
+/// implicitly in "installing" state. Expect sub-second once the upload
+/// finishes.
+@Serializable
+data class WebappInstallBegin (
+	val installId: String,
+	val expectedSha256: String,
+	val expectedSize: UInt
+)
+
+/// Successful response to `WebappInstallBegin`. The companion's next
+/// `WebappInstallChunk` should start at `resume_from_offset`; 0 for a
+/// fresh push, or the byte count already on disk when resuming a
+/// partial after disconnect.
+@Serializable
+data class WebappInstallBeginAck (
+	val resumeFromOffset: UInt
+)
+
+/// Streaming chunk of a webapp install upload opened by
+/// `WebappInstallBegin`. `offset` must equal the daemon's current
+/// `received` for the transfer (chunks are strictly in-order; the
+/// companion learns the resume offset from `WebappInstallBeginAck`).
+/// `last:true` triggers post-stream verify (size + sha256) followed by
+/// extract + validate + install. Terminal outcome arrives as
+/// `WebappInstalled` event or `WebappInstallFailed` event.
+@Serializable
+data class WebappInstallChunk (
+	val installId: String,
+	val offset: UInt,
+	val bytes: ByteArray,
+	val last: Boolean
+)
+
+/// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorWebappNotFoundInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `CannotUninstallBuiltin` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorCannotUninstallBuiltinInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `IdReserved` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorIdReservedInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `ExtractedTooLarge` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorExtractedTooLargeInner (
+	val max_bytes: UInt
+)
+
+/// Generated type representing the anonymous struct variant `ZipMalformed` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorZipMalformedInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `InvalidManifest` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInvalidManifestInner (
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `ArchiveTransferNotFound` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorArchiveTransferNotFoundInner (
+	val install_id: String
+)
+
+/// Generated type representing the anonymous struct variant `IconNotAvailable` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorIconNotAvailableInner (
+	val id: String
+)
+
+/// Generated type representing the anonymous struct variant `UnknownConfigKey` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorUnknownConfigKeyInner (
+	val key: String
+)
+
+/// Generated type representing the anonymous struct variant `InvalidConfigValue` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInvalidConfigValueInner (
+	val key: String,
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `Internal` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInternalInner (
+	val reason: String
+)
+
+/// Domain errors emitted by any webapp surface (gateway- or client-side).
+/// Single catalog: both protocols speak the same variant set.
+@Serializable(with = WebappErrorSerializer::class)
+sealed class WebappError {
+	/// No installed webapp matches this id (uninstall / activate / icon / config target).
+	@Serializable
+	@SerialName("webappNotFound")
+	data class WebappNotFound(val data: WebappErrorWebappNotFoundInner): WebappError()
+	/// Built-in webapps cannot be uninstalled.
+	@Serializable
+	@SerialName("cannotUninstallBuiltin")
+	data class CannotUninstallBuiltin(val data: WebappErrorCannotUninstallBuiltinInner): WebappError()
+	/// Install rejected: the manifest's id is in the reserved-uuid set
+	/// (stock, hub, launcher, etc).
+	@Serializable
+	@SerialName("idReserved")
+	data class IdReserved(val data: WebappErrorIdReservedInner): WebappError()
+	/// Post-stream sha256 of the uploaded archive did not match the
+	/// expected_sha256 declared at Begin.
+	@Serializable
+	@SerialName("archiveSha256Mismatch")
+	object ArchiveSha256Mismatch: WebappError()
+	/// Chunk would push past expected_size, or last:true arrived with
+	/// fewer bytes than expected_size.
+	@Serializable
+	@SerialName("archiveSizeMismatch")
+	object ArchiveSizeMismatch: WebappError()
+	/// Extracted bundle exceeds the 1 GiB disk-protection cap.
+	@Serializable
+	@SerialName("extractedTooLarge")
+	data class ExtractedTooLarge(val data: WebappErrorExtractedTooLargeInner): WebappError()
+	/// Zip extraction failed: corrupt archive, unsafe entry names, etc.
+	@Serializable
+	@SerialName("zipMalformed")
+	data class ZipMalformed(val data: WebappErrorZipMalformedInner): WebappError()
+	/// Bundle has no index.html at its root.
+	@Serializable
+	@SerialName("missingIndexHtml")
+	object MissingIndexHtml: WebappError()
+	/// manifest.json missing, unparseable, or failed schema validation.
+	@Serializable
+	@SerialName("invalidManifest")
+	data class InvalidManifest(val data: WebappErrorInvalidManifestInner): WebappError()
+	/// WebappInstall referenced an install_id that has no in-flight
+	/// transfer (never opened, or already abandoned / completed).
+	@Serializable
+	@SerialName("archiveTransferNotFound")
+	data class ArchiveTransferNotFound(val data: WebappErrorArchiveTransferNotFoundInner): WebappError()
+	/// The webapp's manifest doesn't declare an icon (or the icon file is missing on disk).
+	@Serializable
+	@SerialName("iconNotAvailable")
+	data class IconNotAvailable(val data: WebappErrorIconNotAvailableInner): WebappError()
+	/// Config key is not declared in the webapp's manifest schema.
+	@Serializable
+	@SerialName("unknownConfigKey")
+	data class UnknownConfigKey(val data: WebappErrorUnknownConfigKeyInner): WebappError()
+	/// Value failed schema validation (out of range, regex mismatch, not in enum).
+	@Serializable
+	@SerialName("invalidConfigValue")
+	data class InvalidConfigValue(val data: WebappErrorInvalidConfigValueInner): WebappError()
+	/// Catch-all for genuinely-unexpected failures (io errors, daemon-side
+	/// bugs). Reason is human-readable; not a stable wire contract.
+	@Serializable
+	@SerialName("internal")
+	data class Internal(val data: WebappErrorInternalInner): WebappError()
+}
+
+/// Asynchronous failure of an in-flight install after the upload
+/// completed (post-stream verify failed, extract failed, validation
+/// failed, etc). Pairs with `WebappInstalled` as the terminal-event
+/// duo for an install.
+@Serializable
+data class WebappInstallFailed (
+	val installId: String,
+	val error: WebappError
 )
 
 @Serializable
@@ -2747,10 +2972,6 @@ sealed class BridgeToGatewayNotificationsMsg {
 	@Serializable
 	@SerialName("invokeNegative")
 	data class InvokeNegative(val data: NotificationInvoke): BridgeToGatewayNotificationsMsg()
-	/// iOS-only: daemon has observed the ANCS GATT session transition
-	/// to a new authorization state. Companion app uses this to confirm
-	/// the AccessorySetupKit pair flow drove the iPhone to expose ANCS
-	/// over the new LE bond.
 	@Serializable
 	@SerialName("ancsAuthStateChanged")
 	data class AncsAuthStateChanged(val data: AncsAuthState): BridgeToGatewayNotificationsMsg()
@@ -2867,6 +3088,16 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("otaAssetRangeAbandon")
 	data class OtaAssetRangeAbandon(val data: dev.bridgething.schema.OtaAssetRangeAbandon): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("deviceNickname")
+	data class DeviceNickname(val data: DeviceNicknameReply): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("deviceNicknameRejected")
+	data class DeviceNicknameRejected(val data: dev.bridgething.schema.DeviceNicknameRejected): BridgeToGatewaySystemMsg()
+	/// event broadcast when the nickname changes
+	@Serializable
+	@SerialName("deviceNicknameChanged")
+	data class DeviceNicknameChanged(val data: DeviceNicknameReply): BridgeToGatewaySystemMsg()
 }
 
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
@@ -2909,16 +3140,16 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("switched")
 	data class Switched(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// response to Install indicating the freshly installed app's metadata
+	/// response to InstallBegin indicating the resume offset for the next chunk
 	@Serializable
-	@SerialName("installed")
-	data class Installed(val data: WebappInfo): BridgeToGatewayWebappMsg()
+	@SerialName("installBeginAck")
+	data class InstallBeginAck(val data: WebappInstallBeginAck): BridgeToGatewayWebappMsg()
 	/// response to Uninstall carrying the active app after the uninstall settled
 	@Serializable
 	@SerialName("uninstalled")
 	data class Uninstalled(val data: WebappActive): BridgeToGatewayWebappMsg()
-	/// domain-level error response for any webapp op (e.g. UnknownWebapp,
-	/// CannotUninstallBuiltin)
+	/// domain-level error response for any webapp op (e.g. WebappNotFound,
+	/// CannotUninstallBuiltin, ArchiveTransferNotFound)
 	@Serializable
 	@SerialName("webappError")
 	data class WebappError(val data: dev.bridgething.schema.WebappError): BridgeToGatewayWebappMsg()
@@ -2934,6 +3165,16 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("configAck")
 	data class ConfigAck(val data: WebappConfigAck): BridgeToGatewayWebappMsg()
+	/// event: a chunked install completed successfully; carries the
+	/// installed webapp's metadata.
+	@Serializable
+	@SerialName("webappInstalled")
+	data class WebappInstalled(val data: WebappInfo): BridgeToGatewayWebappMsg()
+	/// event: a chunked install failed post-upload (verify / extract /
+	/// validate); carries the install_id and a typed `WebappError`.
+	@Serializable
+	@SerialName("webappInstallFailed")
+	data class WebappInstallFailed(val data: dev.bridgething.schema.WebappInstallFailed): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -3182,6 +3423,12 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("otaAssetRangeChunk")
 	data class OtaAssetRangeChunk(val data: dev.bridgething.schema.OtaAssetRangeChunk): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("deviceGetNickname")
+	object DeviceGetNickname: GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("deviceSetNickname")
+	data class DeviceSetNickname(val data: dev.bridgething.schema.DeviceSetNickname): GatewayToBridgeSystemMsg()
 }
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce
@@ -3235,11 +3482,22 @@ sealed class GatewayToBridgeWebappMsg {
 	@Serializable
 	@SerialName("switchTo")
 	data class SwitchTo(val data: WebappSwitchTo): GatewayToBridgeWebappMsg()
-	/// command: extract the supplied zip into the installed root under `name`;
-	/// bridge replies with `Installed`
+	/// request: open a chunked install upload; bridge replies with
+	/// `InstallBeginAck { resume_from_offset }` or `WebappError`.
 	@Serializable
-	@SerialName("install")
-	data class Install(val data: WebappInstall): GatewayToBridgeWebappMsg()
+	@SerialName("installBegin")
+	data class InstallBegin(val data: WebappInstallBegin): GatewayToBridgeWebappMsg()
+	/// event: streaming chunk for an in-flight install upload. Companion
+	/// emits on the Bulk lane; daemon writes to disk via ChunkedTransfer.
+	/// Terminal outcome arrives as `WebappInstalled` / `WebappInstallFailed`
+	/// event after `last:true`.
+	@Serializable
+	@SerialName("installChunk")
+	data class InstallChunk(val data: WebappInstallChunk): GatewayToBridgeWebappMsg()
+	/// command: drop the daemon-side partial for `install_id`.
+	@Serializable
+	@SerialName("installAbandon")
+	data class InstallAbandon(val data: WebappInstallAbandon): GatewayToBridgeWebappMsg()
 	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
 	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	@Serializable
@@ -3382,72 +3640,6 @@ enum class Priority(val string: String) {
 	Normal("normal"),
 	@SerialName("bulk")
 	Bulk("bulk"),
-}
-
-/// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorWebappNotFoundInner (
-	val id: String
-)
-
-/// Generated type representing the anonymous struct variant `CannotUninstallBuiltin` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorCannotUninstallBuiltinInner (
-	val id: String
-)
-
-/// Generated type representing the anonymous struct variant `InstallFailed` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorInstallFailedInner (
-	val reason: String
-)
-
-/// Generated type representing the anonymous struct variant `IconNotAvailable` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorIconNotAvailableInner (
-	val id: String
-)
-
-/// Generated type representing the anonymous struct variant `UnknownConfigKey` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorUnknownConfigKeyInner (
-	val key: String
-)
-
-/// Generated type representing the anonymous struct variant `InvalidConfigValue` of the `WebappError` Rust enum
-@Serializable
-data class WebappErrorInvalidConfigValueInner (
-	val key: String,
-	val reason: String
-)
-
-@Serializable(with = WebappErrorSerializer::class)
-sealed class WebappError {
-	/// No installed webapp matches this id.
-	@Serializable
-	@SerialName("webappNotFound")
-	data class WebappNotFound(val data: WebappErrorWebappNotFoundInner): WebappError()
-	/// Built-in webapps cannot be uninstalled.
-	@Serializable
-	@SerialName("cannotUninstallBuiltin")
-	data class CannotUninstallBuiltin(val data: WebappErrorCannotUninstallBuiltinInner): WebappError()
-	/// The install archive could not be applied (corrupt zip, missing
-	/// index.html, manifest validation failed, etc).
-	@Serializable
-	@SerialName("installFailed")
-	data class InstallFailed(val data: WebappErrorInstallFailedInner): WebappError()
-	/// The webapp's manifest doesn't declare an icon (or it's missing on disk).
-	@Serializable
-	@SerialName("iconNotAvailable")
-	data class IconNotAvailable(val data: WebappErrorIconNotAvailableInner): WebappError()
-	/// Config key is not declared in the webapp's manifest schema.
-	@Serializable
-	@SerialName("unknownConfigKey")
-	data class UnknownConfigKey(val data: WebappErrorUnknownConfigKeyInner): WebappError()
-	/// Value failed schema validation (out of range, regex mismatch, not in enum).
-	@Serializable
-	@SerialName("invalidConfigValue")
-	data class InvalidConfigValue(val data: WebappErrorInvalidConfigValueInner): WebappError()
 }
 
 /// Generated type representing the anonymous struct variant `Malformed` of the `WireError` Rust enum

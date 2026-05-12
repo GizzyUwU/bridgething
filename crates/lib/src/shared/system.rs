@@ -10,6 +10,7 @@ pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// to so it can opt out of unsupported surfaces). The companion's mirror
 /// is `GatewayCapabilities::Announce` over in `shared::capabilities`.
 #[typeshare]
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]
 #[wire(BridgeToGateway)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +19,10 @@ pub struct BridgeThingMeta {
   pub bridgething_version: String,
   pub libbridgething_version: String,
   pub app_name: String,
+  /// User-set display name for this device. None when the user hasn't
+  /// set one yet; consumers fall back to `model_name` / `serial_number`.
+  /// Set via the gateway-side `system.device.setNickname` surface.
+  pub nickname: Option<String>,
   /// Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
   /// the manifest's daemon-component version for OTA hot-swap decisions.
   pub app_version: String,

@@ -141,6 +141,18 @@ impl KvStore {
     Ok(())
   }
 
+  pub async fn device_get(&self, key: &str) -> StateResult<Option<String>> {
+    self.read_raw(&device_namespace_key(key)).await
+  }
+
+  pub async fn device_set(&self, key: &str, value: String) -> StateResult<()> {
+    self.write_raw(device_namespace_key(key), value).await
+  }
+
+  pub async fn device_delete(&self, key: &str) -> StateResult<()> {
+    self.delete_raw(&device_namespace_key(key)).await
+  }
+
   pub async fn webapp_purge(&self, app_id: Uuid) -> StateResult<()> {
     let data_pattern = format!("{}:data:%", app_id.simple());
     let config_pattern = format!("{}:config:%", app_id.simple());
@@ -160,6 +172,10 @@ impl KvStore {
 
 fn data_namespace_key(app_id: Uuid, key: &str) -> String {
   format!("{}:data:{key}", app_id.simple())
+}
+
+fn device_namespace_key(key: &str) -> String {
+  format!("device:{key}")
 }
 
 fn config_namespace_key(app_id: Uuid, key: &str) -> String {

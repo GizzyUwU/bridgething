@@ -1,8 +1,8 @@
 use libbridgething::{
   Diagnostics,
   client::{
-    ClientToBridgeSystemMsg, DiagnosticsGet, DiagnosticsReply, LogsSubscribe, LogsSubscribeReply, LogsTail,
-    LogsTailReply, LogsUnsubscribe, RequestVersion,
+    ClientToBridgeSystemMsg, DeviceGetNickname, DeviceNicknameReply, DiagnosticsGet, DiagnosticsReply, LogsSubscribe,
+    LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe, RequestVersion,
   },
 };
 use uuid::Uuid;
@@ -31,20 +31,31 @@ impl SystemHandler {
       ClientToBridgeSystemMsg::Reboot => self.reboot().await,
       ClientToBridgeSystemMsg::PowerOff => self.power_off().await,
       ClientToBridgeSystemMsg::FactoryReset => self.factory_reset().await,
+      ClientToBridgeSystemMsg::DeviceGetNickname => self.device_get_nickname().await,
     }
+  }
+
+  async fn device_get_nickname(&self) -> HandlerResult {
+    let nickname = self.handle.state.meta.nickname();
+    Ok(
+      self
+        .handle
+        .respond_to::<DeviceGetNickname>(DeviceNicknameReply { nickname })
+        .await?,
+    )
   }
 
   async fn version_request(&self) -> HandlerResult {
     Ok(
       self
         .handle
-        .respond_to::<RequestVersion>(self.handle.state.meta.clone().into())
+        .respond_to::<RequestVersion>(self.handle.state.meta.snapshot())
         .await?,
     )
   }
 
   async fn diagnostics_get(&self) -> HandlerResult {
-    let diagnostics = collect_diagnostics(&self.handle.state.meta.version).await;
+    let diagnostics = collect_diagnostics(&self.handle.state.meta.static_meta().version).await;
     Ok(
       self
         .handle

@@ -147,7 +147,7 @@ fn gen_swift() -> Result<()> {
 
   let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
   let content = std::fs::read_to_string(SWIFT_OUTPUT).context("read swift output")?;
-  let patched = patch_swift(&content, &inv.uuid_field_names);
+  let patched = patch_swift(&content, &inv.uuid_field_names)?;
   std::fs::write(SWIFT_OUTPUT, patched).context("write swift output")?;
 
   println!("    emitting swift dispatch helpers");
@@ -214,11 +214,17 @@ fn emit_kotlin_serializers(enums: &[AdjacentTaggedEnum]) -> Result<()> {
   Ok(())
 }
 
-fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> String {
+fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> Result<String> {
+  // typeshare emits one definition per Rust struct, even when two
+  // structs in different modules share an identical name and body
+  // (deliberate when a shared payload is wired to two surfaces, e.g.
+  // WebappInstallBegin). Drop duplicates with matching bodies; bail if
+  // bodies diverge (real type mismatch worth surfacing).
+  let deduped = dedup_swift_decls(input)?;
   // typeshare emits `[UInt8]` for `Vec<u8>`. Swift's Codable plus every
   // msgpack lib distinguishes Data (encodes as msgpack bin) from
   // [UInt8] (encodes as an array of int). Our wire is bin.
-  let mut out = input.replace("[UInt8]", "Data");
+  let mut out = deduped.replace("[UInt8]", "Data");
   // Generated structs travel through actor-isolated stream events on
   // the gateway side; Swift 6 strict concurrency requires Sendable.
   // Every typeshare-emitted type is a value type whose stored fields
@@ -248,7 +254,7 @@ fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> String {
       .into_owned();
   }
 
-  out
+  Ok(out)
 }
 
 fn patch_kotlin_uuid_imports(input: &str) -> String {
@@ -265,10 +271,16 @@ fn patch_kotlin(
   adjacent_tagged: &[AdjacentTaggedEnum],
   uuid_field_names: &BTreeSet<String>,
 ) -> Result<String> {
+  // typeshare emits one definition per Rust struct, even when two
+  // structs in different modules share an identical name and body
+  // (deliberate when a shared payload is wired to two surfaces, e.g.
+  // WebappInstallBegin). Drop duplicates with matching bodies; bail if
+  // bodies diverge (real type mismatch worth surfacing).
+  let deduped = dedup_kotlin_decls(input)?;
   // typeshare emits `List<UByte>` for `Vec<u8>`. kotlinx-msgpack
   // encodes ByteArray as msgpack bin, but List<UByte> as an array of
   // ints. Our wire is bin.
-  let mut out = input.replace("List<UByte>", "ByteArray");
+  let mut out = deduped.replace("List<UByte>", "ByteArray");
 
   // Surface UUID-typed fields as `java.util.UUID` instead of raw
   // `ByteArray`, with `MsgpackUuidSerializer` bridging the 16-byte
@@ -343,6 +355,221 @@ fn patch_kotlin(
     .into_owned();
 
   Ok(out)
+}
+
+/// Drop adjacent identical top-level declarations from typeshare's
+/// swift output. Identifies `public (struct|class|enum) NAME` blocks
+/// (including preceding `///` doc lines), brace-balances their bodies,
+/// and dedupes on `(kind, name, body)`. Bails if two definitions share
+/// a name but differ in body.
+fn dedup_swift_decls(input: &str) -> Result<String> {
+  let header = regex::Regex::new(r"(?m)^public (struct|class|enum) (\w+)\b").expect("swift header regex");
+  let lines: Vec<&str> = input.split_inclusive('\n').collect();
+  let line_starts = line_start_offsets(input);
+  let mut blocks: Vec<DeclBlock> = Vec::new();
+  let mut cursor = 0usize;
+  while let Some(m) = header.find_at(input, cursor) {
+    let header_line_idx = line_index_for(&line_starts, m.start());
+    let cap = header.captures_at(input, m.start()).expect("re-capture");
+    let kind = cap.get(1).unwrap().as_str().to_string();
+    let name = cap.get(2).unwrap().as_str().to_string();
+    let preamble_start = preamble_start_for(&lines, header_line_idx);
+    let body_end = brace_balanced_end(&lines, header_line_idx)?;
+    blocks.push(DeclBlock {
+      kind,
+      name,
+      preamble_start,
+      header_line: header_line_idx,
+      body_end,
+    });
+    let next_line = (body_end + 1).min(line_starts.len() - 1);
+    cursor = line_starts[next_line].max(m.end());
+  }
+  finalize_dedup(&lines, blocks)
+}
+
+/// Drop adjacent identical top-level declarations from typeshare's
+/// kotlin output. Identifies `data class NAME (...)` blocks (paren-
+/// balanced) and `sealed class NAME { ... }` blocks (brace-balanced),
+/// including preceding `@Serializable` / `///` lines. Same dedup rule
+/// as the swift pass.
+fn dedup_kotlin_decls(input: &str) -> Result<String> {
+  let header = regex::Regex::new(r"(?m)^(data class|sealed class|enum class|class) (\w+)\b").expect("kotlin header regex");
+  let lines: Vec<&str> = input.split_inclusive('\n').collect();
+  let line_starts = line_start_offsets(input);
+  let mut blocks: Vec<DeclBlock> = Vec::new();
+  let mut cursor = 0usize;
+  while let Some(m) = header.find_at(input, cursor) {
+    let header_line_idx = line_index_for(&line_starts, m.start());
+    let cap = header.captures_at(input, m.start()).expect("re-capture");
+    let kind = cap.get(1).unwrap().as_str().to_string();
+    let name = cap.get(2).unwrap().as_str().to_string();
+    let preamble_start = preamble_start_for(&lines, header_line_idx);
+    let body_end = kotlin_decl_end(&lines, header_line_idx)?;
+    blocks.push(DeclBlock {
+      kind,
+      name,
+      preamble_start,
+      header_line: header_line_idx,
+      body_end,
+    });
+    let next_line = (body_end + 1).min(line_starts.len() - 1);
+    cursor = line_starts[next_line].max(m.end());
+  }
+  finalize_dedup(&lines, blocks)
+}
+
+struct DeclBlock {
+  kind: String,
+  name: String,
+  preamble_start: usize,
+  header_line: usize,
+  body_end: usize,
+}
+
+fn line_start_offsets(input: &str) -> Vec<usize> {
+  let mut out = Vec::with_capacity(input.len() / 32);
+  out.push(0);
+  for (i, b) in input.bytes().enumerate() {
+    if b == b'\n' {
+      out.push(i + 1);
+    }
+  }
+  out.push(input.len());
+  out
+}
+
+fn line_index_for(starts: &[usize], offset: usize) -> usize {
+  match starts.binary_search(&offset) {
+    Ok(i) => i,
+    Err(i) => i.saturating_sub(1),
+  }
+}
+
+/// Walk backwards from `header_line` over contiguous `///` doc lines
+/// and `@Attribute` annotation lines. Stop at a blank line or any other
+/// content. Returns the first line index that belongs to the block's
+/// preamble (may equal `header_line` when there is no preamble).
+fn preamble_start_for(lines: &[&str], header_line: usize) -> usize {
+  let mut i = header_line;
+  while i > 0 {
+    let prev = lines[i - 1].trim_end_matches('\n');
+    let trimmed = prev.trim_start();
+    if trimmed.starts_with("///") || trimmed.starts_with('@') {
+      i -= 1;
+      continue;
+    }
+    break;
+  }
+  i
+}
+
+fn brace_balanced_end(lines: &[&str], header_line: usize) -> Result<usize> {
+  let mut depth = 0i32;
+  let mut started = false;
+  for (idx, line) in lines.iter().enumerate().skip(header_line) {
+    for c in line.chars() {
+      if c == '{' {
+        depth += 1;
+        started = true;
+      } else if c == '}' {
+        depth -= 1;
+        if started && depth == 0 {
+          return Ok(idx);
+        }
+      }
+    }
+  }
+  Err(anyhow!(
+    "swift dedup: ran off end while balancing braces from line {header_line}"
+  ))
+}
+
+fn kotlin_decl_end(lines: &[&str], header_line: usize) -> Result<usize> {
+  let header = lines[header_line];
+  let opener = if header.contains('(') {
+    '('
+  } else if header.contains('{') {
+    '{'
+  } else {
+    return Err(anyhow!(
+      "kotlin dedup: line {header_line} has no body opener `(` or `{{`"
+    ));
+  };
+  let closer = if opener == '(' { ')' } else { '}' };
+  let mut depth = 0i32;
+  let mut started = false;
+  for (idx, line) in lines.iter().enumerate().skip(header_line) {
+    for c in line.chars() {
+      if c == opener {
+        depth += 1;
+        started = true;
+      } else if c == closer {
+        depth -= 1;
+        if started && depth == 0 {
+          return Ok(idx);
+        }
+      }
+    }
+  }
+  Err(anyhow!(
+    "kotlin dedup: ran off end while balancing {opener}{closer} from line {header_line}"
+  ))
+}
+
+fn finalize_dedup(lines: &[&str], blocks: Vec<DeclBlock>) -> Result<String> {
+  let mut seen: BTreeMap<(String, String), String> = BTreeMap::new();
+  let mut drop_ranges: Vec<(usize, usize)> = Vec::new();
+  for b in &blocks {
+    let body = canonical_body(lines, b.header_line, b.body_end);
+    let key = (b.kind.clone(), b.name.clone());
+    if let Some(first_body) = seen.get(&key) {
+      if first_body != &body {
+        return Err(anyhow!(
+          "codegen dedup: two definitions named `{} {}` differ in body; this is a real type mismatch worth resolving on the rust side",
+          b.kind,
+          b.name
+        ));
+      }
+      drop_ranges.push((b.preamble_start, b.body_end));
+    } else {
+      seen.insert(key, body);
+    }
+  }
+  if drop_ranges.is_empty() {
+    return Ok(lines.join(""));
+  }
+  drop_ranges.sort_by_key(|r| r.0);
+  let mut out = String::with_capacity(lines.iter().map(|l| l.len()).sum());
+  let mut cursor = 0usize;
+  for (start, end) in drop_ranges {
+    while cursor < start {
+      out.push_str(lines[cursor]);
+      cursor += 1;
+    }
+    cursor = end + 1;
+    while cursor < lines.len() && lines[cursor].trim().is_empty() {
+      cursor += 1;
+    }
+  }
+  while cursor < lines.len() {
+    out.push_str(lines[cursor]);
+    cursor += 1;
+  }
+  Ok(out)
+}
+
+/// Hash-equivalent canonical body for dedup. Drops the leading doc
+/// comments (which legitimately differ between two surfaces) and
+/// trims line-by-line so insignificant whitespace doesn't cause
+/// false-positive divergence.
+fn canonical_body(lines: &[&str], header_line: usize, body_end: usize) -> String {
+  let mut out = String::new();
+  for line in lines.iter().take(body_end + 1).skip(header_line) {
+    out.push_str(line.trim());
+    out.push('\n');
+  }
+  out
 }
 
 #[derive(Debug, Clone)]

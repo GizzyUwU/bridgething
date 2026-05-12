@@ -4,8 +4,9 @@
 #   1. Local dev - `cargo run`, `just codegen`, gateway/adapter builds.
 #   2. Device iteration - cross-build the daemon and push to a Car Thing
 #      over USB-CDC-ECM. Helper scripts live in scripts/. Host defaults
-#      to 10.42.1.2 (the gadget end of the USB-CDC link); override with
-#      SUPERBIRD_HOST.
+#      to bridgething.local (mDNS); the per-serial subnet derivation in
+#      bridgething-usb-gadget.sh means the raw IP varies per device, so
+#      mDNS is the right default. Override with SUPERBIRD_HOST.
 
 # --- Path config ---
 
@@ -21,9 +22,13 @@ cross_target := 'aarch64-unknown-linux-gnu'
 # cross invocation.
 cross_target_dir := justfile_directory() / 'target-cross'
 
-# Default device host. The Car Thing exposes itself as a USB-CDC-ECM
-# gadget at 10.42.1.2 when plugged in.
-device_host := env_var_or_default('SUPERBIRD_HOST', '10.42.1.2')
+# Default device host. The Car Thing publishes itself over mDNS as
+# `bridgething.local` (avahi); the underlying IP varies per device
+# because bridgething-usb-gadget.sh derives a /29 subnet offset from
+# the device serial. mDNS is the right default and works for single-
+# device hosts. Multi-device hosts override with SUPERBIRD_HOST set to
+# bridgething-<short-serial>.local (avahi-auto-published per device).
+device_host := env_var_or_default('SUPERBIRD_HOST', 'bridgething.local')
 
 # ssh args used by every recipe that talks to the device. Overrides
 # host-key checking because the device's keys regenerate on each flash.
@@ -120,8 +125,10 @@ iter: push logs
 
 # --- MFi dev proxy (dev-image only) ---
 #
-# bridgething-mfi-proxy listens on 10.42.1.2:9090 and forwards i2c-3
-# transactions to the chip so `cargo test -p bridgething-mfi --test
+# bridgething-mfi-proxy listens on the device's USB-gadget address
+# (the per-serial /29 in the 10.42.1.x range, resolvable via
+# bridgething.local) at port 9090 and forwards i2c-3 transactions to
+# the chip so `cargo test -p bridgething-mfi --test
 # remote -- --ignored` (or any RemoteI2c-using tool) can drive the chip
 # from the dev host. The proxy unit Conflicts= with bridgething.service
 # and bridgething-als.service — starting it stops both, and blanks the

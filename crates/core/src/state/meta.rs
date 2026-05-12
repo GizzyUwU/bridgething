@@ -1,10 +1,14 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
-use libbridgething::{BridgeThingMeta, client::BridgeToClientMsgData, gateway::BridgeToGatewayMsgData};
+use libbridgething::BridgeThingMeta;
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
+
+use super::{KvStore, StateResult};
 
 const BRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BRIDGETHING_APP_NAME: &str = env!("CARGO_PKG_NAME");
+const NICKNAME_KV_KEY: &str = "nickname";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -59,42 +63,90 @@ impl SuperbirdMeta {
   }
 }
 
-impl From<SuperbirdMeta> for BridgeToClientMsgData {
-  fn from(meta: SuperbirdMeta) -> Self {
-    BridgeThingMeta::from(meta).into()
-  }
+/// Single source of truth for device meta. Wraps the immutable static
+/// `SuperbirdMeta` together with the live, user-settable nickname.
+///
+/// Mutation goes through `set_nickname`, which writes KV and updates an
+/// internal watch channel. A `spawn_nickname_observer` task in main.rs
+/// subscribes to that channel and fans out the change (avahi republish,
+/// client + gateway broadcasts) — no caller should fan out manually.
+#[derive(Debug, Clone)]
+pub struct DeviceMeta {
+  inner: Arc<Inner>,
 }
 
-impl From<SuperbirdMeta> for BridgeToGatewayMsgData {
-  fn from(meta: SuperbirdMeta) -> Self {
-    BridgeThingMeta::from(meta).into()
-  }
+#[derive(Debug)]
+struct Inner {
+  static_meta: SuperbirdMeta,
+  kv: KvStore,
+  nickname_tx: watch::Sender<Option<String>>,
 }
 
-impl From<SuperbirdMeta> for BridgeThingMeta {
-  fn from(meta: SuperbirdMeta) -> Self {
+impl DeviceMeta {
+  pub async fn init(static_meta: SuperbirdMeta, kv: KvStore) -> Self {
+    let initial = kv.device_get(NICKNAME_KV_KEY).await.unwrap_or_else(|err| {
+      tracing::warn!(?err, "kv device_get nickname at startup failed; starting empty");
+      None
+    });
+    let (nickname_tx, _rx) = watch::channel(initial);
     Self {
-      bridgething_version: format!("v{}", BRIDGETHING_VERSION),
-      libbridgething_version: Self::libbridgething_version(),
-      app_name: BRIDGETHING_APP_NAME.to_string(),
-      app_version: BRIDGETHING_VERSION.to_string(),
-      os_name: meta.name,
-      os_version: meta.version,
-      os_description: meta.description,
-      bt_mac: meta.bt_mac,
-      serial_number: meta.serial_number,
-      fcc_id: meta.fcc_id,
-      ic_id: meta.ic_id,
-      model_name: meta.model_name,
-      channel: meta.channel,
-      image_variant: meta.image_variant,
-      image_version: meta.image_version,
-      image_build_id: meta.image_build_id,
-      image_build_date: meta.image_build_date,
-      image_distro: meta.image_distro,
-      image_machine: meta.image_machine,
-      discord: "https://tl.mt/d".to_string(),
-      credits: "Joey Eamigh".to_string(),
+      inner: Arc::new(Inner {
+        static_meta,
+        kv,
+        nickname_tx,
+      }),
     }
+  }
+
+  pub fn static_meta(&self) -> &SuperbirdMeta {
+    &self.inner.static_meta
+  }
+
+  pub fn nickname(&self) -> Option<String> {
+    self.inner.nickname_tx.borrow().clone()
+  }
+
+  pub fn subscribe(&self) -> watch::Receiver<Option<String>> {
+    self.inner.nickname_tx.subscribe()
+  }
+
+  pub async fn set_nickname(&self, next: Option<String>) -> StateResult<()> {
+    match &next {
+      Some(value) => self.inner.kv.device_set(NICKNAME_KV_KEY, value.clone()).await?,
+      None => self.inner.kv.device_delete(NICKNAME_KV_KEY).await?,
+    }
+    self.inner.nickname_tx.send_replace(next);
+    Ok(())
+  }
+
+  pub fn snapshot(&self) -> BridgeThingMeta {
+    build_meta(&self.inner.static_meta, self.nickname())
+  }
+}
+
+fn build_meta(meta: &SuperbirdMeta, nickname: Option<String>) -> BridgeThingMeta {
+  BridgeThingMeta {
+    bridgething_version: format!("v{}", BRIDGETHING_VERSION),
+    libbridgething_version: BridgeThingMeta::libbridgething_version(),
+    app_name: BRIDGETHING_APP_NAME.to_string(),
+    nickname,
+    app_version: BRIDGETHING_VERSION.to_string(),
+    os_name: meta.name.clone(),
+    os_version: meta.version.clone(),
+    os_description: meta.description.clone(),
+    bt_mac: meta.bt_mac.clone(),
+    serial_number: meta.serial_number.clone(),
+    fcc_id: meta.fcc_id.clone(),
+    ic_id: meta.ic_id.clone(),
+    model_name: meta.model_name.clone(),
+    channel: meta.channel.clone(),
+    image_variant: meta.image_variant.clone(),
+    image_version: meta.image_version.clone(),
+    image_build_id: meta.image_build_id.clone(),
+    image_build_date: meta.image_build_date.clone(),
+    image_distro: meta.image_distro.clone(),
+    image_machine: meta.image_machine.clone(),
+    discord: "https://tl.mt/d".to_string(),
+    credits: "Joey Eamigh".to_string(),
   }
 }

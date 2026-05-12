@@ -54,10 +54,11 @@ import kotlinx.coroutines.withContext
  */
 @DoNotStrip
 class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
-    /// The bridgething RFCOMM service UUID. Daemon side advertises this same
-    /// SDP record so we can both reach it from `BluetoothDevice` and validate
-    /// that a bonded device actually speaks our protocol.
-    private val serviceUuid: UUID = UUID.fromString("dead0000-53e5-4085-a5d8-f55f3f14ac5a")
+    // Hardcoded rather than imported from dev.bridgething.schema: this Nitro
+    // module deliberately doesn't depend on the schema Gradle module, so the
+    // RFCOMM service UUID is duplicated here. Keep in lockstep with the value
+    // in crates/lib/src/lib.rs.
+    private val serviceUuid: UUID = UUID.fromString("dead0000-854d-408e-81f0-fb6147f918fd")
 
     private val ioScope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("bridgething-rn-transport"))

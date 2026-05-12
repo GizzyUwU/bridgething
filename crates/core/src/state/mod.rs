@@ -17,7 +17,7 @@ use crate::{
   net::{ClientMan, WireEventBus},
   paths,
   peer::PeerTracker,
-  transfer::TransferError,
+  transfer::{ChunkedTransfer, TransferError},
 };
 
 mod audio;
@@ -40,7 +40,7 @@ use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, me
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
 pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
-pub use webapps::{HUB_WEBAPP_ID, InstallError, WebappRegistry};
+pub use webapps::{HUB_WEBAPP_ID, WebappRegistry};
 
 pub type State = Arc<AppState>;
 
@@ -48,11 +48,12 @@ pub type State = Arc<AppState>;
 pub struct AppState {
   pub client_man: ClientMan,
   pub bus: WireEventBus,
-  pub meta: meta::SuperbirdMeta,
+  pub meta: meta::DeviceMeta,
   pub player: crate::player::Player,
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
+  pub transfers: ChunkedTransfer,
   pub ingest: AssetIngest,
   pub asset_wait: AssetWaitTracker,
   pub iap2_pending_art: Iap2PendingArt,
@@ -93,6 +94,7 @@ impl AppState {
       chrome,
       webapps,
       assets,
+      transfers,
       ingest,
       asset_wait,
       iap2_pending_art,
@@ -128,6 +130,7 @@ impl AppState {
       chrome,
       webapps,
       assets,
+      transfers,
       ingest,
       asset_wait,
       iap2_pending_art,
@@ -190,11 +193,12 @@ impl AppState {
 pub struct AssembledState {
   pub client_man: ClientMan,
   pub bus: WireEventBus,
-  pub meta: meta::SuperbirdMeta,
+  pub meta: meta::DeviceMeta,
   pub player: crate::player::Player,
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
+  pub transfers: ChunkedTransfer,
   pub ingest: AssetIngest,
   pub asset_wait: AssetWaitTracker,
   pub iap2_pending_art: Iap2PendingArt,

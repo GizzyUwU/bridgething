@@ -4,6 +4,7 @@ import BridgethingGlue
 import BridgethingLyrics
 import BridgethingSchema
 import BridgethingSession
+import CryptoKit
 import Foundation
 import NitroModules
 import UIKit
@@ -281,12 +282,109 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         guard let data = Data(base64Encoded: archiveBase64, options: .ignoreUnknownCharacters) else {
             throw SessionError.invalidArchive
         }
+        guard data.count <= Int(UInt32.max) else {
+            throw SessionError.invalidArchive
+        }
         let companion = try requirePeerConnected(deviceId)
-        let req = WebappInstall(archive: data)
-        let result = try await companion.gateway.webapp.install(deviceId: deviceId, req)
-        let info = try unwrapWebappErr(result, label: "installWebapp")
+        let installId = Self.sha256Hex(data)
+        let begin = WebappInstallBegin(
+            installId: installId,
+            expectedSha256: installId,
+            expectedSize: UInt32(data.count)
+        )
+        let beginResult = try await companion.gateway.webapp.installBegin(deviceId: deviceId, begin)
+        let ack = try unwrapWebappErr(beginResult, label: "installBegin")
+
+        // Subscribe to terminal events BEFORE the last chunk lands so we
+        // don't race the daemon's broadcast. Each task observes one outcome
+        // and yields it; the cancellation on the other side wins the group.
+        let installedTask = Task<WebappInfo, Error> {
+            for await pair in companion.gateway.webapp.webappInstalled where pair.deviceId == deviceId {
+                return pair.msg
+            }
+            throw SessionError.installInterrupted
+        }
+        let failedTask = Task<WebappError, Error> {
+            for await pair in companion.gateway.webapp.webappInstallFailed
+                where pair.deviceId == deviceId && pair.msg.installId == installId {
+                return pair.msg.error
+            }
+            throw SessionError.installInterrupted
+        }
+
+        do {
+            try await streamInstallChunks(
+                gateway: companion.gateway,
+                deviceId: deviceId,
+                installId: installId,
+                data: data,
+                startOffset: ack.resumeFromOffset
+            )
+        } catch {
+            installedTask.cancel()
+            failedTask.cancel()
+            throw error
+        }
+
+        let info: WebappInfo
+        do {
+            info = try await withThrowingTaskGroup(of: InstallOutcome.self) { group in
+                group.addTask { .installed(try await installedTask.value) }
+                group.addTask { .failed(try await failedTask.value) }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                    throw SessionError.installTimedOut
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next() else {
+                    throw SessionError.installInterrupted
+                }
+                switch first {
+                case let .installed(value):
+                    return value
+                case let .failed(err):
+                    throw SessionError.webappError(err)
+                }
+            }
+        } catch {
+            installedTask.cancel()
+            failedTask.cancel()
+            throw error
+        }
+
         emitWebappsChanged(deviceId)
         return Self.toRNWebappInfo(info)
+    }
+
+    private func streamInstallChunks(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        installId: String,
+        data: Data,
+        startOffset: UInt32
+    ) async throws {
+        let chunkSize = 64 * 1024
+        let total = data.count
+        var offset = Int(startOffset)
+        while offset < total {
+            let end = min(offset + chunkSize, total)
+            let slice = data.subdata(in: offset..<end)
+            let last = end == total
+            let chunk = WebappInstallChunk(
+                installId: installId,
+                offset: UInt32(offset),
+                bytes: slice,
+                last: last
+            )
+            try await gateway.device(deviceId).webapp.installChunk(chunk, priority: .bulk)
+            offset = end
+        }
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: data)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     public func uninstallWebapp(deviceId: String, id: String) async throws {
@@ -822,8 +920,15 @@ private enum SessionError: Error {
     case noPeerConnected(String)
     case invalidUuid(String)
     case invalidArchive
+    case installInterrupted
+    case installTimedOut
     case webappError(WebappError)
     case protocolError(WireError)
+}
+
+private enum InstallOutcome {
+    case installed(WebappInfo)
+    case failed(WebappError)
 }
 
 private extension BridgethingAuthState {

@@ -40,7 +40,10 @@ use crate::{
   net::{WSError, WireEventBus},
   peer::PeerTracker,
   player::PlayerError,
-  state::{DeviceStore, StateError, meta::SuperbirdMeta},
+  state::{
+    DeviceStore, StateError,
+    meta::DeviceMeta,
+  },
 };
 
 pub type BluetoothMan = Arc<BluetoothManager>;
@@ -54,7 +57,7 @@ pub enum BluetoothEvent {
 #[derive(Debug, Clone)]
 pub struct BluetoothDeps {
   pub bus: WireEventBus,
-  pub meta: SuperbirdMeta,
+  pub meta: DeviceMeta,
   pub devices: DeviceStore,
   pub peers: PeerTracker,
 }
@@ -124,7 +127,7 @@ impl BluetoothManager {
 
     tracing::debug!("setting up iap2 manager");
     let (iap2_reconnect, iap2_transport, iap2_telephony, _iap2_handle, iap2_events_rx) =
-      match Iap2Manager::init(&session, adapter.clone(), &deps.meta).await? {
+      match Iap2Manager::init(&session, adapter.clone(), deps.meta.static_meta()).await? {
         Some(out) => (
           Some(out.reconnect),
           Some(out.transport),
@@ -546,7 +549,7 @@ impl GatewayCon {
   pub async fn init(
     _adapter: &Adapter,
     session: &Session,
-    meta: SuperbirdMeta,
+    meta: DeviceMeta,
     peers: PeerTracker,
     bluetooth_tx: BluetoothTx,
     peer_owners: PeerOwners,

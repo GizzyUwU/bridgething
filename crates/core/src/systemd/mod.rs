@@ -1,3 +1,4 @@
+pub mod avahi;
 pub mod power;
 pub mod time;
 

@@ -1,6 +1,10 @@
-use libbridgething::client::{
-  ClientToBridgeWebappMsgRequest, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappError,
-  WebappErrorReply, WebappIcon, WebappIconReply, WebappList, WebappListReply,
+use libbridgething::{
+  WebappError,
+  client::{
+    ClientToBridgeWebappMsg, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappIcon,
+    WebappIconReply, WebappInstallAbandon, WebappInstallBegin, WebappInstallBeginAck, WebappInstallChunk, WebappList,
+    WebappListReply,
+  },
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -15,30 +19,15 @@ impl WebappHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: ClientToBridgeWebappMsgRequest) -> HandlerResult {
+  pub async fn handle(self, msg: ClientToBridgeWebappMsg) -> HandlerResult {
     match msg {
-      ClientToBridgeWebappMsgRequest::List => self.list().await,
-      ClientToBridgeWebappMsgRequest::Current => self.current().await,
-      ClientToBridgeWebappMsgRequest::Activate(req) => self.activate(req).await,
-      ClientToBridgeWebappMsgRequest::Icon(WebappIcon { id }) => {
-        match self.handle.state.webapps.read_icon(id).await {
-          Some((bytes, mime)) => {
-            self
-              .handle
-              .respond_to::<WebappIcon>(WebappIconReply { bytes, mime })
-              .await?;
-          }
-          None => {
-            self
-              .handle
-              .respond_err::<WebappIcon>(WebappErrorReply {
-                error: WebappError::IconNotAvailable { id: id.to_string() },
-              })
-              .await?;
-          }
-        }
-        Ok(())
-      }
+      ClientToBridgeWebappMsg::List => self.list().await,
+      ClientToBridgeWebappMsg::Current => self.current().await,
+      ClientToBridgeWebappMsg::Activate(req) => self.activate(req).await,
+      ClientToBridgeWebappMsg::Icon(req) => self.icon(req).await,
+      ClientToBridgeWebappMsg::InstallBegin(req) => self.install_begin(req).await,
+      ClientToBridgeWebappMsg::InstallChunk(chunk) => self.install_chunk(chunk).await,
+      ClientToBridgeWebappMsg::InstallAbandon(req) => self.install_abandon(req).await,
     }
   }
 
@@ -78,9 +67,7 @@ impl WebappHandler {
     if self.handle.state.webapps.resolve(id).await.is_none() {
       self
         .handle
-        .respond_err::<WebappActivate>(WebappErrorReply {
-          error: WebappError::WebappNotFound { id: id.to_string() },
-        })
+        .respond_err::<WebappActivate>(WebappError::WebappNotFound { id: id.to_string() })
         .await?;
       return Ok(());
     }
@@ -101,6 +88,83 @@ impl WebappHandler {
       .handle
       .respond_to::<WebappActivate>(WebappActiveReply { id: Some(id), name })
       .await?;
+    Ok(())
+  }
+
+  async fn icon(&self, req: WebappIcon) -> HandlerResult {
+    let WebappIcon { id } = req;
+    match self.handle.state.webapps.read_icon(id).await {
+      Some((bytes, mime)) => {
+        self
+          .handle
+          .respond_to::<WebappIcon>(WebappIconReply { bytes, mime })
+          .await?;
+      }
+      None => {
+        self
+          .handle
+          .respond_err::<WebappIcon>(WebappError::IconNotAvailable { id: id.to_string() })
+          .await?;
+      }
+    }
+    Ok(())
+  }
+
+  async fn install_begin(&self, req: WebappInstallBegin) -> HandlerResult {
+    tracing::info!(
+      "({:?}) WebappInstallBegin install_id={} sha256={} size={}",
+      &self.handle.from,
+      req.install_id,
+      req.expected_sha256,
+      req.expected_size,
+    );
+    match crate::install::install_begin(
+      &self.handle.state,
+      req.install_id,
+      req.expected_sha256,
+      req.expected_size,
+    )
+    .await
+    {
+      Ok(resume_from_offset) => {
+        self
+          .handle
+          .respond_to::<WebappInstallBegin>(WebappInstallBeginAck { resume_from_offset })
+          .await?
+      }
+      Err(err) => self.handle.respond_err::<WebappInstallBegin>(err).await?,
+    }
+    Ok(())
+  }
+
+  async fn install_chunk(&self, chunk: WebappInstallChunk) -> HandlerResult {
+    tracing::trace!(
+      "({:?}) WebappInstallChunk install_id={} offset={} len={} last={}",
+      &self.handle.from,
+      chunk.install_id,
+      chunk.offset,
+      chunk.bytes.len(),
+      chunk.last,
+    );
+    crate::install::accept_install_chunk(
+      &self.handle.state,
+      &self.handle.bluetooth,
+      chunk.install_id,
+      chunk.offset,
+      chunk.bytes,
+      chunk.last,
+    )
+    .await;
+    Ok(())
+  }
+
+  async fn install_abandon(&self, req: WebappInstallAbandon) -> HandlerResult {
+    tracing::info!(
+      "({:?}) WebappInstallAbandon install_id={}",
+      &self.handle.from,
+      req.install_id,
+    );
+    crate::install::install_abandon(&self.handle.state, req.install_id).await;
     Ok(())
   }
 }

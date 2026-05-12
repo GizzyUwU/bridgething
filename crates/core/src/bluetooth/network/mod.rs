@@ -52,7 +52,7 @@ use super::{
   BluetoothEvent, BluetoothResult, BluetoothTx, GatewaySendTx, GatewayType, InboundGatewayMessage,
   OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode, peer_owners::PeerOwners,
 };
-use crate::{peer::PeerTracker, state::meta::SuperbirdMeta};
+use crate::{peer::PeerTracker, state::meta::DeviceMeta};
 
 /// Soft cap on a single batched WS write. Keeps the packer's
 /// Normal-before-Bulk discipline meaningful without one writer task
@@ -262,7 +262,7 @@ async fn ws_handler(
 
 #[derive(Debug)]
 pub struct NetworkGateway {
-  meta: SuperbirdMeta,
+  meta: DeviceMeta,
   peers: PeerTracker,
   bluetooth_tx: BluetoothTx,
 
@@ -282,7 +282,7 @@ pub struct NetworkGateway {
 
 impl NetworkGateway {
   pub async fn init(
-    meta: SuperbirdMeta,
+    meta: DeviceMeta,
     peers: PeerTracker,
     bluetooth_tx: BluetoothTx,
     peer_owners: PeerOwners,
@@ -415,7 +415,7 @@ impl NetworkGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.meta.clone().into(),
+      data: self.meta.snapshot().into(),
     };
     if let Err(err) = connection.send(&version, Priority::Normal).await {
       tracing::warn!("({address}) failed to send initial Version: {err:?}");

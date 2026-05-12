@@ -40,7 +40,7 @@ if [ ! -x "$LOCAL" ]; then
     exit 1
 fi
 
-HOST="${SUPERBIRD_HOST:-10.42.1.2}"
+HOST="${SUPERBIRD_HOST:-bridgething.local}"
 DEST_DIR="/opt/bridgething/daemon"
 CURRENT="${DEST_DIR}/bridgething.current"
 PREVIOUS="${DEST_DIR}/bridgething.previous"

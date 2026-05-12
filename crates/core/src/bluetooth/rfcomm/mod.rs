@@ -27,7 +27,7 @@ use crate::{
     GatewayType, InboundGatewayMessage, OutboundGatewayMessage, OutboundPacker, auto_nack_for_failed_decode,
   },
   peer::PeerTracker,
-  state::meta::SuperbirdMeta,
+  state::meta::DeviceMeta,
 };
 
 /// Soft cap on a single batched write. RFCOMM transparently segments
@@ -152,7 +152,7 @@ async fn writer_task(address: Address, mut writer: WriteHalf<Stream>, mut packer
 
 #[derive(Debug)]
 pub struct RfcommGateway {
-  meta: SuperbirdMeta,
+  meta: DeviceMeta,
   peers: PeerTracker,
   handle: ProfileHandle,
 
@@ -168,7 +168,7 @@ pub struct RfcommGateway {
 impl RfcommGateway {
   pub async fn init(
     session: &Session,
-    meta: SuperbirdMeta,
+    meta: DeviceMeta,
     peers: PeerTracker,
     recv_tx: GatewayRecvTx,
     send_rx: GatewaySendRx,
@@ -279,7 +279,7 @@ impl RfcommGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.meta.clone().into(),
+      data: self.meta.snapshot().into(),
     };
     connection.send(&version, Priority::Normal).await?;
 

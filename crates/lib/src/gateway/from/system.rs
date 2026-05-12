@@ -140,6 +140,42 @@ pub struct OtaAssetRangeChunk {
   pub last: bool,
 }
 
+/// Gateway-side read of the device nickname. Returns the current value
+/// (or None when unset). Daemon also broadcasts `DeviceNicknameChanged`
+/// to gateway peers on mutation so the companion stays in sync without
+/// polling.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = System,
+  request_variant = DeviceGetNickname,
+  response = crate::gateway::DeviceNicknameReply,
+  response_variant = DeviceNickname,
+)]
+pub struct DeviceGetNickname;
+
+/// Set the device nickname. Empty string clears (treated as None). The
+/// daemon broadcasts `DeviceNicknameChanged` to gateway + client peers
+/// after writing the KV slot. Length-capped at 64 chars.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = System,
+  request_variant = DeviceSetNickname,
+  response = crate::gateway::DeviceNicknameReply,
+  response_variant = DeviceNickname,
+  error = crate::gateway::DeviceNicknameRejected,
+  error_variant = DeviceNicknameRejected,
+)]
+pub struct DeviceSetNickname {
+  pub nickname: String,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -161,4 +197,8 @@ pub enum GatewayToBridgeSystemMsg {
   OtaAssetRangeRejected(OtaAssetRangeRejected),
   #[bridge_event]
   OtaAssetRangeChunk(OtaAssetRangeChunk),
+  #[bridge_request]
+  DeviceGetNickname,
+  #[bridge_request]
+  DeviceSetNickname(DeviceSetNickname),
 }

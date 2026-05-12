@@ -13,6 +13,7 @@ mod db;
 
 mod handler;
 mod input;
+mod install;
 mod ota;
 mod paths;
 mod peer;
@@ -52,8 +53,8 @@ async fn main() {
   let notifier = systemd::init_notifier();
 
   notifier.status("initializing bridgething...");
-  let meta = state::meta::SuperbirdMeta::read_or_default().await;
-  tracing::debug!("metadata: {:?}", &meta);
+  let static_meta = state::meta::SuperbirdMeta::read_or_default().await;
+  tracing::debug!("metadata: {:?}", &static_meta);
 
   let (client_man, mut client_listener) = net::create_client_manager();
   let bus = net::WireEventBus::new(client_man.clone());
@@ -62,6 +63,8 @@ async fn main() {
   let devices = DeviceStore::new(db.clone());
   let kv = KvStore::new(db.clone());
   let meta_store = MetaStore::new(db.clone());
+
+  let meta = state::meta::DeviceMeta::init(static_meta, kv.clone()).await;
 
   let webapps = WebappRegistry::init()
     .await
@@ -158,6 +161,7 @@ async fn main() {
     chrome,
     webapps,
     assets,
+    transfers: transfers.clone(),
     ingest,
     asset_wait,
     iap2_pending_art,
@@ -187,6 +191,7 @@ async fn main() {
   });
 
   spawn_ota_event_forwarder(bluetooth.clone(), state.client_man.clone(), ota_events_rx);
+  spawn_nickname_observer(state.meta.subscribe(), bluetooth.clone(), state.bus.clone());
 
   let transport = TransportController::new(
     state.authority.clone(),
@@ -285,10 +290,48 @@ fn spawn_ota_event_forwarder(
       let client_mirror = match &event {
         BridgeToGatewaySystemMsgEvent::OtaProgress(p) => Some(BridgeToClientSystemMsgEvent::OtaProgress(*p)),
         BridgeToGatewaySystemMsgEvent::OtaError(e) => Some(BridgeToClientSystemMsgEvent::OtaError(e.clone())),
+        BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(_) => None,
       };
       bluetooth.gateway_man.broadcast(event).await;
       if let Some(mirror) = client_mirror {
         let _ = client_man.broadcast_event(mirror).await;
+      }
+    }
+  });
+}
+
+fn spawn_nickname_observer(
+  mut rx: tokio::sync::watch::Receiver<Option<String>>,
+  bluetooth: bluetooth::BluetoothMan,
+  bus: net::WireEventBus,
+) {
+  use libbridgething::{
+    client::{BridgeToClientSystemMsgEvent, DeviceNicknameReply as ClientNicknameReply},
+    gateway::{BridgeToGatewaySystemMsgEvent, DeviceNicknameReply as GatewayNicknameReply},
+  };
+  tokio::spawn(async move {
+    loop {
+      let value = rx.borrow_and_update().clone();
+
+      if let Err(err) = systemd::avahi::publish_bridgething_service(value.as_deref()).await {
+        tracing::warn!(?err, "avahi republish on nickname change failed");
+      }
+
+      bluetooth
+        .gateway_man
+        .broadcast(BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(
+          GatewayNicknameReply { nickname: value.clone() },
+        ))
+        .await;
+
+      let client_event =
+        BridgeToClientSystemMsgEvent::DeviceNicknameChanged(ClientNicknameReply { nickname: value });
+      if let Err(errs) = bus.broadcast_event(client_event).await {
+        tracing::debug!(count = errs.len(), "nickname-change client broadcast non-fatal errors");
+      }
+
+      if rx.changed().await.is_err() {
+        break;
       }
     }
   });

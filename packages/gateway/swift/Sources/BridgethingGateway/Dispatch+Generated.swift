@@ -1429,6 +1429,57 @@ public struct SystemSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `System::DeviceNickname` messages.
+  public var deviceNickname: AsyncStream<(deviceId: String, msg: DeviceNicknameReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .deviceNickname(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::DeviceNicknameRejected` messages.
+  public var deviceNicknameRejected: AsyncStream<(deviceId: String, msg: DeviceNicknameRejected)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .deviceNicknameRejected(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::DeviceNicknameChanged` messages.
+  public var deviceNicknameChanged: AsyncStream<(deviceId: String, msg: DeviceNicknameReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .deviceNicknameChanged(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `OtaAssetRange` requests with handles for typed responses.
   public var otaAssetRangeRequests: AsyncStream<(handle: OtaAssetRangeHandle, req: OtaAssetRange)> {
     AsyncStream { continuation in
@@ -1511,6 +1562,35 @@ public struct SystemSurface: Sendable {
       switch inner {
       case .otaBeginAck(let value): return .ok(value)
       case .otaBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func deviceGetNickname(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<DeviceNicknameReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.deviceGetNickname), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .deviceNickname(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func deviceSetNickname(deviceId: String, _ req: DeviceSetNickname, timeout: Duration = .seconds(30)) async throws -> RequestResult<DeviceNicknameReply, DeviceNicknameRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.deviceSetNickname(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .deviceNickname(let value): return .ok(value)
+      case .deviceNicknameRejected(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
     case .error(let err): return .protocolError(err)
@@ -1686,6 +1766,392 @@ public struct VoiceSurface: Sendable {
         }
       }
       try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Webapp` wire surface.
+public struct WebappSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Webapp::Webapps` messages.
+  public var webapps: AsyncStream<(deviceId: String, msg: WebappList)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .webapps(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::Active` messages.
+  public var active: AsyncStream<(deviceId: String, msg: WebappActive)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .active(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::Switched` messages.
+  public var switched: AsyncStream<(deviceId: String, msg: WebappActive)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .switched(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::InstallBeginAck` messages.
+  public var installBeginAck: AsyncStream<(deviceId: String, msg: WebappInstallBeginAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .installBeginAck(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::Uninstalled` messages.
+  public var uninstalled: AsyncStream<(deviceId: String, msg: WebappActive)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .uninstalled(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::WebappError` messages.
+  public var webappError: AsyncStream<(deviceId: String, msg: WebappError)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .webappError(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::Icon` messages.
+  public var icon: AsyncStream<(deviceId: String, msg: WebappIconReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .icon(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::ConfigGet` messages.
+  public var configGet: AsyncStream<(deviceId: String, msg: WebappConfigGetReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .configGet(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::ConfigList` messages.
+  public var configList: AsyncStream<(deviceId: String, msg: WebappConfigListReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .configList(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::ConfigAck` messages.
+  public var configAck: AsyncStream<(deviceId: String, msg: WebappConfigAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .configAck(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::WebappInstalled` messages.
+  public var webappInstalled: AsyncStream<(deviceId: String, msg: WebappInfo)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .webappInstalled(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::WebappInstallFailed` messages.
+  public var webappInstallFailed: AsyncStream<(deviceId: String, msg: WebappInstallFailed)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .webappInstallFailed(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Webapp::InstallChunk` to every connected peer (broadcast).
+  public func installChunk(_ payload: WebappInstallChunk, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .webapp(.installChunk(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Webapp::InstallAbandon` to every connected peer (broadcast).
+  public func installAbandon(_ payload: WebappInstallAbandon, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .webapp(.installAbandon(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func list(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .webapps(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func getActive(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.getActive), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .active(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func switchTo(deviceId: String, _ req: WebappSwitchTo, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.switchTo(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .switched(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func installBegin(deviceId: String, _ req: WebappInstallBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInstallBeginAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.installBegin(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .installBeginAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func uninstall(deviceId: String, _ req: WebappUninstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.uninstall(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .uninstalled(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func icon(deviceId: String, _ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .icon(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configGet(deviceId: String, _ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configList(deviceId: String, _ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configSet(deviceId: String, _ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func configDelete(deviceId: String, _ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
     }
   }
 
@@ -1932,160 +2398,6 @@ public struct TimeSurface: Sendable {
         }
       }
       try await group.waitForAll()
-    }
-  }
-
-}
-
-/// Cross-peer methods for the `Webapp` wire surface.
-public struct WebappSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func list(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .webapps(let value): return .ok(value)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func getActive(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, Never> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.getActive), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .active(let value): return .ok(value)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func switchTo(deviceId: String, _ req: WebappSwitchTo, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.switchTo(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .switched(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func install(deviceId: String, _ req: WebappInstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInfo, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.install(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .installed(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func uninstall(deviceId: String, _ req: WebappUninstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.uninstall(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .uninstalled(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func icon(deviceId: String, _ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .icon(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func configGet(deviceId: String, _ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configGet(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func configList(deviceId: String, _ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configList(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func configSet(deviceId: String, _ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configAck(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func configDelete(deviceId: String, _ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configAck(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
     }
   }
 
@@ -3420,6 +3732,60 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `System::DeviceNickname` from this peer.
+  public var deviceNickname: AsyncStream<DeviceNicknameReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .deviceNickname(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::DeviceNicknameRejected` from this peer.
+  public var deviceNicknameRejected: AsyncStream<DeviceNicknameRejected> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .deviceNicknameRejected(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::DeviceNicknameChanged` from this peer.
+  public var deviceNicknameChanged: AsyncStream<DeviceNicknameReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .deviceNicknameChanged(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `OtaAssetRange` requests with handles for typed responses.
   public var otaAssetRangeRequests: AsyncStream<(handle: OtaAssetRangeHandle, req: OtaAssetRange)> {
     AsyncStream { continuation in
@@ -3471,6 +3837,35 @@ public struct SystemSurfaceForDevice: Sendable {
       switch inner {
       case .otaBeginAck(let value): return .ok(value)
       case .otaBeginRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func deviceGetNickname(timeout: Duration = .seconds(30)) async throws -> RequestResult<DeviceNicknameReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.deviceGetNickname), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .deviceNickname(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func deviceSetNickname(_ req: DeviceSetNickname, timeout: Duration = .seconds(30)) async throws -> RequestResult<DeviceNicknameReply, DeviceNicknameRejected> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.deviceSetNickname(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .deviceNickname(let value): return .ok(value)
+      case .deviceNicknameRejected(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
     case .error(let err): return .protocolError(err)
@@ -3623,6 +4018,389 @@ public struct VoiceSurfaceForDevice: Sendable {
   public func micClose(priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.micClose))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Webapp` wire surface (deviceId is baked in).
+public struct WebappSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Webapp::Webapps` from this peer.
+  public var webapps: AsyncStream<WebappList> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .webapps(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::Active` from this peer.
+  public var active: AsyncStream<WebappActive> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .active(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::Switched` from this peer.
+  public var switched: AsyncStream<WebappActive> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .switched(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::InstallBeginAck` from this peer.
+  public var installBeginAck: AsyncStream<WebappInstallBeginAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .installBeginAck(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::Uninstalled` from this peer.
+  public var uninstalled: AsyncStream<WebappActive> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .uninstalled(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::WebappError` from this peer.
+  public var webappError: AsyncStream<WebappError> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .webappError(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::Icon` from this peer.
+  public var icon: AsyncStream<WebappIconReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .icon(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::ConfigGet` from this peer.
+  public var configGet: AsyncStream<WebappConfigGetReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .configGet(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::ConfigList` from this peer.
+  public var configList: AsyncStream<WebappConfigListReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .configList(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::ConfigAck` from this peer.
+  public var configAck: AsyncStream<WebappConfigAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .configAck(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::WebappInstalled` from this peer.
+  public var webappInstalled: AsyncStream<WebappInfo> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .webappInstalled(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::WebappInstallFailed` from this peer.
+  public var webappInstallFailed: AsyncStream<WebappInstallFailed> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .webappInstallFailed(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Webapp::InstallChunk` to this peer.
+  public func installChunk(_ payload: WebappInstallChunk, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .webapp(.installChunk(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Webapp::InstallAbandon` to this peer.
+  public func installAbandon(_ payload: WebappInstallAbandon, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .webapp(.installAbandon(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func list(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .webapps(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func getActive(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.getActive), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .active(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func switchTo(_ req: WebappSwitchTo, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.switchTo(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .switched(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func installBegin(_ req: WebappInstallBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInstallBeginAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.installBegin(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .installBeginAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func uninstall(_ req: WebappUninstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.uninstall(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .uninstalled(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func icon(_ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .icon(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configGet(_ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configList(_ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configSet(_ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func configDelete(_ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
   }
 
 }
@@ -3811,161 +4589,6 @@ public struct TimeSurfaceForDevice: Sendable {
 
 }
 
-/// Per-peer methods for the `Webapp` wire surface (deviceId is baked in).
-public struct WebappSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func list(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .webapps(let value): return .ok(value)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func getActive(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, Never> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.getActive), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .active(let value): return .ok(value)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func switchTo(_ req: WebappSwitchTo, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.switchTo(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .switched(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func install(_ req: WebappInstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInfo, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.install(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .installed(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func uninstall(_ req: WebappUninstall, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappActive, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.uninstall(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .uninstalled(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func icon(_ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .icon(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func configGet(_ req: WebappConfigGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigGetReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configGet(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configGet(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func configList(_ req: WebappConfigList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigListReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configList(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configList(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func configSet(_ req: WebappConfigSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configSet(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configAck(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func configDelete(_ req: WebappConfigDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappConfigAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.configDelete(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .configAck(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-}
-
 /// Per-peer methods for the `Lyrics` wire surface (deviceId is baked in).
 public struct LyricsSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -4019,6 +4642,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var tunnel: TunnelSurfaceForDevice { TunnelSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Voice` wire surface.
   public var voice: VoiceSurfaceForDevice { VoiceSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Webapp` wire surface.
+  public var webapp: WebappSurfaceForDevice { WebappSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Forward` wire surface.
   public var forward: ForwardSurfaceForDevice { ForwardSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Asset` wire surface.
@@ -4031,8 +4656,6 @@ public struct BridgethingGatewayDevice: Sendable {
   public var chrome: ChromeSurfaceForDevice { ChromeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Time` wire surface.
   public var time: TimeSurfaceForDevice { TimeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Webapp` wire surface.
-  public var webapp: WebappSurfaceForDevice { WebappSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Lyrics` wire surface.
   public var lyrics: LyricsSurfaceForDevice { LyricsSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
 }
@@ -4060,6 +4683,8 @@ extension BridgethingGateway {
   public nonisolated var tunnel: TunnelSurface { TunnelSurface(gateway: self) }
   /// Methods scoped to the `Voice` wire surface.
   public nonisolated var voice: VoiceSurface { VoiceSurface(gateway: self) }
+  /// Methods scoped to the `Webapp` wire surface.
+  public nonisolated var webapp: WebappSurface { WebappSurface(gateway: self) }
   /// Methods scoped to the `Forward` wire surface.
   public nonisolated var forward: ForwardSurface { ForwardSurface(gateway: self) }
   /// Methods scoped to the `Asset` wire surface.
@@ -4072,8 +4697,6 @@ extension BridgethingGateway {
   public nonisolated var chrome: ChromeSurface { ChromeSurface(gateway: self) }
   /// Methods scoped to the `Time` wire surface.
   public nonisolated var time: TimeSurface { TimeSurface(gateway: self) }
-  /// Methods scoped to the `Webapp` wire surface.
-  public nonisolated var webapp: WebappSurface { WebappSurface(gateway: self) }
   /// Methods scoped to the `Lyrics` wire surface.
   public nonisolated var lyrics: LyricsSurface { LyricsSurface(gateway: self) }
   /// Returns a per-device proxy with `deviceId` baked into every method and stream.

@@ -75,6 +75,19 @@ pub struct LogsUnsubscribe {
   pub token: String,
 }
 
+/// Webapp read of the device nickname. Read-only on this surface: only
+/// the gateway-side `setNickname` can mutate. Webapps listen for
+/// `DeviceNicknameChanged` events to track updates without polling.
+#[derive(Debug, Clone, Copy, Default, WireRequest)]
+#[wire_request(
+  direction = ClientToBridge,
+  surface = System,
+  request_variant = DeviceGetNickname,
+  response = crate::client::DeviceNicknameReply,
+  response_variant = DeviceNickname,
+)]
+pub struct DeviceGetNickname;
+
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -97,4 +110,6 @@ pub enum ClientToBridgeSystemMsg {
   PowerOff,
   #[bridge_command]
   FactoryReset,
+  #[bridge_request]
+  DeviceGetNickname,
 }

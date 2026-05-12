@@ -281,3 +281,5 @@ export { GATEWAY_VERSION };
 // because dispatch.generated.ts needs `BridgethingGateway` as a value.
 import { applyDispatch } from './dispatch.generated';
 applyDispatch();
+
+export { WebSerialAdapter, type WebSerialAdapterOptions } from './web-serial-adapter';

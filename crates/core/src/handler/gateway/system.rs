@@ -1,10 +1,12 @@
 use libbridgething::gateway::{
-  GatewayToBridgeSystemMsgCommand, GatewayToBridgeSystemMsgEvent, GatewayToBridgeSystemMsgRequest, OtaAbandon,
-  OtaAssetRangeChunk, OtaBegin, OtaChunk,
+  DeviceGetNickname, DeviceNicknameRejected, DeviceNicknameReply, DeviceSetNickname, GatewayToBridgeSystemMsgCommand,
+  GatewayToBridgeSystemMsgEvent, GatewayToBridgeSystemMsgRequest, OtaAbandon, OtaAssetRangeChunk, OtaBegin, OtaChunk,
 };
 
 use super::handle::MsgHandle;
 use crate::{handler::HandlerResult, ota::OtaOrchestrator};
+
+const NICKNAME_MAX_LEN: usize = 64;
 
 #[derive(Debug)]
 pub struct SystemHandler {
@@ -34,7 +36,48 @@ impl SystemHandler {
   pub async fn handle_request(self, req: GatewayToBridgeSystemMsgRequest) -> HandlerResult {
     match req {
       GatewayToBridgeSystemMsgRequest::OtaBegin(begin) => self.ota_begin(begin).await,
+      GatewayToBridgeSystemMsgRequest::DeviceGetNickname => self.device_get_nickname().await,
+      GatewayToBridgeSystemMsgRequest::DeviceSetNickname(req) => self.device_set_nickname(req).await,
     }
+  }
+
+  async fn device_get_nickname(self) -> HandlerResult {
+    let nickname = self.handle.state.meta.nickname();
+    self
+      .handle
+      .respond_to::<DeviceGetNickname>(DeviceNicknameReply { nickname })
+      .await;
+    Ok(())
+  }
+
+  async fn device_set_nickname(self, req: DeviceSetNickname) -> HandlerResult {
+    let trimmed = req.nickname.trim();
+    if trimmed.contains('\0') {
+      self
+        .handle
+        .respond_err::<DeviceSetNickname>(DeviceNicknameRejected {
+          reason: "nickname contains nul byte".into(),
+        })
+        .await;
+      return Ok(());
+    }
+    if trimmed.chars().count() > NICKNAME_MAX_LEN {
+      self
+        .handle
+        .respond_err::<DeviceSetNickname>(DeviceNicknameRejected {
+          reason: format!("nickname longer than {NICKNAME_MAX_LEN} chars"),
+        })
+        .await;
+      return Ok(());
+    }
+
+    let next: Option<String> = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
+    self.handle.state.meta.set_nickname(next.clone()).await?;
+    self
+      .handle
+      .respond_to::<DeviceSetNickname>(DeviceNicknameReply { nickname: next })
+      .await;
+    Ok(())
   }
 
   async fn ota_begin(self, req: OtaBegin) -> HandlerResult {

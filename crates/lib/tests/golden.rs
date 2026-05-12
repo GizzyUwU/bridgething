@@ -182,6 +182,7 @@ fn bridge_meta() -> BridgeThingMeta {
     bridgething_version: "0.1.0".into(),
     libbridgething_version: "v0.1.0".into(),
     app_name: "bridgething".into(),
+    nickname: Some("Joey's kitchen".into()),
     app_version: "0.1.0".into(),
     os_name: "linux".into(),
     os_version: "6.19".into(),
@@ -352,12 +353,12 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(bridge_fixture(
-    "bridge_to_gateway/webapp-installed-response",
-    "response to an Install request - full metadata of the freshly installed app",
+    "bridge_to_gateway/webapp-installed-event",
+    "broadcast event after a chunked install completed - full metadata of the freshly installed app",
     BridgeToGatewayMsg {
       id: id(),
-      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
-      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::Installed(WebappInfo {
+      meta: GatewayMsgMeta::Event,
+      data: BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappInstalled(WebappInfo {
         id: FIXED_DEMO_WEBAPP.parse().unwrap(),
         name: "Demo".into(),
         source: WebappSource::Installed,
@@ -557,13 +558,15 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/webapp-install-command",
-    "gateway uploads a zip archive containing a webapp bundle",
+    "gateway_to_bridge/webapp-install-begin-request",
+    "gateway opens a chunked install upload identified by sha256 hex of the zip",
     GatewayToBridgeMsg {
       id: id(),
-      meta: GatewayMsgMeta::Command,
-      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::Install(WebappInstall {
-        archive: fingerprint_bytes(),
+      meta: GatewayMsgMeta::Request,
+      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::InstallBegin(WebappInstallBegin {
+        install_id: "fb3fdadc2bbac80ef1a0bbd900c3097d3eebb31a92b4c97c7e96b9c2cf6f2c10".into(),
+        expected_sha256: "fb3fdadc2bbac80ef1a0bbd900c3097d3eebb31a92b4c97c7e96b9c2cf6f2c10".into(),
+        expected_size: fingerprint_bytes().len() as u32,
       })),
     },
   ));

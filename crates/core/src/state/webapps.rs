@@ -4,7 +4,7 @@ use std::{
   sync::Arc,
 };
 
-use libbridgething::{ConfigField, WebappInfo, WebappManifest, WebappRole, WebappSource};
+use libbridgething::{ConfigField, WebappError, WebappInfo, WebappManifest, WebappRole, WebappSource};
 use tokio::{fs, sync::RwLock};
 use uuid::Uuid;
 
@@ -12,6 +12,7 @@ use super::StateResult;
 use crate::paths;
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
+const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 
 const STOCK_DIR_NAME: &str = "stock";
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
@@ -163,46 +164,55 @@ impl WebappRegistry {
       .map(|b| b.manifest.id)
   }
 
-  pub async fn install(&self, archive: Vec<u8>) -> Result<WebappInfo, InstallError> {
+  pub async fn install_from_path(&self, archive_path: PathBuf) -> Result<WebappInfo, WebappError> {
     let staging = self.installed_root.join(format!(".tmp.{}", Uuid::now_v7().simple()));
-    fs::create_dir_all(&staging).await.map_err(InstallError::Io)?;
+    fs::create_dir_all(&staging)
+      .await
+      .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
 
     let staging_for_unzip = staging.clone();
-    let unzip = tokio::task::spawn_blocking(move || extract_zip(&archive, &staging_for_unzip))
+    let extract_result = tokio::task::spawn_blocking(move || extract_zip(&archive_path, &staging_for_unzip))
       .await
-      .map_err(|e| InstallError::Validation(format!("zip extract task failed: {e}")))?;
-    if let Err(e) = unzip {
+      .unwrap_or_else(|e| {
+        Err(WebappError::Internal {
+          reason: format!("zip extract task panicked: {e}"),
+        })
+      });
+    if let Err(e) = extract_result {
       let _ = fs::remove_dir_all(&staging).await;
       return Err(e);
     }
 
     if !is_valid_bundle(&staging) {
       let _ = fs::remove_dir_all(&staging).await;
-      return Err(InstallError::Validation("bundle has no index.html".into()));
+      return Err(WebappError::MissingIndexHtml);
     }
 
     let bundle = match load_bundle(&staging, WebappSource::Installed).await {
-      Some(b) if b.manifest.id != Uuid::nil() => b,
+      Some(b) if !b.manifest.id.is_nil() => b,
       _ => {
         let _ = fs::remove_dir_all(&staging).await;
-        return Err(InstallError::Validation(
-          "bundle missing or invalid manifest.json".into(),
-        ));
+        return Err(WebappError::InvalidManifest {
+          reason: "manifest.json missing, unparseable, or failed schema validation".into(),
+        });
       }
     };
 
-    let bundle = if is_reserved(bundle.manifest.id) {
-      remap_to_dev_shadow(bundle)
-    } else {
-      bundle
-    };
+    if is_reserved(bundle.manifest.id) {
+      let _ = fs::remove_dir_all(&staging).await;
+      return Err(WebappError::IdReserved {
+        id: bundle.manifest.id.to_string(),
+      });
+    }
 
     let final_dir_name = bundle.manifest.id.simple().to_string();
     let final_path = self.installed_root.join(&final_dir_name);
 
     if final_path.exists() {
       let trash = self.installed_root.join(format!(".old.{}", Uuid::now_v7().simple()));
-      fs::rename(&final_path, &trash).await.map_err(InstallError::Io)?;
+      fs::rename(&final_path, &trash)
+        .await
+        .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
       tokio::spawn(async move {
         if let Err(e) = fs::remove_dir_all(&trash).await {
           tracing::warn!("failed to clean old webapp dir {}: {:?}", trash.display(), e);
@@ -210,13 +220,14 @@ impl WebappRegistry {
       });
     }
 
-    fs::rename(&staging, &final_path).await.map_err(InstallError::Io)?;
+    fs::rename(&staging, &final_path)
+      .await
+      .map_err(|e| WebappError::Internal { reason: e.to_string() })?;
 
     self.rescan().await;
-    let installed = self
-      .bundle(bundle.manifest.id)
-      .await
-      .ok_or_else(|| InstallError::Validation("post-install scan dropped the bundle".into()))?;
+    let installed = self.bundle(bundle.manifest.id).await.ok_or(WebappError::Internal {
+      reason: "post-install scan dropped the bundle".into(),
+    })?;
     Ok(bundle_to_info(&installed))
   }
 
@@ -241,14 +252,6 @@ impl WebappRegistry {
     self.rescan().await;
     Ok(true)
   }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum InstallError {
-  #[error("io error: {0}")]
-  Io(#[from] tokio::io::Error),
-  #[error("invalid bundle: {0}")]
-  Validation(String),
 }
 
 fn is_safe_name(name: &str) -> bool {
@@ -518,36 +521,56 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
   }
 }
 
-fn extract_zip(archive: &[u8], dest: &Path) -> Result<(), InstallError> {
-  let cursor = std::io::Cursor::new(archive);
-  let mut zip = zip::ZipArchive::new(cursor).map_err(|e| InstallError::Validation(format!("zip read failed: {e}")))?;
+fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), WebappError> {
+  let file = std::fs::File::open(archive_path).map_err(|e| WebappError::Internal {
+    reason: format!("open archive: {e}"),
+  })?;
+  let mut zip = zip::ZipArchive::new(file).map_err(|e| WebappError::ZipMalformed {
+    reason: format!("zip read failed: {e}"),
+  })?;
+  let mut extracted_total: u64 = 0;
 
   for i in 0..zip.len() {
-    let mut entry = zip
-      .by_index(i)
-      .map_err(|e| InstallError::Validation(format!("zip entry {i} read failed: {e}")))?;
-    let raw_name = entry
-      .enclosed_name()
-      .ok_or_else(|| InstallError::Validation(format!("zip entry {i} has unsafe path")))?;
+    let mut entry = zip.by_index(i).map_err(|e| WebappError::ZipMalformed {
+      reason: format!("zip entry {i} read failed: {e}"),
+    })?;
+    let raw_name = entry.enclosed_name().ok_or_else(|| WebappError::ZipMalformed {
+      reason: format!("zip entry {i} has unsafe path"),
+    })?;
 
     let target = dest.join(&raw_name);
     if !target.starts_with(dest) {
-      return Err(InstallError::Validation(format!(
-        "zip entry escapes destination: {}",
-        raw_name.display()
-      )));
+      return Err(WebappError::ZipMalformed {
+        reason: format!("zip entry escapes destination: {}", raw_name.display()),
+      });
     }
 
     if entry.is_dir() {
-      std::fs::create_dir_all(&target)?;
+      std::fs::create_dir_all(&target).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
       continue;
     }
 
-    if let Some(parent) = target.parent() {
-      std::fs::create_dir_all(parent)?;
+    let declared_size = entry.size();
+    let prospective_total = extracted_total.saturating_add(declared_size);
+    if prospective_total > EXTRACTED_SIZE_CAP_BYTES {
+      return Err(WebappError::ExtractedTooLarge {
+        max_bytes: EXTRACTED_SIZE_CAP_BYTES.min(u32::MAX as u64) as u32,
+      });
     }
-    let mut file = std::fs::File::create(&target)?;
-    std::io::copy(&mut entry, &mut file)?;
+
+    if let Some(parent) = target.parent() {
+      std::fs::create_dir_all(parent).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
+    }
+    let mut out = std::fs::File::create(&target).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
+    let mut bounded = std::io::Read::take(&mut entry, declared_size + 1);
+    let copied =
+      std::io::copy(&mut bounded, &mut out).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
+    if copied != declared_size {
+      return Err(WebappError::ZipMalformed {
+        reason: format!("entry {i} size mismatch: CD says {declared_size}, decompressed {copied}"),
+      });
+    }
+    extracted_total = extracted_total.saturating_add(copied);
   }
 
   Ok(())

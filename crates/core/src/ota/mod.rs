@@ -983,6 +983,7 @@ mod tests {
             _ => {}
           },
           BridgeToGatewaySystemMsgEvent::OtaError(e) => panic!("unexpected error during happy path: {e:?}"),
+          other => panic!("unexpected system event during happy path: {other:?}"),
         }
       }
     })

@@ -36,7 +36,7 @@ use crate::{
     peer_owners::PeerOwners,
   },
   peer::PeerTracker,
-  state::meta::SuperbirdMeta,
+  state::meta::DeviceMeta,
 };
 
 const STREAM_INPUT_CAPACITY: usize = 16;
@@ -101,7 +101,7 @@ struct StreamConn {
 
 #[derive(Debug)]
 pub struct Iap2EaGateway {
-  meta: SuperbirdMeta,
+  meta: DeviceMeta,
   peers: PeerTracker,
   bluetooth_tx: mpsc::Sender<BluetoothEvent>,
   send_tx: mpsc::Sender<OutboundGatewayMessage>,
@@ -116,7 +116,7 @@ pub struct Iap2EaGateway {
 
 impl Iap2EaGateway {
   pub fn init(
-    meta: SuperbirdMeta,
+    meta: DeviceMeta,
     peers: PeerTracker,
     bluetooth_tx: mpsc::Sender<BluetoothEvent>,
     peer_owners: PeerOwners,
@@ -206,7 +206,7 @@ impl Iap2EaGateway {
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
       meta: MsgMeta::Event,
-      data: self.meta.clone().into(),
+      data: self.meta.snapshot().into(),
     };
     self.send_to_stream(key, &version, Priority::Normal).await;
 

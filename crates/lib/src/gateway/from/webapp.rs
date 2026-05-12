@@ -38,7 +38,7 @@ pub struct GetActiveWebapp;
   request_variant = SwitchTo,
   response = crate::gateway::WebappActive,
   response_variant = Switched,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappSwitchTo {
@@ -47,8 +47,23 @@ pub struct WebappSwitchTo {
   pub id: Uuid,
 }
 
+/// Companion-initiated chunked webapp install: opens or resumes a
+/// streaming push of a zip bundle. Daemon responds with
+/// `WebappInstallBeginAck { resume_from_offset }` (the byte offset the
+/// next `WebappInstallChunk` should start at, 0 for fresh pushes) or a
+/// `WebappError` variant (already-running install, mismatched size/sha
+/// on conflicting in-flight install_id, etc).
+///
+/// `install_id` is the sha256 of the .zip, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track. The terminal
+/// outcome - `WebappInstalled(WebappInfo)` event on success or
+/// `WebappInstallFailed { install_id, error }` event on failure -
+/// arrives asynchronously after the last chunk lands; between the last
+/// `WebappInstallChunk` ack and the terminal event the install is
+/// implicitly in "installing" state. Expect sub-second once the upload
+/// finishes.
 #[typeshare]
-#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -56,20 +71,51 @@ pub struct WebappSwitchTo {
 #[wire_request(
   direction = GatewayToBridge,
   surface = Webapp,
-  request_variant = Install,
-  response = crate::WebappInfo,
-  response_variant = Installed,
-  error = crate::gateway::WebappError,
+  request_variant = InstallBegin,
+  response = crate::gateway::WebappInstallBeginAck,
+  response_variant = InstallBeginAck,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
-pub struct WebappInstall {
-  /// zip archive whose top-level entries become the bundle contents.
-  /// Must include an `index.html` and a valid `manifest.json` at the
-  /// archive root. The bundle's identity comes from the manifest's id.
+pub struct WebappInstallBegin {
+  pub install_id: String,
+  pub expected_sha256: String,
+  pub expected_size: u32,
+}
+
+/// Streaming chunk of a webapp install upload opened by
+/// `WebappInstallBegin`. `offset` must equal the daemon's current
+/// `received` for the transfer (chunks are strictly in-order; the
+/// companion learns the resume offset from `WebappInstallBeginAck`).
+/// `last:true` triggers post-stream verify (size + sha256) followed by
+/// extract + validate + install. Terminal outcome arrives as
+/// `WebappInstalled` event or `WebappInstallFailed` event.
+#[typeshare]
+#[serde_with::serde_as]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappInstallChunk {
+  pub install_id: String,
+  pub offset: u32,
   #[debug(skip)]
   #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
-  pub archive: Vec<u8>,
+  pub bytes: Vec<u8>,
+  pub last: bool,
+}
+
+/// Drop the daemon-side partial for `install_id`. The chunked-transfer
+/// subsystem also runs a 24h stale GC for partials that were never
+/// abandoned, so this is an explicit cleanup, not a correctness gate.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappInstallAbandon {
+  pub install_id: String,
 }
 
 #[typeshare]
@@ -83,7 +129,7 @@ pub struct WebappInstall {
   request_variant = Uninstall,
   response = crate::gateway::WebappActive,
   response_variant = Uninstalled,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappUninstall {
@@ -105,7 +151,7 @@ pub struct WebappUninstall {
   request_variant = Icon,
   response = crate::gateway::WebappIconReply,
   response_variant = Icon,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappIcon {
@@ -125,7 +171,7 @@ pub struct WebappIcon {
   request_variant = ConfigGet,
   response = crate::gateway::WebappConfigGetReply,
   response_variant = ConfigGet,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappConfigGet {
@@ -146,7 +192,7 @@ pub struct WebappConfigGet {
   request_variant = ConfigList,
   response = crate::gateway::WebappConfigListReply,
   response_variant = ConfigList,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappConfigList {
@@ -166,7 +212,7 @@ pub struct WebappConfigList {
   request_variant = ConfigSet,
   response = crate::gateway::WebappConfigAck,
   response_variant = ConfigAck,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappConfigSet {
@@ -188,7 +234,7 @@ pub struct WebappConfigSet {
   request_variant = ConfigDelete,
   response = crate::gateway::WebappConfigAck,
   response_variant = ConfigAck,
-  error = crate::gateway::WebappError,
+  error = crate::WebappError,
   error_variant = WebappError,
 )]
 pub struct WebappConfigDelete {
@@ -214,10 +260,19 @@ pub enum GatewayToBridgeWebappMsg {
   /// command: switch the kiosk to the named webapp; bridge replies with `Switched`
   #[bridge_request]
   SwitchTo(WebappSwitchTo),
-  /// command: extract the supplied zip into the installed root under `name`;
-  /// bridge replies with `Installed`
+  /// request: open a chunked install upload; bridge replies with
+  /// `InstallBeginAck { resume_from_offset }` or `WebappError`.
   #[bridge_request]
-  Install(WebappInstall),
+  InstallBegin(WebappInstallBegin),
+  /// event: streaming chunk for an in-flight install upload. Companion
+  /// emits on the Bulk lane; daemon writes to disk via ChunkedTransfer.
+  /// Terminal outcome arrives as `WebappInstalled` / `WebappInstallFailed`
+  /// event after `last:true`.
+  #[bridge_event]
+  InstallChunk(WebappInstallChunk),
+  /// command: drop the daemon-side partial for `install_id`.
+  #[bridge_command]
+  InstallAbandon(WebappInstallAbandon),
   /// command: remove the named installed webapp; bridge replies with `Uninstalled`
   /// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
   #[bridge_request]

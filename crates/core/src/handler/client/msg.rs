@@ -8,7 +8,7 @@ use libbridgething::{
     ClientToBridgeGeoMsg, ClientToBridgeHardwareMsg, ClientToBridgeLibraryMsg, ClientToBridgeMsg,
     ClientToBridgeMsgData, ClientToBridgeNetMsg, ClientToBridgeNotificationsMsg, ClientToBridgePhoneMsg,
     ClientToBridgePlayerMsg, ClientToBridgeStoreMsgRequest, ClientToBridgeSystemMsg, ClientToBridgeTimeMsgRequest,
-    ClientToBridgeVoiceMsg, ClientToBridgeWebappMsgRequest,
+    ClientToBridgeVoiceMsg, ClientToBridgeWebappMsg,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -55,7 +55,7 @@ pub enum RecvMsgData {
   System(ClientToBridgeSystemMsg),
   Time(ClientToBridgeTimeMsgRequest),
   Voice(ClientToBridgeVoiceMsg),
-  Webapp(ClientToBridgeWebappMsgRequest),
+  Webapp(ClientToBridgeWebappMsg),
   Forward(ForwardMessage),
 
   // stock compatibility
@@ -113,10 +113,7 @@ impl From<ClientToBridgeMsg> for RecvMsgData {
         None => Self::Hole,
       },
       ClientToBridgeMsgData::Voice(inner) => Self::Voice(inner),
-      ClientToBridgeMsgData::Webapp(inner) => match inner.into_request() {
-        Some(req) => Self::Webapp(req),
-        None => Self::Hole,
-      },
+      ClientToBridgeMsgData::Webapp(inner) => Self::Webapp(inner),
       ClientToBridgeMsgData::Forward(data) => Self::Forward(data),
       ClientToBridgeMsgData::LegacyStock(msg) => Self::LegacyStock(msg),
     }

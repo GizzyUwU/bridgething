@@ -24,7 +24,8 @@ pub use shared::{
   PlayerState, Playlist, PodcastEpisode, Position, Priority, QueueItem, QueuePosition, RangePart, RangeSpec,
   RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station, StreamBegin,
   StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention,
-  TunnelClosed, TunnelData, TunnelError, VoiceDescriptor, WebappInfo, WebappManifest, WebappRole, WebappSource,
+  TunnelClosed, TunnelData, TunnelError, VoiceDescriptor, WebappError, WebappInfo, WebappManifest, WebappRole,
+  WebappSource,
   WsError, WsFrame, to_slug,
 };
 

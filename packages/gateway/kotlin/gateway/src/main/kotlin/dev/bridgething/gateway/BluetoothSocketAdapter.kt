@@ -24,7 +24,7 @@ import java.util.UUID
 /**
  * `Adapter` implementation that talks to the bridgething daemon over a
  * BR/EDR RFCOMM channel published by the daemon under
- * [BridgethingProtocol.SERVICE_UUID].
+ * [BridgethingProtocol.PROFILE_UUID].
  *
  * Lifecycle:
  * 1. The user pairs the Car Thing once via system Bluetooth settings (handled
@@ -48,7 +48,7 @@ import java.util.UUID
  * runtime permission grants on Android 12+.
  */
 public class BluetoothSocketAdapter(
-    private val serviceUuid: UUID = BridgethingProtocol.SERVICE_UUID,
+    private val serviceUuid: UUID = BridgethingProtocol.PROFILE_UUID,
 ) : Adapter {
 
     internal val ioScope: CoroutineScope =

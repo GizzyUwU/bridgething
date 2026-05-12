@@ -4,9 +4,9 @@
  * Direction the accessory wants iOS to take when answering an incoming
  * call while another call is active.
  */
-export type AcceptCallAction = 'accept' | 'endAndAccept';
+export type AcceptCallAction = "accept" | "endAndAccept";
 
-export type Album = { id: string; name: string };
+export type Album = { id: string, name: string, };
 
 /**
  * Daemon-observed state of the ANCS GATT-client session against the
@@ -20,23 +20,19 @@ export type Album = { id: string; name: string };
  * - `Authorized`: ANCS attribute fetches are succeeding.
  * - `Unauthorized`: ANCS service hidden, or auth-gate detected.
  */
-export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized';
+export type AncsAuthState = "unknown" | "probing" | "authorized" | "unauthorized";
 
-export type Artist = { id: string; name: string };
+export type Artist = { id: string, name: string, };
 
-export type AssetRetention =
-  | { type: 'lru' }
-  | { type: 'pinned' }
-  | { type: 'ttl'; data: TtlRetention }
-  | { type: 'persistent' };
+export type AssetRetention = { "type": "lru" } | { "type": "pinned" } | { "type": "ttl", "data": TtlRetention } | { "type": "persistent" };
 
 /**
  * What the gateway-side audio backend supports. `earcons` are short
  * named sounds the companion can play; `voices` are TTS voices.
  */
-export type AudioCapabilities = { earcons: Array<string>; voices: Array<VoiceDescriptor> };
+export type AudioCapabilities = { earcons: Array<string>, voices: Array<VoiceDescriptor>, };
 
-export type BoolField = { key: string; label: string; default: boolean | null };
+export type BoolField = { key: string, label: string, default: boolean | null, };
 
 /**
  * Bridge-side identity announce. Daemon sends one of these to every
@@ -44,64 +40,52 @@ export type BoolField = { key: string; label: string; default: boolean | null };
  * to so it can opt out of unsupported surfaces). The companion's mirror
  * is `GatewayCapabilities::Announce` over in `shared::capabilities`.
  */
-export type BridgeThingMeta = {
-  bridgethingVersion: string;
-  libbridgethingVersion: string;
-  appName: string;
-  /**
-   * Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
-   * the manifest's daemon-component version for OTA hot-swap decisions.
-   */
-  appVersion: string;
-  osName: string;
-  osVersion: string;
-  osDescription: string;
-  btMac: string;
-  serialNumber: string;
-  fccId: string;
-  icId: string;
-  modelName: string;
-  /**
-   * OTA channel the running image was cut on, e.g. `stable` or `dev`.
-   * The companion's poll loop only auto-pushes when its configured
-   * channel matches; a mismatch surfaces a "channel switch needs full
-   * flash" event rather than swapping channels in-band.
-   */
-  channel: string;
-  /**
-   * Image variant the running image was cut as, e.g. `prod` or `dev`.
-   * Maps to the yocto image recipe name `bridgething-<variant>-image`,
-   * which is what the companion uses to construct the OTA artifact URL
-   * `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
-   */
-  imageVariant: string;
-  /**
-   * Canonical image version (CalVer, e.g. `2026.05.0`). What the
-   * companion compares to the manifest's image-component version.
-   */
-  imageVersion: string;
-  imageBuildId: string;
-  imageBuildDate: string;
-  imageDistro: string;
-  imageMachine: string;
-  discord: string;
-  credits: string;
-};
+export type BridgeThingMeta = { bridgethingVersion: string, libbridgethingVersion: string, appName: string, 
+/**
+ * User-set display name for this device. None when the user hasn't
+ * set one yet; consumers fall back to `model_name` / `serial_number`.
+ * Set via the gateway-side `system.device.setNickname` surface.
+ */
+nickname: string | null, 
+/**
+ * Daemon semver (no leading `v`), e.g. `0.8.4`. Compared directly to
+ * the manifest's daemon-component version for OTA hot-swap decisions.
+ */
+appVersion: string, osName: string, osVersion: string, osDescription: string, btMac: string, serialNumber: string, fccId: string, icId: string, modelName: string, 
+/**
+ * OTA channel the running image was cut on, e.g. `stable` or `dev`.
+ * The companion's poll loop only auto-pushes when its configured
+ * channel matches; a mismatch surfaces a "channel switch needs full
+ * flash" event rather than swapping channels in-band.
+ */
+channel: string, 
+/**
+ * Image variant the running image was cut as, e.g. `prod` or `dev`.
+ * Maps to the yocto image recipe name `bridgething-<variant>-image`,
+ * which is what the companion uses to construct the OTA artifact URL
+ * `images/<channel>/<image_version>/bridgething-<variant>-image.{swu,zck}`.
+ */
+imageVariant: string, 
+/**
+ * Canonical image version (CalVer, e.g. `2026.05.0`). What the
+ * companion compares to the manifest's image-component version.
+ */
+imageVersion: string, imageBuildId: string, imageBuildDate: string, imageDistro: string, imageMachine: string, discord: string, credits: string, };
 
-export type BrightnessMode = 'auto' | 'manual';
+export type BrightnessMode = "auto" | "manual";
 
 /**
  * Backlight state. `level` is the user-set value (only respected in
  * `Manual`); `effective_level` is what's actually on the panel - equal
  * to `level` in `Manual`, ALS-derived in `Auto`.
  */
-export type BrightnessState = { mode: BrightnessMode; level: number; effectiveLevel: number };
+export type BrightnessState = { mode: BrightnessMode, level: number, effectiveLevel: number, };
 
 /**
  * One row in a `BrowseResult`: either a folder (drilldown) or a leaf
  * item the user can play / queue / favorite.
  */
-export type BrowseEntry = { type: 'folder'; data: BrowseFolder } | { type: 'item'; data: LibraryItem };
+export type BrowseEntry = { "type": "folder", "data": BrowseFolder } | { "type": "item", "data": LibraryItem };
 
 /**
  * A drilldown node. `node_id` is opaque and gateway-defined; webapps
@@ -113,14 +97,7 @@ export type BrowseEntry = { type: 'folder'; data: BrowseFolder } | { type: 'item
  * previews; Apple Music curated rails do too) and leave it `None`
  * otherwise.
  */
-export type BrowseFolder = {
-  nodeId: string;
-  title: string;
-  subtitle: string | null;
-  artworkId: string | null;
-  total: number | null;
-  previewChildren: Array<BrowseEntry> | null;
-};
+export type BrowseFolder = { nodeId: string, title: string, subtitle: string | null, artworkId: string | null, total: number | null, previewChildren: Array<BrowseEntry> | null, };
 
 /**
  * Page of browse results. `total` is the count of items in the
@@ -129,18 +106,13 @@ export type BrowseFolder = {
  * signal - webapps paginate by raising `offset` until `has_more` is
  * false rather than relying on `total`.
  */
-export type BrowseResult = { entries: Array<BrowseEntry>; total: number | null; hasMore: boolean };
+export type BrowseResult = { entries: Array<BrowseEntry>, total: number | null, hasMore: boolean, };
 
 /**
  * Why a call ended, surfaced on `onPhoneCallEnded`. `Failed` carries a
  * platform-defined reason (network, busy, etc.).
  */
-export type CallEndReason =
-  | { type: 'local' }
-  | { type: 'remote' }
-  | { type: 'missed' }
-  | { type: 'declined' }
-  | { type: 'failed'; data: { reason: string } };
+export type CallEndReason = { "type": "local" } | { "type": "remote" } | { "type": "missed" } | { "type": "declined" } | { "type": "failed", "data": { reason: string, } };
 
 /**
  * What the daemon advertises to webapps. `gateway: None` means no
@@ -148,15 +120,7 @@ export type CallEndReason =
  * surfaces (Library, Net, Notifications, etc.) should branch on this.
  * `authority` is the live set of scopes the companion currently claims.
  */
-export type Capabilities = {
-  gateway: GatewayInfo | null;
-  available: SurfaceAvailability;
-  authority: Array<CompanionAuthorityScope>;
-  uriSchemes: Array<string>;
-  network: NetworkInfo;
-  audio: AudioCapabilities;
-  musicProvider: MusicProvider;
-};
+export type Capabilities = { gateway: GatewayInfo | null, available: SurfaceAvailability, authority: Array<CompanionAuthorityScope>, uriSchemes: Array<string>, network: NetworkInfo, audio: AudioCapabilities, musicProvider: MusicProvider, };
 
 /**
  * What call-control verbs are currently legal. Webapps must gate UI on
@@ -164,25 +128,7 @@ export type Capabilities = {
  * a no-op. All `None` = no signal received yet, treat as conservatively
  * unavailable.
  */
-export type CommunicationsState = {
-  signalStrength: number | null;
-  registrationStatus: RegistrationStatus | null;
-  airplaneMode: boolean | null;
-  carrierName: string | null;
-  cellularSupported: boolean | null;
-  telephonyEnabled: boolean | null;
-  faceTimeAudioEnabled: boolean | null;
-  faceTimeVideoEnabled: boolean | null;
-  muteStatus: boolean | null;
-  currentCallCount: number | null;
-  newVoicemailCount: number | null;
-  initiateCallAvailable: boolean | null;
-  endAndAcceptAvailable: boolean | null;
-  holdAndAcceptAvailable: boolean | null;
-  swapAvailable: boolean | null;
-  mergeAvailable: boolean | null;
-  holdAvailable: boolean | null;
-};
+export type CommunicationsState = { signalStrength: number | null, registrationStatus: RegistrationStatus | null, airplaneMode: boolean | null, carrierName: string | null, cellularSupported: boolean | null, telephonyEnabled: boolean | null, faceTimeAudioEnabled: boolean | null, faceTimeVideoEnabled: boolean | null, muteStatus: boolean | null, currentCallCount: number | null, newVoicemailCount: number | null, initiateCallAvailable: boolean | null, endAndAcceptAvailable: boolean | null, holdAndAcceptAvailable: boolean | null, swapAvailable: boolean | null, mergeAvailable: boolean | null, holdAvailable: boolean | null, };
 
 /**
  * One axis the companion can declare authority over. Each scope has a
@@ -191,79 +137,60 @@ export type CommunicationsState = {
  * Unknown scopes arriving at an older daemon are stored opaquely and
  * ignored.
  */
-export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback' | 'volume';
+export type CompanionAuthorityScope = "nowPlayingMetadata" | "nowPlayingPlayback" | "volume";
 
 /**
  * One key/value pair as exposed by config read APIs. `value` is always a
  * string; consumers parse per the field's declared kind (number → parseFloat,
  * boolean → "true"/"false", string/enum/secret → as-is).
  */
-export type ConfigEntry = { key: string; value: string };
+export type ConfigEntry = { key: string, value: string, };
 
 /**
  * One declared user-tunable setting. Adjacent-tagged on the wire to
  * stay typeshare-compatible: `{"type":"string","data":{"key":"zip",...}}`.
  */
-export type ConfigField =
-  | { type: 'string'; data: StringField }
-  | { type: 'number'; data: NumberField }
-  | { type: 'boolean'; data: BoolField }
-  | { type: 'enum'; data: EnumField }
-  | { type: 'secret'; data: StringField };
+export type ConfigField = { "type": "string", "data": StringField } | { "type": "number", "data": NumberField } | { "type": "boolean", "data": BoolField } | { "type": "enum", "data": EnumField } | { "type": "secret", "data": StringField };
 
-export type CurrentlyActiveApplication = { id: string; name: string };
+export type CurrentlyActiveApplication = { id: string, name: string, };
 
-export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
+export type Device = { name: string, type: DeviceType, mac: string, default: boolean, };
 
-export type DeviceType = 'android' | 'iOS' | 'windows' | 'macOS' | 'linux' | 'unknown';
+export type DeviceType = "android" | "iOS" | "windows" | "macOS" | "linux" | "unknown";
 
 /**
  * Daemon health snapshot. `load_avg` is the unix 1/5/15-minute load.
  * `soc_temp_c` may be `None` on builds where the SoC thermal probe is
  * not exposed by the kernel.
  */
-export type Diagnostics = {
-  diskUsedBytes: number;
-  diskFreeBytes: number;
-  memUsedBytes: number;
-  memAvailBytes: number;
-  uptimeS: number;
-  socTempC: number | null;
-  loadAvg: [number, number, number];
-  daemonVersion: string;
-  kernelVersion: string;
-  bootId: string;
-};
+export type Diagnostics = { diskUsedBytes: number, diskFreeBytes: number, memUsedBytes: number, memAvailBytes: number, uptimeS: number, socTempC: number | null, loadAvg: [number, number, number], daemonVersion: string, kernelVersion: string, bootId: string, };
 
 /**
  * Why a notification went away. `Acted` covers both positive and
  * negative invokes; gateways that distinguish dismiss-vs-acted may
  * surface both as `Acted`.
  */
-export type DismissReason = 'userDismissed' | 'acted' | 'remoteDismissed';
+export type DismissReason = "userDismissed" | "acted" | "remoteDismissed";
 
 /**
  * DTMF tones the accessory can play during an active call.
  */
-export type DtmfTone = 'd0' | 'd1' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8' | 'd9' | 'star' | 'hash';
+export type DtmfTone = "d0" | "d1" | "d2" | "d3" | "d4" | "d5" | "d6" | "d7" | "d8" | "d9" | "star" | "hash";
 
 /**
  * Direction the accessory wants iOS to take when ending a call.
  */
-export type EndCallAction = 'end' | 'endAll';
+export type EndCallAction = "end" | "endAll";
 
-export type EnumField = { key: string; label: string; choices: Array<string>; default: string | null };
+export type EnumField = { key: string, label: string, choices: Array<string>, default: string | null, };
 
 /**
  * Page of the user's favorited / liked / saved library items. Mixed-kind
  * because most platforms expose one "Saved" surface across kinds.
  */
-export type FavoritesPage = { items: Array<LibraryItem>; total: number | null; hasMore: boolean };
+export type FavoritesPage = { items: Array<LibraryItem>, total: number | null, hasMore: boolean, };
 
-export type ForwardMessage =
-  | { encoding: 'text'; data: string }
-  | { encoding: 'json'; data: unknown }
-  | { encoding: 'binary'; data: Uint8Array };
+export type ForwardMessage = { "encoding": "text", "data": string } | { "encoding": "json", "data": unknown } | { "encoding": "binary", "data": Uint8Array };
 
 /**
  * What a connected companion advertises about itself. Sent on every
@@ -271,14 +198,7 @@ export type ForwardMessage =
  * on any change. The daemon caches the latest snapshot per peer and
  * derives the webapp-facing `Capabilities` from it.
  */
-export type GatewayCapabilities = {
-  gateway: GatewayInfo;
-  uriSchemes: Array<string>;
-  network: NetworkInfo;
-  available: SurfaceAvailability;
-  audio: AudioCapabilities;
-  musicProvider: MusicProvider;
-};
+export type GatewayCapabilities = { gateway: GatewayInfo, uriSchemes: Array<string>, network: NetworkInfo, available: SurfaceAvailability, audio: AudioCapabilities, musicProvider: MusicProvider, };
 
 /**
  * Identity payload describing the companion peer the daemon is talking
@@ -287,16 +207,7 @@ export type GatewayCapabilities = {
  * a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
  * is the synthetic address as a string.
  */
-export type GatewayInfo = {
-  address: string;
-  name: string;
-  osName: string;
-  appName: string;
-  appVersion: string;
-  adapterVersion: string;
-  libVersion: string;
-  libbridgethingVersion: string;
-};
+export type GatewayInfo = { address: string, name: string, osName: string, appName: string, appVersion: string, adapterVersion: string, libVersion: string, libbridgethingVersion: string, };
 
 /**
  * Subscriber's accuracy preference. `Coarse` opts into the lower-power
@@ -305,39 +216,39 @@ export type GatewayInfo = {
  * aggregates across subscribers and forwards the most-demanding to the
  * companion.
  */
-export type GeoAccuracy = 'coarse' | 'fine';
+export type GeoAccuracy = "coarse" | "fine";
 
-export type GeoError = 'permissionDenied' | 'unavailable' | 'unknownToken';
+export type GeoError = "permissionDenied" | "unavailable" | "unknownToken";
 
-export type HardwareError = 'levelOutOfRange' | 'modeMismatch';
+export type HardwareError = "levelOutOfRange" | "modeMismatch";
 
 /**
  * Snapshot of the device's hardware-controlled surfaces. Sent on
  * `hardware.state.get` and re-broadcast on any change.
  */
-export type HardwareState = { brightness: BrightnessState; ambientLight: number };
+export type HardwareState = { brightness: BrightnessState, ambientLight: number, };
 
 /**
  * One header on an HTTP request or response. Key order is preserved
  * across serialize/deserialize.
  */
-export type HttpHeader = { name: string; value: string };
+export type HttpHeader = { name: string, value: string, };
 
-export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
+export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
-export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8Array };
+export type Image = { "type": "id", "data": string } | { "type": "bytes", "data": Uint8Array };
 
 /**
  * What kind of outbound call the accessory wants placed.
  */
-export type InitiateCallType = 'destination' | 'voicemail' | 'redial';
+export type InitiateCallType = "destination" | "voicemail" | "redial";
 
 /**
  * Coarse type tag a webapp uses to filter or branch. Mirrors the variant
  * names of `LibraryItem`; kept separate so search/recommendations can
  * constrain by kind without having to construct a sample item.
  */
-export type ItemKind = 'track' | 'album' | 'playlist' | 'podcastEpisode' | 'show' | 'artist' | 'station';
+export type ItemKind = "track" | "album" | "playlist" | "podcastEpisode" | "show" | "artist" | "station";
 
 /**
  * Stable URI + kind a webapp passes back to act on a library item
@@ -345,13 +256,9 @@ export type ItemKind = 'track' | 'album' | 'playlist' | 'podcastEpisode' | 'show
  * `persistent_id` is the platform-stable id when the gateway has one;
  * webapps treat it as opaque.
  */
-export type ItemRef = { uri: string; kind: ItemKind; persistentId: string | null };
+export type ItemRef = { uri: string, kind: ItemKind, persistentId: string | null, };
 
-export type LibraryError =
-  | { type: 'notFound'; data: { uri: string } }
-  | { type: 'notSupported'; data: { reason: string } }
-  | { type: 'unauthorized' }
-  | { type: 'noGateway' };
+export type LibraryError = { "type": "notFound", "data": { uri: string, } } | { "type": "notSupported", "data": { reason: string, } } | { "type": "unauthorized" } | { "type": "noGateway" };
 
 /**
  * One playable / browsable item from the library. Lean per-variant
@@ -360,14 +267,7 @@ export type LibraryError =
  * adding new variants or fields is an additive change webapps can
  * branch on.
  */
-export type LibraryItem =
-  | { type: 'track'; data: Track }
-  | { type: 'album'; data: Album }
-  | { type: 'playlist'; data: Playlist }
-  | { type: 'podcastEpisode'; data: PodcastEpisode }
-  | { type: 'show'; data: Show }
-  | { type: 'artist'; data: Artist }
-  | { type: 'station'; data: Station };
+export type LibraryItem = { "type": "track", "data": Track } | { "type": "album", "data": Album } | { "type": "playlist", "data": Playlist } | { "type": "podcastEpisode", "data": PodcastEpisode } | { "type": "show", "data": Show } | { "type": "artist", "data": Artist } | { "type": "station", "data": Station };
 
 /**
  * One log record. `ts_unix_s` is unix-epoch seconds. `target` is the
@@ -375,16 +275,16 @@ export type LibraryItem =
  * body. Pre-filtered at subscription time so wire-bloating trace
  * events don't reach webapps.
  */
-export type LogEntry = { tsUnixS: number; level: LogLevel; target: string; message: string };
+export type LogEntry = { tsUnixS: number, level: LogLevel, target: string, message: string, };
 
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 /**
  * What stream of log records a subscription pulls from. `Daemon` is the
  * bridgething tracing subscriber; `System` is the `journald` view; `All`
  * merges both in arrival order.
  */
-export type LogSource = 'daemon' | 'system' | 'all';
+export type LogSource = "daemon" | "system" | "all";
 
 /**
  * Currently-playing track, populated to the extent the gateway/iAP2
@@ -392,24 +292,7 @@ export type LogSource = 'daemon' | 'system' | 'all';
  * as a separate attribute fetch on iAP2; the daemon accumulates and the
  * snapshot reflects whatever's known so far.
  */
-export type MediaItem = {
-  uri: string | null;
-  persistentId: string | null;
-  title: string | null;
-  album: string | null;
-  albumArtist: string | null;
-  artist: string | null;
-  liked: boolean | null;
-  artworkId: string | null;
-  durationMs: number | null;
-  mediaTypes: Array<MediaType> | null;
-  trackNumber: number | null;
-  trackCount: number | null;
-  isLikeSupported: boolean | null;
-  isBanSupported: boolean | null;
-  isBanned: boolean | null;
-  chapterCount: number | null;
-};
+export type MediaItem = { uri: string | null, persistentId: string | null, title: string | null, album: string | null, albumArtist: string | null, artist: string | null, liked: boolean | null, artworkId: string | null, durationMs: number | null, mediaTypes: Array<MediaType> | null, trackNumber: number | null, trackCount: number | null, isLikeSupported: boolean | null, isBanSupported: boolean | null, isBanned: boolean | null, chapterCount: number | null, };
 
 /**
  * Per-track attributes that vary per song. `persistent_id` is a stable
@@ -420,63 +303,35 @@ export type MediaItem = {
  * companion picks whatever shape it wants (e.g. `spotify/track/<id>/image`).
  * Webapps treat the value as opaque.
  */
-export type MediaItemUpdate = {
-  persistentId: string | null;
-  title: string | null;
-  album: string | null;
-  albumArtist: string | null;
-  artist: string | null;
-  liked: boolean | null;
-  artworkId: string | null;
-  durationMs: number | null;
-  mediaTypes: Array<MediaType> | null;
-  trackNumber: number | null;
-  trackCount: number | null;
-  isLikeSupported: boolean | null;
-  isBanSupported: boolean | null;
-  isBanned: boolean | null;
-  isResidentOnDevice: boolean | null;
-  chapterCount: number | null;
-};
+export type MediaItemUpdate = { persistentId: string | null, title: string | null, album: string | null, albumArtist: string | null, artist: string | null, liked: boolean | null, artworkId: string | null, durationMs: number | null, mediaTypes: Array<MediaType> | null, trackNumber: number | null, trackCount: number | null, isLikeSupported: boolean | null, isBanSupported: boolean | null, isBanned: boolean | null, isResidentOnDevice: boolean | null, chapterCount: number | null, };
 
 /**
  * The kind of media currently playing. Multi-typed: an item can be
  * e.g. both `Podcast` and `AudioBook` (rare). Drives webapp UI choices
  * like skip-15s-vs-skip-track and chapter UI.
  */
-export type MediaType = 'music' | 'podcast' | 'audioBook';
+export type MediaType = "music" | "podcast" | "audioBook";
 
 /**
  * Which music service the companion is currently logged into and
  * driving on behalf of the user. `None` when no glue is attached.
  */
-export type MusicProvider = 'none' | 'spotify' | 'appleMusic' | 'tidal';
+export type MusicProvider = "none" | "spotify" | "appleMusic" | "tidal";
 
-export type NetError =
-  | { type: 'requestFailed'; data: { reason: string } }
-  | { type: 'timeout' }
-  | { type: 'unavailable' }
-  | { type: 'noGateway' };
+export type NetError = { "type": "requestFailed", "data": { reason: string, } } | { "type": "timeout" } | { "type": "unavailable" } | { "type": "noGateway" };
 
-export type NetFetchRequest = {
-  url: string;
-  method: HttpMethod;
-  headers: Array<HttpHeader>;
-  body?: Uint8Array | null;
-  timeoutMs: number | null;
-  redirect: RedirectPolicy;
-};
+export type NetFetchRequest = { url: string, method: HttpMethod, headers: Array<HttpHeader>, body?: Uint8Array | null, timeoutMs: number | null, redirect: RedirectPolicy, };
 
-export type NetFetchResponse = { status: number; headers: Array<HttpHeader>; body: Uint8Array };
+export type NetFetchResponse = { status: number, headers: Array<HttpHeader>, body: Uint8Array, };
 
 /**
  * What kind of network the companion's host is currently using. `metered`
  * is the OS-reported metered flag; webapps should treat it as a hint
  * (e.g. defer non-essential fetches) rather than a hard ban.
  */
-export type NetworkInfo = { kind: NetworkKind; metered: boolean };
+export type NetworkInfo = { kind: NetworkKind, metered: boolean, };
 
-export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
+export type NetworkKind = "unknown" | "wifi" | "cellular" | "ethernet";
 
 /**
  * One notification surfaced from the connected companion's notification
@@ -485,24 +340,13 @@ export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
  * `onNotificationRemoved`. Bodies (`title`/`subtitle`/`message`) are all
  * optional because ANCS treats them as separate attribute fetches.
  */
-export type Notification = {
-  id: string;
-  app: NotificationApp;
-  category: NotificationCategory;
-  title: string | null;
-  subtitle: string | null;
-  message: string | null;
-  timestampUnixS: number | null;
-  flags: NotificationFlags;
-  positiveAction: NotificationAction | null;
-  negativeAction: NotificationAction | null;
-};
+export type Notification = { id: string, app: NotificationApp, category: NotificationCategory, title: string | null, subtitle: string | null, message: string | null, timestampUnixS: number | null, flags: NotificationFlags, positiveAction: NotificationAction | null, negativeAction: NotificationAction | null, };
 
 /**
  * One ANCS-style action slot. `label` is the gateway-localized prompt
  * the webapp renders on the action button.
  */
-export type NotificationAction = { label: string };
+export type NotificationAction = { label: string, };
 
 /**
  * Originating app metadata. `bundle_id` is platform-stable
@@ -510,21 +354,9 @@ export type NotificationAction = { label: string };
  * and `icon_asset_id` are best-effort and may be missing on Android
  * gateways that don't surface them cheaply.
  */
-export type NotificationApp = { bundleId: string; displayName: string | null; iconAssetId: string | null };
+export type NotificationApp = { bundleId: string, displayName: string | null, iconAssetId: string | null, };
 
-export type NotificationCategory =
-  | 'other'
-  | 'incomingCall'
-  | 'missedCall'
-  | 'voicemail'
-  | 'social'
-  | 'schedule'
-  | 'email'
-  | 'news'
-  | 'healthAndFitness'
-  | 'businessAndFinance'
-  | 'location'
-  | 'entertainment';
+export type NotificationCategory = "other" | "incomingCall" | "missedCall" | "voicemail" | "social" | "schedule" | "email" | "news" | "healthAndFitness" | "businessAndFinance" | "location" | "entertainment";
 
 /**
  * ANCS-shaped flags. `silent` mirrors the iOS "do not surface
@@ -532,7 +364,7 @@ export type NotificationCategory =
  * `pre_existing` is true for notifications that arrived before the
  * daemon connected (replayed by the companion on first sync).
  */
-export type NotificationFlags = { silent: boolean; important: boolean; preExisting: boolean };
+export type NotificationFlags = { silent: boolean, important: boolean, preExisting: boolean, };
 
 /**
  * Delta event the companion or iAP2 stream emits whenever a player
@@ -541,32 +373,17 @@ export type NotificationFlags = { silent: boolean; important: boolean; preExisti
  * optional: producers populate only what they have fresh information
  * about, and the daemon merges into stable internal state.
  */
-export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null; playback: PlaybackUpdate | null };
+export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null, playback: PlaybackUpdate | null, };
 
-export type NumberField = {
-  key: string;
-  label: string;
-  min: number | null;
-  max: number | null;
-  step: number | null;
-  default: number | null;
-};
+export type NumberField = { key: string, label: string, min: number | null, max: number | null, step: number | null, default: number | null, };
 
-export type OtaError = { code: OtaErrorCode; msg: string };
+export type OtaError = { code: OtaErrorCode, msg: string, };
 
 /**
  * Terminal error from the OTA orchestrator. After an `OtaError` the
  * orchestrator is back to idle and a fresh `OtaBegin` may be sent.
  */
-export type OtaErrorCode =
-  | 'unknownUpdate'
-  | 'offsetMismatch'
-  | 'hashMismatch'
-  | 'sizeMismatch'
-  | 'cancelled'
-  | 'writeFailed'
-  | 'confirmFailed'
-  | 'internal';
+export type OtaErrorCode = "unknownUpdate" | "offsetMismatch" | "hashMismatch" | "sizeMismatch" | "cancelled" | "writeFailed" | "confirmFailed" | "internal";
 
 /**
  * What the streamed bytes are going to be applied as. Image kind
@@ -578,7 +395,7 @@ export type OtaErrorCode =
  * power-cycles, daemon means the daemon process restarts and the
  * gateway link drops and reconnects.
  */
-export type OtaKind = 'image' | 'daemon';
+export type OtaKind = "image" | "daemon";
 
 /**
  * Stage of the OTA orchestrator. The phase set is shared between
@@ -594,28 +411,20 @@ export type OtaKind = 'image' | 'daemon';
  * `Confirming` is not emitted for daemon-kind: there is no slot
  * try-counter to flip; the rename is the commit point.
  */
-export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'reboot';
+export type OtaPhase = "streaming" | "verifying" | "writing" | "confirming" | "reboot";
 
 /**
  * Per-phase progress tick. `percent` is 0-100 within the current
  * phase, not the overall flow. `eta_ms` is best-effort remaining time
  * for the phase when the orchestrator can compute it.
  */
-export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
+export type OtaProgress = { phase: OtaPhase, percent: number, etaMs: number | null, };
 
-export type Peer = {
-  device: Device;
-  paired: boolean;
-  iap2: PeerIap2Status;
-  companion: PeerCompanionStatus;
-  displayName: string | null;
-  language: string | null;
-  uuid: string | null;
-};
+export type Peer = { device: Device, paired: boolean, iap2: PeerIap2Status, companion: PeerCompanionStatus, displayName: string | null, language: string | null, uuid: string | null, };
 
-export type PeerCompanionStatus = { type: 'none' } | { type: 'pending' } | { type: 'connected'; data: GatewayInfo };
+export type PeerCompanionStatus = { "type": "none" } | { "type": "pending" } | { "type": "connected", "data": GatewayInfo };
 
-export type PeerIap2Status = 'none' | 'linkUp' | 'authenticated' | 'identified';
+export type PeerIap2Status = "none" | "linkUp" | "authenticated" | "identified";
 
 /**
  * One telephony call. `call_id` is companion-stable for the call's
@@ -623,50 +432,27 @@ export type PeerIap2Status = 'none' | 'linkUp' | 'authenticated' | 'identified';
  * `remote_id` is the raw E.164 (or platform raw); `display_name` is the
  * gateway's resolved contact name when available.
  */
-export type PhoneCall = {
-  callId: string;
-  remoteId: string;
-  displayName: string;
-  status: PhoneCallStatus;
-  direction: PhoneCallDirection;
-  startedAtUnixS: number | null;
-  label: string | null;
-  addressBookId: string | null;
-  service: PhoneCallService | null;
-  isConferenced: boolean | null;
-  conferenceGroup: number | null;
-};
+export type PhoneCall = { callId: string, remoteId: string, displayName: string, status: PhoneCallStatus, direction: PhoneCallDirection, startedAtUnixS: number | null, label: string | null, addressBookId: string | null, service: PhoneCallService | null, isConferenced: boolean | null, conferenceGroup: number | null, };
 
-export type PhoneCallDirection = 'incoming' | 'outgoing';
+export type PhoneCallDirection = "incoming" | "outgoing";
 
 /**
  * Call bearer / service kind. iAP2's `CallStateUpdateService` enum
  * values, projected to our wire surface. Companion gateways that don't
  * distinguish bearers project all calls to `Telephony`.
  */
-export type PhoneCallService = 'unknown' | 'telephony' | 'faceTimeAudio' | 'faceTimeVideo';
+export type PhoneCallService = "unknown" | "telephony" | "faceTimeAudio" | "faceTimeVideo";
 
-export type PhoneCallStatus =
-  | 'disconnected'
-  | 'sending'
-  | 'ringing'
-  | 'connecting'
-  | 'active'
-  | 'held'
-  | 'disconnecting';
+export type PhoneCallStatus = "disconnected" | "sending" | "ringing" | "connecting" | "active" | "held" | "disconnecting";
 
-export type PhoneError =
-  | { type: 'callNotFound'; data: { call_id: string } }
-  | { type: 'actionRejected'; data: { reason: string } }
-  | { type: 'noTarget' }
-  | { type: 'unavailable'; data: { verb: string } };
+export type PhoneError = { "type": "callNotFound", "data": { call_id: string, } } | { "type": "actionRejected", "data": { reason: string, } } | { "type": "noTarget" } | { "type": "unavailable", "data": { verb: string, } };
 
 /**
  * Snapshot of every active call known to the gateway. Multi-call is
  * possible (call-waiting, conference) - webapps rendering only one
  * active call typically pick the first non-Held entry.
  */
-export type PhoneState = { activeCalls: Array<PhoneCall> };
+export type PhoneState = { activeCalls: Array<PhoneCall>, };
 
 /**
  * Optional context for `play({ uri })`. `context_uri` is the album /
@@ -674,7 +460,7 @@ export type PhoneState = { activeCalls: Array<PhoneCall> };
  * playlist support honor it for skip-next semantics. `position` is the
  * 0-based index inside the context.
  */
-export type PlayContext = { contextUri: string; position: number | null };
+export type PlayContext = { contextUri: string, position: number | null, };
 
 /**
  * Per-session playback snapshot: where in the song we are, what mode is
@@ -686,42 +472,20 @@ export type PlayContext = { contextUri: string; position: number | null };
  * thumb. `None` means unknown (no signal received yet); webapps treat
  * unknown as "available" for backward compatibility with older gateways.
  */
-export type Playback = {
-  state: PlaybackState;
-  positionMs: number;
-  shuffle: boolean;
-  shuffleMode: ShuffleMode | null;
-  repeat: RepeatMode;
-  queueIndex: number | null;
-  queueCount: number | null;
-  queueChapterIndex: number | null;
-  setElapsedTimeAvailable: boolean | null;
-  queueListAvail: boolean | null;
-  appleMusicRadioAd: boolean | null;
-};
+export type Playback = { state: PlaybackState, positionMs: number, shuffle: boolean, shuffleMode: ShuffleMode | null, repeat: RepeatMode, queueIndex: number | null, queueCount: number | null, queueChapterIndex: number | null, setElapsedTimeAvailable: boolean | null, queueListAvail: boolean | null, appleMusicRadioAd: boolean | null, };
 
-export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
+export type PlaybackOptions = { repeat: RepeatMode, shuffle: boolean, };
 
-export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
+export type PlaybackQueue = { next: Array<Track>, current: Track, previous: Array<Track>, };
 
-export type PlaybackRestrictions = {
-  can_repeat_context: boolean;
-  can_repeat_track: boolean;
-  can_seek: boolean;
-  can_skip_next: boolean;
-  can_skip_prev: boolean;
-  can_toggle_shuffle: boolean;
-  can_like: boolean;
-  can_change_volume: boolean;
-  can_set_output: boolean;
-};
+export type PlaybackRestrictions = { can_repeat_context: boolean, can_repeat_track: boolean, can_seek: boolean, can_skip_next: boolean, can_skip_prev: boolean, can_toggle_shuffle: boolean, can_like: boolean, can_change_volume: boolean, can_set_output: boolean, };
 
 /**
  * Three-state playback. `Stopped` is the no-track-loaded resting state;
  * `Paused` is "track is loaded, position is held"; `Playing` is the
  * progressing state.
  */
-export type PlaybackState = 'stopped' | 'paused' | 'playing';
+export type PlaybackState = "stopped" | "paused" | "playing";
 
 /**
  * Per-playback-session attributes that vary regardless of track:
@@ -734,29 +498,9 @@ export type PlaybackState = 'stopped' | 'paused' | 'playing';
  * scrub UI: when false, scrubbing is unsupported by the foreground
  * app and the seek button must be disabled.
  */
-export type PlaybackUpdate = {
-  playing: boolean | null;
-  positionMs: number | null;
-  shuffle: boolean | null;
-  shuffleMode: ShuffleMode | null;
-  repeat: RepeatMode | null;
-  appBundle: string | null;
-  appDisplayName: string | null;
-  queueIndex: number | null;
-  queueCount: number | null;
-  queueChapterIndex: number | null;
-  playbackSpeed: number | null;
-  setElapsedTimeAvailable: boolean | null;
-  queueListAvail: boolean | null;
-  appleMusicRadioAd: boolean | null;
-  appleMusicRadioStationName: string | null;
-};
+export type PlaybackUpdate = { playing: boolean | null, positionMs: number | null, shuffle: boolean | null, shuffleMode: ShuffleMode | null, repeat: RepeatMode | null, appBundle: string | null, appDisplayName: string | null, queueIndex: number | null, queueCount: number | null, queueChapterIndex: number | null, playbackSpeed: number | null, setElapsedTimeAvailable: boolean | null, queueListAvail: boolean | null, appleMusicRadioAd: boolean | null, appleMusicRadioStationName: string | null, };
 
-export type PlayerError =
-  | { type: 'schemeUnclaimed'; data: { scheme: string } }
-  | { type: 'playFailed'; data: { reason: string } }
-  | { type: 'noGateway' }
-  | { type: 'notInQueue'; data: { index: number } };
+export type PlayerError = { "type": "schemeUnclaimed", "data": { scheme: string, } } | { "type": "playFailed", "data": { reason: string, } } | { "type": "noGateway" } | { "type": "notInQueue", "data": { index: number, } };
 
 /**
  * User-tunable knobs that are not "currently playing" state.
@@ -764,7 +508,7 @@ export type PlayerError =
  * distinguishes "user explicitly set zero" from "feature unsupported by
  * gateway".
  */
-export type PlayerOptions = { speed: number; crossfade_ms: number | null };
+export type PlayerOptions = { speed: number, crossfade_ms: number | null, };
 
 /**
  * Full player snapshot the daemon broadcasts to webapps. Initial value
@@ -772,12 +516,7 @@ export type PlayerOptions = { speed: number; crossfade_ms: number | null };
  * subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
  * merges into the cached snapshot.
  */
-export type PlayerState = {
-  track: MediaItem | null;
-  playback: Playback;
-  queue: Array<QueueItem>;
-  options: PlayerOptions;
-};
+export type PlayerState = { track: MediaItem | null, playback: Playback, queue: Array<QueueItem>, options: PlayerOptions, };
 
 /**
  * Lean cross-platform shape for a playlist. `uri` is what `player.play`
@@ -785,13 +524,7 @@ export type PlayerState = {
  * it cheaply); `owner_name` is whatever the source surfaces (Spotify
  * owner, Apple Music curator, etc.).
  */
-export type Playlist = {
-  uri: string;
-  name: string;
-  ownerName: string | null;
-  trackCount: number | null;
-  artworkId: string | null;
-};
+export type Playlist = { uri: string, name: string, ownerName: string | null, trackCount: number | null, artworkId: string | null, };
 
 /**
  * One episode of a podcast. `show_name` mirrors what the gateway exposes
@@ -799,14 +532,7 @@ export type Playlist = {
  * separate fetch. `published_at_ms` is best-effort; not every gateway
  * surfaces it.
  */
-export type PodcastEpisode = {
-  uri: string;
-  name: string;
-  showName: string | null;
-  durationMs: number | null;
-  publishedAtUnixS: number | null;
-  artworkId: string | null;
-};
+export type PodcastEpisode = { uri: string, name: string, showName: string | null, durationMs: number | null, publishedAtUnixS: number | null, artworkId: string | null, };
 
 /**
  * One position fix from the gateway. `accuracy_m` is the 1-sigma
@@ -815,17 +541,9 @@ export type PodcastEpisode = {
  * fixes; Android's FusedLocationProvider similar). `ts_ms` is the
  * gateway-provided fix timestamp, not the wire-arrival time.
  */
-export type Position = {
-  lat: number;
-  lon: number;
-  altM: number | null;
-  accuracyM: number;
-  speedMps: number | null;
-  headingDeg: number | null;
-  tsUnixS: number;
-};
+export type Position = { lat: number, lon: number, altM: number | null, accuracyM: number, speedMps: number | null, headingDeg: number | null, tsUnixS: number, };
 
-export type Priority = 'normal' | 'bulk';
+export type Priority = "normal" | "bulk";
 
 /**
  * One row in the player queue. Lean cross-platform shape - gateways
@@ -834,28 +552,20 @@ export type Priority = 'normal' | 'bulk';
  * `skipToIndex`. `persistent_id` is the platform-stable id when
  * available; webapps treat it as opaque.
  */
-export type QueueItem = {
-  uri: string;
-  title: string | null;
-  artist: string | null;
-  album: string | null;
-  artworkId: string | null;
-  durationMs: number | null;
-  persistentId: string | null;
-};
+export type QueueItem = { uri: string, title: string | null, artist: string | null, album: string | null, artworkId: string | null, durationMs: number | null, persistentId: string | null, };
 
 /**
  * Where in the queue a `queue({ uri })` should land. `Append` (default)
  * goes at the end; `Next` is play-next; `Index` is an explicit position.
  */
-export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'index'; data: number };
+export type QueuePosition = { "type": "append" } | { "type": "next" } | { "type": "index", "data": number };
 
 /**
  * Resolved range the companion is about to stream. `start` and `length`
  * echo the corresponding `RangeSpec`; the bytes follow as
  * `OtaAssetRangeChunk` events on the Bulk lane.
  */
-export type RangePart = { start: number; length: number };
+export type RangePart = { start: number, length: number, };
 
 /**
  * Half-open byte range the daemon's range proxy asks the companion
@@ -865,60 +575,42 @@ export type RangePart = { start: number; length: number };
  * delta downloader emits. Offsets are u32 because OTA artifacts are
  * bounded at 4 GiB end-to-end (matches `OtaBegin.expected_size`).
  */
-export type RangeSpec = { start: number; length: number };
+export type RangeSpec = { start: number, length: number, };
 
 /**
  * Page of recommendation results. Gateway decides how seed + kind
  * interact (Spotify uses radio-style seeding, Apple Music uses curated
  * rails) - the daemon doesn't prescribe.
  */
-export type RecommendationsResult = { items: Array<LibraryItem>; total: number | null; hasMore: boolean };
+export type RecommendationsResult = { items: Array<LibraryItem>, total: number | null, hasMore: boolean, };
 
-export type RedirectPolicy = 'follow' | 'manual' | 'error';
+export type RedirectPolicy = "follow" | "manual" | "error";
 
 /**
  * Cellular registration state - populated from iAP2 `CommunicationsUpdate`
  * or the companion's equivalent.
  */
-export type RegistrationStatus =
-  | 'unknown'
-  | 'notRegistered'
-  | 'searching'
-  | 'denied'
-  | 'registeredHome'
-  | 'registeredRoaming'
-  | 'emergencyCallsOnly';
+export type RegistrationStatus = "unknown" | "notRegistered" | "searching" | "denied" | "registeredHome" | "registeredRoaming" | "emergencyCallsOnly";
 
 /**
  * `repeat` is a typed enum (Off/All/One) shared across the player
  * surface and the iAP2 NowPlaying CSM / MediaSession backends, which
  * all expose three repeat states.
  */
-export type RepeatMode = 'off' | 'all' | 'one';
+export type RepeatMode = "off" | "all" | "one";
 
 /**
  * Page of search results. `kinds` is the constrained kinds the search
  * honored (echoed back so webapps can detect ignored constraints); items
  * are ranked best-first.
  */
-export type SearchResult = {
-  items: Array<LibraryItem>;
-  kinds: Array<ItemKind>;
-  total: number | null;
-  hasMore: boolean;
-};
+export type SearchResult = { items: Array<LibraryItem>, kinds: Array<ItemKind>, total: number | null, hasMore: boolean, };
 
 /**
  * One podcast show (parent of `PodcastEpisode`). `episode_count` is
  * best-effort.
  */
-export type Show = {
-  uri: string;
-  name: string;
-  publisher: string | null;
-  episodeCount: number | null;
-  artworkId: string | null;
-};
+export type Show = { uri: string, name: string, publisher: string | null, episodeCount: number | null, artworkId: string | null, };
 
 /**
  * Three-state shuffle. iAP2 and Apple Music distinguish track-level
@@ -926,13 +618,13 @@ export type Show = {
  * project to `Songs` when on. Webapps that just need an on/off signal
  * read `shuffle_on` (None when the underlying mode is unknown).
  */
-export type ShuffleMode = 'off' | 'songs' | 'albums';
+export type ShuffleMode = "off" | "songs" | "albums";
 
 /**
  * Algorithmic / radio station. `seed` is the URI the station was seeded
  * from when known (artist, track, etc.).
  */
-export type Station = { uri: string; name: string; seed: string | null; artworkId: string | null };
+export type Station = { uri: string, name: string, seed: string | null, artworkId: string | null, };
 
 /**
  * First event of an open stream. Carries the response status, headers,
@@ -940,35 +632,28 @@ export type Station = { uri: string; name: string; seed: string | null; artworkI
  * or display progress. Subsequent `StreamChunk` and `StreamEnd` events
  * for the same `stream_id` follow.
  */
-export type StreamBegin = { streamId: string; status: number; headers: Array<HttpHeader>; totalSize: number | null };
+export type StreamBegin = { streamId: string, status: number, headers: Array<HttpHeader>, totalSize: number | null, };
 
 /**
  * One body chunk. Chunks arrive in order; `offset` is the byte
  * position of `bytes[0]` within the full body.
  */
-export type StreamChunk = { streamId: string; offset: number; bytes: Uint8Array };
+export type StreamChunk = { streamId: string, offset: number, bytes: Uint8Array, };
 
 /**
  * Terminates a stream. After `End` no further chunks for `stream_id`
  * are valid and the daemon clears its routing entry.
  */
-export type StreamEnd = { streamId: string };
+export type StreamEnd = { streamId: string, };
 
 /**
  * Stream failed mid-flight (or before the first byte). Terminal - the
  * daemon clears its routing entry. The `error` shape is shared with
  * `fetch` since the failure modes are identical.
  */
-export type StreamError = { streamId: string; error: NetError };
+export type StreamError = { streamId: string, error: NetError, };
 
-export type StringField = {
-  key: string;
-  label: string;
-  pattern: string | null;
-  minLength: number | null;
-  maxLength: number | null;
-  default: string | null;
-};
+export type StringField = { key: string, label: string, pattern: string | null, minLength: number | null, maxLength: number | null, default: string | null, };
 
 /**
  * Bool feature flags the daemon exposes to webapps. Each is true when the
@@ -976,14 +661,7 @@ export type StringField = {
  * connected companion claiming to provide it. False = the surface will
  * respond `Unsupported` or `Unimplemented` to verbs.
  */
-export type SurfaceAvailability = {
-  geo: boolean;
-  notifications: boolean;
-  netFetch: boolean;
-  netWs: boolean;
-  audioTts: boolean;
-  lyrics: boolean;
-};
+export type SurfaceAvailability = { geo: boolean, notifications: boolean, netFetch: boolean, netWs: boolean, audioTts: boolean, lyrics: boolean, };
 
 /**
  * Wall clock + locale snapshot. `wall_clock_unix_s` is the gateway's
@@ -997,70 +675,38 @@ export type SurfaceAvailability = {
  * separate `dst_offset_minutes`. Webapps prefer `tz_iana` when present
  * and fall back to the offset pair.
  */
-export type TimeInfo = {
-  tzIana: string | null;
-  locale: string | null;
-  wallClockUnixS: number | null;
-  utcOffsetMinutes: number | null;
-  dstOffsetMinutes: number | null;
-};
+export type TimeInfo = { tzIana: string | null, locale: string | null, wallClockUnixS: number | null, utcOffsetMinutes: number | null, dstOffsetMinutes: number | null, };
 
-export type Track = {
-  id: string;
-  name: string;
-  album: Album;
-  artist: Artist;
-  artists: Array<Artist>;
-  duration_ms: number;
-  image_id: string;
-  saved: boolean;
-};
+export type Track = { id: string, name: string, album: Album, artist: Artist, artists: Array<Artist>, duration_ms: number, image_id: string, saved: boolean, };
 
-export type TtlRetention = { seconds: number };
+export type TtlRetention = { seconds: number, };
 
-export type TunnelClosed = { tunnelId: string; reason: string | null };
+export type TunnelClosed = { tunnelId: string, reason: string | null, };
 
-export type TunnelData = { tunnelId: string; bytes: Uint8Array };
+export type TunnelData = { tunnelId: string, bytes: Uint8Array, };
 
-export type TunnelError =
-  | { type: 'connectFailed'; data: { reason: string } }
-  | { type: 'permissionDenied' }
-  | { type: 'unavailable' };
+export type TunnelError = { "type": "connectFailed", "data": { reason: string, } } | { "type": "permissionDenied" } | { "type": "unavailable" };
 
 /**
  * One TTS voice the companion's audio backend can speak as. `id` is
  * platform-opaque (Apple/Android voice id); `locale` is BCP-47.
  */
-export type VoiceDescriptor = { id: string; name: string; locale: string };
+export type VoiceDescriptor = { id: string, name: string, locale: string, };
 
-export type WebappInfo = {
-  id: string;
-  name: string;
-  source: WebappSource;
-  role: WebappRole;
-  version: string;
-  description: string | null;
-  iconAvailable: boolean;
-  iconMime: string | null;
-  config: Array<ConfigField>;
-  permissions: Array<string>;
-};
+/**
+ * Domain errors emitted by any webapp surface (gateway- or client-side).
+ * Single catalog: both protocols speak the same variant set.
+ */
+export type WebappError = { "type": "webappNotFound", "data": { id: string, } } | { "type": "cannotUninstallBuiltin", "data": { id: string, } } | { "type": "idReserved", "data": { id: string, } } | { "type": "archiveSha256Mismatch" } | { "type": "archiveSizeMismatch" } | { "type": "extractedTooLarge", "data": { max_bytes: number, } } | { "type": "zipMalformed", "data": { reason: string, } } | { "type": "missingIndexHtml" } | { "type": "invalidManifest", "data": { reason: string, } } | { "type": "archiveTransferNotFound", "data": { install_id: string, } } | { "type": "iconNotAvailable", "data": { id: string, } } | { "type": "unknownConfigKey", "data": { key: string, } } | { "type": "invalidConfigValue", "data": { key: string, reason: string, } } | { "type": "internal", "data": { reason: string, } };
+
+export type WebappInfo = { id: string, name: string, source: WebappSource, role: WebappRole, version: string, description: string | null, iconAvailable: boolean, iconMime: string | null, config: Array<ConfigField>, permissions: Array<string>, };
 
 /**
  * On-disk `manifest.json` shape. Read from the bundle at install time
  * and validated; the resulting metadata projects to `WebappInfo` for
  * the wire.
  */
-export type WebappManifest = {
-  id: string;
-  name: string;
-  version: string;
-  description: string | null;
-  icon: string | null;
-  role: WebappRole;
-  config: Array<ConfigField>;
-  permissions: Array<string>;
-};
+export type WebappManifest = { id: string, name: string, version: string, description: string | null, icon: string | null, role: WebappRole, config: Array<ConfigField>, permissions: Array<string>, };
 
 /**
  * A webapp's launcher visibility. `Standard` shows up in user-facing
@@ -1068,14 +714,10 @@ export type WebappManifest = {
  * hidden from those listings. The daemon filters `Launcher` bundles
  * out of `client.webapp.list`; the gateway list keeps everything.
  */
-export type WebappRole = 'standard' | 'launcher';
+export type WebappRole = "standard" | "launcher";
 
-export type WebappSource = 'builtin' | 'installed';
+export type WebappSource = "builtin" | "installed";
 
-export type WsError =
-  | { type: 'connectFailed'; data: { reason: string } }
-  | { type: 'frameTooLarge' }
-  | { type: 'gatewayDisconnected' }
-  | { type: 'protocolError'; data: { reason: string } };
+export type WsError = { "type": "connectFailed", "data": { reason: string, } } | { "type": "frameTooLarge" } | { "type": "gatewayDisconnected" } | { "type": "protocolError", "data": { reason: string, } };
 
-export type WsFrame = { type: 'text'; data: string } | { type: 'binary'; data: Uint8Array };
+export type WsFrame = { "type": "text", "data": string } | { "type": "binary", "data": Uint8Array };

@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{ConfigEntry, WebappInfo};
+use crate::{ConfigEntry, WebappError, WebappInfo};
 
 #[typeshare]
 #[serde_with::serde_as]
@@ -73,6 +73,33 @@ pub struct WebappActive {
   pub name: Option<String>,
 }
 
+/// Successful response to `WebappInstallBegin`. The companion's next
+/// `WebappInstallChunk` should start at `resume_from_offset`; 0 for a
+/// fresh push, or the byte count already on disk when resuming a
+/// partial after disconnect.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappInstallBeginAck {
+  pub resume_from_offset: u32,
+}
+
+/// Asynchronous failure of an in-flight install after the upload
+/// completed (post-stream verify failed, extract failed, validation
+/// failed, etc). Pairs with `WebappInstalled` as the terminal-event
+/// duo for an install.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappInstallFailed {
+  pub install_id: String,
+  pub error: WebappError,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
@@ -89,14 +116,14 @@ pub enum BridgeToGatewayWebappMsg {
   /// response to SwitchTo indicating the new active app
   #[bridge_response]
   Switched(WebappActive),
-  /// response to Install indicating the freshly installed app's metadata
+  /// response to InstallBegin indicating the resume offset for the next chunk
   #[bridge_response]
-  Installed(WebappInfo),
+  InstallBeginAck(WebappInstallBeginAck),
   /// response to Uninstall carrying the active app after the uninstall settled
   #[bridge_response]
   Uninstalled(WebappActive),
-  /// domain-level error response for any webapp op (e.g. UnknownWebapp,
-  /// CannotUninstallBuiltin)
+  /// domain-level error response for any webapp op (e.g. WebappNotFound,
+  /// CannotUninstallBuiltin, ArchiveTransferNotFound)
   #[bridge_response]
   WebappError(WebappError),
   #[bridge_response]
@@ -107,25 +134,12 @@ pub enum BridgeToGatewayWebappMsg {
   ConfigList(WebappConfigListReply),
   #[bridge_response]
   ConfigAck(WebappConfigAck),
-}
-
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub enum WebappError {
-  /// No installed webapp matches this id.
-  WebappNotFound { id: String },
-  /// Built-in webapps cannot be uninstalled.
-  CannotUninstallBuiltin { id: String },
-  /// The install archive could not be applied (corrupt zip, missing
-  /// index.html, manifest validation failed, etc).
-  InstallFailed { reason: String },
-  /// The webapp's manifest doesn't declare an icon (or it's missing on disk).
-  IconNotAvailable { id: String },
-  /// Config key is not declared in the webapp's manifest schema.
-  UnknownConfigKey { key: String },
-  /// Value failed schema validation (out of range, regex mismatch, not in enum).
-  InvalidConfigValue { key: String, reason: String },
+  /// event: a chunked install completed successfully; carries the
+  /// installed webapp's metadata.
+  #[bridge_event]
+  WebappInstalled(WebappInfo),
+  /// event: a chunked install failed post-upload (verify / extract /
+  /// validate); carries the install_id and a typed `WebappError`.
+  #[bridge_event]
+  WebappInstallFailed(WebappInstallFailed),
 }
