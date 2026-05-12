@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BRIDGETHING_DEVICE_CLIENT_ID</key>
+	<string>$(BRIDGETHING_DEVICE_CLIENT_ID)</string>
+	<key>BRIDGETHING_PKCE_CLIENT_ID</key>
+	<string>$(BRIDGETHING_PKCE_CLIENT_ID)</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -24,12 +28,22 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>BRIDGETHING_DEVICE_CLIENT_ID</key>
-	<string>$(BRIDGETHING_DEVICE_CLIENT_ID)</string>
-	<key>BRIDGETHING_PKCE_CLIENT_ID</key>
-	<string>$(BRIDGETHING_PKCE_CLIENT_ID)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAccessorySetupBluetoothNames</key>
+	<array>
+		<string>Bridgething</string>
+	</array>
+	<key>NSAccessorySetupBluetoothServices</key>
+	<array>
+		<string>B12BE732-C1D0-4001-8001-BB1D6E7A1C01</string>
+	</array>
+	<key>NSAccessorySetupKitSupports</key>
+	<array>
+		<string>Bluetooth</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -37,24 +51,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>NSAccessorySetupKitSupports</key>
-	<array>
-		<string>Bluetooth</string>
-	</array>
-	<key>NSAccessorySetupBluetoothServices</key>
-	<array>
-		<string>B12BE732-C1D0-4001-8001-BB1D6E7A1C01</string>
-	</array>
-	<key>NSAccessorySetupBluetoothNames</key>
-	<array>
-		<string>Bridgething</string>
-	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>bridgething uses Bluetooth to connect to your Car Thing.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>bridgething forwards your location to Car Thing webapps that ask for it (weather, navigation, and similar).</string>
+	<string>bridgething forwards your location to Car Thing webapps that ask for it (weather, navigation, etc).</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIBackgroundModes</key>
@@ -87,5 +87,19 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Medium.ttf</string>
+		<string>Outfit-Bold.ttf</string>
+		<string>Outfit-Regular.ttf</string>
+		<string>Outfit-SemiBold.ttf</string>
+		<string>Outfit-ExtraLight.ttf</string>
+		<string>Inter-Bold.ttf</string>
+		<string>Outfit-ExtraBold.ttf</string>
+		<string>Inter-Regular.ttf</string>
+		<string>Outfit-Medium.ttf</string>
+		<string>Outfit-Light.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+	</array>
 </dict>
 </plist>

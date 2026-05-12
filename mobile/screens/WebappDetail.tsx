@@ -2,9 +2,22 @@ import {
   type BridgethingConfigEntry,
   type BridgethingConfigField,
   type BridgethingWebappInfo,
-  peerDisplayName,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  Bell,
+  Cable,
+  Globe,
+  type LucideIcon,
+  MapPin,
+  Mic,
+  Play,
+  RotateCcw,
+  Shield,
+  Speaker,
+  Trash2,
+  Wifi,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,26 +33,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
-import { Card } from '../components/Card';
-import { Empty, Section } from '../components/Section';
-import { getSession, useSessionValue } from '../lib/session';
+import { ListGroup } from '../components/ListGroup';
+import { ListRow } from '../components/ListRow';
+import { Pill } from '../components/Pill';
+import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import {
+  getSession,
+  peerDisplayName,
+  useSession,
+} from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WebappDetail'>;
 
-/**
- * Detail view for one installed webapp on a specific device. Keyed by
- * {deviceId, webappId} — the same app installed on two devices opens
- * as two separate detail screens with their own per-device config.
- */
 export function WebappDetailScreen({ navigation, route }: Props) {
   const session = getSession();
   const { deviceId, id } = route.params;
 
-  const peer = useSessionValue(
-    s => s.cachedPeers.find(p => p.id === deviceId) ?? null,
-    ['peerConnected', 'peerDisconnected'],
-  );
+  const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
+  const nicknames = useSession(s => s.nicknames);
 
   const [info, setInfo] = useState<BridgethingWebappInfo | null>(null);
   const [iconUri, setIconUri] = useState<string | null>(null);
@@ -55,9 +67,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
       setInfo(match);
       if (match?.iconAvailable) {
         const icon = await session.webappIcon(deviceId, match.id);
-        if (icon) {
-          setIconUri(`data:${icon.mime ?? 'image/png'};base64,${icon.base64}`);
-        }
+        if (icon) setIconUri(icon.fileUri);
       }
       const config = await session.listWebappConfig(deviceId, id);
       setEntries(toMap(config));
@@ -142,107 +152,146 @@ export function WebappDetailScreen({ navigation, route }: Props) {
       >
         {loadError ? (
           <View className="px-6">
-            <Text className="text-sm text-destructive">{loadError}</Text>
+            <Text className="text-center text-[14px] text-destructive">
+              {loadError}
+            </Text>
           </View>
         ) : (
-          <ActivityIndicator size="small" />
+          <ActivityIndicator size="small" color="hsl(199 100% 44%)" />
         )}
       </SafeAreaView>
     );
   }
 
+  const builtin = info.source === 'builtin';
+
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView contentContainerClassName="px-5 pb-8 pt-2">
-        <Section>
-          <Card>
-            <View className="flex-row items-center gap-3">
-              {iconUri ? (
-                <Image
-                  source={{ uri: iconUri }}
-                  className="h-16 w-16 rounded"
-                />
-              ) : (
-                <View className="h-16 w-16 items-center justify-center rounded bg-muted">
-                  <Text className="text-2xl font-bold text-muted-foreground">
-                    {info.name.slice(0, 1).toUpperCase()}
-                  </Text>
-                </View>
-              )}
-              <View className="flex-1">
-                <Text className="text-base font-semibold text-card-foreground">
-                  {info.name}
-                </Text>
-                <Text className="mt-0.5 text-xs text-muted-foreground">
-                  v{info.version}
-                  {info.source === 'builtin' ? ' · built-in' : ''}
-                </Text>
-                {peer ? (
-                  <Text className="mt-0.5 text-xs text-muted-foreground">
-                    on {peerDisplayName(peer)}
-                  </Text>
-                ) : null}
-                {info.description ? (
-                  <Text className="mt-1 text-xs text-muted-foreground">
-                    {info.description}
-                  </Text>
-                ) : null}
-              </View>
+      <ScrollView
+        contentContainerClassName="px-5 pb-12 pt-3"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          className="mb-6 flex-row items-center gap-4 rounded-2xl border border-border bg-surface p-4"
+          style={{
+            shadowColor: '#000',
+            shadowOpacity: 0.06,
+            shadowRadius: 14,
+            shadowOffset: { width: 0, height: 6 },
+          }}
+        >
+          {iconUri ? (
+            <Image
+              source={{ uri: iconUri }}
+              className="h-[64px] w-[64px] rounded-2xl"
+            />
+          ) : (
+            <View className="h-[64px] w-[64px] items-center justify-center rounded-2xl bg-secondary">
+              <Text className="text-[24px] font-extrabold text-foreground">
+                {info.name.slice(0, 1).toUpperCase()}
+              </Text>
             </View>
-          </Card>
-        </Section>
+          )}
+          <View className="flex-1">
+            <Text
+              className="text-[20px] font-extrabold leading-[24px] text-foreground"
+              numberOfLines={2}
+              style={{ letterSpacing: -0.4 }}
+            >
+              {info.name}
+            </Text>
+            <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+              v{info.version}
+            </Text>
+            <View className="mt-2 flex-row flex-wrap gap-1.5">
+              {builtin ? (
+                <Pill tone="neutral">built-in</Pill>
+              ) : (
+                <Pill tone="primary">installed</Pill>
+              )}
+              {peer ? (
+                <Pill tone="neutral" dot={false}>
+                  {peerDisplayName(peer, nicknames)}
+                </Pill>
+              ) : null}
+            </View>
+          </View>
+        </View>
 
-        <Section title="actions">
-          <View className="flex-row gap-2">
+        {info.description ? (
+          <Text className="mb-6 px-1 text-[14px] leading-[20px] text-muted-foreground">
+            {info.description}
+          </Text>
+        ) : null}
+
+        <View className="mb-8 flex-row gap-2">
+          <View className="flex-1">
             <Button
               onPress={switchActive}
               loading={busy === 'switch'}
               variant="primary"
+              icon={Play}
             >
               switch to this
             </Button>
-            {info.source !== 'builtin' ? (
+          </View>
+          {!builtin ? (
+            <View className="flex-1">
               <Button
                 onPress={uninstall}
                 loading={busy === 'uninstall'}
                 variant="destructive"
+                icon={Trash2}
               >
                 uninstall
               </Button>
-            ) : null}
-          </View>
-        </Section>
+            </View>
+          ) : null}
+        </View>
 
-        <Section title="settings">
-          {info.config.length === 0 ? (
-            <Empty>this app has no user-tunable settings</Empty>
-          ) : (
-            info.config.map(field => (
-              <View key={field.key} className="mb-3">
+        {info.config.length > 0 ? (
+          <View className="mb-8">
+            <SectionHeader title="settings" hint="changes save on commit" />
+            <View className="gap-3">
+              {info.config.map(field => (
                 <ConfigEditor
+                  key={field.key}
                   field={field}
                   value={entries[field.key] ?? field.defaultValue ?? ''}
                   onCommit={value => writeField(field.key, value)}
                   onReset={() => resetField(field.key)}
                 />
-              </View>
-            ))
-          )}
-        </Section>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View className="mb-8">
+            <SectionHeader title="settings" />
+            <SectionEmpty>this app has no user-tunable settings</SectionEmpty>
+          </View>
+        )}
 
         {info.permissions.length > 0 ? (
-          <Section title="permissions">
-            <Card>
-              {info.permissions.map(p => (
-                <Text
-                  key={p}
-                  className="font-mono text-xs text-card-foreground"
-                >
-                  {p}
-                </Text>
-              ))}
-            </Card>
-          </Section>
+          <View>
+            <SectionHeader
+              title="what this webapp can do"
+              hint="granted automatically; capabilities your phone offers are in Settings → Advanced"
+            />
+            <ListGroup>
+              {info.permissions.map(p => {
+                const meta = humanizePermission(p);
+                return (
+                  <ListRow
+                    key={p}
+                    icon={meta.icon}
+                    iconTint="default"
+                    title={meta.title}
+                    subtitle={meta.subtitle}
+                  />
+                );
+              })}
+            </ListGroup>
+          </View>
         ) : null}
       </ScrollView>
     </SafeAreaView>
@@ -261,14 +310,27 @@ function ConfigEditor({
   onReset: () => void;
 }) {
   return (
-    <View>
-      <View className="mb-1 flex-row items-baseline justify-between">
-        <Text className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+    <View
+      className="rounded-2xl border border-border bg-surface p-4"
+      style={{
+        shadowColor: '#000',
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 3 },
+      }}
+    >
+      <View className="mb-2 flex-row items-center justify-between">
+        <Text className="flex-1 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
           {field.label}
         </Text>
         {field.defaultValue !== undefined ? (
-          <Pressable onPress={onReset}>
-            <Text className="text-[11px] text-muted-foreground underline">
+          <Pressable
+            onPress={onReset}
+            hitSlop={10}
+            className="flex-row items-center gap-1"
+          >
+            <RotateCcw size={11} color="hsl(199 100% 44%)" strokeWidth={2.4} />
+            <Text className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
               reset
             </Text>
           </Pressable>
@@ -295,10 +357,15 @@ function ConfigInput({
     case 'boolean': {
       const on = value === 'true';
       return (
-        <Switch
-          value={on}
-          onValueChange={next => onCommit(next ? 'true' : 'false')}
-        />
+        <View className="flex-row items-center justify-between">
+          <Text className="text-[14px] text-foreground">
+            {on ? 'enabled' : 'disabled'}
+          </Text>
+          <Switch
+            value={on}
+            onValueChange={next => onCommit(next ? 'true' : 'false')}
+          />
+        </View>
       );
     }
     case 'enum': {
@@ -310,10 +377,10 @@ function ConfigInput({
               <Pressable
                 key={choice}
                 onPress={() => onCommit(choice)}
-                className={`m-1 rounded-md px-3 py-1.5 ${selected ? 'bg-primary' : 'bg-secondary'}`}
+                className={`m-1 rounded-full px-3 py-1.5 ${selected ? 'bg-primary' : 'bg-secondary'}`}
               >
                 <Text
-                  className={`text-sm font-semibold ${selected ? 'text-primary-foreground' : 'text-secondary-foreground'}`}
+                  className={`text-[13px] font-semibold ${selected ? 'text-primary-foreground' : 'text-secondary-foreground'}`}
                 >
                   {choice}
                 </Text>
@@ -330,8 +397,8 @@ function ConfigInput({
           onChangeText={setDraft}
           onEndEditing={() => onCommit(draft)}
           keyboardType="numeric"
-          placeholderTextColor="#888"
-          className="rounded-md bg-card px-3 py-3 text-sm text-card-foreground"
+          placeholderTextColor="hsl(215 14% 55%)"
+          className="rounded-xl bg-surface-subtle px-3 py-3 text-[15px] text-foreground"
         />
       );
     }
@@ -346,8 +413,8 @@ function ConfigInput({
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={field.kind === 'secret'}
-          placeholderTextColor="#888"
-          className="rounded-md bg-card px-3 py-3 text-sm text-card-foreground"
+          placeholderTextColor="hsl(215 14% 55%)"
+          className="rounded-xl bg-surface-subtle px-3 py-3 text-[15px] text-foreground"
         />
       );
     }
@@ -358,4 +425,56 @@ function toMap(entries: BridgethingConfigEntry[]): Record<string, string> {
   const map: Record<string, string> = {};
   for (const e of entries) map[e.key] = e.value;
   return map;
+}
+
+function humanizePermission(perm: string): {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+} {
+  switch (perm) {
+    case 'net.fetch':
+      return {
+        icon: Globe,
+        title: 'use the internet',
+        subtitle: 'data fetched via your phone',
+      };
+    case 'net.ws':
+      return {
+        icon: Wifi,
+        title: 'real-time data',
+        subtitle: 'websockets via your phone',
+      };
+    case 'net.proxy':
+      return {
+        icon: Cable,
+        title: 'tunnel TCP traffic',
+        subtitle: 'general TCP via your phone',
+      };
+    case 'geo':
+      return {
+        icon: MapPin,
+        title: 'see your location',
+        subtitle: 'forwarded from your phone',
+      };
+    case 'notifications':
+      return {
+        icon: Bell,
+        title: 'show iPhone notifications',
+      };
+    case 'audio.tts':
+    case 'audio':
+      return {
+        icon: Speaker,
+        title: 'play sound',
+        subtitle: 'plays through your phone',
+      };
+    case 'mic':
+      return {
+        icon: Mic,
+        title: 'use the Car Thing microphone',
+      };
+    default:
+      return { icon: Shield, title: perm };
+  }
 }

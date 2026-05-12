@@ -4,11 +4,9 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { Button } from './Button';
 
 /**
- * Renders the device-code prompt block when auth is pending. The
- * `verificationUrl` line is what users paste into a browser when the
- * SFSafariViewController didn't auto-open (or they dismissed it).
- *
- * The `failed` state shows the daemon-reported reason and a retry CTA.
+ * Pending / failed states for OAuth provider sign-in. Pending mode
+ * shows the device-code text and a cancel; failed shows the daemon
+ * reason + retry. Hidden entirely when state is idle / authenticated.
  */
 export function PendingAuth({
   state,
@@ -21,26 +19,37 @@ export function PendingAuth({
 }) {
   if (state.kind === 'pending') {
     return (
-      <View className="rounded-md bg-card p-4">
+      <View
+        className="overflow-hidden rounded-2xl border border-primary/30 bg-primary-soft p-4"
+        style={{
+          shadowColor: 'hsl(199 100% 44%)',
+          shadowOpacity: 0.1,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 6 },
+        }}
+      >
         <View className="flex-row items-center gap-2">
-          <ActivityIndicator size="small" />
-          <Text className="text-xs uppercase tracking-widest text-muted-foreground">
-            waiting on auth
+          <ActivityIndicator size="small" color="hsl(199 100% 44%)" />
+          <Text className="text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
+            waiting on provider
           </Text>
         </View>
         {state.userCode ? (
           <View className="mt-3">
-            <Text className="text-xs text-muted-foreground">
-              enter this code
+            <Text className="text-[12px] text-muted-foreground">
+              enter this code in your browser
             </Text>
-            <Text className="mt-0.5 font-mono text-2xl font-semibold tracking-wider text-foreground">
+            <Text
+              className="mt-1 font-mono text-[28px] font-semibold tracking-[0.2em] text-foreground"
+              selectable
+            >
               {state.userCode}
             </Text>
           </View>
         ) : null}
         {state.verificationUrl ? (
-          <Text className="mt-2 text-xs text-muted-foreground">
-            on {state.verificationUrl}
+          <Text className="mt-2 text-[12px] text-muted-foreground" selectable>
+            {state.verificationUrl}
           </Text>
         ) : null}
         {onCancel ? (
@@ -55,11 +64,11 @@ export function PendingAuth({
   }
   if (state.kind === 'failed') {
     return (
-      <View className="rounded-md bg-destructive/10 p-4">
-        <Text className="text-xs uppercase tracking-widest text-destructive">
+      <View className="rounded-2xl border border-destructive/30 bg-destructive-soft p-4">
+        <Text className="text-[11px] font-bold uppercase tracking-[0.18em] text-destructive">
           sign-in failed
         </Text>
-        <Text className="mt-1 text-sm text-destructive">
+        <Text className="mt-1 text-[14px] text-destructive">
           {state.message ?? 'unknown error'}
         </Text>
         {onRetry ? (

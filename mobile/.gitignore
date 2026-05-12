@@ -77,3 +77,6 @@ ios/Local.xcconfig
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# React Native MCP
+/results/

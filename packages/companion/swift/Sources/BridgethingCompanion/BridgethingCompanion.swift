@@ -3,18 +3,49 @@ import BridgethingGlue
 import BridgethingLyrics
 import BridgethingSchema
 import Foundation
+import os
+
+private let osLog = Logger(subsystem: "dev.bridgething.companion", category: "core")
+
+/// Severity tag passed to the `BridgethingCompanion` log observer.
+public enum CompanionLogLevel: String, Sendable {
+    case debug, info, warn, error
+}
+
+/// Version stamp the companion announces in `GatewayInfo`. Hardcoded to
+/// match the Rust workspace `version` and bumped at release time.
+public enum BridgethingCompanionVersion {
+    public static let lib: String = "0.1.0"
+    public static let libbridgething: String = "0.1.0"
+}
 
 /// Identity the companion advertises in `GatewayCapabilities.gateway`.
-/// Caller-supplied at companion init.
+/// Caller-supplied at companion init. The `address` is whatever stable
+/// identifier the host platform exposes for itself (iOS:
+/// `UIDevice.identifierForVendor`, Android: `Settings.Secure.ANDROID_ID`).
+/// Empty string is acceptable when no stable identifier is available.
 public struct HostInfo: Sendable {
     public let appName: String
     public let appVersion: String
     public let osName: String
+    public let osVersion: String
+    public let address: String
+    public let adapterVersion: String
 
-    public init(appName: String, appVersion: String, osName: String) {
+    public init(
+        appName: String,
+        appVersion: String,
+        osName: String,
+        osVersion: String = "",
+        address: String = "",
+        adapterVersion: String = ""
+    ) {
         self.appName = appName
         self.appVersion = appVersion
         self.osName = osName
+        self.osVersion = osVersion
+        self.address = address
+        self.adapterVersion = adapterVersion
     }
 }
 
@@ -64,6 +95,7 @@ public actor BridgethingCompanion {
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
     private var ancsAuthStateObserver: (@Sendable (AncsAuthState) -> Void)?
     private var ancsAuthState: AncsAuthState = .unknown
+    private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
 
     private let netDispatcher: NetDispatcher
     public let ota: OtaService
@@ -98,6 +130,7 @@ public actor BridgethingCompanion {
         if started { return }
         try await gateway.start()
         started = true
+        log(.info, "companion started")
 
         spawnDispatchers()
 
@@ -135,10 +168,17 @@ public actor BridgethingCompanion {
 
         await gateway.stop()
         started = false
+        log(.info, "companion stopped")
+    }
+
+    /// Actor-isolated convenience: capture the current observer + emit.
+    private func log(_ level: CompanionLogLevel, _ message: String) {
+        emitLog(level, message, observer: logObserver)
     }
 
     public func setActive(_ glue: (any BridgethingGlue)?) async throws {
         if let activeGlue {
+            log(.info, "detaching glue \(type(of: activeGlue).name)")
             await activeGlue.detach()
             nowPlayingObserver?(nil)
         }
@@ -147,7 +187,13 @@ public actor BridgethingCompanion {
             if let observer = nowPlayingObserver {
                 await glue.setNowPlayingObserver(observer)
             }
-            try await glue.attach(gateway: gateway)
+            do {
+                try await glue.attach(gateway: gateway)
+                log(.info, "attached glue \(type(of: glue).name)")
+            } catch {
+                log(.error, "glue \(type(of: glue).name) attach failed: \(error.localizedDescription)")
+                throw error
+            }
         }
         await announceCapabilities()
     }
@@ -170,6 +216,24 @@ public actor BridgethingCompanion {
     /// daemon. iOS-only signal; on Android the observer never fires.
     public func setAncsAuthStateObserver(_ observer: (@Sendable (AncsAuthState) -> Void)?) {
         ancsAuthStateObserver = observer
+    }
+
+    /// Subscribe to companion-side log events. Replaces / un-installs
+    /// the previous observer. Companion still emits to `os.Logger`
+    /// regardless; the observer is for surfacing to a host UI (e.g. the
+    /// RN debug-log screen).
+    public func setLogObserver(_ observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
+        logObserver = observer
+    }
+
+    nonisolated func emitLog(_ level: CompanionLogLevel, _ message: String, observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
+        switch level {
+        case .debug: osLog.debug("\(message, privacy: .public)")
+        case .info: osLog.info("\(message, privacy: .public)")
+        case .warn: osLog.warning("\(message, privacy: .public)")
+        case .error: osLog.error("\(message, privacy: .public)")
+        }
+        observer?(level, message)
     }
 
     /// Last daemon-reported ANCS auth state. `unknown` until the daemon
@@ -217,14 +281,14 @@ public actor BridgethingCompanion {
     private func composeCapabilities() -> GatewayCapabilities {
         let glue = activeGlue
         let info = GatewayInfo(
-            address: "",
+            address: host.address,
             name: host.appName,
             osName: host.osName,
             appName: host.appName,
             appVersion: host.appVersion,
-            adapterVersion: "ea",
-            libVersion: "",
-            libbridgethingVersion: ""
+            adapterVersion: host.adapterVersion,
+            libVersion: BridgethingCompanionVersion.lib,
+            libbridgethingVersion: BridgethingCompanionVersion.libbridgething
         )
         let avail = SurfaceAvailability(
             geo: capFlags.geo,
@@ -270,8 +334,16 @@ public actor BridgethingCompanion {
 
     private func runConnectAnnouncer() async {
         for await event in gateway.events {
-            if case .connected = event {
+            switch event {
+            case let .connected(device):
+                log(.info, "peer connected: \(device.name) [\(device.id)]")
                 await announceCapabilities()
+            case let .disconnected(id):
+                log(.info, "peer disconnected: \(id)")
+            case let .decodeError(id, description):
+                log(.warn, "[\(id)] decode error: \(description)")
+            case .message:
+                continue
             }
         }
     }
@@ -283,16 +355,20 @@ public actor BridgethingCompanion {
             else { continue }
             let glue = activeGlue
             guard let glue else { continue }
-            await dispatchPlayer(player, to: glue)
+            let observer = logObserver
+            await dispatchPlayer(player, to: glue, logObserver: observer)
         }
     }
 
     private nonisolated func dispatchPlayer(
-        _ player: BridgeToGatewayPlayerMsg, to glue: any BridgethingGlue
+        _ player: BridgeToGatewayPlayerMsg,
+        to glue: any BridgethingGlue,
+        logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
     ) async {
         do {
             switch player {
             case let .play(p): try await glue.play(p)
+            case let .queue(q): try await glue.queue(q)
             case .pause: try await glue.pause()
             case .resume: try await glue.resume()
             case .skipNext: try await glue.skipNext()
@@ -304,11 +380,13 @@ public actor BridgethingCompanion {
             case let .setSpeed(s): try await glue.setSpeed(s.speed)
             case let .setCrossfade(s): try await glue.setCrossfade(s.durationMs)
             case let .hint(h): await glue.handlePlaybackHint(h)
-            case .queue: throw GlueError.notImplemented
             }
         } catch {
-            // Player verbs are commands; we don't have a response surface
-            // to report failures back. Logging only.
+            emitLog(
+                .warn,
+                "player verb \(String(describing: player)) failed: \(error.localizedDescription)",
+                observer: logObserver
+            )
         }
     }
 
@@ -323,6 +401,7 @@ public actor BridgethingCompanion {
         do {
             bytes = try await activeGlue?.asset(id: id)
         } catch {
+            log(.warn, "asset \(id) glue resolve failed: \(error.localizedDescription)")
             try? await handle.respondErr(AssetNotFoundReply(id: id))
             return
         }
@@ -348,6 +427,7 @@ public actor BridgethingCompanion {
     private func handleAncsAuthState(_ next: AncsAuthState) async {
         guard ancsAuthState != next else { return }
         ancsAuthState = next
+        log(.info, "ancs auth state -> \(String(describing: next))")
         #if os(iOS)
             if let coordinator = ancsCoordinator {
                 await coordinator.setLastAuthState(next)
@@ -373,6 +453,7 @@ public actor BridgethingCompanion {
                 resolved = await lyricsResolver.lyrics(for: identity)
             }
         } catch {
+            log(.warn, "lyrics resolve failed for \(req.track.artist) - \(req.track.track): \(error.localizedDescription)")
             try? await handle.respondErr(LyricsErrorReply(message: String(describing: error)))
             return
         }

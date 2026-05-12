@@ -5,9 +5,6 @@ export type BridgethingSessionPeer = {
   id: string;
   /** BT-advertised name. Often identical across multiple Car Things. */
   name: string;
-  /** User-assigned local nickname, persisted in UserDefaults. UI prefers
-   *  this over `name` when set. Set/cleared via `setDeviceNickname`. */
-  nickname?: string;
 };
 
 /** A music-provider glue installed in the host app. */
@@ -26,9 +23,8 @@ export type BridgethingAuthKind = 'idle' | 'pending' | 'authenticated' | 'failed
  * Auth lifecycle snapshot the active glue surfaces.
  *
  * - `kind === "pending"` may carry device-code prompt data: `userCode`,
- *   `verificationUrl`, and `verificationUrlComplete` (the prefilled URL
- *   the native side opens in SFSafariViewController so the user lands
- *   on the page with their code already filled).
+ *   `verificationUrl`, and `verificationUrlComplete`. JS opens the
+ *   prefilled URL in InAppBrowser.
  * - `kind === "failed"` carries `message`.
  *
  * Other kinds leave the optional fields undefined.
@@ -179,10 +175,14 @@ export type BridgethingConfigEntry = {
   value: string;
 };
 
-/** Bytes + mime returned by `webappIcon`. The base64 string excludes
- *  the `data:` prefix; the consumer wraps it as `data:<mime>;base64,...` */
+/** Decoded webapp icon. The bytes have been written to a temp file the
+ *  consumer can hand straight to RN's Image as `{ uri: fileUri }`. */
 export type BridgethingWebappIcon = {
-  base64: string;
+  /** `file://...` path to a freshly-written PNG/JPEG. The native side
+   *  re-uses this filename on subsequent fetches; consumers that diff on
+   *  uri may want to bust their own cache when the underlying icon could
+   *  have changed. */
+  fileUri: string;
   mime?: string;
 };
 
@@ -206,8 +206,8 @@ export type BridgethingCapabilityFlags = {
 };
 
 /**
- * Configuration for the OTA manifest poll loop. Persisted via
- * UserDefaults; `setOtaPollConfig(null)` disables polling.
+ * Configuration for the OTA manifest poll loop. JS persists this in
+ * mmkv and reapplies on bootstrap; `setOtaPollConfig(null)` disables polling.
  */
 export type BridgethingOtaPollConfig = {
   /** Channel the user has selected (e.g. "stable" or "dev"). Channel
@@ -284,6 +284,30 @@ export type BridgethingDeviceMeta = {
   serialNumber: string;
 };
 
+/** Companion-side identity. Mirrors what the companion announces to the
+ *  daemon as `GatewayInfo`; surfaced to RN so Settings can render real
+ *  values instead of hardcoded strings. */
+export type BridgethingHostInfo = {
+  /** Display name (e.g. "bridgething"). Matches `CFBundleName`. */
+  appName: string;
+  /** Marketing version of the host app, read from `CFBundleShortVersionString`. */
+  appVersion: string;
+  /** "iOS" or "Android". */
+  osName: string;
+  /** OS version string (e.g. "26.0"). */
+  osVersion: string;
+  /** Stable per-vendor identifier. iOS: `identifierForVendor` UUID. Empty
+   *  if the platform doesn't expose one. */
+  hostIdentifier: string;
+  /** Version of the BridgethingCompanion Swift / Kotlin package. */
+  libVersion: string;
+  /** Version of the wire-protocol crate (libbridgething). */
+  libbridgethingVersion: string;
+  /** Transport-adapter label, e.g. "eaccessory" on iOS, "rfcomm" on
+   *  macOS dev / Android. */
+  adapterVersion: string;
+};
+
 /**
  * Native session module bridging the React Native UI shell to the Swift /
  * Kotlin `BridgethingCompanion`. The native side owns the gateway, the
@@ -300,6 +324,12 @@ export type BridgethingDeviceMeta = {
  * `deviceId` argument matching one of the ids returned by
  * `connectedPeers()`. Methods throw `noPeerConnected` if the deviceId
  * isn't currently in the connected set.
+ *
+ * Storage scope: the native module only persists what it must — Spotify
+ * tokens go through Spotiny into Keychain because Spotiny owns the auth
+ * lifecycle. Everything else (setup-completed flag, device nicknames,
+ * capability flags, OTA poll config) lives in JS via mmkv; the JS layer
+ * re-applies flags + poll config on each bootstrap.
  */
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   /**
@@ -357,16 +387,6 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   /** Latest daemon-reported ANCS auth state. `unknown` until the daemon emits one. */
   ancsAuthStatus(): Promise<BridgethingAncsAuthStatus>;
 
-  // MARK: - Device naming
-
-  /** Set or clear (`null`) a local nickname for the device. The
-   *  companion stores it in UserDefaults and re-emits the affected
-   *  peer through `setOnPeerConnected` so the UI re-renders. */
-  setDeviceNickname(deviceId: string, nickname: string | null): Promise<void>;
-
-  /** Read the nickname for `deviceId`, or `null` if none set. */
-  getDeviceNickname(deviceId: string): Promise<string | null>;
-
   // MARK: - Webapps (per-device)
 
   /** Installed bundles on `deviceId`. Filters out `launcher` role
@@ -377,12 +397,17 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   currentWebapp(deviceId: string): Promise<BridgethingActiveWebapp | null>;
 
   /**
-   * Download a `.zip` bundle from `url` and install it on `deviceId`.
-   * The bundle's `manifest.json` is validated daemon-side. Throws on
-   * download failure or daemon-side install rejection. To install on
-   * multiple devices, call this method per deviceId.
+   * Install a `.zip` bundle the JS side has already downloaded. Pass
+   * the archive as a base64-encoded string (no `data:` prefix); the
+   * daemon validates `manifest.json` and rejects if invalid. To install
+   * on multiple devices, call this method per deviceId.
+   *
+   * Why base64 and not `ArrayBuffer`: Nitro 0.35.5's Swift-side
+   * `ArrayBuffer` typealias breaks Swift→C++ header interop on iOS
+   * for Swift HybridObjects. Webapp bundles are small (KBs–MBs) so
+   * the 33% base64 inflation is acceptable.
    */
-  installWebappFromUrl(deviceId: string, url: string): Promise<BridgethingWebappInfo>;
+  installWebappFromBase64(deviceId: string, archiveBase64: string): Promise<BridgethingWebappInfo>;
 
   /** Uninstall the bundle from `deviceId`. Builtin bundles cannot
    *  be uninstalled. */
@@ -393,9 +418,11 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   switchWebapp(deviceId: string, id: string): Promise<void>;
 
   /**
-   * Fetch the bundle's icon from `deviceId` as a base64 data string.
-   * The webapp's detail view embeds it as `data:<mime>;base64,<base64>`.
-   * Returns `null` if the manifest doesn't declare an icon.
+   * Fetch the bundle's icon from `deviceId` and write it to a temp
+   * file. Returns a `file://` URI suitable for RN's `Image` component.
+   * Returns `null` if the manifest doesn't declare an icon. The native
+   * side rewrites the same temp file on each call so the URI stays
+   * stable per `(deviceId, id)`.
    */
   webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null>;
 
@@ -421,10 +448,9 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   // MARK: - Capability flags
 
-  /** Current companion-side capability flags. Persisted via UserDefaults. */
-  getCapabilityFlags(): Promise<BridgethingCapabilityFlags>;
-
-  /** Replace capability flags and re-announce capabilities to the daemon. */
+  /** Apply capability flags and re-announce capabilities to the daemon.
+   *  JS owns the persisted copy in mmkv and calls this on bootstrap +
+   *  every change. */
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
   // MARK: - OTA
@@ -432,12 +458,10 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   /**
    * Set or replace the manifest poll configuration. Pass `null` to
    * disable polling (manual `pollOtaNow()` and inbound range serving
-   * still work). Persisted via UserDefaults; restored on next start.
+   * still work). JS owns the persisted copy in mmkv and re-applies on
+   * bootstrap.
    */
   setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void>;
-
-  /** Read back the current poll configuration. */
-  getOtaPollConfig(): Promise<BridgethingOtaPollConfig | null>;
 
   /** Run one poll iteration immediately, regardless of where the
    *  interval timer is. Useful when the user taps "Check for updates". */
@@ -448,6 +472,10 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
    *  `setOnDeviceMetaChanged`. */
   deviceMeta(deviceId: string): Promise<BridgethingDeviceMeta | null>;
 
+  /** Companion-side identity snapshot. Used by Settings → About to
+   *  render the real version instead of a hardcoded string. */
+  hostInfo(): Promise<BridgethingHostInfo>;
+
   // MARK: - Callbacks
 
   setOnProviderChanged(callback: (info: BridgethingProviderInfo | null) => void): void;
@@ -457,6 +485,13 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
+  /** Toggle the underlying log stream. Off by default; turn on only
+   *  while a UI is actively rendering log lines. Logs are high volume
+   *  and every line crosses JSI, so unconditional streaming pulls real
+   *  cost on a 512MB device. The JS session refcounts subscribers and
+   *  flips this automatically. */
+  setLogStreamingEnabled(enabled: boolean): void;
+
   /** Fires after any local action that mutates a device's webapp
    *  registry (install / uninstall / switch). The deviceId identifies
    *  which device's list to refresh. Active-webapp changes from

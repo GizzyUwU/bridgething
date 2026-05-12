@@ -24,14 +24,10 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
     func ancsAuthStatus() async -> BridgethingAncsAuthStatus
 
-    // Device naming
-    func setDeviceNickname(deviceId: String, nickname: String?) async
-    func getDeviceNickname(deviceId: String) async -> String?
-
     // Webapps (per-device)
     func listWebapps(deviceId: String) async throws -> [BridgethingWebappInfo]
     func currentWebapp(deviceId: String) async throws -> BridgethingActiveWebapp?
-    func installWebappFromUrl(deviceId: String, url: String) async throws -> BridgethingWebappInfo
+    func installWebappFromBase64(deviceId: String, archiveBase64: String) async throws -> BridgethingWebappInfo
     func uninstallWebapp(deviceId: String, id: String) async throws
     func switchWebapp(deviceId: String, id: String) async throws
     func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon?
@@ -40,14 +36,15 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func deleteWebappConfigField(deviceId: String, id: String, key: String) async throws
 
     // Capability flags
-    func getCapabilityFlags() async -> BridgethingCapabilityFlags
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
     // OTA
     func setOtaPollConfig(config: BridgethingOtaPollConfig?) async
-    func getOtaPollConfig() async -> BridgethingOtaPollConfig?
     func pollOtaNow() async
     func deviceMeta(deviceId: String) async -> BridgethingDeviceMeta?
+
+    // Host identity
+    func hostInfo() async -> BridgethingHostInfo
 
     func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void)
     func setOnAuthStateChanged(_ callback: @escaping @Sendable (BridgethingAuthState) -> Void)
@@ -56,6 +53,8 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnNowPlayingChanged(_ callback: @escaping @Sendable (BridgethingNowPlaying?) -> Void)
     func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (BridgethingAncsAuthStatus) -> Void)
     func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void)
+    func setLogStreamingEnabled(_ enabled: Bool)
+
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
@@ -211,27 +210,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    // MARK: - Device naming
-
-    public func setDeviceNickname(deviceId: String, nickname: Variant_NullType_String?) throws -> Promise<Void> {
-        let unwrapped: String? = nickname.flatMap { variant in
-            switch variant {
-            case .first: nil
-            case let .second(value): value
-            }
-        }
-        return Promise.async {
-            await (try Self.backend()).setDeviceNickname(deviceId: deviceId, nickname: unwrapped)
-        }
-    }
-
-    public func getDeviceNickname(deviceId: String) throws -> Promise<Variant_NullType_String> {
-        Promise.async {
-            let value = await (try Self.backend()).getDeviceNickname(deviceId: deviceId)
-            return value.map { .second($0) } ?? .first(NullType.null)
-        }
-    }
-
     // MARK: - Webapps (per-device)
 
     public func listWebapps(deviceId: String) throws -> Promise<[BridgethingWebappInfo]> {
@@ -247,9 +225,9 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func installWebappFromUrl(deviceId: String, url: String) throws -> Promise<BridgethingWebappInfo> {
+    public func installWebappFromBase64(deviceId: String, archiveBase64: String) throws -> Promise<BridgethingWebappInfo> {
         Promise.async {
-            try await Self.backend().installWebappFromUrl(deviceId: deviceId, url: url)
+            try await Self.backend().installWebappFromBase64(deviceId: deviceId, archiveBase64: archiveBase64)
         }
     }
 
@@ -292,12 +270,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     // MARK: - Capability flags
 
-    public func getCapabilityFlags() throws -> Promise<BridgethingCapabilityFlags> {
-        Promise.async {
-            await (try Self.backend()).getCapabilityFlags()
-        }
-    }
-
     public func setCapabilityFlags(flags: BridgethingCapabilityFlags) throws -> Promise<Void> {
         Promise.async {
             await (try Self.backend()).setCapabilityFlags(flags: flags)
@@ -318,13 +290,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func getOtaPollConfig() throws -> Promise<Variant_NullType_BridgethingOtaPollConfig> {
-        Promise.async {
-            let cfg = await (try Self.backend()).getOtaPollConfig()
-            return cfg.map { .second($0) } ?? .first(NullType.null)
-        }
-    }
-
     public func pollOtaNow() throws -> Promise<Void> {
         Promise.async {
             await (try Self.backend()).pollOtaNow()
@@ -335,6 +300,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async {
             let meta = await (try Self.backend()).deviceMeta(deviceId: deviceId)
             return meta.map { .second($0) } ?? .first(NullType.null)
+        }
+    }
+
+    public func hostInfo() throws -> Promise<BridgethingHostInfo> {
+        Promise.async {
+            await (try Self.backend()).hostInfo()
         }
     }
 
@@ -405,6 +376,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingLog = wrapped }
         Self.stateLock.unlock()
         backend?.setOnLog(wrapped)
+    }
+
+    public func setLogStreamingEnabled(enabled: Bool) throws {
+        // Pre-backend toggles are dropped; whoever installs the backend
+        // is responsible for the initial stream state.
+        Self.stateLock.lock()
+        let backend = Self._backend
+        Self.stateLock.unlock()
+        backend?.setLogStreamingEnabled(enabled)
     }
 
     public func setOnWebappsChanged(callback: @escaping (String) -> Void) throws {

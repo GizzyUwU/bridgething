@@ -38,6 +38,7 @@ public protocol BridgethingGlue: Sendable {
     /// support. The companion's central dispatcher routes inbound
     /// `BridgeToGatewayPlayerMsg` variants to these.
     func play(_ uri: PlayUri) async throws
+    func queue(_ req: QueueUri) async throws
     func pause() async throws
     func resume() async throws
     func skipNext() async throws
@@ -48,6 +49,15 @@ public protocol BridgethingGlue: Sendable {
     func setRepeat(_ mode: BridgethingSchema.RepeatMode) async throws
     func setSpeed(_ speed: Float) async throws
     func setCrossfade(_ durationMs: UInt32?) async throws
+
+    /// Subscribe to auth-lifecycle updates. The active glue is responsible
+    /// for driving this — `pending(prompt: nil)` while it negotiates,
+    /// `pending(prompt: ...)` once it has a device-code prompt to show
+    /// the user, `authenticated` after token exchange succeeds (refresh
+    /// or fresh authorize), and `failed(reason)` on error. Stub glues
+    /// without an auth surface emit `authenticated` from the default
+    /// extension below so the host can advance immediately.
+    func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async
 
     /// Daemon-observed iAP2 playback hint. Fires when the daemon notices
     /// the iPhone's NowPlaying state changed in a way the companion can't
@@ -71,6 +81,7 @@ public protocol BridgethingGlue: Sendable {
 
 public extension BridgethingGlue {
     func play(_: PlayUri) async throws { throw GlueError.notImplemented }
+    func queue(_: QueueUri) async throws { throw GlueError.notImplemented }
     func pause() async throws { throw GlueError.notImplemented }
     func resume() async throws { throw GlueError.notImplemented }
     func skipNext() async throws { throw GlueError.notImplemented }
@@ -85,6 +96,39 @@ public extension BridgethingGlue {
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
     func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
+
+    /// Default for glues without an auth surface: report ready
+    /// immediately. Glues with real OAuth (Spotify, Apple Music when it
+    /// lands) override this to drive the lifecycle.
+    func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
+        observer(.authenticated)
+    }
+}
+
+/// Auth lifecycle the active glue surfaces to the host. Mirrors the
+/// shape the React Native session bridge publishes to the companion app
+/// UI; intentionally narrower than the wire types so glues don't have
+/// to depend on the schema package.
+public enum GlueAuthState: Sendable {
+    case pending(GlueDeviceCodePrompt?)
+    case authenticated
+    case failed(String)
+}
+
+public struct GlueDeviceCodePrompt: Sendable {
+    public let userCode: String
+    public let verificationURL: URL
+    public let verificationURLComplete: URL
+
+    public init(
+        userCode: String,
+        verificationURL: URL,
+        verificationURLComplete: URL
+    ) {
+        self.userCode = userCode
+        self.verificationURL = verificationURL
+        self.verificationURLComplete = verificationURLComplete
+    }
 }
 
 /// NowPlaying snapshot the active glue surfaces to the companion. Wraps

@@ -39,21 +39,21 @@ enum BridgethingApp {
                 id: SpotifyGlue.name,
                 displayName: SpotifyGlue.displayName,
                 available: true,
-                factory: { context in makeSpotifyGlue(context: context) },
+                factory: { makeSpotifyGlue() },
                 signOut: { spotifyTokenStore.clear() }
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id: AppleMusicGlue.name,
                 displayName: AppleMusicGlue.displayName,
                 available: false,
-                factory: { _ in AppleMusicGlue() },
+                factory: { AppleMusicGlue() },
                 signOut: {}
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id: TidalGlue.name,
                 displayName: TidalGlue.displayName,
                 available: false,
-                factory: { _ in TidalGlue() },
+                factory: { TidalGlue() },
                 signOut: {}
             ),
         ]
@@ -61,11 +61,10 @@ enum BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl())
     }
 
-    private static func makeSpotifyGlue(context: HybridBridgethingSessionImpl.BackendContext) -> SpotifyGlue {
-        let authenticator = makeSpotifyAuthenticator(emitAuth: context.emitAuth)
+    private static func makeSpotifyGlue() -> SpotifyGlue {
         let initial = spotifyTokenStore.load()
         return SpotifyGlue(
-            authenticator: authenticator,
+            authenticatorFactory: spotifyAuthenticatorFactory(),
             accessToken: initial.access ?? "",
             refreshToken: initial.refresh ?? "",
             onTokensRefreshed: { access, refresh in
@@ -74,9 +73,7 @@ enum BridgethingApp {
         )
     }
 
-    private static func makeSpotifyAuthenticator(
-        emitAuth: @escaping @Sendable (BridgethingAuthState) -> Void
-    ) -> any OAuthAuthenticator {
+    private static func spotifyAuthenticatorFactory() -> SpotifyAuthenticatorFactory {
         let scopes: [String] = [
             "user-read-playback-state",
             "user-modify-playback-state",
@@ -101,20 +98,19 @@ enum BridgethingApp {
            !clientID.isEmpty
         {
             let deviceCodeURL = URL(string: "https://accounts.spotify.com/api/device/code")!
+            // Spotify's device-code endpoint requires `description` (the
+            // device label users see on spotify.com/pair). Match what the
+            // daytona / car-thing-device client sends — see
+            // `notes/spotify/AUTH_FLOW.md`.
             let configuration = DeviceCodeConfiguration(
                 deviceCodeEndpoint: deviceCodeURL,
                 tokenEndpoint: tokenURL,
                 clientID: clientID,
+                description: "car-thing-device",
                 scopes: scopes
             )
-            return DeviceCodeAuthenticator(configuration: configuration) { prompt in
-                emitAuth(BridgethingAuthState(
-                    kind: .pending,
-                    userCode: prompt.userCode,
-                    verificationUrl: prompt.verificationURL.absoluteString,
-                    verificationUrlComplete: prompt.verificationURLPrefilled.absoluteString,
-                    message: nil
-                ))
+            return { onPrompt in
+                DeviceCodeAuthenticator(configuration: configuration, onPrompt: onPrompt)
             }
         }
 
@@ -126,7 +122,11 @@ enum BridgethingApp {
             redirectURI: "bridgething://oauth",
             scopes: scopes
         )
-        return WebViewPKCEAuthenticator(configuration: configuration)
+        return { _ in
+            // PKCE drives the user through a WebView; no device-code
+            // prompt is ever produced, so the closure argument is unused.
+            WebViewPKCEAuthenticator(configuration: configuration)
+        }
     }
 }
 

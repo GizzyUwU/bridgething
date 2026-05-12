@@ -8,6 +8,12 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, '18.0'
 prepare_react_native_project!
 
+# react-native-permissions handlers — enable per-permission so the app
+# only ships the privacy strings + handler classes it actually uses.
+# Each entry compiles in one of the 'PermissionsIOS*' subspecs.
+require_relative '../node_modules/react-native-permissions/scripts/setup'
+setup_permissions(['LocationWhenInUse'])
+
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil
   Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green

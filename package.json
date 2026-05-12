@@ -12,19 +12,23 @@
     "mobile": "cd mobile && bun run"
   },
   "devDependencies": {
-    "turbo": "^2.9.6",
-    "typescript": "^6.0.3",
     "@eslint/js": "^9.39.4",
     "@types/bun": "^1.3.13",
     "eslint": "^9.39.4",
     "prettier": "^3.8.3",
     "prettier-plugin-organize-imports": "^4.3.0",
+    "turbo": "^2.9.6",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.1"
   },
   "engines": {
     "node": ">=18"
   },
   "packageManager": "bun@1.3.8",
+  "overrides": {
+    "react": "19.2.3",
+    "react-native-nitro-modules": "0.35.5"
+  },
   "workspaces": [
     "crates/lib",
     "packages/*",

@@ -3,24 +3,36 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
+		03A6F015D1AB4A1B80687CFF /* Inter-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 24CD0CE69E824899BEF3AC07 /* Inter-Medium.ttf */; };
 		066175F8327347C4FDA8F77D /* BridgethingSchema in Frameworks */ = {isa = PBXBuildFile; productRef = 63A2BDB8419785846352F797 /* BridgethingSchema */; };
 		0C80B921A6F3F58F76C31292 /* libPods-bridgething.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-bridgething.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		1B16E5853653557376728421 /* BridgethingAppleMusicGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 37EB35D1D6F792B888BCCF58 /* BridgethingAppleMusicGlue */; };
+		1C51C335AD1C44A981FFFB96 /* Inter-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 79675C6A31B7457CA37EB159 /* Inter-Bold.ttf */; };
+		29B54422A3AC4543A51CA516 /* Outfit-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DCB841C5F0384D4F84D2FA3A /* Outfit-SemiBold.ttf */; };
 		2EEBCB58BB4C8FABE67C2E1C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		3A2E5194E671495BB69D4FCD /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 92FD12EF2CA04AC78A5DA12B /* Inter-Regular.ttf */; };
 		3B02C793BAC72F1B294EAA73 /* Spotiny in Frameworks */ = {isa = PBXBuildFile; productRef = 551530E258B5741A425B6B22 /* Spotiny */; };
+		4BD53FBDDB8C4BD5A06AF5A0 /* Outfit-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF3A93B38AEF41FEB0A84550 /* Outfit-Light.ttf */; };
 		6E84EDDB26BD5F95073E6040 /* BridgethingLyrics in Frameworks */ = {isa = PBXBuildFile; productRef = 36F56798DD80B12C33156F70 /* BridgethingLyrics */; };
+		72010B89238448ABB08972C6 /* Outfit-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E933859026B94647ACD128BF /* Outfit-Medium.ttf */; };
+		72B79D6718F445D1A51FDA33 /* Inter-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E0BE777E0ADC4EA7902341C3 /* Inter-SemiBold.ttf */; };
 		7429B03CA90D9A8E71D3DD4C /* BridgethingCompanion in Frameworks */ = {isa = PBXBuildFile; productRef = D924249BDDDFEA6D9511A03E /* BridgethingCompanion */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		8868A51EB33F4439843D8B91 /* Outfit-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 3DC9B5987AB34C49936EC520 /* Outfit-Regular.ttf */; };
+		8D1BC0D1F9C54CFDAA21BFFD /* Outfit-ExtraLight.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FE1D413C46CB48BEA5BAB463 /* Outfit-ExtraLight.ttf */; };
 		9784D74A20B7ACD8BF06CB6A /* BridgethingGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 2E405B13DD58F284C50D592C /* BridgethingGlue */; };
 		9C8FD1C63CD9EF67C147DC17 /* HybridBridgethingSessionImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F62D530B751F5AA413C237E /* HybridBridgethingSessionImpl.swift */; };
 		BC79AA2F2A35E07E1F67B7B4 /* BridgethingSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DAD565BA58DD5688307A0D8 /* BridgethingSetup.swift */; };
+		C6A372097A7A4E5CB4E8C13E /* Outfit-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 21D9091C54374D049D155AF7 /* Outfit-ExtraBold.ttf */; };
 		C90677CED5F4F396FA808345 /* BridgethingSpotifyGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */; };
+		CC51CD1356EF4F9EAF2251BF /* Outfit-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2C29232EA11541098B55B62E /* Outfit-Bold.ttf */; };
+		D493A3B12FAEC981004E66E2 /* bridgething.icon in Resources */ = {isa = PBXBuildFile; fileRef = D493A3B02FAEC981004E66E2 /* bridgething.icon */; };
 		ED6C51592E60E3F272DF62BC /* BridgethingTidalGlue in Frameworks */ = {isa = PBXBuildFile; productRef = 951DEFFC70F323C14864A561 /* BridgethingTidalGlue */; };
 		F0CA64465D30B821F9715B12 /* BridgethingGateway in Frameworks */ = {isa = PBXBuildFile; productRef = 302CF909B3940CFB4BD61A29 /* BridgethingGateway */; };
 /* End PBXBuildFile section */
@@ -30,14 +42,26 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = bridgething/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = bridgething/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = bridgething/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		21D9091C54374D049D155AF7 /* Outfit-ExtraBold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-ExtraBold.ttf"; path = "../assets/fonts/Outfit-ExtraBold.ttf"; sourceTree = "<group>"; };
+		24CD0CE69E824899BEF3AC07 /* Inter-Medium.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Inter-Medium.ttf"; path = "../assets/fonts/Inter-Medium.ttf"; sourceTree = "<group>"; };
+		2C29232EA11541098B55B62E /* Outfit-Bold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-Bold.ttf"; path = "../assets/fonts/Outfit-Bold.ttf"; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-bridgething.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-bridgething.debug.xcconfig"; path = "Target Support Files/Pods-bridgething/Pods-bridgething.debug.xcconfig"; sourceTree = "<group>"; };
+		3DC9B5987AB34C49936EC520 /* Outfit-Regular.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-Regular.ttf"; path = "../assets/fonts/Outfit-Regular.ttf"; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-bridgething.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-bridgething.release.xcconfig"; path = "Target Support Files/Pods-bridgething/Pods-bridgething.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-bridgething.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-bridgething.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F62D530B751F5AA413C237E /* HybridBridgethingSessionImpl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HybridBridgethingSessionImpl.swift; path = bridgething/HybridBridgethingSessionImpl.swift; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = bridgething/AppDelegate.swift; sourceTree = "<group>"; };
+		79675C6A31B7457CA37EB159 /* Inter-Bold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Inter-Bold.ttf"; path = "../assets/fonts/Inter-Bold.ttf"; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = bridgething/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8DAD565BA58DD5688307A0D8 /* BridgethingSetup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BridgethingSetup.swift; path = bridgething/BridgethingSetup.swift; sourceTree = "<group>"; };
+		92FD12EF2CA04AC78A5DA12B /* Inter-Regular.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Inter-Regular.ttf"; path = "../assets/fonts/Inter-Regular.ttf"; sourceTree = "<group>"; };
+		AF3A93B38AEF41FEB0A84550 /* Outfit-Light.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-Light.ttf"; path = "../assets/fonts/Outfit-Light.ttf"; sourceTree = "<group>"; };
+		D493A3B02FAEC981004E66E2 /* bridgething.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = bridgething.icon; sourceTree = "<group>"; };
+		DCB841C5F0384D4F84D2FA3A /* Outfit-SemiBold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-SemiBold.ttf"; path = "../assets/fonts/Outfit-SemiBold.ttf"; sourceTree = "<group>"; };
+		E0BE777E0ADC4EA7902341C3 /* Inter-SemiBold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Inter-SemiBold.ttf"; path = "../assets/fonts/Inter-SemiBold.ttf"; sourceTree = "<group>"; };
+		E933859026B94647ACD128BF /* Outfit-Medium.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-Medium.ttf"; path = "../assets/fonts/Outfit-Medium.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		FE1D413C46CB48BEA5BAB463 /* Outfit-ExtraLight.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = "Outfit-ExtraLight.ttf"; path = "../assets/fonts/Outfit-ExtraLight.ttf"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
+				D493A3B02FAEC981004E66E2 /* bridgething.icon */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -84,6 +109,25 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		511AD04A3194408FAAECBCC1 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				24CD0CE69E824899BEF3AC07 /* Inter-Medium.ttf */,
+				2C29232EA11541098B55B62E /* Outfit-Bold.ttf */,
+				3DC9B5987AB34C49936EC520 /* Outfit-Regular.ttf */,
+				DCB841C5F0384D4F84D2FA3A /* Outfit-SemiBold.ttf */,
+				FE1D413C46CB48BEA5BAB463 /* Outfit-ExtraLight.ttf */,
+				79675C6A31B7457CA37EB159 /* Inter-Bold.ttf */,
+				21D9091C54374D049D155AF7 /* Outfit-ExtraBold.ttf */,
+				92FD12EF2CA04AC78A5DA12B /* Inter-Regular.ttf */,
+				E933859026B94647ACD128BF /* Outfit-Medium.ttf */,
+				AF3A93B38AEF41FEB0A84550 /* Outfit-Light.ttf */,
+				E0BE777E0ADC4EA7902341C3 /* Inter-SemiBold.ttf */,
+			);
+			name = Resources;
+			path = "";
+			sourceTree = "<group>";
+		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
 			isa = PBXGroup;
 			children = (
@@ -99,6 +143,7 @@
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				511AD04A3194408FAAECBCC1 /* Resources */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -200,7 +245,19 @@
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
+				D493A3B12FAEC981004E66E2 /* bridgething.icon in Resources */,
 				2EEBCB58BB4C8FABE67C2E1C /* PrivacyInfo.xcprivacy in Resources */,
+				03A6F015D1AB4A1B80687CFF /* Inter-Medium.ttf in Resources */,
+				CC51CD1356EF4F9EAF2251BF /* Outfit-Bold.ttf in Resources */,
+				8868A51EB33F4439843D8B91 /* Outfit-Regular.ttf in Resources */,
+				29B54422A3AC4543A51CA516 /* Outfit-SemiBold.ttf in Resources */,
+				8D1BC0D1F9C54CFDAA21BFFD /* Outfit-ExtraLight.ttf in Resources */,
+				1C51C335AD1C44A981FFFB96 /* Inter-Bold.ttf in Resources */,
+				C6A372097A7A4E5CB4E8C13E /* Outfit-ExtraBold.ttf in Resources */,
+				3A2E5194E671495BB69D4FCD /* Inter-Regular.ttf in Resources */,
+				72010B89238448ABB08972C6 /* Outfit-Medium.ttf in Resources */,
+				4BD53FBDDB8C4BD5A06AF5A0 /* Outfit-Light.ttf in Resources */,
+				72B79D6718F445D1A51FDA33 /* Inter-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -299,7 +356,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-bridgething.debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = bridgething;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
@@ -310,12 +367,14 @@
 					"\"${PODS_ROOT}/Headers/Private/NitroModules\"",
 				);
 				INFOPLIST_FILE = bridgething/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = bridgething;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -335,7 +394,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-bridgething.release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = bridgething;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
@@ -345,12 +404,14 @@
 					"\"${PODS_ROOT}/Headers/Private/NitroModules\"",
 				);
 				INFOPLIST_FILE = bridgething/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = bridgething;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -439,7 +500,7 @@
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -513,7 +574,7 @@
 					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
 					"-DRCT_REMOVE_LEGACY_ARCH=1",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;

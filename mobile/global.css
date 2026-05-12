@@ -2,56 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
-/* bridgething palette
-   ink:    #1B1F23 → 210 14% 12%
-   paper:  #EFEFEF →   0  0% 94%
-   accent: #00A8E8 → 199 100% 46% (signature cyan in the wordmark)
+/* bridgething brand palette
+   charcoal:  #1B1F23 → 210 14% 12%
+   off-white: #EFEFEF →   0  0% 94%
+   blue:      #00A8E8 → 199 100% 46%
+   soft-gray: #A7ADB5 → 215  7% 68%
 */
 
 @layer base {
   :root {
     --background: 0 0% 96%;
     --foreground: 210 14% 12%;
+
+    --surface: 0 0% 100%;
+    --surface-foreground: 210 14% 12%;
+    --surface-subtle: 210 12% 94%;
+
     --card: 0 0% 100%;
     --card-foreground: 210 14% 12%;
     --popover: 0 0% 100%;
     --popover-foreground: 210 14% 12%;
+
     --primary: 199 100% 46%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 14% 92%;
-    --secondary-foreground: 210 14% 12%;
-    --muted: 210 14% 92%;
-    --muted-foreground: 210 10% 40%;
+    --primary-soft: 199 100% 94%;
+
+    --secondary: 210 12% 92%;
+    --secondary-foreground: 210 14% 14%;
+
+    --muted: 210 12% 92%;
+    --muted-foreground: 215 8% 46%;
+
     --accent: 199 100% 46%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 210 14% 86%;
-    --input: 210 14% 86%;
+    --destructive-soft: 0 72% 96%;
+
+    --success: 152 60% 38%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 60% 95%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 30 30% 12%;
+
+    --border: 215 7% 86%;
+    --border-strong: 215 7% 78%;
+    --input: 215 7% 86%;
     --ring: 199 100% 46%;
-    --radius: 0.625rem;
+
+    --radius: 1rem;
   }
 
   .dark:root {
-    --background: 210 14% 12%;
-    --foreground: 0 0% 94%;
-    --card: 210 14% 16%;
-    --card-foreground: 0 0% 94%;
-    --popover: 210 14% 16%;
-    --popover-foreground: 0 0% 94%;
-    --primary: 199 100% 52%;
+    --background: 210 14% 9%;
+    --foreground: 0 0% 96%;
+
+    --surface: 210 14% 13%;
+    --surface-foreground: 0 0% 96%;
+    --surface-subtle: 210 14% 11%;
+
+    --card: 210 14% 13%;
+    --card-foreground: 0 0% 96%;
+    --popover: 210 14% 13%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 199 100% 56%;
     --primary-foreground: 210 14% 8%;
-    --secondary: 210 14% 20%;
-    --secondary-foreground: 0 0% 94%;
-    --muted: 210 14% 20%;
-    --muted-foreground: 210 10% 65%;
-    --accent: 199 100% 52%;
+    --primary-soft: 199 80% 18%;
+
+    --secondary: 210 12% 20%;
+    --secondary-foreground: 0 0% 96%;
+
+    --muted: 210 12% 20%;
+    --muted-foreground: 215 7% 68%;
+
+    --accent: 199 100% 56%;
     --accent-foreground: 210 14% 8%;
-    --destructive: 0 65% 58%;
+
+    --destructive: 0 80% 64%;
     --destructive-foreground: 0 0% 100%;
-    --border: 210 14% 24%;
-    --input: 210 14% 24%;
-    --ring: 199 100% 52%;
-    --radius: 0.625rem;
+    --destructive-soft: 0 60% 18%;
+
+    --success: 152 60% 50%;
+    --success-foreground: 210 14% 8%;
+    --success-soft: 152 50% 14%;
+
+    --warning: 38 92% 60%;
+    --warning-foreground: 30 30% 12%;
+
+    --border: 210 14% 22%;
+    --border-strong: 210 14% 30%;
+    --input: 210 14% 22%;
+    --ring: 199 100% 56%;
+
+    --radius: 1rem;
   }
 }

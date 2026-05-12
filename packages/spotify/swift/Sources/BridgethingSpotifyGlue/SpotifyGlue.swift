@@ -16,6 +16,15 @@ private let hintDebounceNanos: UInt64 = 250_000_000
 private let pollIntervalNanos: UInt64 = 60_000_000_000
 private let spotifyAppBundle = "com.spotify.client"
 
+/// Closure the host supplies so the glue can build whichever
+/// `OAuthAuthenticator` the host has configured (device-code or PKCE)
+/// while still wiring the device-code prompt through the glue's own
+/// auth-lifecycle observer. PKCE authenticators ignore the closure
+/// argument (they present a WebView directly).
+public typealias SpotifyAuthenticatorFactory = @Sendable (
+    _ onPrompt: @escaping @Sendable (DeviceCodePrompt) async -> Void
+) -> any OAuthAuthenticator
+
 public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public static let name: String = "spotify"
     public static let displayName: String = "Spotify"
@@ -32,11 +41,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public let uriSchemes: [String] = ["spotify"]
     public let musicProvider: MusicProvider = .spotify
-    public let lyricsSupported: Bool = true
+    public let lyricsSupported: Bool = false
 
     public typealias TokenCallback = @Sendable (_ accessToken: String, _ refreshToken: String) -> Void
 
-    private let authenticator: any OAuthAuthenticator
+    private let authenticatorFactory: SpotifyAuthenticatorFactory
     private let initialAccessToken: String
     private let initialRefreshToken: String
     private let onTokensRefreshed: TokenCallback?
@@ -46,17 +55,19 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var gateway: BridgethingGateway?
     private var authorityHeld: Bool = false
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
+    private var authObserver: (@Sendable (GlueAuthState) -> Void)?
     private var hintFetchTask: Task<Void, Never>?
     private var baselinePollTask: Task<Void, Never>?
+    private var connectTask: Task<Void, Never>?
 
     public init(
-        authenticator: any OAuthAuthenticator,
+        authenticatorFactory: @escaping SpotifyAuthenticatorFactory,
         accessToken: String = "",
         refreshToken: String = "",
         onTokensRefreshed: TokenCallback? = nil,
         urlSession: URLSession = .shared
     ) {
-        self.authenticator = authenticator
+        self.authenticatorFactory = authenticatorFactory
         initialAccessToken = accessToken
         initialRefreshToken = refreshToken
         self.onTokensRefreshed = onTokensRefreshed
@@ -64,9 +75,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     public func attach(gateway: BridgethingGateway) async throws {
-        if self.gateway != nil { throw GlueError.notImplemented }
+        if self.gateway != nil { await detach() }
 
         self.gateway = gateway
+
+        // Tell the host we're starting; userCode prompt (if needed) will
+        // arrive on the device-code path before tokens come back.
+        authObserver?(.pending(nil))
+
+        let authenticator = authenticatorFactory { [weak self] prompt in
+            self?.handleDeviceCodePrompt(prompt)
+        }
 
         let client = SpotinyClient(
             authenticator: authenticator,
@@ -76,10 +95,25 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         )
         self.client = client
 
-        await client.connect()
+        // Run auth + dealer-socket connect in the background. We don't
+        // await it here because the daytona/device-code client_id has no
+        // dealer access — `socket.connect()` would block forever. Auth
+        // lifecycle reaches the host through the spotiny delegate
+        // (authDidRefresh / authDidFail), so blocking attach buys us
+        // nothing.
+        connectTask = Task { [weak client] in
+            await client?.connect()
+        }
     }
 
     public func detach() async {
+        // Stop emitting auth state once we're tearing down; cancellation
+        // races inside spotiny would otherwise fire authDidFail and emit
+        // a ghost `failed` after the host has already moved to idle.
+        authObserver = nil
+
+        connectTask?.cancel()
+        connectTask = nil
         hintFetchTask?.cancel()
         hintFetchTask = nil
         baselinePollTask?.cancel()
@@ -102,6 +136,10 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         nowPlayingObserver = observer
     }
 
+    public func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
+        authObserver = observer
+    }
+
     // MARK: - inbound dispatch
 
     public func play(_ uri: PlayUri) async throws {
@@ -114,6 +152,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         } else {
             throw GlueError.notImplemented
         }
+    }
+
+    public func queue(_ req: QueueUri) async throws {
+        guard let client else { throw GlueError.detached }
+        if case .index = req.position { throw GlueError.notImplemented }
+        guard let parsed = SpotifyURI(req.uri) else { throw GlueError.notImplemented }
+        await client.player.addItemToQueue(uri: parsed)
     }
 
     public func pause() async throws {
@@ -225,6 +270,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
     }
 
+    private func handleDeviceCodePrompt(_ prompt: DeviceCodePrompt) {
+        authObserver?(.pending(GlueDeviceCodePrompt(
+            userCode: prompt.userCode,
+            verificationURL: prompt.verificationURL,
+            verificationURLComplete: prompt.verificationURLPrefilled
+        )))
+    }
+
     private func startBaselinePollIfNeeded() {
         guard baselinePollTask == nil else { return }
         baselinePollTask = Task { [weak self] in
@@ -315,10 +368,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 extension SpotifyGlue: SpotinyDelegate {
     public func authDidRefresh(accessToken: String, refreshToken: String) {
         onTokensRefreshed?(accessToken, refreshToken)
+        // Empty tokens here mean spotiny just cleared state because the
+        // current attempt failed; the matching `authDidFail` will follow.
+        // Don't emit `authenticated` until we actually have credentials.
+        if !accessToken.isEmpty {
+            authObserver?(.authenticated)
+        }
     }
 
-    public func authDidFail() {
+    public func authDidFail(reason: String) {
         handleSocketDown()
+        authObserver?(.failed(reason))
     }
 
     public func socketDidConnect() {}
