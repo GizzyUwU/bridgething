@@ -27,6 +27,8 @@
   "packageManager": "bun@1.3.8",
   "overrides": {
     "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-is": "19.2.3",
     "react-native-nitro-modules": "0.35.5"
   },
   "workspaces": [
