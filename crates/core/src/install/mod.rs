@@ -122,7 +122,10 @@ async fn broadcast_install_failed(state: &State, bluetooth: &BluetoothMan, insta
     error,
   });
   if let Err(errs) = state.bus.broadcast_event(client_event).await {
-    tracing::debug!(count = errs.len(), "webapp install failed client broadcast non-fatal errors");
+    tracing::debug!(
+      count = errs.len(),
+      "webapp install failed client broadcast non-fatal errors"
+    );
   }
 }
 

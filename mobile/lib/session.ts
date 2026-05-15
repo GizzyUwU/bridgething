@@ -173,7 +173,10 @@ export async function updateOtaPollConfig(
 
 /** JS-only nickname update. Mirrors to mmkv. The store layer reads
  *  nicknames by id when rendering peer rows. */
-export function updateNickname(deviceId: string, nickname: string | null): void {
+export function updateNickname(
+  deviceId: string,
+  nickname: string | null,
+): void {
   useSessionStore.setState(s => {
     const next = { ...s.nicknames };
     const trimmed = nickname?.trim();
@@ -207,7 +210,9 @@ export function useSession<T>(selector: (state: SessionState) => T): T {
  * Push the native log stream on while the calling screen is mounted.
  * Refcounted across multiple Logs screens (multi-window etc.).
  */
-export function useLogStream(handler: (level: string, message: string) => void): void {
+export function useLogStream(
+  handler: (level: string, message: string) => void,
+): void {
   const session = getSession();
   useEffect(() => {
     session.setLogStreamingEnabled(true);

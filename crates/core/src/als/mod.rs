@@ -1,15 +1,23 @@
 //! ALS (ambient light sensor) driver + backlight policy. Owns the
 //! TMD2772 IIO node and the pwm-backlight sysfs entry; reads the
-//! photodiode raw count, applies the same EMA + log10 + hysteresis
-//! curve the standalone bridgething-als C daemon uses, and either
-//! drives `/sys/class/backlight/backlight/brightness` directly (Auto)
-//! or holds a webapp-set level (Manual).
+//! photodiode raw count, applies a median + log10 + ease-toward-target
+//! pipeline, and either drives `/sys/class/backlight/backlight/brightness`
+//! directly (Auto) or holds a webapp-set level (Manual).
+//!
+//! The mainline tsl2772 driver boots the chip at minimum sensitivity
+//! (1x analog gain, single 2.73 ms ADC cycle, ~1024 max counts) — far
+//! below useful range. The daemon writes `in_intensity0_calibscale` and
+//! `in_intensity0_integration_time` at startup to put the chip in a
+//! regime where typical room ambient produces tens of counts and direct
+//! daylight produces low thousands. Without this the screen barely
+//! responds short of a flashlight.
 //!
 //! Wire surface: `BridgeToClientHardwareMsg::AmbientLightUpdate` fires
 //! on raw-sample changes; `BrightnessChanged` fires on mode/level/
 //! effective-level transitions; `HardwareStateGet` returns a snapshot.
 
 use std::{
+  collections::VecDeque,
   path::{Path, PathBuf},
   sync::Arc,
   time::Duration,
@@ -33,11 +41,13 @@ const BACKLIGHT_DIR: &str = "/sys/class/backlight/backlight";
 #[derive(Debug, Clone)]
 pub struct AlsConfig {
   pub poll_interval: Duration,
-  pub ema_alpha: f64,
   pub raw_at_max: f64,
   pub min_brightness: u32,
-  pub hysteresis: u32,
-  pub zero_streak_limit: u32,
+  pub dim_knee: u32,
+  pub median_window: usize,
+  pub ease_pct: f32,
+  pub integration_time_s: f64,
+  pub gain: u32,
   pub als_path: PathBuf,
   pub backlight_dir: PathBuf,
 }
@@ -46,11 +56,13 @@ impl Default for AlsConfig {
   fn default() -> Self {
     Self {
       poll_interval: Duration::from_millis(200),
-      ema_alpha: 0.20,
-      raw_at_max: 500.0,
-      min_brightness: 64,
-      hysteresis: 2,
-      zero_streak_limit: 5,
+      raw_at_max: 1500.0,
+      min_brightness: 16,
+      dim_knee: 3,
+      median_window: 11,
+      ease_pct: 0.15,
+      integration_time_s: 0.100,
+      gain: 16,
       als_path: PathBuf::from(ALS_PATH),
       backlight_dir: PathBuf::from(BACKLIGHT_DIR),
     }
@@ -72,23 +84,22 @@ struct Inner {
   config: AlsConfig,
   mode: BrightnessMode,
   manual_level: f32,
-  effective_level: f32,
   ambient_raw: u32,
-  smoothed: f64,
-  zero_streak: u32,
+  samples: VecDeque<u32>,
+  current_ticks: u32,
   max_brightness: u32,
 }
 
 impl Inner {
-  fn new(config: AlsConfig, max_brightness: u32) -> Self {
+  fn new(config: AlsConfig, max_brightness: u32, current_ticks: u32) -> Self {
+    let cap = config.median_window.max(1);
     Self {
       config,
       mode: BrightnessMode::Auto,
       manual_level: 1.0,
-      effective_level: 1.0,
       ambient_raw: 0,
-      smoothed: -1.0,
-      zero_streak: 0,
+      samples: VecDeque::with_capacity(cap),
+      current_ticks,
       max_brightness,
     }
   }
@@ -98,27 +109,69 @@ impl Inner {
       brightness: BrightnessState {
         mode: self.mode,
         level: self.manual_level,
-        effective_level: self.effective_level,
+        effective_level: self.current_level(),
       },
       ambient_light: self.ambient_raw,
     }
   }
 
-  fn brightness_for_ambient(&self) -> f32 {
-    if self.smoothed < 0.0 || self.max_brightness == 0 {
-      return self.effective_level;
+  fn current_level(&self) -> f32 {
+    if self.max_brightness == 0 {
+      return 0.0;
+    }
+    self.current_ticks as f32 / self.max_brightness as f32
+  }
+
+  fn push_sample(&mut self, raw: u32) {
+    if self.samples.len() == self.config.median_window {
+      self.samples.pop_front();
+    }
+    self.samples.push_back(raw);
+  }
+
+  fn median(&self) -> Option<u32> {
+    if self.samples.len() < self.config.median_window {
+      return None;
+    }
+    let mut sorted: Vec<u32> = self.samples.iter().copied().collect();
+    sorted.sort_unstable();
+    Some(sorted[sorted.len() / 2])
+  }
+
+  fn target_for_raw(&self, raw: u32) -> u32 {
+    if self.max_brightness == 0 {
+      return 0;
+    }
+    let min_t = self.config.min_brightness.min(self.max_brightness);
+    if raw <= self.config.dim_knee {
+      return min_t;
     }
     let log_max = (1.0 + self.config.raw_at_max).log10();
-    let mut ratio = (1.0 + self.smoothed).log10() / log_max;
-    ratio = ratio.clamp(0.0, 1.0);
-    let min = self.config.min_brightness as f32 / self.max_brightness as f32;
-    min + (1.0 - min) * ratio as f32
+    let ratio = ((1.0 + raw as f64).log10() / log_max).clamp(0.0, 1.0);
+    let span = (self.max_brightness - min_t) as f64;
+    min_t + (span * ratio).round() as u32
   }
 
   fn level_to_ticks(&self, level: f32) -> u32 {
     let level = level.clamp(0.0, 1.0);
     (level * self.max_brightness as f32 + 0.5) as u32
   }
+}
+
+fn ease_step(current: u32, target: u32, ease_pct: f32) -> u32 {
+  if current == target {
+    return current;
+  }
+  let diff = target as i32 - current as i32;
+  let mag = diff.unsigned_abs();
+  let mut step = ((mag as f32) * ease_pct).round() as u32;
+  if step == 0 {
+    step = 1;
+  }
+  if step > mag {
+    step = mag;
+  }
+  if diff > 0 { current + step } else { current - step }
 }
 
 #[derive(Debug)]
@@ -135,6 +188,8 @@ pub struct AlsManager {
 
 impl AlsManager {
   pub async fn init(bus: WireEventBus, config: AlsConfig) -> Result<AlsManagerInit, AlsError> {
+    apply_chip_config(&config).await;
+
     let max_brightness = read_max_brightness(&config.backlight_dir).await.unwrap_or_else(|_| {
       tracing::warn!(
         "als: unable to read {}/max_brightness; deferring backlight policy until paths exist",
@@ -142,17 +197,24 @@ impl AlsManager {
       );
       0
     });
+    let initial_ticks = read_actual_brightness(&config.backlight_dir)
+      .await
+      .unwrap_or(max_brightness)
+      .min(max_brightness);
     if max_brightness > 0 {
       tracing::info!(
-        "als: initialized (max_brightness={max_brightness}, min={}, raw_at_max={}, alpha={}, hysteresis={})",
+        "als: initialized (max={max_brightness}, min={}, raw_at_max={}, knee={}, window={}, ease={:.2}, gain={}, integ={}s, current={initial_ticks})",
         config.min_brightness,
         config.raw_at_max,
-        config.ema_alpha,
-        config.hysteresis,
+        config.dim_knee,
+        config.median_window,
+        config.ease_pct,
+        config.gain,
+        config.integration_time_s,
       );
     }
 
-    let inner = Arc::new(RwLock::new(Inner::new(config, max_brightness)));
+    let inner = Arc::new(RwLock::new(Inner::new(config, max_brightness, initial_ticks)));
     let (tx, rx) = mpsc::channel(16);
     Ok(AlsManagerInit {
       manager: Self {
@@ -237,25 +299,27 @@ async fn run_loop(mut rx: mpsc::Receiver<Cmd>, inner: Arc<RwLock<Inner>>, bus: W
 async fn handle_cmd(cmd: Cmd, inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) {
   match cmd {
     Cmd::SetMode(mode, reply) => {
-      let brightness = {
+      let (write_ticks, dir, brightness) = {
         let mut guard = inner.write().await;
         if guard.mode == mode {
           let _ = reply.send(());
           return;
         }
         guard.mode = mode;
-        if mode == BrightnessMode::Manual {
-          guard.effective_level = guard.manual_level;
+        let ticks = if mode == BrightnessMode::Manual {
+          guard.level_to_ticks(guard.manual_level)
         } else {
-          guard.effective_level = guard.brightness_for_ambient();
-        }
-        let ticks = guard.level_to_ticks(guard.effective_level);
+          guard
+            .median()
+            .map(|m| guard.target_for_raw(m))
+            .unwrap_or(guard.current_ticks)
+        };
+        guard.current_ticks = ticks;
         let dir = guard.config.backlight_dir.clone();
-        let snapshot = guard.snapshot().brightness;
-        drop(guard);
-        write_brightness(&dir, ticks).await.ok();
-        snapshot
+        let brightness = guard.snapshot().brightness;
+        (ticks, dir, brightness)
       };
+      write_brightness(&dir, write_ticks).await.ok();
       let _ = reply.send(());
       broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness)).await;
     }
@@ -264,22 +328,23 @@ async fn handle_cmd(cmd: Cmd, inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) {
         let _ = reply.send(Err(HardwareError::LevelOutOfRange));
         return;
       }
-      let (mismatch, brightness) = {
+      let (mismatch, write_ticks, dir, brightness) = {
         let mut guard = inner.write().await;
         guard.manual_level = level;
         if guard.mode != BrightnessMode::Manual {
-          let snapshot = guard.snapshot().brightness;
-          (true, snapshot)
+          let brightness = guard.snapshot().brightness;
+          (true, None, guard.config.backlight_dir.clone(), brightness)
         } else {
-          guard.effective_level = level;
           let ticks = guard.level_to_ticks(level);
+          guard.current_ticks = ticks;
           let dir = guard.config.backlight_dir.clone();
-          let snapshot = guard.snapshot().brightness;
-          drop(guard);
-          write_brightness(&dir, ticks).await.ok();
-          (false, snapshot)
+          let brightness = guard.snapshot().brightness;
+          (false, Some(ticks), dir, brightness)
         }
       };
+      if let Some(ticks) = write_ticks {
+        write_brightness(&dir, ticks).await.ok();
+      }
       let outcome = if mismatch {
         Err(HardwareError::ModeMismatch)
       } else {
@@ -292,61 +357,52 @@ async fn handle_cmd(cmd: Cmd, inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) {
 }
 
 async fn poll_once(inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) -> Result<(), AlsError> {
-  let (mode, max_brightness, als_path) = {
-    let guard = inner.read().await;
-    (guard.mode, guard.max_brightness, guard.config.als_path.clone())
-  };
+  let als_path = inner.read().await.config.als_path.clone();
   let sample = match read_raw(&als_path).await {
     Ok(v) => v,
     Err(_) => return Ok(()),
   };
-  if max_brightness == 0 {
-    let max = read_max_brightness(&inner.read().await.config.backlight_dir).await?;
-    inner.write().await.max_brightness = max;
+  if inner.read().await.max_brightness == 0 {
+    let dir = inner.read().await.config.backlight_dir.clone();
+    let max = read_max_brightness(&dir).await?;
+    let actual = read_actual_brightness(&dir).await.unwrap_or(max).min(max);
+    let mut guard = inner.write().await;
+    guard.max_brightness = max;
+    guard.current_ticks = actual;
   }
 
-  let (ambient_changed, brightness_changed, ticks_to_write, dir, brightness_state, ambient_event) = {
+  let (ambient_changed, ticks_to_write, dir, brightness_state, ambient_event, brightness_changed) = {
     let mut guard = inner.write().await;
-
-    if sample == 0 && guard.smoothed > 1.0 && guard.zero_streak < guard.config.zero_streak_limit {
-      guard.zero_streak += 1;
-      return Ok(());
-    }
-    guard.zero_streak = 0;
-
-    if guard.smoothed < 0.0 {
-      guard.smoothed = sample as f64;
-    } else {
-      guard.smoothed = guard.config.ema_alpha * sample as f64 + (1.0 - guard.config.ema_alpha) * guard.smoothed;
-    }
-
     let prev_raw = guard.ambient_raw;
     guard.ambient_raw = sample;
+    guard.push_sample(sample);
     let ambient_changed = sample != prev_raw;
 
-    let prev_effective = guard.effective_level;
-    let mut brightness_changed = false;
     let mut ticks_to_write: Option<u32> = None;
-    if mode == BrightnessMode::Auto {
-      let new_effective = guard.brightness_for_ambient();
-      let new_ticks = guard.level_to_ticks(new_effective);
-      let prev_ticks = guard.level_to_ticks(prev_effective);
-      if new_ticks.abs_diff(prev_ticks) >= guard.config.hysteresis {
-        guard.effective_level = new_effective;
-        ticks_to_write = Some(new_ticks);
+    let mut brightness_changed = false;
+    if guard.mode == BrightnessMode::Auto
+      && let Some(m) = guard.median()
+    {
+      let target = guard.target_for_raw(m);
+      let prev_ticks = guard.current_ticks;
+      let next = ease_step(prev_ticks, target, guard.config.ease_pct);
+      if next != prev_ticks {
+        guard.current_ticks = next;
+        ticks_to_write = Some(next);
         brightness_changed = true;
       }
     }
+
     let dir = guard.config.backlight_dir.clone();
-    let snapshot = guard.snapshot();
+    let brightness = guard.snapshot().brightness;
     let ambient_event = AmbientLightUpdate { brightness: sample };
     (
       ambient_changed,
-      brightness_changed,
       ticks_to_write,
       dir,
-      snapshot.brightness,
+      brightness,
       ambient_event,
+      brightness_changed,
     )
   };
 
@@ -362,6 +418,25 @@ async fn poll_once(inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) -> Result<(),
   Ok(())
 }
 
+async fn apply_chip_config(config: &AlsConfig) {
+  let calibscale = config.als_path.with_file_name("in_intensity0_calibscale");
+  let integ = config.als_path.with_file_name("in_intensity0_integration_time");
+  if let Err(err) = tokio::fs::write(&integ, format!("{:.6}\n", config.integration_time_s)).await {
+    tracing::warn!(
+      "als: failed to write integration_time={} to {}: {err}",
+      config.integration_time_s,
+      integ.display(),
+    );
+  }
+  if let Err(err) = tokio::fs::write(&calibscale, format!("{}\n", config.gain)).await {
+    tracing::warn!(
+      "als: failed to write gain={} to {}: {err}",
+      config.gain,
+      calibscale.display(),
+    );
+  }
+}
+
 async fn read_raw(path: &Path) -> Result<u32, AlsError> {
   let bytes = tokio::fs::read(path).await?;
   Ok(parse_uint(&bytes))
@@ -373,6 +448,11 @@ async fn read_max_brightness(dir: &Path) -> Result<u32, AlsError> {
     return Err(AlsError::BacklightAbsent(dir.to_path_buf()));
   }
   let bytes = tokio::fs::read(&path).await?;
+  Ok(parse_uint(&bytes))
+}
+
+async fn read_actual_brightness(dir: &Path) -> Result<u32, AlsError> {
+  let bytes = tokio::fs::read(dir.join("actual_brightness")).await?;
   Ok(parse_uint(&bytes))
 }
 

@@ -18,7 +18,11 @@ const PEAK_OPACITY = 0.5;
  * half-cycle apart so coverage is always continuous; opacity hits zero
  * at both ends of the cycle so the wrap-around is invisible.
  */
-export function HeroPulse({ tint = 'primary' }: { tint?: 'primary' | 'muted' }) {
+export function HeroPulse({
+  tint = 'primary',
+}: {
+  tint?: 'primary' | 'muted';
+}) {
   const phase1 = useSharedValue(0);
   const phase2 = useSharedValue(0);
 

@@ -25,15 +25,14 @@ import {
   Wifi,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
+import { Alert, Linking, ScrollView, Switch, Text, View } from 'react-native';
 import {
-  Alert,
-  Linking,
-  ScrollView,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
-import { check, request, PERMISSIONS, RESULTS, type PermissionStatus } from 'react-native-permissions';
+  check,
+  request,
+  PERMISSIONS,
+  RESULTS,
+  type PermissionStatus,
+} from 'react-native-permissions';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
@@ -134,7 +133,8 @@ export function SettingsScreen({ navigation }: Props) {
   const setChannel = async (channel: 'stable' | 'dev') => {
     const next: BridgethingOtaPollConfig = {
       channel,
-      intervalSeconds: pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
+      intervalSeconds:
+        pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
       autoPush: pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush,
       rootUrl: pollConfig?.rootUrl,
     };
@@ -144,7 +144,8 @@ export function SettingsScreen({ navigation }: Props) {
   const toggleAutoPush = async (autoPush: boolean) => {
     const next: BridgethingOtaPollConfig = {
       channel: pollConfig?.channel ?? DEFAULT_OTA_POLL_CONFIG.channel,
-      intervalSeconds: pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
+      intervalSeconds:
+        pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
       autoPush,
       rootUrl: pollConfig?.rootUrl,
     };
@@ -222,7 +223,9 @@ export function SettingsScreen({ navigation }: Props) {
               subtitle={provider ? 'signed in' : 'not signed in'}
               trailing={
                 provider ? (
-                  <Pill tone="success" dot={false}>active</Pill>
+                  <Pill tone="success" dot={false}>
+                    active
+                  </Pill>
                 ) : null
               }
             />
@@ -347,9 +350,17 @@ export function SettingsScreen({ navigation }: Props) {
             className="mb-2 flex-row items-center gap-2 px-2 py-1"
           >
             {advancedOpen ? (
-              <ChevronDown size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+              <ChevronDown
+                size={16}
+                color="hsl(215 14% 50%)"
+                strokeWidth={2.4}
+              />
             ) : (
-              <ChevronRight size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+              <ChevronRight
+                size={16}
+                color="hsl(215 14% 50%)"
+                strokeWidth={2.4}
+              />
             )}
             <Text className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
               advanced
@@ -358,8 +369,8 @@ export function SettingsScreen({ navigation }: Props) {
           {advancedOpen ? (
             <View>
               <Text className="mb-2 px-2 text-[12px] leading-[18px] text-muted-foreground">
-                capabilities your phone offers to webapps on the Car Thing.
-                most users should leave these alone.
+                capabilities your phone offers to webapps on the Car Thing. most
+                users should leave these alone.
               </Text>
               <ListGroup>
                 <GeoFlagRow

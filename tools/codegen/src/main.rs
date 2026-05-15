@@ -394,7 +394,8 @@ fn dedup_swift_decls(input: &str) -> Result<String> {
 /// including preceding `@Serializable` / `///` lines. Same dedup rule
 /// as the swift pass.
 fn dedup_kotlin_decls(input: &str) -> Result<String> {
-  let header = regex::Regex::new(r"(?m)^(data class|sealed class|enum class|class) (\w+)\b").expect("kotlin header regex");
+  let header =
+    regex::Regex::new(r"(?m)^(data class|sealed class|enum class|class) (\w+)\b").expect("kotlin header regex");
   let lines: Vec<&str> = input.split_inclusive('\n').collect();
   let line_starts = line_start_offsets(input);
   let mut blocks: Vec<DeclBlock> = Vec::new();

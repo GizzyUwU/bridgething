@@ -72,10 +72,15 @@ export default function App() {
     const session = getSession();
     return session.subscribe(event => {
       if (event.type !== 'authStateChanged') return;
-      if (event.state.kind === 'pending' && event.state.verificationUrlComplete) {
-        openVerificationBrowser(event.state.verificationUrlComplete).catch(err => {
-          console.warn('[bridgething] verification browser open failed', err);
-        });
+      if (
+        event.state.kind === 'pending' &&
+        event.state.verificationUrlComplete
+      ) {
+        openVerificationBrowser(event.state.verificationUrlComplete).catch(
+          err => {
+            console.warn('[bridgething] verification browser open failed', err);
+          },
+        );
       } else {
         // authenticated / failed / idle all want the browser gone.
         dismissVerificationBrowser().catch(() => {});

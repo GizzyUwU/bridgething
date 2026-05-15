@@ -16,11 +16,7 @@ import { ListGroup } from '../components/ListGroup';
 import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
-import {
-  getSession,
-  peerDisplayName,
-  useSession,
-} from '../lib/session';
+import { getSession, peerDisplayName, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WebappBrowse'>;

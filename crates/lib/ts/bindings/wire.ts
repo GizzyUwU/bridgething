@@ -5,13 +5,17 @@
  * whether to send back a typed response, treat it as a one-way command,
  * or pair it against a pending request.
  */
-export type MsgMeta = { "kind": "command" } | { "kind": "event" } | { "kind": "request" } | { "kind": "response", "data": ResponseMeta };
+export type MsgMeta =
+  | { kind: 'command' }
+  | { kind: 'event' }
+  | { kind: 'request' }
+  | { kind: 'response'; data: ResponseMeta };
 
 /**
  * Correlation handle the responder echoes back so the requester's
  * pending future can resolve.
  */
-export type ResponseMeta = { requestId: string, };
+export type ResponseMeta = { requestId: string };
 
 /**
  * Protocol-level failure the responder ships when a request could not be
@@ -22,4 +26,8 @@ export type ResponseMeta = { requestId: string, };
  * want to recover from) live inside the per-op response variant, not
  * here.
  */
-export type WireError = { "type": "unsupported" } | { "type": "unimplemented" } | { "type": "malformed", "data": { reason: string, } } | { "type": "handlerFailed", "data": { reason: string, } };
+export type WireError =
+  | { type: 'unsupported' }
+  | { type: 'unimplemented' }
+  | { type: 'malformed'; data: { reason: string } }
+  | { type: 'handlerFailed'; data: { reason: string } };

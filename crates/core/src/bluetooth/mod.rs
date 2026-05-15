@@ -40,10 +40,7 @@ use crate::{
   net::{WSError, WireEventBus},
   peer::PeerTracker,
   player::PlayerError,
-  state::{
-    DeviceStore, StateError,
-    meta::DeviceMeta,
-  },
+  state::{DeviceStore, StateError, meta::DeviceMeta},
 };
 
 pub type BluetoothMan = Arc<BluetoothManager>;

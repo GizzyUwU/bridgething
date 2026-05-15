@@ -6,8 +6,8 @@
 
 mod chaos;
 mod conn;
-mod ota;
 mod install;
+mod ota;
 mod webapp;
 
 use std::path::PathBuf;

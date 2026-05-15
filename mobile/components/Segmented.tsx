@@ -1,9 +1,6 @@
 import { Text } from 'react-native';
 
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from './ui/toggle-group';
+import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 
 /**
  * Pill-style segmented control. Built on RNR's ToggleGroup primitive

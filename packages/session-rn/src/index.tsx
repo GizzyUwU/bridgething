@@ -166,10 +166,7 @@ export class BridgethingSession {
     return this.native.currentWebapp(deviceId);
   }
 
-  async installWebappFromBytes(
-    deviceId: string,
-    archive: ArrayBuffer,
-  ): Promise<BridgethingWebappInfo> {
+  async installWebappFromBytes(deviceId: string, archive: ArrayBuffer): Promise<BridgethingWebappInfo> {
     return this.native.installWebappFromBase64(deviceId, arrayBufferToBase64(archive));
   }
 
@@ -189,12 +186,7 @@ export class BridgethingSession {
     return this.native.listWebappConfig(deviceId, id);
   }
 
-  async setWebappConfigField(
-    deviceId: string,
-    id: string,
-    key: string,
-    value: string,
-  ): Promise<void> {
+  async setWebappConfigField(deviceId: string, id: string, key: string, value: string): Promise<void> {
     await this.native.setWebappConfigField(deviceId, id, key, value);
   }
 
@@ -334,10 +326,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const chunk = 8192;
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(
-      null,
-      Array.from(bytes.subarray(i, i + chunk)),
-    );
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
   // Hermes / RN ship `globalThis.btoa`; fall back to a tiny encoder if
   // missing (some test environments).
@@ -347,8 +336,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return manualBtoa(binary);
 }
 
-const B64_ALPHABET =
-  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function manualBtoa(binary: string): string {
   let out = '';

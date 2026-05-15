@@ -1,12 +1,7 @@
 import type { LucideIcon } from 'lucide-react-native';
 import { X } from 'lucide-react-native';
 import { useState } from 'react';
-import {
-  Pressable,
-  Text,
-  type TextInputProps,
-  View,
-} from 'react-native';
+import { Pressable, Text, type TextInputProps, View } from 'react-native';
 
 import { Input } from './ui/input';
 

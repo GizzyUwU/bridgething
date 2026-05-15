@@ -1,10 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  Pause,
-  Play,
-  Share2,
-  Trash2,
-} from 'lucide-react-native';
+import { Pause, Play, Share2, Trash2 } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -60,7 +55,8 @@ export function LogsScreen({}: Props) {
             message: event.message,
           },
         ];
-        if (next.length > BUFFER_LIMIT) next.splice(0, next.length - BUFFER_LIMIT);
+        if (next.length > BUFFER_LIMIT)
+          next.splice(0, next.length - BUFFER_LIMIT);
         return next;
       });
     });
@@ -106,7 +102,8 @@ export function LogsScreen({}: Props) {
         </View>
         <View className="mt-3 flex-row items-center justify-between">
           <Text className="text-[12px] text-muted-foreground">
-            {filtered.length} / {entries.length} entries{paused ? ' · paused' : ''}
+            {filtered.length} / {entries.length} entries
+            {paused ? ' · paused' : ''}
           </Text>
           <View className="flex-row gap-1.5">
             <ToolbarBtn
@@ -180,9 +177,7 @@ function renderRow({ item }: ListRenderItemInfo<LogEntry>) {
   return (
     <View className="border-b border-border/50 py-1.5">
       <View className="flex-row items-center gap-2">
-        <View
-          className={`rounded-md px-1.5 py-0.5 ${levelBg(item.level)}`}
-        >
+        <View className={`rounded-md px-1.5 py-0.5 ${levelBg(item.level)}`}>
           <Text
             className={`font-mono text-[10px] font-bold uppercase ${levelText(item.level)}`}
           >

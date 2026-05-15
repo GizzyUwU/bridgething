@@ -37,11 +37,7 @@ import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
-import {
-  getSession,
-  peerDisplayName,
-  useSession,
-} from '../lib/session';
+import { getSession, peerDisplayName, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WebappDetail'>;

@@ -91,21 +91,20 @@ export function ListRow({
       ) : null}
       {trailing ? <View className="ml-1">{trailing}</View> : null}
       {chevron ? (
-        <ChevronRight
-          size={18}
-          color="hsl(215 14% 60%)"
-          strokeWidth={2.2}
-        />
+        <ChevronRight size={18} color="hsl(215 14% 60%)" strokeWidth={2.2} />
       ) : null}
-      {loading ? (
-        <View className="h-2 w-2 rounded-full bg-primary" />
-      ) : null}
+      {loading ? <View className="h-2 w-2 rounded-full bg-primary" /> : null}
     </View>
   );
 
   if (!onPress) return body;
   return (
-    <Press onPress={onPress} disabled={disabled || loading} fade={false} scaleTo={1}>
+    <Press
+      onPress={onPress}
+      disabled={disabled || loading}
+      fade={false}
+      scaleTo={1}
+    >
       {body}
     </Press>
   );

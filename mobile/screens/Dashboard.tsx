@@ -4,13 +4,7 @@ import {
   type BridgethingWebappInfo,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  AppWindow,
-  Cable,
-  Pencil,
-  Plus,
-  RefreshCw,
-} from 'lucide-react-native';
+import { AppWindow, Cable, Pencil, Plus, RefreshCw } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,7 +34,11 @@ export function DashboardScreen({ navigation }: Props) {
   const paired = ancsStatus !== 'unknown';
   const signedIn = provider != null;
 
-  const status = describeStatus({ signedIn, paired, hasPeer: peers.length > 0 });
+  const status = describeStatus({
+    signedIn,
+    paired,
+    hasPeer: peers.length > 0,
+  });
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
@@ -309,9 +307,7 @@ function AppTile({
     <Press onPress={onTap} className="m-1 w-[31%]" scaleTo={0.94}>
       <View
         className={`items-center rounded-2xl border px-3 py-4 ${
-          active
-            ? 'border-primary bg-primary-soft'
-            : 'border-border bg-surface'
+          active ? 'border-primary bg-primary-soft' : 'border-border bg-surface'
         }`}
         style={
           active

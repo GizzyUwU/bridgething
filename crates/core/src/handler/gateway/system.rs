@@ -71,7 +71,11 @@ impl SystemHandler {
       return Ok(());
     }
 
-    let next: Option<String> = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
+    let next: Option<String> = if trimmed.is_empty() {
+      None
+    } else {
+      Some(trimmed.to_string())
+    };
     self.handle.state.meta.set_nickname(next.clone()).await?;
     self
       .handle

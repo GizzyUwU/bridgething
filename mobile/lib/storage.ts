@@ -110,6 +110,11 @@ export function getOtaPollConfig(): BridgethingOtaPollConfig | null {
   }
 }
 
-export function setOtaPollConfig(config: BridgethingOtaPollConfig | null): void {
-  storage.set(KEY.otaPollConfig, config == null ? 'null' : JSON.stringify(config));
+export function setOtaPollConfig(
+  config: BridgethingOtaPollConfig | null,
+): void {
+  storage.set(
+    KEY.otaPollConfig,
+    config == null ? 'null' : JSON.stringify(config),
+  );
 }

@@ -563,8 +563,7 @@ fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), WebappError> {
     }
     let mut out = std::fs::File::create(&target).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
     let mut bounded = std::io::Read::take(&mut entry, declared_size + 1);
-    let copied =
-      std::io::copy(&mut bounded, &mut out).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
+    let copied = std::io::copy(&mut bounded, &mut out).map_err(|e| WebappError::Internal { reason: e.to_string() })?;
     if copied != declared_size {
       return Err(WebappError::ZipMalformed {
         reason: format!("entry {i} size mismatch: CD says {declared_size}, decompressed {copied}"),

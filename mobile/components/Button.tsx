@@ -19,7 +19,10 @@ import { Text } from './ui/text';
 type Variant = 'primary' | 'secondary' | 'destructive' | 'ghost' | 'tonal';
 type Size = 'sm' | 'md' | 'lg';
 
-const RNR_VARIANT: Record<Variant, 'default' | 'secondary' | 'destructive' | 'ghost'> = {
+const RNR_VARIANT: Record<
+  Variant,
+  'default' | 'secondary' | 'destructive' | 'ghost'
+> = {
   primary: 'default',
   secondary: 'secondary',
   destructive: 'destructive',

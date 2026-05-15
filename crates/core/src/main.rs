@@ -320,12 +320,13 @@ fn spawn_nickname_observer(
       bluetooth
         .gateway_man
         .broadcast(BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(
-          GatewayNicknameReply { nickname: value.clone() },
+          GatewayNicknameReply {
+            nickname: value.clone(),
+          },
         ))
         .await;
 
-      let client_event =
-        BridgeToClientSystemMsgEvent::DeviceNicknameChanged(ClientNicknameReply { nickname: value });
+      let client_event = BridgeToClientSystemMsgEvent::DeviceNicknameChanged(ClientNicknameReply { nickname: value });
       if let Err(errs) = bus.broadcast_event(client_event).await {
         tracing::debug!(count = errs.len(), "nickname-change client broadcast non-fatal errors");
       }

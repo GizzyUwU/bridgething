@@ -1,11 +1,6 @@
 import type { BridgethingProviderInfo } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  ArrowRight,
-  BellRing,
-  Check,
-  ChevronLeft,
-} from 'lucide-react-native';
+import { ArrowRight, BellRing, Check, ChevronLeft } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -425,12 +420,7 @@ function PairPage({
           </Button>
         ) : (
           <>
-            <Button
-              onPress={onPair}
-              loading={busy}
-              size="lg"
-              icon={BellRing}
-            >
+            <Button onPress={onPair} loading={busy} size="lg" icon={BellRing}>
               pair
             </Button>
             <Button onPress={onFinish} variant="ghost" size="md">

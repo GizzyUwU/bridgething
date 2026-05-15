@@ -25,8 +25,7 @@ pub use shared::{
   RecommendationsResult, RegistrationStatus, RepeatMode, SearchResult, Show, ShuffleMode, Station, StreamBegin,
   StreamChunk, StreamEnd, StreamError, SurfaceAvailability, THUMBNAIL_SIZE, TimeInfo, Track, TtlRetention,
   TunnelClosed, TunnelData, TunnelError, VoiceDescriptor, WebappError, WebappInfo, WebappManifest, WebappRole,
-  WebappSource,
-  WsError, WsFrame, to_slug,
+  WebappSource, WsError, WsFrame, to_slug,
 };
 
 pub const BRIDGETHING_DEVICE_CLASS: u32 = 0x7c0000;
