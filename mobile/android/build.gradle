@@ -1,7 +1,7 @@
 buildscript {
     ext {
         buildToolsVersion = "36.0.0"
-        minSdkVersion = 24
+        minSdkVersion = 26
         compileSdkVersion = 36
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
@@ -15,7 +15,27 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Schema + glue + companion packages declare
+        // `kotlin("plugin.serialization")` in their build.gradle.kts;
+        // ship the plugin classpath so they resolve when built from
+        // mobile/android (root build.gradle.kts ships its own copy).
+        classpath("org.jetbrains.kotlin:kotlin-serialization:2.1.20")
     }
+}
+
+// session-rn isn't picked up by RN autolinking (bun workspace symlink),
+// so the autolinker doesn't inject the nitro modules dep substitution
+// for it. Add it manually before the RN root plugin evaluates anything,
+// otherwise `evaluationDependsOn(:app)` runs first and project
+// configurations get locked.
+subprojects { sub ->
+  sub.configurations.all { config ->
+    config.resolutionStrategy.dependencySubstitution {
+      substitute(module("com.margelo.nitro:react-native-nitro-modules"))
+        .using(project(":react-native-nitro-modules"))
+        .because("session-rn isn't autolinked but still needs the nitro modules JNI")
+    }
+  }
 }
 
 apply plugin: "com.facebook.react.rootproject"
