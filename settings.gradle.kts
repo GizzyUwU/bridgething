@@ -6,6 +6,12 @@ pluginManagement {
   }
 }
 
+plugins {
+  // Auto-downloads JDK toolchains the kotlin modules declare via
+  // jvmToolchain(...) when the host machine doesn't have a matching JDK.
+  id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
 rootProject.name = "bridgething"
 
 include(":crates:lib:kotlin:schema")
