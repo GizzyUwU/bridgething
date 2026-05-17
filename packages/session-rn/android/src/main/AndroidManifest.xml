@@ -1,14 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!--
+      Legacy BR/EDR perms - max API 30. From 31 onwards
+      BLUETOOTH_CONNECT/BLUETOOTH_SCAN cover the same surface and are
+      requested at runtime.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!--
+      `neverForLocation` asserts to the platform we don't derive geo
+      info from scan results. Without it, Samsung (and a few other OEMs)
+      still require ACCESS_FINE_LOCATION at runtime even on API 31+
+      before BluetoothAdapter.startDiscovery() will succeed.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Fine + coarse location are for the companion's geo dispatcher
+      (location fixes forwarded to webapps that ask). Not used for BT
+      scan thanks to `neverForLocation` above.
+    -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!--
+      Background location is requested at runtime; on API 30+ the OS
+      kicks the user to its system settings page rather than showing a
+      prompt. The companion only uses it when the user has opted in.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
 </manifest>

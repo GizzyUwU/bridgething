@@ -15,22 +15,48 @@ buildscript {
   }
 }
 
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+}
+
 apply plugin: "com.android.library"
 apply plugin: "org.jetbrains.kotlin.android"
+
+// `com.facebook.react` plugin wires in the react-android prefab + JNI
+// codegen path. Without it the prefab `find_package(ReactAndroid)` call
+// in nitrogen's autolinking.cmake can't resolve `hermestooling` because
+// the prefab artifact never gets extracted into the module's .cxx tree.
+// Mirror what react-native-mmkv does.
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
 
 apply from: '../nitrogen/generated/android/BridgethingSession+autolinking.gradle'
 
 android {
   namespace "com.bridgething.session"
   compileSdk getExtOrDefault("compileSdkVersion", 35).toInteger()
+  ndkVersion getExtOrDefault("ndkVersion", "27.1.12297006").toString()
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion", 26).toInteger()
     targetSdkVersion getExtOrDefault("targetSdkVersion", 35).toInteger()
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
+        // ReactAndroid prefab requires libc++_shared (its .so links
+        // against it). Without explicit ANDROID_STL the NDK defaults
+        // to static and prefab rejects the import.
+        arguments "-DANDROID_STL=c++_shared"
+      }
+    }
   }
 
   buildFeatures {
     buildConfig false
+    prefab true
+    prefabPublishing true
   }
 
   compileOptions {
@@ -42,6 +68,24 @@ android {
     main {
       manifest.srcFile "src/main/AndroidManifest.xml"
       java.srcDirs += ["src/main/java"]
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+
+  packagingOptions {
+    jniLibs {
+      excludes = ["**/libreact_*.so", "**/libfbjni.so"]
+    }
+  }
+
+  prefab {
+    BridgethingSession {
+      headers "${project.projectDir}/../nitrogen/generated/shared/c++"
     }
   }
 }
@@ -56,6 +100,8 @@ repositories {
 }
 
 dependencies {
+  // RN gradle plugin substitutes both of these for the autolinked
+  // project deps (`:react-native-nitro-modules` + `:react-android`).
   implementation "com.facebook.react:react-android"
   implementation "com.margelo.nitro:react-native-nitro-modules"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0"
