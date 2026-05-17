@@ -86,6 +86,23 @@ public object CompanionDevicePicker {
         return deferred.await()
     }
 
+    /**
+     * MAC addresses the user has authorized via CDM for this app. Used
+     * at session start to reopen RFCOMM sockets without prompting again.
+     */
+    public fun associations(context: Context): Set<String> {
+        val manager = context.applicationContext
+            .getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager
+            ?: return emptySet()
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                manager.myAssociations.mapNotNullTo(mutableSetOf()) { it.deviceMacAddress?.toString() }
+            } else {
+                @Suppress("DEPRECATION") manager.associations.toSet()
+            }
+        } catch (_: Throwable) { emptySet() }
+    }
+
     private fun toWireDevice(device: BluetoothDevice): BridgethingBtDevice {
         val name = try { device.name } catch (_: SecurityException) { null }
         return BridgethingBtDevice(

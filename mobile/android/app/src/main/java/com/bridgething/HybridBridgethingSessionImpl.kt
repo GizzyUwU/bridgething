@@ -1,7 +1,6 @@
 package com.bridgething
 
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
@@ -93,10 +92,6 @@ public class HybridBridgethingSessionImpl(
             osName = "Android",
         )
         public var lyricsResolver: LyricsResolver = LrclibResolver()
-
-        // Mirror of `hciconfig hci0 class 0x7c0000` set by yocto-superbird
-        // BSP. Used by tryAutoConnect to skip non-Car-Thing bonded devices.
-        internal const val BRIDGETHING_COD_CLASS = 0x7c0000
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -180,10 +175,10 @@ public class HybridBridgethingSessionImpl(
             // Let BridgethingNotificationListener find the live gateway.
             NotificationBridgeRegistry.companion = c
 
-            // Auto-connect to every bonded device that looks like a Car Thing.
-            // Bond status is the user's gate (they pair once via system
-            // settings); the adapter then opens an RFCOMM session per device.
-            tryAutoConnect(adapter)
+            // Reopen RFCOMM sessions to every CDM-authorized device.
+            // CDM's association list is the user's pair gate - anything
+            // there is one they explicitly picked via the system picker.
+            reconnectAssociated(adapter)
         }
     }
 
@@ -216,23 +211,12 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    private fun tryAutoConnect(adapter: BluetoothSocketAdapter) {
-        // Host app must have requested BLUETOOTH_CONNECT before start();
-        // SecurityException here means it didn't, so skip silently.
+    private fun reconnectAssociated(adapter: BluetoothSocketAdapter) {
         val ba = bluetoothAdapter() ?: return
-        val bonded = try { ba.bondedDevices } catch (_: SecurityException) { null } ?: return
-        for (device in bonded) {
-            if (!looksLikeCarThing(device)) continue
+        for (mac in CompanionDevicePicker.associations(context.applicationContext)) {
+            val device = runCatching { ba.getRemoteDevice(mac) }.getOrNull() ?: continue
             scope.launch { runCatching { adapter.connect(device) } }
         }
-    }
-
-    private fun looksLikeCarThing(device: BluetoothDevice): Boolean {
-        val cod = try { device.bluetoothClass?.hashCode() } catch (_: SecurityException) { null }
-        if (cod == BRIDGETHING_COD_CLASS) return true
-        val name = try { device.name } catch (_: SecurityException) { null } ?: return false
-        return name.contains("Car Thing", ignoreCase = true) ||
-            name.contains("bridgething", ignoreCase = true)
     }
 
     // ---- Provider selection ----
@@ -451,23 +435,16 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
-        // CDM returns a bonded BluetoothDevice; kick the gateway to open
-        // an RFCOMM session so the peer shows up in the dashboard
-        // without requiring an app restart.
-        bluetoothAdapter()?.getRemoteDevice(picked.address)?.let { device ->
-            scope.launch { runCatching { connectIfPicked(device) } }
-        }
+        // Kick the gateway to open an RFCOMM session so the new peer
+        // shows up in the dashboard without requiring an app restart.
+        val adapter = stateLock.withLock { btAdapter } ?: return picked
+        scope.launch { reconnectAssociated(adapter) }
         return picked
     }
 
     private fun bluetoothAdapter(): BluetoothAdapter? {
         val ctx = context.applicationContext
         return (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-    }
-
-    private suspend fun connectIfPicked(device: BluetoothDevice) {
-        val adapter = stateLock.withLock { btAdapter } ?: return
-        runCatching { adapter.connect(device) }
     }
 
     // ---- Callback setters ----
