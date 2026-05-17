@@ -3,6 +3,9 @@ import type {
   BridgethingAncsAuthStatus,
   BridgethingAncsSetupResult,
   BridgethingAuthState,
+  BridgethingBtBondState,
+  BridgethingBtDevice,
+  BridgethingBtDiscoveryEvent,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingDeviceMeta,
@@ -24,6 +27,10 @@ export type {
   BridgethingAncsSetupResult,
   BridgethingAuthKind,
   BridgethingAuthState,
+  BridgethingBtBondState,
+  BridgethingBtDevice,
+  BridgethingBtDiscoveryEvent,
+  BridgethingBtDiscoveryEventKind,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingConfigField,
@@ -51,6 +58,8 @@ export type SessionEvent =
   | { type: 'webappsChanged'; deviceId: string }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
+  | { type: 'btDiscoveryEvent'; event: BridgethingBtDiscoveryEvent }
+  | { type: 'btBondStateChanged'; device: BridgethingBtDevice }
   | { type: 'log'; level: string; message: string };
 
 /**
@@ -218,6 +227,65 @@ export class BridgethingSession {
     return this.native.hostInfo();
   }
 
+  // MARK: - In-app Bluetooth pairing (android-only)
+
+  async listBondedBluetoothDevices(): Promise<BridgethingBtDevice[]> {
+    return this.native.listBondedBluetoothDevices();
+  }
+
+  async startBluetoothDiscovery(): Promise<void> {
+    await this.native.startBluetoothDiscovery();
+  }
+
+  async stopBluetoothDiscovery(): Promise<void> {
+    await this.native.stopBluetoothDiscovery();
+  }
+
+  async pairBluetoothDevice(address: string): Promise<BridgethingBtBondState> {
+    return this.native.pairBluetoothDevice(address);
+  }
+
+  /**
+   * iOS-only happy-path pair flow via AccessorySetupKit. Returns the
+   * chosen accessory, or null on cancel. Android consumers render the
+   * `BluetoothPairPicker` component instead.
+   */
+  async presentPairPicker(): Promise<BridgethingBtDevice | null> {
+    return this.native.presentPairPicker();
+  }
+
+  // MARK: - Notification access (android-only)
+
+  async isNotificationAccessGranted(): Promise<boolean> {
+    return this.native.isNotificationAccessGranted();
+  }
+
+  async requestNotificationAccess(): Promise<void> {
+    await this.native.requestNotificationAccess();
+  }
+
+  /**
+   * Drop a set of runtime permissions. Android 13+ queues the revoke
+   * for next process kill via `revokeSelfPermissionsOnKill`; older
+   * platforms + iOS return `false` and the caller bounces the user to
+   * system settings instead. Pass every related permission together
+   * (e.g. `ACCESS_BACKGROUND_LOCATION` + `ACCESS_FINE_LOCATION` +
+   * `ACCESS_COARSE_LOCATION`) to fully revoke - revoking the
+   * background-only one just downgrades the OS grant to "while using".
+   */
+  async revokeRuntimePermissions(permissions: string[]): Promise<boolean> {
+    return this.native.revokeRuntimePermissions(permissions);
+  }
+
+  /**
+   * Force-kill our own process. Use after `revokeRuntimePermissions`
+   * to apply the queued revoke immediately - the OS routes the user
+   * back to the launcher and the perm is gone when they reopen.
+   */
+  async killApp(): Promise<void> {
+    await this.native.killApp();
+  }
+
   // MARK: - Per-device proxy
 
   device(deviceId: string): BridgethingDevice {
@@ -261,6 +329,12 @@ export class BridgethingSession {
     });
     this.native.setOnOtaEvent(event => {
       this.dispatch({ type: 'otaEvent', event });
+    });
+    this.native.setOnBluetoothDiscoveryEvent(event => {
+      this.dispatch({ type: 'btDiscoveryEvent', event });
+    });
+    this.native.setOnBluetoothBondStateChanged(device => {
+      this.dispatch({ type: 'btBondStateChanged', device });
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });

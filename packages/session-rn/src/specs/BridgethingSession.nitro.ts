@@ -273,6 +273,41 @@ export type BridgethingOtaEvent = {
   configuredChannel?: string;
 };
 
+/**
+ * In-app Bluetooth bond state for a discovered device. Mirror of
+ * Android's `BluetoothDevice.BOND_*` constants. iOS pairing happens via
+ * the system MFi flow and never surfaces these.
+ */
+export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
+
+/**
+ * One Bluetooth Classic device surfaced by an in-app scan (or a bonded
+ * lookup). `name` is the friendly device name when available, else null
+ * (some devices only advertise their MAC).
+ */
+export type BridgethingBtDevice = {
+  address: string;
+  name?: string;
+  bondState: BridgethingBtBondState;
+  /** True when the device's CoD matches the bridgething profile class
+   *  (0x7c0000), so the picker can filter the discovery firehose. */
+  isCarThing: boolean;
+};
+
+/**
+ * Discovery lifecycle event from the in-app Bluetooth scan. iOS never
+ * emits these (pairing handled by MFi system flow).
+ */
+export type BridgethingBtDiscoveryEventKind = 'started' | 'finished' | 'found' | 'failed';
+
+export type BridgethingBtDiscoveryEvent = {
+  kind: BridgethingBtDiscoveryEventKind;
+  /** Populated on `found`. */
+  device?: BridgethingBtDevice;
+  /** Populated on `failed`. */
+  reason?: string;
+};
+
 /** Subset of the wire-protocol `BridgeThingMeta` exposed for UI. */
 export type BridgethingDeviceMeta = {
   daemonVersion: string;
@@ -476,6 +511,82 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
    *  render the real version instead of a hardcoded string. */
   hostInfo(): Promise<BridgethingHostInfo>;
 
+  // MARK: - In-app Bluetooth pairing (android only)
+
+  /** Snapshot of every currently-bonded BR/EDR device the OS knows
+   *  about. iOS returns an empty list (pairing happens via MFi). */
+  listBondedBluetoothDevices(): Promise<BridgethingBtDevice[]>;
+
+  /** Kick off a BR/EDR inquiry. The user must have granted
+   *  `BLUETOOTH_SCAN` runtime permission on android API 31+. Discovery
+   *  events flow through `setOnBluetoothDiscoveryEvent`; call
+   *  `stopBluetoothDiscovery` (or wait for the OS-bounded ~12s window
+   *  to finish) to stop. iOS rejects with `unsupported`. */
+  startBluetoothDiscovery(): Promise<void>;
+
+  /** Cancel an in-flight inquiry. No-op if nothing is in flight. */
+  stopBluetoothDiscovery(): Promise<void>;
+
+  /** Trigger an OS-level pair dialog for `address`. Resolves once the
+   *  bond state stabilizes (`bonded` or returns to `none` on cancel).
+   *  Throws on android when the device is unknown or the OS rejects
+   *  the bond. iOS rejects with `unsupported`. */
+  pairBluetoothDevice(address: string): Promise<BridgethingBtBondState>;
+
+  /**
+   * Cross-platform happy-path pair flow.
+   *
+   * On iOS, presents AccessorySetupKit's system picker (iOS 18+) -
+   * native UI, no separate scan/list/pair steps. Returns the chosen
+   * accessory translated into a `BridgethingBtDevice`, or `null` when
+   * the user cancels. iOS <=17 rejects with `unsupported`.
+   *
+   * On android, rejects with `unsupported` - the in-app
+   * `BluetoothPairPicker` component is the equivalent surface there.
+   * Callers branch on `Platform.OS`.
+   */
+  presentPairPicker(): Promise<BridgethingBtDevice | null>;
+
+  // MARK: - Notification access (android only)
+
+  /** True when the app has been toggled on in Android's "Device & app
+   *  notifications" settings (the only way to grant access to a
+   *  NotificationListenerService). iOS treats notifications differently
+   *  (ANCS) and always reports false here. */
+  isNotificationAccessGranted(): Promise<boolean>;
+
+  /** Open the system "Notification access" settings page so the user
+   *  can grant access manually - Android offers no programmatic prompt.
+   *  iOS rejects with `unsupported`. */
+  requestNotificationAccess(): Promise<void>;
+
+  /**
+   * Drop a list of runtime permissions this app currently holds. On
+   * Android 13+ (API 33+) this uses `Context.revokeSelfPermissionsOnKill`,
+   * which queues the revoke for the next process kill - the user
+   * doesn't see a settings bounce. Returns `true` when the queued
+   * revoke was scheduled, `false` when the platform offers no
+   * programmatic path (Android <=12, iOS); callers fall back to
+   * opening app settings.
+   *
+   * Pass android.permission.* constants (e.g.
+   * `["android.permission.ACCESS_BACKGROUND_LOCATION",
+   *   "android.permission.ACCESS_FINE_LOCATION"]`).
+   *
+   * Revoking only the background variant leaves the foreground grant in
+   * place and the OS just downgrades to "while using"; pass every
+   * related permission together when the caller wants a full revoke.
+   */
+  revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
+
+  /**
+   * Force-kill our own process so a queued
+   * `revokeSelfPermissionsOnKill` actually takes effect. The OS routes
+   * users back to the launcher; they reopen bridgething and the perm
+   * is gone. Android-only; iOS rejects.
+   */
+  killApp(): Promise<void>;
+
   // MARK: - Callbacks
 
   setOnProviderChanged(callback: (info: BridgethingProviderInfo | null) => void): void;
@@ -503,4 +614,12 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   /** Stream of OtaPollEvent translated to RN shape. */
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
+
+  /** Stream of in-app Bluetooth discovery events (started/found/finished/failed). */
+  setOnBluetoothDiscoveryEvent(callback: (event: BridgethingBtDiscoveryEvent) => void): void;
+
+  /** Stream of bond-state transitions for any device the OS reports.
+   *  Used by the pairing UI to drive a "bonding…" → "bonded" → "open dashboard"
+   *  flow without polling. */
+  setOnBluetoothBondStateChanged(callback: (device: BridgethingBtDevice) => void): void;
 }
