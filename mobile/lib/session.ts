@@ -103,10 +103,14 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
         return;
       case 'webappsChanged':
       case 'otaEvent':
+      case 'btDiscoveryEvent':
+      case 'btBondStateChanged':
       case 'log':
         // Webapps changes are observed by the dashboard via dedicated
         // selectors / subscriptions; OTA events + logs are streamed to
-        // ad-hoc consumers in their own components.
+        // ad-hoc consumers in their own components. BT discovery + bond
+        // state events are consumed by the Setup screen's pair picker
+        // via session.subscribe directly.
         return;
     }
   },

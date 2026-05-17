@@ -17,6 +17,7 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  MoonStar,
   RadioTower,
   RefreshCw,
   Speaker,
@@ -25,7 +26,17 @@ import {
   Wifi,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Linking,
+  Platform,
+  ScrollView,
+  Switch,
+  Text,
+  ToastAndroid,
+  View,
+} from 'react-native';
 import {
   check,
   request,
@@ -377,15 +388,28 @@ export function SettingsScreen({ navigation }: Props) {
                   value={flags.geo}
                   onChange={geo => writeFlags({ ...flags, geo })}
                 />
-                <FlagRow
-                  icon={Bell}
-                  title="iPhone notifications"
-                  subtitle="forward iPhone notifications to the Car Thing"
-                  value={flags.notifications}
-                  onChange={notifications =>
-                    writeFlags({ ...flags, notifications })
-                  }
-                />
+                {Platform.OS === 'android' && flags.geo ? (
+                  <BackgroundLocationRow />
+                ) : null}
+                {Platform.OS === 'ios' ? (
+                  <FlagRow
+                    icon={Bell}
+                    title="iPhone notifications"
+                    subtitle="forward iPhone notifications to the Car Thing"
+                    value={flags.notifications}
+                    onChange={notifications =>
+                      writeFlags({ ...flags, notifications })
+                    }
+                  />
+                ) : null}
+                {Platform.OS === 'android' ? (
+                  <NotificationListenerRow
+                    value={flags.notifications}
+                    onChange={notifications =>
+                      writeFlags({ ...flags, notifications })
+                    }
+                  />
+                ) : null}
                 <FlagRow
                   icon={Globe}
                   title="HTTP proxy"
@@ -500,19 +524,27 @@ function GeoFlagRow({
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
+  // Pick the right OS-level permission constant for the running
+  // platform. Without this check the row tries to query an iOS
+  // permission on android and the toggle silently springs back.
+  const permission =
+    Platform.OS === 'android'
+      ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
+      : PERMISSIONS.IOS.LOCATION_WHEN_IN_USE;
+
   const [status, setStatus] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await check(PERMISSIONS.IOS.LOCATION_WHEN_IN_USE);
+      const s = await check(permission);
       if (!cancelled) setStatus(s);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [permission]);
 
   const denied = status === RESULTS.DENIED || status === RESULTS.BLOCKED;
   const granted = status === RESULTS.GRANTED || status === RESULTS.LIMITED;
@@ -533,7 +565,7 @@ function GeoFlagRow({
     if (blocked) return;
     setBusy(true);
     try {
-      const result = await request(PERMISSIONS.IOS.LOCATION_WHEN_IN_USE);
+      const result = await request(permission);
       setStatus(result);
       if (result === RESULTS.GRANTED || result === RESULTS.LIMITED) {
         onChange(true);
@@ -555,6 +587,247 @@ function GeoFlagRow({
           value={value && granted}
           onValueChange={handleToggle}
           disabled={busy || blocked}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * Background-location toggle. Android 10+ requires a separate runtime
+ * grant on top of foreground location; from API 30 on the request can't
+ * pop a dialog and instead kicks the user to system Settings ("Allow
+ * all the time"). The toggle reflects the OS-level state, not a user
+ * preference - the OS owns the truth.
+ */
+function BackgroundLocationRow() {
+  const permission = PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
+  const [status, setStatus] = useState<PermissionStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setStatus(await check(permission));
+  }, [permission]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Foreground transitions re-check OS state (user may have flipped
+  // the perm from system settings without our knowledge).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const granted = status === RESULTS.GRANTED;
+  const blocked = status === RESULTS.BLOCKED;
+  const subtitle = granted
+    ? 'allowed all the time'
+    : blocked
+      ? 'denied at the system level — tap to open Settings'
+      : 'forward fixes even when the app is in the background';
+
+  const handleToggle = async (next: boolean) => {
+    if (!next) {
+      // Revoking only the bg variant just downgrades to "while using"
+      // - drop fine+coarse together for a real revoke. Confirm first
+      // because the OS only applies the change on next process kill,
+      // so we have to restart ourselves to make it stick.
+      Alert.alert(
+        'restart bridgething?',
+        'to revoke location, android needs to kill + restart the app. revoke now?',
+        [
+          { text: 'later', style: 'cancel' },
+          {
+            text: 'revoke + restart',
+            style: 'destructive',
+            onPress: async () => {
+              setBusy(true);
+              try {
+                const session = getSession();
+                const scheduled = await session.revokeRuntimePermissions([
+                  PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION,
+                  PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+                  PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
+                ]);
+                if (!scheduled) {
+                  Alert.alert(
+                    'revoke in settings',
+                    'this android version needs you to revoke location from system settings. open it?',
+                    [
+                      { text: 'cancel', style: 'cancel' },
+                      { text: 'open settings', onPress: () => Linking.openSettings() },
+                    ],
+                  );
+                  return;
+                }
+                ToastAndroid.show('restarting bridgething…', ToastAndroid.SHORT);
+                // Give the toast a beat to render, then kill ourselves.
+                setTimeout(() => {
+                  session.killApp().catch(() => {});
+                }, 500);
+              } finally {
+                setBusy(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await request(permission);
+      setStatus(result);
+      if (result === RESULTS.BLOCKED) {
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(
+            'tap "Allow all the time" in the perms screen',
+            ToastAndroid.LONG,
+          );
+        }
+        Alert.alert(
+          'background location blocked',
+          'android requires "Allow all the time" from the system settings page. open it?',
+          [
+            { text: 'cancel', style: 'cancel' },
+            { text: 'open settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ListRow
+      icon={MoonStar}
+      iconTint={blocked ? 'destructive' : 'default'}
+      title="background location"
+      subtitle={subtitle}
+      onPress={blocked ? () => Linking.openSettings() : undefined}
+      trailing={
+        <Switch
+          value={granted}
+          onValueChange={handleToggle}
+          disabled={busy}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * NotificationListenerService access. The Android equivalent of iOS's
+ * ANCS pair flow - the user has to toggle our app on under "Device & app
+ * notifications" themselves; there is no programmatic grant. We poll
+ * the enabled state every time the screen mounts (and after a Settings
+ * trip) so the visual toggle matches the OS truth.
+ */
+function NotificationListenerRow({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const session = getSession();
+  const [granted, setGranted] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setGranted(await session.isNotificationAccessGranted());
+    } catch {
+      setGranted(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Re-check whenever the app comes back to the foreground (the user
+  // most likely just toggled the switch in the system settings page).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const subtitle = granted
+    ? 'forwarding to the Car Thing'
+    : 'tap to open notification access in Settings';
+
+  const openSettings = async (mode: 'grant' | 'revoke') => {
+    try {
+      await session.requestNotificationAccess();
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(
+          mode === 'grant'
+            ? 'tap bridgething and allow access'
+            : 'tap bridgething and revoke access',
+          ToastAndroid.LONG,
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        'failed to open settings',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
+
+  const handleToggle = async (next: boolean) => {
+    if (!next) {
+      // No programmatic revoke for NotificationListenerService - the
+      // user has to flip our app off in system settings.
+      Alert.alert(
+        'revoke in settings',
+        'android only lets you revoke notification access from system settings. open it?',
+        [
+          { text: 'leave as-is', style: 'cancel' },
+          {
+            text: 'open settings',
+            onPress: () => {
+              onChange(false);
+              openSettings('revoke');
+            },
+          },
+        ],
+      );
+      return;
+    }
+    if (granted) {
+      onChange(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await openSettings('grant');
+      onChange(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ListRow
+      icon={Bell}
+      iconTint="default"
+      title="notification access"
+      subtitle={subtitle}
+      onPress={!granted ? () => openSettings('grant') : undefined}
+      trailing={
+        <Switch
+          value={Boolean(value && granted)}
+          onValueChange={handleToggle}
+          disabled={busy}
         />
       }
     />
