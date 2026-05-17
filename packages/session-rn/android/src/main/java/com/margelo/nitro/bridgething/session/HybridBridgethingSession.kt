@@ -31,8 +31,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingWebappsChanged: ((String) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
-        private var pendingBtDiscoveryEvent: ((BridgethingBtDiscoveryEvent) -> Unit)? = null
-        private var pendingBtBondStateChanged: ((BridgethingBtDevice) -> Unit)? = null
 
         /**
          * Load the BridgethingSession JNI lib + register the HybridObject
@@ -67,8 +65,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     webapps = pendingWebappsChanged,
                     deviceMeta = pendingDeviceMetaChanged,
                     ota = pendingOtaEvent,
-                    btDiscovery = pendingBtDiscoveryEvent,
-                    btBondState = pendingBtBondStateChanged,
                 )
                 pendingProviderChanged = null
                 pendingAuthStateChanged = null
@@ -80,8 +76,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingWebappsChanged = null
                 pendingDeviceMetaChanged = null
                 pendingOtaEvent = null
-                pendingBtDiscoveryEvent = null
-                pendingBtBondStateChanged = null
                 snapshot
             }
             replay.provider?.let(b::setOnProviderChanged)
@@ -94,8 +88,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.webapps?.let(b::setOnWebappsChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.ota?.let(b::setOnOtaEvent)
-            replay.btDiscovery?.let(b::setOnBluetoothDiscoveryEvent)
-            replay.btBondState?.let(b::setOnBluetoothBondStateChanged)
         }
 
         private fun require(): BridgethingSessionBackend = backend
@@ -116,8 +108,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val webapps: ((String) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val ota: ((BridgethingOtaEvent) -> Unit)?,
-        val btDiscovery: ((BridgethingBtDiscoveryEvent) -> Unit)?,
-        val btBondState: ((BridgethingBtDevice) -> Unit)?,
     )
 
     // Lifecycle
@@ -257,23 +247,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         )
     }
 
-    // In-app Bluetooth pairing
-
-    override fun listBondedBluetoothDevices(): Promise<Array<BridgethingBtDevice>> = Promise.async {
-        backend?.listBondedBluetoothDevices() ?: emptyArray()
-    }
-
-    override fun startBluetoothDiscovery(): Promise<Unit> = Promise.async {
-        require().startBluetoothDiscovery()
-    }
-
-    override fun stopBluetoothDiscovery(): Promise<Unit> = Promise.async {
-        backend?.stopBluetoothDiscovery()
-    }
-
-    override fun pairBluetoothDevice(address: String): Promise<BridgethingBtBondState> = Promise.async {
-        require().pairBluetoothDevice(address)
-    }
+    // OS-mediated pair flow
 
     override fun presentPairPicker(): Promise<Variant_NullType_BridgethingBtDevice> = Promise.async {
         val device = require().presentPairPicker()
@@ -353,14 +327,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnOtaEvent(callback: (event: BridgethingOtaEvent) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaEvent) { pendingOtaEvent = it }
-    }
-
-    override fun setOnBluetoothDiscoveryEvent(callback: (event: BridgethingBtDiscoveryEvent) -> Unit) {
-        forwardOrBuffer(callback, BridgethingSessionBackend::setOnBluetoothDiscoveryEvent) { pendingBtDiscoveryEvent = it }
-    }
-
-    override fun setOnBluetoothBondStateChanged(callback: (device: BridgethingBtDevice) -> Unit) {
-        forwardOrBuffer(callback, BridgethingSessionBackend::setOnBluetoothBondStateChanged) { pendingBtBondStateChanged = it }
     }
 
     private inline fun <C> forwardOrBuffer(

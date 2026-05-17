@@ -7,7 +7,7 @@
  * detail flows route to the correct Car Thing.
  */
 export type RootStackParamList = {
-  Setup: { startAt?: 'signIn' | 'pair' } | undefined;
+  Setup: { startAt?: 'signIn' | 'pair'; step?: number } | undefined;
   Dashboard: undefined;
   WebappBrowse: { deviceId: string };
   WebappDetail: { deviceId: string; id: string };

@@ -18,17 +18,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BluetoothPairPicker } from '../components/BluetoothPairPicker';
 import { Button } from '../components/Button';
 import { HeroPulse } from '../components/HeroPulse';
 import { IconBadge } from '../components/IconBadge';
 import { PagerDots } from '../components/PagerDots';
 import { PendingAuth } from '../components/PendingAuth';
 import { Press } from '../components/Press';
-import {
-  openSystemBluetoothSettings,
-  requestPairPermissions,
-} from '../lib/pair-permissions';
 import { getSession, useSession } from '../lib/session';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
@@ -41,8 +36,19 @@ export function SetupScreen({ navigation, route }: Props) {
   const session = getSession();
   const { width } = useWindowDimensions();
 
-  const initialStep = route.params?.startAt === 'pair' ? 1 : 0;
-  const [step, setStep] = useState(initialStep);
+  // Step is mirrored to route params so it survives a screen remount
+  // (react-native-screens detaches us while a system activity like the
+  // CDM picker is in the foreground).
+  const initialStep =
+    route.params?.step ?? (route.params?.startAt === 'pair' ? 1 : 0);
+  const [step, setStepState] = useState(initialStep);
+  const setStep = (next: number | ((prev: number) => number)) => {
+    setStepState(prev => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      navigation.setParams({ step: value });
+      return value;
+    });
+  };
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
@@ -52,11 +58,10 @@ export function SetupScreen({ navigation, route }: Props) {
   const ancsStatus = useSession(s => s.ancsAuthStatus);
   const peers = useSession(s => s.peers);
 
-  // On iOS, "paired" means the daemon has seen an ANCS auth state (any
-  // value other than unknown means the LE bond from AccessorySetupKit
-  // landed). On android there's no ANCS - "paired" means we have an
-  // RFCOMM session with at least one Car Thing, which only happens
-  // after the user has bonded the device via system Bluetooth settings.
+  // iOS uses ANCS auth state as the pair signal (LE bond from ASK
+  // landed). Android has no ANCS - we treat any live RFCOMM peer as
+  // paired, since CompanionDeviceManager only resolves successfully
+  // after the system has already completed the BR/EDR bond.
   const paired =
     Platform.OS === 'android' ? peers.length > 0 : ancsStatus !== 'unknown';
   const signedIn = authState.kind === 'authenticated' && provider != null;
@@ -116,24 +121,9 @@ export function SetupScreen({ navigation, route }: Props) {
     setPairBusy(true);
     try {
       if (Platform.OS === 'android') {
-        // Android: request the nearby-devices runtime grants first, then
-        // deep-link to the system BT settings so the user can bond their
-        // Car Thing. The companion's adapter picks up the bond on the
-        // next gateway start cycle.
-        const perm = await requestPairPermissions();
-        if (perm === 'blocked') {
-          Alert.alert(
-            'permission needed',
-            'bridgething needs nearby-devices permission to find your Car Thing. open settings to grant it.',
-            [
-              { text: 'cancel', style: 'cancel' },
-              { text: 'open settings', onPress: openSystemBluetoothSettings },
-            ],
-          );
-          return;
-        }
-        if (perm !== 'granted') return;
-        await openSystemBluetoothSettings();
+        // CompanionDeviceManager picker. Returns the chosen accessory
+        // or null on cancel - no error handling needed.
+        await session.presentPairPicker();
         return;
       }
       const result = await session.enableAncsNotifications();
@@ -408,47 +398,6 @@ function PairPage({
   onPair: () => void;
   onFinish: () => void;
 }) {
-  if (Platform.OS === 'android') {
-    return (
-      <ScrollView
-        contentContainerClassName="px-7 pb-8 pt-6"
-        showsVerticalScrollIndicator={false}
-      >
-        <Text className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.18em] text-primary">
-          step 2 of 2
-        </Text>
-        <Text
-          className="text-foreground"
-          style={{
-            fontFamily: 'Outfit-Medium',
-            fontSize: 30,
-            lineHeight: 34,
-            letterSpacing: -0.9,
-          }}
-        >
-          pair your Car Thing
-        </Text>
-        <Text className="mt-2 mb-6 text-[14px] leading-[20px] text-muted-foreground">
-          put your Car Thing in pairing mode, then scan + tap it below. you&apos;ll see one system confirmation per device.
-        </Text>
-
-        <BluetoothPairPicker />
-
-        <View className="mt-8 gap-2.5">
-          {paired ? (
-            <Button onPress={onFinish} icon={ArrowRight} size="lg">
-              open dashboard
-            </Button>
-          ) : (
-            <Button onPress={onFinish} variant="ghost" size="md">
-              skip — i&apos;ll pair later
-            </Button>
-          )}
-        </View>
-      </ScrollView>
-    );
-  }
-
   return (
     <ScrollView
       contentContainerClassName="flex-1 px-7 pb-8 pt-6"
@@ -471,7 +420,7 @@ function PairPage({
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
           turn on your Car Thing and tap pair. you&apos;ll see a system
-          confirmation — accept it to finish.
+          picker - choose your device to finish.
         </Text>
 
         <View className="my-10 items-center">

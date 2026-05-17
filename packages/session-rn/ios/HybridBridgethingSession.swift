@@ -46,11 +46,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     // Host identity
     func hostInfo() async -> BridgethingHostInfo
 
-    // In-app Bluetooth pairing (android-only in spec; iOS impls reject as unsupported)
-    func listBondedBluetoothDevices() async -> [BridgethingBtDevice]
-    func startBluetoothDiscovery() async throws
-    func stopBluetoothDiscovery() async
-    func pairBluetoothDevice(address: String) async throws -> BridgethingBtBondState
+    // OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
     func presentPairPicker() async throws -> BridgethingBtDevice?
 
     // Notification access (android-only in spec; iOS impls reject as unsupported)
@@ -73,8 +69,6 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
-    func setOnBluetoothDiscoveryEvent(_ callback: @escaping @Sendable (BridgethingBtDiscoveryEvent) -> Void)
-    func setOnBluetoothBondStateChanged(_ callback: @escaping @Sendable (BridgethingBtDevice) -> Void)
 }
 
 /// Thin Nitro proxy. The pod ships this; the host app installs a
@@ -95,8 +89,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingWebappsChanged: (@Sendable (String) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
-    private static var pendingBtDiscoveryEvent: (@Sendable (BridgethingBtDiscoveryEvent) -> Void)?
-    private static var pendingBtBondStateChanged: (@Sendable (BridgethingBtDevice) -> Void)?
 
     /// Host apps call this once at launch (before React Native starts)
     /// to wire up the real session backend that uses the bridgething
@@ -115,8 +107,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let webappsCb = pendingWebappsChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
-        let btDiscCb = pendingBtDiscoveryEvent
-        let btBondCb = pendingBtBondStateChanged
         pendingProviderChanged = nil
         pendingAuthStateChanged = nil
         pendingPeerConnected = nil
@@ -127,8 +117,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingWebappsChanged = nil
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
-        pendingBtDiscoveryEvent = nil
-        pendingBtBondStateChanged = nil
         stateLock.unlock()
 
         if let providerCb { backend.setOnProviderChanged(providerCb) }
@@ -141,8 +129,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let webappsCb { backend.setOnWebappsChanged(webappsCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
-        if let btDiscCb { backend.setOnBluetoothDiscoveryEvent(btDiscCb) }
-        if let btBondCb { backend.setOnBluetoothBondStateChanged(btBondCb) }
     }
 
     private static func backend() throws -> any BridgethingSessionBackend {
@@ -334,23 +320,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    // MARK: - In-app Bluetooth pairing (android-only in spec)
-
-    public func listBondedBluetoothDevices() throws -> Promise<[BridgethingBtDevice]> {
-        Promise.async { await (try Self.backend()).listBondedBluetoothDevices() }
-    }
-
-    public func startBluetoothDiscovery() throws -> Promise<Void> {
-        Promise.async { try await Self.backend().startBluetoothDiscovery() }
-    }
-
-    public func stopBluetoothDiscovery() throws -> Promise<Void> {
-        Promise.async { await (try Self.backend()).stopBluetoothDiscovery() }
-    }
-
-    public func pairBluetoothDevice(address: String) throws -> Promise<BridgethingBtBondState> {
-        Promise.async { try await Self.backend().pairBluetoothDevice(address: address) }
-    }
+    // MARK: - OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
 
     public func presentPairPicker() throws -> Promise<BridgethingBtDevice?> {
         Promise.async { try await Self.backend().presentPairPicker() }
@@ -479,23 +449,5 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingOtaEvent = wrapped }
         Self.stateLock.unlock()
         backend?.setOnOtaEvent(wrapped)
-    }
-
-    public func setOnBluetoothDiscoveryEvent(callback: @escaping (BridgethingBtDiscoveryEvent) -> Void) throws {
-        let wrapped: @Sendable (BridgethingBtDiscoveryEvent) -> Void = { event in callback(event) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingBtDiscoveryEvent = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnBluetoothDiscoveryEvent(wrapped)
-    }
-
-    public func setOnBluetoothBondStateChanged(callback: @escaping (BridgethingBtDevice) -> Void) throws {
-        let wrapped: @Sendable (BridgethingBtDevice) -> Void = { device in callback(device) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingBtBondStateChanged = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnBluetoothBondStateChanged(wrapped)
     }
 }

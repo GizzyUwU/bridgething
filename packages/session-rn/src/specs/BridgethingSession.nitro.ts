@@ -274,38 +274,24 @@ export type BridgethingOtaEvent = {
 };
 
 /**
- * In-app Bluetooth bond state for a discovered device. Mirror of
- * Android's `BluetoothDevice.BOND_*` constants. iOS pairing happens via
- * the system MFi flow and never surfaces these.
+ * Bond state returned by `presentPairPicker`. Always `bonded` on success
+ * (both iOS ASK and android CDM only resolve after the system has
+ * completed the pair). Kept as a typed field for future expansion.
  */
 export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
 
 /**
- * One Bluetooth Classic device surfaced by an in-app scan (or a bonded
- * lookup). `name` is the friendly device name when available, else null
- * (some devices only advertise their MAC).
+ * One Car Thing handed back by the OS-mediated pair picker
+ * (AccessorySetupKit on iOS, CompanionDeviceManager on android).
+ * `address` is the BT MAC on android and an opaque accessory identifier
+ * on iOS - callers shouldn't interpret it beyond echoing back to the
+ * wire protocol.
  */
 export type BridgethingBtDevice = {
   address: string;
   name?: string;
   bondState: BridgethingBtBondState;
-  /** True when the device's CoD matches the bridgething profile class
-   *  (0x7c0000), so the picker can filter the discovery firehose. */
   isCarThing: boolean;
-};
-
-/**
- * Discovery lifecycle event from the in-app Bluetooth scan. iOS never
- * emits these (pairing handled by MFi system flow).
- */
-export type BridgethingBtDiscoveryEventKind = 'started' | 'finished' | 'found' | 'failed';
-
-export type BridgethingBtDiscoveryEvent = {
-  kind: BridgethingBtDiscoveryEventKind;
-  /** Populated on `found`. */
-  device?: BridgethingBtDevice;
-  /** Populated on `failed`. */
-  reason?: string;
 };
 
 /** Subset of the wire-protocol `BridgeThingMeta` exposed for UI. */
@@ -511,39 +497,14 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
    *  render the real version instead of a hardcoded string. */
   hostInfo(): Promise<BridgethingHostInfo>;
 
-  // MARK: - In-app Bluetooth pairing (android only)
-
-  /** Snapshot of every currently-bonded BR/EDR device the OS knows
-   *  about. iOS returns an empty list (pairing happens via MFi). */
-  listBondedBluetoothDevices(): Promise<BridgethingBtDevice[]>;
-
-  /** Kick off a BR/EDR inquiry. The user must have granted
-   *  `BLUETOOTH_SCAN` runtime permission on android API 31+. Discovery
-   *  events flow through `setOnBluetoothDiscoveryEvent`; call
-   *  `stopBluetoothDiscovery` (or wait for the OS-bounded ~12s window
-   *  to finish) to stop. iOS rejects with `unsupported`. */
-  startBluetoothDiscovery(): Promise<void>;
-
-  /** Cancel an in-flight inquiry. No-op if nothing is in flight. */
-  stopBluetoothDiscovery(): Promise<void>;
-
-  /** Trigger an OS-level pair dialog for `address`. Resolves once the
-   *  bond state stabilizes (`bonded` or returns to `none` on cancel).
-   *  Throws on android when the device is unknown or the OS rejects
-   *  the bond. iOS rejects with `unsupported`. */
-  pairBluetoothDevice(address: string): Promise<BridgethingBtBondState>;
-
   /**
-   * Cross-platform happy-path pair flow.
+   * Cross-platform pair flow. The OS handles scan + picker + bond in
+   * a single system surface - no in-app perms, no manual list.
    *
-   * On iOS, presents AccessorySetupKit's system picker (iOS 18+) -
-   * native UI, no separate scan/list/pair steps. Returns the chosen
-   * accessory translated into a `BridgethingBtDevice`, or `null` when
-   * the user cancels. iOS <=17 rejects with `unsupported`.
+   * - iOS: AccessorySetupKit picker (iOS 18+); rejects on earlier iOS.
+   * - Android: CompanionDeviceManager picker (API 26+).
    *
-   * On android, rejects with `unsupported` - the in-app
-   * `BluetoothPairPicker` component is the equivalent surface there.
-   * Callers branch on `Platform.OS`.
+   * Returns the chosen accessory, or `null` when the user cancels.
    */
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
 
@@ -614,12 +575,4 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   /** Stream of OtaPollEvent translated to RN shape. */
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
-
-  /** Stream of in-app Bluetooth discovery events (started/found/finished/failed). */
-  setOnBluetoothDiscoveryEvent(callback: (event: BridgethingBtDiscoveryEvent) => void): void;
-
-  /** Stream of bond-state transitions for any device the OS reports.
-   *  Used by the pairing UI to drive a "bonding…" → "bonded" → "open dashboard"
-   *  flow without polling. */
-  setOnBluetoothBondStateChanged(callback: (device: BridgethingBtDevice) => void): void;
 }

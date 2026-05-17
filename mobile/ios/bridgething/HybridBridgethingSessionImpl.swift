@@ -599,12 +599,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     // MARK: - Android-only surfaces (iOS stubs)
 
-    public func listBondedBluetoothDevices() async -> [BridgethingBtDevice] { [] }
-    public func startBluetoothDiscovery() async throws { throw SessionError.unsupportedOnPlatform }
-    public func stopBluetoothDiscovery() async {}
-    public func pairBluetoothDevice(address: String) async throws -> BridgethingBtBondState {
-        throw SessionError.unsupportedOnPlatform
-    }
     public func isNotificationAccessGranted() async -> Bool { false }
     public func requestNotificationAccess() async throws { throw SessionError.unsupportedOnPlatform }
     public func revokeRuntimePermissions(permissions: [String]) async -> Bool { false }
@@ -613,9 +607,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         // and self-restart isn't needed (no equivalent of android's
         // revokeSelfPermissionsOnKill that defers until process death).
     }
-
-    public func setOnBluetoothDiscoveryEvent(_ callback: @escaping @Sendable (BridgethingBtDiscoveryEvent) -> Void) {}
-    public func setOnBluetoothBondStateChanged(_ callback: @escaping @Sendable (BridgethingBtDevice) -> Void) {}
 
     // MARK: - Internal
 

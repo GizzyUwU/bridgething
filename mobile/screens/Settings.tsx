@@ -18,6 +18,7 @@ import {
   LogOut,
   MapPin,
   MoonStar,
+  Plus,
   RadioTower,
   RefreshCw,
   Speaker,
@@ -88,7 +89,23 @@ export function SettingsScreen({ navigation }: Props) {
   const [pollBusy, setPollBusy] = useState(false);
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [signInBusy, setSignInBusy] = useState<string | null>(null);
+  const [addDeviceBusy, setAddDeviceBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const addDevice = async () => {
+    if (addDeviceBusy) return;
+    setAddDeviceBusy(true);
+    try {
+      await session.presentPairPicker();
+    } catch (err) {
+      Alert.alert(
+        'pair failed',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setAddDeviceBusy(false);
+    }
+  };
 
   const refresh = useCallback(async () => {
     const [h, providerList] = await Promise.all([
@@ -309,6 +326,17 @@ export function SettingsScreen({ navigation }: Props) {
               })}
             </ListGroup>
           )}
+          <View className="mt-3">
+            <Button
+              onPress={addDevice}
+              loading={addDeviceBusy}
+              icon={Plus}
+              variant="tonal"
+              size="md"
+            >
+              add device
+            </Button>
+          </View>
         </View>
 
         <View className="mb-7">

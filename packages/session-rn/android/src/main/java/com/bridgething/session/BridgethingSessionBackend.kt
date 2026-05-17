@@ -4,9 +4,7 @@ import com.margelo.nitro.bridgething.session.BridgethingActiveWebapp
 import com.margelo.nitro.bridgething.session.BridgethingAncsAuthStatus
 import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
-import com.margelo.nitro.bridgething.session.BridgethingBtBondState
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
-import com.margelo.nitro.bridgething.session.BridgethingBtDiscoveryEvent
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
@@ -68,11 +66,7 @@ public interface BridgethingSessionBackend {
     // Host identity
     public suspend fun hostInfo(): BridgethingHostInfo
 
-    // In-app Bluetooth pairing (android only)
-    public suspend fun listBondedBluetoothDevices(): Array<BridgethingBtDevice>
-    public suspend fun startBluetoothDiscovery()
-    public suspend fun stopBluetoothDiscovery()
-    public suspend fun pairBluetoothDevice(address: String): BridgethingBtBondState
+    // OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
     public suspend fun presentPairPicker(): BridgethingBtDevice?
 
     // Notification access (android only)
@@ -93,6 +87,4 @@ public interface BridgethingSessionBackend {
     public fun setOnWebappsChanged(callback: (String) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
-    public fun setOnBluetoothDiscoveryEvent(callback: (BridgethingBtDiscoveryEvent) -> Unit)
-    public fun setOnBluetoothBondStateChanged(callback: (BridgethingBtDevice) -> Unit)
 }

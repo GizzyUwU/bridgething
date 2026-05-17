@@ -3,9 +3,7 @@ import type {
   BridgethingAncsAuthStatus,
   BridgethingAncsSetupResult,
   BridgethingAuthState,
-  BridgethingBtBondState,
   BridgethingBtDevice,
-  BridgethingBtDiscoveryEvent,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingDeviceMeta,
@@ -29,8 +27,6 @@ export type {
   BridgethingAuthState,
   BridgethingBtBondState,
   BridgethingBtDevice,
-  BridgethingBtDiscoveryEvent,
-  BridgethingBtDiscoveryEventKind,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingConfigField,
@@ -58,8 +54,6 @@ export type SessionEvent =
   | { type: 'webappsChanged'; deviceId: string }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
-  | { type: 'btDiscoveryEvent'; event: BridgethingBtDiscoveryEvent }
-  | { type: 'btBondStateChanged'; device: BridgethingBtDevice }
   | { type: 'log'; level: string; message: string };
 
 /**
@@ -227,28 +221,10 @@ export class BridgethingSession {
     return this.native.hostInfo();
   }
 
-  // MARK: - In-app Bluetooth pairing (android-only)
-
-  async listBondedBluetoothDevices(): Promise<BridgethingBtDevice[]> {
-    return this.native.listBondedBluetoothDevices();
-  }
-
-  async startBluetoothDiscovery(): Promise<void> {
-    await this.native.startBluetoothDiscovery();
-  }
-
-  async stopBluetoothDiscovery(): Promise<void> {
-    await this.native.stopBluetoothDiscovery();
-  }
-
-  async pairBluetoothDevice(address: string): Promise<BridgethingBtBondState> {
-    return this.native.pairBluetoothDevice(address);
-  }
-
   /**
-   * iOS-only happy-path pair flow via AccessorySetupKit. Returns the
-   * chosen accessory, or null on cancel. Android consumers render the
-   * `BluetoothPairPicker` component instead.
+   * Cross-platform OS-mediated pair flow. iOS = AccessorySetupKit
+   * picker (iOS 18+). Android = CompanionDeviceManager picker (API 26+).
+   * Returns the chosen accessory, or null on cancel.
    */
   async presentPairPicker(): Promise<BridgethingBtDevice | null> {
     return this.native.presentPairPicker();
@@ -329,12 +305,6 @@ export class BridgethingSession {
     });
     this.native.setOnOtaEvent(event => {
       this.dispatch({ type: 'otaEvent', event });
-    });
-    this.native.setOnBluetoothDiscoveryEvent(event => {
-      this.dispatch({ type: 'btDiscoveryEvent', event });
-    });
-    this.native.setOnBluetoothBondStateChanged(device => {
-      this.dispatch({ type: 'btBondStateChanged', device });
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });

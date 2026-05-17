@@ -1,27 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      Legacy BR/EDR perms - max API 30. From 31 onwards
-      BLUETOOTH_CONNECT/BLUETOOTH_SCAN cover the same surface and are
-      requested at runtime.
+      Legacy BR/EDR perm - max API 30. Needed to open RFCOMM sockets to
+      the device after CompanionDeviceManager has handed us a bonded
+      MAC. From 31 onwards BLUETOOTH_CONNECT covers it.
     -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
-        android:maxSdkVersion="30" />
 
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <!--
-      `neverForLocation` asserts to the platform we don't derive geo
-      info from scan results. Without it, Samsung (and a few other OEMs)
-      still require ACCESS_FINE_LOCATION at runtime even on API 31+
-      before BluetoothAdapter.startDiscovery() will succeed.
+      Required to call CompanionDeviceManager.associate(). The system
+      throws IllegalStateException at IPC time without this declaration.
     -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
+    <uses-feature android:name="android.software.companion_device_setup" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

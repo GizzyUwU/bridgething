@@ -3,10 +3,8 @@ package com.bridgething
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.provider.Settings
 import com.bridgething.session.BridgethingSessionBackend
 import com.margelo.nitro.bridgething.session.BridgethingActiveWebapp
@@ -15,10 +13,7 @@ import com.margelo.nitro.bridgething.session.BridgethingAncsSetupKind
 import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
 import com.margelo.nitro.bridgething.session.BridgethingAuthKind
-import com.margelo.nitro.bridgething.session.BridgethingBtBondState
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
-import com.margelo.nitro.bridgething.session.BridgethingBtDiscoveryEvent
-import com.margelo.nitro.bridgething.session.BridgethingBtDiscoveryEventKind
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
@@ -56,16 +51,13 @@ import dev.bridgething.schema.OtaKind
 import dev.bridgething.schema.OtaPhase
 import dev.bridgething.schema.RepeatMode
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeout
 
 /**
  * Real [BridgethingSessionBackend] impl for the bridgething host app.
@@ -102,29 +94,9 @@ public class HybridBridgethingSessionImpl(
         )
         public var lyricsResolver: LyricsResolver = LrclibResolver()
 
-        // Class-of-device bridgething sets on the Car Thing for SDP
-        // discovery. Mirror of `hciconfig hci0 class 0x7c0000` from the
-        // yocto BSP. Internal to the impl - kept here because only one
-        // companion object is allowed per class.
+        // Mirror of `hciconfig hci0 class 0x7c0000` set by yocto-superbird
+        // BSP. Used by tryAutoConnect to skip non-Car-Thing bonded devices.
         internal const val BRIDGETHING_COD_CLASS = 0x7c0000
-
-        internal const val EXTRA_REASON_KEY = "android.bluetooth.device.extra.REASON"
-        internal const val EXTRA_REASON_UNKNOWN = -1
-
-        // BluetoothDevice.UNBOND_REASON_* are @SystemApi but the integer
-        // constants are stable. Map them to user-facing copy.
-        internal fun describeUnbondReason(reason: Int): String = when (reason) {
-            1 -> "the device's PIN didn't match"
-            2 -> "the device rejected the pair request"
-            3 -> "the system cancelled the pair"
-            4 -> "the device didn't respond - make sure it's on, in range, and in pairing mode"
-            5 -> "a scan was in progress; try again"
-            6 -> "the pair timed out"
-            7 -> "too many failed attempts; reboot the device or forget any stale bonds"
-            8 -> "the device cancelled the pair on its end"
-            9 -> "the bond was removed before it could finish"
-            else -> "the device declined the bond (reason $reason)"
-        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -174,20 +146,7 @@ public class HybridBridgethingSessionImpl(
     private var onOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
 
     @Volatile
-    private var onBtDiscoveryEvent: ((BridgethingBtDiscoveryEvent) -> Unit)? = null
-
-    @Volatile
-    private var onBtBondStateChanged: ((BridgethingBtDevice) -> Unit)? = null
-
-    @Volatile
     private var logStreamingDesired: Boolean = false
-
-    // Bluetooth discovery / pair state: receivers register lazily and stay
-    // live across discovery/pair calls until [stop] tears them down.
-    private val btMutex = Mutex()
-    private var discoveryReceiver: BroadcastReceiver? = null
-    private var bondReceiver: BroadcastReceiver? = null
-    private val pendingBonds = ConcurrentHashMap<String, CompletableDeferred<BridgethingBtBondState>>()
 
     // ---- Lifecycle ----
 
@@ -251,9 +210,6 @@ public class HybridBridgethingSessionImpl(
             priorCompanion?.stop()
         } finally {
             NotificationBridgeRegistry.companion = null
-            unregisterBtReceivers()
-            pendingBonds.values.forEach { it.complete(BridgethingBtBondState.NONE) }
-            pendingBonds.clear()
             peers.clear()
             lastNowPlaying = null
             emitNowPlaying(null)
@@ -491,245 +447,27 @@ public class HybridBridgethingSessionImpl(
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    // ---- In-app Bluetooth pairing ----
-
-    override suspend fun listBondedBluetoothDevices(): Array<BridgethingBtDevice> {
-        val adapter = bluetoothAdapter() ?: return emptyArray()
-        return try {
-            adapter.bondedDevices.map(::toBtDevice).toTypedArray()
-        } catch (_: SecurityException) {
-            emptyArray()
-        }
-    }
-
-    override suspend fun startBluetoothDiscovery() {
-        val adapter = bluetoothAdapter() ?: error("bluetooth unavailable on this device")
-        btMutex.withLock {
-            ensureDiscoveryReceiver()
-            try {
-                if (adapter.isDiscovering) adapter.cancelDiscovery()
-                val ok = adapter.startDiscovery()
-                if (!ok) {
-                    onBtDiscoveryEvent?.invoke(
-                        makeBtDiscoveryEvent(BridgethingBtDiscoveryEventKind.FAILED, reason = "BluetoothAdapter.startDiscovery() returned false (missing perm, BT off, or already discovering)")
-                    )
-                }
-            } catch (e: SecurityException) {
-                onBtDiscoveryEvent?.invoke(
-                    makeBtDiscoveryEvent(BridgethingBtDiscoveryEventKind.FAILED, reason = e.message ?: "BLUETOOTH_SCAN denied")
-                )
-            }
-        }
-    }
-
-    override suspend fun stopBluetoothDiscovery() {
-        val adapter = bluetoothAdapter() ?: return
-        try {
-            if (adapter.isDiscovering) adapter.cancelDiscovery()
-        } catch (_: SecurityException) {
-            // Caller already lost permission; the receiver's FINISHED event
-            // will fire (or already did) so nothing else to do.
-        }
-    }
+    // ---- OS-mediated pair flow (CompanionDeviceManager) ----
 
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
-        // android's happy-path is the in-app BluetoothPairPicker
-        // component; this method is the iOS AccessorySetupKit entrypoint.
-        error("presentPairPicker is iOS-only; use the BluetoothPairPicker component on android")
+        val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
+        // CDM returns a bonded BluetoothDevice; kick the gateway to open
+        // an RFCOMM session so the peer shows up in the dashboard
+        // without requiring an app restart.
+        bluetoothAdapter()?.getRemoteDevice(picked.address)?.let { device ->
+            scope.launch { runCatching { connectIfPicked(device) } }
+        }
+        return picked
     }
-
-    override suspend fun pairBluetoothDevice(address: String): BridgethingBtBondState {
-        val adapter = bluetoothAdapter() ?: error("bluetooth unavailable on this device")
-        val device = try {
-            adapter.getRemoteDevice(address)
-        } catch (e: IllegalArgumentException) {
-            error("invalid bluetooth address: ${e.message}")
-        }
-        ensureBondReceiver()
-        if (currentBondState(device) == BluetoothDevice.BOND_BONDED) {
-            scope.launch { runCatching { connectIfBridgething(device) } }
-            return BridgethingBtBondState.BONDED
-        }
-        // Android refuses createBond() while inquiry is running.
-        try {
-            if (adapter.isDiscovering) adapter.cancelDiscovery()
-        } catch (_: SecurityException) {}
-
-        val deferred = CompletableDeferred<BridgethingBtBondState>()
-        pendingBonds[address] = deferred
-        val started = try {
-            device.createBond()
-        } catch (e: SecurityException) {
-            pendingBonds.remove(address)
-            error("BLUETOOTH_CONNECT denied: ${e.message}")
-        }
-        if (!started) {
-            pendingBonds.remove(address)
-            error("createBond() returned false (already bonding, or unsupported)")
-        }
-        return try {
-            withTimeout(60_000L) { deferred.await() }
-        } catch (_: TimeoutCancellationException) {
-            pendingBonds.remove(address)
-            error("pair timed out after 60s")
-        } catch (e: PairException) {
-            error(e.message ?: "pair failed")
-        }
-    }
-
-    /** Exception carrying a friendly unbond reason from the bond receiver. */
-    private class PairException(message: String) : RuntimeException(message)
 
     private fun bluetoothAdapter(): BluetoothAdapter? {
         val ctx = context.applicationContext
         return (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     }
 
-    private fun currentBondState(device: BluetoothDevice): Int = try {
-        device.bondState
-    } catch (_: SecurityException) {
-        BluetoothDevice.BOND_NONE
-    }
-
-    private fun ensureDiscoveryReceiver() {
-        if (discoveryReceiver != null) return
-        val ctx = context.applicationContext
-        val recv = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val action = intent?.action ?: return
-                // Hop off the main thread before any binder lookups
-                // (toBtDevice does 3) or JS bridge calls.
-                scope.launch { dispatchDiscoveryEvent(action, intent) }
-            }
-        }
-        val filter = IntentFilter().apply {
-            addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
-            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-            addAction(BluetoothDevice.ACTION_FOUND)
-        }
-        registerSystemReceiver(ctx, recv, filter)
-        discoveryReceiver = recv
-    }
-
-    private fun dispatchDiscoveryEvent(action: String, intent: Intent) {
-        when (action) {
-            BluetoothAdapter.ACTION_DISCOVERY_STARTED ->
-                onBtDiscoveryEvent?.invoke(makeBtDiscoveryEvent(BridgethingBtDiscoveryEventKind.STARTED))
-            BluetoothAdapter.ACTION_DISCOVERY_FINISHED ->
-                onBtDiscoveryEvent?.invoke(makeBtDiscoveryEvent(BridgethingBtDiscoveryEventKind.FINISHED))
-            BluetoothDevice.ACTION_FOUND -> {
-                val device = extractBtDevice(intent) ?: return
-                onBtDiscoveryEvent?.invoke(
-                    makeBtDiscoveryEvent(BridgethingBtDiscoveryEventKind.FOUND, device = toBtDevice(device))
-                )
-            }
-        }
-    }
-
-    private suspend fun ensureBondReceiver() {
-        if (bondReceiver != null) return
-        btMutex.withLock {
-            if (bondReceiver != null) return@withLock
-            val ctx = context.applicationContext
-            val recv = object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) {
-                    if (intent?.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
-                    scope.launch { dispatchBondStateChange(intent) }
-                }
-            }
-            registerSystemReceiver(ctx, recv, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED))
-            bondReceiver = recv
-        }
-    }
-
-    private fun dispatchBondStateChange(intent: Intent) {
-        val device = extractBtDevice(intent) ?: return
-        val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
-        onBtBondStateChanged?.invoke(toBtDevice(device))
-
-        val address = device.address ?: return
-        val deferred = pendingBonds[address] ?: return
-        when (state) {
-            BluetoothDevice.BOND_BONDED -> {
-                pendingBonds.remove(address)
-                deferred.complete(BridgethingBtBondState.BONDED)
-                scope.launch { runCatching { connectIfBridgething(device) } }
-            }
-            BluetoothDevice.BOND_NONE -> {
-                pendingBonds.remove(address)
-                val reason = intent.getIntExtra(EXTRA_REASON_KEY, EXTRA_REASON_UNKNOWN)
-                deferred.completeExceptionally(PairException(describeUnbondReason(reason)))
-            }
-        }
-    }
-
-    private fun extractBtDevice(intent: Intent): BluetoothDevice? =
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-        }
-
-    private fun registerSystemReceiver(ctx: Context, receiver: BroadcastReceiver, filter: IntentFilter) {
-        // System broadcasts on Tiramisu+ need RECEIVER_EXPORTED.
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            ctx.registerReceiver(receiver, filter)
-        }
-    }
-
-    private suspend fun connectIfBridgething(device: BluetoothDevice) {
-        // Open an RFCOMM session over the newly-bonded device using the
-        // live adapter the companion is sharing. Drops silently if the
-        // companion isn't running (no peer for the gateway to attach to).
+    private suspend fun connectIfPicked(device: BluetoothDevice) {
         val adapter = stateLock.withLock { btAdapter } ?: return
         runCatching { adapter.connect(device) }
-    }
-
-    private fun toBtDevice(device: BluetoothDevice): BridgethingBtDevice {
-        val name = try { device.name } catch (_: SecurityException) { null }
-        // BluetoothClass's hashCode is the raw 24-bit CoD per AOSP source.
-        // The Car Thing advertises 0x7c0000 (set by the yocto-superbird
-        // image via `hciconfig hci0 class 0x7c0000`). Name fallback covers
-        // pre-bond detection where the class may not have been read yet.
-        val cod = try { device.bluetoothClass?.hashCode() } catch (_: SecurityException) { null }
-        val isCarThing =
-            cod == BRIDGETHING_COD_CLASS ||
-                (name?.contains("Car Thing", ignoreCase = true) == true) ||
-                (name?.contains("bridgething", ignoreCase = true) == true)
-        return BridgethingBtDevice(
-            address = device.address ?: "",
-            name = name,
-            bondState = mapBondState(currentBondState(device)),
-            isCarThing = isCarThing,
-        )
-    }
-
-
-    private fun mapBondState(state: Int): BridgethingBtBondState = when (state) {
-        BluetoothDevice.BOND_BONDED -> BridgethingBtBondState.BONDED
-        BluetoothDevice.BOND_BONDING -> BridgethingBtBondState.BONDING
-        else -> BridgethingBtBondState.NONE
-    }
-
-    private fun makeBtDiscoveryEvent(
-        kind: BridgethingBtDiscoveryEventKind,
-        device: BridgethingBtDevice? = null,
-        reason: String? = null,
-    ): BridgethingBtDiscoveryEvent = BridgethingBtDiscoveryEvent(
-        kind = kind,
-        device = device,
-        reason = reason,
-    )
-
-    private fun unregisterBtReceivers() {
-        val ctx = context.applicationContext
-        discoveryReceiver?.let { runCatching { ctx.unregisterReceiver(it) } }
-        bondReceiver?.let { runCatching { ctx.unregisterReceiver(it) } }
-        discoveryReceiver = null
-        bondReceiver = null
     }
 
     // ---- Callback setters ----
@@ -755,8 +493,6 @@ public class HybridBridgethingSessionImpl(
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
-    override fun setOnBluetoothDiscoveryEvent(callback: (BridgethingBtDiscoveryEvent) -> Unit) { onBtDiscoveryEvent = callback }
-    override fun setOnBluetoothBondStateChanged(callback: (BridgethingBtDevice) -> Unit) { onBtBondStateChanged = callback }
 
     // ---- Internal ----
 
