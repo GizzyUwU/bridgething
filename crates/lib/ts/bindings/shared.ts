@@ -485,6 +485,104 @@ export type NetworkInfo = { kind: NetworkKind; metered: boolean };
 export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
 
 /**
+ * One alternate interpretation the LLM surfaced alongside the primary.
+ * Populated when the LLM returns `ambiguous_alternates` in its
+ * json_schema output; consumed by the companion's CLARIFY UI so the
+ * user can pick.
+ */
+export type NluAlternate = { intent: string; slots: NluSlots | null };
+
+/**
+ * Closed intent enum the companion-side NLU pipeline emits. The full
+ * catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
+ * also encoded in `configs/grammar.strict.json` (the json_schema the
+ * LLM is decoded against). At the wire boundary we serialize as a
+ * string for forward-compat; the daemon dispatcher matches on the
+ * well-known SHOUTY_SNAKE values.
+ */
+export type NluConfidence = {
+  /**
+   * "low" | "medium" | "high". The LLM emits one of these per channel.
+   */
+  intent: string;
+  slots: string | null;
+};
+
+/**
+ * What the companion-side NLU resolved an utterance to, sent across
+ * the gateway link for the daemon to dispatch. This is the bridgething-
+ * native shape; the daemon's stock-compat layer wraps it into the
+ * SLIMO `NluMessage` envelope when the active webapp is stock.
+ *
+ * `transcript` is the ASR output the NLU ran on; carried so the daemon
+ * can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
+ * stock-compat fallbacks have the raw query available.
+ */
+export type NluResolvedIntent = {
+  intent: string;
+  slots: NluSlots;
+  transcript: string;
+  confidence: NluConfidence | null;
+  alternates: Array<NluAlternate> | null;
+};
+
+/**
+ * Slot catalog. Every variant in `intents.yaml` projects through this
+ * flat shape; per-intent slot allowlists are enforced by the
+ * json_schema grammar at decode time, not by this struct. The wire
+ * payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+ * so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
+ *
+ * String values are passed through verbatim from the user's transcript
+ * (no normalization at this layer); the SpotifyResolver may decorate
+ * the slots with a `uri` after catalog lookup.
+ */
+export type NluSlots = {
+  artist: string | null;
+  track: string | null;
+  album: string | null;
+  playlist: string | null;
+  podcast: string | null;
+  episode: string | null;
+  mood: string | null;
+  genre: string | null;
+  era: string | null;
+  popularityFilter: string | null;
+  entityType: string | null;
+  query: string | null;
+  /**
+   * WEBAPP_INTENT only: the filler-stripped natural-language command
+   * the active webapp's voice grammar handler will parse.
+   */
+  rawQuery: string | null;
+  /**
+   * WEBAPP_INTENT / OPEN_WEBAPP only.
+   */
+  webappId: string | null;
+  webappName: string | null;
+  /**
+   * PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
+   * but stock SLIMO expects an Array<string> envelope - the stock
+   * translation wraps as needed.
+   */
+  preset: string | null;
+  /**
+   * VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+   */
+  amount: string | null;
+  /**
+   * VOLUME_ABSOLUTE. 0-100.
+   */
+  level: number | null;
+  /**
+   * Post-resolution Spotify URI. Populated by the companion's
+   * SpotifyResolver after the NLU stage; daemon dispatches directly
+   * to playback when set.
+   */
+  uri: string | null;
+};
+
+/**
  * One notification surfaced from the connected companion's notification
  * center. `id` is companion-stable for the lifetime of the notification
  * - webapps pass it to `invokePositive`/`invokeNegative` and listen for
@@ -1040,6 +1138,25 @@ export type TunnelError =
 export type VoiceDescriptor = { id: string; name: string; locale: string };
 
 /**
+ * Why dispatch declined to act on a `VoiceDispatch`. The companion
+ * surfaces these to the user (toast / UI hint); the daemon does not
+ * otherwise retain state about the failure.
+ */
+export type VoiceDispatchErrorCode =
+  | 'webappNotInstalled'
+  | 'webappNotActive'
+  | 'webappRefused'
+  | 'notDispatchable'
+  | 'playbackFailed'
+  | 'internal';
+
+/**
+ * Where the daemon actually routed a successful dispatch. Carried back
+ * to the companion so it can render the right confirmation UI.
+ */
+export type VoiceDispatchTarget = 'stockPlayback' | 'activeWebapp' | 'webappSwitch';
+
+/**
  * Domain errors emitted by any webapp surface (gateway- or client-side).
  * Single catalog: both protocols speak the same variant set.
  */
@@ -1070,6 +1187,14 @@ export type WebappInfo = {
   iconMime: string | null;
   config: Array<ConfigField>;
   permissions: Array<string>;
+  /**
+   * Plain-English description of the voice intents the webapp wants
+   * WEBAPP_INTENT routing for. Companion-side NLU folds this into the
+   * "currently active extensions" section of the system prompt at
+   * inference, which is what makes WEBAPP_INTENT emission context-aware.
+   * `None` opts the webapp out of voice integration.
+   */
+  voiceGrammar: string | null;
 };
 
 /**
@@ -1086,6 +1211,14 @@ export type WebappManifest = {
   role: WebappRole;
   config: Array<ConfigField>;
   permissions: Array<string>;
+  /**
+   * Optional plain-English description of the voice commands this
+   * webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
+   * the grammars of all installed-and-active webapps into the system
+   * prompt at inference. Webapps that don't declare a grammar opt out
+   * of voice integration.
+   */
+  voiceGrammar: string | null;
 };
 
 /**

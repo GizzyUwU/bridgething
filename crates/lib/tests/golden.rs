@@ -308,6 +308,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             icon_mime: None,
             config: vec![],
             permissions: vec![],
+            voice_grammar: None,
           },
           WebappInfo {
             id: FIXED_DEMO_WEBAPP.parse().unwrap(),
@@ -320,6 +321,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
             icon_mime: Some("image/png".into()),
             config: vec![],
             permissions: vec![],
+            voice_grammar: None,
           },
         ],
       })),
@@ -369,6 +371,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
         icon_mime: None,
         config: vec![],
         permissions: vec![],
+        voice_grammar: None,
       })),
     },
   ));

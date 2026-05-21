@@ -87,6 +87,12 @@ pub struct WebappInfo {
   pub icon_mime: Option<String>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
+  /// Plain-English description of the voice intents the webapp wants
+  /// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
+  /// "currently active extensions" section of the system prompt at
+  /// inference, which is what makes WEBAPP_INTENT emission context-aware.
+  /// `None` opts the webapp out of voice integration.
+  pub voice_grammar: Option<String>,
 }
 
 /// On-disk `manifest.json` shape. Read from the bundle at install time
@@ -111,6 +117,12 @@ pub struct WebappManifest {
   pub config: Vec<ConfigField>,
   #[serde(default)]
   pub permissions: Vec<String>,
+  /// Optional plain-English description of the voice commands this
+  /// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
+  /// the grammars of all installed-and-active webapps into the system
+  /// prompt at inference. Webapps that don't declare a grammar opt out
+  /// of voice integration.
+  pub voice_grammar: Option<String>,
 }
 
 /// One declared user-tunable setting. Adjacent-tagged on the wire to

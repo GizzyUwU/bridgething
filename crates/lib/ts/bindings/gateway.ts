@@ -25,6 +25,7 @@ import type {
   NetError,
   NetFetchRequest,
   NetFetchResponse,
+  NluResolvedIntent,
   Notification,
   NowPlayingUpdate,
   OtaError,
@@ -51,6 +52,8 @@ import type {
   TunnelClosed,
   TunnelData,
   TunnelError,
+  VoiceDispatchErrorCode,
+  VoiceDispatchTarget,
   WebappError,
   WebappInfo,
   WsError,
@@ -265,7 +268,9 @@ export type BridgeToGatewayTunnelMsg =
 export type BridgeToGatewayVoiceMsg =
   | { event: 'streamOpen'; data: VoiceStreamOpen }
   | { event: 'frame'; data: VoiceFrame }
-  | { event: 'streamClose'; data: VoiceStreamClose };
+  | { event: 'streamClose'; data: VoiceStreamClose }
+  | { event: 'dispatched'; data: VoiceDispatched }
+  | { event: 'dispatchFailed'; data: VoiceDispatchFailed };
 
 export type BridgeToGatewayWebappMsg =
   | { event: 'webapps'; data: WebappList }
@@ -491,7 +496,10 @@ export type GatewayToBridgeTunnelMsg =
   | { event: 'data'; data: TunnelData }
   | { event: 'closed'; data: TunnelClosed };
 
-export type GatewayToBridgeVoiceMsg = { event: 'micOpen'; data: VoiceMicOpen } | { event: 'micClose' };
+export type GatewayToBridgeVoiceMsg =
+  | { event: 'micOpen'; data: VoiceMicOpen }
+  | { event: 'micClose' }
+  | { event: 'dispatch'; data: VoiceDispatch };
 
 export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
@@ -854,7 +862,45 @@ export type TunnelOpen = { tunnelId: string; host: string; port: number };
 
 export type TunnelOpenReply = Record<symbol, never>;
 
+/**
+ * Why the gateway is opening the mic. The daemon currently treats every
+ * reason the same (open and stream); the field is kept so future policy
+ * (hotword vs. assistant routing, VAD timeout per reason) has the shape
+ * it needs.
+ */
+export type VoiceCaptureReason = 'pushToTalk' | 'assistant' | 'wakeWord';
+
 export type VoiceCloseReason = 'endOfSpeech' | 'cancelled' | 'muted' | 'error';
+
+/**
+ * The companion has resolved a captured utterance into an NluResolvedIntent
+ * (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
+ * catalog slots) and is asking the daemon to dispatch. The daemon's
+ * dispatcher picks the target: stock playback, active-webapp forward, or
+ * OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
+ * Dispatched` / `DispatchFailed`.
+ */
+export type VoiceDispatch = { resolved: NluResolvedIntent };
+
+/**
+ * Terminal failure for an inbound `VoiceDispatch`. Daemon could not
+ * route the resolved intent; companion presents the appropriate UX.
+ */
+export type VoiceDispatchFailed = {
+  code: VoiceDispatchErrorCode;
+  intent: string;
+  webappId: string | null;
+  msg: string;
+};
+
+/**
+ * Notification that an inbound `VoiceDispatch` was routed. `target`
+ * describes where the daemon sent it; the daemon's own action surfaces
+ * (Player events, WebappActive changes) are the source of truth for the
+ * effect - this event is purely so the companion can render confirmation
+ * UI without polling state.
+ */
+export type VoiceDispatched = { target: VoiceDispatchTarget; intent: string; webappId: string | null };
 
 /**
  * PCM frame format the daemon ships in `Frame` payloads. Voice capture
@@ -871,15 +917,7 @@ export type VoiceFormat = { sampleRateHz: number; channels: number; bitsPerSampl
  */
 export type VoiceFrame = { streamId: string; seq: number; pcm: Uint8Array };
 
-/**
- * Why the gateway is opening the mic. The daemon currently treats every
- * intent the same (open and stream); the field is kept so future policy
- * (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
- * shape it needs.
- */
-export type VoiceIntent = 'pushToTalk' | 'assistant' | 'wakeWord';
-
-export type VoiceMicOpen = { intent: VoiceIntent };
+export type VoiceMicOpen = { reason: VoiceCaptureReason };
 
 export type VoiceStreamClose = { streamId: string; reason: VoiceCloseReason };
 

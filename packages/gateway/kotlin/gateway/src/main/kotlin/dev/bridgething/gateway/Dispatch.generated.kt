@@ -1261,6 +1261,24 @@ public class VoiceSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Voice::Dispatched` messages. */
+  public val dispatched: Flow<Pair<String, VoiceDispatched>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.Dispatched ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `Voice::DispatchFailed` messages. */
+  public val dispatchFailed: Flow<Pair<String, VoiceDispatchFailed>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.DispatchFailed ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `Voice::MicOpen` to every connected peer (broadcast). */
   public suspend fun micOpen(payload: VoiceMicOpen, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -1288,6 +1306,23 @@ public class VoiceSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Voice::Dispatch` to every connected peer (broadcast). */
+  public suspend fun dispatch(payload: VoiceDispatch, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
+            data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.Dispatch(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -2976,6 +3011,26 @@ public class VoiceSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Voice::Dispatched` from this peer. */
+  public val dispatched: Flow<VoiceDispatched> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.Dispatched ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `Voice::DispatchFailed` from this peer. */
+  public val dispatchFailed: Flow<VoiceDispatchFailed> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Voice ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayVoiceMsg.DispatchFailed ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `Voice::MicOpen` to this peer. */
   public suspend fun micOpen(payload: VoiceMicOpen, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2992,6 +3047,16 @@ public class VoiceSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.MicClose),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Voice::Dispatch` to this peer. */
+  public suspend fun dispatch(payload: VoiceDispatch, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
+      data = GatewayToBridgeMsgData.Voice(GatewayToBridgeVoiceMsg.Dispatch(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }

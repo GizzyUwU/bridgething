@@ -118,6 +118,9 @@ import type {
   TunnelErrorReply,
   TunnelOpen,
   TunnelOpenReply,
+  VoiceDispatch,
+  VoiceDispatchFailed,
+  VoiceDispatched,
   VoiceFrame,
   VoiceMicOpen,
   VoiceStreamClose,
@@ -354,12 +357,16 @@ export type VoiceInboundHandlers = {
   streamOpen: (deviceId: string, msg: VoiceStreamOpen) => void;
   frame: (deviceId: string, msg: VoiceFrame) => void;
   streamClose: (deviceId: string, msg: VoiceStreamClose) => void;
+  dispatched: (deviceId: string, msg: VoiceDispatched) => void;
+  dispatchFailed: (deviceId: string, msg: VoiceDispatchFailed) => void;
 };
 
 export type VoiceDeviceInboundHandlers = {
   streamOpen: (msg: VoiceStreamOpen) => void;
   frame: (msg: VoiceFrame) => void;
   streamClose: (msg: VoiceStreamClose) => void;
+  dispatched: (msg: VoiceDispatched) => void;
+  dispatchFailed: (msg: VoiceDispatchFailed) => void;
 };
 
 export type WebappInboundHandlers = {
@@ -2488,6 +2495,30 @@ export class VoiceSurface {
     });
   }
 
+  /** Subscribe to `Voice::Dispatched` across all peers. */
+  onDispatched(handler: (deviceId: string, msg: VoiceDispatched) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'dispatched') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::DispatchFailed` across all peers. */
+  onDispatchFailed(handler: (deviceId: string, msg: VoiceDispatchFailed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'dispatchFailed') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Voice` variants. */
   subscribe(handlers: VoiceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2515,6 +2546,14 @@ export class VoiceSurface {
         }
         case 'streamClose': {
           handlers.streamClose?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'dispatched': {
+          handlers.dispatched?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'dispatchFailed': {
+          handlers.dispatchFailed?.(event.deviceId, inner.data);
           return;
         }
         default: {
@@ -2549,6 +2588,21 @@ export class VoiceSurface {
           id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'voice', data: { event: 'micClose' } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Voice::Dispatch` to every connected peer (broadcast). */
+  async dispatch(payload: VoiceDispatch, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'command' },
+          data: { type: 'voice', data: { event: 'dispatch', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -5321,6 +5375,32 @@ export class VoiceSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Voice::Dispatched` from this peer. */
+  onDispatched(handler: (msg: VoiceDispatched) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'dispatched') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Voice::DispatchFailed` from this peer. */
+  onDispatchFailed(handler: (msg: VoiceDispatchFailed) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'voice') return;
+      const inner = data.data;
+      if (inner.event !== 'dispatchFailed') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Voice` variants from this peer. */
   subscribe(handlers: VoiceDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5351,6 +5431,14 @@ export class VoiceSurfaceForDevice {
           handlers.streamClose?.(inner.data);
           return;
         }
+        case 'dispatched': {
+          handlers.dispatched?.(inner.data);
+          return;
+        }
+        case 'dispatchFailed': {
+          handlers.dispatchFailed?.(inner.data);
+          return;
+        }
         default: {
           if (!partial) this._gateway.logger.warn('Voice: no handler for inner', inner);
           return;
@@ -5375,6 +5463,16 @@ export class VoiceSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'voice', data: { event: 'micClose' } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Voice::Dispatch` to this peer. */
+  async dispatch(payload: VoiceDispatch, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'voice', data: { event: 'dispatch', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -7471,6 +7569,14 @@ function outerSubscribeGateway(
             innerHandlers.streamClose?.(event.deviceId, inner.data);
             return;
           }
+          case 'dispatched': {
+            innerHandlers.dispatched?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'dispatchFailed': {
+            innerHandlers.dispatchFailed?.(event.deviceId, inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('Voice: no handler for inner', inner);
             return;
@@ -8125,6 +8231,14 @@ function outerSubscribeDevice(
           }
           case 'streamClose': {
             innerHandlers.streamClose?.(inner.data);
+            return;
+          }
+          case 'dispatched': {
+            innerHandlers.dispatched?.(inner.data);
+            return;
+          }
+          case 'dispatchFailed': {
+            innerHandlers.dispatchFailed?.(inner.data);
             return;
           }
           default: {

@@ -466,6 +466,7 @@ fn stock_manifest() -> WebappManifest {
     role: WebappRole::Standard,
     config: Vec::new(),
     permissions: Vec::new(),
+    voice_grammar: None,
   }
 }
 
@@ -518,6 +519,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     icon_mime: b.icon_mime.clone(),
     config: b.manifest.config.clone(),
     permissions: b.manifest.permissions.clone(),
+    voice_grammar: b.manifest.voice_grammar.clone(),
   }
 }
 

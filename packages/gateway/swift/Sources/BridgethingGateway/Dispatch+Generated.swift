@@ -1741,6 +1741,40 @@ public struct VoiceSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Voice::Dispatched` messages.
+  public var dispatched: AsyncStream<(deviceId: String, msg: VoiceDispatched)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .voice(let outer) = message.data,
+             case .dispatched(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Voice::DispatchFailed` messages.
+  public var dispatchFailed: AsyncStream<(deviceId: String, msg: VoiceDispatchFailed)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .voice(let outer) = message.data,
+             case .dispatchFailed(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Voice::MicOpen` to every connected peer (broadcast).
   public func micOpen(_ payload: VoiceMicOpen, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1762,6 +1796,20 @@ public struct VoiceSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.micClose))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Voice::Dispatch` to every connected peer (broadcast).
+  public func dispatch(_ payload: VoiceDispatch, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.dispatch(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -4008,6 +4056,42 @@ public struct VoiceSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Voice::Dispatched` from this peer.
+  public var dispatched: AsyncStream<VoiceDispatched> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .voice(let outer) = message.data,
+             case .dispatched(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Voice::DispatchFailed` from this peer.
+  public var dispatchFailed: AsyncStream<VoiceDispatchFailed> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .voice(let outer) = message.data,
+             case .dispatchFailed(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Voice::MicOpen` to this peer.
   public func micOpen(_ payload: VoiceMicOpen, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.micOpen(payload)))
@@ -4017,6 +4101,12 @@ public struct VoiceSurfaceForDevice: Sendable {
   /// Send `Voice::MicClose` to this peer.
   public func micClose(priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.micClose))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Voice::Dispatch` to this peer.
+  public func dispatch(_ payload: VoiceDispatch, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .voice(.dispatch(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

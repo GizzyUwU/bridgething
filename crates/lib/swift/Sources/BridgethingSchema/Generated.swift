@@ -2331,6 +2331,125 @@ public struct NetWsSend: Codable, Sendable {
 	}
 }
 
+/// Slot catalog. Every variant in `intents.yaml` projects through this
+/// flat shape; per-intent slot allowlists are enforced by the
+/// json_schema grammar at decode time, not by this struct. The wire
+/// payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+/// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
+/// 
+/// String values are passed through verbatim from the user's transcript
+/// (no normalization at this layer); the SpotifyResolver may decorate
+/// the slots with a `uri` after catalog lookup.
+public struct NluSlots: Codable, Sendable {
+	public let artist: String?
+	public let track: String?
+	public let album: String?
+	public let playlist: String?
+	public let podcast: String?
+	public let episode: String?
+	public let mood: String?
+	public let genre: String?
+	public let era: String?
+	public let popularityFilter: String?
+	public let entityType: String?
+	public let query: String?
+	/// WEBAPP_INTENT only: the filler-stripped natural-language command
+	/// the active webapp's voice grammar handler will parse.
+	public let rawQuery: String?
+	/// WEBAPP_INTENT / OPEN_WEBAPP only.
+	public let webappId: String?
+	public let webappName: String?
+	/// PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
+	/// but stock SLIMO expects an Array<string> envelope - the stock
+	/// translation wraps as needed.
+	public let preset: String?
+	/// VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+	public let amount: String?
+	/// VOLUME_ABSOLUTE. 0-100.
+	public let level: UInt32?
+	/// Post-resolution Spotify URI. Populated by the companion's
+	/// SpotifyResolver after the NLU stage; daemon dispatches directly
+	/// to playback when set.
+	public let uri: String?
+
+	public init(artist: String?, track: String?, album: String?, playlist: String?, podcast: String?, episode: String?, mood: String?, genre: String?, era: String?, popularityFilter: String?, entityType: String?, query: String?, rawQuery: String?, webappId: String?, webappName: String?, preset: String?, amount: String?, level: UInt32?, uri: String?) {
+		self.artist = artist
+		self.track = track
+		self.album = album
+		self.playlist = playlist
+		self.podcast = podcast
+		self.episode = episode
+		self.mood = mood
+		self.genre = genre
+		self.era = era
+		self.popularityFilter = popularityFilter
+		self.entityType = entityType
+		self.query = query
+		self.rawQuery = rawQuery
+		self.webappId = webappId
+		self.webappName = webappName
+		self.preset = preset
+		self.amount = amount
+		self.level = level
+		self.uri = uri
+	}
+}
+
+/// One alternate interpretation the LLM surfaced alongside the primary.
+/// Populated when the LLM returns `ambiguous_alternates` in its
+/// json_schema output; consumed by the companion's CLARIFY UI so the
+/// user can pick.
+public struct NluAlternate: Codable, Sendable {
+	public let intent: String
+	public let slots: NluSlots?
+
+	public init(intent: String, slots: NluSlots?) {
+		self.intent = intent
+		self.slots = slots
+	}
+}
+
+/// Closed intent enum the companion-side NLU pipeline emits. The full
+/// catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
+/// also encoded in `configs/grammar.strict.json` (the json_schema the
+/// LLM is decoded against). At the wire boundary we serialize as a
+/// string for forward-compat; the daemon dispatcher matches on the
+/// well-known SHOUTY_SNAKE values.
+public struct NluConfidence: Codable, Sendable {
+	/// "low" | "medium" | "high". The LLM emits one of these per channel.
+	public let intent: String
+	public let slots: String?
+
+	public init(intent: String, slots: String?) {
+		self.intent = intent
+		self.slots = slots
+	}
+}
+
+/// What the companion-side NLU resolved an utterance to, sent across
+/// the gateway link for the daemon to dispatch. This is the bridgething-
+/// native shape; the daemon's stock-compat layer wraps it into the
+/// SLIMO `NluMessage` envelope when the active webapp is stock.
+/// 
+/// `transcript` is the ASR output the NLU ran on; carried so the daemon
+/// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
+/// stock-compat fallbacks have the raw query available.
+public struct NluResolvedIntent: Codable, Sendable {
+	public let intent: String
+	public let slots: NluSlots?
+	public let transcript: String
+	public let confidence: NluConfidence?
+	public let alternates: [NluAlternate]?
+
+	public init(intent: String, slots: NluSlots?, transcript: String, confidence: NluConfidence?, alternates: [NluAlternate]?) {
+		self.intent = intent
+		self.slots = slots
+		self.transcript = transcript
+		self.confidence = confidence
+		self.alternates = alternates
+	}
+}
+
 /// Originating app metadata. `bundle_id` is platform-stable
 /// (`com.apple.MobileSMS`, `com.spotify.client`, etc.); `display_name`
 /// and `icon_asset_id` are best-effort and may be missing on Android
@@ -3882,6 +4001,86 @@ public struct TunnelOpenReply: Codable, Sendable {
 	public init() {}
 }
 
+/// The companion has resolved a captured utterance into an NluResolvedIntent
+/// (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
+/// catalog slots) and is asking the daemon to dispatch. The daemon's
+/// dispatcher picks the target: stock playback, active-webapp forward, or
+/// OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
+/// Dispatched` / `DispatchFailed`.
+public struct VoiceDispatch: Codable, Sendable {
+	public let resolved: NluResolvedIntent
+
+	public init(resolved: NluResolvedIntent) {
+		self.resolved = resolved
+	}
+}
+
+/// Why dispatch declined to act on a `VoiceDispatch`. The companion
+/// surfaces these to the user (toast / UI hint); the daemon does not
+/// otherwise retain state about the failure.
+public enum VoiceDispatchErrorCode: String, Codable, Sendable {
+	/// WEBAPP_INTENT targeted a webapp_id that isn't installed.
+	case webappNotInstalled
+	/// WEBAPP_INTENT targeted an installed webapp that isn't the active
+	/// one. Companion can prompt the user to switch.
+	case webappNotActive
+	/// Active webapp accepted the dispatch but reported an error.
+	case webappRefused
+	/// Intent is CLARIFY / NO_INTENT - companion should resolve at its
+	/// own edge rather than asking the daemon to dispatch.
+	case notDispatchable
+	/// Stock playback target couldn't be resolved (no Spotify session,
+	/// missing slot, etc.).
+	case playbackFailed
+	/// Catch-all (io error, internal state machine glitch).
+	case `internal`
+}
+
+/// Terminal failure for an inbound `VoiceDispatch`. Daemon could not
+/// route the resolved intent; companion presents the appropriate UX.
+public struct VoiceDispatchFailed: Codable, Sendable {
+	public let code: VoiceDispatchErrorCode
+	public let intent: String
+	public let webappId: String?
+	public let msg: String
+
+	public init(code: VoiceDispatchErrorCode, intent: String, webappId: String?, msg: String) {
+		self.code = code
+		self.intent = intent
+		self.webappId = webappId
+		self.msg = msg
+	}
+}
+
+/// Where the daemon actually routed a successful dispatch. Carried back
+/// to the companion so it can render the right confirmation UI.
+public enum VoiceDispatchTarget: String, Codable, Sendable {
+	/// Stock playback path (PLAY/PAUSE/NEXT/etc) - translated into the
+	/// SLIMO `NluMessage` and handed to the stock webapp.
+	case stockPlayback
+	/// Forwarded to the active webapp's voice handler.
+	case activeWebapp
+	/// Switched the active webapp via OPEN_WEBAPP.
+	case webappSwitch
+}
+
+/// Notification that an inbound `VoiceDispatch` was routed. `target`
+/// describes where the daemon sent it; the daemon's own action surfaces
+/// (Player events, WebappActive changes) are the source of truth for the
+/// effect - this event is purely so the companion can render confirmation
+/// UI without polling state.
+public struct VoiceDispatched: Codable, Sendable {
+	public let target: VoiceDispatchTarget
+	public let intent: String
+	public let webappId: String?
+
+	public init(target: VoiceDispatchTarget, intent: String, webappId: String?) {
+		self.target = target
+		self.intent = intent
+		self.webappId = webappId
+	}
+}
+
 /// PCM frame format the daemon ships in `Frame` payloads. Voice capture
 /// runs at a fixed format per session; format is announced once on
 /// `StreamOpen` and held constant through `StreamClose`.
@@ -3914,20 +4113,20 @@ public struct VoiceFrame: Codable, Sendable {
 }
 
 /// Why the gateway is opening the mic. The daemon currently treats every
-/// intent the same (open and stream); the field is kept so future policy
-/// (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
-/// shape it needs.
-public enum VoiceIntent: String, Codable, Sendable {
+/// reason the same (open and stream); the field is kept so future policy
+/// (hotword vs. assistant routing, VAD timeout per reason) has the shape
+/// it needs.
+public enum VoiceCaptureReason: String, Codable, Sendable {
 	case pushToTalk
 	case assistant
 	case wakeWord
 }
 
 public struct VoiceMicOpen: Codable, Sendable {
-	public let intent: VoiceIntent
+	public let reason: VoiceCaptureReason
 
-	public init(intent: VoiceIntent) {
-		self.intent = intent
+	public init(reason: VoiceCaptureReason) {
+		self.reason = reason
 	}
 }
 
@@ -4176,8 +4375,14 @@ public struct WebappInfo: Codable, Sendable {
 	public let iconMime: String?
 	public let config: [ConfigField]
 	public let permissions: [String]
+	/// Plain-English description of the voice intents the webapp wants
+	/// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
+	/// "currently active extensions" section of the system prompt at
+	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
+	/// `None` opts the webapp out of voice integration.
+	public let voiceGrammar: String?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String]) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -4188,6 +4393,7 @@ public struct WebappInfo: Codable, Sendable {
 		self.iconMime = iconMime
 		self.config = config
 		self.permissions = permissions
+		self.voiceGrammar = voiceGrammar
 	}
 }
 
@@ -4554,8 +4760,14 @@ public struct WebappManifest: Codable, Sendable {
 	public let role: WebappRole?
 	public let config: [ConfigField]?
 	public let permissions: [String]?
+	/// Optional plain-English description of the voice commands this
+	/// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
+	/// the grammars of all installed-and-active webapps into the system
+	/// prompt at inference. Webapps that don't declare a grammar opt out
+	/// of voice integration.
+	public let voiceGrammar: String?
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -4564,6 +4776,7 @@ public struct WebappManifest: Codable, Sendable {
 		self.role = role
 		self.config = config
 		self.permissions = permissions
+		self.voiceGrammar = voiceGrammar
 	}
 }
 
@@ -5559,11 +5772,15 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 	case streamOpen(VoiceStreamOpen)
 	case frame(VoiceFrame)
 	case streamClose(VoiceStreamClose)
+	case dispatched(VoiceDispatched)
+	case dispatchFailed(VoiceDispatchFailed)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case streamOpen,
 			frame,
-			streamClose
+			streamClose,
+			dispatched,
+			dispatchFailed
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5589,6 +5806,16 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 					self = .streamClose(content)
 					return
 				}
+			case .dispatched:
+				if let content = try? container.decode(VoiceDispatched.self, forKey: .data) {
+					self = .dispatched(content)
+					return
+				}
+			case .dispatchFailed:
+				if let content = try? container.decode(VoiceDispatchFailed.self, forKey: .data) {
+					self = .dispatchFailed(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayVoiceMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayVoiceMsg"))
@@ -5605,6 +5832,12 @@ public enum BridgeToGatewayVoiceMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .streamClose(let content):
 			try container.encode(CodingKeys.streamClose, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .dispatched(let content):
+			try container.encode(CodingKeys.dispatched, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .dispatchFailed(let content):
+			try container.encode(CodingKeys.dispatchFailed, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6842,10 +7075,12 @@ public enum GatewayToBridgeTunnelMsg: Codable, Sendable {
 public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 	case micOpen(VoiceMicOpen)
 	case micClose
+	case dispatch(VoiceDispatch)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case micOpen,
-			micClose
+			micClose,
+			dispatch
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6864,6 +7099,11 @@ public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 			case .micClose:
 				self = .micClose
 				return
+			case .dispatch:
+				if let content = try? container.decode(VoiceDispatch.self, forKey: .data) {
+					self = .dispatch(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeVoiceMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeVoiceMsg"))
@@ -6877,6 +7117,9 @@ public enum GatewayToBridgeVoiceMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .micClose:
 			try container.encode(CodingKeys.micClose, forKey: .event)
+		case .dispatch(let content):
+			try container.encode(CodingKeys.dispatch, forKey: .event)
+			try container.encode(content, forKey: .data)
 		}
 	}
 }

@@ -1,4 +1,9 @@
-use libbridgething::gateway::{GatewayToBridgeVoiceMsgCommand, VoiceCloseReason};
+use libbridgething::{
+  VoiceDispatchErrorCode,
+  gateway::{
+    BridgeToGatewayVoiceMsg, GatewayToBridgeVoiceMsgCommand, VoiceCloseReason, VoiceDispatch, VoiceDispatchFailed,
+  },
+};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -21,6 +26,24 @@ impl VoiceHandler {
         if let Err(err) = self.handle.state.mic.stop_with(VoiceCloseReason::Cancelled).await {
           tracing::warn!("({:?}) gateway mic close failed: {err}", &self.handle.address);
         }
+      }
+      GatewayToBridgeVoiceMsgCommand::Dispatch(VoiceDispatch { resolved }) => {
+        tracing::info!(
+          "({:?}) voice dispatch received: intent={} transcript={:?} webapp_id={:?}",
+          &self.handle.address,
+          resolved.intent,
+          resolved.transcript,
+          resolved.slots.webapp_id,
+        );
+        self
+          .handle
+          .send_info(BridgeToGatewayVoiceMsg::DispatchFailed(VoiceDispatchFailed {
+            code: VoiceDispatchErrorCode::Internal,
+            intent: resolved.intent,
+            webapp_id: resolved.slots.webapp_id,
+            msg: "dispatch routing pending hardware bring-up; see todo.md voice section".into(),
+          }))
+          .await;
       }
     }
     Ok(())

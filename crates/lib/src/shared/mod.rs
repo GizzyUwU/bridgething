@@ -17,6 +17,7 @@ mod priority;
 mod system;
 mod time;
 mod tunnel;
+mod voice;
 mod webapp;
 
 pub use asset::*;
@@ -38,6 +39,7 @@ pub use priority::*;
 pub use system::*;
 pub use time::*;
 pub use tunnel::*;
+pub use voice::*;
 pub use webapp::*;
 
 pub fn to_slug(value: &str) -> String {

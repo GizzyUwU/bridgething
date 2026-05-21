@@ -1307,6 +1307,89 @@ data class NetWsSend (
 	val frame: WsFrame
 )
 
+/// Slot catalog. Every variant in `intents.yaml` projects through this
+/// flat shape; per-intent slot allowlists are enforced by the
+/// json_schema grammar at decode time, not by this struct. The wire
+/// payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+/// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
+/// 
+/// String values are passed through verbatim from the user's transcript
+/// (no normalization at this layer); the SpotifyResolver may decorate
+/// the slots with a `uri` after catalog lookup.
+@Serializable
+data class NluSlots (
+	val artist: String? = null,
+	val track: String? = null,
+	val album: String? = null,
+	val playlist: String? = null,
+	val podcast: String? = null,
+	val episode: String? = null,
+	val mood: String? = null,
+	val genre: String? = null,
+	val era: String? = null,
+	val popularityFilter: String? = null,
+	val entityType: String? = null,
+	val query: String? = null,
+	/// WEBAPP_INTENT only: the filler-stripped natural-language command
+	/// the active webapp's voice grammar handler will parse.
+	val rawQuery: String? = null,
+	/// WEBAPP_INTENT / OPEN_WEBAPP only.
+	val webappId: String? = null,
+	val webappName: String? = null,
+	/// PLAY_PRESET / SAVE_TO_PRESET only. String because users say "two"
+	/// but stock SLIMO expects an Array<string> envelope - the stock
+	/// translation wraps as needed.
+	val preset: String? = null,
+	/// VOLUME_UP / VOLUME_DOWN. "small" | "large" | numeric step.
+	val amount: String? = null,
+	/// VOLUME_ABSOLUTE. 0-100.
+	val level: UInt? = null,
+	/// Post-resolution Spotify URI. Populated by the companion's
+	/// SpotifyResolver after the NLU stage; daemon dispatches directly
+	/// to playback when set.
+	val uri: String? = null
+)
+
+/// One alternate interpretation the LLM surfaced alongside the primary.
+/// Populated when the LLM returns `ambiguous_alternates` in its
+/// json_schema output; consumed by the companion's CLARIFY UI so the
+/// user can pick.
+@Serializable
+data class NluAlternate (
+	val intent: String,
+	val slots: NluSlots? = null
+)
+
+/// Closed intent enum the companion-side NLU pipeline emits. The full
+/// catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
+/// also encoded in `configs/grammar.strict.json` (the json_schema the
+/// LLM is decoded against). At the wire boundary we serialize as a
+/// string for forward-compat; the daemon dispatcher matches on the
+/// well-known SHOUTY_SNAKE values.
+@Serializable
+data class NluConfidence (
+	/// "low" | "medium" | "high". The LLM emits one of these per channel.
+	val intent: String,
+	val slots: String? = null
+)
+
+/// What the companion-side NLU resolved an utterance to, sent across
+/// the gateway link for the daemon to dispatch. This is the bridgething-
+/// native shape; the daemon's stock-compat layer wraps it into the
+/// SLIMO `NluMessage` envelope when the active webapp is stock.
+/// 
+/// `transcript` is the ASR output the NLU ran on; carried so the daemon
+/// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
+/// stock-compat fallbacks have the raw query available.
+@Serializable
+data class NluResolvedIntent (
+	val intent: String,
+	val slots: NluSlots? = null,
+	val transcript: String,
+	val confidence: NluConfidence? = null,
+	val alternates: List<NluAlternate>? = null
+)
+
 /// Originating app metadata. `bundle_id` is platform-stable
 /// (`com.apple.MobileSMS`, `com.spotify.client`, etc.); `display_name`
 /// and `icon_asset_id` are best-effort and may be missing on Android
@@ -2406,6 +2489,83 @@ data class TunnelOpen (
 @Serializable
 object TunnelOpenReply
 
+/// The companion has resolved a captured utterance into an NluResolvedIntent
+/// (fast-path or LLM stage on the phone, plus SpotifyResolver decoration on
+/// catalog slots) and is asking the daemon to dispatch. The daemon's
+/// dispatcher picks the target: stock playback, active-webapp forward, or
+/// OPEN_WEBAPP switch. Outcome is broadcast via `BridgeToGatewayVoiceMsg::
+/// Dispatched` / `DispatchFailed`.
+@Serializable
+data class VoiceDispatch (
+	val resolved: NluResolvedIntent
+)
+
+/// Why dispatch declined to act on a `VoiceDispatch`. The companion
+/// surfaces these to the user (toast / UI hint); the daemon does not
+/// otherwise retain state about the failure.
+@Serializable
+enum class VoiceDispatchErrorCode(val string: String) {
+	/// WEBAPP_INTENT targeted a webapp_id that isn't installed.
+	@SerialName("webappNotInstalled")
+	WebappNotInstalled("webappNotInstalled"),
+	/// WEBAPP_INTENT targeted an installed webapp that isn't the active
+	/// one. Companion can prompt the user to switch.
+	@SerialName("webappNotActive")
+	WebappNotActive("webappNotActive"),
+	/// Active webapp accepted the dispatch but reported an error.
+	@SerialName("webappRefused")
+	WebappRefused("webappRefused"),
+	/// Intent is CLARIFY / NO_INTENT - companion should resolve at its
+	/// own edge rather than asking the daemon to dispatch.
+	@SerialName("notDispatchable")
+	NotDispatchable("notDispatchable"),
+	/// Stock playback target couldn't be resolved (no Spotify session,
+	/// missing slot, etc.).
+	@SerialName("playbackFailed")
+	PlaybackFailed("playbackFailed"),
+	/// Catch-all (io error, internal state machine glitch).
+	@SerialName("internal")
+	Internal("internal"),
+}
+
+/// Terminal failure for an inbound `VoiceDispatch`. Daemon could not
+/// route the resolved intent; companion presents the appropriate UX.
+@Serializable
+data class VoiceDispatchFailed (
+	val code: VoiceDispatchErrorCode,
+	val intent: String,
+	val webappId: String? = null,
+	val msg: String
+)
+
+/// Where the daemon actually routed a successful dispatch. Carried back
+/// to the companion so it can render the right confirmation UI.
+@Serializable
+enum class VoiceDispatchTarget(val string: String) {
+	/// Stock playback path (PLAY/PAUSE/NEXT/etc) - translated into the
+	/// SLIMO `NluMessage` and handed to the stock webapp.
+	@SerialName("stockPlayback")
+	StockPlayback("stockPlayback"),
+	/// Forwarded to the active webapp's voice handler.
+	@SerialName("activeWebapp")
+	ActiveWebapp("activeWebapp"),
+	/// Switched the active webapp via OPEN_WEBAPP.
+	@SerialName("webappSwitch")
+	WebappSwitch("webappSwitch"),
+}
+
+/// Notification that an inbound `VoiceDispatch` was routed. `target`
+/// describes where the daemon sent it; the daemon's own action surfaces
+/// (Player events, WebappActive changes) are the source of truth for the
+/// effect - this event is purely so the companion can render confirmation
+/// UI without polling state.
+@Serializable
+data class VoiceDispatched (
+	val target: VoiceDispatchTarget,
+	val intent: String,
+	val webappId: String? = null
+)
+
 /// PCM frame format the daemon ships in `Frame` payloads. Voice capture
 /// runs at a fixed format per session; format is announced once on
 /// `StreamOpen` and held constant through `StreamClose`.
@@ -2428,11 +2588,11 @@ data class VoiceFrame (
 )
 
 /// Why the gateway is opening the mic. The daemon currently treats every
-/// intent the same (open and stream); the field is kept so future policy
-/// (e.g. hotword vs. assistant routing, VAD timeout per intent) has the
-/// shape it needs.
+/// reason the same (open and stream); the field is kept so future policy
+/// (hotword vs. assistant routing, VAD timeout per reason) has the shape
+/// it needs.
 @Serializable
-enum class VoiceIntent(val string: String) {
+enum class VoiceCaptureReason(val string: String) {
 	@SerialName("pushToTalk")
 	PushToTalk("pushToTalk"),
 	@SerialName("assistant")
@@ -2443,7 +2603,7 @@ enum class VoiceIntent(val string: String) {
 
 @Serializable
 data class VoiceMicOpen (
-	val intent: VoiceIntent
+	val reason: VoiceCaptureReason
 )
 
 @Serializable
@@ -2596,33 +2756,26 @@ data class WebappInfo (
 	val iconAvailable: Boolean,
 	val iconMime: String? = null,
 	val config: List<ConfigField>,
-	val permissions: List<String>
+	val permissions: List<String>,
+	/// Plain-English description of the voice intents the webapp wants
+	/// WEBAPP_INTENT routing for. Companion-side NLU folds this into the
+	/// "currently active extensions" section of the system prompt at
+	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
+	/// `None` opts the webapp out of voice integration.
+	val voiceGrammar: String? = null
 )
 
-/// Drop the daemon-side partial for `install_id`. The chunked-transfer
-/// subsystem also runs a 24h stale GC for partials that were never
-/// abandoned, so this is an explicit cleanup, not a correctness gate.
 @Serializable
 data class WebappInstallAbandon (
 	val installId: String
 )
 
-/// Companion-initiated chunked webapp install: opens or resumes a
-/// streaming push of a zip bundle. Daemon responds with
-/// `WebappInstallBeginAck { resume_from_offset }` (the byte offset the
-/// next `WebappInstallChunk` should start at, 0 for fresh pushes) or a
-/// `WebappError` variant (already-running install, mismatched size/sha
-/// on conflicting in-flight install_id, etc).
-/// 
-/// `install_id` is the sha256 of the .zip, hex-encoded. Content-
-/// addressed so resume across daemon restarts and retries-after-failure
-/// both work without companion-side state to track. The terminal
-/// outcome - `WebappInstalled(WebappInfo)` event on success or
-/// `WebappInstallFailed { install_id, error }` event on failure -
-/// arrives asynchronously after the last chunk lands; between the last
-/// `WebappInstallChunk` ack and the terminal event the install is
-/// implicitly in "installing" state. Expect sub-second once the upload
-/// finishes.
+/// Webapp-initiated chunked install. Mirrors `WebappInstallBegin` from
+/// the gateway surface line-for-line - same install_id (sha256 hex of
+/// the zip), same chunk shape, same terminal-event behavior. The same
+/// daemon-side install handler services both surfaces, so the
+/// `WebappInstalled` / `WebappInstallFailed` events broadcast to both
+/// gateway and webapp peers when either initiates an install.
 @Serializable
 data class WebappInstallBegin (
 	val installId: String,
@@ -2639,13 +2792,6 @@ data class WebappInstallBeginAck (
 	val resumeFromOffset: UInt
 )
 
-/// Streaming chunk of a webapp install upload opened by
-/// `WebappInstallBegin`. `offset` must equal the daemon's current
-/// `received` for the transfer (chunks are strictly in-order; the
-/// companion learns the resume offset from `WebappInstallBeginAck`).
-/// `last:true` triggers post-stream verify (size + sha256) followed by
-/// extract + validate + install. Terminal outcome arrives as
-/// `WebappInstalled` event or `WebappInstallFailed` event.
 @Serializable
 data class WebappInstallChunk (
 	val installId: String,
@@ -2815,7 +2961,13 @@ data class WebappManifest (
 	val icon: String? = null,
 	val role: WebappRole? = null,
 	val config: List<ConfigField>? = null,
-	val permissions: List<String>? = null
+	val permissions: List<String>? = null,
+	/// Optional plain-English description of the voice commands this
+	/// webapp wants WEBAPP_INTENT routing for. The companion's NLU folds
+	/// the grammars of all installed-and-active webapps into the system
+	/// prompt at inference. Webapps that don't declare a grammar opt out
+	/// of voice integration.
+	val voiceGrammar: String? = null
 )
 
 @Serializable
@@ -3124,6 +3276,12 @@ sealed class BridgeToGatewayVoiceMsg {
 	@Serializable
 	@SerialName("streamClose")
 	data class StreamClose(val data: VoiceStreamClose): BridgeToGatewayVoiceMsg()
+	@Serializable
+	@SerialName("dispatched")
+	data class Dispatched(val data: VoiceDispatched): BridgeToGatewayVoiceMsg()
+	@Serializable
+	@SerialName("dispatchFailed")
+	data class DispatchFailed(val data: VoiceDispatchFailed): BridgeToGatewayVoiceMsg()
 }
 
 @Serializable(with = BridgeToGatewayWebappMsgSerializer::class)
@@ -3466,6 +3624,9 @@ sealed class GatewayToBridgeVoiceMsg {
 	@Serializable
 	@SerialName("micClose")
 	object MicClose: GatewayToBridgeVoiceMsg()
+	@Serializable
+	@SerialName("dispatch")
+	data class Dispatch(val data: VoiceDispatch): GatewayToBridgeVoiceMsg()
 }
 
 @Serializable(with = GatewayToBridgeWebappMsgSerializer::class)
