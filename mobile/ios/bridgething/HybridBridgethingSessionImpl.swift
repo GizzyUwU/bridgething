@@ -584,6 +584,30 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onOtaEvent = callback }
     }
 
+    // MARK: - Cross-platform AccessorySetupKit picker
+
+    public func presentPairPicker() async throws -> BridgethingBtDevice? {
+        let companion = try requireCompanion()
+        guard let result = await companion.presentPairPicker() else { return nil }
+        return BridgethingBtDevice(
+            address: result.id,
+            name: result.name,
+            bondState: .bonded,
+            isCarThing: true
+        )
+    }
+
+    // MARK: - Android-only surfaces (iOS stubs)
+
+    public func isNotificationAccessGranted() async -> Bool { false }
+    public func requestNotificationAccess() async throws { throw SessionError.unsupportedOnPlatform }
+    public func revokeRuntimePermissions(permissions: [String]) async -> Bool { false }
+    public func killApp() async {
+        // No-op on iOS - Apple rejects apps that exit(0) themselves
+        // and self-restart isn't needed (no equivalent of android's
+        // revokeSelfPermissionsOnKill that defers until process death).
+    }
+
     // MARK: - Internal
 
     private func runSetActive(id: String?) async throws {
@@ -680,6 +704,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let (companion, connected) = stateLock.withLock { (self.companion, peers[deviceId] != nil) }
         guard let companion else { throw SessionError.notStarted }
         guard connected else { throw SessionError.noPeerConnected(deviceId) }
+        return companion
+    }
+
+    private func requireCompanion() throws -> BridgethingCompanion {
+        guard let companion = stateLock.withLock({ self.companion }) else {
+            throw SessionError.notStarted
+        }
         return companion
     }
 
@@ -924,6 +955,7 @@ private enum SessionError: Error {
     case installTimedOut
     case webappError(WebappError)
     case protocolError(WireError)
+    case unsupportedOnPlatform
 }
 
 private enum InstallOutcome {

@@ -257,6 +257,7 @@ public actor BridgethingCompanion {
 
     #if os(iOS)
         private var ancsCoordinator: AncsPairCoordinator?
+        private var pickerCoordinator: AccessoryPickerCoordinator?
 
         private func makeOrReuseCoordinator() async -> AncsPairCoordinator {
             if let existing = ancsCoordinator { return existing }
@@ -264,7 +265,29 @@ public actor BridgethingCompanion {
             ancsCoordinator = coordinator
             return coordinator
         }
+
+        private func makeOrReusePicker() async -> AccessoryPickerCoordinator {
+            if let existing = pickerCoordinator { return existing }
+            let coordinator = await MainActor.run { AccessoryPickerCoordinator() }
+            pickerCoordinator = coordinator
+            return coordinator
+        }
     #endif
+
+    /// Present AccessorySetupKit's system picker (iOS 18+) and return
+    /// the chosen accessory, or `nil` on cancel. iOS <=17 and non-iOS
+    /// platforms return `nil` immediately - callers branch on
+    /// `Platform.OS` and use the in-app picker on android.
+    public func presentPairPicker() async -> AccessoryPickResult? {
+        #if os(iOS)
+            if #available(iOS 18.0, *) {
+                return await makeOrReusePicker().pick()
+            }
+            return nil
+        #else
+            return nil
+        #endif
+    }
 
     public func setCapabilityFlags(_ flags: CompanionCapabilityFlags) async {
         capFlags = flags

@@ -104,9 +104,8 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       case 'webappsChanged':
       case 'otaEvent':
       case 'log':
-        // Webapps changes are observed by the dashboard via dedicated
-        // selectors / subscriptions; OTA events + logs are streamed to
-        // ad-hoc consumers in their own components.
+        // Observed by dedicated selectors / subscriptions on the dashboard
+        // and ad-hoc consumers in their own components.
         return;
     }
   },

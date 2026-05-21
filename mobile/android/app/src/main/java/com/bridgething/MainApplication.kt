@@ -22,6 +22,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Install the bridgething session backend BEFORE react native starts
+    // so the JS proxy never sees a "backend not installed" throw on first
+    // bridge call. iOS does the equivalent in BridgethingSetup.swift.
+    BridgethingActivityRegistry.installCallbacks(this)
+    BridgethingApp.installBridgething(this)
     loadReactNative(this)
   }
 }

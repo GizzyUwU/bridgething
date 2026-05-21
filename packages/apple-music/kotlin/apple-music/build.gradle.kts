@@ -25,7 +25,7 @@ android {
 }
 
 kotlin {
-  jvmToolchain(26)
+  jvmToolchain(21)
   compilerOptions {
     jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
   }

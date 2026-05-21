@@ -123,4 +123,21 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // bridgething packages: companion owns the gateway + dispatchers; the
+    // session-rn module is the nitro proxy the JS shell talks to. Same
+    // colon paths as the root settings.gradle.kts so each package's
+    // build.gradle.kts (which uses these paths internally) resolves
+    // identically whether built from root or from mobile/android.
+    implementation project(":packages:companion:kotlin:companion")
+    implementation project(":packages:gateway:kotlin:gateway")
+    implementation project(":packages:glue:kotlin:glue")
+    implementation project(":packages:lyrics:kotlin:lyrics")
+    implementation project(":packages:spotify:kotlin:spotify")
+    implementation project(":packages:apple-music:kotlin:apple-music")
+    implementation project(":packages:tidal:kotlin:tidal")
+    // play-services-location is optional at runtime (GeoController falls
+    // back to AOSP LocationManager) but having it on the classpath gives
+    // the better-battery + better-accuracy fused provider where available.
+    implementation "com.google.android.gms:play-services-location:21.3.0"
 }

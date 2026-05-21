@@ -1,14 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!--
+      Legacy BR/EDR perm - max API 30. Needed to open RFCOMM sockets to
+      the device after CompanionDeviceManager has handed us a bonded
+      MAC. From 31 onwards BLUETOOTH_CONNECT covers it.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!--
+      Required to call CompanionDeviceManager.associate(). The system
+      throws IllegalStateException at IPC time without this declaration.
+    -->
+    <uses-feature android:name="android.software.companion_device_setup" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Fine + coarse location are for the companion's geo dispatcher
+      (location fixes forwarded to webapps that ask). Not used for BT
+      scan thanks to `neverForLocation` above.
+    -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!--
+      Background location is requested at runtime; on API 30+ the OS
+      kicks the user to its system settings page rather than showing a
+      prompt. The companion only uses it when the user has opted in.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
 </manifest>

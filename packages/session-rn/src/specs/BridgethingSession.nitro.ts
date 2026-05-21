@@ -273,6 +273,27 @@ export type BridgethingOtaEvent = {
   configuredChannel?: string;
 };
 
+/**
+ * Bond state returned by `presentPairPicker`. Always `bonded` on success
+ * (both iOS ASK and android CDM only resolve after the system has
+ * completed the pair). Kept as a typed field for future expansion.
+ */
+export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
+
+/**
+ * One Car Thing handed back by the OS-mediated pair picker
+ * (AccessorySetupKit on iOS, CompanionDeviceManager on android).
+ * `address` is the BT MAC on android and an opaque accessory identifier
+ * on iOS - callers shouldn't interpret it beyond echoing back to the
+ * wire protocol.
+ */
+export type BridgethingBtDevice = {
+  address: string;
+  name?: string;
+  bondState: BridgethingBtBondState;
+  isCarThing: boolean;
+};
+
 /** Subset of the wire-protocol `BridgeThingMeta` exposed for UI. */
 export type BridgethingDeviceMeta = {
   daemonVersion: string;
@@ -475,6 +496,57 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   /** Companion-side identity snapshot. Used by Settings → About to
    *  render the real version instead of a hardcoded string. */
   hostInfo(): Promise<BridgethingHostInfo>;
+
+  /**
+   * Cross-platform pair flow. The OS handles scan + picker + bond in
+   * a single system surface - no in-app perms, no manual list.
+   *
+   * - iOS: AccessorySetupKit picker (iOS 18+); rejects on earlier iOS.
+   * - Android: CompanionDeviceManager picker (API 26+).
+   *
+   * Returns the chosen accessory, or `null` when the user cancels.
+   */
+  presentPairPicker(): Promise<BridgethingBtDevice | null>;
+
+  // MARK: - Notification access (android only)
+
+  /** True when the app has been toggled on in Android's "Device & app
+   *  notifications" settings (the only way to grant access to a
+   *  NotificationListenerService). iOS treats notifications differently
+   *  (ANCS) and always reports false here. */
+  isNotificationAccessGranted(): Promise<boolean>;
+
+  /** Open the system "Notification access" settings page so the user
+   *  can grant access manually - Android offers no programmatic prompt.
+   *  iOS rejects with `unsupported`. */
+  requestNotificationAccess(): Promise<void>;
+
+  /**
+   * Drop a list of runtime permissions this app currently holds. On
+   * Android 13+ (API 33+) this uses `Context.revokeSelfPermissionsOnKill`,
+   * which queues the revoke for the next process kill - the user
+   * doesn't see a settings bounce. Returns `true` when the queued
+   * revoke was scheduled, `false` when the platform offers no
+   * programmatic path (Android <=12, iOS); callers fall back to
+   * opening app settings.
+   *
+   * Pass android.permission.* constants (e.g.
+   * `["android.permission.ACCESS_BACKGROUND_LOCATION",
+   *   "android.permission.ACCESS_FINE_LOCATION"]`).
+   *
+   * Revoking only the background variant leaves the foreground grant in
+   * place and the OS just downgrades to "while using"; pass every
+   * related permission together when the caller wants a full revoke.
+   */
+  revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
+
+  /**
+   * Force-kill our own process so a queued
+   * `revokeSelfPermissionsOnKill` actually takes effect. The OS routes
+   * users back to the launcher; they reopen bridgething and the perm
+   * is gone. Android-only; iOS rejects.
+   */
+  killApp(): Promise<void>;
 
   // MARK: - Callbacks
 

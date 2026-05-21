@@ -4,6 +4,7 @@ import { ArrowRight, BellRing, Check, ChevronLeft } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Platform,
   ScrollView,
   Text,
   useWindowDimensions,
@@ -35,8 +36,19 @@ export function SetupScreen({ navigation, route }: Props) {
   const session = getSession();
   const { width } = useWindowDimensions();
 
-  const initialStep = route.params?.startAt === 'pair' ? 1 : 0;
-  const [step, setStep] = useState(initialStep);
+  // Step is mirrored to route params so it survives a screen remount
+  // (react-native-screens detaches us while a system activity like the
+  // CDM picker is in the foreground).
+  const initialStep =
+    route.params?.step ?? (route.params?.startAt === 'pair' ? 1 : 0);
+  const [step, setStepState] = useState(initialStep);
+  const setStep = (next: number | ((prev: number) => number)) => {
+    setStepState(prev => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      navigation.setParams({ step: value });
+      return value;
+    });
+  };
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
@@ -44,8 +56,14 @@ export function SetupScreen({ navigation, route }: Props) {
   const provider = useSession(s => s.provider);
   const authState = useSession(s => s.authState);
   const ancsStatus = useSession(s => s.ancsAuthStatus);
+  const peers = useSession(s => s.peers);
 
-  const paired = ancsStatus !== 'unknown';
+  // iOS uses ANCS auth state as the pair signal (LE bond from ASK
+  // landed). Android has no ANCS - we treat any live RFCOMM peer as
+  // paired, since CompanionDeviceManager only resolves successfully
+  // after the system has already completed the BR/EDR bond.
+  const paired =
+    Platform.OS === 'android' ? peers.length > 0 : ancsStatus !== 'unknown';
   const signedIn = authState.kind === 'authenticated' && provider != null;
 
   useEffect(() => {
@@ -102,6 +120,12 @@ export function SetupScreen({ navigation, route }: Props) {
     if (pairBusy) return;
     setPairBusy(true);
     try {
+      if (Platform.OS === 'android') {
+        // CompanionDeviceManager picker. Returns the chosen accessory
+        // or null on cancel - no error handling needed.
+        await session.presentPairPicker();
+        return;
+      }
       const result = await session.enableAncsNotifications();
       if (result.kind === 'failed') {
         Alert.alert(
@@ -396,7 +420,7 @@ function PairPage({
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
           turn on your Car Thing and tap pair. you&apos;ll see a system
-          confirmation — accept it to finish.
+          picker - choose your device to finish.
         </Text>
 
         <View className="my-10 items-center">

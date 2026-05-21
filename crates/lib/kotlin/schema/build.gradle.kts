@@ -18,7 +18,7 @@ dependencies {
 kotlin {
   // Bumped to 26 because msgpack 0.6.1 is compiled at class file 65 (JVM 21+).
   // Output bytecode stays at 17 for consumer compat - Android R8 desugars.
-  jvmToolchain(26)
+  jvmToolchain(21)
   compilerOptions {
     jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
   }

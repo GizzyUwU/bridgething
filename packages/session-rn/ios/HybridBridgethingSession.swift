@@ -46,6 +46,17 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     // Host identity
     func hostInfo() async -> BridgethingHostInfo
 
+    // OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
+    func presentPairPicker() async throws -> BridgethingBtDevice?
+
+    // Notification access (android-only in spec; iOS impls reject as unsupported)
+    func isNotificationAccessGranted() async -> Bool
+    func requestNotificationAccess() async throws
+
+    // Runtime perm revoke (android-only; iOS returns false / no-op)
+    func revokeRuntimePermissions(permissions: [String]) async -> Bool
+    func killApp() async
+
     func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void)
     func setOnAuthStateChanged(_ callback: @escaping @Sendable (BridgethingAuthState) -> Void)
     func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
@@ -307,6 +318,32 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async {
             await (try Self.backend()).hostInfo()
         }
+    }
+
+    // MARK: - OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
+
+    public func presentPairPicker() throws -> Promise<BridgethingBtDevice?> {
+        Promise.async { try await Self.backend().presentPairPicker() }
+    }
+
+    // MARK: - Notification access (android-only in spec)
+
+    public func isNotificationAccessGranted() throws -> Promise<Bool> {
+        Promise.async { await (try Self.backend()).isNotificationAccessGranted() }
+    }
+
+    public func requestNotificationAccess() throws -> Promise<Void> {
+        Promise.async { try await Self.backend().requestNotificationAccess() }
+    }
+
+    // MARK: - Runtime perm revoke (android-only)
+
+    public func revokeRuntimePermissions(permissions: [String]) throws -> Promise<Bool> {
+        Promise.async { await (try Self.backend()).revokeRuntimePermissions(permissions: permissions) }
+    }
+
+    public func killApp() throws -> Promise<Void> {
+        Promise.async { await (try Self.backend()).killApp() }
     }
 
     // MARK: - Callback setters

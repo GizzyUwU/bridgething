@@ -1,6 +1,70 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
+pluginManagement {
+  includeBuild("../node_modules/@react-native/gradle-plugin")
+  repositories {
+    gradlePluginPortal()
+    google()
+    mavenCentral()
+  }
+}
+plugins {
+  id("com.facebook.react.settings")
+  // Auto-provisions JDK toolchains the kotlin packages declare (jvmToolchain(26)).
+  id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'bridgething'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+
+// bridgething kotlin packages. Same colon paths as the root
+// settings.gradle.kts so each package's build.gradle.kts (which uses
+// e.g. project(":packages:glue:kotlin:glue")) resolves identically
+// whether built from root or from mobile/android. Intermediate paths
+// (`:packages`, `:packages:glue`, etc.) get explicit projectDir
+// overrides because gradle 9 requires every intermediate project to
+// resolve to a real directory.
+def repoRoot = file('../..')
+def setProj(path, dir) {
+  include path
+  project(path).projectDir = file(dir)
+}
+
+setProj(':crates', "${repoRoot}/crates")
+setProj(':crates:lib', "${repoRoot}/crates/lib")
+setProj(':crates:lib:kotlin', "${repoRoot}/crates/lib/kotlin")
+setProj(':crates:lib:kotlin:schema', "${repoRoot}/crates/lib/kotlin/schema")
+
+setProj(':packages', "${repoRoot}/packages")
+
+setProj(':packages:gateway', "${repoRoot}/packages/gateway")
+setProj(':packages:gateway:kotlin', "${repoRoot}/packages/gateway/kotlin")
+setProj(':packages:gateway:kotlin:gateway', "${repoRoot}/packages/gateway/kotlin/gateway")
+
+setProj(':packages:glue', "${repoRoot}/packages/glue")
+setProj(':packages:glue:kotlin', "${repoRoot}/packages/glue/kotlin")
+setProj(':packages:glue:kotlin:glue', "${repoRoot}/packages/glue/kotlin/glue")
+
+setProj(':packages:lyrics', "${repoRoot}/packages/lyrics")
+setProj(':packages:lyrics:kotlin', "${repoRoot}/packages/lyrics/kotlin")
+setProj(':packages:lyrics:kotlin:lyrics', "${repoRoot}/packages/lyrics/kotlin/lyrics")
+
+setProj(':packages:companion', "${repoRoot}/packages/companion")
+setProj(':packages:companion:kotlin', "${repoRoot}/packages/companion/kotlin")
+setProj(':packages:companion:kotlin:companion', "${repoRoot}/packages/companion/kotlin/companion")
+
+setProj(':packages:spotify', "${repoRoot}/packages/spotify")
+setProj(':packages:spotify:kotlin', "${repoRoot}/packages/spotify/kotlin")
+setProj(':packages:spotify:kotlin:spotify', "${repoRoot}/packages/spotify/kotlin/spotify")
+
+setProj(':packages:apple-music', "${repoRoot}/packages/apple-music")
+setProj(':packages:apple-music:kotlin', "${repoRoot}/packages/apple-music/kotlin")
+setProj(':packages:apple-music:kotlin:apple-music', "${repoRoot}/packages/apple-music/kotlin/apple-music")
+
+setProj(':packages:tidal', "${repoRoot}/packages/tidal")
+setProj(':packages:tidal:kotlin', "${repoRoot}/packages/tidal/kotlin")
+setProj(':packages:tidal:kotlin:tidal', "${repoRoot}/packages/tidal/kotlin/tidal")
+
+// session-rn is autolinked by RN's CLI as :react-native-session-react-native
+// (read from `@bridgething/session-react-native` once the package.json
+// exports map exposes ./package.json and the config file is .cjs - bun
+// workspaces choked on both before the fix).

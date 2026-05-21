@@ -3,6 +3,7 @@ import type {
   BridgethingAncsAuthStatus,
   BridgethingAncsSetupResult,
   BridgethingAuthState,
+  BridgethingBtDevice,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingDeviceMeta,
@@ -24,6 +25,8 @@ export type {
   BridgethingAncsSetupResult,
   BridgethingAuthKind,
   BridgethingAuthState,
+  BridgethingBtBondState,
+  BridgethingBtDevice,
   BridgethingCapabilityFlags,
   BridgethingConfigEntry,
   BridgethingConfigField,
@@ -216,6 +219,47 @@ export class BridgethingSession {
 
   async hostInfo(): Promise<BridgethingHostInfo> {
     return this.native.hostInfo();
+  }
+
+  /**
+   * Cross-platform OS-mediated pair flow. iOS = AccessorySetupKit
+   * picker (iOS 18+). Android = CompanionDeviceManager picker (API 26+).
+   * Returns the chosen accessory, or null on cancel.
+   */
+  async presentPairPicker(): Promise<BridgethingBtDevice | null> {
+    return this.native.presentPairPicker();
+  }
+
+  // MARK: - Notification access (android-only)
+
+  async isNotificationAccessGranted(): Promise<boolean> {
+    return this.native.isNotificationAccessGranted();
+  }
+
+  async requestNotificationAccess(): Promise<void> {
+    await this.native.requestNotificationAccess();
+  }
+
+  /**
+   * Drop a set of runtime permissions. Android 13+ queues the revoke
+   * for next process kill via `revokeSelfPermissionsOnKill`; older
+   * platforms + iOS return `false` and the caller bounces the user to
+   * system settings instead. Pass every related permission together
+   * (e.g. `ACCESS_BACKGROUND_LOCATION` + `ACCESS_FINE_LOCATION` +
+   * `ACCESS_COARSE_LOCATION`) to fully revoke - revoking the
+   * background-only one just downgrades the OS grant to "while using".
+   */
+  async revokeRuntimePermissions(permissions: string[]): Promise<boolean> {
+    return this.native.revokeRuntimePermissions(permissions);
+  }
+
+  /**
+   * Force-kill our own process. Use after `revokeRuntimePermissions`
+   * to apply the queued revoke immediately - the OS routes the user
+   * back to the launcher and the perm is gone when they reopen.
+   */
+  async killApp(): Promise<void> {
+    await this.native.killApp();
   }
 
   // MARK: - Per-device proxy
