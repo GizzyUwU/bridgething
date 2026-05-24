@@ -1,7 +1,7 @@
 use libbridgething::{
   WebappError,
   client::{
-    ClientToBridgeWebappMsg, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappIcon,
+    ClientToBridgeWebappMsgDispatch, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappIcon,
     WebappIconReply, WebappInstallAbandon, WebappInstallBegin, WebappInstallBeginAck, WebappInstallChunk, WebappList,
     WebappListReply,
   },
@@ -18,18 +18,10 @@ impl WebappHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgeWebappMsg) -> HandlerResult {
-    match msg {
-      ClientToBridgeWebappMsg::List => self.list().await,
-      ClientToBridgeWebappMsg::Current => self.current().await,
-      ClientToBridgeWebappMsg::Activate(req) => self.activate(req).await,
-      ClientToBridgeWebappMsg::Icon(req) => self.icon(req).await,
-      ClientToBridgeWebappMsg::InstallBegin(req) => self.install_begin(req).await,
-      ClientToBridgeWebappMsg::InstallChunk(chunk) => self.install_chunk(chunk).await,
-      ClientToBridgeWebappMsg::InstallAbandon(req) => self.install_abandon(req).await,
-    }
-  }
+impl ClientToBridgeWebappMsgDispatch for WebappHandler {
+  type Output = HandlerResult;
 
   async fn list(&self) -> HandlerResult {
     let webapps = self.handle.state.webapps.list_for_clients().await;
@@ -59,8 +51,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn activate(&self, req: WebappActivate) -> HandlerResult {
-    let WebappActivate { id } = req;
+  async fn activate(&self, params: WebappActivate) -> HandlerResult {
+    let WebappActivate { id } = params;
     if self.handle.state.webapps.resolve(id).await.is_none() {
       self.handle.state.webapps.rescan().await;
     }
@@ -91,8 +83,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn icon(&self, req: WebappIcon) -> HandlerResult {
-    let WebappIcon { id } = req;
+  async fn icon(&self, params: WebappIcon) -> HandlerResult {
+    let WebappIcon { id } = params;
     match self.handle.state.webapps.read_icon(id).await {
       Some((bytes, mime)) => {
         self
@@ -110,7 +102,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn install_begin(&self, req: WebappInstallBegin) -> HandlerResult {
+  async fn install_begin(&self, params: WebappInstallBegin) -> HandlerResult {
+    let req = params;
     tracing::info!(
       "({:?}) WebappInstallBegin install_id={} sha256={} size={}",
       &self.handle.from,
@@ -137,7 +130,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn install_chunk(&self, chunk: WebappInstallChunk) -> HandlerResult {
+  async fn install_chunk(&self, params: WebappInstallChunk) -> HandlerResult {
+    let chunk = params;
     tracing::trace!(
       "({:?}) WebappInstallChunk install_id={} offset={} len={} last={}",
       &self.handle.from,
@@ -158,7 +152,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn install_abandon(&self, req: WebappInstallAbandon) -> HandlerResult {
+  async fn install_abandon(&self, params: WebappInstallAbandon) -> HandlerResult {
+    let req = params;
     tracing::info!(
       "({:?}) WebappInstallAbandon install_id={}",
       &self.handle.from,

@@ -4,15 +4,19 @@ use std::{
   time::Duration,
 };
 
-use bluer::{Adapter, Address, Session, agent::AgentHandle};
-use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Manager, Iap2ReconnectHandle};
+use bluer::{Adapter, Address, Session};
+use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Handles, Iap2Manager};
 use libbridgething::{
   Priority,
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsg, GatewayToBridgeMsgData},
   protocol::EnvelopeProbe,
   wire::{MsgMeta, RequestError, ResponseMeta, WireCommand, WireError, WireEvent, WireRequest},
 };
-use tokio::{sync::oneshot, task::JoinHandle};
+use profiles::ProfileManager;
+use tokio::{
+  sync::{oneshot, watch},
+  task::JoinHandle,
+};
 use uuid::Uuid;
 
 // protocol modules
@@ -37,14 +41,17 @@ use profiles::ProfileMan;
 use rfcomm::RfcommGateway;
 
 use crate::{
+  handler::Iap2EventRouter,
   net::{WSError, WireEventBus},
   peer::PeerTracker,
   player::PlayerError,
-  state::{DeviceStore, StateError, meta::DeviceMeta},
+  state::{DeviceStore, State, StateError, meta::DeviceMeta},
 };
 
 pub type BluetoothMan = Arc<BluetoothManager>;
 pub type BluetoothTx = tokio::sync::mpsc::Sender<BluetoothEvent>;
+
+const GATEWAY_OUTBOUND_CAPACITY: usize = 64;
 
 #[derive(Debug)]
 pub enum BluetoothEvent {
@@ -59,28 +66,86 @@ pub struct BluetoothDeps {
   pub peers: PeerTracker,
 }
 
+/// Synchronously-available facade for the bluetooth subsystem.
+///
+/// `BluetoothManager::create()` builds this with every cloneable handle
+/// populated (gateway outbound, iAP2 transport/telephony/reconnect,
+/// profile_man watch) but *no* bluez activity yet. Consumers wire it
+/// into `AppState` and the daemon's HTTP/WS server binds immediately;
+/// commands sent through these handles queue in the bounded mpsc until
+/// `BluetoothManager::spawn` drains them.
+///
+/// `spawn` runs the async body (Session/set_powered/profile
+/// registration/MFi probe/per-transport drainers/Iap2EventRouter) and
+/// is the long-lived bluetooth task. On MFi probe failure the iAP2
+/// receivers are dropped here, so sends through the iAP2 handles
+/// return `Err(SendError)` for the rest of the run; per-handle wrappers
+/// log-and-swallow.
 #[derive(Debug)]
 pub struct BluetoothManager {
-  _adapter: Adapter,
-
-  pub profile_man: ProfileMan,
   pub gateway_man: GatewayMan,
-  iap2_reconnect: Option<Iap2ReconnectHandle>,
-  iap2_transport: Option<iap2::Iap2TransportHandle>,
-  iap2_telephony: Option<iap2::Iap2TelephonyHandle>,
-
-  _agent_handle: AgentHandle,
-  _iap2_handle: Option<JoinHandle<()>>,
+  pub iap2: Iap2Handles,
+  pub profile_man: ProfileManAccess,
 }
 
-#[derive(Debug)]
-pub struct BluetoothInit {
-  pub manager: BluetoothMan,
-  pub iap2_events_rx: Option<Iap2EventsRx>,
+pub(crate) struct BluetoothBootstrap {
+  gateway: GatewayBootstrap,
+  iap2_events_rx: Iap2EventsRx,
+  iap2_bootstrap: iap2::Iap2Bootstrap,
+  profile_man_tx: watch::Sender<Option<ProfileMan>>,
 }
 
 impl BluetoothManager {
-  pub async fn init(deps: BluetoothDeps, tx: BluetoothTx) -> BluetoothResult<BluetoothInit> {
+  pub fn create() -> (BluetoothMan, BluetoothBootstrap) {
+    let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
+    let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
+    let (profile_man_tx, profile_man_rx) = watch::channel(None);
+
+    let manager = Arc::new(Self {
+      gateway_man,
+      iap2: iap2_handles,
+      profile_man: ProfileManAccess { rx: profile_man_rx },
+    });
+
+    let bootstrap = BluetoothBootstrap {
+      gateway: gateway_bootstrap,
+      iap2_events_rx,
+      iap2_bootstrap,
+      profile_man_tx,
+    };
+
+    (manager, bootstrap)
+  }
+
+  pub fn spawn(
+    self: &BluetoothMan,
+    bootstrap: BluetoothBootstrap,
+    deps: BluetoothDeps,
+    state: State,
+    bluetooth_tx: BluetoothTx,
+  ) -> JoinHandle<()> {
+    let manager = self.clone();
+    tokio::spawn(async move {
+      if let Err(err) = manager.run(bootstrap, deps, state, bluetooth_tx).await {
+        tracing::error!(?err, "FATAL: bluetooth coordinator failed");
+      }
+    })
+  }
+
+  async fn run(
+    self: BluetoothMan,
+    bootstrap: BluetoothBootstrap,
+    deps: BluetoothDeps,
+    state: State,
+    bluetooth_tx: BluetoothTx,
+  ) -> BluetoothResult<()> {
+    let BluetoothBootstrap {
+      gateway,
+      mut iap2_events_rx,
+      iap2_bootstrap,
+      profile_man_tx,
+    } = bootstrap;
+
     tracing::debug!("initializing bluetooth manager");
     let session = Session::new().await?;
     let adapter = adapter::get_adapter(&session).await?;
@@ -101,15 +166,15 @@ impl BluetoothManager {
     debug::query_adapter(&adapter).await?;
 
     tracing::debug!("setting up bluetooth profile manager");
-    let profile_man = Arc::new(
-      profiles::ProfileManager::init(
-        adapter.clone(),
-        deps.bus.clone(),
-        deps.devices.clone(),
-        deps.peers.clone(),
-      )
-      .await,
-    );
+    let profile_man = Arc::new(ProfileManager::init(
+      adapter.clone(),
+      deps.bus.clone(),
+      deps.devices.clone(),
+      deps.peers.clone(),
+      self.iap2.reconnect.clone(),
+    ));
+    let _ = profile_man_tx.send(Some(profile_man.clone()));
+
     let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
 
     // start stream BEFORE device reconnection attempts
@@ -119,69 +184,60 @@ impl BluetoothManager {
     }
     .spawn(profile_man.clone());
 
-    tracing::debug!("setting up bluetooth gateway manager");
-    let gateway_man = GatewayMan::init(adapter.clone(), &session, &deps, tx.clone()).await?;
+    tracing::debug!("setting up bluetooth gateway transports");
+    let gateway_runtime = self
+      .gateway_man
+      .start(gateway, &session, &deps, bluetooth_tx.clone())
+      .await?;
 
     tracing::debug!("setting up iap2 manager");
-    let (iap2_reconnect, iap2_transport, iap2_telephony, _iap2_handle, iap2_events_rx) =
-      match Iap2Manager::init(&session, adapter.clone(), deps.meta.static_meta()).await? {
-        Some(out) => (
-          Some(out.reconnect),
-          Some(out.transport),
-          Some(out.telephony),
-          Some(out.manager.spawn()),
-          Some(out.events_rx),
-        ),
+    let _iap2_handle = Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
+
+    let pending_art = state.iap2_pending_art.clone();
+    let router = Arc::new(Iap2EventRouter::new(
+      state,
+      self.clone(),
+      profile_man.clone(),
+      gateway_runtime.iap2_ea_handle.clone(),
+      self.iap2.reconnect.clone(),
+      pending_art,
+    ));
+
+    loop {
+      match iap2_events_rx.recv().await {
+        Some(event) => router.route(event).await,
         None => {
-          tracing::info!("iAP2 manager not started (MFi probe failed); native gateway still available");
-          (None, None, None, None, None)
+          tracing::debug!("bluetooth coordinator: iap2 event stream ended; coordinator parking");
+          std::future::pending::<()>().await;
         }
-      };
-
-    if let Some(handle) = &iap2_reconnect {
-      profile_man.set_iap2_reconnect(handle.clone());
+      }
     }
-
-    let manager = Arc::new(Self {
-      _adapter: adapter,
-
-      profile_man,
-      gateway_man,
-      iap2_reconnect,
-      iap2_transport,
-      iap2_telephony,
-
-      _agent_handle,
-      _iap2_handle,
-    });
-
-    Ok(BluetoothInit {
-      manager,
-      iap2_events_rx,
-    })
-  }
-
-  pub fn iap2_transport_handle(&self) -> Option<iap2::Iap2TransportHandle> {
-    self.iap2_transport.clone()
-  }
-
-  pub fn iap2_telephony_handle(&self) -> Option<iap2::Iap2TelephonyHandle> {
-    self.iap2_telephony.clone()
-  }
-
-  pub fn iap2_reconnect_handle(&self) -> Option<Iap2ReconnectHandle> {
-    self.iap2_reconnect.clone()
   }
 
   pub async fn connect(&self, mac: &str) -> bluer::Result<()> {
     let address: Address = mac.parse()?;
-    if let Some(handle) = &self.iap2_reconnect {
-      tracing::debug!(%address, "kicking iAP2 reconnect from connect command");
-      handle.kick(address).await;
-    } else {
-      tracing::debug!(%address, "iAP2 manager not running; connect command has no effect");
-    }
+    tracing::debug!(%address, "kicking iAP2 reconnect from connect command");
+    self.iap2.reconnect.kick(address).await;
     Ok(())
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProfileManAccess {
+  rx: watch::Receiver<Option<ProfileMan>>,
+}
+
+impl ProfileManAccess {
+  pub async fn get(&self) -> ProfileMan {
+    let mut rx = self.rx.clone();
+    loop {
+      if let Some(pm) = rx.borrow_and_update().as_ref() {
+        return pm.clone();
+      }
+      if rx.changed().await.is_err() {
+        std::future::pending::<()>().await;
+      }
+    }
   }
 }
 
@@ -261,113 +317,101 @@ type PendingRequests = Arc<Mutex<HashMap<Uuid, oneshot::Sender<GatewayToBridgeMs
 
 #[derive(Debug)]
 pub struct GatewayMan {
-  rfcomm: GatewayCon,
-  iap2_ea_send_tx: GatewaySendTx,
-  iap2_ea_handle: Iap2EaGatewayHandle,
-  network_send_tx: GatewaySendTx,
+  outbound_tx: GatewaySendTx,
   peer_owners: PeerOwners,
   pending: PendingRequests,
+}
 
+pub(crate) struct GatewayBootstrap {
+  outbound_rx: GatewaySendRx,
+}
+
+#[derive(Debug)]
+struct GatewayRuntime {
+  iap2_ea_handle: Iap2EaGatewayHandle,
+  _rfcomm_handle: JoinHandle<()>,
+  _rfcomm_listener: JoinHandle<()>,
   _iap2_ea_handle: JoinHandle<()>,
   _network_handle: JoinHandle<()>,
+  _router_handle: JoinHandle<()>,
 }
 
 impl GatewayMan {
-  pub async fn init(
-    adapter: Adapter,
+  fn allocate() -> (Self, GatewayBootstrap) {
+    let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(GATEWAY_OUTBOUND_CAPACITY);
+    let me = Self {
+      outbound_tx,
+      peer_owners: PeerOwners::new(),
+      pending: Arc::new(Mutex::new(HashMap::new())),
+    };
+    (me, GatewayBootstrap { outbound_rx })
+  }
+
+  async fn start(
+    &self,
+    bootstrap: GatewayBootstrap,
     session: &Session,
     deps: &BluetoothDeps,
-    tx: BluetoothTx,
-  ) -> BluetoothResult<Self> {
+    bluetooth_tx: BluetoothTx,
+  ) -> BluetoothResult<GatewayRuntime> {
     tracing::debug!("initializing bluetooth gateway manager");
-    let peer_owners = PeerOwners::new();
 
-    let rfcomm = GatewayCon::init(
-      &adapter,
+    let (rfcomm_recv_tx, rfcomm_recv_rx) = tokio::sync::mpsc::channel(16);
+    let (rfcomm_send_tx, rfcomm_send_rx) = tokio::sync::mpsc::channel(16);
+
+    let _rfcomm_handle = RfcommGateway::init(
       session,
       deps.meta.clone(),
       deps.peers.clone(),
-      tx.clone(),
-      peer_owners.clone(),
+      rfcomm_recv_tx,
+      rfcomm_send_rx,
+      self.peer_owners.clone(),
+    )
+    .await?
+    .spawn();
+
+    let _rfcomm_listener = spawn_gateway_listener(GatewayType::Rfcomm, rfcomm_recv_rx, bluetooth_tx.clone());
+
+    let (iap2_ea, iap2_ea_handle) = Iap2EaGateway::init(
+      deps.meta.clone(),
+      deps.peers.clone(),
+      bluetooth_tx.clone(),
+      self.peer_owners.clone(),
+    );
+    let iap2_ea_send_tx = iap2_ea.send_tx();
+    let _iap2_ea_handle_join = iap2_ea.spawn();
+
+    let network = NetworkGateway::init(
+      deps.meta.clone(),
+      deps.peers.clone(),
+      bluetooth_tx.clone(),
+      self.peer_owners.clone(),
     )
     .await?;
-
-    let (iap2_ea, iap2_ea_handle) =
-      Iap2EaGateway::init(deps.meta.clone(), deps.peers.clone(), tx.clone(), peer_owners.clone());
-    let iap2_ea_send_tx = iap2_ea.send_tx();
-    let _iap2_ea_handle = iap2_ea.spawn();
-
-    let network = NetworkGateway::init(deps.meta.clone(), deps.peers.clone(), tx.clone(), peer_owners.clone()).await?;
     let network_send_tx = network.send_tx();
     let _network_handle = network.spawn();
 
-    Ok(Self {
-      rfcomm,
+    let _router_handle = spawn_outbound_router(
+      bootstrap.outbound_rx,
+      self.peer_owners.clone(),
+      rfcomm_send_tx,
       iap2_ea_send_tx,
-      iap2_ea_handle,
       network_send_tx,
-      peer_owners,
-      pending: Arc::new(Mutex::new(HashMap::new())),
+    );
 
-      _iap2_ea_handle,
+    Ok(GatewayRuntime {
+      iap2_ea_handle,
+      _rfcomm_handle,
+      _rfcomm_listener,
+      _iap2_ea_handle: _iap2_ea_handle_join,
       _network_handle,
+      _router_handle,
     })
   }
 
-  pub fn iap2_ea_handle(&self) -> Iap2EaGatewayHandle {
-    self.iap2_ea_handle.clone()
-  }
-
   pub async fn send_all(&self, data: OutboundGatewayMessage) {
-    let targets = self.resolve_targets(data.address);
-    match targets.len() {
-      0 => tracing::trace!("send_all: no targets for {:?}; dropping", data.address),
-      1 => self.dispatch_to(targets[0], data).await,
-      _ => {
-        let last = *targets.last().expect("non-empty targets");
-        for kind in &targets[..targets.len() - 1] {
-          self.dispatch_to(*kind, data.clone()).await;
-        }
-        self.dispatch_to(last, data).await;
-      }
-    }
-  }
-
-  fn resolve_targets(&self, address: Option<Address>) -> Vec<GatewayType> {
-    match address {
-      Some(addr) => match self.peer_owners.owner(&addr) {
-        Some(kind) => vec![kind],
-        None => {
-          tracing::trace!(%addr, "send_all: no transport owns address; dropping");
-          Vec::new()
-        }
-      },
-      None => {
-        let active = self.peer_owners.active_kinds();
-        let mut targets = Vec::with_capacity(3);
-        for kind in [GatewayType::Rfcomm, GatewayType::Iap2Ea, GatewayType::Network] {
-          if active.contains(&kind) {
-            targets.push(kind);
-          }
-        }
-        targets
-      }
-    }
-  }
-
-  async fn dispatch_to(&self, kind: GatewayType, data: OutboundGatewayMessage) {
-    match kind {
-      GatewayType::Rfcomm => self.rfcomm.send(data).await,
-      GatewayType::Iap2Ea => {
-        if let Err(err) = self.iap2_ea_send_tx.send(data).await {
-          tracing::error!(?err, "failed to enqueue iap2 ea gateway send");
-        }
-      }
-      GatewayType::Network => {
-        if let Err(err) = self.network_send_tx.send(data).await {
-          tracing::error!(?err, "failed to enqueue network gateway send");
-        }
-      }
+    if let Err(err) = self.outbound_tx.send(data).await {
+      tracing::error!(?err, "gateway outbound queue closed; drop");
     }
   }
 
@@ -534,60 +578,80 @@ impl GatewayMan {
   }
 }
 
-#[derive(Debug)]
-pub struct GatewayCon {
-  tx: GatewaySendTx,
-
-  _handle: JoinHandle<()>,
-  _listener: JoinHandle<()>,
+fn spawn_gateway_listener(gateway_type: GatewayType, mut rx: GatewayRecvRx, tx: BluetoothTx) -> JoinHandle<()> {
+  tracing::debug!("spawning gateway listener for {gateway_type:?}");
+  tokio::spawn(async move {
+    while let Some(msg) = rx.recv().await {
+      if let Err(err) = tx.send(BluetoothEvent::Gateway(msg)).await {
+        tracing::error!("failed to send message to bluetooth manager: {:?}", err);
+      }
+    }
+    tracing::error!("gateway connection closed?? this is very very bad!!");
+  })
 }
 
-impl GatewayCon {
-  pub async fn init(
-    _adapter: &Adapter,
-    session: &Session,
-    meta: DeviceMeta,
-    peers: PeerTracker,
-    bluetooth_tx: BluetoothTx,
-    peer_owners: PeerOwners,
-  ) -> BluetoothResult<Self> {
-    tracing::debug!("initializing rfcomm gateway connection handle");
-    let (recv_tx, rx) = tokio::sync::mpsc::channel(16);
-    let (tx, notify_rx) = tokio::sync::mpsc::channel(16);
-
-    let _handle = RfcommGateway::init(session, meta, peers, recv_tx, notify_rx, peer_owners)
-      .await?
-      .spawn();
-
-    let _listener = Self::spawn_listener(GatewayType::Rfcomm, rx, bluetooth_tx);
-
-    Ok(Self { tx, _handle, _listener })
-  }
-
-  pub async fn send(&self, data: OutboundGatewayMessage) {
-    if let Err(err) = self.tx.send(data).await {
-      tracing::error!("failed to send message to gateway: {:?}", err);
-    }
-  }
-
-  fn spawn_listener(gateway_type: GatewayType, mut rx: GatewayRecvRx, tx: BluetoothTx) -> JoinHandle<()> {
-    tracing::debug!("spawning gateway listener for {gateway_type:?}");
-
-    tokio::spawn(async move {
-      loop {
-        let msg = match rx.recv().await {
-          Some(msg) => msg,
-          None => {
-            tracing::error!("gateway connection closed?? this is very very bad!!");
-            return;
+fn spawn_outbound_router(
+  mut outbound_rx: GatewaySendRx,
+  peer_owners: PeerOwners,
+  rfcomm_send_tx: GatewaySendTx,
+  iap2_ea_send_tx: GatewaySendTx,
+  network_send_tx: GatewaySendTx,
+) -> JoinHandle<()> {
+  tokio::spawn(async move {
+    while let Some(msg) = outbound_rx.recv().await {
+      let targets = resolve_targets(&peer_owners, msg.address);
+      match targets.len() {
+        0 => tracing::trace!("outbound router: no targets for {:?}; dropping", msg.address),
+        1 => dispatch_to(targets[0], msg, &rfcomm_send_tx, &iap2_ea_send_tx, &network_send_tx).await,
+        _ => {
+          let last = *targets.last().expect("non-empty targets");
+          for kind in &targets[..targets.len() - 1] {
+            dispatch_to(*kind, msg.clone(), &rfcomm_send_tx, &iap2_ea_send_tx, &network_send_tx).await;
           }
-        };
-
-        if let Err(err) = tx.send(BluetoothEvent::Gateway(msg)).await {
-          tracing::error!("failed to send message to bluetooth manager: {:?}", err);
+          dispatch_to(last, msg, &rfcomm_send_tx, &iap2_ea_send_tx, &network_send_tx).await;
         }
       }
-    })
+    }
+    tracing::debug!("outbound router: outbound channel closed; exiting");
+  })
+}
+
+fn resolve_targets(peer_owners: &PeerOwners, address: Option<Address>) -> Vec<GatewayType> {
+  match address {
+    Some(addr) => match peer_owners.owner(&addr) {
+      Some(kind) => vec![kind],
+      None => {
+        tracing::trace!(%addr, "outbound router: no transport owns address; dropping");
+        Vec::new()
+      }
+    },
+    None => {
+      let active = peer_owners.active_kinds();
+      let mut targets = Vec::with_capacity(3);
+      for kind in [GatewayType::Rfcomm, GatewayType::Iap2Ea, GatewayType::Network] {
+        if active.contains(&kind) {
+          targets.push(kind);
+        }
+      }
+      targets
+    }
+  }
+}
+
+async fn dispatch_to(
+  kind: GatewayType,
+  msg: OutboundGatewayMessage,
+  rfcomm_send_tx: &GatewaySendTx,
+  iap2_ea_send_tx: &GatewaySendTx,
+  network_send_tx: &GatewaySendTx,
+) {
+  let tx = match kind {
+    GatewayType::Rfcomm => rfcomm_send_tx,
+    GatewayType::Iap2Ea => iap2_ea_send_tx,
+    GatewayType::Network => network_send_tx,
+  };
+  if let Err(err) = tx.send(msg).await {
+    tracing::error!(?err, ?kind, "outbound router: transport queue closed");
   }
 }
 

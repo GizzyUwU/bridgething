@@ -1,6 +1,6 @@
 use libbridgething::{
-  client::{BridgeToClientLibraryMsgEvent, FavoriteChanged},
-  gateway::GatewayToBridgeLibraryMsgEvent,
+  client::{BridgeToClientLibraryMsgEvent, FavoriteChanged as ClientFavoriteChanged},
+  gateway::{FavoriteChanged, GatewayToBridgeLibraryMsgEventDispatch},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -13,21 +13,21 @@ impl LibraryHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: GatewayToBridgeLibraryMsgEvent) -> HandlerResult {
-    match msg {
-      GatewayToBridgeLibraryMsgEvent::FavoriteChanged(change) => {
-        self
-          .handle
-          .state
-          .bus
-          .broadcast_event(BridgeToClientLibraryMsgEvent::FavoriteChanged(FavoriteChanged {
-            uri: change.uri,
-            liked: change.liked,
-          }))
-          .await?;
-      }
-    }
+impl GatewayToBridgeLibraryMsgEventDispatch for LibraryHandler {
+  type Output = HandlerResult;
+
+  async fn favorite_changed(&self, params: FavoriteChanged) -> HandlerResult {
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientLibraryMsgEvent::FavoriteChanged(ClientFavoriteChanged {
+        uri: params.uri,
+        liked: params.liked,
+      }))
+      .await?;
     Ok(())
   }
 }

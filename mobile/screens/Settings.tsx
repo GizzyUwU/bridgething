@@ -687,12 +687,18 @@ function BackgroundLocationRow() {
                     'this android version needs you to revoke location from system settings. open it?',
                     [
                       { text: 'cancel', style: 'cancel' },
-                      { text: 'open settings', onPress: () => Linking.openSettings() },
+                      {
+                        text: 'open settings',
+                        onPress: () => Linking.openSettings(),
+                      },
                     ],
                   );
                   return;
                 }
-                ToastAndroid.show('restarting bridgething…', ToastAndroid.SHORT);
+                ToastAndroid.show(
+                  'restarting bridgething…',
+                  ToastAndroid.SHORT,
+                );
                 // Give the toast a beat to render, then kill ourselves.
                 setTimeout(() => {
                   session.killApp().catch(() => {});
@@ -739,11 +745,7 @@ function BackgroundLocationRow() {
       subtitle={subtitle}
       onPress={blocked ? () => Linking.openSettings() : undefined}
       trailing={
-        <Switch
-          value={granted}
-          onValueChange={handleToggle}
-          disabled={busy}
-        />
+        <Switch value={granted} onValueChange={handleToggle} disabled={busy} />
       }
     />
   );

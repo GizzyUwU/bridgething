@@ -1,8 +1,8 @@
 use libbridgething::{
   GeoError,
   client::{
-    BridgeToClientMsgData, ClientToBridgeGeoMsg, GeoErrorReply, GeoGetOnce, GeoGetOnceReply, GeoUnwatch, GeoWatch,
-    GeoWatchReply,
+    BridgeToClientMsgData, ClientToBridgeGeoMsgDispatch, GeoErrorReply, GeoGetOnce, GeoGetOnceReply, GeoUnwatch,
+    GeoWatch, GeoWatchReply,
   },
   gateway::{self, BridgeToGatewayGeoMsgCommand},
   wire::{RequestError, WireRequest},
@@ -20,22 +20,16 @@ impl GeoHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgeGeoMsg) -> HandlerResult {
-    match msg {
-      ClientToBridgeGeoMsg::Watch(req) => self.watch(req).await,
-      ClientToBridgeGeoMsg::Unwatch(req) => self.unwatch(req).await,
-      ClientToBridgeGeoMsg::GetOnce(req) => self.get_once(req).await,
-    }
-  }
+impl ClientToBridgeGeoMsgDispatch for GeoHandler {
+  type Output = HandlerResult;
 
-  async fn watch(
-    self,
-    GeoWatch {
+  async fn watch(&self, params: GeoWatch) -> HandlerResult {
+    let GeoWatch {
       accuracy,
       min_interval_ms,
-    }: GeoWatch,
-  ) -> HandlerResult {
+    } = params;
     if !self.has_geo() {
       return self.respond_error::<GeoWatch>(GeoError::Unavailable).await;
     }
@@ -55,7 +49,8 @@ impl GeoHandler {
     Ok(())
   }
 
-  async fn unwatch(self, GeoUnwatch { token }: GeoUnwatch) -> HandlerResult {
+  async fn unwatch(&self, params: GeoUnwatch) -> HandlerResult {
+    let GeoUnwatch { token } = params;
     let Ok(uuid) = Uuid::parse_str(&token) else {
       tracing::trace!(%token, "geo.unwatch with malformed token; dropping");
       return Ok(());
@@ -69,7 +64,8 @@ impl GeoHandler {
     Ok(())
   }
 
-  async fn get_once(self, GeoGetOnce { accuracy }: GeoGetOnce) -> HandlerResult {
+  async fn get_once(&self, params: GeoGetOnce) -> HandlerResult {
+    let GeoGetOnce { accuracy } = params;
     if !self.has_geo() {
       return self.respond_error::<GeoGetOnce>(GeoError::Unavailable).await;
     }
@@ -87,7 +83,9 @@ impl GeoHandler {
     }
     Ok(())
   }
+}
 
+impl GeoHandler {
   fn has_geo(&self) -> bool {
     let snapshot = self.handle.state.capabilities.snapshot();
     snapshot.gateway.is_some() && snapshot.available.geo

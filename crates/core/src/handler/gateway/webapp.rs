@@ -2,10 +2,11 @@ use libbridgething::{
   ConfigEntry, ConfigField, WebappError,
   client::{BridgeToClientConfigMsgEvent, ConfigChanged},
   gateway::{
-    GatewayToBridgeWebappMsgCommand, GatewayToBridgeWebappMsgEvent, GatewayToBridgeWebappMsgRequest, GetActiveWebapp,
-    ListWebapps, WebappActive, WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply,
-    WebappConfigList, WebappConfigListReply, WebappConfigSet, WebappIcon, WebappIconReply, WebappInstallAbandon,
-    WebappInstallBegin, WebappInstallBeginAck, WebappInstallChunk, WebappList, WebappSwitchTo, WebappUninstall,
+    GatewayToBridgeWebappMsgCommandDispatch, GatewayToBridgeWebappMsgEventDispatch,
+    GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, WebappActive, WebappConfigAck,
+    WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList, WebappConfigListReply,
+    WebappConfigSet, WebappIcon, WebappIconReply, WebappInstallAbandon, WebappInstallBegin, WebappInstallBeginAck,
+    WebappInstallChunk, WebappList, WebappSwitchTo, WebappUninstall,
   },
 };
 use uuid::Uuid;
@@ -25,35 +26,10 @@ impl WebappHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle_request(&mut self, msg: GatewayToBridgeWebappMsgRequest) -> HandlerResult {
-    tracing::debug!("({:?}) handling webapp request", &self.handle.address);
-
-    match msg {
-      GatewayToBridgeWebappMsgRequest::List => self.list().await,
-      GatewayToBridgeWebappMsgRequest::GetActive => self.get_active().await,
-      GatewayToBridgeWebappMsgRequest::SwitchTo(req) => self.switch_to(req).await,
-      GatewayToBridgeWebappMsgRequest::InstallBegin(req) => self.install_begin(req).await,
-      GatewayToBridgeWebappMsgRequest::Uninstall(req) => self.uninstall(req).await,
-      GatewayToBridgeWebappMsgRequest::Icon(req) => self.icon(req).await,
-      GatewayToBridgeWebappMsgRequest::ConfigGet(req) => self.config_get(req).await,
-      GatewayToBridgeWebappMsgRequest::ConfigList(req) => self.config_list(req).await,
-      GatewayToBridgeWebappMsgRequest::ConfigSet(req) => self.config_set(req).await,
-      GatewayToBridgeWebappMsgRequest::ConfigDelete(req) => self.config_delete(req).await,
-    }
-  }
-
-  pub async fn handle_command(&mut self, cmd: GatewayToBridgeWebappMsgCommand) -> HandlerResult {
-    match cmd {
-      GatewayToBridgeWebappMsgCommand::InstallAbandon(req) => self.install_abandon(req).await,
-    }
-  }
-
-  pub async fn handle_event(&mut self, ev: GatewayToBridgeWebappMsgEvent) -> HandlerResult {
-    match ev {
-      GatewayToBridgeWebappMsgEvent::InstallChunk(chunk) => self.install_chunk(chunk).await,
-    }
-  }
+impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
+  type Output = HandlerResult;
 
   async fn list(&self) -> HandlerResult {
     let webapps = self.handle.state.webapps.list().await;
@@ -67,8 +43,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn switch_to(&self, req: WebappSwitchTo) -> HandlerResult {
-    let WebappSwitchTo { id } = req;
+  async fn switch_to(&self, params: WebappSwitchTo) -> HandlerResult {
+    let WebappSwitchTo { id } = params;
     if self.handle.state.webapps.resolve(id).await.is_none() {
       tracing::debug!(
         "({:?}) webapp {id} not in registry; rescanning disk before refusing",
@@ -92,19 +68,19 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn install_begin(&self, req: WebappInstallBegin) -> HandlerResult {
+  async fn install_begin(&self, params: WebappInstallBegin) -> HandlerResult {
     tracing::info!(
       "({:?}) WebappInstallBegin install_id={} sha256={} size={}",
       &self.handle.address,
-      req.install_id,
-      req.expected_sha256,
-      req.expected_size,
+      params.install_id,
+      params.expected_sha256,
+      params.expected_size,
     );
     match crate::install::install_begin(
       &self.handle.state,
-      req.install_id,
-      req.expected_sha256,
-      req.expected_size,
+      params.install_id,
+      params.expected_sha256,
+      params.expected_size,
     )
     .await
     {
@@ -119,39 +95,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn install_chunk(&self, chunk: WebappInstallChunk) -> HandlerResult {
-    tracing::trace!(
-      "({:?}) WebappInstallChunk install_id={} offset={} len={} last={}",
-      &self.handle.address,
-      chunk.install_id,
-      chunk.offset,
-      chunk.bytes.len(),
-      chunk.last,
-    );
-    crate::install::accept_install_chunk(
-      &self.handle.state,
-      &self.handle.bluetooth,
-      chunk.install_id,
-      chunk.offset,
-      chunk.bytes,
-      chunk.last,
-    )
-    .await;
-    Ok(())
-  }
-
-  async fn install_abandon(&self, req: WebappInstallAbandon) -> HandlerResult {
-    tracing::info!(
-      "({:?}) WebappInstallAbandon install_id={}",
-      &self.handle.address,
-      req.install_id,
-    );
-    crate::install::install_abandon(&self.handle.state, req.install_id).await;
-    Ok(())
-  }
-
-  async fn uninstall(&self, req: WebappUninstall) -> HandlerResult {
-    let WebappUninstall { id } = req;
+  async fn uninstall(&self, params: WebappUninstall) -> HandlerResult {
+    let WebappUninstall { id } = params;
     if self.handle.state.webapps.is_builtin(id).await {
       tracing::warn!("({:?}) refusing uninstall of builtin webapp {id}", &self.handle.address);
       self
@@ -187,8 +132,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn icon(&self, req: WebappIcon) -> HandlerResult {
-    let WebappIcon { id } = req;
+  async fn icon(&self, params: WebappIcon) -> HandlerResult {
+    let WebappIcon { id } = params;
     match self.handle.state.webapps.read_icon(id).await {
       Some((bytes, mime)) => {
         self
@@ -206,8 +151,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn config_get(&self, req: WebappConfigGet) -> HandlerResult {
-    let WebappConfigGet { id, key } = req;
+  async fn config_get(&self, params: WebappConfigGet) -> HandlerResult {
+    let WebappConfigGet { id, key } = params;
     if self.handle.state.webapps.bundle(id).await.is_none() {
       self
         .handle
@@ -223,8 +168,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn config_list(&self, req: WebappConfigList) -> HandlerResult {
-    let WebappConfigList { id } = req;
+  async fn config_list(&self, params: WebappConfigList) -> HandlerResult {
+    let WebappConfigList { id } = params;
     if self.handle.state.webapps.bundle(id).await.is_none() {
       self
         .handle
@@ -248,8 +193,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn config_set(&self, req: WebappConfigSet) -> HandlerResult {
-    let WebappConfigSet { id, key, value } = req;
+  async fn config_set(&self, params: WebappConfigSet) -> HandlerResult {
+    let WebappConfigSet { id, key, value } = params;
     let manifest = match self.handle.state.webapps.manifest(id).await {
       Some(m) => m,
       None => {
@@ -290,8 +235,8 @@ impl WebappHandler {
     Ok(())
   }
 
-  async fn config_delete(&self, req: WebappConfigDelete) -> HandlerResult {
-    let WebappConfigDelete { id, key } = req;
+  async fn config_delete(&self, params: WebappConfigDelete) -> HandlerResult {
+    let WebappConfigDelete { id, key } = params;
     let manifest = match self.handle.state.webapps.manifest(id).await {
       Some(m) => m,
       None => {
@@ -329,7 +274,48 @@ impl WebappHandler {
       .await;
     Ok(())
   }
+}
 
+impl GatewayToBridgeWebappMsgCommandDispatch for WebappHandler {
+  type Output = HandlerResult;
+
+  async fn install_abandon(&self, params: WebappInstallAbandon) -> HandlerResult {
+    tracing::info!(
+      "({:?}) WebappInstallAbandon install_id={}",
+      &self.handle.address,
+      params.install_id,
+    );
+    crate::install::install_abandon(&self.handle.state, params.install_id).await;
+    Ok(())
+  }
+}
+
+impl GatewayToBridgeWebappMsgEventDispatch for WebappHandler {
+  type Output = HandlerResult;
+
+  async fn install_chunk(&self, params: WebappInstallChunk) -> HandlerResult {
+    tracing::trace!(
+      "({:?}) WebappInstallChunk install_id={} offset={} len={} last={}",
+      &self.handle.address,
+      params.install_id,
+      params.offset,
+      params.bytes.len(),
+      params.last,
+    );
+    crate::install::accept_install_chunk(
+      &self.handle.state,
+      &self.handle.bluetooth,
+      params.install_id,
+      params.offset,
+      params.bytes,
+      params.last,
+    )
+    .await;
+    Ok(())
+  }
+}
+
+impl WebappHandler {
   async fn broadcast_config_change(&self, id: Uuid, key: &str, value: Option<String>) {
     let active = match self.handle.state.active_webapp().await {
       Ok(Some(active)) => active,

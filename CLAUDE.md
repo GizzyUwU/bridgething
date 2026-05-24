@@ -8,8 +8,8 @@ to keep that split intact.
 
 The repo splits into two top-level workspace roots:
 
-- `crates/` — Rust workspace members (`crates/lib`, `crates/core`, `crates/client-rs`, `crates/mfi`, `crates/mfi-proxy`, ...). The cargo workspace also pulls in `packages/adapter-node/` (mixed Rust+TS via NAPI) and `tools/codegen/`.
-- `packages/` — Bun/turbo workspace members (`packages/gateway/typescript`, `packages/client-ts`, `packages/adapter-node`, `packages/adapter-rn`, `packages/examples/*`).
+- `crates/` — Rust workspace members (`crates/lib`, `crates/core`, `crates/client-rs`, `crates/mfi`, `crates/mfi-proxy`, ...). The cargo workspace also pulls in `tools/codegen/`.
+- `packages/` — Bun/turbo workspace members (`packages/gateway/typescript`, `packages/client-ts`, `packages/adapter-network`, `packages/adapter-rn`, `packages/examples/*`).
 - `mobile/` — RN app, consumer of the packages.
 
 The lib/core split below is the load-bearing one. Naming convention: Rust crates use kebab-case package names (`bridgething-mfi`); TS packages use scoped names (`@bridgething/lib`).
@@ -48,12 +48,17 @@ systemd integration. The binary lives here.
 
 Core depends on lib for wire types and re-exports nothing.
 
-### crates/client-rs/, packages/adapter-node/
+### crates/client-rs/, packages/adapter-network/
 
 Both consume `libbridgething`. They MUST NOT redefine wire types — they
 re-export from lib or build on top of lib's types. If a wire type needs
 a field added, the field goes in lib and propagates outward, never the
 other way.
+
+`adapter-network` is the canonical host-side transport: pure TypeScript,
+WebSocket to the daemon's network gateway on port 8892. The retired
+`adapter-node` was NAPI + bluer/btleplug; it's gone — the network
+gateway covers Linux / macOS / Windows / browser uniformly.
 
 ## Wrap, don't duplicate
 

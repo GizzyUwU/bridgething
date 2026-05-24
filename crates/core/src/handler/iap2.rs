@@ -299,15 +299,11 @@ impl Iap2EventRouter {
       }
       SessionEvent::DeviceName(update) => {
         tracing::info!(%address, name = %update.device_name, "iAP2 device name");
-        if let Err(err) = self.state.peers.set_display_name(address, update.device_name).await {
-          tracing::warn!(%address, ?err, "failed to apply iAP2 device name");
-        }
+        self.state.peers.set_display_name(address, update.device_name).await;
       }
       SessionEvent::DeviceLanguage(update) => {
         tracing::info!(%address, language = %update.language, "iAP2 device language");
-        if let Err(err) = self.state.peers.set_language(address, update.language).await {
-          tracing::warn!(%address, ?err, "failed to apply iAP2 device language");
-        }
+        self.state.peers.set_language(address, update.language).await;
       }
       SessionEvent::DeviceTime(update) => {
         tracing::info!(
@@ -332,9 +328,7 @@ impl Iap2EventRouter {
       }
       SessionEvent::DeviceUuid(update) => {
         tracing::info!(%address, uuid = %update.uuid, "iAP2 device UUID");
-        if let Err(err) = self.state.peers.set_uuid(address, update.uuid).await {
-          tracing::warn!(%address, ?err, "failed to apply iAP2 device UUID");
-        }
+        self.state.peers.set_uuid(address, update.uuid).await;
       }
       SessionEvent::EaStreamOpened {
         stream_id,

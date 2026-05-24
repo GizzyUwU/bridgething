@@ -1,4 +1,4 @@
-use libbridgething::client::{ClientToBridgeStoreMsgRequest, KVDelete, KVGet, KVPut, StorageResponse};
+use libbridgething::client::{ClientToBridgeStoreMsgRequestDispatch, KVDelete, KVGet, KVPut, StorageResponse};
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
@@ -14,18 +14,17 @@ impl StorageHandler {
     Self { handle }
   }
 
-  pub async fn handle(&mut self, msg: ClientToBridgeStoreMsgRequest) -> HandlerResult {
-    tracing::debug!("({}) handling storage message", &self.handle.from);
-
-    let app_id = self.handle.state.active_webapp().await?.unwrap_or(Uuid::nil());
-    match msg {
-      ClientToBridgeStoreMsgRequest::Get(KVGet { key }) => self.get(app_id, key).await,
-      ClientToBridgeStoreMsgRequest::Put(KVPut { key, value }) => self.put(app_id, key, value).await,
-      ClientToBridgeStoreMsgRequest::Delete(KVDelete { key }) => self.delete(app_id, key).await,
-    }
+  async fn active_app_id(&self) -> Result<Uuid, crate::handler::HandlerError> {
+    Ok(self.handle.state.active_webapp().await?.unwrap_or(Uuid::nil()))
   }
+}
 
-  async fn get(&self, app_id: Uuid, key: String) -> HandlerResult {
+impl ClientToBridgeStoreMsgRequestDispatch for StorageHandler {
+  type Output = HandlerResult;
+
+  async fn get(&self, params: KVGet) -> HandlerResult {
+    let app_id = self.active_app_id().await?;
+    let KVGet { key } = params;
     tracing::debug!("({}) getting value for key: {}", &self.handle.from, &key);
 
     let mut value = self.handle.state.kv.data_get(app_id, &key).await?;
@@ -50,7 +49,9 @@ impl StorageHandler {
     Ok(self.handle.respond_to::<KVGet>(StorageResponse { key, value }).await?)
   }
 
-  async fn put(&mut self, app_id: Uuid, key: String, value: String) -> HandlerResult {
+  async fn put(&self, params: KVPut) -> HandlerResult {
+    let app_id = self.active_app_id().await?;
+    let KVPut { key, value } = params;
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
     self.handle.state.kv.data_set(app_id, &key, value.clone()).await?;
 
@@ -65,7 +66,9 @@ impl StorageHandler {
     )
   }
 
-  async fn delete(&mut self, app_id: Uuid, key: String) -> HandlerResult {
+  async fn delete(&self, params: KVDelete) -> HandlerResult {
+    let app_id = self.active_app_id().await?;
+    let KVDelete { key } = params;
     tracing::debug!("({}) deleting value for key: {}", &self.handle.from, key);
     self.handle.state.kv.data_delete(app_id, &key).await?;
 

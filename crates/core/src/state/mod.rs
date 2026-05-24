@@ -173,8 +173,8 @@ impl AppState {
     Ok(())
   }
 
-  pub async fn gateway_info(&self) -> Option<GatewayInfo> {
-    self.peers.first_connected_gateway().await
+  pub fn gateway_info(&self) -> Option<GatewayInfo> {
+    self.peers.first_connected_gateway()
   }
 
   pub async fn reset(&self) -> StateResult<()> {
@@ -254,8 +254,6 @@ pub enum StateError {
   Io(#[from] tokio::io::Error),
   #[error("database error: {0}")]
   Db(#[from] DbErr),
-  #[error("invalid path: {0}")]
-  InvalidPath(String),
   #[error(transparent)]
   Asset(#[from] AssetError),
   #[error(transparent)]

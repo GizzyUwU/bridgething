@@ -24,6 +24,7 @@ use syn::{DeriveInput, parse_macro_input};
 
 mod bridge_enum;
 mod csm;
+mod dispatch;
 mod markers;
 mod outer_enum;
 mod request;
@@ -89,6 +90,15 @@ pub fn derive_wire_command(input: TokenStream) -> TokenStream {
 pub fn derive_wire_unicast(input: TokenStream) -> TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
   match markers::expand(&ast, "WireUnicast") {
+    Ok(ts) => ts.into(),
+    Err(err) => err.to_compile_error().into(),
+  }
+}
+
+#[proc_macro_derive(BridgeDispatch)]
+pub fn derive_bridge_dispatch(input: TokenStream) -> TokenStream {
+  let ast = parse_macro_input!(input as DeriveInput);
+  match dispatch::expand(&ast) {
     Ok(ts) => ts.into(),
     Err(err) => err.to_compile_error().into(),
   }

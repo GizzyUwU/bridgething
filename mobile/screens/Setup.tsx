@@ -419,8 +419,8 @@ function PairPage({
           pair your Car Thing
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-          turn on your Car Thing and tap pair. you&apos;ll see a system
-          picker - choose your device to finish.
+          turn on your Car Thing and tap pair. you&apos;ll see a system picker -
+          choose your device to finish.
         </Text>
 
         <View className="my-10 items-center">

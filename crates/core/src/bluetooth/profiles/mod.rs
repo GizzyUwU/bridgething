@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use bluer::{Adapter, AdapterEvent, AdapterProperty, Address};
 use libbridgething::{client::BridgeToClientBluetoothMsg, wire::MsgMeta};
@@ -14,11 +14,17 @@ pub struct ProfileManager {
   bus: WireEventBus,
   devices: DeviceStore,
   peers: PeerTracker,
-  iap2_reconnect: OnceLock<Iap2ReconnectHandle>,
+  iap2_reconnect: Iap2ReconnectHandle,
 }
 
 impl ProfileManager {
-  pub async fn init(adapter: Adapter, bus: WireEventBus, devices: DeviceStore, peers: PeerTracker) -> ProfileManager {
+  pub fn init(
+    adapter: Adapter,
+    bus: WireEventBus,
+    devices: DeviceStore,
+    peers: PeerTracker,
+    iap2_reconnect: Iap2ReconnectHandle,
+  ) -> ProfileManager {
     tracing::debug!("initializing bluetooth profile connection manager");
 
     Self {
@@ -26,13 +32,7 @@ impl ProfileManager {
       bus,
       devices,
       peers,
-      iap2_reconnect: OnceLock::new(),
-    }
-  }
-
-  pub fn set_iap2_reconnect(&self, handle: Iap2ReconnectHandle) {
-    if self.iap2_reconnect.set(handle).is_err() {
-      tracing::warn!("iAP2 reconnect handle already set on ProfileManager; ignoring");
+      iap2_reconnect,
     }
   }
 
@@ -127,9 +127,7 @@ impl ProfileManager {
         BluetoothConnectionEvent::DeviceRemoved { mac } => {
           tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
 
-          if let Err(err) = self.peers.remove(mac).await {
-            tracing::warn!(?err, "failed to remove peer on DeviceRemoved");
-          }
+          self.peers.remove(mac).await;
           if let Err(err) = self.devices.remove(mac.to_string()).await {
             tracing::warn!(?err, "failed to remove device store entry on DeviceRemoved");
           }
@@ -145,20 +143,16 @@ impl ProfileManager {
             {
               tracing::warn!(?err, "failed to register newly-paired device");
             }
-          } else if let Err(err) = self.peers.set_paired(mac, false).await {
-            tracing::warn!(?err, "failed to mark peer unpaired");
+          } else {
+            self.peers.set_paired(mac, false).await;
           }
           Ok(())
         }
         BluetoothConnectionEvent::ConnectedChanged { mac, connected } => {
           tracing::trace!("bluetooth Connected property changed for mac {:?}: {}", &mac, connected);
           if connected {
-            if let Err(err) = self.peers.confirm_pairing(mac).await {
-              tracing::warn!(?err, "failed to confirm pairing on Connected=true");
-            }
-            if let Some(handle) = self.iap2_reconnect.get() {
-              handle.kick(mac).await;
-            }
+            self.peers.confirm_pairing(mac).await;
+            self.iap2_reconnect.kick(mac).await;
           }
           Ok(())
         }

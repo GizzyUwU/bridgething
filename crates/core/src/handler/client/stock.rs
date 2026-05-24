@@ -111,7 +111,7 @@ impl LegacyStockHandler {
       return self.send_stock_image(stock_msg_id, &asset).await;
     }
 
-    let is_now_playing = self.handle.state.player.current_artwork_id().await.as_deref() == Some(id.as_str());
+    let is_now_playing = self.handle.state.player.current_artwork_id().as_deref() == Some(id.as_str());
     if !is_now_playing {
       tracing::trace!(
         "({}) asset miss for stock image (not now-playing): {}",
@@ -161,7 +161,7 @@ impl LegacyStockHandler {
   }
 
   async fn get_next_tracks(&self) -> HandlerResult {
-    let reply = self.handle.state.player.queue_reply().await;
+    let reply = self.handle.state.player.queue_reply();
     let payload = crate::stock::interapp::player_queue_to_stock(reply);
     self
       .handle
@@ -252,7 +252,7 @@ impl LegacyStockHandler {
   }
 
   async fn spotify_get_player_state(&self) -> HandlerResult {
-    let reply = self.handle.state.player.state_reply().await;
+    let reply = self.handle.state.player.state_reply();
     let payload = crate::stock::interapp::player_state_to_stock(reply);
     self
       .handle

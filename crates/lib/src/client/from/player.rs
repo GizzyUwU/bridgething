@@ -1,4 +1,4 @@
-use bridgething_macros::{BridgeEnum, WireRequest};
+use bridgething_macros::{BridgeDispatch, BridgeEnum, WireRequest};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -88,7 +88,7 @@ pub struct PlayerStateGet;
 pub struct PlayerQueueGet;
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum, BridgeDispatch)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]

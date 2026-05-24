@@ -87,15 +87,15 @@ impl GatewayHandler {
       GatewayToBridgeMsgData::Asset(asset_msg) => {
         if asset_msg.is_request_variant() {
           let req = asset_msg.into_request().expect("checked above");
-          tokio::spawn(async move { AssetHandler::new(handle).handle_request(req).await });
+          tokio::spawn(async move { req.dispatch(&AssetHandler::new(handle)).await });
         } else if asset_msg.is_event_variant() {
           let ev = asset_msg.into_event().expect("checked above");
           // fine to await here - asset events need to arrive in order, and handle_event just forwards
-          if let Err(err) = AssetHandler::new(handle).handle_event(ev).await {
+          if let Err(err) = ev.dispatch(&AssetHandler::new(handle)).await {
             tracing::error!(?err, "asset event handler failed");
           }
         } else if let Some(cmd) = asset_msg.into_command() {
-          tokio::spawn(async move { AssetHandler::new(handle).handle_command(cmd).await });
+          tokio::spawn(async move { cmd.dispatch(&AssetHandler::new(handle)).await });
         } else {
           tracing::warn!(
             "({:?}) stray response-shape arrival on Asset surface with no matching pending request; dropping",
@@ -105,32 +105,32 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Audio(audio_msg) => {
         if let Some(event) = audio_msg.into_event() {
-          tokio::spawn(async move { AudioHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&AudioHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Authority(auth_msg) => {
         if let Some(event) = auth_msg.into_event() {
-          tokio::spawn(async move { AuthorityHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&AuthorityHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Capabilities(cap_msg) => {
         if let Some(event) = cap_msg.into_event() {
-          tokio::spawn(async move { CapabilitiesHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&CapabilitiesHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Chrome(chrome_msg) => {
         if let Some(cmd) = chrome_msg.into_command() {
-          tokio::spawn(async move { ChromeHandler::new(handle).handle(cmd).await });
+          tokio::spawn(async move { cmd.dispatch(&ChromeHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Geo(geo_msg) => {
         if let Some(event) = geo_msg.into_event() {
-          tokio::spawn(async move { GeoHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&GeoHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Library(lib_msg) => {
         if let Some(event) = lib_msg.into_event() {
-          tokio::spawn(async move { LibraryHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&LibraryHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Lyrics(_) => {
@@ -140,63 +140,72 @@ impl GatewayHandler {
         );
       }
       GatewayToBridgeMsgData::Net(net_msg) => {
-        tokio::spawn(async move { NetHandler::new(handle).handle(net_msg).await });
+        if let Some(event) = net_msg.into_event() {
+          tokio::spawn(async move { event.dispatch(&NetHandler::new(handle)).await });
+        } else {
+          tracing::warn!(
+            "({:?}) stray response-shape Net arrival with no matching pending request; dropping",
+            handle.address,
+          );
+        }
       }
       GatewayToBridgeMsgData::Notifications(notif_msg) => {
         if let Some(event) = notif_msg.into_event() {
-          tokio::spawn(async move { NotificationsHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&NotificationsHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Phone(phone_msg) => {
         if let Some(event) = phone_msg.into_event() {
-          tokio::spawn(async move { PhoneHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&PhoneHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Player(player_msg) => {
         if let Some(event) = player_msg.into_event() {
-          tokio::spawn(async move { PlayerHandler::new(handle).handle_event(event).await });
+          tokio::spawn(async move { event.dispatch(&PlayerHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::System(system_msg) => {
         let ota = self.ota.clone();
         if system_msg.is_request_variant() {
           let req = system_msg.into_request().expect("checked above");
-          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_request(req).await });
+          tokio::spawn(async move { req.dispatch(&SystemHandler::new(handle, ota)).await });
         } else if system_msg.is_event_variant() {
           let ev = system_msg.into_event().expect("checked above");
           // fine to await here - asset events need to arrive in order, and handle_event just forwards
-          if let Err(err) = SystemHandler::new(handle, ota).handle_event(ev).await {
+          if let Err(err) = ev.dispatch(&SystemHandler::new(handle, ota)).await {
             tracing::error!(?err, "system event handler failed");
           }
         } else if let Some(cmd) = system_msg.into_command() {
-          tokio::spawn(async move { SystemHandler::new(handle, ota).handle_command(cmd).await });
+          tokio::spawn(async move { cmd.dispatch(&SystemHandler::new(handle, ota)).await });
         }
       }
       GatewayToBridgeMsgData::Time(time_msg) => {
-        tokio::spawn(async move { TimeHandler::new(handle).handle(time_msg).await });
+        if let Some(event) = time_msg.into_event() {
+          tokio::spawn(async move { event.dispatch(&TimeHandler::new(handle)).await });
+        }
       }
       GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {
         if let Some(event) = tunnel_msg.into_event() {
-          tokio::spawn(async move { TunnelHandler::new(handle).handle(event).await });
+          tokio::spawn(async move { event.dispatch(&TunnelHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Voice(voice_msg) => {
         if let Some(cmd) = voice_msg.into_command() {
-          tokio::spawn(async move { VoiceHandler::new(handle).handle(cmd).await });
+          tokio::spawn(async move { cmd.dispatch(&VoiceHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {
         if webapp_msg.is_request_variant() {
           let req = webapp_msg.into_request().expect("checked above");
-          tokio::spawn(async move { WebappHandler::new(handle).handle_request(req).await });
+          tokio::spawn(async move { req.dispatch(&WebappHandler::new(handle)).await });
         } else if webapp_msg.is_event_variant() {
           let ev = webapp_msg.into_event().expect("checked above");
           // await rather than spawn so chunked install events stay in order
-          if let Err(err) = WebappHandler::new(handle).handle_event(ev).await {
+          if let Err(err) = ev.dispatch(&WebappHandler::new(handle)).await {
             tracing::error!(?err, "webapp event handler failed");
           }
         } else if let Some(cmd) = webapp_msg.into_command() {
-          tokio::spawn(async move { WebappHandler::new(handle).handle_command(cmd).await });
+          tokio::spawn(async move { cmd.dispatch(&WebappHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Error(err) => {

@@ -2,8 +2,7 @@
 # stock aarch64-unknown-linux-gnu image, then adds the target-arch
 # C deps the bridgething daemon links against:
 #
-#   - libusb-1.0, libdbus-1, pkg-config: required by bluer + adapter-node
-#     transitive deps
+#   - libusb-1.0, libdbus-1, pkg-config: required by bluer transitive deps
 #   - libasound2-dev: alsa-sys for the in-daemon mic capture surface
 #   - libswupdate.so.0.1: built here from the vendored swupdate submodule
 #     (just the IPC source files, no Kconfig - pure libc + pthread). The

@@ -340,12 +340,24 @@ fn emit_sibling_enum(parent: &Ident, vis: &Visibility, bucket: Bucket, variants:
     parent,
     bucket.snake(),
   );
+  let macros_crate = macros_crate_path();
   quote! {
     #[doc = #doc]
-    #[derive(::core::fmt::Debug, ::core::clone::Clone)]
+    #[derive(::core::fmt::Debug, ::core::clone::Clone, #macros_crate::BridgeDispatch)]
     #vis enum #sibling {
       #(#decls),*
     }
+  }
+}
+
+fn macros_crate_path() -> TokenStream2 {
+  match proc_macro_crate::crate_name("bridgething-macros") {
+    Ok(proc_macro_crate::FoundCrate::Itself) => quote!(crate),
+    Ok(proc_macro_crate::FoundCrate::Name(name)) => {
+      let ident = Ident::new(&name, Span::call_site());
+      quote!(::#ident)
+    }
+    Err(_) => quote!(::bridgething_macros),
   }
 }
 

@@ -3,7 +3,7 @@ use libbridgething::{
     BridgeToClientAudioMsgEvent, TtsEnded as ClientTtsEnded, TtsStarted as ClientTtsStarted,
     VolumeChanged as ClientVolumeChanged,
   },
-  gateway::GatewayToBridgeAudioMsgEvent,
+  gateway::{GatewayToBridgeAudioMsgEventDispatch, TtsEnded, TtsStarted, VolumeChanged},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -16,32 +16,36 @@ impl AudioHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: GatewayToBridgeAudioMsgEvent) -> HandlerResult {
-    match msg {
-      GatewayToBridgeAudioMsgEvent::TtsStarted(started) => {
-        let event = BridgeToClientAudioMsgEvent::TtsStarted(ClientTtsStarted { id: started.id });
-        self.handle.state.bus.broadcast_event(event).await?;
-      }
-      GatewayToBridgeAudioMsgEvent::TtsEnded(ended) => {
-        let event = BridgeToClientAudioMsgEvent::TtsEnded(ClientTtsEnded {
-          id: ended.id,
-          completed: ended.completed,
-        });
-        self.handle.state.bus.broadcast_event(event).await?;
-      }
-      GatewayToBridgeAudioMsgEvent::VolumeChanged(vol) => {
-        self
-          .handle
-          .state
-          .audio
-          .apply_companion(ClientVolumeChanged {
-            level: vol.level,
-            muted: vol.muted,
-          })
-          .await?;
-      }
-    }
+impl GatewayToBridgeAudioMsgEventDispatch for AudioHandler {
+  type Output = HandlerResult;
+
+  async fn tts_started(&self, params: TtsStarted) -> HandlerResult {
+    let event = BridgeToClientAudioMsgEvent::TtsStarted(ClientTtsStarted { id: params.id });
+    self.handle.state.bus.broadcast_event(event).await?;
+    Ok(())
+  }
+
+  async fn tts_ended(&self, params: TtsEnded) -> HandlerResult {
+    let event = BridgeToClientAudioMsgEvent::TtsEnded(ClientTtsEnded {
+      id: params.id,
+      completed: params.completed,
+    });
+    self.handle.state.bus.broadcast_event(event).await?;
+    Ok(())
+  }
+
+  async fn volume_changed(&self, params: VolumeChanged) -> HandlerResult {
+    self
+      .handle
+      .state
+      .audio
+      .apply_companion(ClientVolumeChanged {
+        level: params.level,
+        muted: params.muted,
+      })
+      .await?;
     Ok(())
   }
 }

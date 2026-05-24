@@ -57,14 +57,12 @@ const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 const RECONNECT_KICK_CAPACITY: usize = 16;
 const SESSION_DEAD_CAPACITY: usize = 16;
 
-/// Custom SDP record advertised for the iAP2 RFCOMM listener. iOS does
+/// SDP record advertised for the iAP2 RFCOMM listener. iOS does
 /// not engage iAP2 on the auto-generated record bluez emits when only
 /// `Profile { uuid, channel, ... }` is supplied - it specifically wants
 /// the BluetoothProfileDescriptorList entry pointing at SerialPort
 /// (0x1101 v1.0). Without that, iOS Bluetooth Settings shows
-/// "<name> is Not Supported" without ever opening RFCOMM. The shape
-/// here mirrors what the wiomoc-iap2 reference implementation publishes,
-/// adjusted for our UUID and channel.
+/// "<name> is Not Supported" without ever opening RFCOMM.
 fn iap2_service_record() -> String {
   format!(
     r#"<?xml version="1.0" encoding="UTF-8" ?>
@@ -92,8 +90,6 @@ fn iap2_service_record() -> String {
   )
 }
 
-/// One inbound iAP2 session event tagged with the originating peer.
-/// Fanned out from the manager to the daemon's `Iap2EventRouter`.
 #[derive(Debug)]
 pub struct Iap2Event {
   pub address: Address,
@@ -113,14 +109,12 @@ struct ActiveSession {
   _shovel_handle: JoinHandle<()>,
 }
 
-/// One outbound transport message routed through the iAP2 manager.
 #[derive(Debug, Clone, Copy)]
 pub enum Iap2TransportCommand {
   Hid(HidCommand),
   NowPlaying(NowPlayingCommand),
 }
 
-/// Cloneable handle to kick the iAP2 reconnect loop for a given peer.
 #[derive(Debug, Clone)]
 pub struct Iap2ReconnectHandle {
   tx: mpsc::Sender<Address>,
@@ -166,9 +160,6 @@ impl Iap2TelephonyHandle {
   }
 }
 
-/// Cheaply-cloneable view of which peers currently have an iAP2
-/// session up. Read by the reconnect loop to decide whether to keep
-/// dialing; written by the manager when it accepts/tears down sessions.
 #[derive(Debug, Clone, Default)]
 pub struct Iap2ActiveSessions {
   inner: Arc<RwLock<HashSet<Address>>>,
@@ -207,24 +198,57 @@ pub struct Iap2Manager {
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
 }
 
-pub struct Iap2InitOutput {
-  pub manager: Iap2Manager,
-  pub events_rx: Iap2EventsRx,
+#[derive(Debug, Clone)]
+pub struct Iap2Handles {
   pub reconnect: Iap2ReconnectHandle,
   pub transport: Iap2TransportHandle,
   pub telephony: Iap2TelephonyHandle,
 }
 
+pub(super) struct Iap2Bootstrap {
+  reconnect_rx: mpsc::Receiver<Address>,
+  transport_rx: mpsc::Receiver<Iap2TransportCommand>,
+  telephony_rx: mpsc::Receiver<TelephonyCommand>,
+  events_tx: mpsc::Sender<Iap2Event>,
+  session_dead_tx: mpsc::Sender<(Address, u64)>,
+  session_dead_rx: mpsc::Receiver<(Address, u64)>,
+}
+
+pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
+  let (reconnect_tx, reconnect_rx) = mpsc::channel(RECONNECT_KICK_CAPACITY);
+  let (transport_tx, transport_rx) = mpsc::channel::<Iap2TransportCommand>(IAP2_CHANNEL_CAPACITY);
+  let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
+  let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
+  let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
+
+  let handles = Iap2Handles {
+    reconnect: Iap2ReconnectHandle { tx: reconnect_tx },
+    transport: Iap2TransportHandle { tx: transport_tx },
+    telephony: Iap2TelephonyHandle { tx: telephony_tx },
+  };
+  let bootstrap = Iap2Bootstrap {
+    reconnect_rx,
+    transport_rx,
+    telephony_rx,
+    events_tx,
+    session_dead_tx,
+    session_dead_rx,
+  };
+  (handles, events_rx, bootstrap)
+}
+
 impl Iap2Manager {
-  pub async fn init(
+  pub(super) async fn start(
+    bootstrap: Iap2Bootstrap,
     session: &Session,
     adapter: Adapter,
     meta: &SuperbirdMeta,
-  ) -> BluetoothResult<Option<Iap2InitOutput>> {
+  ) -> BluetoothResult<Option<JoinHandle<()>>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
       Err(reason) => {
         tracing::warn!(%reason, "MFi probe failed; iAP2 disabled");
+        drop(bootstrap);
         return Ok(None);
       }
     };
@@ -256,18 +280,14 @@ impl Iap2Manager {
     tracing::info!("registered iAP2 RFCOMM client profile (accessory-initiated reconnect)");
 
     let identification = build_identification(meta);
-
-    let (reconnect_tx, reconnect_rx) = mpsc::channel(RECONNECT_KICK_CAPACITY);
-    let reconnect = Iap2ReconnectHandle { tx: reconnect_tx };
-
-    let (transport_tx, transport_rx) = mpsc::channel::<Iap2TransportCommand>(IAP2_CHANNEL_CAPACITY);
-    let transport = Iap2TransportHandle { tx: transport_tx };
-
-    let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
-    let telephony = Iap2TelephonyHandle { tx: telephony_tx };
-
-    let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
-    let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
+    let Iap2Bootstrap {
+      reconnect_rx,
+      transport_rx,
+      telephony_rx,
+      events_tx,
+      session_dead_rx,
+      session_dead_tx,
+    } = bootstrap;
     let active_sessions = Iap2ActiveSessions::default();
 
     let manager = Self {
@@ -288,16 +308,10 @@ impl Iap2Manager {
       session_dead_rx,
     };
 
-    Ok(Some(Iap2InitOutput {
-      manager,
-      events_rx,
-      reconnect,
-      transport,
-      telephony,
-    }))
+    Ok(Some(manager.spawn()))
   }
 
-  pub fn spawn(mut self) -> JoinHandle<()> {
+  fn spawn(mut self) -> JoinHandle<()> {
     tokio::spawn(async move { self.recv().await })
   }
 

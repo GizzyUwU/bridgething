@@ -1,4 +1,4 @@
-use libbridgething::client::{CapabilitiesGet, CapabilitiesSnapshot, ClientToBridgeCapabilitiesMsgRequest};
+use libbridgething::client::{CapabilitiesGet, CapabilitiesSnapshot, ClientToBridgeCapabilitiesMsgRequestDispatch};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -10,18 +10,18 @@ impl CapabilitiesHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgeCapabilitiesMsgRequest) -> HandlerResult {
-    match msg {
-      ClientToBridgeCapabilitiesMsgRequest::Get => {
-        let capabilities = self.handle.state.capabilities.snapshot();
-        Ok(
-          self
-            .handle
-            .respond_to::<CapabilitiesGet>(CapabilitiesSnapshot { capabilities })
-            .await?,
-        )
-      }
-    }
+impl ClientToBridgeCapabilitiesMsgRequestDispatch for CapabilitiesHandler {
+  type Output = HandlerResult;
+
+  async fn get(&self) -> HandlerResult {
+    let capabilities = self.handle.state.capabilities.snapshot();
+    Ok(
+      self
+        .handle
+        .respond_to::<CapabilitiesGet>(CapabilitiesSnapshot { capabilities })
+        .await?,
+    )
   }
 }

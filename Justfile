@@ -51,9 +51,6 @@ gateway:
   bun run build -- --filter=@bridgething/gateway
   bun run gateway:example:dev
 
-adapter:
-  bun run build -- --filter=@bridgething/adapter-node
-
 # --- Codegen ---
 
 typescript:

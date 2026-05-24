@@ -4,7 +4,7 @@ use libbridgething::{
   AssetRetention,
   client::{
     AssetGet, AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, AssetPreload, BridgeToClientAssetMsg,
-    ClientToBridgeAssetMsg,
+    ClientToBridgeAssetMsgDispatch,
   },
   gateway::AssetRequest,
   wire::RequestError,
@@ -33,17 +33,23 @@ impl AssetHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(&self, msg: ClientToBridgeAssetMsg) -> HandlerResult {
-    match msg {
-      ClientToBridgeAssetMsg::Get(AssetGet { id, request_id }) => self.handle_get(id, request_id).await,
-      ClientToBridgeAssetMsg::Preload(AssetPreload { ids }) => {
-        self.handle_preload(ids).await;
-        Ok(())
-      }
-    }
+impl ClientToBridgeAssetMsgDispatch for AssetHandler {
+  type Output = HandlerResult;
+
+  async fn get(&self, params: AssetGet) -> HandlerResult {
+    let AssetGet { id, request_id } = params;
+    self.handle_get(id, request_id).await
   }
 
+  async fn preload(&self, params: AssetPreload) -> HandlerResult {
+    self.handle_preload(params.ids).await;
+    Ok(())
+  }
+}
+
+impl AssetHandler {
   async fn handle_get(&self, id: String, request_id: Uuid) -> HandlerResult {
     if let Some(asset) = self.handle.state.assets.get(&id).await? {
       return self.respond_got(request_id, id, asset).await;
@@ -51,7 +57,7 @@ impl AssetHandler {
 
     let outcome = if id.starts_with(IAP2_ART_PREFIX) {
       self.fetch_iap2_art(&id).await
-    } else if self.handle.state.gateway_info().await.is_none() {
+    } else if self.handle.state.gateway_info().is_none() {
       FetchOutcome::NotFound
     } else {
       self.fetch_via_companion(&id).await
@@ -149,7 +155,7 @@ impl AssetHandler {
   }
 
   async fn handle_preload(&self, ids: Vec<String>) {
-    if self.handle.state.gateway_info().await.is_none() {
+    if self.handle.state.gateway_info().is_none() {
       return;
     }
     for id in ids.into_iter().take(PRELOAD_IDS_MAX) {

@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgeTimeMsg;
+use libbridgething::{TimeInfo, gateway::GatewayToBridgeTimeMsgEventDispatch};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -10,14 +10,14 @@ impl TimeHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: GatewayToBridgeTimeMsg) -> HandlerResult {
-    match msg {
-      GatewayToBridgeTimeMsg::Snapshot(info) => {
-        if let Err(err) = self.handle.state.time.apply_companion_snapshot(info).await {
-          tracing::warn!(?err, "failed to apply companion time snapshot");
-        }
-      }
+impl GatewayToBridgeTimeMsgEventDispatch for TimeHandler {
+  type Output = HandlerResult;
+
+  async fn snapshot(&self, params: TimeInfo) -> HandlerResult {
+    if let Err(err) = self.handle.state.time.apply_companion_snapshot(params).await {
+      tracing::warn!(?err, "failed to apply companion time snapshot");
     }
     Ok(())
   }

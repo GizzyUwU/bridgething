@@ -13,6 +13,11 @@ export const BRIDGETHING_MANUFACTURER_ID = 0xdead;
 
 export const BRIDGETHING_WS_PORT = 8891;
 export const BRIDGETHING_FILE_PORT = 8891;
+export const BRIDGETHING_NETWORK_GATEWAY_PORT = 8892;
+
+export const BRIDGETHING_MDNS_SERVICE_TYPE = 'bridgething';
+export const BRIDGETHING_DEFAULT_HOST = 'bridgething.local';
+export const BRIDGETHING_NETWORK_GATEWAY_URL = `ws://${BRIDGETHING_DEFAULT_HOST}:${BRIDGETHING_NETWORK_GATEWAY_PORT}/`;
 
 import { version } from './version';
 export const LIB_VERSION = `v${version}`;

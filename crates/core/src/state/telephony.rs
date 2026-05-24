@@ -21,7 +21,7 @@ use bridgething_iap2::{
 use libbridgething::{
   CallEndReason, CommunicationsState, DtmfTone, PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus,
   PhoneState, RegistrationStatus,
-  client::{BridgeToClientPhoneMsg, PhoneCallEnded, PhoneCommunicationsReply, PhoneStateReply},
+  client::{BridgeToClientPhoneMsg, PhoneCallEnded, PhoneCommunicationsReply},
   wire::MsgMeta,
 };
 use tokio::sync::RwLock;
@@ -38,19 +38,17 @@ struct Inner {
 pub struct TelephonyManager {
   inner: Arc<RwLock<Inner>>,
   bus: WireEventBus,
-  iap2: Option<Iap2TelephonyHandle>,
+  iap2: Iap2TelephonyHandle,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum TelephonyError {
-  #[error("no iAP2 link to send action")]
-  NoIap2,
   #[error("broadcast failed for {0} client(s)")]
   Broadcast(usize),
 }
 
 impl TelephonyManager {
-  pub fn new(bus: WireEventBus, iap2: Option<Iap2TelephonyHandle>) -> Self {
+  pub fn new(bus: WireEventBus, iap2: Iap2TelephonyHandle) -> Self {
     Self {
       inner: Arc::new(RwLock::new(Inner::default())),
       bus,
@@ -128,9 +126,6 @@ impl TelephonyManager {
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
   }
 
-  /// Replace the active-call set with the companion's announce-time
-  /// snapshot. No per-call event is fanned out - webapps that connect
-  /// later read the merged state via `phone.stateGet`.
   pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
     let mut inner = self.inner.write().await;
     inner.calls = state.active_calls.into_iter().map(|c| (c.call_id.clone(), c)).collect();
@@ -243,15 +238,10 @@ impl TelephonyManager {
   }
 
   pub async fn dispatch(&self, cmd: TelephonyCommand) -> Result<(), TelephonyError> {
-    let Some(handle) = self.iap2.as_ref() else {
-      return Err(TelephonyError::NoIap2);
-    };
-    handle.send(cmd).await;
+    self.iap2.send(cmd).await;
     Ok(())
   }
 
-  /// Helpers for the handler layer to build typed iAP2 actions without
-  /// importing the iap2 crate's types directly.
   pub fn build_initiate(
     kind: u8,
     destination_id: Option<String>,
@@ -303,12 +293,6 @@ impl TelephonyManager {
       return Err(TelephonyError::Broadcast(errors.len()));
     }
     Ok(())
-  }
-
-  pub async fn snapshot_reply(&self) -> PhoneStateReply {
-    PhoneStateReply {
-      state: self.snapshot().await,
-    }
   }
 }
 

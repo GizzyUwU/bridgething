@@ -1,4 +1,4 @@
-use bridgething_macros::BridgeEnum;
+use bridgething_macros::{BridgeDispatch, BridgeEnum};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -10,7 +10,7 @@ pub struct NotificationInvoke {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum, BridgeDispatch)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]

@@ -69,66 +69,95 @@ impl ClientHandler {
 
     match msg.data {
       RecvMsgData::Asset(msg) => {
-        dispatch(handle, move |h| async move { AssetHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&AssetHandler::new(h)).await },
+        );
       }
       RecvMsgData::Audio(msg) => {
-        dispatch(handle, move |h| async move { AudioHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&AudioHandler::new(h)).await },
+        );
       }
       RecvMsgData::Bluetooth(msg) => {
         dispatch(
           handle,
-          move |h| async move { BluetoothHandler::new(h).handle(msg).await },
+          move |h| async move { msg.dispatch(&BluetoothHandler::new(h)).await },
         );
       }
       RecvMsgData::Capabilities(msg) => {
-        dispatch(
-          handle,
-          move |h| async move { CapabilitiesHandler::new(h).handle(msg).await },
-        );
+        dispatch(handle, move |h| async move {
+          msg.dispatch(&CapabilitiesHandler::new(h)).await
+        });
       }
       RecvMsgData::Config(msg) => {
-        dispatch(handle, move |h| async move { ConfigHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&ConfigHandler::new(h)).await },
+        );
       }
       RecvMsgData::Geo(msg) => {
-        dispatch(handle, move |h| async move { GeoHandler::new(h).handle(msg).await });
+        dispatch(handle, move |h| async move { msg.dispatch(&GeoHandler::new(h)).await });
       }
       RecvMsgData::Hardware(msg) => {
         dispatch(
           handle,
-          move |h| async move { HardwareHandler::new(h).handle(msg).await },
+          move |h| async move { msg.dispatch(&HardwareHandler::new(h)).await },
         );
       }
       RecvMsgData::Library(msg) => {
-        dispatch(handle, move |h| async move { LibraryHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&LibraryHandler::new(h)).await },
+        );
       }
       RecvMsgData::Net(msg) => {
-        dispatch(handle, move |h| async move { NetHandler::new(h).handle(msg).await });
+        dispatch(handle, move |h| async move { msg.dispatch(&NetHandler::new(h)).await });
       }
       RecvMsgData::Notifications(msg) => {
         dispatch(handle, move |h| async move {
-          NotificationsHandler::new(h).handle(msg).await
+          msg.dispatch(&NotificationsHandler::new(h)).await
         });
       }
       RecvMsgData::Phone(msg) => {
-        dispatch(handle, move |h| async move { PhoneHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&PhoneHandler::new(h)).await },
+        );
       }
       RecvMsgData::Player(msg) => {
-        dispatch(handle, move |h| async move { PlayerHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&PlayerHandler::new(h)).await },
+        );
       }
       RecvMsgData::Store(msg) => {
-        dispatch(handle, move |h| async move { StorageHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&StorageHandler::new(h)).await },
+        );
       }
       RecvMsgData::System(msg) => {
-        dispatch(handle, move |h| async move { SystemHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&SystemHandler::new(h)).await },
+        );
       }
       RecvMsgData::Time(msg) => {
-        dispatch(handle, move |h| async move { TimeHandler::new(h).handle(msg).await });
+        dispatch(handle, move |h| async move { msg.dispatch(&TimeHandler::new(h)).await });
       }
       RecvMsgData::Voice(msg) => {
-        dispatch(handle, move |h| async move { VoiceHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&VoiceHandler::new(h)).await },
+        );
       }
       RecvMsgData::Webapp(msg) => {
-        dispatch(handle, move |h| async move { WebappHandler::new(h).handle(msg).await });
+        dispatch(
+          handle,
+          move |h| async move { msg.dispatch(&WebappHandler::new(h)).await },
+        );
       }
       RecvMsgData::Forward(msg) => {
         dispatch(handle, move |h| async move {
@@ -173,7 +202,7 @@ impl ClientHandler {
       // switch to legacy compatibility mode
       RecvMsgData::ChangeMode(mode) => {
         if mode == ClientMode::Stock {
-          self.state.peers.resync_stock_connection().await?;
+          self.state.peers.resync_stock_connection().await;
         };
       }
 

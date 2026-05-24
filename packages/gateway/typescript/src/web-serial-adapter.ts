@@ -219,7 +219,6 @@ export class WebSerialAdapter implements Adapter {
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        // eslint-disable-next-line no-console
         console.error('[bridgething] web-serial read loop error', err);
       }
     } finally {
@@ -240,7 +239,6 @@ export class WebSerialAdapter implements Adapter {
       try {
         listener(event);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('[bridgething] web-serial listener threw', err);
       }
     }

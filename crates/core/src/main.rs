@@ -32,7 +32,7 @@ use asset::{AssetCache, AssetIngest};
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothDeps, BluetoothManager};
 use capabilities::CapabilitiesRegistry;
-use handler::{ClientHandler, GatewayHandler, Iap2EventRouter};
+use handler::{ClientHandler, GatewayHandler};
 use mic::{MicConfig, MicManager};
 use ota::{OtaOrchestrator, OtaTerminators, RangeProxy};
 use peer::PeerTracker;
@@ -107,24 +107,16 @@ async fn main() {
 
   let chrome = chrome::Chrome::init().await.expect("failed to initialize chrome");
 
-  notifier.status("initializing bluetooth stack...");
   let (bluetooth_tx, mut bluetooth_rx) = tokio::sync::mpsc::channel(16);
-  let bluetooth::BluetoothInit {
-    manager: bluetooth,
-    mut iap2_events_rx,
-  } = BluetoothManager::init(
-    BluetoothDeps {
-      bus: bus.clone(),
-      meta: meta.clone(),
-      devices: devices.clone(),
-      peers: peers.clone(),
-    },
-    bluetooth_tx,
-  )
-  .await
-  .expect("failed to initialize bluetooth stack");
+  let bluetooth_deps = BluetoothDeps {
+    bus: bus.clone(),
+    meta: meta.clone(),
+    devices: devices.clone(),
+    peers: peers.clone(),
+  };
+  let (bluetooth, bluetooth_bootstrap) = BluetoothManager::create();
 
-  let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2_telephony_handle());
+  let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2.telephony.clone());
   let time = TimeManager::new(bus.clone());
   let audio = AudioManager::new(authority.clone(), bus.clone());
 
@@ -197,22 +189,11 @@ async fn main() {
     state.authority.clone(),
     state.player.clone(),
     bluetooth.clone(),
-    bluetooth.iap2_transport_handle(),
+    bluetooth.iap2.transport.clone(),
   );
 
-  let iap2_router = bluetooth.iap2_reconnect_handle().map(|reconnect| {
-    std::sync::Arc::new(Iap2EventRouter::new(
-      state.clone(),
-      bluetooth.clone(),
-      bluetooth.profile_man.clone(),
-      bluetooth.gateway_man.iap2_ea_handle(),
-      reconnect,
-      state.iap2_pending_art.clone(),
-    ))
-  });
-
   notifier.status("initializing server binds...");
-  let mut server = net::Server::bind(state.clone(), bluetooth.clone())
+  let mut server = net::Server::bind(state.clone())
     .await
     .expect("failed to bind to 127.0.0.1:8890");
 
@@ -227,6 +208,9 @@ async fn main() {
       "SOCKS proxy failed to bind; chromium net.proxy webapps will not work"
     );
   }
+
+  notifier.status("initializing bluetooth stack...");
+  let _bluetooth_handle = bluetooth.spawn(bluetooth_bootstrap, bluetooth_deps, state.clone(), bluetooth_tx.clone());
 
   notifier.ready(true, Some("ready to accept connections..."));
 
@@ -252,11 +236,6 @@ async fn main() {
           }
         }
       },
-      Some(event) = recv_iap2(&mut iap2_events_rx) => {
-        if let Some(router) = iap2_router.as_ref() {
-          router.route(event).await;
-        }
-      },
 
       _ = monitoring::wait_for_signal() => {
         break;
@@ -270,13 +249,6 @@ async fn main() {
   range_proxy_handle.cancel.cancel();
 
   tracing::info!("thank you for using bridgething!");
-}
-
-async fn recv_iap2(rx: &mut Option<bluetooth::iap2::Iap2EventsRx>) -> Option<bluetooth::iap2::Iap2Event> {
-  match rx {
-    Some(rx) => rx.recv().await,
-    None => std::future::pending().await,
-  }
 }
 
 fn spawn_ota_event_forwarder(

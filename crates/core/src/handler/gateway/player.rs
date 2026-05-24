@@ -1,4 +1,7 @@
-use libbridgething::gateway::GatewayToBridgePlayerMsgEvent;
+use libbridgething::{
+  NowPlayingUpdate, PlayerState,
+  gateway::{GatewayToBridgePlayerMsgEventDispatch, QueueSnapshot},
+};
 
 use super::{HandlerResult, MsgHandle};
 use crate::player::NowPlayingSource;
@@ -11,24 +14,28 @@ impl PlayerHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle_event(self, msg: GatewayToBridgePlayerMsgEvent) -> HandlerResult {
-    match msg {
-      GatewayToBridgePlayerMsgEvent::Delta(update) => {
-        self
-          .handle
-          .state
-          .player
-          .apply_now_playing(NowPlayingSource::Companion, update)
-          .await?;
-      }
-      GatewayToBridgePlayerMsgEvent::Snapshot(state) => {
-        self.handle.state.player.apply_companion_snapshot(state).await?;
-      }
-      GatewayToBridgePlayerMsgEvent::QueueChanged(snapshot) => {
-        self.handle.state.player.apply_companion_queue(snapshot.items).await?;
-      }
-    }
+impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
+  type Output = HandlerResult;
+
+  async fn snapshot(&self, params: PlayerState) -> HandlerResult {
+    self.handle.state.player.apply_companion_snapshot(params).await?;
+    Ok(())
+  }
+
+  async fn delta(&self, params: NowPlayingUpdate) -> HandlerResult {
+    self
+      .handle
+      .state
+      .player
+      .apply_now_playing(NowPlayingSource::Companion, params)
+      .await?;
+    Ok(())
+  }
+
+  async fn queue_changed(&self, params: QueueSnapshot) -> HandlerResult {
+    self.handle.state.player.apply_companion_queue(params.items).await?;
     Ok(())
   }
 }

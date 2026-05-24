@@ -1,6 +1,7 @@
 use libbridgething::{
+  Notification,
   client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved as ClientNotificationRemoved},
-  gateway::GatewayToBridgeNotificationsMsgEvent,
+  gateway::{GatewayToBridgeNotificationsMsgEventDispatch, NotificationRemoved},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -13,23 +14,43 @@ impl NotificationsHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: GatewayToBridgeNotificationsMsgEvent) -> HandlerResult {
-    let event = match msg {
-      GatewayToBridgeNotificationsMsgEvent::Posted(notification) => {
-        BridgeToClientNotificationsMsgEvent::Posted(notification)
-      }
-      GatewayToBridgeNotificationsMsgEvent::Updated(notification) => {
-        BridgeToClientNotificationsMsgEvent::Updated(notification)
-      }
-      GatewayToBridgeNotificationsMsgEvent::Removed(removed) => {
-        BridgeToClientNotificationsMsgEvent::Removed(ClientNotificationRemoved {
-          id: removed.id,
-          reason: removed.reason,
-        })
-      }
-    };
-    self.handle.state.bus.broadcast_event(event).await?;
+impl GatewayToBridgeNotificationsMsgEventDispatch for NotificationsHandler {
+  type Output = HandlerResult;
+
+  async fn posted(&self, params: Notification) -> HandlerResult {
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientNotificationsMsgEvent::Posted(params))
+      .await?;
+    Ok(())
+  }
+
+  async fn updated(&self, params: Notification) -> HandlerResult {
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientNotificationsMsgEvent::Updated(params))
+      .await?;
+    Ok(())
+  }
+
+  async fn removed(&self, params: NotificationRemoved) -> HandlerResult {
+    self
+      .handle
+      .state
+      .bus
+      .broadcast_event(BridgeToClientNotificationsMsgEvent::Removed(
+        ClientNotificationRemoved {
+          id: params.id,
+          reason: params.reason,
+        },
+      ))
+      .await?;
     Ok(())
   }
 }

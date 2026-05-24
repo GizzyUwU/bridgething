@@ -1,5 +1,5 @@
 use libbridgething::{
-  client::ClientToBridgeAudioMsgCommand,
+  client::{ClientToBridgeAudioMsgCommandDispatch, Earcon, SetMute, SetVolume, Tts, TtsCancel},
   gateway::{self, BridgeToGatewayAudioMsgCommand},
 };
 
@@ -14,81 +14,91 @@ impl AudioHandler {
     Self { handle }
   }
 
-  pub async fn handle(self, msg: ClientToBridgeAudioMsgCommand) -> HandlerResult {
-    let transport = self.handle.transport.clone();
-    match msg {
-      ClientToBridgeAudioMsgCommand::VolumeUp => self.actuate_volume(transport.volume_up().await).await,
-      ClientToBridgeAudioMsgCommand::VolumeDown => self.actuate_volume(transport.volume_down().await).await,
-      ClientToBridgeAudioMsgCommand::SetVolume(req) => {
-        self
-          .handle
-          .bluetooth
-          .gateway_man
-          .broadcast_command(BridgeToGatewayAudioMsgCommand::SetVolume(gateway::SetVolume {
-            level: req.level,
-          }))
-          .await;
-        self.handle.state.audio.broadcast_current().await?;
-        Ok(())
-      }
-      ClientToBridgeAudioMsgCommand::MuteToggle => self.actuate_volume(transport.mute_toggle().await).await,
-      ClientToBridgeAudioMsgCommand::SetMute(req) => {
-        self
-          .handle
-          .bluetooth
-          .gateway_man
-          .broadcast_command(BridgeToGatewayAudioMsgCommand::SetMute(gateway::SetMute {
-            muted: req.muted,
-          }))
-          .await;
-        self.handle.state.audio.broadcast_current().await?;
-        Ok(())
-      }
-      ClientToBridgeAudioMsgCommand::Tts(req) => {
-        self
-          .forward(BridgeToGatewayAudioMsgCommand::Tts(gateway::Tts {
-            id: req.id,
-            text: req.text,
-            voice: req.voice,
-          }))
-          .await
-      }
-      ClientToBridgeAudioMsgCommand::TtsCancel(req) => {
-        self
-          .forward(BridgeToGatewayAudioMsgCommand::TtsCancel(gateway::TtsCancel {
-            id: req.id,
-          }))
-          .await
-      }
-      ClientToBridgeAudioMsgCommand::TtsCancelAll => self.forward(BridgeToGatewayAudioMsgCommand::TtsCancelAll).await,
-      ClientToBridgeAudioMsgCommand::Earcon(req) => {
-        self
-          .forward(BridgeToGatewayAudioMsgCommand::Earcon(gateway::Earcon {
-            name: req.name,
-          }))
-          .await
-      }
-    }
-  }
-
-  async fn forward(self, cmd: BridgeToGatewayAudioMsgCommand) -> HandlerResult {
+  async fn forward(&self, cmd: BridgeToGatewayAudioMsgCommand) -> HandlerResult {
     self.handle.bluetooth.gateway_man.broadcast_command(cmd).await;
     Ok(())
   }
 
-  /// Volume / mute commands always re-broadcast the current state so
-  /// the kiosk receives a `volume_state` push in response to its
-  /// `volume_up/down/mute` send. When a companion holds Volume
-  /// authority that broadcast carries the companion-reported value;
-  /// otherwise it carries the placeholder, so the slider never flags a
-  /// mute condition. The `transport` actuation is best-effort - a
-  /// `NoTarget` error (no iAP2 link) is swallowed so the UI still
-  /// updates.
-  async fn actuate_volume(self, actuate: Result<(), crate::transport::TransportError>) -> HandlerResult {
-    if let Err(err) = actuate {
-      tracing::debug!(?err, "audio command actuation dropped (no transport target)");
-    }
+  async fn actuate_volume(&self) -> HandlerResult {
     self.handle.state.audio.broadcast_current().await?;
     Ok(())
+  }
+}
+
+impl ClientToBridgeAudioMsgCommandDispatch for AudioHandler {
+  type Output = HandlerResult;
+
+  async fn volume_up(&self) -> HandlerResult {
+    let transport = self.handle.transport.clone();
+    transport.volume_up().await;
+    self.actuate_volume().await
+  }
+
+  async fn volume_down(&self) -> HandlerResult {
+    let transport = self.handle.transport.clone();
+    transport.volume_down().await;
+    self.actuate_volume().await
+  }
+
+  async fn set_volume(&self, params: SetVolume) -> HandlerResult {
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast_command(BridgeToGatewayAudioMsgCommand::SetVolume(gateway::SetVolume {
+        level: params.level,
+      }))
+      .await;
+    self.handle.state.audio.broadcast_current().await?;
+    Ok(())
+  }
+
+  async fn mute_toggle(&self) -> HandlerResult {
+    let transport = self.handle.transport.clone();
+    transport.mute_toggle().await;
+    self.actuate_volume().await
+  }
+
+  async fn set_mute(&self, params: SetMute) -> HandlerResult {
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast_command(BridgeToGatewayAudioMsgCommand::SetMute(gateway::SetMute {
+        muted: params.muted,
+      }))
+      .await;
+    self.handle.state.audio.broadcast_current().await?;
+    Ok(())
+  }
+
+  async fn tts(&self, params: Tts) -> HandlerResult {
+    self
+      .forward(BridgeToGatewayAudioMsgCommand::Tts(gateway::Tts {
+        id: params.id,
+        text: params.text,
+        voice: params.voice,
+      }))
+      .await
+  }
+
+  async fn tts_cancel(&self, params: TtsCancel) -> HandlerResult {
+    self
+      .forward(BridgeToGatewayAudioMsgCommand::TtsCancel(gateway::TtsCancel {
+        id: params.id,
+      }))
+      .await
+  }
+
+  async fn tts_cancel_all(&self) -> HandlerResult {
+    self.forward(BridgeToGatewayAudioMsgCommand::TtsCancelAll).await
+  }
+
+  async fn earcon(&self, params: Earcon) -> HandlerResult {
+    self
+      .forward(BridgeToGatewayAudioMsgCommand::Earcon(gateway::Earcon {
+        name: params.name,
+      }))
+      .await
   }
 }

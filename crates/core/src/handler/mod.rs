@@ -13,7 +13,6 @@ use crate::{
   net::WSError,
   player::PlayerError,
   state::{AudioError, StateError},
-  transport::TransportError,
 };
 
 type HandlerResult = Result<(), HandlerError>;
@@ -34,8 +33,6 @@ pub enum HandlerError {
   Player(#[from] PlayerError),
   #[error(transparent)]
   Asset(#[from] AssetError),
-  #[error(transparent)]
-  Transport(#[from] TransportError),
   #[error(transparent)]
   Audio(#[from] AudioError),
 }

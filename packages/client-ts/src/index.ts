@@ -264,8 +264,6 @@ export class BridgethingClient {
       text = raw;
     } else if (raw instanceof ArrayBuffer) {
       text = new TextDecoder().decode(raw);
-    } else if (raw && typeof (raw as { toString?: () => string }).toString === 'function') {
-      text = String(raw);
     } else {
       this.emit({ type: 'decodeError', description: 'unknown message payload type' });
       return;

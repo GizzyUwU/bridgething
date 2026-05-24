@@ -1,8 +1,8 @@
 use libbridgething::{
   PlayerError,
   client::{
-    BridgeToClientPlayerMsg, ClientToBridgePlayerMsg, PlayUri, PlayerErrorReply, PlayerQueueGet, PlayerStateGet,
-    QueueUri, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
+    BridgeToClientPlayerMsg, ClientToBridgePlayerMsgDispatch, PlayUri, PlayerErrorReply, PlayerQueueGet,
+    PlayerStateGet, QueueUri, SeekTo, SetCrossfade, SetRepeat, SetShuffle, SetSpeed, SkipToIndex,
   },
   gateway::{self, BridgeToGatewayPlayerMsgCommand},
 };
@@ -17,40 +17,13 @@ impl PlayerHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgePlayerMsg) -> HandlerResult {
-    let transport = self.handle.transport.clone();
-    match msg {
-      ClientToBridgePlayerMsg::Play(req) => self.play(req).await,
-      ClientToBridgePlayerMsg::Queue(req) => self.queue(req).await,
-      ClientToBridgePlayerMsg::Pause => Ok(transport.pause().await?),
-      ClientToBridgePlayerMsg::Resume => Ok(transport.play().await?),
-      ClientToBridgePlayerMsg::SkipNext => Ok(transport.next().await?),
-      ClientToBridgePlayerMsg::SkipPrev => Ok(transport.prev().await?),
-      ClientToBridgePlayerMsg::SkipToIndex(SkipToIndex { index }) => Ok(transport.skip_to_index(index).await?),
-      ClientToBridgePlayerMsg::SeekTo(SeekTo { position_ms }) => Ok(transport.seek_to(position_ms).await?),
-      ClientToBridgePlayerMsg::SetShuffle(SetShuffle { on }) => Ok(transport.set_shuffle(on).await?),
-      ClientToBridgePlayerMsg::SetRepeat(SetRepeat { mode }) => Ok(transport.set_repeat(mode).await?),
-      ClientToBridgePlayerMsg::SetSpeed(req) => {
-        self
-          .forward_command(BridgeToGatewayPlayerMsgCommand::SetSpeed(gateway::SetSpeed {
-            speed: req.speed,
-          }))
-          .await
-      }
-      ClientToBridgePlayerMsg::SetCrossfade(req) => {
-        self
-          .forward_command(BridgeToGatewayPlayerMsgCommand::SetCrossfade(gateway::SetCrossfade {
-            duration_ms: req.duration_ms,
-          }))
-          .await
-      }
-      ClientToBridgePlayerMsg::StateGet => self.state_get().await,
-      ClientToBridgePlayerMsg::QueueGet => self.queue_get().await,
-    }
-  }
+impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
+  type Output = HandlerResult;
 
-  async fn play(self, PlayUri { uri, context }: PlayUri) -> HandlerResult {
+  async fn play(&self, params: PlayUri) -> HandlerResult {
+    let PlayUri { uri, context } = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     let Some(scheme) = scheme_of(&uri) else {
       return self
@@ -68,7 +41,8 @@ impl PlayerHandler {
       .await
   }
 
-  async fn queue(self, QueueUri { uri, position }: QueueUri) -> HandlerResult {
+  async fn queue(&self, params: QueueUri) -> HandlerResult {
+    let QueueUri { uri, position } = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     let Some(scheme) = scheme_of(&uri) else {
       return self
@@ -89,19 +63,77 @@ impl PlayerHandler {
       .await
   }
 
-  async fn state_get(self) -> HandlerResult {
-    let reply = self.handle.state.player.state_reply().await;
+  async fn pause(&self) -> HandlerResult {
+    self.handle.transport.pause().await;
+    Ok(())
+  }
+
+  async fn resume(&self) -> HandlerResult {
+    self.handle.transport.play().await;
+    Ok(())
+  }
+
+  async fn skip_next(&self) -> HandlerResult {
+    self.handle.transport.next().await;
+    Ok(())
+  }
+
+  async fn skip_prev(&self) -> HandlerResult {
+    self.handle.transport.prev().await;
+    Ok(())
+  }
+
+  async fn skip_to_index(&self, params: SkipToIndex) -> HandlerResult {
+    self.handle.transport.skip_to_index(params.index).await;
+    Ok(())
+  }
+
+  async fn seek_to(&self, params: SeekTo) -> HandlerResult {
+    self.handle.transport.seek_to(params.position_ms).await;
+    Ok(())
+  }
+
+  async fn set_shuffle(&self, params: SetShuffle) -> HandlerResult {
+    self.handle.transport.set_shuffle(params.on).await;
+    Ok(())
+  }
+
+  async fn set_repeat(&self, params: SetRepeat) -> HandlerResult {
+    self.handle.transport.set_repeat(params.mode).await;
+    Ok(())
+  }
+
+  async fn set_speed(&self, params: SetSpeed) -> HandlerResult {
+    self
+      .forward_command(BridgeToGatewayPlayerMsgCommand::SetSpeed(gateway::SetSpeed {
+        speed: params.speed,
+      }))
+      .await
+  }
+
+  async fn set_crossfade(&self, params: SetCrossfade) -> HandlerResult {
+    self
+      .forward_command(BridgeToGatewayPlayerMsgCommand::SetCrossfade(gateway::SetCrossfade {
+        duration_ms: params.duration_ms,
+      }))
+      .await
+  }
+
+  async fn state_get(&self) -> HandlerResult {
+    let reply = self.handle.state.player.state_reply();
     self.handle.respond_to::<PlayerStateGet>(reply).await?;
     Ok(())
   }
 
-  async fn queue_get(self) -> HandlerResult {
-    let reply = self.handle.state.player.queue_reply().await;
+  async fn queue_get(&self) -> HandlerResult {
+    let reply = self.handle.state.player.queue_reply();
     self.handle.respond_to::<PlayerQueueGet>(reply).await?;
     Ok(())
   }
+}
 
-  async fn forward_command<C>(self, cmd: C) -> HandlerResult
+impl PlayerHandler {
+  async fn forward_command<C>(&self, cmd: C) -> HandlerResult
   where
     C: libbridgething::wire::WireCommand<libbridgething::gateway::BridgeToGatewayMsgData>,
   {
@@ -109,7 +141,7 @@ impl PlayerHandler {
     Ok(())
   }
 
-  async fn respond_player_error(self, error: PlayerError) -> HandlerResult {
+  async fn respond_player_error(&self, error: PlayerError) -> HandlerResult {
     self
       .handle
       .respond(BridgeToClientPlayerMsg::ErrorReply(PlayerErrorReply { error }))

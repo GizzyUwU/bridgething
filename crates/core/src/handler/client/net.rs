@@ -1,8 +1,8 @@
 use libbridgething::{
   NetError, WsError,
   client::{
-    ClientToBridgeNetMsg, NetFetch, NetFetchErrorReply, NetFetchReply, NetStreamCancel, NetStreamOpen, NetWsClose,
-    NetWsErrorReply, NetWsOpen, NetWsOpenReply, NetWsSend,
+    ClientToBridgeNetMsgDispatch, NetFetch, NetFetchErrorReply, NetFetchReply, NetStreamCancel, NetStreamOpen,
+    NetWsClose, NetWsErrorReply, NetWsOpen, NetWsOpenReply, NetWsSend,
   },
   gateway::{self, BridgeToGatewayNetMsgCommand},
   wire::RequestError,
@@ -18,19 +18,13 @@ impl NetHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgeNetMsg) -> HandlerResult {
-    match msg {
-      ClientToBridgeNetMsg::Fetch(NetFetch { request }) => self.handle_fetch(request).await,
-      ClientToBridgeNetMsg::WsOpen(open) => self.handle_ws_open(open).await,
-      ClientToBridgeNetMsg::WsSend(send) => self.handle_ws_send(send).await,
-      ClientToBridgeNetMsg::WsClose(close) => self.handle_ws_close(close).await,
-      ClientToBridgeNetMsg::StreamOpen(open) => self.handle_stream_open(open).await,
-      ClientToBridgeNetMsg::StreamCancel(cancel) => self.handle_stream_cancel(cancel).await,
-    }
-  }
+impl ClientToBridgeNetMsgDispatch for NetHandler {
+  type Output = HandlerResult;
 
-  async fn handle_fetch(self, request: libbridgething::NetFetchRequest) -> HandlerResult {
+  async fn fetch(&self, params: NetFetch) -> HandlerResult {
+    let NetFetch { request } = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     if snapshot.gateway.is_none() {
       return self
@@ -93,7 +87,8 @@ impl NetHandler {
     Ok(())
   }
 
-  async fn handle_ws_open(self, open: NetWsOpen) -> HandlerResult {
+  async fn ws_open(&self, params: NetWsOpen) -> HandlerResult {
+    let open = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     if snapshot.gateway.is_none() {
       return self
@@ -171,7 +166,8 @@ impl NetHandler {
     Ok(())
   }
 
-  async fn handle_ws_send(self, send: NetWsSend) -> HandlerResult {
+  async fn ws_send(&self, params: NetWsSend) -> HandlerResult {
+    let send = params;
     let owner = self.handle.state.ws_routes.lookup(send.connection_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(
@@ -190,7 +186,8 @@ impl NetHandler {
     Ok(())
   }
 
-  async fn handle_ws_close(self, close: NetWsClose) -> HandlerResult {
+  async fn ws_close(&self, params: NetWsClose) -> HandlerResult {
+    let close = params;
     let owner = self.handle.state.ws_routes.drop_id(close.connection_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(
@@ -210,7 +207,8 @@ impl NetHandler {
     Ok(())
   }
 
-  async fn handle_stream_open(self, open: NetStreamOpen) -> HandlerResult {
+  async fn stream_open(&self, params: NetStreamOpen) -> HandlerResult {
+    let open = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     if snapshot.gateway.is_none() || !snapshot.available.net_fetch {
       // No way to surface the rejection synchronously; emit a synthetic
@@ -241,7 +239,8 @@ impl NetHandler {
     Ok(())
   }
 
-  async fn handle_stream_cancel(self, cancel: NetStreamCancel) -> HandlerResult {
+  async fn stream_cancel(&self, params: NetStreamCancel) -> HandlerResult {
+    let cancel = params;
     let owner = self.handle.state.stream_routes.drop_id(cancel.stream_id);
     if owner != Some(self.handle.from) {
       tracing::warn!(

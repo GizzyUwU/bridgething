@@ -492,14 +492,6 @@ impl PlayerState {
     (state, queue)
   }
 
-  pub fn state_reply(&self) -> PlayerStateReply {
-    self.replies().0
-  }
-
-  pub fn queue_reply(&self) -> PlayerQueueReply {
-    self.replies().1
-  }
-
   pub fn current_artwork_id(&self) -> Option<String> {
     self.effective_track()?;
     let id = self.merged_metadata().artwork_id?;
@@ -693,7 +685,7 @@ mod tests {
   }
 
   fn artwork_id_of(state: &PlayerState) -> Option<String> {
-    state.state_reply().state.track.and_then(|t| t.artwork_id)
+    state.replies().0.state.track.and_then(|t| t.artwork_id)
   }
 
   #[test]
@@ -720,7 +712,7 @@ mod tests {
         playback: None,
       },
     );
-    assert!(state.state_reply().state.track.is_none());
+    assert!(state.replies().0.state.track.is_none());
     assert_eq!(state.current_artwork_id(), None);
   }
 
@@ -734,7 +726,7 @@ mod tests {
         "99.9% Of Elden Ring Players CAN'T Beat This Mod",
       ),
     );
-    let track = state.state_reply().state.track.expect("track present");
+    let track = state.replies().0.state.track.expect("track present");
     assert_eq!(
       track.title.as_deref(),
       Some("99.9% Of Elden Ring Players CAN'T Beat This Mod")
@@ -811,7 +803,7 @@ mod tests {
   fn build_media_item_emits_none_for_empty_image_id() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
-    let track = state.state_reply().state.track.expect("track present");
+    let track = state.replies().0.state.track.expect("track present");
     assert_eq!(track.artwork_id, None);
   }
 }

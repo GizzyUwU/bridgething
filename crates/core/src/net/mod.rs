@@ -21,7 +21,6 @@ use tower::util::ServiceExt;
 use tower_http::services::ServeDir;
 
 use crate::{
-  bluetooth::BluetoothMan,
   handler::client::{ClientMode, PossibleSendMsg},
   state::State as BridgeThingState,
 };
@@ -40,12 +39,11 @@ pub struct Server {
 #[derive(Clone)]
 struct ModernRouterState {
   state: BridgeThingState,
-  bluetooth: BluetoothMan,
   tx: ServerTx,
 }
 
 impl Server {
-  pub async fn bind(state: BridgeThingState, bluetooth: BluetoothMan) -> WSResult<Self> {
+  pub async fn bind(state: BridgeThingState) -> WSResult<Self> {
     tracing::debug!(
       "binding to ports {} (stock) and {} (modern + file serve)",
       BRIDGETHING_STOCK_WS_PORT,
@@ -59,7 +57,7 @@ impl Server {
       .fallback(axum::routing::any(stock_ws_handler))
       .with_state(Arc::new(tx.clone()));
 
-    let modern_state = ModernRouterState { state, bluetooth, tx };
+    let modern_state = ModernRouterState { state, tx };
     let modern_app = Router::new()
       .fallback(axum::routing::any(modern_handler))
       .with_state(modern_state);

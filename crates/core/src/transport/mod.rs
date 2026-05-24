@@ -37,10 +37,6 @@ use crate::{
   player::Player,
 };
 
-/// Bit positions inside the bridgething HID transport descriptor. Mirrored
-/// from `bridgething_iap2::csm::hid::report_bit` so the controller can
-/// build pulse masks without depending on the iap2 crate's bytes-level
-/// types directly.
 mod hid_bit {
   pub const PLAY_PAUSE: u8 = 0x01;
   pub const NEXT: u8 = 0x02;
@@ -57,16 +53,11 @@ pub struct TransportController {
   authority: AuthorityRegistry,
   player: Player,
   bluetooth: BluetoothMan,
-  iap2: Option<Iap2TransportHandle>,
+  iap2: Iap2TransportHandle,
 }
 
 impl TransportController {
-  pub fn new(
-    authority: AuthorityRegistry,
-    player: Player,
-    bluetooth: BluetoothMan,
-    iap2: Option<Iap2TransportHandle>,
-  ) -> Self {
+  pub fn new(authority: AuthorityRegistry, player: Player, bluetooth: BluetoothMan, iap2: Iap2TransportHandle) -> Self {
     Self {
       authority,
       player,
@@ -75,90 +66,90 @@ impl TransportController {
     }
   }
 
-  pub async fn play(&self) -> TransportResult<()> {
+  pub async fn play(&self) {
     if let Err(err) = self.player.apply_transport_intent(true).await {
       tracing::warn!(?err, "transport play: failed to broadcast optimistic intent");
     }
     self
       .dispatch_player("play", BridgeToGatewayPlayerMsgCommand::Resume, hid_bit::PLAY_PAUSE)
-      .await
+      .await;
   }
 
-  pub async fn pause(&self) -> TransportResult<()> {
+  pub async fn pause(&self) {
     if let Err(err) = self.player.apply_transport_intent(false).await {
       tracing::warn!(?err, "transport pause: failed to broadcast optimistic intent");
     }
     self
       .dispatch_player("pause", BridgeToGatewayPlayerMsgCommand::Pause, hid_bit::PLAY_PAUSE)
-      .await
+      .await;
   }
 
-  pub async fn next(&self) -> TransportResult<()> {
+  pub async fn next(&self) {
     self
       .dispatch_player("next", BridgeToGatewayPlayerMsgCommand::SkipNext, hid_bit::NEXT)
-      .await
+      .await;
   }
 
-  pub async fn prev(&self) -> TransportResult<()> {
+  pub async fn prev(&self) {
     self
       .dispatch_player("prev", BridgeToGatewayPlayerMsgCommand::SkipPrev, hid_bit::PREV)
-      .await
+      .await;
   }
 
-  pub async fn volume_up(&self) -> TransportResult<()> {
+  pub async fn volume_up(&self) {
     self
       .dispatch_audio(
         "volume_up",
         BridgeToGatewayAudioMsgCommand::VolumeUp,
         hid_bit::VOLUME_UP,
       )
-      .await
+      .await;
   }
 
-  pub async fn volume_down(&self) -> TransportResult<()> {
+  pub async fn volume_down(&self) {
     self
       .dispatch_audio(
         "volume_down",
         BridgeToGatewayAudioMsgCommand::VolumeDown,
         hid_bit::VOLUME_DOWN,
       )
-      .await
+      .await;
   }
 
-  pub async fn mute_toggle(&self) -> TransportResult<()> {
+  pub async fn mute_toggle(&self) {
     self
       .dispatch_audio("mute_toggle", BridgeToGatewayAudioMsgCommand::MuteToggle, hid_bit::MUTE)
-      .await
+      .await;
   }
 
-  pub async fn set_shuffle(&self, on: bool) -> TransportResult<()> {
+  pub async fn set_shuffle(&self, on: bool) {
     if self.companion_owns_playback() {
-      return self
+      self
         .send_player(BridgeToGatewayPlayerMsgCommand::SetShuffle(GatewaySetShuffle { on }))
         .await;
+      return;
     }
-    match self.player.iap2_shuffle().await {
+    match self.player.iap2_shuffle() {
       None => {
         tracing::warn!("transport set_shuffle({on}): iap2 shuffle state unknown; refusing toggle");
-        Ok(())
       }
-      Some(current) if current == on => Ok(()),
+      Some(current) if current == on => {}
       Some(_) => self.send_iap2(HidCommand::Pulse(hid_bit::SHUFFLE)).await,
     }
   }
 
-  pub async fn set_repeat(&self, mode: RepeatMode) -> TransportResult<()> {
+  pub async fn set_repeat(&self, mode: RepeatMode) {
     if self.companion_owns_playback() {
-      return self
+      self
         .send_player(BridgeToGatewayPlayerMsgCommand::SetRepeat(GatewaySetRepeat { mode }))
         .await;
+      return;
     }
-    match self.player.iap2_repeat_mode().await {
+    match self.player.iap2_repeat_mode() {
       None => {
         tracing::warn!("transport set_repeat({mode:?}): iap2 repeat state unknown; refusing toggle");
-        Ok(())
       }
-      Some(current) if current == mode => Ok(()),
+      Some(current) if current == mode => {}
       Some(current) => {
         let count = repeat_toggle_count(current, mode);
         self
@@ -166,23 +157,24 @@ impl TransportController {
             mask: hid_bit::REPEAT,
             count,
           })
-          .await
+          .await;
       }
     }
   }
 
-  pub async fn seek_to(&self, position_ms: u32) -> TransportResult<()> {
+  pub async fn seek_to(&self, position_ms: u32) {
     if self.companion_owns_playback() {
       if let Err(err) = self.player.apply_seek_intent(position_ms).await {
         tracing::warn!(?err, "transport seek_to: failed to broadcast optimistic intent");
       }
-      return self
+      self
         .send_player(BridgeToGatewayPlayerMsgCommand::SeekTo(GatewaySeekTo { position_ms }))
         .await;
+      return;
     }
-    if self.player.iap2_set_elapsed_time_available().await == Some(false) {
+    if self.player.iap2_set_elapsed_time_available() == Some(false) {
       tracing::warn!("transport seek_to({position_ms}): foreground app refuses absolute seek; ignoring");
-      return Ok(());
+      return;
     }
     if let Err(err) = self.player.apply_seek_intent(position_ms).await {
       tracing::warn!(?err, "transport seek_to: failed to broadcast optimistic intent");
@@ -192,23 +184,24 @@ impl TransportController {
         elapsed_time_ms: Some(position_ms),
         queue_index: None,
       })
-      .await
+      .await;
   }
 
-  pub async fn skip_to_index(&self, index: u32) -> TransportResult<()> {
+  pub async fn skip_to_index(&self, index: u32) {
     if self.companion_owns_playback() {
-      return self
+      self
         .send_player(BridgeToGatewayPlayerMsgCommand::SkipToIndex(GatewaySkipToIndex {
           index,
         }))
         .await;
+      return;
     }
     self
       .send_iap2_now_playing(NowPlayingCommand {
         elapsed_time_ms: None,
         queue_index: Some(index),
       })
-      .await
+      .await;
   }
 
   fn companion_owns_playback(&self) -> bool {
@@ -221,73 +214,43 @@ impl TransportController {
     self.authority.is_authoritative(CompanionAuthorityScope::Volume)
   }
 
-  /// Common path for player verbs that map cleanly to both a companion
-  /// gateway variant and a single HID press.
-  async fn dispatch_player(
-    &self,
-    verb: &str,
-    companion_msg: BridgeToGatewayPlayerMsgCommand,
-    hid_mask: u8,
-  ) -> TransportResult<()> {
+  async fn dispatch_player(&self, verb: &str, companion_msg: BridgeToGatewayPlayerMsgCommand, hid_mask: u8) {
     if self.companion_owns_playback() {
       tracing::debug!("transport {verb}: routing to companion (player)");
-      return self.send_player(companion_msg).await;
+      self.send_player(companion_msg).await;
+      return;
     }
     tracing::debug!("transport {verb}: routing to iAP2 HID");
-    self.send_iap2(HidCommand::Pulse(hid_mask)).await
+    self.send_iap2(HidCommand::Pulse(hid_mask)).await;
   }
 
-  async fn dispatch_audio(
-    &self,
-    verb: &str,
-    companion_msg: BridgeToGatewayAudioMsgCommand,
-    hid_mask: u8,
-  ) -> TransportResult<()> {
+  async fn dispatch_audio(&self, verb: &str, companion_msg: BridgeToGatewayAudioMsgCommand, hid_mask: u8) {
     if self.companion_owns_volume() {
       tracing::debug!("transport {verb}: routing to companion (audio)");
-      return self.send_audio(companion_msg).await;
+      self.send_audio(companion_msg).await;
+      return;
     }
     tracing::debug!("transport {verb}: routing to iAP2 HID (best-effort)");
-    self.send_iap2(HidCommand::Pulse(hid_mask)).await
+    self.send_iap2(HidCommand::Pulse(hid_mask)).await;
   }
 
-  async fn send_player(&self, msg: BridgeToGatewayPlayerMsgCommand) -> TransportResult<()> {
+  async fn send_player(&self, msg: BridgeToGatewayPlayerMsgCommand) {
     self.bluetooth.gateway_man.broadcast_command(msg).await;
-    Ok(())
   }
 
-  async fn send_audio(&self, msg: BridgeToGatewayAudioMsgCommand) -> TransportResult<()> {
+  async fn send_audio(&self, msg: BridgeToGatewayAudioMsgCommand) {
     self.bluetooth.gateway_man.broadcast_command(msg).await;
-    Ok(())
   }
 
-  async fn send_iap2(&self, cmd: HidCommand) -> TransportResult<()> {
-    let Some(handle) = &self.iap2 else {
-      tracing::debug!(
-        ?cmd,
-        "iap2 transport not available (MFi probe failed); dropping HID command"
-      );
-      return Err(TransportError::NoTarget);
-    };
-    handle.send_hid(cmd).await;
-    Ok(())
+  async fn send_iap2(&self, cmd: HidCommand) {
+    self.iap2.send_hid(cmd).await;
   }
 
-  async fn send_iap2_now_playing(&self, cmd: NowPlayingCommand) -> TransportResult<()> {
-    let Some(handle) = &self.iap2 else {
-      tracing::debug!(
-        ?cmd,
-        "iap2 transport not available (MFi probe failed); dropping NowPlaying command"
-      );
-      return Err(TransportError::NoTarget);
-    };
-    handle.send_now_playing(cmd).await;
-    Ok(())
+  async fn send_iap2_now_playing(&self, cmd: NowPlayingCommand) {
+    self.iap2.send_now_playing(cmd).await;
   }
 }
 
-/// Number of `Repeat` HID toggles to fire to reach `target` from
-/// `current`, given iOS Music's Off -> All -> One -> Off cycle.
 fn repeat_toggle_count(current: RepeatMode, target: RepeatMode) -> u8 {
   let cur = repeat_cycle_index(current);
   let tgt = repeat_cycle_index(target);
@@ -300,14 +263,6 @@ fn repeat_cycle_index(mode: RepeatMode) -> u32 {
     RepeatMode::All => 1,
     RepeatMode::One => 2,
   }
-}
-
-pub type TransportResult<T> = Result<T, TransportError>;
-
-#[derive(Debug, thiserror::Error)]
-pub enum TransportError {
-  #[error("no peer with a transport route is connected")]
-  NoTarget,
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use libbridgething::client::{BridgeToClientTimeMsg, ClientToBridgeTimeMsgRequest, TimeSnapshot};
+use libbridgething::client::{BridgeToClientTimeMsg, ClientToBridgeTimeMsgRequestDispatch, TimeSnapshot};
 
 use super::{HandlerResult, MsgHandle};
 
@@ -10,17 +10,17 @@ impl TimeHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: ClientToBridgeTimeMsgRequest) -> HandlerResult {
-    match msg {
-      ClientToBridgeTimeMsgRequest::Get => {
-        let time = self.handle.state.time.snapshot().await;
-        self
-          .handle
-          .respond(BridgeToClientTimeMsg::Snapshot(TimeSnapshot { time }))
-          .await?;
-      }
-    }
+impl ClientToBridgeTimeMsgRequestDispatch for TimeHandler {
+  type Output = HandlerResult;
+
+  async fn get(&self) -> HandlerResult {
+    let time = self.handle.state.time.snapshot().await;
+    self
+      .handle
+      .respond(BridgeToClientTimeMsg::Snapshot(TimeSnapshot { time }))
+      .await?;
     Ok(())
   }
 }

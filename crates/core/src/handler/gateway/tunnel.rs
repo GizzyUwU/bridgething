@@ -1,4 +1,4 @@
-use libbridgething::gateway::GatewayToBridgeTunnelMsgEvent;
+use libbridgething::{TunnelClosed, TunnelData, gateway::GatewayToBridgeTunnelMsgEventDispatch};
 
 use super::{HandlerResult, MsgHandle};
 use crate::state::TunnelInbound;
@@ -11,23 +11,25 @@ impl TunnelHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(self, msg: GatewayToBridgeTunnelMsgEvent) -> HandlerResult {
-    match msg {
-      GatewayToBridgeTunnelMsgEvent::Data(data) => {
-        if let Some(tx) = self.handle.state.tunnel_routes.lookup(data.tunnel_id) {
-          let _ = tx.send(TunnelInbound::Data(data.bytes)).await;
-        } else {
-          tracing::trace!(tunnel_id = %data.tunnel_id, "tunnel data for unknown tunnel; dropping");
-        }
-      }
-      GatewayToBridgeTunnelMsgEvent::Closed(closed) => {
-        if let Some(tx) = self.handle.state.tunnel_routes.drop_id(closed.tunnel_id) {
-          let _ = tx.send(TunnelInbound::Closed(closed.reason)).await;
-        } else {
-          tracing::trace!(tunnel_id = %closed.tunnel_id, "tunnel closed for unknown tunnel; dropping");
-        }
-      }
+impl GatewayToBridgeTunnelMsgEventDispatch for TunnelHandler {
+  type Output = HandlerResult;
+
+  async fn data(&self, params: TunnelData) -> HandlerResult {
+    if let Some(tx) = self.handle.state.tunnel_routes.lookup(params.tunnel_id) {
+      let _ = tx.send(TunnelInbound::Data(params.bytes)).await;
+    } else {
+      tracing::trace!(tunnel_id = %params.tunnel_id, "tunnel data for unknown tunnel; dropping");
+    }
+    Ok(())
+  }
+
+  async fn closed(&self, params: TunnelClosed) -> HandlerResult {
+    if let Some(tx) = self.handle.state.tunnel_routes.drop_id(params.tunnel_id) {
+      let _ = tx.send(TunnelInbound::Closed(params.reason)).await;
+    } else {
+      tracing::trace!(tunnel_id = %params.tunnel_id, "tunnel closed for unknown tunnel; dropping");
     }
     Ok(())
   }

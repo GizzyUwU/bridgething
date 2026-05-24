@@ -1,8 +1,8 @@
 use libbridgething::{
   Diagnostics,
   client::{
-    ClientToBridgeSystemMsg, DeviceGetNickname, DeviceNicknameReply, DiagnosticsGet, DiagnosticsReply, LogsSubscribe,
-    LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe, RequestVersion,
+    ClientToBridgeSystemMsgDispatch, DeviceGetNickname, DeviceNicknameReply, DiagnosticsGet, DiagnosticsReply,
+    LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe, RequestVersion,
   },
 };
 use uuid::Uuid;
@@ -18,22 +18,10 @@ impl SystemHandler {
   pub fn new(handle: MsgHandle) -> Self {
     Self { handle }
   }
+}
 
-  pub async fn handle(&mut self, msg: ClientToBridgeSystemMsg) -> HandlerResult {
-    tracing::debug!("({}) handling system message", &self.handle.from);
-
-    match msg {
-      ClientToBridgeSystemMsg::VersionRequest => self.version_request().await,
-      ClientToBridgeSystemMsg::DiagnosticsGet => self.diagnostics_get().await,
-      ClientToBridgeSystemMsg::LogsTail(req) => self.logs_tail(req).await,
-      ClientToBridgeSystemMsg::LogsSubscribe(req) => self.logs_subscribe(req).await,
-      ClientToBridgeSystemMsg::LogsUnsubscribe(req) => self.logs_unsubscribe(req).await,
-      ClientToBridgeSystemMsg::Reboot => self.reboot().await,
-      ClientToBridgeSystemMsg::PowerOff => self.power_off().await,
-      ClientToBridgeSystemMsg::FactoryReset => self.factory_reset().await,
-      ClientToBridgeSystemMsg::DeviceGetNickname => self.device_get_nickname().await,
-    }
-  }
+impl ClientToBridgeSystemMsgDispatch for SystemHandler {
+  type Output = HandlerResult;
 
   async fn device_get_nickname(&self) -> HandlerResult {
     let nickname = self.handle.state.meta.nickname();
@@ -64,22 +52,23 @@ impl SystemHandler {
     )
   }
 
-  async fn logs_tail(&self, req: LogsTail) -> HandlerResult {
-    let entries = self
-      .handle
-      .state
-      .log_tap
-      .tail(req.source, &req.levels, req.filter.as_deref(), req.max_lines);
+  async fn logs_tail(&self, params: LogsTail) -> HandlerResult {
+    let entries = self.handle.state.log_tap.tail(
+      params.source,
+      &params.levels,
+      params.filter.as_deref(),
+      params.max_lines,
+    );
     Ok(self.handle.respond_to::<LogsTail>(LogsTailReply { entries }).await?)
   }
 
-  async fn logs_subscribe(&self, req: LogsSubscribe) -> HandlerResult {
+  async fn logs_subscribe(&self, params: LogsSubscribe) -> HandlerResult {
     let token = self.handle.state.log_tap.subscribe(
       self.handle.state.bus.clone(),
       self.handle.from,
-      req.source,
-      req.levels,
-      req.filter,
+      params.source,
+      params.levels,
+      params.filter,
     );
     Ok(
       self
@@ -91,8 +80,8 @@ impl SystemHandler {
     )
   }
 
-  async fn logs_unsubscribe(&self, req: LogsUnsubscribe) -> HandlerResult {
-    let LogsUnsubscribe { token } = req;
+  async fn logs_unsubscribe(&self, params: LogsUnsubscribe) -> HandlerResult {
+    let LogsUnsubscribe { token } = params;
     let Ok(uuid) = Uuid::parse_str(&token) else {
       tracing::trace!(%token, "system.logsUnsubscribe with malformed token; dropping");
       return Ok(());
@@ -117,8 +106,8 @@ impl SystemHandler {
     Ok(())
   }
 
-  async fn factory_reset(&mut self) -> HandlerResult {
-    if let Err(err) = self.handle.bluetooth.profile_man.reset().await {
+  async fn factory_reset(&self) -> HandlerResult {
+    if let Err(err) = self.handle.bluetooth.profile_man.get().await.reset().await {
       tracing::error!("error resetting bluetooth devices: {:?}", err);
     }
 
@@ -126,7 +115,9 @@ impl SystemHandler {
       tracing::error!("error resetting state: {:?}", err);
     }
 
-    self.reboot().await?;
+    if let Err(err) = power::reboot().await {
+      tracing::error!("reboot failed: {err}");
+    }
 
     Ok(())
   }
