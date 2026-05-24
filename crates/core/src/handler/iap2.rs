@@ -145,7 +145,7 @@ impl Iap2EventRouter {
           tracing::warn!(%address, ?err, "failed to upsert peer for iAP2 link");
         }
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::LinkUp).await;
-        self.state.ancs.attach(address).await;
+        self.bluetooth.ancs.attach(address).await;
       }
       SessionEvent::Authenticated => {
         tracing::info!(%address, "iAP2 authenticated");
@@ -355,7 +355,7 @@ impl Iap2EventRouter {
       SessionEvent::LinkDown(reason) => {
         tracing::info!(%address, %reason, "iAP2 link down");
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
-        self.state.ancs.detach(address).await;
+        self.bluetooth.ancs.detach(address).await;
         self.hint_state.lock().await.remove(&address);
         self.queue_ctx.lock().await.remove(&address);
         self.pending_art.clear(address).await;

@@ -4,7 +4,7 @@ use std::{
   time::Duration,
 };
 
-use bluer::{Adapter, Address, Session};
+use bluer::{Address, Session};
 use iap2::{Iap2EaGateway, Iap2EaGatewayHandle, Iap2EventsRx, Iap2Handles, Iap2Manager};
 use libbridgething::{
   Priority,
@@ -34,6 +34,7 @@ mod debug;
 mod packer;
 mod peer_owners;
 
+use ancs::{AncsBootstrap, AncsManager};
 use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
 use peer_owners::PeerOwners;
@@ -85,6 +86,7 @@ pub struct BluetoothDeps {
 pub struct BluetoothManager {
   pub gateway_man: GatewayMan,
   pub iap2: Iap2Handles,
+  pub ancs: AncsManager,
   pub profile_man: ProfileManAccess,
 }
 
@@ -92,6 +94,7 @@ pub(crate) struct BluetoothBootstrap {
   gateway: GatewayBootstrap,
   iap2_events_rx: Iap2EventsRx,
   iap2_bootstrap: iap2::Iap2Bootstrap,
+  ancs: AncsBootstrap,
   profile_man_tx: watch::Sender<Option<ProfileMan>>,
 }
 
@@ -99,11 +102,13 @@ impl BluetoothManager {
   pub fn create() -> (BluetoothMan, BluetoothBootstrap) {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
     let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
+    let (ancs_handle, ancs_bootstrap) = AncsManager::allocate();
     let (profile_man_tx, profile_man_rx) = watch::channel(None);
 
     let manager = Arc::new(Self {
       gateway_man,
       iap2: iap2_handles,
+      ancs: ancs_handle,
       profile_man: ProfileManAccess { rx: profile_man_rx },
     });
 
@@ -111,6 +116,7 @@ impl BluetoothManager {
       gateway: gateway_bootstrap,
       iap2_events_rx,
       iap2_bootstrap,
+      ancs: ancs_bootstrap,
       profile_man_tx,
     };
 
@@ -143,6 +149,7 @@ impl BluetoothManager {
       gateway,
       mut iap2_events_rx,
       iap2_bootstrap,
+      ancs: ancs_bootstrap,
       profile_man_tx,
     } = bootstrap;
 
@@ -192,6 +199,11 @@ impl BluetoothManager {
 
     tracing::debug!("setting up iap2 manager");
     let _iap2_handle = Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
+
+    tracing::debug!("setting up ancs dispatcher");
+    let _ancs_handle = ancs_bootstrap
+      .start(adapter.clone(), deps.bus.clone(), self.clone())
+      .await;
 
     let pending_art = state.iap2_pending_art.clone();
     let router = Arc::new(Iap2EventRouter::new(

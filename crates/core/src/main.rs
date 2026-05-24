@@ -128,10 +128,6 @@ async fn main() {
     .await
     .spawn();
 
-  let (ancs, _ancs_handle) = bluetooth::ancs::AncsManager::spawn(bus.clone(), bluetooth.clone())
-    .await
-    .expect("failed to initialize ANCS manager");
-
   let range_proxy_handle = RangeProxy::spawn(bluetooth.clone(), libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT).await;
 
   let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
@@ -172,7 +168,6 @@ async fn main() {
     geo_watchers,
     log_tap,
     tunnel_routes,
-    ancs,
     db,
     meta_store,
     asset_cache_handle,

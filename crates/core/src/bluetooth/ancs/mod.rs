@@ -64,7 +64,7 @@
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use bluer::{
-  Adapter, Address, Session,
+  Adapter, Address,
   gatt::{
     WriteOp,
     remote::{Characteristic, CharacteristicWriteRequest, Service},
@@ -146,47 +146,14 @@ pub struct AncsManager {
   tx: mpsc::Sender<AncsCommand>,
 }
 
+pub(crate) struct AncsBootstrap {
+  rx: mpsc::Receiver<AncsCommand>,
+}
+
 impl AncsManager {
-  pub async fn spawn(bus: WireEventBus, bluetooth: BluetoothMan) -> AncsResult<(Self, JoinHandle<()>)> {
-    let session = Session::new().await?;
-    let adapter = session.default_adapter().await?;
-    let adapter_dbus_path = format!("/org/bluez/{}", adapter.name());
-    let pair_trigger = match PairTrigger::register(&adapter).await {
-      Ok(handle) => Some(handle),
-      Err(err) => {
-        tracing::warn!(
-          ?err,
-          "ANCS pair-trigger GATT register failed; companion-app LE pair will not work"
-        );
-        None
-      }
-    };
-    let advertisement = match AncsAdvertisement::register(&adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
-      Ok(handle) => {
-        tracing::info!("ANCS LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
-        Some(handle)
-      }
-      Err(err) => {
-        tracing::warn!(
-          ?err,
-          "ANCS LE advertisement register failed; iOS notifications will not be available"
-        );
-        None
-      }
-    };
+  pub(crate) fn allocate() -> (Self, AncsBootstrap) {
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
-    let auth_reporter = AuthStateReporter::new(bluetooth);
-    let dispatcher = AncsDispatcher {
-      adapter: Arc::new(adapter),
-      bus,
-      rx,
-      session: None,
-      auth_reporter,
-      _advertisement: advertisement,
-      _pair_trigger: pair_trigger,
-    };
-    let handle = tokio::spawn(dispatcher.run());
-    Ok((Self { tx }, handle))
+    (Self { tx }, AncsBootstrap { rx })
   }
 
   pub async fn attach(&self, address: Address) {
@@ -221,6 +188,45 @@ impl AncsManager {
       tracing::trace!(%id, "ANCS dispatcher closed; invoke dropped");
     }
     true
+  }
+}
+
+impl AncsBootstrap {
+  pub(crate) async fn start(self, adapter: Adapter, bus: WireEventBus, bluetooth: BluetoothMan) -> JoinHandle<()> {
+    let adapter_dbus_path = format!("/org/bluez/{}", adapter.name());
+    let pair_trigger = match PairTrigger::register(&adapter).await {
+      Ok(handle) => Some(handle),
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "ANCS pair-trigger GATT register failed; companion-app LE pair will not work"
+        );
+        None
+      }
+    };
+    let advertisement = match AncsAdvertisement::register(&adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
+      Ok(handle) => {
+        tracing::info!("ANCS LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
+        Some(handle)
+      }
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "ANCS LE advertisement register failed; iOS notifications will not be available"
+        );
+        None
+      }
+    };
+    let dispatcher = AncsDispatcher {
+      adapter: Arc::new(adapter),
+      bus,
+      rx: self.rx,
+      session: None,
+      auth_reporter: AuthStateReporter::new(bluetooth),
+      _advertisement: advertisement,
+      _pair_trigger: pair_trigger,
+    };
+    tokio::spawn(dispatcher.run())
   }
 }
 

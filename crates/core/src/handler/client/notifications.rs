@@ -19,7 +19,7 @@ impl ClientToBridgeNotificationsMsgDispatch for NotificationsHandler {
   type Output = HandlerResult;
 
   async fn invoke_positive(&self, params: ClientNotificationInvoke) -> HandlerResult {
-    if self.handle.state.ancs.try_invoke_positive(&params.id).await {
+    if self.handle.bluetooth.ancs.try_invoke_positive(&params.id).await {
       return Ok(());
     }
     self
@@ -34,7 +34,7 @@ impl ClientToBridgeNotificationsMsgDispatch for NotificationsHandler {
   }
 
   async fn invoke_negative(&self, params: ClientNotificationInvoke) -> HandlerResult {
-    if self.handle.state.ancs.try_invoke_negative(&params.id).await {
+    if self.handle.bluetooth.ancs.try_invoke_negative(&params.id).await {
       return Ok(());
     }
     self
