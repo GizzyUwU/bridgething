@@ -1,4 +1,5 @@
-#[cfg(debug_assertions)]
+#![allow(dead_code)]
+
 pub async fn query_adapter(adapter: &bluer::Adapter) -> bluer::Result<()> {
   println!("Debug Adapter Information:");
   println!("Address:                    {}", adapter.address().await?);
@@ -39,7 +40,6 @@ pub async fn query_adapter(adapter: &bluer::Adapter) -> bluer::Result<()> {
   Ok(())
 }
 
-#[cfg(debug_assertions)]
 pub async fn query_device(device: &bluer::Device) -> bluer::Result<()> {
   println!("Address type:       {}", device.address_type().await?);
   println!("Name:               {:?}", device.name().await?);
@@ -62,7 +62,6 @@ pub async fn query_device(device: &bluer::Device) -> bluer::Result<()> {
   Ok(())
 }
 
-#[cfg(debug_assertions)]
 pub async fn query_socket(stream: &bluer::l2cap::Stream) -> bluer::Result<()> {
   println!("Local address: {:?}", stream.as_ref().local_addr()?);
   println!("Remote address: {:?}", stream.peer_addr()?);

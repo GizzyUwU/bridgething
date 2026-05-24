@@ -81,10 +81,9 @@ pub struct AppState {
   _mic_handle: JoinHandle<()>,
 }
 
-#[allow(clippy::too_many_arguments)]
 impl AppState {
-  pub fn assemble(parts: AssembledState) -> State {
-    let AssembledState {
+  pub fn assemble(parts: StateAssembly) -> State {
+    let StateAssembly {
       client_man,
       bus,
       meta,
@@ -186,7 +185,7 @@ impl AppState {
   }
 }
 
-pub struct AssembledState {
+pub struct StateAssembly {
   pub client_man: ClientMan,
   pub bus: WireEventBus,
   pub meta: meta::DeviceMeta,

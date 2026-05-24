@@ -56,13 +56,24 @@ tower = { version = "0.5.3", features = ["util"] }
 bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
 bridgething-mfi = { version = "0.1.0", path = "../mfi" }
 anyhow = "1.0.102"
-sea-orm = { version = "1.1.20", default-features = false, features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid"] }
-sea-orm-migration = { version = "1.1.20", default-features = false, features = ["sqlx-sqlite", "runtime-tokio-rustls", "with-uuid"] }
+sea-orm = { version = "1.1.20", default-features = false, features = [
+  "sqlx-sqlite",
+  "runtime-tokio-rustls",
+  "macros",
+  "with-uuid",
+] }
+sea-orm-migration = { version = "1.1.20", default-features = false, features = [
+  "sqlx-sqlite",
+  "runtime-tokio-rustls",
+  "with-uuid",
+] }
 bytes = "1.11.1"
 lru = "0.18.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
-zbus = { version = "5.15.0", default-features = false, features = ["tokio"], optional = true }
+zbus = { version = "5.15.0", default-features = false, features = [
+  "tokio",
+], optional = true }
 evdev = { version = "0.13.2", features = ["tokio"], optional = true }
 libc = "0.2.186"
 async-stream = "0.3"
@@ -71,6 +82,7 @@ async-stream = "0.3"
 default = ["dev-linux-host"]
 als = []
 mic = ["dep:alsa"]
+input = ["dep:evdev"]
 chrome = ["dep:headless_chrome"]
 systemd = ["dep:sd-notify", "dep:zbus"]
 swupdate = ["dep:bridgething-swupdate-sys"]
@@ -78,7 +90,8 @@ superbird = ["als", "mic", "systemd", "chrome", "swupdate", "input"]
 # dev features
 dev-linux-host = ["als", "mic", "systemd", "chrome"]
 no-persist = []
-input = ["dep:evdev"]
+# test features
+test-tap = []
 
 [[example]]
 name = "cover_art"

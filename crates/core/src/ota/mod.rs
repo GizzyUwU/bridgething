@@ -6,13 +6,17 @@
 //!
 //! Image (`.swu`):
 //!
-//!     Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
-//!         --> Writing (libswupdate) --> Confirming --> Reboot
+//! ```text
+//! Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
+//!     --> Writing (libswupdate) --> Confirming --> Reboot
+//! ```
 //!
 //! Daemon (raw aarch64 binary):
 //!
-//!     Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
-//!         --> Writing (atomic rename) --> Reboot
+//! ```text
+//! Idle --[OtaBegin]--> Streaming --[last chunk]--> Verifying
+//!     --> Writing (atomic rename) --> Reboot
+//! ```
 //!
 //! `Confirming` is image-only (slot try-counter flip). `Reboot` is
 //! universal: image fires systemd Reboot, daemon fires `systemctl

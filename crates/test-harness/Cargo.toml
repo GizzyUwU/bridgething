@@ -1,0 +1,21 @@
+[package]
+name = "bridgething-test-harness"
+rust-version.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+bridgething = { path = "../core", features = ["test-tap"] }
+libbridgething = { path = "../lib", features = ["protocol"] }
+
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
+bluer = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+anyhow = "1.0"
+tempfile = "3.23.0"

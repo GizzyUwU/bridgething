@@ -52,6 +52,10 @@ enum PeerCommand {
     mac: Address,
     device: Device,
   },
+  EnsureExists {
+    mac: Address,
+    device: Device,
+  },
   SetPaired {
     mac: Address,
     paired: bool,
@@ -134,6 +138,10 @@ impl PeerTracker {
 
   pub async fn upsert(&self, mac: Address, device: Device) {
     self.send(PeerCommand::Upsert { mac, device }).await;
+  }
+
+  pub async fn ensure_exists(&self, mac: Address, device: Device) {
+    self.send(PeerCommand::EnsureExists { mac, device }).await;
   }
 
   pub async fn set_paired(&self, mac: Address, paired: bool) {
@@ -224,6 +232,7 @@ impl PeerActor {
   async fn handle(&mut self, cmd: PeerCommand) {
     match cmd {
       PeerCommand::Upsert { mac, device } => self.upsert(mac, device).await,
+      PeerCommand::EnsureExists { mac, device } => self.ensure_exists(mac, device).await,
       PeerCommand::SetPaired { mac, paired } => self.set_paired(mac, paired).await,
       PeerCommand::SetIap2 { mac, iap2 } => self.set_iap2(mac, iap2).await,
       PeerCommand::SetCompanion { mac, companion } => self.set_companion(mac, companion).await,
@@ -250,6 +259,16 @@ impl PeerActor {
     let entry = self.peers.entry(mac).or_insert_with(|| Peer::new(device.clone()));
     entry.device = device;
     let diff = Diff::compute(mac, prior, Some(entry.clone()), &self.peers);
+    self.broadcast_diff(diff).await;
+  }
+
+  async fn ensure_exists(&mut self, mac: Address, device: Device) {
+    if self.peers.contains_key(&mac) {
+      return;
+    }
+    let entry = Peer::new(device);
+    self.peers.insert(mac, entry.clone());
+    let diff = Diff::compute(mac, None, Some(entry), &self.peers);
     self.broadcast_diff(diff).await;
   }
 

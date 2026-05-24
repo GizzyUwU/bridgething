@@ -1,5 +1,6 @@
 use std::{
   collections::HashMap,
+  net::SocketAddr,
   sync::{Arc, Mutex},
   time::Duration,
 };
@@ -39,7 +40,11 @@ use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
 use peer_owners::PeerOwners;
 use profiles::ProfileMan;
-use rfcomm::RfcommGateway;
+#[cfg(feature = "test-tap")]
+pub use rfcomm::InjectConnectionTx;
+#[cfg(feature = "test-tap")]
+pub(crate) use rfcomm::inject_channel;
+use rfcomm::{ConnectionSource, RfcommGateway};
 
 use crate::{
   handler::Iap2EventRouter,
@@ -67,21 +72,12 @@ pub struct BluetoothDeps {
   pub peers: PeerTracker,
 }
 
-/// Synchronously-available facade for the bluetooth subsystem.
-///
-/// `BluetoothManager::create()` builds this with every cloneable handle
-/// populated (gateway outbound, iAP2 transport/telephony/reconnect,
-/// profile_man watch) but *no* bluez activity yet. Consumers wire it
-/// into `AppState` and the daemon's HTTP/WS server binds immediately;
-/// commands sent through these handles queue in the bounded mpsc until
-/// `BluetoothManager::spawn` drains them.
-///
-/// `spawn` runs the async body (Session/set_powered/profile
-/// registration/MFi probe/per-transport drainers/Iap2EventRouter) and
-/// is the long-lived bluetooth task. On MFi probe failure the iAP2
-/// receivers are dropped here, so sends through the iAP2 handles
-/// return `Err(SendError)` for the rest of the run; per-handle wrappers
-/// log-and-swallow.
+pub(crate) enum BluetoothBringup {
+  Real,
+  #[cfg(feature = "test-tap")]
+  Headless(rfcomm::InjectConnectionRx),
+}
+
 #[derive(Debug)]
 pub struct BluetoothManager {
   pub gateway_man: GatewayMan,
@@ -99,7 +95,7 @@ pub(crate) struct BluetoothBootstrap {
 }
 
 impl BluetoothManager {
-  pub fn create() -> (BluetoothMan, BluetoothBootstrap) {
+  pub(crate) fn create() -> (BluetoothMan, BluetoothBootstrap) {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
     let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
     let (ancs_handle, ancs_bootstrap) = AncsManager::allocate();
@@ -123,16 +119,21 @@ impl BluetoothManager {
     (manager, bootstrap)
   }
 
-  pub fn spawn(
+  pub(crate) fn spawn(
     self: &BluetoothMan,
     bootstrap: BluetoothBootstrap,
     deps: BluetoothDeps,
     state: State,
     bluetooth_tx: BluetoothTx,
+    network_bind: SocketAddr,
+    bringup: BluetoothBringup,
   ) -> JoinHandle<()> {
     let manager = self.clone();
     tokio::spawn(async move {
-      if let Err(err) = manager.run(bootstrap, deps, state, bluetooth_tx).await {
+      if let Err(err) = manager
+        .run(bootstrap, deps, state, bluetooth_tx, network_bind, bringup)
+        .await
+      {
         tracing::error!(?err, "FATAL: bluetooth coordinator failed");
       }
     })
@@ -144,83 +145,108 @@ impl BluetoothManager {
     deps: BluetoothDeps,
     state: State,
     bluetooth_tx: BluetoothTx,
+    network_bind: SocketAddr,
+    bringup: BluetoothBringup,
   ) -> BluetoothResult<()> {
-    let BluetoothBootstrap {
-      gateway,
-      mut iap2_events_rx,
-      iap2_bootstrap,
-      ancs: ancs_bootstrap,
-      profile_man_tx,
-    } = bootstrap;
+    match bringup {
+      #[cfg(feature = "test-tap")]
+      BluetoothBringup::Headless(inject_rx) => {
+        let BluetoothBootstrap { gateway, .. } = bootstrap;
+        tracing::debug!("bringing up gateway transports with no radio (headless)");
+        let _runtime = self
+          .gateway_man
+          .start(
+            gateway,
+            ConnectionSource::Injected(inject_rx),
+            network_bind,
+            &deps,
+            bluetooth_tx,
+          )
+          .await?;
+        std::future::pending::<()>().await;
+        Ok(())
+      }
+      BluetoothBringup::Real => {
+        let BluetoothBootstrap {
+          gateway,
+          mut iap2_events_rx,
+          iap2_bootstrap,
+          ancs: ancs_bootstrap,
+          profile_man_tx,
+        } = bootstrap;
 
-    tracing::debug!("initializing bluetooth manager");
-    let session = Session::new().await?;
-    let adapter = adapter::get_adapter(&session).await?;
+        tracing::debug!("initializing bluetooth manager");
+        let session = Session::new().await?;
+        let adapter = adapter::get_adapter(&session).await?;
 
-    tracing::debug!("attempting to power on adapter");
-    adapter.set_powered(true).await?;
+        tracing::debug!("attempting to power on adapter");
+        adapter.set_powered(true).await?;
 
-    tracing::info!("initialized bluetooth adapter {}", adapter.name());
+        tracing::info!("initialized bluetooth adapter {}", adapter.name());
 
-    tracing::debug!("configuring adapter");
-    adapter.set_pairable_timeout(0).await?;
-    adapter.set_pairable(true).await?;
+        tracing::debug!("configuring adapter");
+        adapter.set_pairable_timeout(0).await?;
+        adapter.set_pairable(true).await?;
 
-    adapter.set_discoverable_timeout(0).await?;
-    adapter.set_discoverable(true).await?;
+        adapter.set_discoverable_timeout(0).await?;
+        adapter.set_discoverable(true).await?;
 
-    #[cfg(debug_assertions)]
-    debug::query_adapter(&adapter).await?;
+        #[cfg(debug_assertions)]
+        debug::query_adapter(&adapter).await?;
 
-    tracing::debug!("setting up bluetooth profile manager");
-    let profile_man = Arc::new(ProfileManager::init(
-      adapter.clone(),
-      deps.bus.clone(),
-      deps.devices.clone(),
-      deps.peers.clone(),
-      self.iap2.reconnect.clone(),
-    ));
-    let _ = profile_man_tx.send(Some(profile_man.clone()));
+        tracing::debug!("setting up bluetooth profile manager");
+        let profile_man = Arc::new(ProfileManager::init(
+          adapter.clone(),
+          deps.bus.clone(),
+          deps.devices.clone(),
+          deps.peers.clone(),
+          self.iap2.reconnect.clone(),
+        ));
+        let _ = profile_man_tx.send(Some(profile_man.clone()));
 
-    let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
+        let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
 
-    // start stream BEFORE device reconnection attempts
-    let _adapter_event_handle = adapter::AdapterEventStream {
-      stream: Box::new(adapter.events().await?),
-      adapter: adapter.clone(),
-    }
-    .spawn(profile_man.clone());
+        // start stream BEFORE device reconnection attempts
+        let _adapter_event_handle = adapter::AdapterEventStream {
+          stream: Box::new(adapter.events().await?),
+          adapter: adapter.clone(),
+        }
+        .spawn(profile_man.clone());
 
-    tracing::debug!("setting up bluetooth gateway transports");
-    let gateway_runtime = self
-      .gateway_man
-      .start(gateway, &session, &deps, bluetooth_tx.clone())
-      .await?;
+        tracing::debug!("setting up bluetooth gateway transports");
+        let source = rfcomm::bluez_source(&session).await?;
+        let gateway_runtime = self
+          .gateway_man
+          .start(gateway, source, network_bind, &deps, bluetooth_tx)
+          .await?;
 
-    tracing::debug!("setting up iap2 manager");
-    let _iap2_handle = Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
+        tracing::debug!("setting up iap2 manager");
+        let _iap2_handle =
+          Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
 
-    tracing::debug!("setting up ancs dispatcher");
-    let _ancs_handle = ancs_bootstrap
-      .start(adapter.clone(), deps.bus.clone(), self.clone())
-      .await;
+        tracing::debug!("setting up ancs dispatcher");
+        let _ancs_handle = ancs_bootstrap
+          .start(adapter.clone(), deps.bus.clone(), self.clone())
+          .await;
 
-    let pending_art = state.iap2_pending_art.clone();
-    let router = Arc::new(Iap2EventRouter::new(
-      state,
-      self.clone(),
-      profile_man.clone(),
-      gateway_runtime.iap2_ea_handle.clone(),
-      self.iap2.reconnect.clone(),
-      pending_art,
-    ));
+        let pending_art = state.iap2_pending_art.clone();
+        let router = Arc::new(Iap2EventRouter::new(
+          state,
+          self.clone(),
+          profile_man.clone(),
+          gateway_runtime.iap2_ea_handle.clone(),
+          self.iap2.reconnect.clone(),
+          pending_art,
+        ));
 
-    loop {
-      match iap2_events_rx.recv().await {
-        Some(event) => router.route(event).await,
-        None => {
-          tracing::debug!("bluetooth coordinator: iap2 event stream ended; coordinator parking");
-          std::future::pending::<()>().await;
+        loop {
+          match iap2_events_rx.recv().await {
+            Some(event) => router.route(event).await,
+            None => {
+              tracing::warn!("bluetooth coordinator: iap2 event stream ended; coordinator parking");
+              std::future::pending::<()>().await;
+            }
+          }
         }
       }
     }
@@ -250,6 +276,10 @@ impl ProfileManAccess {
         std::future::pending::<()>().await;
       }
     }
+  }
+
+  pub fn try_get(&self) -> Option<ProfileMan> {
+    self.rx.borrow().clone()
   }
 }
 
@@ -362,7 +392,8 @@ impl GatewayMan {
   async fn start(
     &self,
     bootstrap: GatewayBootstrap,
-    session: &Session,
+    source: ConnectionSource,
+    network_bind: SocketAddr,
     deps: &BluetoothDeps,
     bluetooth_tx: BluetoothTx,
   ) -> BluetoothResult<GatewayRuntime> {
@@ -372,14 +403,13 @@ impl GatewayMan {
     let (rfcomm_send_tx, rfcomm_send_rx) = tokio::sync::mpsc::channel(16);
 
     let _rfcomm_handle = RfcommGateway::init(
-      session,
+      source,
       deps.meta.clone(),
       deps.peers.clone(),
       rfcomm_recv_tx,
       rfcomm_send_rx,
       self.peer_owners.clone(),
     )
-    .await?
     .spawn();
 
     let _rfcomm_listener = spawn_gateway_listener(GatewayType::Rfcomm, rfcomm_recv_rx, bluetooth_tx.clone());
@@ -394,6 +424,7 @@ impl GatewayMan {
     let _iap2_ea_handle_join = iap2_ea.spawn();
 
     let network = NetworkGateway::init(
+      network_bind,
       deps.meta.clone(),
       deps.peers.clone(),
       bluetooth_tx.clone(),

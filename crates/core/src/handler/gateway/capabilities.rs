@@ -20,29 +20,23 @@ impl GatewayToBridgeCapabilitiesMsgEventDispatch for CapabilitiesHandler {
 
   async fn announce(&self, params: GatewayCapabilities) -> HandlerResult {
     if let Some(mac) = self.handle.address {
-      let device_type = device_type_from_os(&params.gateway.os_name);
+      let device = Device {
+        name: params.gateway.name.clone(),
+        device_type: device_type_from_os(&params.gateway.os_name),
+        mac: mac.to_string(),
+        default: false,
+      };
       match self.handle.protocol {
         GatewayType::Network => {
-          let device = Device {
-            name: params.gateway.name.clone(),
-            device_type,
-            mac: mac.to_string(),
-            default: false,
-          };
           self.handle.state.peers.upsert(mac, device).await;
         }
         GatewayType::Rfcomm | GatewayType::Iap2Ea => {
-          if let Err(err) = self
-            .handle
-            .bluetooth
-            .profile_man
-            .get()
-            .await
-            .upsert_paired_device(mac, device_type)
-            .await
+          if let Some(profile_man) = self.handle.bluetooth.profile_man.try_get()
+            && let Err(err) = profile_man.upsert_paired_device(mac, device.device_type.clone()).await
           {
             tracing::warn!(?err, "failed to upsert paired device on capabilities announce");
           }
+          self.handle.state.peers.ensure_exists(mac, device).await;
         }
       }
       self

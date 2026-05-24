@@ -544,6 +544,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridgething-test-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bluer",
+ "bridgething",
+ "futures",
+ "libbridgething",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

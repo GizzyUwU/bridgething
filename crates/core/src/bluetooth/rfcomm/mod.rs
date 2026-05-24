@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bluer::{
   Address, Session,
-  rfcomm::{self, ConnectRequest, Profile, ProfileHandle, Stream},
+  rfcomm::{self, Profile, ProfileHandle},
 };
 use futures::StreamExt;
 use libbridgething::{
@@ -12,7 +12,7 @@ use libbridgething::{
   wire::MsgMeta,
 };
 use tokio::{
-  io::{AsyncWriteExt, ReadHalf, WriteHalf},
+  io::{AsyncRead, AsyncWrite, AsyncWriteExt},
   sync::mpsc,
   task::JoinHandle,
 };
@@ -30,11 +30,6 @@ use crate::{
   state::meta::DeviceMeta,
 };
 
-/// Soft cap on a single batched write. RFCOMM transparently segments
-/// at L2CAP so this is purely about how many small frames the packer
-/// coalesces per writer-task tick. Big enough to amortize Normal-Bulk
-/// preemption overhead, small enough that the packer doesn't hog the
-/// writer task across many milliseconds of throughput.
 const RFCOMM_BATCH_BYTES: usize = 4 * 1024;
 const LANE_CAPACITY: usize = 16;
 
@@ -54,6 +49,53 @@ impl From<GatewayToBridgeMsg> for ConnectionMessage {
 type ConnectionTx = mpsc::Sender<(Address, ConnectionMessage)>;
 type ConnectionRx = mpsc::Receiver<(Address, ConnectionMessage)>;
 
+#[cfg(feature = "test-tap")]
+pub type InjectConnectionTx = mpsc::Sender<(Address, tokio::io::DuplexStream)>;
+#[cfg(feature = "test-tap")]
+pub(crate) type InjectConnectionRx = mpsc::Receiver<(Address, tokio::io::DuplexStream)>;
+
+#[derive(Debug)]
+pub enum ConnectionSource {
+  Bluez(ProfileHandle),
+  #[cfg(feature = "test-tap")]
+  Injected(InjectConnectionRx),
+}
+
+enum Incoming {
+  Bluez(Address, rfcomm::Stream),
+  #[cfg(feature = "test-tap")]
+  Injected(Address, tokio::io::DuplexStream),
+}
+
+impl ConnectionSource {
+  async fn accept(&mut self) -> Option<Incoming> {
+    match self {
+      Self::Bluez(handle) => loop {
+        let request = handle.next().await?;
+        let address = request.device();
+        tracing::debug!("rfcomm connect request from: {address}");
+        match request.accept() {
+          Ok(stream) => {
+            tracing::debug!("rfcomm accepted connection from: {address}");
+            return Some(Incoming::Bluez(address, stream));
+          }
+          Err(err) => tracing::warn!("({address}) rfcomm accept failed: {err:?}"),
+        }
+      },
+      #[cfg(feature = "test-tap")]
+      Self::Injected(rx) => {
+        let (address, stream) = rx.recv().await?;
+        Some(Incoming::Injected(address, stream))
+      }
+    }
+  }
+}
+
+#[cfg(feature = "test-tap")]
+pub(crate) fn inject_channel() -> (InjectConnectionTx, InjectConnectionRx) {
+  mpsc::channel(16)
+}
+
 #[derive(Debug)]
 struct Connection {
   address: Address,
@@ -64,7 +106,10 @@ struct Connection {
 }
 
 impl Connection {
-  fn new(address: Address, stream: Stream, tx: ConnectionTx) -> Self {
+  fn new<S>(address: Address, stream: S, tx: ConnectionTx) -> Self
+  where
+    S: AsyncRead + AsyncWrite + Send + 'static,
+  {
     let (read_half, write_half) = tokio::io::split(stream);
     let reader = FramedRead::new(read_half, BridgeEndec::default());
     let _reader_handle = tokio::spawn(reader_task(address, reader, tx));
@@ -99,7 +144,10 @@ impl Connection {
   }
 }
 
-async fn reader_task(address: Address, mut reader: FramedRead<ReadHalf<Stream>, BridgeEndec>, tx: ConnectionTx) {
+async fn reader_task<R>(address: Address, mut reader: FramedRead<R, BridgeEndec>, tx: ConnectionTx)
+where
+  R: AsyncRead + Unpin + Send + 'static,
+{
   while let Some(frame) = reader.next().await {
     match frame {
       Ok(frame) => {
@@ -136,7 +184,10 @@ async fn reader_task(address: Address, mut reader: FramedRead<ReadHalf<Stream>, 
   }
 }
 
-async fn writer_task(address: Address, mut writer: WriteHalf<Stream>, mut packer: OutboundPacker) {
+async fn writer_task<W>(address: Address, mut writer: W, mut packer: OutboundPacker)
+where
+  W: AsyncWrite + Unpin + Send + 'static,
+{
   while let Some(batch) = packer.next_batch().await {
     if let Err(err) = writer.write_all(&batch).await {
       tracing::debug!("({address}) rfcomm write error: {:?}", err);
@@ -154,7 +205,7 @@ async fn writer_task(address: Address, mut writer: WriteHalf<Stream>, mut packer
 pub struct RfcommGateway {
   meta: DeviceMeta,
   peers: PeerTracker,
-  handle: ProfileHandle,
+  source: ConnectionSource,
 
   conn_tx: ConnectionTx,
   conn_rx: ConnectionRx,
@@ -166,33 +217,20 @@ pub struct RfcommGateway {
 }
 
 impl RfcommGateway {
-  pub async fn init(
-    session: &Session,
+  pub fn init(
+    source: ConnectionSource,
     meta: DeviceMeta,
     peers: PeerTracker,
     recv_tx: GatewayRecvTx,
     send_rx: GatewaySendRx,
     peer_owners: PeerOwners,
-  ) -> BluetoothResult<Self> {
-    tracing::debug!("creating rfcomm gateway profile");
-    let profile = Profile {
-      uuid: BRIDGETHING_PROFILE_UUID,
-      name: Some("bridgething".to_string()),
-      role: Some(rfcomm::Role::Server),
-      channel: Some(BRIDGETHING_RFCOMM_CHANNEL as u16),
-      require_authentication: Some(false),
-      require_authorization: Some(false),
-      service_record: Some(bridgething_service_record()),
-      ..Default::default()
-    };
-
-    let handle = session.register_profile(profile).await?;
+  ) -> Self {
     let (conn_tx, conn_rx) = mpsc::channel(16);
 
-    Ok(Self {
+    Self {
       meta,
       peers,
-      handle,
+      source,
 
       conn_tx,
       conn_rx,
@@ -201,7 +239,7 @@ impl RfcommGateway {
       recv_tx,
       send_rx,
       peer_owners,
-    })
+    }
   }
 
   pub fn spawn(mut self) -> JoinHandle<()> {
@@ -213,9 +251,21 @@ impl RfcommGateway {
 
     loop {
       tokio::select! {
-        Some(request) = self.handle.next() => {
-          if let Err(err) = self.handle_connect_request(request).await {
-            tracing::error!("failed to handle connect request: {:?}", err);
+        incoming = self.source.accept() => match incoming {
+          Some(Incoming::Bluez(address, stream)) => {
+            if let Err(err) = self.add_connection(address, stream).await {
+              tracing::error!("({address}) failed to add rfcomm connection: {:?}", err);
+            }
+          }
+          #[cfg(feature = "test-tap")]
+          Some(Incoming::Injected(address, stream)) => {
+            if let Err(err) = self.add_connection(address, stream).await {
+              tracing::error!("({address}) failed to add injected connection: {:?}", err);
+            }
+          }
+          None => {
+            tracing::error!("rfcomm connection source ended");
+            return;
           }
         },
         Some(data) = self.send_rx.recv() => {
@@ -260,21 +310,14 @@ impl RfcommGateway {
             }
           }
         },
-        else => {
-          tracing::error!("rfcomm profile handle stream ended - this should not happen");
-          return;
-        }
       }
     }
   }
 
-  async fn handle_connect_request(&mut self, request: ConnectRequest) -> BluetoothResult<()> {
-    let address = request.device();
-    tracing::debug!("rfcomm connect request from: {address}");
-
-    let stream = request.accept()?;
-    tracing::debug!("rfcomm accepted connection from: {address}");
-
+  async fn add_connection<S>(&mut self, address: Address, stream: S) -> BluetoothResult<()>
+  where
+    S: AsyncRead + AsyncWrite + Send + 'static,
+  {
     let connection = Connection::new(address, stream, self.conn_tx.clone());
     let version = BridgeToGatewayMsg {
       id: uuid::Uuid::now_v7(),
@@ -289,6 +332,23 @@ impl RfcommGateway {
 
     Ok(())
   }
+}
+
+pub async fn bluez_source(session: &Session) -> BluetoothResult<ConnectionSource> {
+  tracing::debug!("creating rfcomm gateway profile");
+  let profile = Profile {
+    uuid: BRIDGETHING_PROFILE_UUID,
+    name: Some("bridgething".to_string()),
+    role: Some(rfcomm::Role::Server),
+    channel: Some(BRIDGETHING_RFCOMM_CHANNEL as u16),
+    require_authentication: Some(false),
+    require_authorization: Some(false),
+    service_record: Some(bridgething_service_record()),
+    ..Default::default()
+  };
+
+  let handle = session.register_profile(profile).await?;
+  Ok(ConnectionSource::Bluez(handle))
 }
 
 fn bridgething_service_record() -> String {

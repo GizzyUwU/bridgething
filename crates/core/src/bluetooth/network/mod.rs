@@ -1,5 +1,5 @@
-//! WebSocket-based gateway transport. Accepts WS connections on
-//! [`BRIDGETHING_NETWORK_GATEWAY_PORT`] and carries the bridgething
+//! WebSocket-based gateway transport. Accepts WS connections on a
+//! caller-supplied bind address and carries the bridgething
 //! gateway protocol over `BridgeEndec`-framed binary messages. Mirrors
 //! `RfcommGateway`'s shape: per-connection reader/writer pair, a shared
 //! `OutboundPacker` for normal+bulk lanes, a single `recv()` loop owns
@@ -37,7 +37,7 @@ use futures::{
   stream::{SplitSink, SplitStream},
 };
 use libbridgething::{
-  BRIDGETHING_NETWORK_GATEWAY_PORT, Device, DeviceType, PeerCompanionStatus, Priority,
+  Device, DeviceType, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
   protocol::{encode_bridge_frame, parse_bridge_frame},
   wire::MsgMeta,
@@ -54,32 +54,16 @@ use super::{
 };
 use crate::{peer::PeerTracker, state::meta::DeviceMeta};
 
-/// Soft cap on a single batched WS write. Keeps the packer's
-/// Normal-before-Bulk discipline meaningful without one writer task
-/// hogging the runtime across many milliseconds of throughput.
 const NETWORK_BATCH_BYTES: usize = 16 * 1024;
 const LANE_CAPACITY: usize = 16;
-
-/// WebSocket frame + message size cap. Companions push large blobs
-/// (.swu OTA payloads, persistent assets) via the chunked surfaces
-/// (`OtaBegin`/`OtaChunk`, `AssetPushBegin`/`AssetPushChunk`), which
-/// stream chunk-at-a-time to disk; single-frame `AssetPush` is capped
-/// at `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` (256 KiB) at the daemon
-/// edge. 1 MiB clears those plus encoding overhead with room to spare,
-/// while keeping any oversized misuse from landing on disk before the
-/// daemon can reject it.
 const WS_MAX_FRAME_BYTES: usize = 1024 * 1024;
-
-/// Reserved BT-MAC prefix for synthetic addresses assigned to network
-/// peers. Locally-administered (high bit set) and outside any real
-/// OUI, so collision with a paired BlueZ peer is impossible.
-const NETWORK_ADDR_PREFIX: [u8; 2] = [0xfe, 0xfe];
+const SYNTHETIC_NETWORK_ADDR_PREFIX: [u8; 2] = [0xfe, 0xfe];
 
 static NETWORK_ADDR_COUNTER: AtomicU32 = AtomicU32::new(1);
 
 fn next_network_address() -> Address {
   let n = NETWORK_ADDR_COUNTER.fetch_add(1, Ordering::Relaxed).to_be_bytes();
-  Address::new([NETWORK_ADDR_PREFIX[0], NETWORK_ADDR_PREFIX[1], n[0], n[1], n[2], n[3]])
+  Address::new([SYNTHETIC_NETWORK_ADDR_PREFIX[0], SYNTHETIC_NETWORK_ADDR_PREFIX[1], n[0], n[1], n[2], n[3]])
 }
 
 #[derive(Debug)]
@@ -98,11 +82,6 @@ impl From<GatewayToBridgeMsg> for ConnectionMessage {
 type ConnectionTx = mpsc::Sender<(Address, ConnectionMessage)>;
 type ConnectionRx = mpsc::Receiver<(Address, ConnectionMessage)>;
 
-/// Inbound notification posted by the axum WS handler when a fresh
-/// peer connects. The recv loop accepts these, mints an Address,
-/// spins up the per-connection tasks, and inserts the entry into the
-/// connection map. Carrying the WS halves over a channel keeps axum's
-/// per-request scope distinct from the gateway recv loop's lifetime.
 struct ConnectAccepted {
   remote: SocketAddr,
   ws: WebSocket,
@@ -174,12 +153,6 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
       ws::Message::Close(_) => break,
     };
 
-    // Each WS Binary message is a complete sequence of frames produced
-    // by `OutboundPacker`. We parse directly out of the Bytes view -
-    // body slices stay as zero-copy `Bytes` references into the WS
-    // payload, so a single 64 KiB chunk that arrives via the wire
-    // never lands on the heap a second time before reaching the
-    // ChunkedTransfer write.
     while !chunk.is_empty() {
       match parse_bridge_frame(&mut chunk) {
         Ok(Some(frame)) => {
@@ -189,9 +162,6 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
           }
         }
         Ok(None) => {
-          // A WS message that doesn't carry a whole frame is a
-          // protocol-violation by `OutboundPacker`'s contract. Drop the
-          // connection rather than silently buffering across messages.
           tracing::warn!(
             "({address}) network ws message ended mid-frame ({} byte tail); closing",
             chunk.len()
@@ -282,16 +252,18 @@ pub struct NetworkGateway {
 
 impl NetworkGateway {
   pub async fn init(
+    bind: SocketAddr,
     meta: DeviceMeta,
     peers: PeerTracker,
     bluetooth_tx: BluetoothTx,
     peer_owners: PeerOwners,
   ) -> BluetoothResult<Self> {
-    tracing::debug!("initializing network gateway on port {BRIDGETHING_NETWORK_GATEWAY_PORT}");
+    tracing::debug!("initializing network gateway on {bind}");
 
     let (accept_tx, accept_rx) = mpsc::channel::<ConnectAccepted>(16);
-    let listener = TcpListener::bind(format!("0.0.0.0:{BRIDGETHING_NETWORK_GATEWAY_PORT}")).await?;
-    tracing::info!("network gateway listening on 0.0.0.0:{BRIDGETHING_NETWORK_GATEWAY_PORT}");
+    let listener = TcpListener::bind(bind).await?;
+    let local_addr = listener.local_addr().unwrap_or(bind);
+    tracing::info!("network gateway listening on {local_addr}");
 
     let cancel_token = CancellationToken::new();
     let app = Router::new()
