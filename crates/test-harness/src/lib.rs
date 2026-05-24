@@ -6,10 +6,7 @@
 //! `AppState` surface.
 
 use std::{
-  sync::{
-    Once,
-    atomic::{AtomicU8, Ordering},
-  },
+  sync::atomic::{AtomicU8, Ordering},
   time::Duration,
 };
 
@@ -32,28 +29,6 @@ use uuid::Uuid;
 
 const DUPLEX_BUF: usize = 256 * 1024;
 
-/// Point the webapp roots at empty temp dirs once per process so the
-/// registry comes up clean and never touches the developer's real data
-/// dir. Webapp state does not vary between in-process tests, so a single
-/// shared empty root is correct; mutable state (db, asset blobs) is
-/// isolated per harness through the daemon config instead.
-fn ensure_isolated_webapp_env() {
-  static ONCE: Once = Once::new();
-  ONCE.call_once(|| {
-    let root = std::env::temp_dir().join(format!("bridgething-harness-webapps-{}", std::process::id()));
-    let installed = root.join("installed");
-    let builtin = root.join("builtin");
-    std::fs::create_dir_all(&installed).expect("create harness webapp dir");
-    std::fs::create_dir_all(&builtin).expect("create harness builtin webapp dir");
-    // SAFETY: set before any daemon assembly; tests in this crate do not
-    // race assembly against this one-time setup.
-    unsafe {
-      std::env::set_var("BRIDGETHING_WEBAPPS_DIR", &installed);
-      std::env::set_var("BRIDGETHING_RO_WEBAPPS_DIR", &builtin);
-    }
-  });
-}
-
 /// A running headless daemon plus the handles a scenario needs to drive
 /// and observe it.
 pub struct Harness {
@@ -68,8 +43,6 @@ impl Harness {
   /// Assemble a fresh headless daemon with an isolated in-memory db and
   /// temp blob stores, then run its event loop in the background.
   pub async fn start() -> Result<Self> {
-    ensure_isolated_webapp_env();
-
     let state_dir = tempfile::tempdir()?;
     let assembled = bridgething::init(DaemonConfig::headless(state_dir.path().to_path_buf())).await;
 

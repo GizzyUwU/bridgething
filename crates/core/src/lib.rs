@@ -107,7 +107,9 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let meta = state::meta::DeviceMeta::init(static_meta, kv.clone()).await;
 
-  let webapps = WebappRegistry::init()
+  let installed_webapps_root = config.webapps_dir.clone().unwrap_or_else(paths::webapps_dir);
+  let builtin_webapps_root = config.ro_webapps_dir.clone().unwrap_or_else(paths::ro_webapps_dir);
+  let webapps = WebappRegistry::init(installed_webapps_root, builtin_webapps_root)
     .await
     .expect("failed to initialize webapp registry");
   meta_store
@@ -357,6 +359,8 @@ pub struct DaemonConfig {
   pub handle_signals: bool,
   pub install_logger: bool,
   pub state_dir: Option<PathBuf>,
+  pub webapps_dir: Option<PathBuf>,
+  pub ro_webapps_dir: Option<PathBuf>,
 }
 
 impl DaemonConfig {
@@ -368,6 +372,8 @@ impl DaemonConfig {
       handle_signals: true,
       install_logger: true,
       state_dir: None,
+      webapps_dir: None,
+      ro_webapps_dir: None,
     }
   }
 
@@ -379,6 +385,8 @@ impl DaemonConfig {
       bind_servers: false,
       handle_signals: false,
       install_logger: false,
+      webapps_dir: Some(state_dir.join("webapps")),
+      ro_webapps_dir: Some(state_dir.join("builtin")),
       state_dir: Some(state_dir),
     }
   }

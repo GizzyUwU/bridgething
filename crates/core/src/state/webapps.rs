@@ -9,7 +9,6 @@ use tokio::{fs, sync::RwLock};
 use uuid::Uuid;
 
 use super::StateResult;
-use crate::paths;
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
@@ -46,10 +45,7 @@ pub struct WebappRegistry {
 }
 
 impl WebappRegistry {
-  pub async fn init() -> StateResult<Self> {
-    let installed_root = paths::webapps_dir();
-    let builtin_root = paths::ro_webapps_dir();
-
+  pub async fn init(installed_root: PathBuf, builtin_root: PathBuf) -> StateResult<Self> {
     if !installed_root.exists() {
       tracing::debug!("creating installed webapps root at {}", installed_root.display());
       fs::create_dir_all(&installed_root).await?;
