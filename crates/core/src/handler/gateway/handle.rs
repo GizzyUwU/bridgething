@@ -1,7 +1,7 @@
 use bluer::Address;
 use libbridgething::{
   gateway::{BridgeToGatewayMsg, BridgeToGatewayMsgData, GatewayToBridgeMsgData},
-  wire::{MsgMeta, ResponseMeta, WireError, WireRequest},
+  wire::{MsgMeta, ResponseMeta, WireRequest},
 };
 use uuid::Uuid;
 
@@ -88,19 +88,5 @@ impl MsgHandle {
 
   pub async fn send_info(&self, data: impl Into<BridgeToGatewayMsgData>) {
     self.send(Uuid::now_v7(), data, MsgMeta::Event).await
-  }
-
-  /// Mark a verb as recognized-but-not-yet-built. Logs at the
-  /// `bridgething::unimplemented` tracing target and ships a
-  /// `WireError::Unimplemented` response on the wire so any awaiting
-  /// caller resolves immediately. Greppable as `.unimplemented(` for a
-  /// source-level inventory of holes.
-  pub async fn unimplemented(&self, verb: &str) {
-    tracing::warn!(
-      target: "bridgething::unimplemented",
-      "({:?}) {verb}",
-      &self.address,
-    );
-    self.respond(WireError::Unimplemented).await;
   }
 }

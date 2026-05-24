@@ -261,7 +261,7 @@ mod tests {
   #[tokio::test]
   async fn offset_mismatch_rejected() {
     let (xfer, _root, _join) = fresh().await;
-    let body = vec![0u8; 100];
+    let body = [0u8; 100];
     xfer.begin("t/3".into(), body.len() as u64, None).await.unwrap();
     xfer
       .accept_chunk("t/3".into(), 0, Bytes::copy_from_slice(&body[..50]), false)

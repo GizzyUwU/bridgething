@@ -1,8 +1,7 @@
-//! LE advertisement registration for the ANCS pair-trigger service.
-//! Written against zbus rather than bluer's `Adapter::advertise` because
-//! bluer 0.17 doesn't expose every BlueZ property we want to pin
-//! (LocalName + Includes + tx-power live on different paths in the
-//! wrapper).
+//! LE advertisement registration for the pair-trigger service. Written
+//! against zbus rather than bluer's `Adapter::advertise` because bluer
+//! 0.17 doesn't expose every BlueZ property we want to pin (LocalName +
+//! Includes + tx-power live on different paths in the wrapper).
 //!
 //! Carries `ServiceUUIDs = [PAIR_TRIGGER_SERVICE]` so the iOS companion
 //! app's `AccessorySetupKit` picker (and CoreBluetooth's
@@ -23,7 +22,7 @@ use zbus::{
   zvariant::{ObjectPath, OwnedObjectPath, Value},
 };
 
-const ADV_OBJECT_PATH: &str = "/dev/bridgething/ancs/adv0";
+const ADV_OBJECT_PATH: &str = "/dev/bridgething/le/adv0";
 const ADV_LOCAL_NAME: &str = "Bridgething";
 
 const ADV_MIN_INTERVAL_MS: u32 = 100;
@@ -40,12 +39,12 @@ trait LEAdvertisingManager {
   fn unregister_advertisement(&self, advertisement: &ObjectPath<'_>) -> zbus::Result<()>;
 }
 
-struct AncsLeAdvertisement {
+struct LeAdvertisementImpl {
   service_uuids: Vec<String>,
 }
 
 #[zbus::interface(name = "org.bluez.LEAdvertisement1")]
-impl AncsLeAdvertisement {
+impl LeAdvertisementImpl {
   #[zbus(property, name = "Type")]
   fn r#type(&self) -> &str {
     "peripheral"
@@ -82,17 +81,17 @@ impl AncsLeAdvertisement {
   }
 
   fn release(&self) {
-    tracing::debug!("BlueZ released ANCS LE advertisement");
+    tracing::debug!("BlueZ released LE advertisement");
   }
 }
 
-pub struct AncsAdvertisement {
+pub struct LeAdvertisement {
   conn: Connection,
   path: OwnedObjectPath,
   adapter_path: OwnedObjectPath,
 }
 
-impl AncsAdvertisement {
+impl LeAdvertisement {
   pub async fn register(adapter_dbus_path: &str, advertised_service_uuid: Uuid) -> Result<Self, AdvertiseError> {
     let conn = Connection::system().await?;
     let path: OwnedObjectPath = ObjectPath::try_from(ADV_OBJECT_PATH)?.into();
@@ -101,7 +100,7 @@ impl AncsAdvertisement {
       .object_server()
       .at(
         &path,
-        AncsLeAdvertisement {
+        LeAdvertisementImpl {
           service_uuids: vec![advertised_service_uuid.to_string()],
         },
       )
@@ -124,7 +123,7 @@ impl AncsAdvertisement {
   }
 }
 
-impl Drop for AncsAdvertisement {
+impl Drop for LeAdvertisement {
   fn drop(&mut self) {
     let conn = self.conn.clone();
     let path = self.path.clone();
@@ -139,10 +138,10 @@ impl Drop for AncsAdvertisement {
       {
         tracing::trace!(
           ?err,
-          "ANCS LE advertisement unregister failed (BlueZ may already have released it)"
+          "LE advertisement unregister failed (BlueZ may already have released it)"
         );
       }
-      let _ = conn.object_server().remove::<AncsLeAdvertisement, _>(&path).await;
+      let _ = conn.object_server().remove::<LeAdvertisementImpl, _>(&path).await;
     });
   }
 }

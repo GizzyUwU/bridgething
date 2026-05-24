@@ -64,24 +64,22 @@ pub const VENDOR_ID: u16 = 0x1D6B;
 pub const PRODUCT_ID: u16 = 0xB31D;
 
 /// USB-HID 1.11 descriptor for bridgething's outbound transport device.
-/// Three Consumer Control usages packed into a single byte with five
-/// bits of constant padding; no Report ID. Matches the descriptor shape
-/// observed in factory Car Thing iAP2 captures, which is the shape iOS's
-/// HID stack actually accepts in practice.
+/// Six Consumer Control usages packed into a single byte with two bits
+/// of constant padding; no Report ID.
 ///
 /// | Bit  | Usage               | Code |
 /// | ---- | ------------------- | ---- |
 /// | 0x01 | Play/Pause          | 0xCD |
 /// | 0x02 | Scan Next Track     | 0xB5 |
 /// | 0x04 | Scan Previous Track | 0xB6 |
-/// | 0x08..0x80 | constant padding (no actuation) |
+/// | 0x08 | Volume Increment    | 0xE9 |
+/// | 0x10 | Volume Decrement    | 0xEA |
+/// | 0x20 | Mute                | 0xE2 |
+/// | 0x40..0x80 | constant padding (no actuation) |
 ///
 /// Wheel rotation, presets, and other physical inputs are NOT in this
 /// descriptor; they are captured by the on-device webapp and never sent
-/// to iOS. Volume / mute / shuffle / repeat are intentionally absent -
-/// iAP2-message HID descriptor shapes that go beyond a 3-bit transport
-/// remote have not been observed to actuate on iOS, so those verbs need
-/// a different surface (gateway companion, EA channel) when wired.
+/// to iOS.
 pub const TRANSPORT_DESCRIPTOR: &[u8] = &[
   0x05, 0x0C, // Usage Page (Consumer)
   0x09, 0x01, // Usage (Consumer Control)
@@ -89,12 +87,15 @@ pub const TRANSPORT_DESCRIPTOR: &[u8] = &[
   0x15, 0x00, //   Logical Minimum (0)
   0x25, 0x01, //   Logical Maximum (1)
   0x75, 0x01, //   Report Size (1)
-  0x95, 0x03, //   Report Count (3)
+  0x95, 0x06, //   Report Count (6)
   0x09, 0xCD, //   Usage (Play/Pause)
   0x09, 0xB5, //   Usage (Scan Next Track)
   0x09, 0xB6, //   Usage (Scan Previous Track)
+  0x09, 0xE9, //   Usage (Volume Increment)
+  0x09, 0xEA, //   Usage (Volume Decrement)
+  0x09, 0xE2, //   Usage (Mute)
   0x81, 0x02, //   Input (Data,Var,Abs)
-  0x75, 0x05, //   Report Size (5)
+  0x75, 0x02, //   Report Size (2)
   0x95, 0x01, //   Report Count (1)
   0x81, 0x03, //   Input (Const,Var,Abs) - padding
   0xC0, // End Collection
@@ -107,13 +108,13 @@ pub mod report_bit {
   pub const PLAY_PAUSE: u8 = 0x01;
   pub const NEXT: u8 = 0x02;
   pub const PREV: u8 = 0x04;
-  /// Bits 0x08..0x80 fall inside the descriptor's 5-bit constant padding
-  /// field. They will not actuate on iOS regardless of mask value; the
-  /// constants exist so the transport controller's bit-mask plumbing
-  /// stays compilable while the additional verbs live on other surfaces.
   pub const VOLUME_UP: u8 = 0x08;
   pub const VOLUME_DOWN: u8 = 0x10;
   pub const MUTE: u8 = 0x20;
+  /// Bits 0x40 / 0x80 fall inside the descriptor's 2-bit constant padding
+  /// field. They will not actuate on iOS regardless of mask value; the
+  /// constants exist so the transport controller's bit-mask plumbing
+  /// stays compilable while shuffle / repeat live on other surfaces.
   pub const SHUFFLE: u8 = 0x40;
   pub const REPEAT: u8 = 0x80;
 }

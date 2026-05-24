@@ -52,7 +52,7 @@ impl PairTrigger {
     let handle = adapter.serve_gatt_application(app).await?;
     tracing::info!(
       service = %PAIR_TRIGGER_SERVICE,
-      "ANCS pair-trigger GATT service registered"
+      "LE pair-trigger GATT service registered"
     );
     Ok(Self { _handle: handle })
   }

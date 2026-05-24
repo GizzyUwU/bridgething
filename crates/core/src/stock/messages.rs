@@ -8,12 +8,6 @@ use crate::{
   },
 };
 
-/// Broadcasts that put the stock Spotify webapp into the "phone connected"
-/// state. Fires whenever the peer's useful link comes up - first pair after
-/// iAP2 identifies, RFCOMM gateway Version exchange, iAP2 reconnect, etc. -
-/// not just on first BlueZ pair, since the webapp will sit on stale state
-/// (and ignore now-playing deltas) if it doesn't see these on every link
-/// transition.
 pub async fn broadcast_stock_connection(
   bus: &WireEventBus,
   device: &Device,

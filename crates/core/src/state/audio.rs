@@ -23,6 +23,7 @@ pub struct AudioManager {
 #[derive(Debug, Default)]
 struct Inner {
   companion: Option<VolumeChanged>,
+  ams: Option<VolumeChanged>,
 }
 
 impl AudioManager {
@@ -35,9 +36,13 @@ impl AudioManager {
   }
 
   pub async fn current(&self) -> VolumeChanged {
+    let inner = self.inner.read().await;
     if self.authority.is_authoritative(CompanionAuthorityScope::Volume)
-      && let Some(v) = self.inner.read().await.companion
+      && let Some(v) = inner.companion
     {
+      return v;
+    }
+    if let Some(v) = inner.ams {
       return v;
     }
     PLACEHOLDER
@@ -45,6 +50,11 @@ impl AudioManager {
 
   pub async fn apply_companion(&self, vol: VolumeChanged) -> Result<(), AudioError> {
     self.inner.write().await.companion = Some(vol);
+    self.broadcast_current().await
+  }
+
+  pub async fn apply_ams(&self, vol: VolumeChanged) -> Result<(), AudioError> {
+    self.inner.write().await.ams = Some(vol);
     self.broadcast_current().await
   }
 

@@ -1,8 +1,8 @@
 use libbridgething::{
   NetError, WsError,
   client::{
-    ClientToBridgeNetMsgDispatch, NetFetch, NetFetchErrorReply, NetFetchReply, NetStreamCancel, NetStreamOpen,
-    NetWsClose, NetWsErrorReply, NetWsOpen, NetWsOpenReply, NetWsSend,
+    BridgeToClientNetMsgEvent, ClientToBridgeNetMsgDispatch, NetFetch, NetFetchErrorReply, NetFetchReply,
+    NetStreamCancel, NetStreamOpen, NetWsClose, NetWsErrorReply, NetWsOpen, NetWsOpenReply, NetWsSend,
   },
   gateway::{self, BridgeToGatewayNetMsgCommand},
   wire::RequestError,
@@ -211,14 +211,13 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     let open = params;
     let snapshot = self.handle.state.capabilities.snapshot();
     if snapshot.gateway.is_none() || !snapshot.available.net_fetch {
-      // No way to surface the rejection synchronously; emit a synthetic
-      // StreamError event so the SDK's pending consumer resolves.
+      // TODO: no way to surface the rejection synchronously
       let error = if snapshot.gateway.is_none() {
         NetError::NoGateway
       } else {
         NetError::Unavailable
       };
-      let event = libbridgething::client::BridgeToClientNetMsgEvent::StreamError(libbridgething::StreamError {
+      let event = BridgeToClientNetMsgEvent::StreamError(libbridgething::StreamError {
         stream_id: open.stream_id,
         error,
       });

@@ -137,12 +137,14 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let authority = AuthorityRegistry::new();
   let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
   let player = Player::new(bus.clone(), authority.clone());
+  let audio = AudioManager::new(authority.clone(), bus.clone());
   let asset_wait = asset::wait::AssetWaitTracker::new();
   let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());
   let iap2_pending_art = handler::iap2::Iap2PendingArt::new();
   let peers = PeerTracker::new(
     bus.clone(),
     player.clone(),
+    audio.clone(),
     capabilities.clone(),
     ws_routes.clone(),
     stream_routes.clone(),
@@ -161,7 +163,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let telephony = TelephonyManager::new(bus.clone(), bluetooth.iap2.telephony.clone());
   let time = TimeManager::new(bus.clone());
-  let audio = AudioManager::new(authority.clone(), bus.clone());
 
   let (als, als_handle) = AlsManager::init(bus.clone(), AlsConfig::default())
     .await

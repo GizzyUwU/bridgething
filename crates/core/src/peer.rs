@@ -35,7 +35,7 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   player::Player,
-  state::RouteTable,
+  state::{AudioManager, RouteTable},
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -102,6 +102,7 @@ impl PeerTracker {
   pub fn new(
     bus: WireEventBus,
     player: Player,
+    audio: AudioManager,
     capabilities: CapabilitiesRegistry,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
@@ -113,6 +114,7 @@ impl PeerTracker {
       snapshot_tx,
       bus,
       player,
+      audio,
       capabilities,
       ws_routes,
       stream_routes,
@@ -196,17 +198,20 @@ struct PeerActor {
   pin_pending: HashSet<Address>,
   bus: WireEventBus,
   player: Player,
+  audio: AudioManager,
   capabilities: CapabilitiesRegistry,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
   snapshot_tx: watch::Sender<PeerSnapshot>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_actor(
   mut cmd_rx: mpsc::Receiver<PeerCommand>,
   snapshot_tx: watch::Sender<PeerSnapshot>,
   bus: WireEventBus,
   player: Player,
+  audio: AudioManager,
   capabilities: CapabilitiesRegistry,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
@@ -216,6 +221,7 @@ async fn run_actor(
     pin_pending: HashSet::new(),
     bus,
     player,
+    audio,
     capabilities,
     ws_routes,
     stream_routes,
@@ -379,6 +385,9 @@ impl PeerActor {
     }
     if let Err(err) = self.player.send_state().await {
       tracing::warn!(?err, "failed to send player state during stock resync");
+    }
+    if let Err(err) = self.audio.broadcast_current().await {
+      tracing::warn!(?err, "failed to seed volume on stock activate");
     }
   }
 

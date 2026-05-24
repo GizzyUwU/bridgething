@@ -21,8 +21,8 @@ use tokio::{
 use uuid::Uuid;
 
 // protocol modules
-pub mod ancs;
 pub mod iap2;
+pub mod le;
 mod network;
 pub mod profiles;
 mod rfcomm;
@@ -35,7 +35,7 @@ mod debug;
 mod packer;
 mod peer_owners;
 
-use ancs::{AncsBootstrap, AncsManager};
+use le::{LeBootstrap, LeManager};
 use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
 use peer_owners::PeerOwners;
@@ -82,7 +82,7 @@ pub(crate) enum BluetoothBringup {
 pub struct BluetoothManager {
   pub gateway_man: GatewayMan,
   pub iap2: Iap2Handles,
-  pub ancs: AncsManager,
+  pub le: LeManager,
   pub profile_man: ProfileManAccess,
 }
 
@@ -90,7 +90,7 @@ pub(crate) struct BluetoothBootstrap {
   gateway: GatewayBootstrap,
   iap2_events_rx: Iap2EventsRx,
   iap2_bootstrap: iap2::Iap2Bootstrap,
-  ancs: AncsBootstrap,
+  le: LeBootstrap,
   profile_man_tx: watch::Sender<Option<ProfileMan>>,
 }
 
@@ -98,13 +98,13 @@ impl BluetoothManager {
   pub(crate) fn create() -> (BluetoothMan, BluetoothBootstrap) {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
     let (iap2_handles, iap2_events_rx, iap2_bootstrap) = iap2::allocate_iap2();
-    let (ancs_handle, ancs_bootstrap) = AncsManager::allocate();
+    let (le_handle, le_bootstrap) = LeManager::allocate();
     let (profile_man_tx, profile_man_rx) = watch::channel(None);
 
     let manager = Arc::new(Self {
       gateway_man,
       iap2: iap2_handles,
-      ancs: ancs_handle,
+      le: le_handle,
       profile_man: ProfileManAccess { rx: profile_man_rx },
     });
 
@@ -112,7 +112,7 @@ impl BluetoothManager {
       gateway: gateway_bootstrap,
       iap2_events_rx,
       iap2_bootstrap,
-      ancs: ancs_bootstrap,
+      le: le_bootstrap,
       profile_man_tx,
     };
 
@@ -171,7 +171,7 @@ impl BluetoothManager {
           gateway,
           mut iap2_events_rx,
           iap2_bootstrap,
-          ancs: ancs_bootstrap,
+          le: le_bootstrap,
           profile_man_tx,
         } = bootstrap;
 
@@ -224,9 +224,9 @@ impl BluetoothManager {
         let _iap2_handle =
           Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
 
-        tracing::debug!("setting up ancs dispatcher");
-        let _ancs_handle = ancs_bootstrap
-          .start(adapter.clone(), deps.bus.clone(), self.clone())
+        tracing::debug!("setting up le dispatcher");
+        let _le_handle = le_bootstrap
+          .start(adapter.clone(), deps.bus.clone(), self.clone(), state.audio.clone())
           .await;
 
         let pending_art = state.iap2_pending_art.clone();

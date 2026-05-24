@@ -1,0 +1,461 @@
+//! Shared LE-bonded session to an iPhone. ANCS (notifications) and AMS
+//! (media-player volume) are two GATT services on one iPhone over a
+//! single LE bond, so this module owns the connection, discovery, and
+//! lifecycle once and runs both as consumers off the same resolved
+//! services. A second discovery/connection per service would be a
+//! parallel LE codepath.
+//!
+//! The LE link is iPhone-driven: the phone is LE central and connects to
+//! our advertised peripheral (`advertise.rs` + `pair_trigger.rs`, both
+//! registered for the daemon's lifetime); the accessory is GATT client
+//! reading ANCS/AMS. So the session's job is discovery + lifecycle, not
+//! connection management.
+//!
+//! Each consumer degrades independently: ANCS absent (notifications
+//! disabled) or unauthorized does not stop AMS, and AMS absent does not
+//! stop ANCS. Connection-level loss (a present service's stream ending)
+//! re-discovers both; ANCS appearing later (the user authorizes) is
+//! caught by a slow re-probe while AMS keeps serving.
+//!
+//! The per-peer session starts on iAP2 `LinkEstablished` (`attach`) and
+//! is torn down on link loss (`detach`).
+
+use std::{sync::Arc, time::Duration};
+
+use bluer::{Adapter, Address, gatt::remote::Service};
+use futures::{Stream, StreamExt, stream};
+use libbridgething::{AncsAuthState, client::VolumeChanged};
+use tokio::{sync::mpsc, task::JoinHandle, time};
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+mod advertise;
+mod ams;
+mod ancs;
+mod pair_trigger;
+
+use advertise::LeAdvertisement;
+use ancs::AuthStateReporter;
+use pair_trigger::{PAIR_TRIGGER_SERVICE, PairTrigger};
+
+use crate::{bluetooth::BluetoothMan, net::WireEventBus, state::AudioManager};
+
+const COMMAND_MAILBOX_CAP: usize = 16;
+const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
+const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
+const ANCS_REPROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+#[derive(Debug)]
+enum LeCommand {
+  Attach { address: Address },
+  Detach { address: Address },
+  Invoke { uid: u32, action: u8 },
+}
+
+#[derive(Debug, Clone)]
+pub struct LeManager {
+  tx: mpsc::Sender<LeCommand>,
+}
+
+pub(crate) struct LeBootstrap {
+  rx: mpsc::Receiver<LeCommand>,
+}
+
+impl LeManager {
+  pub(crate) fn allocate() -> (Self, LeBootstrap) {
+    let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
+    (Self { tx }, LeBootstrap { rx })
+  }
+
+  pub async fn attach(&self, address: Address) {
+    if self.tx.send(LeCommand::Attach { address }).await.is_err() {
+      tracing::warn!(%address, "LE dispatcher closed; cannot attach");
+    }
+  }
+
+  pub async fn detach(&self, address: Address) {
+    if self.tx.send(LeCommand::Detach { address }).await.is_err() {
+      tracing::trace!(%address, "LE dispatcher closed; detach no-op");
+    }
+  }
+
+  pub async fn try_invoke_positive(&self, id: &str) -> bool {
+    self.try_invoke(id, ancs::ACTION_POSITIVE).await
+  }
+
+  pub async fn try_invoke_negative(&self, id: &str) -> bool {
+    self.try_invoke(id, ancs::ACTION_NEGATIVE).await
+  }
+
+  async fn try_invoke(&self, id: &str, action: u8) -> bool {
+    let Some(rest) = id.strip_prefix(ancs::ANCS_ID_PREFIX) else {
+      return false;
+    };
+    let Ok(uid) = rest.parse::<u32>() else {
+      tracing::trace!(%id, "ANCS invoke: malformed UID");
+      return true;
+    };
+    if self.tx.send(LeCommand::Invoke { uid, action }).await.is_err() {
+      tracing::trace!(%id, "LE dispatcher closed; invoke dropped");
+    }
+    true
+  }
+}
+
+impl LeBootstrap {
+  pub(crate) async fn start(
+    self,
+    adapter: Adapter,
+    bus: WireEventBus,
+    bluetooth: BluetoothMan,
+    audio: AudioManager,
+  ) -> JoinHandle<()> {
+    let adapter_dbus_path = format!("/org/bluez/{}", adapter.name());
+    let pair_trigger = match PairTrigger::register(&adapter).await {
+      Ok(handle) => Some(handle),
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "LE pair-trigger GATT register failed; companion-app LE pair will not work"
+        );
+        None
+      }
+    };
+    let advertisement = match LeAdvertisement::register(&adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
+      Ok(handle) => {
+        tracing::info!("LE advertisement registered; companion app drives LE pair via AccessorySetupKit");
+        Some(handle)
+      }
+      Err(err) => {
+        tracing::warn!(
+          ?err,
+          "LE advertisement register failed; iOS notifications + volume state unavailable"
+        );
+        None
+      }
+    };
+    let dispatcher = LeDispatcher {
+      adapter: Arc::new(adapter),
+      bus,
+      audio,
+      rx: self.rx,
+      session: None,
+      auth_reporter: AuthStateReporter::new(bluetooth),
+      _advertisement: advertisement,
+      _pair_trigger: pair_trigger,
+    };
+    tokio::spawn(dispatcher.run())
+  }
+}
+
+struct LeDispatcher {
+  adapter: Arc<Adapter>,
+  bus: WireEventBus,
+  audio: AudioManager,
+  rx: mpsc::Receiver<LeCommand>,
+  session: Option<ActiveSession>,
+  auth_reporter: AuthStateReporter,
+  _advertisement: Option<LeAdvertisement>,
+  _pair_trigger: Option<PairTrigger>,
+}
+
+struct ActiveSession {
+  address: Address,
+  invoke_tx: mpsc::Sender<(u32, u8)>,
+  cancel: CancellationToken,
+  _handle: JoinHandle<()>,
+}
+
+impl LeDispatcher {
+  async fn run(mut self) {
+    while let Some(cmd) = self.rx.recv().await {
+      match cmd {
+        LeCommand::Attach { address } => self.handle_attach(address).await,
+        LeCommand::Detach { address } => self.handle_detach(address).await,
+        LeCommand::Invoke { uid, action } => self.handle_invoke(uid, action).await,
+      }
+    }
+  }
+
+  async fn handle_attach(&mut self, address: Address) {
+    if let Some(existing) = self.session.take() {
+      tracing::debug!(prev = %existing.address, new = %address, "LE replacing active session");
+      existing.cancel.cancel();
+    }
+    self.auth_reporter.report(AncsAuthState::Probing).await;
+    let cancel = CancellationToken::new();
+    let (invoke_tx, invoke_rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
+    let session = LeSession {
+      address,
+      adapter: self.adapter.clone(),
+      bus: self.bus.clone(),
+      audio: self.audio.clone(),
+      auth_reporter: self.auth_reporter.clone(),
+      invoke_rx,
+      cancel: cancel.clone(),
+    };
+    let handle = tokio::spawn(session.run());
+    self.session = Some(ActiveSession {
+      address,
+      invoke_tx,
+      cancel,
+      _handle: handle,
+    });
+  }
+
+  async fn handle_detach(&mut self, address: Address) {
+    if let Some(session) = self.session.take_if(|s| s.address == address) {
+      tracing::debug!(%address, "LE detaching session");
+      session.cancel.cancel();
+      self.auth_reporter.report(AncsAuthState::Probing).await;
+    } else {
+      tracing::trace!(%address, "LE detach for non-active address; ignoring");
+    }
+  }
+
+  async fn handle_invoke(&self, uid: u32, action: u8) {
+    let Some(session) = &self.session else {
+      tracing::trace!(uid, "ANCS invoke: no active session");
+      return;
+    };
+    if session.invoke_tx.send((uid, action)).await.is_err() {
+      tracing::trace!(uid, "ANCS invoke: session task closed");
+    }
+  }
+}
+
+struct LeSession {
+  address: Address,
+  adapter: Arc<Adapter>,
+  bus: WireEventBus,
+  audio: AudioManager,
+  auth_reporter: AuthStateReporter,
+  invoke_rx: mpsc::Receiver<(u32, u8)>,
+  cancel: CancellationToken,
+}
+
+enum LoopExit {
+  Cancelled,
+  ConnectionLost,
+  ReprobeAncs,
+}
+
+impl LeSession {
+  async fn run(self) {
+    let LeSession {
+      address,
+      adapter,
+      bus,
+      audio,
+      auth_reporter,
+      mut invoke_rx,
+      cancel,
+    } = self;
+
+    let mut backoff = TRANSIENT_BACKOFF_INITIAL;
+    let mut absent_logged = false;
+
+    loop {
+      if cancel.is_cancelled() {
+        return;
+      }
+      let outcome = attempt(
+        &adapter,
+        address,
+        &bus,
+        &audio,
+        &auth_reporter,
+        &mut invoke_rx,
+        &cancel,
+        &mut absent_logged,
+        &mut backoff,
+      )
+      .await;
+      match outcome {
+        Ok(LoopExit::Cancelled) => return,
+        Ok(LoopExit::ReprobeAncs) => {}
+        Ok(LoopExit::ConnectionLost) => {
+          let d = backoff;
+          backoff = (backoff * 2).min(TRANSIENT_BACKOFF_MAX);
+          tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = time::sleep(d) => {}
+          }
+        }
+        Err(err) if cancel.is_cancelled() => {
+          tracing::debug!(%address, ?err, "LE session ended after detach");
+          return;
+        }
+        Err(err) => {
+          tracing::warn!(%address, ?err, "LE session error; will retry");
+          let d = backoff;
+          backoff = (backoff * 2).min(TRANSIENT_BACKOFF_MAX);
+          tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = time::sleep(d) => {}
+          }
+        }
+      }
+    }
+  }
+}
+
+type NotifyStream = std::pin::Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
+
+fn pending_stream() -> NotifyStream {
+  Box::pin(stream::pending())
+}
+
+async fn find_service(services: &[Service], uuid: Uuid) -> Option<Service> {
+  for svc in services {
+    if let Ok(u) = svc.uuid().await
+      && u == uuid
+    {
+      return Some(svc.clone());
+    }
+  }
+  None
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attempt(
+  adapter: &Adapter,
+  address: Address,
+  bus: &WireEventBus,
+  audio: &AudioManager,
+  auth_reporter: &AuthStateReporter,
+  invoke_rx: &mut mpsc::Receiver<(u32, u8)>,
+  cancel: &CancellationToken,
+  absent_logged: &mut bool,
+  backoff: &mut Duration,
+) -> Result<LoopExit, bluer::Error> {
+  let device = adapter.device(address)?;
+  let pre_connected = device.is_connected().await.unwrap_or(false);
+  let pre_paired = device.is_paired().await.unwrap_or(false);
+  let pre_resolved = device.is_services_resolved().await.unwrap_or(false);
+  tracing::debug!(
+    %address,
+    connected = pre_connected,
+    paired = pre_paired,
+    services_resolved = pre_resolved,
+    "LE attempt: pre-discover state"
+  );
+
+  let services = device.services().await?;
+  let ancs_svc = find_service(&services, ancs::ANCS_SERVICE).await;
+  let ams_svc = find_service(&services, ams::AMS_SERVICE).await;
+
+  if ancs_svc.is_none() && ams_svc.is_none() {
+    tracing::debug!(%address, "LE attempt: no ANCS/AMS services resolved yet");
+    return Ok(LoopExit::ConnectionLost);
+  }
+
+  let (mut ancs, mut ns, mut ds) = match &ancs_svc {
+    Some(svc) => match ancs::Ancs::subscribe(svc).await {
+      Ok((a, streams)) => {
+        tracing::info!(%address, "LE session: ANCS subscribed");
+        *absent_logged = false;
+        (Some(a), streams.notification_source, streams.data_source)
+      }
+      Err(err) => {
+        tracing::warn!(%address, ?err, "ANCS subscribe failed; serving AMS only this session");
+        (None, pending_stream(), pending_stream())
+      }
+    },
+    None => (None, pending_stream(), pending_stream()),
+  };
+
+  let ancs_present = ancs.is_some();
+  if !ancs_present {
+    if !*absent_logged {
+      tracing::warn!(
+        %address,
+        "ANCS unavailable (notifications disabled / unauthorized); serving AMS only. Run the companion \
+         iOS app's \"Enable notifications\" flow to LE-pair the device and accept the ANCS prompt"
+      );
+      *absent_logged = true;
+    }
+    auth_reporter.report(AncsAuthState::Unauthorized).await;
+  }
+
+  let mut ams_eu = match &ams_svc {
+    Some(svc) => match ams::subscribe(svc).await {
+      Ok(s) => {
+        tracing::info!(%address, "LE session: AMS subscribed");
+        s
+      }
+      Err(err) => {
+        tracing::warn!(%address, ?err, "AMS subscribe failed; volume state unavailable this session");
+        pending_stream()
+      }
+    },
+    None => {
+      tracing::debug!(%address, "AMS service absent");
+      pending_stream()
+    }
+  };
+
+  // a working connection with at least one service: reset the reconnect backoff.
+  *backoff = TRANSIENT_BACKOFF_INITIAL;
+
+  let reprobe = time::sleep(ANCS_REPROBE_INTERVAL);
+  tokio::pin!(reprobe);
+
+  loop {
+    if cancel.is_cancelled() {
+      let _ = device.disconnect().await;
+      return Ok(LoopExit::Cancelled);
+    }
+    if let Some(a) = &mut ancs
+      && a.pump_allowed()
+    {
+      a.pump().await;
+    }
+
+    tokio::select! {
+      _ = cancel.cancelled() => {
+        let _ = device.disconnect().await;
+        return Ok(LoopExit::Cancelled);
+      }
+      ns_item = ns.next() => match ns_item {
+        Some(v) => { if let Some(a) = &mut ancs { a.on_notification_source(&v, bus).await; } }
+        None => return Ok(LoopExit::ConnectionLost),
+      },
+      ds_item = ds.next() => match ds_item {
+        Some(v) => {
+          if let Some(a) = &mut ancs
+            && a.on_data_source(&v, bus).await
+          {
+            auth_reporter.report(AncsAuthState::Authorized).await;
+          }
+        }
+        None => return Ok(LoopExit::ConnectionLost),
+      },
+      cmd = invoke_rx.recv() => match cmd {
+        Some((uid, action)) => { if let Some(a) = &ancs { a.on_invoke(uid, action).await; } }
+        None => return Ok(LoopExit::Cancelled),
+      },
+      _ = time::sleep(ancs::ATTRIBUTE_FETCH_TIMEOUT), if ancs.as_ref().is_some_and(ancs::Ancs::has_in_flight) => {
+        if let Some(a) = &mut ancs
+          && a.on_fetch_timeout()
+        {
+          auth_reporter.report(AncsAuthState::Unauthorized).await;
+        }
+      }
+      ams_item = ams_eu.next() => match ams_item {
+        Some(v) => {
+          if let Some(level) = ams::parse_volume(&v)
+            && let Err(err) = audio.apply_ams(VolumeChanged { level, muted: false }).await
+          {
+            tracing::warn!(?err, "failed to apply AMS volume");
+          }
+        }
+        None => return Ok(LoopExit::ConnectionLost),
+      },
+      _ = &mut reprobe, if !ancs_present => {
+        tracing::debug!(%address, "ANCS re-probe interval elapsed; re-discovering");
+        return Ok(LoopExit::ReprobeAncs);
+      }
+    }
+  }
+}

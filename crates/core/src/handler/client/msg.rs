@@ -164,9 +164,6 @@ pub enum PossibleSendMsg {
 }
 
 impl PossibleSendMsg {
-  /// Wrap a modern `BridgeToClientMsg` for outbound transmission.
-  /// `stock_msg_id` is the inter-app correlation id for stock connections
-  /// (ignored for modern).
   pub fn from_send_msg(msg: BridgeToClientMsg, mode: &ClientMode, stock_msg_id: Option<usize>) -> Self {
     match mode {
       ClientMode::Modern => Self::Modern(msg),
