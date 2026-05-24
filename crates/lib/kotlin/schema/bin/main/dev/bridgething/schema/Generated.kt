@@ -893,11 +893,12 @@ data class GeoWatch (
 )
 
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
-/// `hardware.state.get` and re-broadcast on any change.
+/// `hardware.state.get` and re-broadcast on any change. See
+/// `AmbientLightUpdate` for the ambient_level semantics.
 @Serializable
 data class HardwareState (
 	val brightness: BrightnessState,
-	val ambientLight: UInt
+	val ambientLevel: UByte
 )
 
 /// One header on an HTTP request or response. Key order is preserved

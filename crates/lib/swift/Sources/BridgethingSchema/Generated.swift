@@ -1598,14 +1598,15 @@ public struct GeoWatch: Codable, Sendable {
 }
 
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
-/// `hardware.state.get` and re-broadcast on any change.
+/// `hardware.state.get` and re-broadcast on any change. See
+/// `AmbientLightUpdate` for the ambient_level semantics.
 public struct HardwareState: Codable, Sendable {
 	public let brightness: BrightnessState
-	public let ambientLight: UInt32
+	public let ambientLevel: UInt8
 
-	public init(brightness: BrightnessState, ambientLight: UInt32) {
+	public init(brightness: BrightnessState, ambientLevel: UInt8) {
 		self.brightness = brightness
-		self.ambientLight = ambientLight
+		self.ambientLevel = ambientLevel
 	}
 }
 

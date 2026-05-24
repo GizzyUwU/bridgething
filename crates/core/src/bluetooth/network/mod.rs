@@ -63,7 +63,14 @@ static NETWORK_ADDR_COUNTER: AtomicU32 = AtomicU32::new(1);
 
 fn next_network_address() -> Address {
   let n = NETWORK_ADDR_COUNTER.fetch_add(1, Ordering::Relaxed).to_be_bytes();
-  Address::new([SYNTHETIC_NETWORK_ADDR_PREFIX[0], SYNTHETIC_NETWORK_ADDR_PREFIX[1], n[0], n[1], n[2], n[3]])
+  Address::new([
+    SYNTHETIC_NETWORK_ADDR_PREFIX[0],
+    SYNTHETIC_NETWORK_ADDR_PREFIX[1],
+    n[0],
+    n[1],
+    n[2],
+    n[3],
+  ])
 }
 
 #[derive(Debug)]

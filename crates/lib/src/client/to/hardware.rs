@@ -4,11 +4,14 @@ use ts_rs::TS;
 
 use crate::{BrightnessState, HardwareState};
 
+/// 0..=100 ambient-brightness indicator derived from the on-board ALS +
+/// backlight curve. Low = dark room, high = bright room. The stock translation
+/// layer inverts this at the edge for `sp-als-backlight`-compatible payloads.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct AmbientLightUpdate {
-  pub brightness: u32,
+  pub ambient_level: u8,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]

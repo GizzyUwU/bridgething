@@ -33,14 +33,15 @@ pub struct BrightnessState {
 }
 
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
-/// `hardware.state.get` and re-broadcast on any change.
+/// `hardware.state.get` and re-broadcast on any change. See
+/// `AmbientLightUpdate` for the ambient_level semantics.
 #[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct HardwareState {
   pub brightness: BrightnessState,
-  pub ambient_light: u32,
+  pub ambient_level: u8,
 }
 
 #[typeshare]

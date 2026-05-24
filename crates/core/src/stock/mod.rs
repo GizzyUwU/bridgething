@@ -100,9 +100,9 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
     BridgeToClientMsgData::System(data) => data.into(),
     BridgeToClientMsgData::Player(data) => StockSendMsg::InterApp(StockInterAppSend::new(stock_msg_id, data.into())),
     BridgeToClientMsgData::Hardware(BridgeToClientHardwareMsg::AmbientLightUpdate(AmbientLightUpdate {
-      brightness,
+      ambient_level,
     })) => StockSendMsg::Hardware(StockHardwareSend::AmbientLightUpdate {
-      payload: brightness as usize,
+      payload: (100u8.saturating_sub(ambient_level)) as usize,
     }),
     BridgeToClientMsgData::Forward(_) => {
       tracing::warn!("forward message is not supported in stock app!!");

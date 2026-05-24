@@ -84,7 +84,6 @@ struct Inner {
   config: AlsConfig,
   mode: BrightnessMode,
   manual_level: f32,
-  ambient_raw: u32,
   samples: VecDeque<u32>,
   current_ticks: u32,
   max_brightness: u32,
@@ -97,7 +96,6 @@ impl Inner {
       config,
       mode: BrightnessMode::Auto,
       manual_level: 1.0,
-      ambient_raw: 0,
       samples: VecDeque::with_capacity(cap),
       current_ticks,
       max_brightness,
@@ -111,7 +109,7 @@ impl Inner {
         level: self.manual_level,
         effective_level: self.current_level(),
       },
-      ambient_light: self.ambient_raw,
+      ambient_level: self.ambient_level(),
     }
   }
 
@@ -120,6 +118,16 @@ impl Inner {
       return 0.0;
     }
     self.current_ticks as f32 / self.max_brightness as f32
+  }
+
+  /// 0..=100 ambient brightness, natural direction. Low = dark room, high =
+  /// bright room. Stock translation inverts at the edge for sp-als-backlight
+  /// payload compatibility.
+  fn ambient_level(&self) -> u8 {
+    if self.max_brightness == 0 {
+      return 0;
+    }
+    ((self.current_ticks * 100) / self.max_brightness).min(100) as u8
   }
 
   fn push_sample(&mut self, raw: u32) {
@@ -371,12 +379,10 @@ async fn poll_once(inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) -> Result<(),
     guard.current_ticks = actual;
   }
 
-  let (ambient_changed, ticks_to_write, dir, brightness_state, ambient_event, brightness_changed) = {
+  let (ticks_to_write, dir, brightness_state, ambient_event, brightness_changed) = {
     let mut guard = inner.write().await;
-    let prev_raw = guard.ambient_raw;
-    guard.ambient_raw = sample;
+    let prev_level = guard.ambient_level();
     guard.push_sample(sample);
-    let ambient_changed = sample != prev_raw;
 
     let mut ticks_to_write: Option<u32> = None;
     let mut brightness_changed = false;
@@ -395,22 +401,20 @@ async fn poll_once(inner: &Arc<RwLock<Inner>>, bus: &WireEventBus) -> Result<(),
 
     let dir = guard.config.backlight_dir.clone();
     let brightness = guard.snapshot().brightness;
-    let ambient_event = AmbientLightUpdate { brightness: sample };
-    (
-      ambient_changed,
-      ticks_to_write,
-      dir,
-      brightness,
-      ambient_event,
-      brightness_changed,
-    )
+    let level = guard.ambient_level();
+    let ambient_event = if level != prev_level {
+      Some(AmbientLightUpdate { ambient_level: level })
+    } else {
+      None
+    };
+    (ticks_to_write, dir, brightness, ambient_event, brightness_changed)
   };
 
   if let Some(ticks) = ticks_to_write {
     write_brightness(&dir, ticks).await.ok();
   }
-  if ambient_changed {
-    broadcast(bus, BridgeToClientHardwareMsg::AmbientLightUpdate(ambient_event)).await;
+  if let Some(event) = ambient_event {
+    broadcast(bus, BridgeToClientHardwareMsg::AmbientLightUpdate(event)).await;
   }
   if brightness_changed {
     broadcast(bus, BridgeToClientHardwareMsg::BrightnessChanged(brightness_state)).await;

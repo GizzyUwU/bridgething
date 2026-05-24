@@ -60,7 +60,12 @@ import type {
 } from './shared';
 import type { MsgMeta, WireError } from './wire';
 
-export type AmbientLightUpdate = { brightness: number };
+/**
+ * 0..=100 ambient-brightness indicator derived from the on-board ALS +
+ * backlight curve. Low = dark room, high = bright room. The stock translation
+ * layer inverts this at the edge for `sp-als-backlight`-compatible payloads.
+ */
+export type AmbientLightUpdate = { ambientLevel: number };
 
 export type AssetCleared = { id: string };
 

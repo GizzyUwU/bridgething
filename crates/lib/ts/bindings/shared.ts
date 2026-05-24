@@ -319,9 +319,10 @@ export type HardwareError = 'levelOutOfRange' | 'modeMismatch';
 
 /**
  * Snapshot of the device's hardware-controlled surfaces. Sent on
- * `hardware.state.get` and re-broadcast on any change.
+ * `hardware.state.get` and re-broadcast on any change. See
+ * `AmbientLightUpdate` for the ambient_level semantics.
  */
-export type HardwareState = { brightness: BrightnessState; ambientLight: number };
+export type HardwareState = { brightness: BrightnessState; ambientLevel: number };
 
 /**
  * One header on an HTTP request or response. Key order is preserved
