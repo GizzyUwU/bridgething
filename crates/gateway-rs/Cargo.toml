@@ -1,5 +1,5 @@
 [package]
-name = "bridgething-client"
+name = "bridgething-gateway"
 rust-version.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -11,9 +11,9 @@ homepage.workspace = true
 bridgething-sdk-runtime = { path = "../sdk-runtime" }
 libbridgething = { path = "../lib" }
 
-tokio = { workspace = true, features = ["sync", "net"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
@@ -21,4 +21,4 @@ tokio-tungstenite = "0.29.0"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-util"] }

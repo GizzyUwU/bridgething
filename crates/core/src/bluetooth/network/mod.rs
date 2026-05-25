@@ -183,7 +183,7 @@ async fn reader_task(address: Address, mut reader: SplitStream<WebSocket>, tx: C
               probe.data_type, probe.data_event, probe.meta_kind, probe.id,
             );
             if tx
-              .send((address, ConnectionMessage::DecodeFailed(probe)))
+              .send((address, ConnectionMessage::DecodeFailed(*probe)))
               .await
               .is_err()
             {

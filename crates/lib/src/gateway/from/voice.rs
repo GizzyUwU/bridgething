@@ -41,7 +41,7 @@ pub struct VoiceMicOpen {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct VoiceDispatch {
-  pub resolved: NluResolvedIntent,
+  pub resolved: Box<NluResolvedIntent>,
 }
 
 #[typeshare]

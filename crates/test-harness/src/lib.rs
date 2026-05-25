@@ -6,28 +6,21 @@
 //! `AppState` surface.
 
 use std::{
+  path::Path,
   sync::atomic::{AtomicU8, Ordering},
   time::Duration,
 };
 
+mod chrome;
 use anyhow::Result;
 use bluer::Address;
 use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, ServerAddrs, State, TappedFrame};
+use bridgething_gateway::Gateway;
 use bridgething_iap2::SessionEvent;
-use futures::{SinkExt, StreamExt};
-use libbridgething::{
-  AssetRetention, CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, NowPlayingUpdate,
-  gateway::{
-    AssetPush, AuthorityClaim, BridgeToGatewayMsg, GatewayToBridgeAssetMsg, GatewayToBridgeAuthorityMsg,
-    GatewayToBridgeCapabilitiesMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgePlayerMsg,
-  },
-  protocol::GatewayEndec,
-  wire::MsgMeta,
-};
-use tokio::{io::DuplexStream, net::TcpStream, sync::broadcast, task::JoinHandle};
+pub use chrome::ChromeView;
+use futures::StreamExt;
+use tokio::{net::TcpStream, sync::broadcast, task::JoinHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
-use tokio_util::codec::Framed;
-use uuid::Uuid;
 
 const DUPLEX_BUF: usize = 256 * 1024;
 
@@ -46,7 +39,21 @@ impl Harness {
   /// Assemble a fresh headless daemon with an isolated in-memory db and
   /// temp blob stores, then run its event loop in the background.
   pub async fn start() -> Result<Self> {
+    Self::start_inner(false).await
+  }
+
+  /// Like `start`, but provisions the real stock SPA bundle as the headless
+  /// daemon's active webapp (served on the modern http port) so a Tier-2
+  /// `ChromeView` can render it. Errors when the stock dist is not on disk.
+  pub async fn start_with_stock_webapp() -> Result<Self> {
+    Self::start_inner(true).await
+  }
+
+  async fn start_inner(provision_stock: bool) -> Result<Self> {
     let state_dir = tempfile::tempdir()?;
+    if provision_stock {
+      provision_stock_bundle(state_dir.path())?;
+    }
     let assembled = bridgething::init(DaemonConfig::headless(state_dir.path().to_path_buf())).await;
 
     let state = assembled.state.clone();
@@ -72,15 +79,18 @@ impl Harness {
     &self.state
   }
 
-  /// Attach a mock Android companion: open a duplex, hand the daemon one
-  /// end through the rfcomm inject channel (it sees a `GatewayType::Rfcomm`
-  /// peer indistinguishable from a real one), and drive the other end.
-  pub async fn connect_android(&self) -> Result<MockPhone> {
+  /// Attach a real Android companion: open a duplex, hand the daemon one end
+  /// through the rfcomm inject channel (it sees a `GatewayType::Rfcomm` peer
+  /// indistinguishable from a real one), and drive the other end with the real
+  /// `bridgething-gateway` SDK over the same `GatewayEndec` framing a hardware
+  /// companion uses. Dropping the returned `Gateway` closes the duplex, which
+  /// the daemon observes as a companion disconnect.
+  pub async fn connect_android(&self) -> Result<Gateway> {
     let (daemon_half, phone_half) = tokio::io::duplex(DUPLEX_BUF);
     let n = self.next_peer.fetch_add(1, Ordering::Relaxed);
     let addr = Address([0xFE, 0xED, 0x00, 0x00, 0x00, n]);
     self.inject.rfcomm.send((addr, daemon_half)).await?;
-    Ok(MockPhone::new(phone_half, addr))
+    Ok(Gateway::from_io(phone_half))
   }
 
   /// Inject a raw iAP2 `SessionEvent` for `address` into the same channel
@@ -161,6 +171,13 @@ impl Harness {
     let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.stock)).await?;
     Ok(MockWsClient { stream })
   }
+
+  /// Launch headless chromium against the daemon and render the real stock SPA
+  /// (Tier-2 observer). Requires `start_with_stock_webapp`. Errors when no
+  /// chromium binary is present, which lets callers skip rather than fail.
+  pub async fn open_stock_chrome(&self) -> Result<ChromeView> {
+    ChromeView::launch(self.server_addrs.modern, self.server_addrs.stock.port()).await
+  }
 }
 
 /// Ergonomic view over the egress frame mirror. Wraps the broadcast receiver
@@ -230,88 +247,36 @@ impl MockWsClient {
   }
 }
 
-/// A mock phone speaking the gateway wire protocol over a byte stream.
-/// Android mode only for now; the same speaker layers under an iAP2 peer
-/// for iOS once that lane lands.
-pub struct MockPhone {
-  framed: Framed<DuplexStream, GatewayEndec>,
-  addr: Address,
+/// Symlink the real stock SPA dist into the headless daemon's builtin webapp
+/// root as the reserved `stock` bundle, so the registry's startup scan picks it
+/// up with the synthetic stock manifest and `active_webapp` falls through to it.
+fn provision_stock_bundle(state_dir: &Path) -> Result<()> {
+  let dist = stock_dist_path()?;
+  let builtin = state_dir.join("builtin");
+  std::fs::create_dir_all(&builtin)?;
+  std::os::unix::fs::symlink(&dist, builtin.join("stock"))?;
+  Ok(())
 }
 
-impl MockPhone {
-  fn new(stream: DuplexStream, addr: Address) -> Self {
-    Self {
-      framed: Framed::new(stream, GatewayEndec::default()),
-      addr,
+/// Locate the built stock SPA. `BRIDGETHING_STOCK_DIST` overrides; otherwise the
+/// sibling `superbird-webapp/dist` checkout relative to this crate. Errors when
+/// absent so Tier-2 callers can skip on a runner that has not built it.
+fn stock_dist_path() -> Result<std::path::PathBuf> {
+  let has_index = |p: &Path| p.join("index.html").is_file();
+  if let Ok(env) = std::env::var("BRIDGETHING_STOCK_DIST") {
+    let p = std::path::PathBuf::from(env);
+    if has_index(&p) {
+      return Ok(p);
     }
+    anyhow::bail!("BRIDGETHING_STOCK_DIST set to {} but no index.html there", p.display());
   }
-
-  pub fn address(&self) -> Address {
-    self.addr
+  let sibling = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../superbird-webapp/dist");
+  let sibling = sibling.canonicalize().unwrap_or(sibling);
+  if has_index(&sibling) {
+    return Ok(sibling);
   }
-
-  async fn send(&mut self, data: GatewayToBridgeMsgData) -> Result<()> {
-    let msg = GatewayToBridgeMsg {
-      id: Uuid::now_v7(),
-      meta: MsgMeta::Event,
-      data,
-    };
-    self.framed.send(msg).await?;
-    Ok(())
-  }
-
-  /// Announce capabilities. The daemon upserts the peer into PeerTracker
-  /// and marks the companion connected (the Android useful-link path).
-  pub async fn announce(&mut self) -> Result<()> {
-    let caps = GatewayCapabilities {
-      gateway: GatewayInfo {
-        address: String::new(),
-        name: "mock-android".into(),
-        os_name: "android".into(),
-        app_name: "mock-android".into(),
-        app_version: "0.0.0".into(),
-        adapter_version: "mock".into(),
-        lib_version: "0.0.0".into(),
-        libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
-      },
-      ..Default::default()
-    };
-    self.send(GatewayToBridgeCapabilitiesMsg::Announce(caps).into()).await
-  }
-
-  /// Claim a now-playing authority scope. Companion data only surfaces in
-  /// merged player state for scopes the companion holds.
-  pub async fn claim_authority(&mut self, scope: CompanionAuthorityScope) -> Result<()> {
-    self
-      .send(GatewayToBridgeAuthorityMsg::Claim(AuthorityClaim { scope }).into())
-      .await
-  }
-
-  pub async fn now_playing(&mut self, update: NowPlayingUpdate) -> Result<()> {
-    self.send(GatewayToBridgePlayerMsg::Delta(update).into()).await
-  }
-
-  pub async fn push_asset(&mut self, id: &str, retention: AssetRetention, bytes: Vec<u8>) -> Result<()> {
-    self
-      .send(
-        GatewayToBridgeAssetMsg::Push(AssetPush {
-          id: id.into(),
-          bytes,
-          mime: Some("image/jpeg".into()),
-          retention,
-        })
-        .into(),
-      )
-      .await
-  }
-
-  /// Next message the daemon sent to this phone, or None if the link
-  /// closed. The daemon sends a version event on connect; callers that
-  /// assert on outbound traffic should account for it.
-  pub async fn recv(&mut self) -> Option<BridgeToGatewayMsg> {
-    match self.framed.next().await {
-      Some(Ok(frame)) => Some(frame.msg),
-      _ => None,
-    }
-  }
+  anyhow::bail!(
+    "stock dist not found at {} (build superbird-webapp or set BRIDGETHING_STOCK_DIST)",
+    sibling.display()
+  )
 }

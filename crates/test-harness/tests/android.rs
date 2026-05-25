@@ -1,29 +1,54 @@
 //! Android (gateway-only) scenarios driven in-process against a headless
-//! daemon. Each test assembles a fresh daemon, attaches a mock companion
-//! over a duplex-backed RFCOMM-shaped link, drives the real wire surface,
-//! and asserts on merged daemon state.
+//! daemon. Each test assembles a fresh daemon, attaches a real companion
+//! (the `bridgething-gateway` SDK) over a duplex-backed RFCOMM-shaped link,
+//! drives the real wire surface, and asserts on merged daemon state.
 
 use std::time::Duration;
 
 use bridgething_test_harness::Harness;
-use libbridgething::{CompanionAuthorityScope, MediaItemUpdate, NowPlayingUpdate};
+use libbridgething::{
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate,
+  gateway::AuthorityClaim,
+};
 
 const CONVERGE: Duration = Duration::from_secs(3);
+
+/// A minimal Android announce payload - enough for the daemon to register the
+/// companion and mark it connected (the Android useful-link path).
+fn caps() -> GatewayCapabilities {
+  GatewayCapabilities {
+    gateway: GatewayInfo {
+      address: String::new(),
+      name: "harness-android".into(),
+      os_name: "android".into(),
+      app_name: "harness-android".into(),
+      app_version: "0.0.0".into(),
+      adapter_version: "harness".into(),
+      lib_version: "0.0.0".into(),
+      libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
+    },
+    ..Default::default()
+  }
+}
 
 /// A companion announces, claims metadata authority, and pushes a track.
 /// Merged player state must reflect exactly the companion-supplied data.
 #[tokio::test]
 async fn gateway_only_now_playing() {
   let harness = Harness::start().await.expect("harness start");
-  let mut phone = harness.connect_android().await.expect("connect");
+  let phone = harness.connect_android().await.expect("connect");
 
-  phone.announce().await.expect("announce");
+  phone.capabilities().announce(caps()).await.expect("announce");
   phone
-    .claim_authority(CompanionAuthorityScope::NowPlayingMetadata)
+    .authority()
+    .claim(AuthorityClaim {
+      scope: CompanionAuthorityScope::NowPlayingMetadata,
+    })
     .await
     .expect("claim metadata");
   phone
-    .now_playing(NowPlayingUpdate {
+    .player()
+    .delta(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("track-1".into()),
         title: Some("Test Song".into()),
@@ -56,12 +81,13 @@ async fn gateway_only_now_playing() {
 #[tokio::test]
 async fn no_authority_no_merge() {
   let harness = Harness::start().await.expect("harness start");
-  let mut phone = harness.connect_android().await.expect("connect");
+  let phone = harness.connect_android().await.expect("connect");
 
-  phone.announce().await.expect("announce");
+  phone.capabilities().announce(caps()).await.expect("announce");
   // deliberately NO claim_authority
   phone
-    .now_playing(NowPlayingUpdate {
+    .player()
+    .delta(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("track-2".into()),
         title: Some("Should Not Appear".into()),
@@ -88,9 +114,9 @@ async fn no_authority_no_merge() {
 #[tokio::test]
 async fn companion_disconnect_clears_authority() {
   let harness = Harness::start().await.expect("harness start");
-  let mut phone = harness.connect_android().await.expect("connect");
+  let phone = harness.connect_android().await.expect("connect");
 
-  phone.announce().await.expect("announce");
+  phone.capabilities().announce(caps()).await.expect("announce");
 
   // Wait until the daemon registers the companion as connected before
   // claiming/disconnecting. The daemon dispatches each inbound message
@@ -102,11 +128,17 @@ async fn companion_disconnect_clears_authority() {
   assert!(connected, "companion never registered as connected");
 
   phone
-    .claim_authority(CompanionAuthorityScope::NowPlayingMetadata)
+    .authority()
+    .claim(AuthorityClaim {
+      scope: CompanionAuthorityScope::NowPlayingMetadata,
+    })
     .await
     .expect("claim metadata");
   phone
-    .claim_authority(CompanionAuthorityScope::NowPlayingPlayback)
+    .authority()
+    .claim(AuthorityClaim {
+      scope: CompanionAuthorityScope::NowPlayingPlayback,
+    })
     .await
     .expect("claim playback");
 

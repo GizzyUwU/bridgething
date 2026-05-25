@@ -15,6 +15,8 @@ const SWIFT_OUTPUT: &str = "crates/lib/swift/Sources/BridgethingSchema/Generated
 const KOTLIN_OUTPUT: &str = "crates/lib/kotlin/schema/src/main/kotlin/dev/bridgething/schema/Generated.kt";
 const KOTLIN_PACKAGE: &str = "dev.bridgething.schema";
 const LIB_SRC: &str = "crates/lib/src";
+const RUST_CLIENT_OUTPUT: &str = "crates/client-rs/src/surface.generated.rs";
+const RUST_GATEWAY_OUTPUT: &str = "crates/gateway-rs/src/surface.generated.rs";
 
 fn workspace_root() -> PathBuf {
   Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,13 +35,45 @@ fn main() -> Result<()> {
     "ts" | "typescript" => gen_typescript()?,
     "swift" => gen_swift()?,
     "kotlin" => gen_kotlin()?,
+    "rust" => gen_rust()?,
     "all" => {
       gen_typescript()?;
       gen_swift()?;
       gen_kotlin()?;
+      gen_rust()?;
     }
-    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, all"),
+    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, rust, all"),
   }
+  Ok(())
+}
+
+/// Emit the Rust SDK surface files (`bridgething-client` /
+/// `bridgething-gateway`). Pure naming sugar over the generic runtime;
+/// no DTOs are materialized (the types are native Rust in `libbridgething`).
+fn gen_rust() -> Result<()> {
+  println!("==> rust");
+  let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  let plans = dispatch::build_plans(&inv).context("dispatch plans")?;
+  for plan in &plans {
+    let target = match plan.protocol {
+      dispatch::Protocol::Client => dispatch::RustTarget {
+        out_path: RUST_CLIENT_OUTPUT,
+        sdk_type: "Client",
+        wire_mod: "client",
+      },
+      dispatch::Protocol::Gateway => dispatch::RustTarget {
+        out_path: RUST_GATEWAY_OUTPUT,
+        sdk_type: "Gateway",
+        wire_mod: "gateway",
+      },
+    };
+    dispatch::emit_rust(plan, &target).with_context(|| format!("emit rust dispatch for {:?}", plan.protocol))?;
+    println!("    emitted {}", target.out_path);
+  }
+  run(
+    "rustfmt",
+    &["--edition", "2024", RUST_CLIENT_OUTPUT, RUST_GATEWAY_OUTPUT],
+  )?;
   Ok(())
 }
 
@@ -651,9 +685,9 @@ fn typeshared_adjacent_tag(attrs: &[syn::Attribute]) -> Option<String> {
             && let syn::Expr::Lit(syn::ExprLit {
               lit: syn::Lit::Str(s), ..
             }) = &nv.value
-            {
-              tag = Some(s.value());
-            }
+          {
+            tag = Some(s.value());
+          }
           if nv.path.is_ident("content") {
             has_content = true;
           }

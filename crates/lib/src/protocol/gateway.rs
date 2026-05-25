@@ -101,7 +101,7 @@ impl Decoder for GatewayEndec {
         Err(err) => {
           return Err(EndecError::TypedDecode {
             error: TypedDecodeError::Rmp(err),
-            probe: try_probe_envelope_msgpack(payload),
+            probe: Box::new(try_probe_envelope_msgpack(payload)),
           });
         }
       },
@@ -110,7 +110,7 @@ impl Decoder for GatewayEndec {
         Err(err) => {
           return Err(EndecError::TypedDecode {
             error: TypedDecodeError::Json(err),
-            probe: try_probe_envelope_json(payload),
+            probe: Box::new(try_probe_envelope_json(payload)),
           });
         }
       },

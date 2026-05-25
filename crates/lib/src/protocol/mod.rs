@@ -101,7 +101,7 @@ pub enum EndecError {
   #[error("typed decode failed (recoverable): {error}")]
   TypedDecode {
     error: TypedDecodeError,
-    probe: EnvelopeProbe,
+    probe: Box<EnvelopeProbe>,
   },
   #[error(transparent)]
   Io(#[from] std::io::Error),

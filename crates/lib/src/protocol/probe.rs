@@ -96,9 +96,6 @@ pub fn try_probe_envelope_msgpack(bytes: &[u8]) -> EnvelopeProbe {
   probe
 }
 
-/// Walk a JSON body without typed defs and pull out the envelope
-/// fields we care about. Mirrors `try_probe_envelope_msgpack` for the
-/// local websocket protocol.
 pub fn try_probe_envelope_json(bytes: &[u8]) -> EnvelopeProbe {
   let mut probe = EnvelopeProbe::default();
   let value: Value = match serde_json::from_slice(bytes) {
@@ -117,18 +114,20 @@ pub fn try_probe_envelope_json(bytes: &[u8]) -> EnvelopeProbe {
       probe.meta_kind = Some(kind.clone());
     }
     if let Some(Value::Object(meta_data)) = meta.get("data")
-      && let Some(rid) = meta_data.get("requestId") {
-        probe.request_id = json_uuid(rid);
-      }
+      && let Some(rid) = meta_data.get("requestId")
+    {
+      probe.request_id = json_uuid(rid);
+    }
   }
   if let Some(Value::Object(data)) = map.get("data") {
     if let Some(Value::String(type_str)) = data.get("type") {
       probe.data_type = Some(type_str.clone());
     }
     if let Some(Value::Object(inner)) = data.get("data")
-      && let Some(Value::String(event)) = inner.get("event") {
-        probe.data_event = Some(event.clone());
-      }
+      && let Some(Value::String(event)) = inner.get("event")
+    {
+      probe.data_event = Some(event.clone());
+    }
   }
 
   probe
