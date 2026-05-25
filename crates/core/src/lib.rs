@@ -33,10 +33,16 @@ use als::{AlsConfig, AlsManager};
 use asset::{AssetCache, AssetIngest};
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothBringup, BluetoothDeps, BluetoothManager};
+#[cfg(feature = "test-tap")]
+pub use bluetooth::{Iap2Event, Iap2InjectTx};
 use capabilities::CapabilitiesRegistry;
+#[cfg(feature = "test-tap")]
+pub use handler::client::{ClientMode, PossibleSendMsg};
 use handler::{ClientHandler, GatewayHandler};
-use libbridgething::BRIDGETHING_NETWORK_GATEWAY_PORT;
+use libbridgething::{BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use mic::{MicConfig, MicManager};
+#[cfg(feature = "test-tap")]
+pub use net::TappedFrame;
 use ota::{OtaOrchestrator, OtaTerminators, RangeProxy};
 use peer::PeerTracker;
 use player::Player;
@@ -53,7 +59,16 @@ pub struct Daemon {
   pub state: State,
   #[cfg(feature = "test-tap")]
   pub inject: Option<HeadlessInject>,
+  #[cfg(feature = "test-tap")]
+  pub server_addrs: ServerAddrs,
   loop_fut: Pin<Box<dyn Future<Output = ()> + Send>>,
+}
+
+#[cfg(feature = "test-tap")]
+#[derive(Clone, Copy, Debug)]
+pub struct ServerAddrs {
+  pub stock: SocketAddr,
+  pub modern: SocketAddr,
 }
 
 impl Daemon {
@@ -231,15 +246,14 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     bluetooth.iap2.transport.clone(),
   );
 
-  let server = if config.bind_servers {
-    notifier.status("initializing server binds...");
-    Some(
-      net::Server::bind(state.clone())
-        .await
-        .expect("failed to bind to 127.0.0.1:8890"),
-    )
-  } else {
-    None
+  notifier.status("initializing server binds...");
+  let server = net::Server::bind(state.clone(), config.stock_bind, config.modern_bind)
+    .await
+    .expect("failed to bind client servers");
+  #[cfg(feature = "test-tap")]
+  let server_addrs = ServerAddrs {
+    stock: server.stock_addr(),
+    modern: server.modern_addr(),
   };
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
@@ -262,7 +276,10 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     #[cfg(feature = "test-tap")]
     BluetoothMode::Headless => {
       let (inject_tx, inject_rx) = bluetooth::inject_channel();
-      headless_inject = Some(HeadlessInject { rfcomm: inject_tx });
+      headless_inject = Some(HeadlessInject {
+        rfcomm: inject_tx,
+        iap2: bluetooth_bootstrap.iap2_inject_tx(),
+      });
       BluetoothBringup::Headless(inject_rx)
     }
   };
@@ -292,13 +309,8 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
     loop {
       tokio::select! {
-        client_conn = async {
-          match server.as_mut() {
-            Some(server) => Some(server.listen().await),
-            None => std::future::pending().await,
-          }
-        } => {
-          if let Some(Ok((stream, address, mode))) = client_conn
+        client_conn = server.listen() => {
+          if let Ok((stream, address, mode)) = client_conn
             && let Err(err) = client_man.handle_connection(address, stream, mode, &state).await {
               tracing::error!("failed to accept tcp stream: {:?}", err);
             }
@@ -325,9 +337,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
     tracing::info!("shutting down...");
     state.chrome.shutdown().await;
-    if let Some(server) = server {
-      server.shutdown().await;
-    }
+    server.shutdown().await;
     range_proxy_handle.cancel.cancel();
 
     tracing::info!("thank you for using bridgething!");
@@ -337,6 +347,8 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     state: state_out,
     #[cfg(feature = "test-tap")]
     inject: headless_inject,
+    #[cfg(feature = "test-tap")]
+    server_addrs,
     loop_fut,
   }
 }
@@ -345,6 +357,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 #[derive(Clone)]
 pub struct HeadlessInject {
   pub rfcomm: bluetooth::InjectConnectionTx,
+  pub iap2: bluetooth::Iap2InjectTx,
 }
 
 pub enum BluetoothMode {
@@ -356,7 +369,8 @@ pub enum BluetoothMode {
 pub struct DaemonConfig {
   pub bluetooth: BluetoothMode,
   pub network_bind: SocketAddr,
-  pub bind_servers: bool,
+  pub stock_bind: SocketAddr,
+  pub modern_bind: SocketAddr,
   pub handle_signals: bool,
   pub install_logger: bool,
   pub state_dir: Option<PathBuf>,
@@ -369,7 +383,8 @@ impl DaemonConfig {
     Self {
       bluetooth: BluetoothMode::Real,
       network_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_NETWORK_GATEWAY_PORT)),
-      bind_servers: true,
+      stock_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_STOCK_WS_PORT)),
+      modern_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_WS_MODERN_PORT)),
       handle_signals: true,
       install_logger: true,
       state_dir: None,
@@ -383,7 +398,8 @@ impl DaemonConfig {
     Self {
       bluetooth: BluetoothMode::Headless,
       network_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
-      bind_servers: false,
+      stock_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+      modern_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       handle_signals: false,
       install_logger: false,
       webapps_dir: Some(state_dir.join("webapps")),

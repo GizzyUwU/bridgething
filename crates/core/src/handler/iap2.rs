@@ -31,7 +31,6 @@ use crate::{
   bluetooth::{
     BluetoothMan,
     iap2::{Iap2EaGatewayHandle, Iap2Event, Iap2ReconnectHandle, StreamClosed, StreamOpened},
-    profiles::ProfileMan,
   },
   state::State,
 };
@@ -102,7 +101,6 @@ impl Iap2PendingArt {
 pub struct Iap2EventRouter {
   state: State,
   bluetooth: BluetoothMan,
-  profile_man: ProfileMan,
   ea_gateway: Iap2EaGatewayHandle,
   reconnect: Iap2ReconnectHandle,
   pending_art: Iap2PendingArt,
@@ -114,7 +112,6 @@ impl Iap2EventRouter {
   pub fn new(
     state: State,
     bluetooth: BluetoothMan,
-    profile_man: ProfileMan,
     ea_gateway: Iap2EaGatewayHandle,
     reconnect: Iap2ReconnectHandle,
     pending_art: Iap2PendingArt,
@@ -122,7 +119,6 @@ impl Iap2EventRouter {
     Self {
       state,
       bluetooth,
-      profile_man,
       ea_gateway,
       reconnect,
       pending_art,
@@ -141,7 +137,9 @@ impl Iap2EventRouter {
           peer_max_len = lsp.max_len,
           "iAP2 link Established",
         );
-        if let Err(err) = self.profile_man.upsert_paired_device(address, DeviceType::Ios).await {
+        if let Some(profile_man) = self.bluetooth.profile_man.try_get()
+          && let Err(err) = profile_man.upsert_paired_device(address, DeviceType::Ios).await
+        {
           tracing::warn!(%address, ?err, "failed to upsert peer for iAP2 link");
         }
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::LinkUp).await;

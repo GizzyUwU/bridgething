@@ -35,6 +35,8 @@ mod debug;
 mod packer;
 mod peer_owners;
 
+#[cfg(feature = "test-tap")]
+pub use iap2::{Iap2Event, Iap2InjectTx};
 use le::{LeBootstrap, LeManager};
 use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
@@ -94,6 +96,14 @@ pub(crate) struct BluetoothBootstrap {
   profile_man_tx: watch::Sender<Option<ProfileMan>>,
 }
 
+#[cfg(feature = "test-tap")]
+impl BluetoothBootstrap {
+  /// Clone of the iAP2 event sender for the headless inject lane.
+  pub(crate) fn iap2_inject_tx(&self) -> Iap2InjectTx {
+    self.iap2_bootstrap.events_tx()
+  }
+}
+
 impl BluetoothManager {
   pub(crate) fn create() -> (BluetoothMan, BluetoothBootstrap) {
     let (gateway_man, gateway_bootstrap) = GatewayMan::allocate();
@@ -151,9 +161,13 @@ impl BluetoothManager {
     match bringup {
       #[cfg(feature = "test-tap")]
       BluetoothBringup::Headless(inject_rx) => {
-        let BluetoothBootstrap { gateway, .. } = bootstrap;
-        tracing::debug!("bringing up gateway transports with no radio (headless)");
-        let _runtime = self
+        let BluetoothBootstrap {
+          gateway,
+          mut iap2_events_rx,
+          ..
+        } = bootstrap;
+        tracing::debug!("bringing up gateway transports + iap2 router with no radio (headless)");
+        let gateway_runtime = self
           .gateway_man
           .start(
             gateway,
@@ -163,8 +177,25 @@ impl BluetoothManager {
             bluetooth_tx,
           )
           .await?;
-        std::future::pending::<()>().await;
-        Ok(())
+
+        let pending_art = state.iap2_pending_art.clone();
+        let router = Arc::new(Iap2EventRouter::new(
+          state,
+          self.clone(),
+          gateway_runtime.iap2_ea_handle.clone(),
+          self.iap2.reconnect.clone(),
+          pending_art,
+        ));
+
+        loop {
+          match iap2_events_rx.recv().await {
+            Some(event) => router.route(event).await,
+            None => {
+              tracing::warn!("headless coordinator: iap2 event stream ended; parking");
+              std::future::pending::<()>().await;
+            }
+          }
+        }
       }
       BluetoothBringup::Real => {
         let BluetoothBootstrap {
@@ -233,7 +264,6 @@ impl BluetoothManager {
         let router = Arc::new(Iap2EventRouter::new(
           state,
           self.clone(),
-          profile_man.clone(),
           gateway_runtime.iap2_ea_handle.clone(),
           self.iap2.reconnect.clone(),
           pending_art,

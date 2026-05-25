@@ -181,7 +181,7 @@ async fn writer_task(
       tracing::error!(?err, "failed to encode outbound frame - skipping");
       continue;
     }
-    if let Err(err) = sink.send(WsMessage::Binary(buf.freeze().into())).await {
+    if let Err(err) = sink.send(WsMessage::Binary(buf.freeze())).await {
       tracing::warn!(?err, "ws write error - exiting writer");
       break;
     }

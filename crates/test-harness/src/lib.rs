@@ -12,7 +12,8 @@ use std::{
 
 use anyhow::Result;
 use bluer::Address;
-use bridgething::{DaemonConfig, HeadlessInject, State};
+use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, ServerAddrs, State, TappedFrame};
+use bridgething_iap2::SessionEvent;
 use futures::{SinkExt, StreamExt};
 use libbridgething::{
   AssetRetention, CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, NowPlayingUpdate,
@@ -23,7 +24,8 @@ use libbridgething::{
   protocol::GatewayEndec,
   wire::MsgMeta,
 };
-use tokio::{io::DuplexStream, task::JoinHandle};
+use tokio::{io::DuplexStream, net::TcpStream, sync::broadcast, task::JoinHandle};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 
@@ -34,6 +36,7 @@ const DUPLEX_BUF: usize = 256 * 1024;
 pub struct Harness {
   state: State,
   inject: HeadlessInject,
+  server_addrs: ServerAddrs,
   next_peer: AtomicU8,
   _daemon: JoinHandle<()>,
   _state_dir: tempfile::TempDir,
@@ -51,11 +54,13 @@ impl Harness {
       .inject
       .clone()
       .expect("headless assembly must expose inject handles");
+    let server_addrs = assembled.server_addrs;
     let daemon = tokio::spawn(assembled.run());
 
     Ok(Self {
       state,
       inject,
+      server_addrs,
       next_peer: AtomicU8::new(1),
       _daemon: daemon,
       _state_dir: state_dir,
@@ -78,6 +83,38 @@ impl Harness {
     Ok(MockPhone::new(phone_half, addr))
   }
 
+  /// Inject a raw iAP2 `SessionEvent` for `address` into the same channel
+  /// the real `Iap2Manager` feeds. The unmodified `Iap2EventRouter` routes
+  /// it through the real Player merge / stock translation / broadcast - no
+  /// Link, no session, no MFi. This is the iOS T1/T2 driver: the session
+  /// events are what a real iPhone's iAP2 session produces, minus the radio.
+  pub async fn inject_iap2(&self, address: Address, event: SessionEvent) -> Result<()> {
+    self.inject.iap2.send(Iap2Event { address, event }).await?;
+    Ok(())
+  }
+
+  /// Deliver iAP2 artwork bytes (the FileTransfer the daemon pairs to a
+  /// prior now-playing delta's `artwork_id`). On a real iPhone these arrive
+  /// a beat after the metadata - the latency the cover-art bug rides.
+  pub async fn iap2_artwork(&self, address: Address, transfer_id: u8, bytes: Vec<u8>) -> Result<()> {
+    self
+      .inject_iap2(
+        address,
+        SessionEvent::ArtworkBytes {
+          transfer_id,
+          bytes: bytes.into(),
+        },
+      )
+      .await
+  }
+
+  /// Convenience: an iAP2 peer address distinct from the Android range, so
+  /// scenarios mixing both transports get non-colliding peers.
+  pub fn iap2_peer(&self) -> Address {
+    let n = self.next_peer.fetch_add(1, Ordering::Relaxed);
+    Address([0xA9, 0x00, 0x00, 0x00, 0x00, n])
+  }
+
   /// Poll a predicate against daemon state until it holds or the timeout
   /// elapses. The daemon applies wire messages asynchronously, so state
   /// assertions converge rather than being instantaneous.
@@ -95,6 +132,101 @@ impl Harness {
       }
       tokio::time::sleep(Duration::from_millis(5)).await;
     }
+  }
+
+  /// Observe the daemon's egress frame mirror. Each frame is one
+  /// post-translation message the daemon sent to a client connection - the
+  /// observer side of the flicker bug, where the symptom is a broadcast
+  /// stream that oscillates even when settled state looks clean. Start
+  /// observing before driving a scenario; only frames sent afterward arrive.
+  pub fn observe_frames(&self) -> FrameObserver {
+    FrameObserver {
+      rx: self.state.client_man.subscribe_frames(),
+    }
+  }
+
+  /// Open a real modern-mode websocket to the daemon's bound modern port.
+  /// The daemon proactively pushes a capabilities snapshot to every new
+  /// modern client, so a connect alone produces an observable egress frame.
+  pub async fn connect_modern_client(&self) -> Result<MockWsClient> {
+    let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.modern)).await?;
+    Ok(MockWsClient { stream })
+  }
+
+  /// Open a real stock-mode websocket to the daemon's bound stock port. The
+  /// daemon broadcasts stock-translated now-playing to it like any client,
+  /// so a bare stock connection observes the merge/re-broadcast suspects.
+  /// (The serve-asset suspect is request-driven and needs the real SPA - T2.)
+  pub async fn connect_stock_client(&self) -> Result<MockWsClient> {
+    let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.stock)).await?;
+    Ok(MockWsClient { stream })
+  }
+}
+
+/// Ergonomic view over the egress frame mirror. Wraps the broadcast receiver
+/// with predicate-wait and windowed-collect helpers scenarios assert against.
+pub struct FrameObserver {
+  rx: broadcast::Receiver<TappedFrame>,
+}
+
+impl FrameObserver {
+  /// Wait for an egress frame matching `pred`, or None on timeout. Lagged
+  /// frames (a slow observer falling behind the broadcast ring) are skipped.
+  pub async fn wait_for<F>(&mut self, timeout: Duration, pred: F) -> Option<TappedFrame>
+  where
+    F: Fn(&TappedFrame) -> bool,
+  {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() {
+        return None;
+      }
+      match tokio::time::timeout(remaining, self.rx.recv()).await {
+        Ok(Ok(frame)) if pred(&frame) => return Some(frame),
+        Ok(Ok(_)) => continue,
+        Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+        Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return None,
+      }
+    }
+  }
+
+  /// Collect every frame observed over `window`. Use to assert on an ordered
+  /// sequence (e.g. an art id that must never revert to absent).
+  pub async fn collect_for(&mut self, window: Duration) -> Vec<TappedFrame> {
+    let mut frames = Vec::new();
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() {
+        return frames;
+      }
+      match tokio::time::timeout(remaining, self.rx.recv()).await {
+        Ok(Ok(frame)) => frames.push(frame),
+        Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+        Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return frames,
+      }
+    }
+  }
+}
+
+/// A real websocket client against the daemon's client server. Holds the
+/// stream open so the daemon keeps the connection; `recv` reads the next
+/// text frame the daemon sent.
+pub struct MockWsClient {
+  stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+}
+
+impl MockWsClient {
+  pub async fn recv(&mut self) -> Option<String> {
+    while let Some(msg) = self.stream.next().await {
+      match msg {
+        Ok(Message::Text(text)) => return Some(text.to_string()),
+        Ok(_) => continue,
+        Err(_) => return None,
+      }
+    }
+    None
   }
 }
 

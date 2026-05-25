@@ -98,6 +98,9 @@ pub struct Iap2Event {
 
 pub type Iap2EventsRx = mpsc::Receiver<Iap2Event>;
 
+#[cfg(feature = "test-tap")]
+pub type Iap2InjectTx = mpsc::Sender<Iap2Event>;
+
 #[derive(Debug)]
 struct ActiveSession {
   generation: u64,
@@ -212,6 +215,13 @@ pub(super) struct Iap2Bootstrap {
   events_tx: mpsc::Sender<Iap2Event>,
   session_dead_tx: mpsc::Sender<(Address, u64)>,
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
+}
+
+#[cfg(feature = "test-tap")]
+impl Iap2Bootstrap {
+  pub(super) fn events_tx(&self) -> Iap2InjectTx {
+    self.events_tx.clone()
+  }
 }
 
 pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {

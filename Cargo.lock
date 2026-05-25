@@ -550,10 +550,12 @@ dependencies = [
  "anyhow",
  "bluer",
  "bridgething",
+ "bridgething-iap2",
  "futures",
  "libbridgething",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "uuid",
 ]

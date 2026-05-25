@@ -68,8 +68,7 @@ use crate::{
 /// need to wrap.
 pub type MfiResult<T> = std::result::Result<T, MfiError>;
 
-/// Async-trait surface over the MFi coprocessor. Two methods, one
-/// production impl ([`WorkerMfiAccess`]), and tests fake their own.
+/// Async-trait surface over the MFi coprocessor.
 #[async_trait]
 pub trait MfiAccess: Send + 'static {
   async fn cert(&mut self) -> MfiResult<Bytes>;
@@ -155,6 +154,7 @@ pub struct Iap2Session<M: MfiAccess> {
 }
 
 impl<M: MfiAccess> Iap2Session<M> {
+  #[allow(clippy::too_many_arguments)]
   pub fn new(
     identification: IdentificationConfig,
     mfi: M,
@@ -178,10 +178,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     )
   }
 
-  /// Construct a session that will auto-fire `RequestAppLaunch` for
-  /// `bundle_id` once identification reaches Accepted. Pass `None`
-  /// to skip the launch step (companion-less mode, dev builds with
-  /// no installed companion, etc.).
+  #[allow(clippy::too_many_arguments)]
   pub fn with_app_launch(
     identification: IdentificationConfig,
     app_launch_bundle_id: Option<String>,
@@ -367,9 +364,6 @@ impl<M: MfiAccess> Iap2Session<M> {
   }
 }
 
-/// Encode `csm` and dispatch it as a link `Send` on the control
-/// session. Shared by every flow; `pub(super)` so flow modules don't
-/// need to re-implement encode bookkeeping.
 pub(super) async fn send_csm<F>(csm: F, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()>
 where
   F: Into<CsmFrame>,
@@ -387,9 +381,6 @@ where
   Ok(())
 }
 
-/// Best-effort emit; logs at debug if the receiver is gone (which is
-/// recoverable - the session keeps running, the consumer just won't
-/// see the event).
 pub(super) async fn emit(tx: &mpsc::Sender<SessionEvent>, event: SessionEvent) {
   if tx.send(event).await.is_err() {
     tracing::debug!("iap2 session: events receiver dropped");

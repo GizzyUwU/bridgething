@@ -647,14 +647,13 @@ fn typeshared_adjacent_tag(attrs: &[syn::Attribute]) -> Option<String> {
       };
       for meta in nested {
         if let Meta::NameValue(nv) = meta {
-          if nv.path.is_ident("tag") {
-            if let syn::Expr::Lit(syn::ExprLit {
+          if nv.path.is_ident("tag")
+            && let syn::Expr::Lit(syn::ExprLit {
               lit: syn::Lit::Str(s), ..
             }) = &nv.value
             {
               tag = Some(s.value());
             }
-          }
           if nv.path.is_ident("content") {
             has_content = true;
           }

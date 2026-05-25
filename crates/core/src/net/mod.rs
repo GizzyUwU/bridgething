@@ -12,8 +12,9 @@ use axum::{
   response::{IntoResponse, Response},
 };
 pub use bus::WireEventBus;
+#[cfg(feature = "test-tap")]
+pub use connman::TappedFrame;
 pub use connman::{ClientMan, create_client_manager};
-use libbridgething::{BRIDGETHING_STOCK_WS_PORT, BRIDGETHING_WS_MODERN_PORT};
 use reqwest::StatusCode;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +33,11 @@ pub struct Server {
   rx: ServerRx,
   cancel_token: CancellationToken,
 
+  #[cfg(feature = "test-tap")]
+  stock_addr: SocketAddr,
+  #[cfg(feature = "test-tap")]
+  modern_addr: SocketAddr,
+
   _stock_handle: tokio::task::JoinHandle<()>,
   _modern_handle: tokio::task::JoinHandle<()>,
 }
@@ -43,13 +49,7 @@ struct ModernRouterState {
 }
 
 impl Server {
-  pub async fn bind(state: BridgeThingState) -> WSResult<Self> {
-    tracing::debug!(
-      "binding to ports {} (stock) and {} (modern + file serve)",
-      BRIDGETHING_STOCK_WS_PORT,
-      BRIDGETHING_WS_MODERN_PORT
-    );
-
+  pub async fn bind(state: BridgeThingState, stock_bind: SocketAddr, modern_bind: SocketAddr) -> WSResult<Self> {
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let cancel_token = CancellationToken::new();
 
@@ -62,13 +62,11 @@ impl Server {
       .fallback(axum::routing::any(modern_handler))
       .with_state(modern_state);
 
-    let stock_listener = TcpListener::bind(format!("0.0.0.0:{}", BRIDGETHING_STOCK_WS_PORT)).await?;
-    let modern_listener = TcpListener::bind(format!("0.0.0.0:{}", BRIDGETHING_WS_MODERN_PORT)).await?;
-    tracing::info!(
-      "listening on ports {} (stock) and {} (modern)",
-      BRIDGETHING_STOCK_WS_PORT,
-      BRIDGETHING_WS_MODERN_PORT
-    );
+    let stock_listener = TcpListener::bind(stock_bind).await?;
+    let modern_listener = TcpListener::bind(modern_bind).await?;
+    let stock_addr = stock_listener.local_addr().unwrap_or(stock_bind);
+    let modern_addr = modern_listener.local_addr().unwrap_or(modern_bind);
+    tracing::info!("listening on {stock_addr} (stock) and {modern_addr} (modern + file serve)");
 
     let stock_cancel_token = cancel_token.clone();
     let _stock_handle = tokio::spawn(async move {
@@ -98,9 +96,24 @@ impl Server {
       rx,
       cancel_token,
 
+      #[cfg(feature = "test-tap")]
+      stock_addr,
+      #[cfg(feature = "test-tap")]
+      modern_addr,
+
       _stock_handle,
       _modern_handle,
     })
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn stock_addr(&self) -> SocketAddr {
+    self.stock_addr
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn modern_addr(&self) -> SocketAddr {
+    self.modern_addr
   }
 
   /// cancel-safe

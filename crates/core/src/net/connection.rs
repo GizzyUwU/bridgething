@@ -30,6 +30,9 @@ pub struct Connection {
   rx: SendRx,
 
   cancel_token: CancellationToken,
+
+  #[cfg(feature = "test-tap")]
+  frame_tap: tokio::sync::broadcast::Sender<super::connman::TappedFrame>,
 }
 
 impl Connection {
@@ -40,6 +43,7 @@ impl Connection {
     rx: SendRx,
     cancel_token: CancellationToken,
     mode: ClientMode,
+    #[cfg(feature = "test-tap")] frame_tap: tokio::sync::broadcast::Sender<super::connman::TappedFrame>,
   ) -> JoinHandle<()> {
     tracing::debug!("spawning listener for {address} in {:?} mode", &mode);
     let (writer, reader) = ws.split();
@@ -56,6 +60,9 @@ impl Connection {
         rx,
 
         cancel_token,
+
+        #[cfg(feature = "test-tap")]
+        frame_tap,
       }
       .listen()
       .await
@@ -189,6 +196,13 @@ impl Connection {
   }
 
   async fn send(&mut self, msg: PossibleSendMsg) {
+    #[cfg(feature = "test-tap")]
+    let _ = self.frame_tap.send(super::connman::TappedFrame {
+      to: self.address,
+      mode: self.mode,
+      msg: msg.clone(),
+    });
+
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => {

@@ -25,8 +25,24 @@ use crate::{
   stock::StockSendMsg,
 };
 
-/// default timeout for daemon-initiated typed client requests
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(feature = "test-tap")]
+const FRAME_TAP_CAPACITY: usize = 256;
+
+#[cfg(feature = "test-tap")]
+#[derive(Debug, Clone)]
+pub struct TappedFrame {
+  pub to: SocketAddr,
+  pub mode: ClientMode,
+  pub msg: PossibleSendMsg,
+}
+
+#[cfg(feature = "test-tap")]
+impl TappedFrame {
+  pub fn json(&self) -> String {
+    serde_json::to_string(&self.msg).unwrap_or_default()
+  }
+}
 
 #[derive(Debug)]
 struct ClientData {
@@ -57,11 +73,7 @@ impl ClientListener {
     Self { rx, client_man }
   }
 
-  /// cancel-safe. Loops past response-meta inbound messages - those
-  /// are routed straight to `ClientManager::complete_pending` to resolve
-  /// pending daemon-initiated typed requests, and the caller never sees
-  /// them. Stray responses (no matching pending request) are warn-logged
-  /// and dropped.
+  /// cancel-safe
   pub async fn recv(&mut self) -> WSResult<RecvMsg> {
     loop {
       let msg = self.rx.recv().await.ok_or(WSError::ChannelClosed)?;
@@ -98,12 +110,10 @@ pub struct ClientManager {
   cancel_token: CancellationToken,
 
   tx: RecvTx,
-
-  /// Pending daemon-initiated typed requests, keyed by the request id
-  /// echoed back in `BridgeToClientMsg.meta = Response { request_id }`.
-  /// The connection layer drops Response-meta inbound messages into
-  /// `complete_pending` instead of normal dispatch.
   pending: Mutex<HashMap<Uuid, oneshot::Sender<ClientToBridgeMsgData>>>,
+
+  #[cfg(feature = "test-tap")]
+  frame_tap: tokio::sync::broadcast::Sender<TappedFrame>,
 }
 
 impl ClientManager {
@@ -116,7 +126,20 @@ impl ClientManager {
 
       tx,
       pending: Mutex::new(HashMap::new()),
+
+      #[cfg(feature = "test-tap")]
+      frame_tap: tokio::sync::broadcast::channel(FRAME_TAP_CAPACITY).0,
     }
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn subscribe_frames(&self) -> tokio::sync::broadcast::Receiver<TappedFrame> {
+    self.frame_tap.subscribe()
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn client_count(&self) -> usize {
+    self.connections.len()
   }
 
   pub fn change_mode(&self, from: &SocketAddr, mode: &ClientMode) {
@@ -169,14 +192,10 @@ impl ClientManager {
     if errors.is_empty() { Ok(()) } else { Err(errors) }
   }
 
-  /// Send a typed event to one specific webapp connection. Stock-mode
-  /// connections get the translated form; modern-mode connections get
-  /// the wire shape.
   pub async fn send_event<E: WireEvent<BridgeToClientMsgData>>(&self, to: SocketAddr, event: E) -> WSResult<()> {
     self.send(Uuid::now_v7(), to, event.into(), MsgMeta::Event, None).await
   }
 
-  /// Broadcast a typed event to every connected webapp.
   pub async fn broadcast_event<E: WireEvent<BridgeToClientMsgData> + Clone>(
     &self,
     event: E,
@@ -184,12 +203,10 @@ impl ClientManager {
     self.broadcast(event.into(), MsgMeta::Event).await
   }
 
-  /// Send a typed command to one specific webapp connection.
   pub async fn send_command<C: WireCommand<BridgeToClientMsgData>>(&self, to: SocketAddr, cmd: C) -> WSResult<()> {
     self.send(Uuid::now_v7(), to, cmd.into(), MsgMeta::Command, None).await
   }
 
-  /// Broadcast a typed command to every connected webapp.
   pub async fn broadcast_command<C: WireCommand<BridgeToClientMsgData> + Clone>(
     &self,
     cmd: C,
@@ -197,13 +214,6 @@ impl ClientManager {
     self.broadcast(cmd.into(), MsgMeta::Command).await
   }
 
-  /// Send a typed request to a specific webapp and await the typed
-  /// response. Times out after 10 seconds. The webapp is expected to
-  /// echo the request id back in `MsgMeta::Response { request_id }`.
-  ///
-  /// Domain errors surface as `RequestError::Domain(_)`; protocol
-  /// failures (`WireError`, channel close, timeout) as
-  /// `RequestError::Protocol(_)`.
   pub async fn request<R>(&self, to: SocketAddr, req: R) -> Result<R::Response, RequestError<R::DomainError>>
   where
     R: WireRequest<Outbound = BridgeToClientMsgData, Inbound = ClientToBridgeMsgData>,
@@ -240,10 +250,6 @@ impl ClientManager {
     }
   }
 
-  /// Consume an inbound `Response`-meta message by completing the
-  /// matching pending request. Returns `true` if the message was
-  /// consumed (caller should not dispatch further); `false` if no
-  /// pending request matched.
   pub fn complete_pending(&self, request_id: &Uuid, data: ClientToBridgeMsgData) -> bool {
     let tx = self
       .pending
@@ -258,8 +264,6 @@ impl ClientManager {
     }
   }
 
-  /// Lift a `ResponseMeta` to a `Uuid` request id. Convenience for
-  /// the connection layer which holds the meta as a value.
   pub fn complete_pending_meta(&self, meta: &ResponseMeta, data: ClientToBridgeMsgData) -> bool {
     self.complete_pending(&meta.request_id, data)
   }
@@ -316,7 +320,16 @@ impl ClientManager {
       tx,
       mode,
 
-      _handle: Connection::spawn(address, ws, self.tx.clone(), rx, cancel_token.clone(), mode),
+      _handle: Connection::spawn(
+        address,
+        ws,
+        self.tx.clone(),
+        rx,
+        cancel_token.clone(),
+        mode,
+        #[cfg(feature = "test-tap")]
+        self.frame_tap.clone(),
+      ),
       cancel_token,
     };
 
