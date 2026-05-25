@@ -54,9 +54,15 @@ goldens:
 cross-build:
   CARGO_TARGET_DIR={{cross_target_dir}} cross build --release -p bridgething --target {{cross_target}} --no-default-features --features superbird --config profile.release.lto=false --config profile.release.codegen-units=32
 
+cross-build-test:
+  CARGO_TARGET_DIR={{cross_target_dir}} cross build --release -p bridgething --target {{cross_target}} --no-default-features --features "superbird,test-tap" --config profile.release.lto=false --config profile.release.codegen-units=32
+
 # Cross-build then push the daemon to /opt/bridgething/daemon/
 push: cross-build
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
+
+push-test: cross-build-test
+  scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/deps/bridgething
 
 # Push a webapp bundle into /var/bridgething/webapps/<name>/
 push-webapp local name="":

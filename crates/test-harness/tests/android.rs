@@ -7,8 +7,7 @@ use std::time::Duration;
 
 use bridgething_test_harness::Harness;
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate,
-  gateway::AuthorityClaim,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate, gateway::AuthorityClaim,
 };
 
 const CONVERGE: Duration = Duration::from_secs(3);

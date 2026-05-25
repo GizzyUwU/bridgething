@@ -37,9 +37,13 @@ pub struct Server {
   stock_addr: SocketAddr,
   #[cfg(feature = "test-tap")]
   modern_addr: SocketAddr,
+  #[cfg(feature = "test-tap")]
+  frame_tap_addr: SocketAddr,
 
   _stock_handle: tokio::task::JoinHandle<()>,
   _modern_handle: tokio::task::JoinHandle<()>,
+  #[cfg(feature = "test-tap")]
+  _frame_tap_handle: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Clone)]
@@ -49,9 +53,17 @@ struct ModernRouterState {
 }
 
 impl Server {
-  pub async fn bind(state: BridgeThingState, stock_bind: SocketAddr, modern_bind: SocketAddr) -> WSResult<Self> {
+  pub async fn bind(
+    state: BridgeThingState,
+    stock_bind: SocketAddr,
+    modern_bind: SocketAddr,
+    #[cfg(feature = "test-tap")] frame_tap_bind: SocketAddr,
+  ) -> WSResult<Self> {
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let cancel_token = CancellationToken::new();
+
+    #[cfg(feature = "test-tap")]
+    let frame_tap_state = state.clone();
 
     let stock_app = Router::new()
       .fallback(axum::routing::any(stock_ws_handler))
@@ -92,6 +104,29 @@ impl Server {
       }
     });
 
+    #[cfg(feature = "test-tap")]
+    let (frame_tap_addr, _frame_tap_handle) = {
+      let frame_tap_app = Router::new()
+        .fallback(axum::routing::any(frame_tap_ws_handler))
+        .with_state(frame_tap_state);
+      let frame_tap_listener = TcpListener::bind(frame_tap_bind).await?;
+      let frame_tap_addr = frame_tap_listener.local_addr().unwrap_or(frame_tap_bind);
+      tracing::info!("listening on {frame_tap_addr} (frame-tap egress mirror)");
+
+      let frame_tap_cancel_token = cancel_token.clone();
+      let handle = tokio::spawn(async move {
+        tokio::select! {
+          _ = axum::serve(frame_tap_listener, frame_tap_app.into_make_service()) => {
+            tracing::error!("FATAL: frame-tap server stopped");
+          }
+          _ = frame_tap_cancel_token.cancelled() => {
+            tracing::debug!("frame-tap server shutting down");
+          }
+        }
+      });
+      (frame_tap_addr, handle)
+    };
+
     Ok(Self {
       rx,
       cancel_token,
@@ -100,9 +135,13 @@ impl Server {
       stock_addr,
       #[cfg(feature = "test-tap")]
       modern_addr,
+      #[cfg(feature = "test-tap")]
+      frame_tap_addr,
 
       _stock_handle,
       _modern_handle,
+      #[cfg(feature = "test-tap")]
+      _frame_tap_handle,
     })
   }
 
@@ -114,6 +153,11 @@ impl Server {
   #[cfg(feature = "test-tap")]
   pub fn modern_addr(&self) -> SocketAddr {
     self.modern_addr
+  }
+
+  #[cfg(feature = "test-tap")]
+  pub fn frame_tap_addr(&self) -> SocketAddr {
+    self.frame_tap_addr
   }
 
   /// cancel-safe
@@ -128,6 +172,10 @@ impl Server {
     }
     if let Err(err) = self._modern_handle.await {
       tracing::error!("failed to shutdown modern server: {:?}", err);
+    }
+    #[cfg(feature = "test-tap")]
+    if let Err(err) = self._frame_tap_handle.await {
+      tracing::error!("failed to shutdown frame-tap server: {:?}", err);
     }
   }
 }
@@ -250,6 +298,34 @@ async fn modern_ws_handler(ws: WebSocketUpgrade, addr: SocketAddr, tx: ServerTx)
   ws.on_upgrade(move |socket| async move {
     if let Err(err) = tx.send((socket, addr, ClientMode::Modern)).await {
       tracing::error!("failed to send new connection to server: {:?}", err);
+    }
+  })
+}
+
+#[cfg(feature = "test-tap")]
+async fn frame_tap_ws_handler(
+  ws: WebSocketUpgrade,
+  AxumState(state): AxumState<BridgeThingState>,
+) -> impl IntoResponse {
+  let mut frames = state.client_man.subscribe_frames();
+  ws.on_upgrade(move |mut socket| async move {
+    loop {
+      match frames.recv().await {
+        Ok(frame) => {
+          let Ok(json) = serde_json::to_string(&frame) else {
+            continue;
+          };
+          if socket
+            .send(axum::extract::ws::Message::Text(json.into()))
+            .await
+            .is_err()
+          {
+            break;
+          }
+        }
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+      }
     }
   })
 }

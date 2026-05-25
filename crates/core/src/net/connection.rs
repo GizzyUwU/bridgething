@@ -196,19 +196,20 @@ impl Connection {
   }
 
   async fn send(&mut self, msg: PossibleSendMsg) {
-    #[cfg(feature = "test-tap")]
-    let _ = self.frame_tap.send(super::connman::TappedFrame {
-      to: self.address,
-      mode: self.mode,
-      msg: msg.clone(),
-    });
-
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => {
         return tracing::error!(target: "bridgething::ws::connection::send", "({}) error converting message to json!!: {:?}", &self.address, err);
       }
     };
+
+    #[cfg(feature = "test-tap")]
+    let _ = self.frame_tap.send(super::connman::TappedFrame {
+      to: self.address,
+      mode: self.mode,
+      json: json.clone(),
+    });
+
     tracing::trace!(target: "bridgething::ws::connection::send", "sending json: {:?}", json);
 
     if let Err(err) = self.writer.send(ws::Message::Text(json.into())).await {

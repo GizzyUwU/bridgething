@@ -12,17 +12,20 @@ use std::{
 };
 
 mod chrome;
+mod device;
 use anyhow::Result;
 use bluer::Address;
 use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, ServerAddrs, State, TappedFrame};
 use bridgething_gateway::Gateway;
 use bridgething_iap2::SessionEvent;
 pub use chrome::ChromeView;
+pub use device::DeviceHarness;
 use futures::StreamExt;
 use tokio::{net::TcpStream, sync::broadcast, task::JoinHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 const DUPLEX_BUF: usize = 256 * 1024;
+const FRAME_OBSERVER_CAPACITY: usize = 256;
 
 /// A running headless daemon plus the handles a scenario needs to drive
 /// and observe it.
@@ -178,6 +181,14 @@ impl Harness {
   pub async fn open_stock_chrome(&self) -> Result<ChromeView> {
     ChromeView::launch(self.server_addrs.modern, self.server_addrs.stock.port()).await
   }
+
+  /// Observe egress frames through the daemon's frame-tap WS bridge instead of
+  /// the in-process broadcast. Same `FrameObserver`, fed by deserializing the
+  /// `TappedFrame`s the bridge ships - the observation transport a device rig
+  /// uses over the tunnel, validated here against the loopback daemon.
+  pub async fn connect_frame_tap_ws(&self) -> Result<FrameObserver> {
+    frame_tap_ws_observer(&format!("ws://{}/", self.server_addrs.frame_tap)).await
+  }
 }
 
 /// Ergonomic view over the egress frame mirror. Wraps the broadcast receiver
@@ -225,6 +236,35 @@ impl FrameObserver {
       }
     }
   }
+}
+
+/// Connect to a daemon's frame-tap WS bridge and adapt it into a `FrameObserver`.
+/// A background task deserializes each `TappedFrame` the bridge ships and
+/// re-publishes it onto a local broadcast the observer drains, so the same
+/// assertions work whether frames arrive in-process or over a tunnel. The task
+/// ends (and the observer sees the channel close) when the WS connection drops.
+pub async fn frame_tap_ws_observer(url: &str) -> Result<FrameObserver> {
+  let (stream, _resp) = connect_async(url).await?;
+  let (tx, _seed_rx) = broadcast::channel(FRAME_OBSERVER_CAPACITY);
+  let rx = tx.subscribe();
+
+  tokio::spawn(async move {
+    let mut stream = stream;
+    while let Some(msg) = stream.next().await {
+      match msg {
+        Ok(Message::Text(text)) => match serde_json::from_str::<TappedFrame>(text.as_str()) {
+          Ok(frame) => {
+            let _ = tx.send(frame);
+          }
+          Err(err) => eprintln!("frame-tap WS observer failed to decode a frame: {err}"),
+        },
+        Ok(Message::Close(_)) | Err(_) => break,
+        Ok(_) => continue,
+      }
+    }
+  });
+
+  Ok(FrameObserver { rx })
 }
 
 /// A real websocket client against the daemon's client server. Holds the

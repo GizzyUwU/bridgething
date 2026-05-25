@@ -21,7 +21,7 @@ pub type RecvRx = tokio::sync::mpsc::Receiver<RecvMsg>;
 pub type SendTx = tokio::sync::mpsc::Sender<PossibleSendMsg>;
 pub type SendRx = tokio::sync::mpsc::Receiver<PossibleSendMsg>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientMode {
   Modern,
   Stock,

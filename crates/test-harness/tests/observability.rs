@@ -25,6 +25,30 @@ async fn frame_tap_observes_new_modern_client_snapshot() {
   assert_eq!(observed.mode, ClientMode::Modern);
 }
 
+/// The same modern-snapshot scenario, observed through the frame-tap WS bridge
+/// instead of the in-process broadcast. Proves the bridge is honest: the daemon
+/// serializes a `TappedFrame`, ships it over the WS, the host deserializes the
+/// identical type, and `FrameObserver` sees it exactly as the in-process tap
+/// would. This is the observation transport a device rig uses over the tunnel.
+#[tokio::test]
+async fn frame_tap_ws_bridge_mirrors_in_process_tap() {
+  let harness = Harness::start().await.expect("harness start");
+  let mut frames = harness.connect_frame_tap_ws().await.expect("connect frame-tap ws");
+
+  let _client = harness.connect_modern_client().await.expect("connect modern client");
+
+  let observed = frames
+    .wait_for(Duration::from_secs(3), |f| f.mode == ClientMode::Modern)
+    .await
+    .expect("frame-tap WS bridge should deliver the modern snapshot frame");
+
+  assert_eq!(observed.mode, ClientMode::Modern);
+  assert!(
+    !observed.json().is_empty(),
+    "bridged frame should carry the serialized payload"
+  );
+}
+
 /// The daemon broadcasts stock-translated now-playing to a bare stock client
 /// like any other - no SPA request loop needed. Proves connect_stock_client
 /// + that the merge/re-broadcast suspects are observable on the stock lane.

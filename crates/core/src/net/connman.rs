@@ -30,17 +30,17 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_TAP_CAPACITY: usize = 256;
 
 #[cfg(feature = "test-tap")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TappedFrame {
   pub to: SocketAddr,
   pub mode: ClientMode,
-  pub msg: PossibleSendMsg,
+  pub json: String,
 }
 
 #[cfg(feature = "test-tap")]
 impl TappedFrame {
-  pub fn json(&self) -> String {
-    serde_json::to_string(&self.msg).unwrap_or_default()
+  pub fn json(&self) -> &str {
+    &self.json
   }
 }
 

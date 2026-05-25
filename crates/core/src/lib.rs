@@ -65,10 +65,14 @@ pub struct Daemon {
 }
 
 #[cfg(feature = "test-tap")]
+pub const FRAME_TAP_PORT: u16 = 8894;
+
+#[cfg(feature = "test-tap")]
 #[derive(Clone, Copy, Debug)]
 pub struct ServerAddrs {
   pub stock: SocketAddr,
   pub modern: SocketAddr,
+  pub frame_tap: SocketAddr,
 }
 
 impl Daemon {
@@ -247,13 +251,20 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   );
 
   notifier.status("initializing server binds...");
-  let server = net::Server::bind(state.clone(), config.stock_bind, config.modern_bind)
-    .await
-    .expect("failed to bind client servers");
+  let server = net::Server::bind(
+    state.clone(),
+    config.stock_bind,
+    config.modern_bind,
+    #[cfg(feature = "test-tap")]
+    config.frame_tap_bind,
+  )
+  .await
+  .expect("failed to bind client servers");
   #[cfg(feature = "test-tap")]
   let server_addrs = ServerAddrs {
     stock: server.stock_addr(),
     modern: server.modern_addr(),
+    frame_tap: server.frame_tap_addr(),
   };
 
   let client_handler = ClientHandler::new(state.clone(), bluetooth.clone(), transport);
@@ -371,6 +382,8 @@ pub struct DaemonConfig {
   pub network_bind: SocketAddr,
   pub stock_bind: SocketAddr,
   pub modern_bind: SocketAddr,
+  #[cfg(feature = "test-tap")]
+  pub frame_tap_bind: SocketAddr,
   pub handle_signals: bool,
   pub install_logger: bool,
   pub state_dir: Option<PathBuf>,
@@ -385,6 +398,8 @@ impl DaemonConfig {
       network_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_NETWORK_GATEWAY_PORT)),
       stock_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_STOCK_WS_PORT)),
       modern_bind: SocketAddr::from(([0, 0, 0, 0], BRIDGETHING_WS_MODERN_PORT)),
+      #[cfg(feature = "test-tap")]
+      frame_tap_bind: SocketAddr::from(([0, 0, 0, 0], FRAME_TAP_PORT)),
       handle_signals: true,
       install_logger: true,
       state_dir: None,
@@ -400,6 +415,7 @@ impl DaemonConfig {
       network_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       stock_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       modern_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+      frame_tap_bind: SocketAddr::from(([127, 0, 0, 1], 0)),
       handle_signals: false,
       install_logger: false,
       webapps_dir: Some(state_dir.join("webapps")),
