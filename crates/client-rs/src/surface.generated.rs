@@ -93,8 +93,7 @@ impl<'a> AssetSurface<'a> {
   pub async fn get(&self, request: AssetGet) -> Result<AssetGot, RequestFailure<AssetNotFound>> {
     self.0.request(request).await
   }
-  /// Stream of `Asset` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Asset` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientAssetMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -139,8 +138,7 @@ impl<'a> AudioSurface<'a> {
   pub async fn earcon(&self, payload: Earcon) -> Result<(), SdkError> {
     self.0.command(ClientToBridgeAudioMsgCommand::Earcon(payload)).await
   }
-  /// Stream of `Audio` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Audio` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientAudioMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -206,8 +204,7 @@ impl<'a> BluetoothSurface<'a> {
   pub async fn list(&self) -> Result<PairedDevicesMap, RequestFailure<::core::convert::Infallible>> {
     self.0.request(ListBluetoothDevices).await
   }
-  /// Stream of `Bluetooth` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Bluetooth` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientBluetoothMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -228,8 +225,7 @@ impl<'a> CapabilitiesSurface<'a> {
   pub async fn get(&self) -> Result<CapabilitiesSnapshot, RequestFailure<::core::convert::Infallible>> {
     self.0.request(CapabilitiesGet).await
   }
-  /// Stream of `Capabilities` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Capabilities` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientCapabilitiesMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -253,8 +249,7 @@ impl<'a> ConfigSurface<'a> {
   pub async fn list(&self) -> Result<ConfigListReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(ConfigList).await
   }
-  /// Stream of `Config` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Config` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientConfigMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -281,8 +276,7 @@ impl<'a> GeoSurface<'a> {
   pub async fn get_once(&self, request: GeoGetOnce) -> Result<GeoGetOnceReply, RequestFailure<GeoErrorReply>> {
     self.0.request(request).await
   }
-  /// Stream of `Geo` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Geo` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientGeoMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -315,8 +309,7 @@ impl<'a> HardwareSurface<'a> {
   pub async fn state_get(&self) -> Result<HardwareStateReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(HardwareStateGet).await
   }
-  /// Stream of `Hardware` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Hardware` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientHardwareMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -376,8 +369,7 @@ impl<'a> LibrarySurface<'a> {
   ) -> Result<LibraryFavoritesContainsReply, RequestFailure<LibraryErrorReply>> {
     self.0.request(request).await
   }
-  /// Stream of `Library` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Library` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientLibraryMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -413,8 +405,7 @@ impl<'a> NetSurface<'a> {
   pub async fn ws_open(&self, request: NetWsOpen) -> Result<NetWsOpenReply, RequestFailure<NetWsErrorReply>> {
     self.0.request(request).await
   }
-  /// Stream of `Net` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Net` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientNetMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -444,8 +435,7 @@ impl<'a> NotificationsSurface<'a> {
       .command(ClientToBridgeNotificationsMsgCommand::InvokeNegative(payload))
       .await
   }
-  /// Stream of `Notifications` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Notifications` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientNotificationsMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -463,8 +453,7 @@ impl<'a> NotificationsSurface<'a> {
 pub struct PeerSurface<'a>(&'a Client);
 
 impl<'a> PeerSurface<'a> {
-  /// Stream of `Peer` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Peer` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientPeerMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -521,8 +510,7 @@ impl<'a> PhoneSurface<'a> {
   pub async fn state_get(&self) -> Result<PhoneStateReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(PhoneStateGet).await
   }
-  /// Stream of `Phone` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Phone` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientPhoneMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -591,8 +579,7 @@ impl<'a> PlayerSurface<'a> {
   pub async fn queue_get(&self) -> Result<PlayerQueueReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(PlayerQueueGet).await
   }
-  /// Stream of `Player` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Player` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientPlayerMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -646,8 +633,7 @@ impl<'a> SystemSurface<'a> {
   pub async fn device_get_nickname(&self) -> Result<DeviceNicknameReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(DeviceGetNickname).await
   }
-  /// Stream of `System` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `System` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientSystemMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -668,8 +654,7 @@ impl<'a> TimeSurface<'a> {
   pub async fn get(&self) -> Result<TimeSnapshot, RequestFailure<::core::convert::Infallible>> {
     self.0.request(TimeGet).await
   }
-  /// Stream of `Time` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Time` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientTimeMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -702,8 +687,7 @@ impl<'a> VoiceSurface<'a> {
   pub async fn state_get(&self) -> Result<VoiceStateReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(VoiceStateGet).await
   }
-  /// Stream of `Voice` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Voice` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientVoiceMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -751,8 +735,7 @@ impl<'a> WebappSurface<'a> {
   ) -> Result<WebappInstallBeginAck, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
-  /// Stream of `Webapp` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Webapp` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToClientWebappMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {

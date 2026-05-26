@@ -92,6 +92,10 @@ pub fn transfers_dir() -> PathBuf {
   state_dir().join("transfers")
 }
 
+pub fn bandaid_transfers_dir() -> PathBuf {
+  PathBuf::from("/opt/bridgething/.transfers")
+}
+
 pub fn assets_blobs_dir() -> PathBuf {
   state_dir().join("assets")
 }

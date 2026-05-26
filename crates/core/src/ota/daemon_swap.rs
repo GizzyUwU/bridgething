@@ -1,16 +1,9 @@
-//! Daemon-binary backend for the OTA orchestrator. Stages the freshly
-//! streamed aarch64 binary at `bridgething.incoming`, fsyncs it,
-//! atomic-rotates the existing `bridgething.current` to
-//! `bridgething.previous`, then atomic-renames `.incoming` to
-//! `.current`. The orchestrator's terminator thunk follows up with
-//! `systemctl restart bridgething.service`; the just-renamed `.current`
-//! is what the launcher (`/usr/bin/bridgething`) picks up.
-//!
-//! On-device the staging path lives on the settings partition (same fs
-//! as `<state_dir>/transfers/` thanks to the opt-overlay bind-mount),
-//! so the rename is same-fs and atomic. Off-device the call short-
-//! circuits behind the `/etc/superbird` sentinel and just emits a
-//! tracing warning, mirroring `systemd::power::reboot`.
+//! Daemon-binary backend for the OTA orchestrator. The streamed binary
+//! already landed on bandaid via the orchestrator's per-kind target_dir
+//! routing, so swap is a same-fs rename: stage at `bridgething.incoming`,
+//! fsync, rotate existing `bridgething.current` to `bridgething.previous`,
+//! rename `.incoming` to `.current`. Off-device the call short-circuits
+//! behind the `/etc/superbird` sentinel and just emits a tracing warning.
 
 use std::{
   io,
@@ -65,7 +58,18 @@ pub async fn swap(staged_binary: &Path) -> Result<(), SwapError> {
     });
   }
 
-  rename_or_copy(staged_binary, &incoming).await?;
+  if let Err(err) = fs::remove_file(&previous).await
+    && err.kind() != io::ErrorKind::NotFound
+  {
+    return Err(SwapError::Io {
+      step: "clear stale previous",
+      source: err,
+    });
+  }
+
+  fs::rename(staged_binary, &incoming)
+    .await
+    .map_err(io_err("rename staged -> incoming"))?;
 
   fs::set_permissions(&incoming, std::fs::Permissions::from_mode(0o755))
     .await
@@ -86,21 +90,6 @@ pub async fn swap(staged_binary: &Path) -> Result<(), SwapError> {
     current.display()
   );
   Ok(())
-}
-
-async fn rename_or_copy(src: &Path, dst: &Path) -> Result<(), SwapError> {
-  match fs::rename(src, dst).await {
-    Ok(()) => Ok(()),
-    Err(err) if err.raw_os_error() == Some(libc::EXDEV) => {
-      tracing::debug!("staged binary on different fs from {DAEMON_DIR}, copying instead");
-      fs::copy(src, dst).await.map_err(io_err("copy staged -> incoming"))?;
-      Ok(())
-    }
-    Err(err) => Err(SwapError::Io {
-      step: "rename staged -> incoming",
-      source: err,
-    }),
-  }
 }
 
 async fn sync_file(path: &Path) -> Result<(), SwapError> {

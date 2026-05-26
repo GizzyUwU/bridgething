@@ -39,7 +39,8 @@ use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, me
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
 pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
-pub use webapps::{HUB_WEBAPP_ID, WebappRegistry};
+pub(crate) use webapps::extract_zip;
+pub use webapps::{HUB_WEBAPP_ID, STOCK_WEBAPP_ID, WebappRegistry};
 
 pub type State = Arc<AppState>;
 

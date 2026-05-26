@@ -126,6 +126,10 @@ impl PeerTracker {
     self.snapshot_rx.borrow().clone()
   }
 
+  pub fn watch_snapshot(&self) -> watch::Receiver<PeerSnapshot> {
+    self.snapshot_rx.clone()
+  }
+
   pub fn first_connected_gateway(&self) -> Option<GatewayInfo> {
     self
       .snapshot_rx
@@ -190,6 +194,13 @@ impl PeerTracker {
     if self.cmd_tx.send(cmd).await.is_err() {
       tracing::warn!("peer tracker: command channel closed; command dropped");
     }
+  }
+
+  #[cfg(test)]
+  pub fn noop() -> Self {
+    let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+    let (_snapshot_tx, snapshot_rx) = watch::channel(PeerSnapshot::default());
+    Self { cmd_tx, snapshot_rx }
   }
 }
 

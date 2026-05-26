@@ -224,7 +224,11 @@ impl AssetIngestActor {
     retention: AssetRetention,
     ack: oneshot::Sender<Result<u64, TransferError>>,
   ) {
-    match self.transfers.begin(id.clone(), expected_size, expected_sha256).await {
+    match self
+      .transfers
+      .begin(id.clone(), expected_size, expected_sha256, None)
+      .await
+    {
       Ok(offset) => {
         self.pending.insert(id, PendingPush { mime, retention });
         let _ = ack.send(Ok(offset));

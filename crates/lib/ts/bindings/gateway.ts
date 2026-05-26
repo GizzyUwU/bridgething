@@ -679,24 +679,17 @@ export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart> };
  * update artifact identified by its sha256. The daemon responds with
  * `OtaBeginAck { resume_from_offset }` (the byte offset the next
  * `OtaChunk` should start at, 0 for fresh pushes) or
- * `OtaBeginRejected { reason }` (already-running OTA, conflicting
- * in-flight update_id with mismatched size/sha, or budget exhausted).
+ * `OtaBeginRejected { reason }`.
  *
- * `kind` selects the backend: `Image` for a `.swu` (libswupdate +
- * slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
- * (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
- * systemctl restart). The streaming half is identical across kinds.
+ * `kind` selects the backend. See `OtaKind`.
  *
  * `update_id` is the sha256 of the artifact, hex-encoded. Content-
  * addressed so resume across daemon restarts and retries-after-failure
  * both work without companion-side state to track.
  *
- * `update_url_base` is the server prefix the companion may refetch
- * the .zck delta from on cache miss, e.g.
- * `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
- * fetch from it - it's carried so the companion can self-recover its
- * cache while serving range requests during the Writing phase.
- * Image-kind only; ignored for daemon-kind.
+ * `update_url_base` is image-kind only: the server prefix the companion
+ * may refetch the .zck delta from on cache miss while serving range
+ * requests during the Writing phase. Ignored for non-image kinds.
  */
 export type OtaBegin = {
   kind: OtaKind;

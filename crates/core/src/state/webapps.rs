@@ -13,7 +13,6 @@ use super::StateResult;
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 
-const STOCK_DIR_NAME: &str = "stock";
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
 pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
 const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID, HUB_WEBAPP_ID];
@@ -301,27 +300,23 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     return None;
   }
 
-  let manifest = if dir_name == STOCK_DIR_NAME && matches!(source, WebappSource::Builtin) {
-    stock_manifest()
-  } else {
-    match fs::read(path.join("manifest.json")).await {
-      Ok(bytes) => match serde_json::from_slice::<WebappManifest>(&bytes) {
-        Ok(m) => match validate_manifest(&m) {
-          Ok(()) => m,
-          Err(e) => {
-            tracing::warn!("webapp '{dir_name}' manifest invalid ({e}); skipping");
-            return None;
-          }
-        },
+  let manifest = match fs::read(path.join("manifest.json")).await {
+    Ok(bytes) => match serde_json::from_slice::<WebappManifest>(&bytes) {
+      Ok(m) => match validate_manifest(&m) {
+        Ok(()) => m,
         Err(e) => {
-          tracing::warn!("webapp '{dir_name}' manifest.json failed to parse ({e}); skipping");
+          tracing::warn!("webapp '{dir_name}' manifest invalid ({e}); skipping");
           return None;
         }
       },
-      Err(_) => {
-        tracing::warn!("webapp '{dir_name}' has no manifest.json; skipping");
+      Err(e) => {
+        tracing::warn!("webapp '{dir_name}' manifest.json failed to parse ({e}); skipping");
         return None;
       }
+    },
+    Err(_) => {
+      tracing::warn!("webapp '{dir_name}' has no manifest.json; skipping");
+      return None;
     }
   };
 
@@ -452,20 +447,6 @@ fn validate_config_field(field: &ConfigField) -> Result<(), String> {
   Ok(())
 }
 
-fn stock_manifest() -> WebappManifest {
-  WebappManifest {
-    id: STOCK_WEBAPP_ID,
-    name: "Spotify".into(),
-    version: "8.9.2".into(),
-    description: Some("Built-in Spotify Car Thing UI".into()),
-    icon: Some("spotify.svg".into()),
-    role: WebappRole::Standard,
-    config: Vec::new(),
-    permissions: Vec::new(),
-    voice_grammar: None,
-  }
-}
-
 fn guess_mime_from_ext(name: &str) -> String {
   let ext = Path::new(name)
     .extension()
@@ -519,7 +500,7 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
   }
 }
 
-fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), WebappError> {
+pub(crate) fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), WebappError> {
   let file = std::fs::File::open(archive_path).map_err(|e| WebappError::Internal {
     reason: format!("open archive: {e}"),
   })?;

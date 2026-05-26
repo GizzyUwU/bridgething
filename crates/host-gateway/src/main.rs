@@ -84,6 +84,15 @@ enum Command {
     /// against `--fixture` when set, otherwise CWD.
     binary: PathBuf,
   },
+  /// Open `OtaBegin` for a builtin-webapp update and stream a fresh
+  /// hub or stock webapp bundle zip. Bundle's `manifest.json` id must
+  /// be `HUB_WEBAPP_ID` or `STOCK_WEBAPP_ID`; the daemon atomic-rotates
+  /// the existing dir on the bandaid bind-mount and restarts.
+  PushBuiltinWebapp {
+    /// Path to the webapp bundle `.zip`. Relative paths resolve
+    /// against `--fixture` when set, otherwise CWD.
+    bundle: PathBuf,
+  },
   /// Send `WebappSwitchTo` to flip the kiosk's active webapp. The
   /// daemon rescans `/var/bridgething/webapps/` if the id is unknown,
   /// so this is also the activation half of the dev-iter loop after
@@ -142,6 +151,19 @@ async fn main() -> anyhow::Result<()> {
         cli.chunk_size,
         OtaKind::Daemon,
         binary_path,
+        None,
+        None,
+      )
+      .await
+    }
+    Command::PushBuiltinWebapp { bundle } => {
+      let bundle_path = resolve_path(cli.fixture.as_deref(), &bundle);
+      ota::run_push_update(
+        &cli.url,
+        chaos,
+        cli.chunk_size,
+        OtaKind::BuiltinWebapp,
+        bundle_path,
         None,
         None,
       )

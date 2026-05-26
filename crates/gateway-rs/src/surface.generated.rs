@@ -160,8 +160,7 @@ impl<'a> NotificationsSurface<'a> {
       .event(GatewayToBridgeNotificationsMsgEvent::Removed(payload))
       .await
   }
-  /// Stream of `Notifications` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Notifications` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayNotificationsMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -212,8 +211,7 @@ impl<'a> PlayerSurface<'a> {
   pub async fn queue_changed(&self, payload: QueueSnapshot) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePlayerMsgEvent::QueueChanged(payload)).await
   }
-  /// Stream of `Player` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Player` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayPlayerMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -261,8 +259,7 @@ impl<'a> SystemSurface<'a> {
   ) -> Result<DeviceNicknameReply, RequestFailure<DeviceNicknameRejected>> {
     self.0.request(request).await
   }
-  /// Stream of `System` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `System` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewaySystemMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -301,8 +298,7 @@ impl<'a> VoiceSurface<'a> {
   pub async fn dispatch(&self, payload: VoiceDispatch) -> Result<(), SdkError> {
     self.0.command(GatewayToBridgeVoiceMsgCommand::Dispatch(payload)).await
   }
-  /// Stream of `Voice` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Voice` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayVoiceMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {
@@ -371,8 +367,7 @@ impl<'a> WebappSurface<'a> {
   ) -> Result<WebappConfigAck, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
-  /// Stream of `Webapp` events. Broadcast lag is dropped silently. The
-  /// stream is `Unpin`, so callers can `.next().await` without pinning.
+  /// Stream of `Webapp` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayWebappMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
       ready(match msg {

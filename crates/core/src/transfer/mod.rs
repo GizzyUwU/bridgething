@@ -71,6 +71,7 @@ impl ChunkedTransfer {
     id: String,
     expected_size: u64,
     expected_sha256: Option<String>,
+    target_dir: Option<PathBuf>,
   ) -> Result<u64, TransferError> {
     let (ack, rx) = oneshot::channel();
     self
@@ -80,6 +81,7 @@ impl ChunkedTransfer {
         id,
         expected_size,
         expected_sha256,
+        target_dir,
         ack,
       })
       .await
@@ -211,7 +213,7 @@ mod tests {
     let sha = sha256_hex(&body);
 
     let off = xfer
-      .begin("t/1".into(), body.len() as u64, Some(sha.clone()))
+      .begin("t/1".into(), body.len() as u64, Some(sha.clone()), None)
       .await
       .unwrap();
     assert_eq!(off, 0);
@@ -237,7 +239,7 @@ mod tests {
     let sha = sha256_hex(&body);
 
     let off = xfer
-      .begin("t/2".into(), body.len() as u64, Some(sha.clone()))
+      .begin("t/2".into(), body.len() as u64, Some(sha.clone()), None)
       .await
       .unwrap();
     assert_eq!(off, 0);
@@ -262,7 +264,7 @@ mod tests {
   async fn offset_mismatch_rejected() {
     let (xfer, _root, _join) = fresh().await;
     let body = [0u8; 100];
-    xfer.begin("t/3".into(), body.len() as u64, None).await.unwrap();
+    xfer.begin("t/3".into(), body.len() as u64, None, None).await.unwrap();
     xfer
       .accept_chunk("t/3".into(), 0, Bytes::copy_from_slice(&body[..50]), false)
       .await
@@ -284,7 +286,7 @@ mod tests {
   #[tokio::test]
   async fn size_overflow_rejected() {
     let (xfer, _root, _join) = fresh().await;
-    xfer.begin("t/4".into(), 100, None).await.unwrap();
+    xfer.begin("t/4".into(), 100, None, None).await.unwrap();
     let err = xfer
       .accept_chunk("t/4".into(), 0, Bytes::from(vec![0u8; 200]), true)
       .await
@@ -297,7 +299,7 @@ mod tests {
     let (xfer, _root, _join) = fresh().await;
     let body = b"hello".to_vec();
     xfer
-      .begin("t/5".into(), body.len() as u64, Some("0".repeat(64)))
+      .begin("t/5".into(), body.len() as u64, Some("0".repeat(64)), None)
       .await
       .unwrap();
     let err = xfer
@@ -316,7 +318,7 @@ mod tests {
     let body: Vec<u8> = (0u8..=255).cycle().take(2048).collect();
     let sha = sha256_hex(&body);
     xfer
-      .begin("t/6".into(), body.len() as u64, Some(sha.clone()))
+      .begin("t/6".into(), body.len() as u64, Some(sha.clone()), None)
       .await
       .unwrap();
     xfer
@@ -328,7 +330,7 @@ mod tests {
     let pending2 = ChunkedTransfer::init(root.clone()).await.unwrap();
     let (xfer2, _join2) = pending2.spawn();
     let off = xfer2
-      .begin("t/6".into(), body.len() as u64, Some(sha.clone()))
+      .begin("t/6".into(), body.len() as u64, Some(sha.clone()), None)
       .await
       .unwrap();
     assert_eq!(off, 1024);
@@ -346,15 +348,15 @@ mod tests {
   #[tokio::test]
   async fn conflicting_begin_rejected() {
     let (xfer, _root, _join) = fresh().await;
-    xfer.begin("t/7".into(), 100, None).await.unwrap();
-    let err = xfer.begin("t/7".into(), 200, None).await.unwrap_err();
+    xfer.begin("t/7".into(), 100, None, None).await.unwrap();
+    let err = xfer.begin("t/7".into(), 200, None, None).await.unwrap_err();
     assert!(matches!(err, TransferError::ConflictingBegin { .. }));
   }
 
   #[tokio::test]
   async fn abandon_clears_partial_and_meta() {
     let (xfer, root, _join) = fresh().await;
-    xfer.begin("t/8".into(), 100, None).await.unwrap();
+    xfer.begin("t/8".into(), 100, None, None).await.unwrap();
     xfer
       .accept_chunk("t/8".into(), 0, Bytes::from(vec![0u8; 50]), false)
       .await
@@ -379,7 +381,7 @@ mod tests {
   async fn over_budget_begin_rejected() {
     let (xfer, _root, _join) = fresh().await;
     let err = xfer
-      .begin("t/9".into(), TRANSFER_DISK_BUDGET_BYTES + 1, None)
+      .begin("t/9".into(), TRANSFER_DISK_BUDGET_BYTES + 1, None, None)
       .await
       .unwrap_err();
     assert!(matches!(err, TransferError::TooLarge { .. }));

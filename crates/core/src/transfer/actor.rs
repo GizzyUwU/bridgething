@@ -21,6 +21,7 @@ pub(super) enum Command {
     id: String,
     expected_size: u64,
     expected_sha256: Option<String>,
+    target_dir: Option<PathBuf>,
     ack: oneshot::Sender<Result<u64, TransferError>>,
   },
   AcceptChunk {
@@ -48,6 +49,7 @@ struct Meta {
   expected_sha256: Option<String>,
   received: u64,
   last_touched_unix: i64,
+  partial_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -157,9 +159,10 @@ impl ChunkedTransferActor {
         id,
         expected_size,
         expected_sha256,
+        target_dir,
         ack,
       } => {
-        let result = self.handle_begin(id, expected_size, expected_sha256).await;
+        let result = self.handle_begin(id, expected_size, expected_sha256, target_dir).await;
         let _ = ack.send(result);
       }
       Command::AcceptChunk {
@@ -182,6 +185,7 @@ impl ChunkedTransferActor {
     id: String,
     expected_size: u64,
     expected_sha256: Option<String>,
+    target_dir: Option<PathBuf>,
   ) -> Result<u64, TransferError> {
     if expected_size > TRANSFER_DISK_BUDGET_BYTES {
       return Err(TransferError::TooLarge {
@@ -213,7 +217,14 @@ impl ChunkedTransferActor {
     }
 
     let stem = safe_filename(&id);
-    let partial_path = self.transfers_dir.join(format!("{stem}.partial"));
+    let partial_dir = match &target_dir {
+      Some(dir) => {
+        tokio::fs::create_dir_all(dir).await?;
+        dir.clone()
+      }
+      None => self.transfers_dir.clone(),
+    };
+    let partial_path = partial_dir.join(format!("{stem}.partial"));
     let meta_path = self.transfers_dir.join(format!("{stem}.meta"));
 
     let _ = tokio::fs::remove_file(&partial_path).await;
@@ -415,19 +426,18 @@ async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, T
   let raw = tokio::fs::read(meta_path).await?;
   let meta: Meta = serde_json::from_slice(&raw)?;
 
-  let stem = safe_filename(&meta.id);
-  let expected_partial = meta_path.with_file_name(format!("{stem}.partial"));
-  if !expected_partial.exists() {
+  let partial_path = meta.partial_path.clone();
+  if !partial_path.exists() {
     return Ok(None);
   }
 
-  let actual_size = tokio::fs::metadata(&expected_partial).await?.len();
+  let actual_size = tokio::fs::metadata(&partial_path).await?.len();
   if actual_size > meta.received {
-    let f = OpenOptions::new().write(true).open(&expected_partial).await?;
+    let f = OpenOptions::new().write(true).open(&partial_path).await?;
     f.set_len(meta.received).await?;
   }
   if actual_size < meta.received {
-    let f = OpenOptions::new().write(true).open(&expected_partial).await?;
+    let f = OpenOptions::new().write(true).open(&partial_path).await?;
     f.set_len(actual_size).await?;
   }
   let received = std::cmp::min(actual_size, meta.received);
@@ -438,7 +448,7 @@ async fn load_recovered_transfer(meta_path: &Path) -> Result<Option<Transfer>, T
     expected_sha256: meta.expected_sha256,
     received,
     last_touched_unix: meta.last_touched_unix,
-    partial_path: expected_partial,
+    partial_path,
     meta_path: meta_path.to_path_buf(),
     file: None,
   }))
@@ -501,6 +511,7 @@ fn meta_from(t: &Transfer) -> Meta {
     expected_sha256: t.expected_sha256.clone(),
     received: t.received,
     last_touched_unix: t.last_touched_unix,
+    partial_path: t.partial_path.clone(),
   }
 }
 

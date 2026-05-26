@@ -33,7 +33,7 @@ pub async fn install_begin(
 ) -> Result<u32, WebappError> {
   match state
     .transfers
-    .begin(install_id, expected_size as u64, Some(expected_sha256))
+    .begin(install_id, expected_size as u64, Some(expected_sha256), None)
     .await
   {
     Ok(resume_from_offset) => Ok(resume_from_offset.min(u32::MAX as u64) as u32),

@@ -202,6 +202,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
       restart_self: std::sync::Arc::new(trigger_restart_self),
     },
     range_proxy_handle.proxy.clone(),
+    peers.clone(),
   );
 
   let state = AppState::assemble(StateAssembly {

@@ -2784,41 +2784,39 @@ public struct OtaAssetRangeReply: Codable, Sendable {
 	}
 }
 
-/// What the streamed bytes are going to be applied as. Image kind
-/// streams a `.swu` and goes through libswupdate + slot flip + reboot;
-/// daemon kind streams a fresh aarch64 daemon binary and goes through
-/// the on-disk rotate (`.incoming` -> `.current`, prior `.current` ->
-/// `.previous`) followed by a `systemctl restart bridgething.service`.
+/// What the streamed bytes are going to be applied as.
+/// 
+/// `Image` streams a `.swu` through libswupdate + slot flip + reboot.
+/// `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
+/// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
+/// streams a zip bundle of hub or stock, validates the manifest id is
+/// one of the reserved built-ins, atomic-rotates the bundle dir on the
+/// bandaid bind-mount, restarts the service.
+/// 
 /// Companions key reboot expectations off this: image means the device
-/// power-cycles, daemon means the daemon process restarts and the
-/// gateway link drops and reconnects.
+/// power-cycles; daemon and builtin-webapp mean the daemon process
+/// restarts and the gateway link drops and reconnects.
 public enum OtaKind: String, Codable, Sendable {
 	case image
 	case daemon
+	case builtinWebapp
 }
 
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the next
 /// `OtaChunk` should start at, 0 for fresh pushes) or
-/// `OtaBeginRejected { reason }` (already-running OTA, conflicting
-/// in-flight update_id with mismatched size/sha, or budget exhausted).
+/// `OtaBeginRejected { reason }`.
 /// 
-/// `kind` selects the backend: `Image` for a `.swu` (libswupdate +
-/// slot flip + reboot) or `Daemon` for a fresh aarch64 daemon binary
-/// (atomic rotate at `/opt/bridgething/daemon/bridgething.current` +
-/// systemctl restart). The streaming half is identical across kinds.
+/// `kind` selects the backend. See `OtaKind`.
 /// 
 /// `update_id` is the sha256 of the artifact, hex-encoded. Content-
 /// addressed so resume across daemon restarts and retries-after-failure
 /// both work without companion-side state to track.
 /// 
-/// `update_url_base` is the server prefix the companion may refetch
-/// the .zck delta from on cache miss, e.g.
-/// `https://ota.bridgething.com/releases/prod/1.2.3/`. Daemon doesn't
-/// fetch from it - it's carried so the companion can self-recover its
-/// cache while serving range requests during the Writing phase.
-/// Image-kind only; ignored for daemon-kind.
+/// `update_url_base` is image-kind only: the server prefix the companion
+/// may refetch the .zck delta from on cache miss while serving range
+/// requests during the Writing phase. Ignored for non-image kinds.
 public struct OtaBegin: Codable, Sendable {
 	public let kind: OtaKind
 	public let updateId: String
@@ -2910,17 +2908,14 @@ public struct OtaError: Codable, Sendable {
 }
 
 /// Stage of the OTA orchestrator. The phase set is shared between
-/// kinds, with daemon-kind emitting a subset.
+/// kinds, with non-image kinds emitting a subset.
 /// 
-/// Image: `Streaming` (chunk push) -> `Verifying` (sha+size on disk)
-/// -> `Writing` (libswupdate streams to slot) -> `Confirming` (flip
-/// try-counter) -> `Reboot` (systemd Reboot).
+/// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
+/// -> `Confirming` (try-counter reset) -> `Reboot`.
 /// 
-/// Daemon: `Streaming` -> `Verifying` -> `Writing` (atomic rename of
-/// `.incoming` over `.current`, with prior `.current` rotated to
-/// `.previous`) -> `Reboot` (systemctl restart of bridgething.service).
-/// `Confirming` is not emitted for daemon-kind: there is no slot
-/// try-counter to flip; the rename is the commit point.
+/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`
+/// (atomic rotate on the bandaid bind-mount) -> `Reboot` (systemctl
+/// restart of bridgething.service). `Confirming` is image-only.
 public enum OtaPhase: String, Codable, Sendable {
 	case streaming
 	case verifying
