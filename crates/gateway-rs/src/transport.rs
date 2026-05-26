@@ -45,8 +45,6 @@ fn map_ws(err: WsError) -> TransportError {
   }
 }
 
-// --- Framed over AsyncRead + AsyncWrite (duplex / RFCOMM) ---
-
 pub struct FramedConnector<S> {
   pub(crate) io: S,
 }
@@ -92,8 +90,6 @@ where
     }
   }
 }
-
-// --- GatewayEndec frames over binary WebSocket messages ---
 
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

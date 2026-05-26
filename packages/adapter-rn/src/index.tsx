@@ -22,15 +22,11 @@ export type ReactNativeAdapterOptions = {
 };
 
 /**
- * Byte-level RN adapter built on top of the Nitro HybridObject. Implements
- * the `Adapter` contract that `BridgethingGateway` expects: bytes in, bytes
- * out, plus connect / disconnect / connected events.
+ * Byte-level RN adapter over the Nitro HybridObject implementing the `Adapter` contract.
  *
- * On iOS the underlying transport observes `EAAccessoryDidConnect` and
- * auto-opens sessions for the bridgething protocol string - `connect()` is
- * a manual fallback for accessories that were already attached when the
- * adapter started. On Android, `connect(deviceId)` opens the RFCOMM channel
- * to a bonded `BluetoothDevice`.
+ * iOS: the transport observes `EAAccessoryDidConnect` and auto-opens sessions; `connect()` is
+ * a manual fallback for accessories already attached at start. Android: `connect(deviceId)`
+ * opens the RFCOMM channel to a bonded `BluetoothDevice`.
  */
 export class ReactNativeAdapter implements Adapter {
   private readonly transport: BridgethingTransport;
@@ -80,12 +76,10 @@ export class ReactNativeAdapter implements Adapter {
   /**
    * Manually open a session against a known peer.
    *
-   * iOS: useful when the accessory was already attached before `start()` -
-   * `EAAccessoryDidConnect` doesn't fire retroactively. Returns immediately
-   * if iOS already has a session for `deviceId`.
+   * iOS: needed when the accessory was already attached before `start()` since `EAAccessoryDidConnect`
+   * doesn't fire retroactively. Returns immediately if a session already exists.
    *
-   * Android: required for every bonded `BluetoothDevice` - RFCOMM doesn't
-   * auto-open. The device must already be paired via system Settings.
+   * Android: required for every bonded device; RFCOMM doesn't auto-open.
    */
   async connect(deviceId: string): Promise<BridgethingTransportDevice> {
     if (!this.started) {
@@ -110,11 +104,8 @@ export class ReactNativeAdapter implements Adapter {
       this.dispatch({ type: 'bytes', deviceId, data: new Uint8Array(frame) });
     });
     this.transport.setOnError((deviceId, description) => {
-      // Errors from the native transport bubble up to consumers via the
-      // gateway's existing decode-error path is for *codec* failures;
-      // transport-level errors aren't part of the Adapter event surface, so
-      // surface them through console for now and rely on the disconnect
-      // event that follows.
+      // transport-level errors aren't part of the Adapter event surface;
+      // log and rely on the disconnect event that follows.
       console.warn(`[bridgething] transport error on ${deviceId}: ${description}`);
     });
   }
@@ -131,8 +122,7 @@ export class ReactNativeAdapter implements Adapter {
 }
 
 function createNativeTransport(): BridgethingTransport {
-  // Lazy-require so test environments that pass `options.transport` never
-  // pull in the RN runtime (Bun can't parse react-native's Flow source).
+  // lazy-require so test environments never pull in the RN runtime (Bun can't parse Flow source)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { NitroModules } = require('react-native-nitro-modules') as typeof import('react-native-nitro-modules');
   return NitroModules.createHybridObject<BridgethingTransport>('BridgethingTransport');

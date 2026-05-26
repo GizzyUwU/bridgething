@@ -53,8 +53,7 @@ export class FrameAccumulator {
     if (this.buffer.length < total) return null;
     const frame = this.buffer.subarray(0, total);
     this.buffer = this.buffer.subarray(total);
-    // Detach view so the caller can hold onto `frame` without the underlying
-    // buffer being mutated by future appends. (subarray shares storage.)
+    // copy out: subarray shares storage that future appends would mutate.
     const owned = new Uint8Array(frame.length);
     owned.set(frame);
     return owned;

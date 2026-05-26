@@ -50,7 +50,6 @@ impl Connector<crate::ClientProtocol> for WsConnector {
 }
 
 impl OutboundHalf<crate::ClientProtocol> for WsOut {
-  // the client lane has no priority wire field; priority is dropped.
   async fn send(&mut self, frame: PrioritizedFrame<ClientToBridgeMsg>) -> Result<(), TransportError> {
     let text = serde_json::to_string(&frame.msg).map_err(|e| TransportError::Encode(e.to_string()))?;
     self.sink.send(Message::Text(text.into())).await.map_err(map_ws)

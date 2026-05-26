@@ -165,7 +165,6 @@ impl ClientHandler {
         });
       }
 
-      // stock compatibility
       RecvMsgData::LegacyStock(msg) => {
         dispatch(
           handle,
@@ -183,7 +182,6 @@ impl ClientHandler {
         );
       }
 
-      // ignored and unsupported
       RecvMsgData::Hole => {
         tracing::trace!("({}) received blackhole message", &handle.from);
 
@@ -199,7 +197,6 @@ impl ClientHandler {
         }
       }
 
-      // switch to legacy compatibility mode
       RecvMsgData::ChangeMode(mode) => {
         if mode == ClientMode::Stock {
           self.state.peers.resync_stock_connection().await;

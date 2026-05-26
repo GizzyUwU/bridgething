@@ -61,8 +61,7 @@ pub struct WebappSwitchTo {
 /// `WebappInstallFailed { install_id, error }` event on failure -
 /// arrives asynchronously after the last chunk lands; between the last
 /// `WebappInstallChunk` ack and the terminal event the install is
-/// implicitly in "installing" state. Expect sub-second once the upload
-/// finishes.
+/// implicitly in "installing" state.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]

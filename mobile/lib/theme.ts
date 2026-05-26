@@ -1,12 +1,10 @@
-// Mirror of global.css palette so react-navigation's theme can match
-// NativeWind. Keep both in sync — one canonical source on each side
-// because NativeWind doesn't expose css vars to JS at runtime.
+// mirror of global.css palette so react-navigation's theme can match nativewind.
+// NativeWind doesn't expose css vars to JS at runtime, so both must be kept in sync.
 //
-// Brand source: docs/brand.md
-// charcoal:  #1B1F23 → 210 14% 12%
-// off-white: #EFEFEF →   0  0% 94%
-// blue:      #00A8E8 → 199 100% 46%
-// soft-gray: #A7ADB5 → 215  7% 68%
+// charcoal:  #1B1F23 -> 210 14% 12%
+// off-white: #EFEFEF ->   0  0% 94%
+// blue:      #00A8E8 -> 199 100% 46%
+// soft-gray: #A7ADB5 -> 215  7% 68%
 
 export const PALETTE = {
   light: {

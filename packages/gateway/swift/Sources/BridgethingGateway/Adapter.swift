@@ -18,7 +18,7 @@ public struct Device: Sendable, Equatable, Hashable {
 
 /// Raw byte-level events surfaced by an `Adapter` to the gateway.
 ///
-/// The gateway accumulates `bytes` chunks per device into framed payloads -
+/// The gateway accumulates `bytes` chunks per device into framed payloads;
 /// adapters do not need to align chunks to frame boundaries.
 public enum AdapterEvent: Sendable {
   case connected(Device)

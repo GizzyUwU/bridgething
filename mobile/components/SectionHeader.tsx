@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 /**
- * Inset section label — small, uppercase, tracked. Optional trailing
+ * Inset section label: small, uppercase, tracked. Optional trailing
  * action button (rendered as a primary-tinted text link).
  */
 export function SectionHeader({

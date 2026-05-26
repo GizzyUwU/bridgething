@@ -6,7 +6,7 @@ use typeshare::typeshare;
 
 use crate::GeoAccuracy;
 
-/// Bridge → companion watch forward. The daemon aggregates webapp
+/// Bridge -> companion watch forward. The daemon aggregates webapp
 /// watches and re-issues this with the most-demanding accuracy +
 /// fastest interval. `min_interval_ms = 0` lets the gateway pick.
 #[typeshare]

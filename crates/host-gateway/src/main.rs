@@ -75,19 +75,15 @@ enum Command {
     #[arg(long)]
     zck: Option<PathBuf>,
   },
-  /// Open `OtaBegin` for a daemon-kind update and stream a fresh
-  /// aarch64 daemon binary. Daemon reaches `Writing` (atomic rename)
-  /// and `Reboot` (which for this kind is a `systemctl restart
-  /// bridgething.service`). No range proxy traffic.
+  /// Open `OtaBegin` for a daemon-kind update and stream a fresh aarch64 daemon binary.
+  /// Daemon reaches `Writing` then `Reboot`. No range proxy traffic.
   PushDaemon {
     /// Path to the aarch64 daemon binary. Relative paths resolve
     /// against `--fixture` when set, otherwise CWD.
     binary: PathBuf,
   },
-  /// Open `OtaBegin` for a builtin-webapp update and stream a fresh
-  /// hub or stock webapp bundle zip. Bundle's `manifest.json` id must
-  /// be `HUB_WEBAPP_ID` or `STOCK_WEBAPP_ID`; the daemon atomic-rotates
-  /// the existing dir on the bandaid bind-mount and restarts.
+  /// Open `OtaBegin` for a builtin-webapp update and stream a hub or stock webapp bundle zip.
+  /// Bundle's `manifest.json` id must be `HUB_WEBAPP_ID` or `STOCK_WEBAPP_ID`.
   PushBuiltinWebapp {
     /// Path to the webapp bundle `.zip`. Relative paths resolve
     /// against `--fixture` when set, otherwise CWD.

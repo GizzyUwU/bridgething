@@ -22,7 +22,7 @@
 //! - [`StatusExternalAccessoryProtocolSession`] (`0xEA03`) - accessory
 //!   to iPhone. Reply to `StartES`. `Ok` (`0`) opens the stream;
 //!   `Close` (`1`) refuses (unknown `protocol_id`, capacity exhausted,
-//!   etc.). See cleanroom doc `protocol/40_external_accessory.md`.
+//!   etc.).
 //!
 //! Stream payloads themselves do not ride on the control session;
 //! they ride on iAP2 link session id 3 (declared as
@@ -44,10 +44,9 @@ pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
   StopExternalAccessoryProtocolSession::CSM_MSG_ID,
 ];
 
-/// `0xEA00` iPhone -> accessory. `protocol_id` matches one of the
-/// `EaProtocol::id` values declared in our `IdentificationInformation`
-/// param 10; `session_id` is iOS's opaque stream key, unique within a
-/// single iAP2 link.
+/// `0xEA00` iPhone -> accessory. `protocol_id` matches an `EaProtocol::id`
+/// declared in `IdentificationInformation` param 10; `session_id` is
+/// iOS's opaque stream key, unique within an iAP2 link.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0xEA00)]
 pub struct StartExternalAccessoryProtocolSession {
@@ -67,10 +66,8 @@ pub struct StopExternalAccessoryProtocolSession {
 }
 
 /// `AppLaunchMethod` enum (param 1 of `RequestAppLaunch`). Selects
-/// whether iOS shows the per-app permission prompt before foregrounding
-/// the matching app, or launches it silently (background-mode if the
-/// device is locked / another app is foreground). When the param is
-/// absent iOS defaults to [`WithUserAlert`].
+/// whether iOS shows the per-app permission prompt or launches silently.
+/// Defaults to [`WithUserAlert`] when the param is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AppLaunchMethod {
@@ -93,9 +90,8 @@ impl AppLaunchMethod {
 }
 
 /// `0xEA02` accessory -> iPhone. `bundle_id` is a UTF-8 + NUL string
-/// matching the iOS app's `CFBundleIdentifier`. `launch_method` is the
-/// only iAP2 knob that controls whether iOS shows the per-app
-/// "would like to communicate with" permission prompt; pass
+/// matching the iOS app's `CFBundleIdentifier`. `launch_method` gates
+/// the per-app permission prompt; pass
 /// [`AppLaunchMethod::WithoutUserAlert`] to suppress it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestAppLaunch {
@@ -166,8 +162,7 @@ impl EaSessionStatus {
 
 /// `0xEA03` accessory -> iPhone. Reply to
 /// `StartExternalAccessoryProtocolSession` with the same `session_id`
-/// the iPhone used. Hand-rolled rather than macro-derived because the
-/// `status` field is a typed enum (the macro maps `u8` directly).
+/// the iPhone used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusExternalAccessoryProtocolSession {
   pub session_id: u16,

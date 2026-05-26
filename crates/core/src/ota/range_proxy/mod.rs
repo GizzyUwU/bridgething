@@ -14,10 +14,9 @@
 //! chromium; range responses can be hundreds of MB if libcurl asks for
 //! a large coalesced range.
 //!
-//! Concurrency model follows the actor-with-mpsc convention from
-//! `RfcommGateway`: a single broker task owns `active` and `inflight`,
-//! HTTP handlers and chunk-routing both reach it through a cloneable
-//! `RangeProxy` handle.
+//! Actor-with-mpsc concurrency: a single broker task owns `active` and
+//! `inflight`, and HTTP handlers and chunk-routing both reach it through
+//! a cloneable `RangeProxy` handle.
 
 use bluer::Address;
 use libbridgething::gateway::OtaAssetRangeChunk;

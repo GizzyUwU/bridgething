@@ -6,8 +6,7 @@ use ts_rs::TS;
 
 use crate::Peer;
 
-/// Map of peer-id → `Peer`. Wraps `HashMap` so codegen has a named type
-/// to expose for inbound listeners.
+/// Map of peer-id to `Peer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(transparent)]
 #[ts(export, export_to = "client.ts")]

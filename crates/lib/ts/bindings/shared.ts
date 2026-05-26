@@ -40,9 +40,8 @@ export type BoolField = { key: string; label: string; default: boolean | null };
 
 /**
  * Bridge-side identity announce. Daemon sends one of these to every
- * gateway on connect (companion needs to know what daemon it's talking
- * to so it can opt out of unsupported surfaces). The companion's mirror
- * is `GatewayCapabilities::Announce` over in `shared::capabilities`.
+ * gateway on connect so the companion knows what daemon it's talking to
+ * and can opt out of unsupported surfaces.
  */
 export type BridgeThingMeta = {
   bridgethingVersion: string;
@@ -193,16 +192,15 @@ export type CommunicationsState = {
 /**
  * One axis the companion can declare authority over. Each scope has a
  * fallback source the daemon merges with when no claim is active or
- * the claim has gone stale (see daemon-side merge in `core::player`).
- * Unknown scopes arriving at an older daemon are stored opaquely and
- * ignored.
+ * the claim has gone stale. Unknown scopes arriving at an older daemon
+ * are stored opaquely and ignored.
  */
 export type CompanionAuthorityScope = 'nowPlayingMetadata' | 'nowPlayingPlayback' | 'volume';
 
 /**
  * One key/value pair as exposed by config read APIs. `value` is always a
- * string; consumers parse per the field's declared kind (number → parseFloat,
- * boolean → "true"/"false", string/enum/secret → as-is).
+ * string; consumers parse per the field's declared kind (number -> parseFloat,
+ * boolean -> "true"/"false", string/enum/secret -> as-is).
  */
 export type ConfigEntry = { key: string; value: string };
 
@@ -288,8 +286,7 @@ export type GatewayCapabilities = {
 
 /**
  * Identity payload describing the companion peer the daemon is talking
- * to. Replaces the old `GatewayMeta` and the old `GatewayStatus` bits.
- * Address is the BT MAC the companion advertises; on transports without
+ * to. Address is the BT MAC the companion advertises; on transports without
  * a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
  * is the synthetic address as a string.
  */
@@ -319,8 +316,8 @@ export type HardwareError = 'levelOutOfRange' | 'modeMismatch';
 
 /**
  * Snapshot of the device's hardware-controlled surfaces. Sent on
- * `hardware.state.get` and re-broadcast on any change. See
- * `AmbientLightUpdate` for the ambient_level semantics.
+ * `hardware.state.get` and re-broadcast on any change. `ambient_level`
+ * is the 0-255 ambient light reading.
  */
 export type HardwareState = { brightness: BrightnessState; ambientLevel: number };
 
@@ -494,12 +491,9 @@ export type NetworkKind = 'unknown' | 'wifi' | 'cellular' | 'ethernet';
 export type NluAlternate = { intent: string; slots: NluSlots | null };
 
 /**
- * Closed intent enum the companion-side NLU pipeline emits. The full
- * catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
- * also encoded in `configs/grammar.strict.json` (the json_schema the
- * LLM is decoded against). At the wire boundary we serialize as a
- * string for forward-compat; the daemon dispatcher matches on the
- * well-known SHOUTY_SNAKE values.
+ * Confidence the companion-side NLU pipeline attaches to a resolved
+ * intent: a coarse "low" | "medium" | "high" level per channel, one for
+ * the intent match and one for the extracted slots.
  */
 export type NluConfidence = {
   /**
@@ -528,10 +522,9 @@ export type NluResolvedIntent = {
 };
 
 /**
- * Slot catalog. Every variant in `intents.yaml` projects through this
- * flat shape; per-intent slot allowlists are enforced by the
- * json_schema grammar at decode time, not by this struct. The wire
- * payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+ * Slot catalog. Every intent projects through this flat shape;
+ * per-intent slot allowlists are enforced by the json_schema grammar at
+ * decode time, not by this struct. The wire payload omits absent slots,
  * so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
  *
  * String values are passed through verbatim from the user's transcript
@@ -641,10 +634,9 @@ export type NotificationFlags = { silent: boolean; important: boolean; preExisti
 
 /**
  * Delta event the companion or iAP2 stream emits whenever a player
- * attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
- * (the only delta-shaped event in the protocol). Every field is
- * optional: producers populate only what they have fresh information
- * about, and the daemon merges into stable internal state.
+ * attribute changes. Every field is optional: producers send partial
+ * updates populating only what changed, and fields left unset keep
+ * their prior value.
  */
 export type NowPlayingUpdate = { mediaItem: MediaItemUpdate | null; playback: PlaybackUpdate | null };
 

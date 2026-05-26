@@ -46,8 +46,7 @@ pub struct BluetoothPin {
   pub pin: String,
 }
 
-/// Map of MAC string → `Device`. Wraps `HashMap` so codegen has a named
-/// type to import for the typed request response.
+/// Map of MAC string to `Device`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(transparent)]
 #[ts(export, export_to = "client.ts")]

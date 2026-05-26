@@ -53,9 +53,9 @@ import okio.ByteString
  * (Fetch + WsOpen requests, WsClose / WsSend / StreamOpen / StreamCancel
  * commands) and answers with OkHttp.
  *
- * Mirror of Swift `NetDispatcher`. Per-connection state (websocket
- * sockets, in-flight stream jobs) is keyed by the wire connection /
- * stream UUID and cleaned up on terminal state.
+ * Per-connection state (websocket sockets, in-flight stream jobs) is
+ * keyed by the wire connection / stream UUID and cleaned up on terminal
+ * state.
  */
 public class NetDispatcher(
     private val client: OkHttpClient = defaultClient(),
@@ -138,8 +138,6 @@ public class NetDispatcher(
         streamJobs.clear()
     }
 
-    // MARK: - Fetch
-
     private suspend fun handleFetch(
         handle: dev.bridgething.gateway.NetFetchRequestMsgHandle,
         req: NetFetchRequest,
@@ -184,8 +182,6 @@ public class NetDispatcher(
             }
         }
     }
-
-    // MARK: - WebSocket
 
     private suspend fun handleWsOpen(
         handle: dev.bridgething.gateway.NetWsOpenHandle,
@@ -299,8 +295,6 @@ public class NetDispatcher(
         }
     }
 
-    // MARK: - Stream
-
     private suspend fun runStream(
         deviceId: String,
         streamId: UUID,
@@ -370,8 +364,6 @@ public class NetDispatcher(
         }
     }
 
-    // MARK: - helpers
-
     private fun buildOkRequest(req: NetFetchRequest): Request? {
         val builder = Request.Builder()
         try {
@@ -380,8 +372,7 @@ public class NetDispatcher(
             return null
         }
         val body: RequestBody? = req.body?.let { bytes ->
-            // Honor an explicit Content-Type header if present; otherwise
-            // hand OkHttp `null` and let it omit the header.
+            // honor an explicit Content-Type header if present; null lets OkHttp omit it.
             val contentType = req.headers
                 .firstOrNull { it.name.equals("content-type", ignoreCase = true) }
                 ?.value
@@ -390,8 +381,7 @@ public class NetDispatcher(
         }
         builder.method(req.method.string, body)
         for (header in req.headers) {
-            // Content-Type was attached to the body; OkHttp rejects
-            // duplicate header keys on body-carrying methods.
+            // Content-Type rides the body; OkHttp rejects duplicate keys on body-carrying methods.
             if (header.name.equals("content-type", ignoreCase = true) && body != null) continue
             builder.addHeader(header.name, header.value)
         }

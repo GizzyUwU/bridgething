@@ -6,9 +6,8 @@ use typeshare::typeshare;
 pub const LIBBRIDGETHING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Bridge-side identity announce. Daemon sends one of these to every
-/// gateway on connect (companion needs to know what daemon it's talking
-/// to so it can opt out of unsupported surfaces). The companion's mirror
-/// is `GatewayCapabilities::Announce` over in `shared::capabilities`.
+/// gateway on connect so the companion knows what daemon it's talking to
+/// and can opt out of unsupported surfaces.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireEvent)]

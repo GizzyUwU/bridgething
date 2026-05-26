@@ -45,7 +45,6 @@ import okhttp3.Request
 
 /**
  * Snapshot of the current OTA flow visible to the host app's UI.
- * Mirror of Swift `OtaPhaseSnapshot`.
  */
 public sealed class OtaPhaseSnapshot {
     public object Idle : OtaPhaseSnapshot()
@@ -56,7 +55,7 @@ public sealed class OtaPhaseSnapshot {
 }
 
 /**
- * Configuration for the manifest poll loop. Mirror of Swift `OtaPollConfig`.
+ * Configuration for the manifest poll loop.
  *
  * Set to opt the device into auto-updates against `ota.bridgething.com`
  * (or a self-hosted equivalent). When unset the service stays in passive
@@ -74,8 +73,7 @@ public data class OtaPollConfig(
  * High-level event from the manifest poll loop. The host app drives UI
  * off these (channel-switch prompts, "downloading update" toast,
  * progress bar). In-flight per-chunk progress comes through as
- * [Progress] carrying an [OtaPhaseSnapshot]. Mirror of Swift
- * `OtaPollEvent`.
+ * [Progress] carrying an [OtaPhaseSnapshot].
  */
 public sealed class OtaPollEvent {
     public data class ManifestPolled(val updatedAt: String) : OtaPollEvent()
@@ -109,7 +107,7 @@ public sealed class OtaPollEvent {
 }
 
 /**
- * OTA service for the bridgething companion. Mirror of Swift `OtaService`.
+ * OTA service for the bridgething companion.
  *
  * Three jobs in one class:
  *
@@ -247,8 +245,6 @@ public class OtaService(
         }
     }
 
-    // MARK: - manifest poll loop
-
     public suspend fun meta(deviceId: String): BridgeThingMeta? = deviceMetaMutex.withLock {
         deviceMeta[deviceId]
     }
@@ -304,8 +300,7 @@ public class OtaService(
             if (release.yanked != null || release.deprecated) return
         }
 
-        // Snapshot devices so the iteration below doesn't hold the
-        // meta lock across per-device download work.
+        // snapshot devices so the iteration below doesn't hold the meta lock across download work.
         val snapshot = deviceMetaMutex.withLock { deviceMeta.toMap() }
         for ((deviceId, meta) in snapshot) {
             reconcileDevice(deviceId, meta, composite, config, gateway)
@@ -351,8 +346,7 @@ public class OtaService(
             if (config.autoPush) {
                 runDaemonAuto(deviceId, latest.daemon, urls.daemonBinary, config, gateway)
             }
-            // Daemon push restarts the gateway link; let the next poll
-            // cycle handle the image check when the link is back.
+            // daemon push restarts the gateway link; the next poll cycle handles the image check.
             return
         }
 
@@ -505,8 +499,6 @@ public class OtaService(
         target
     }
 
-    // MARK: - inbound range serving
-
     private suspend fun handleRangeRequest(
         gateway: BridgethingGateway,
         handle: OtaAssetRangeHandle,
@@ -576,8 +568,6 @@ public class OtaService(
             runCatching { raf.close() }
         }
     }
-
-    // MARK: - push-side driver
 
     private suspend fun driveOta(
         gateway: BridgethingGateway,

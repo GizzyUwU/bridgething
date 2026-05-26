@@ -23,7 +23,7 @@
 //! The reassembly buffer is pre-allocated with the Setup-declared size
 //! so we don't grow as bytes arrive. Bytes that exceed the declared
 //! size hard-stop the transfer (drops the buffer, drops the future
-//! SetupAck). Cleanroom doc 70.
+//! SetupAck).
 
 use std::collections::HashMap;
 
@@ -50,9 +50,7 @@ const OP_LAST_DATA: u8 = 0x40;
 const OP_FIRST_DATA: u8 = 0x80;
 const OP_FIRST_AND_ONLY: u8 = 0xC0;
 
-/// Cleanroom-confirmed file type for `MediaItemArtwork` transfers.
-/// Other types (queue snapshots, podcast extras) are accepted with a
-/// generic event upstream.
+/// File type for `MediaItemArtwork` transfers. Other types emit a generic event upstream.
 const FILE_TYPE_ARTWORK: u16 = 2;
 
 #[derive(Debug)]
@@ -112,7 +110,6 @@ impl FileTransferFlow {
         Ok(())
       }
       OP_SETUP_ACK | OP_COMPLETE_ACK => {
-        // these are accessory-originated; receiving them from peer is unexpected
         tracing::warn!(
           transfer_id = id,
           op,
@@ -128,11 +125,7 @@ impl FileTransferFlow {
   }
 
   async fn handle_setup(&mut self, id: u8, mut rest: Bytes) -> Result<()> {
-    // Stock-observed traffic carries an extra reserved byte between size
-    // and type (`[u64 size][u8 reserved][u16 type]`, 11 bytes). Modern
-    // iOS has been observed shipping the 10-byte form without the reserved
-    // byte (`[u64 size][u16 type]`). Accept both rather than dropping the
-    // shorter shape on the floor.
+    // two Setup shapes: 11-byte `[u64 size][u8 reserved][u16 type]` and 10-byte `[u64 size][u16 type]`.
     let declared_size = match rest.len() {
       11 => {
         let size = rest.get_u64() as usize;
@@ -255,9 +248,7 @@ impl FileTransferFlow {
 #[cfg(feature = "emulator")]
 pub(crate) use device::DeviceFileTransfer;
 
-/// Device-half (iPhone-side) artwork sender: the inverse of
-/// [`FileTransferFlow`]. Lives here, gated, to reuse the private opcode
-/// constants and the link session id rather than re-export them.
+/// Device-half (iPhone-side) artwork sender: the inverse of [`FileTransferFlow`].
 #[cfg(feature = "emulator")]
 mod device {
   use std::collections::HashMap;
@@ -275,12 +266,9 @@ mod device {
     link::Iap2Command,
   };
 
-  /// Per-packet bytes the file-transfer body shares with framing: the
-  /// link header, the link payload checksum trailer, and the `[id, op]`
-  /// file-transfer header. Bodies are chunked so each `[id, op, chunk]`
-  /// stays within the negotiated link payload budget; otherwise the
-  /// link layer re-chunks it and the accessory parses the spilled bytes
-  /// of the next packet as a bogus `[id, op]` header.
+  /// Per-packet overhead: link header + link payload checksum trailer + the `[id, op]` header.
+  /// Bodies are chunked so each `[id, op, chunk]` stays within the negotiated link payload budget;
+  /// otherwise the link re-chunks and the accessory misparses the spilled bytes as a bogus `[id, op]`.
   const PER_PACKET_OVERHEAD: usize = LINK_HEADER_LEN + 1 + 2;
 
   pub(crate) struct DeviceFileTransfer {
@@ -416,7 +404,6 @@ mod tests {
   async fn first_and_only_round_trip() {
     let (mut flow, mut outbox, mut events, evt_tx) = flow_with_outbox();
     flow.dispatch_link_data(setup_payload(7, 5, 2), &evt_tx).await.unwrap();
-    // SetupAck queued
     let cmd = outbox.recv().await.unwrap();
     match cmd {
       Iap2Command::Send { session_id: 2, payload } => {
@@ -429,7 +416,6 @@ mod tests {
       .dispatch_link_data(data_with(7, OP_FIRST_AND_ONLY, b"hello"), &evt_tx)
       .await
       .unwrap();
-    // CompleteAck queued
     let cmd = outbox.recv().await.unwrap();
     match cmd {
       Iap2Command::Send { session_id: 2, payload } => {
@@ -493,8 +479,7 @@ mod tests {
   #[tokio::test]
   async fn non_artwork_type_lands_as_queue_snapshot() {
     let (mut flow, mut outbox, mut events, evt_tx) = flow_with_outbox();
-    flow.dispatch_link_data(setup_payload(9, 4, 5), &evt_tx).await.unwrap(); // any non-2 type
-    // SetupAck expected for any accepted Setup
+    flow.dispatch_link_data(setup_payload(9, 4, 5), &evt_tx).await.unwrap();
     let cmd = outbox.recv().await.unwrap();
     if let Iap2Command::Send { session_id: 2, payload } = cmd {
       assert_eq!(&payload[..], &[9, OP_SETUP_ACK]);
@@ -505,7 +490,7 @@ mod tests {
       .dispatch_link_data(data_with(9, OP_FIRST_AND_ONLY, b"abcd"), &evt_tx)
       .await
       .unwrap();
-    let _ = outbox.recv().await; // CompleteAck
+    let _ = outbox.recv().await;
     let evt = events.recv().await.unwrap();
     match evt {
       SessionEvent::QueueSnapshotBytes { transfer_id, bytes } => {

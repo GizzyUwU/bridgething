@@ -112,15 +112,12 @@ class GoldenTests {
     assertTrue(forward is ForwardMessage.Json, "expected ForwardMessage.Json, got $forward")
     val json = (forward as ForwardMessage.Json).data.jsonObject
 
-    // The decoded structure should match what Rust serde_json::to_value emitted
-    // in the fixture: {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
+    // fixture content: {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
     assertEquals("playback-changed", json["kind"]!!.jsonPrimitive.content)
     val payload = json["payload"]!!.jsonObject
     assertEquals(true, payload["playing"]!!.jsonPrimitive.content.toBoolean())
     assertEquals("12345", payload["positionMs"]!!.jsonPrimitive.content)
 
-    // Round-trip back through the codec to confirm the JsonElement re-encodes
-    // and re-decodes losslessly.
     val reEncoded = codec.encode(BridgeToGatewayMsg.serializer(), msg)
     val reDecoded = codec.decode(BridgeToGatewayMsg.serializer(), reEncoded)
     val reForward = (reDecoded.data as BridgeToGatewayMsgData.Forward).data as ForwardMessage.Json
@@ -143,12 +140,9 @@ class GoldenTests {
     assertTrue(decoded.data is BridgeToGatewayMsgData.Ack)
   }
 
-  // MARK: - fixture loading
-
   private fun loadGoldens(): GoldenFile {
-    // user.dir is the Gradle invocation cwd. Try a handful of relative paths
-    // so the test passes whether the test is invoked from the repo root, the
-    // gateway/kotlin/gateway module dir, or anywhere in between.
+    // user.dir is the Gradle invocation cwd; try candidate relative paths so the
+    // test passes from the repo root or the gateway module dir.
     val here = Paths.get(System.getProperty("user.dir"))
     val candidates = listOf(
       here.resolve("crates/lib/fixtures/golden.json"),

@@ -22,15 +22,8 @@ use crate::{
   link::Iap2Command,
 };
 
-/// One outbound NowPlaying control message. `TransportController`
-/// emits one of these per webapp scrub or queue-row tap; the flow
-/// turns it into a `SetNowPlayingInformation` CSM on the wire.
-///
-/// The `set_elapsed_time_available` gate documented in cleanroom doc
-/// 80 is enforced upstream (in `core::transport`) by reading the most
-/// recent `PlaybackAttributes.set_elapsed_time_available` snapshot
-/// before issuing seek; this flow trusts callers and emits whatever it
-/// receives.
+/// One outbound NowPlaying control message; the flow turns it into a `SetNowPlayingInformation`
+/// CSM. The `set_elapsed_time_available` gate is enforced upstream; this flow trusts callers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NowPlayingCommand {
   pub elapsed_time_ms: Option<u32>,
@@ -62,9 +55,7 @@ impl NowPlayingFlow {
     msg_id == NowPlayingUpdate::CSM_MSG_ID
   }
 
-  /// Send `StartNowPlayingUpdates` if we haven't yet. Idempotent;
-  /// callers may invoke after every dispatch as a cheap "kick once
-  /// identification is accepted" check.
+  /// Send `StartNowPlayingUpdates` if we haven't yet. Idempotent.
   pub(super) async fn ensure_subscribed(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, NowPlayingState::Idle) {
       tracing::debug!("iap2 now-playing: sending StartNowPlayingUpdates");
@@ -74,10 +65,8 @@ impl NowPlayingFlow {
     Ok(())
   }
 
-  /// Process one NowPlaying-range CSM. Always returns `Ok(None)` -
-  /// NowPlaying has no terminal failure state of its own; if the
-  /// iPhone stops pushing updates the link itself falls over and the
-  /// session emits `LinkDown` from there.
+  /// Process one NowPlaying-range CSM. Always returns `Ok(None)`; NowPlaying has no terminal
+  /// failure state of its own.
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,
@@ -95,9 +84,7 @@ impl NowPlayingFlow {
     Ok(None)
   }
 
-  /// Pull the next outbound command from the controller. The session's
-  /// main loop selects this alongside the link-event channel; returning
-  /// `None` means the controller's sender was dropped.
+  /// Pull the next outbound command from the controller. `None` means the sender was dropped.
   pub(super) async fn recv(&mut self) -> Option<NowPlayingCommand> {
     self.rx.recv().await
   }

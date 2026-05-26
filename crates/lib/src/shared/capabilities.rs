@@ -12,8 +12,7 @@ use typeshare::typeshare;
 use super::CompanionAuthorityScope;
 
 /// Identity payload describing the companion peer the daemon is talking
-/// to. Replaces the old `GatewayMeta` and the old `GatewayStatus` bits.
-/// Address is the BT MAC the companion advertises; on transports without
+/// to. Address is the BT MAC the companion advertises; on transports without
 /// a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
 /// is the synthetic address as a string.
 #[typeshare]

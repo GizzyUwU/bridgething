@@ -1,11 +1,10 @@
 import { Text, View } from 'react-native';
 
 /**
- * Bridgething wordmark — strict per docs/brand.md:
- *   single string, lowercase, never split
- *   "bridge" in Outfit Medium, "thing" in Outfit ExtraLight
- *   tracking -3% at display sizes, -2% in small lockups
- *   blue is accent only, never inside the wordmark
+ * Bridgething wordmark. Single string, lowercase, never split.
+ * "bridge" in Outfit Medium, "thing" in Outfit ExtraLight.
+ * Tracking -3% at display sizes, -2% in small lockups.
+ * Blue is accent only, never inside the wordmark.
  */
 const SIZES = {
   xs: { font: 14, tracking: -0.28, lineHeight: 16 },

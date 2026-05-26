@@ -7,14 +7,9 @@ import { Button as RNRButton } from './ui/button';
 import { Text } from './ui/text';
 
 /**
- * App-flavoured Button. Composes RNR's `<Button>` (the Pressable +
- * variant styling primitive) and adds bridgething-specific touches:
- * an optional leading icon, a loading spinner, and the soft glow that
- * primary / destructive variants get.
- *
- * Variant aliases preserve the legacy API so calls like
- * `<Button variant="primary" size="lg">` still work without screen edits:
- * `primary`/`tonal` map to RNR's `default`/`secondary`, etc.
+ * App-flavoured Button. Composes RNR's `<Button>` with an optional leading
+ * icon, a loading spinner, and the soft glow that primary / destructive
+ * variants get. `primary`/`tonal` map to RNR's `default`/`secondary`.
  */
 type Variant = 'primary' | 'secondary' | 'destructive' | 'ghost' | 'tonal';
 type Size = 'sm' | 'md' | 'lg';

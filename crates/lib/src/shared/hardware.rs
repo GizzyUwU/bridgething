@@ -33,8 +33,8 @@ pub struct BrightnessState {
 }
 
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
-/// `hardware.state.get` and re-broadcast on any change. See
-/// `AmbientLightUpdate` for the ambient_level semantics.
+/// `hardware.state.get` and re-broadcast on any change. `ambient_level`
+/// is the 0-255 ambient light reading.
 #[typeshare]
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]

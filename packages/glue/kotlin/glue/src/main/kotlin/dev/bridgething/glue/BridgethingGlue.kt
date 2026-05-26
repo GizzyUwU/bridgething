@@ -11,18 +11,15 @@ import dev.bridgething.schema.RepeatMode
 /**
  * Pluggable music-provider abstraction over a connected `BridgethingGateway`.
  *
- * Glues are lifecycle-managed by `BridgethingCompanion`: the companion calls
- * `attach(gateway)` after the gateway is running, and dispatches inbound
- * player verbs / asset / lyrics requests to the corresponding methods.
- * Outbound (NowPlayingUpdate delta, authority claim/release) is the glue's
- * own responsibility once it holds the gateway reference.
+ * Lifecycle-managed by `BridgethingCompanion`: `attach(gateway)` is called
+ * after the gateway is running; inbound player verbs / asset / lyrics requests
+ * are dispatched to the corresponding methods. Outbound events (NowPlayingUpdate
+ * deltas, authority claim/release) are the glue's own responsibility.
  *
- * Capabilities are composed by the companion. Glues contribute
- * `uriSchemes`, `musicProvider`, and `lyricsSupported`; everything else
- * (geo, net, audioTts, ...) is companion-level and ignored here.
- *
- * Mirror of the Swift `BridgethingGlue` protocol with default no-op
- * (`NotImplemented`) impls; concrete glues override what they support.
+ * Glues contribute `uriSchemes`, `musicProvider`, and `lyricsSupported`;
+ * other capabilities (geo, net, audioTts, ...) are companion-level.
+ * Default impls throw [GlueError.NotImplemented]; concrete glues override
+ * what they support.
  */
 interface BridgethingGlue {
     val name: String

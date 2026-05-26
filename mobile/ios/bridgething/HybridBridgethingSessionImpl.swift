@@ -9,23 +9,10 @@ import Foundation
 import NitroModules
 import UIKit
 
-/// Real `BridgethingSessionBackend` impl for the bridgething host app.
-/// Owns one `BridgethingCompanion` (which owns the gateway, the active
-/// glue, and every dispatcher).
-///
-/// Glue registration happens before the backend is installed: the
-/// `BridgethingApp` setup code populates the static `registry` with a
-/// `ProviderRegistration` per provider id. Each registration carries a
-/// factory closure that produces a fresh glue, plus a `signOut` closure
-/// that clears the host's persisted credentials. The glue itself drives
-/// the auth lifecycle via `setAuthObserver`; this backend translates
-/// `GlueAuthState` updates into the wire `BridgethingAuthState`.
-///
-/// State scope: this backend persists nothing of its own. JS owns the
-/// preferences (setup-completed, nicknames, capability flags, OTA poll
-/// config) in mmkv and reapplies flags + poll config on bootstrap. The
-/// only persisted state on the iOS side belongs to Spotiny (Keychain
-/// tokens) — separate; see BridgethingSetup.swift.
+/// Real `BridgethingSessionBackend` for the bridgething host app.
+/// Owns one `BridgethingCompanion` and translates `GlueAuthState` updates
+/// into the wire `BridgethingAuthState`. This backend persists nothing; JS
+/// owns preferences in mmkv and reapplies them on bootstrap.
 public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unchecked Sendable {
     public typealias GlueFactory = @Sendable () -> any BridgethingGlue
     public typealias SignOutFn = @Sendable () -> Void
@@ -83,14 +70,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     // MARK: - Lifecycle
 
     public func start() async throws {
-        // Idempotent — App.tsx and any legacy callers can start without
-        // worrying about double-construction of the companion.
         if stateLock.withLock({ self.companion != nil }) { return }
         let adapter = EAAccessoryAdapter(protocolString: Self.eaProtocolString)
         let host = Self.makeHostInfo()
-        // Companion starts with all-off capability flags; JS reads its
-        // mmkv copy on bootstrap and calls `setCapabilityFlags(...)`
-        // before / after start().
+        // capability flags start all-off; JS applies them via setCapabilityFlags on bootstrap
         let companion = BridgethingCompanion(
             adapter: adapter,
             lyricsResolver: Self.lyricsResolver,
@@ -295,9 +278,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let beginResult = try await companion.gateway.webapp.installBegin(deviceId: deviceId, begin)
         let ack = try unwrapWebappErr(beginResult, label: "installBegin")
 
-        // Subscribe to terminal events BEFORE the last chunk lands so we
-        // don't race the daemon's broadcast. Each task observes one outcome
-        // and yields it; the cancellation on the other side wins the group.
+        // subscribe before the last chunk lands to avoid racing the daemon's broadcast
         let installedTask = Task<WebappInfo, Error> {
             for await pair in companion.gateway.webapp.webappInstalled where pair.deviceId == deviceId {
                 return pair.msg
@@ -603,9 +584,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public func requestNotificationAccess() async throws { throw SessionError.unsupportedOnPlatform }
     public func revokeRuntimePermissions(permissions: [String]) async -> Bool { false }
     public func killApp() async {
-        // No-op on iOS - Apple rejects apps that exit(0) themselves
-        // and self-restart isn't needed (no equivalent of android's
-        // revokeSelfPermissionsOnKill that defers until process death).
+        // no-op on iOS; Apple rejects explicit process termination
     }
 
     // MARK: - Internal
@@ -621,17 +600,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
             let glue = registration.factory()
             stateLock.withLock { activeRegistration = registration }
-            // Subscribe before `setActive`: the glue may emit
-            // `authenticated` synchronously inside `attach` if cached
-            // tokens still validate, and we'd miss it otherwise.
+            // subscribe before setActive; the glue may emit authenticated synchronously during attach
             await glue.setAuthObserver { [weak self] state in
                 self?.handleGlueAuthState(state)
             }
-            // setActive awaits the glue's full attach pipeline, which
-            // includes the dealer-websocket connect after auth — that
-            // can hang on flaky networks. The provider is emitted from
-            // `handleGlueAuthState` the moment `.authenticated` lands,
-            // so the host doesn't have to wait for socket setup.
             try await companion.setActive(glue)
             try Task.checkCancellation()
         } else {
@@ -643,8 +615,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
     private func handleGlueAuthState(_ state: GlueAuthState) {
-        // JS opens the verification URL via InAppBrowser in response to
-        // the `pending` event; native does not present any browser UI.
         switch state {
         case let .pending(prompt):
             emitAuth(.pendingState(
@@ -744,11 +714,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    /// Persist webapp icon bytes to the caches directory and return a
-    /// stable file URL. Same `(deviceId, id)` always rewrites the same
-    /// path so RN's Image cache is still useful; consumers that diff on
-    /// uri can append a query string to bust their own caches when they
-    /// know the underlying icon could have changed.
+    /// Persist webapp icon bytes and return a stable file URL.
+    /// Same `(deviceId, id)` always writes the same path so the RN image cache remains valid.
     private static func writeIconToCache(deviceId: String, id: String, mime: String?, bytes: Data) throws -> URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let dir = caches.appendingPathComponent("bridgething-webapp-icons", isDirectory: true)
@@ -986,7 +953,7 @@ private extension NSLock {
     }
 }
 
-/// Wire enum → RN string union.
+/// Wire enum -> RN string union.
 private func toRNAncsAuthStatus(_ state: AncsAuthState) -> BridgethingAncsAuthStatus {
     switch state {
     case .unknown: .unknown

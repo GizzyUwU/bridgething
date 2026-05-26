@@ -8,9 +8,7 @@ import dev.bridgething.schema.MusicProvider
 
 /**
  * `BridgethingGlue` impl backed by a hand-ported Kotlin Spotify Web API +
- * dealer WS client (mirror of spotiny on the Swift side). Real impl lands
- * in a follow-up slice; the type, contribution properties, and
- * constructor shape are stable from this round.
+ * dealer WS client.
  */
 class SpotifyGlue(
     private val authenticator: SpotifyAuthenticator,
@@ -40,9 +38,8 @@ class SpotifyGlue(
 }
 
 /**
- * Mirror of spotiny's `OAuthAuthenticator` Swift protocol. WebView PKCE
- * and device-code impls land in the next slice; the surface is here so
- * `SpotifyGlue` can take one at construction.
+ * Authorization interface `SpotifyGlue` takes at construction; concrete
+ * implementations provide WebView PKCE or device-code auth.
  */
 interface SpotifyAuthenticator {
     suspend fun authorize(): TokenBundle

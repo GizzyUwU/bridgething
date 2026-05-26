@@ -22,15 +22,13 @@ use crate::{
 
 const STREAM_INBOUND_CAPACITY: usize = 32;
 
-/// First EA stream id the device allocates. The value is opaque to the
-/// accessory beyond uniqueness within a link; the real iPhone uses
-/// 0x0100-range ids, so we mirror that.
+/// First EA stream id the device allocates, opaque beyond uniqueness
+/// within a link; mirrors the real iPhone's 0x0100-range ids.
 const FIRST_STREAM_ID: u16 = 0x0100;
 
-/// An opened device-side EA stream, surfaced to the emulator's consumer.
+/// An opened device-side EA stream surfaced to the consumer.
 /// `inbound_rx` yields reassembled bytes the accessory sent on this
-/// stream; `outbound` chunks bytes back onto link session 3. Together
-/// they are a byte pipe the host can wrap with the real gateway client.
+/// stream; `outbound` chunks bytes back onto link session 3.
 #[derive(Debug)]
 pub struct DeviceEaStream {
   pub stream_id: u16,
@@ -55,8 +53,7 @@ impl DeviceEaFlow {
   }
 
   /// Allocate a stream id and set up its inbound routing, returning the
-  /// `StartES` CSM the emulator must send on the control session plus
-  /// the opened stream's byte channels.
+  /// `StartES` CSM to send on the control session plus the stream's channels.
   pub(crate) fn open(&mut self, protocol_id: u8) -> (StartExternalAccessoryProtocolSession, DeviceEaStream) {
     let session_id = self.next_session_id;
     self.next_session_id = self.next_session_id.wrapping_add(1);

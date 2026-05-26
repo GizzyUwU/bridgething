@@ -135,9 +135,7 @@ export async function bootstrapSession(): Promise<void> {
   await session.start();
   useSessionStore.setState({ started: true });
 
-  // Apply persisted preferences. Order: flags (cheap; pure config),
-  // poll config (may schedule a network call). Errors here are
-  // non-fatal — the user can fix them in Settings.
+  // apply persisted preferences; errors are non-fatal.
   try {
     await session.setCapabilityFlags(store.capabilityFlags);
   } catch (err) {
@@ -150,10 +148,7 @@ export async function bootstrapSession(): Promise<void> {
   }
 }
 
-// MARK: - Convenience selectors / mutators
-
-/** Push a flag change to native and mmkv at the same time. The optimistic
- *  store update lands first so toggles feel instant. */
+/** Push a flag change to native and mmkv at the same time; optimistic store update lands first so toggles feel instant. */
 export async function updateCapabilityFlags(
   flags: typeof DEFAULT_CAPABILITY_FLAGS,
 ): Promise<void> {
@@ -186,15 +181,13 @@ export function updateNickname(
   persistNickname(deviceId, nickname);
 }
 
-/** Pretty name for a peer — nickname when set, BT-advertised name otherwise. */
+/** Nickname when set, BT-advertised name otherwise. */
 export function peerDisplayName(
   peer: BridgethingSessionPeer,
   nicknames: Record<string, string>,
 ): string {
   return nicknames[peer.id] ?? peer.name;
 }
-
-// MARK: - Hook helpers
 
 /**
  * Subscribe to a slice of session state. `selector` is wrapped in

@@ -3,20 +3,12 @@ import { BRIDGETHING_MDNS_SERVICE_TYPE, BRIDGETHING_NETWORK_GATEWAY_PORT } from 
 import type { Discoverer, DiscoveryListener, Endpoint } from './discovery';
 
 /**
- * Browse for `_bridgething._tcp` services and surface each as an
- * `Endpoint`. Node / Bun only — pulls in `bonjour-service` lazily so
- * browser bundles don't trip over the import.
+ * Browse for `_bridgething._tcp` services and surface each as an `Endpoint`.
+ * Node/Bun only; `bonjour-service` is loaded lazily so browser bundles are unaffected.
  *
- * The daemon's avahi service file (rendered at runtime so the nickname
- * TXT record can update without a config rewrite, see
- * `crates/core/src/systemd/avahi.rs`) advertises:
- *   type   = `_bridgething._tcp`
- *   port   = `BRIDGETHING_NETWORK_GATEWAY_PORT` (8892)
- *   txt    = `nickname=<user-set string>` when present
- * The hostname comes from avahi's `%h.local` substitution; on a stock
- * bridgething image that resolves to `bridgething.local` (single device)
- * or `bridgething-<short-serial>.local` (multi-device, where the gadget
- * script derives a unique hostname per serial).
+ * The daemon advertises type=`_bridgething._tcp`, port=8892, and txt `nickname=<string>` when set.
+ * The hostname comes from avahi's `%h.local` substitution (`bridgething.local` or
+ * `bridgething-<short-serial>.local` on multi-device hosts).
  */
 
 type BonjourLike = {

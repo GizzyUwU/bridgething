@@ -54,10 +54,7 @@ import kotlinx.coroutines.withContext
  */
 @DoNotStrip
 class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
-    // Hardcoded rather than imported from dev.bridgething.schema: this Nitro
-    // module deliberately doesn't depend on the schema Gradle module, so the
-    // RFCOMM service UUID is duplicated here. Keep in lockstep with the value
-    // in crates/lib/src/lib.rs.
+    // duplicated from schema to avoid a Gradle dependency on the schema module; keep in lockstep.
     private val serviceUuid: UUID = UUID.fromString("dead0000-854d-408e-81f0-fb6147f918fd")
 
     private val ioScope: CoroutineScope =
@@ -70,8 +67,6 @@ class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
     private var onDisconnected: ((String) -> Unit)? = null
     private var onBytes: ((String, ArrayBuffer) -> Unit)? = null
     private var onError: ((String, String) -> Unit)? = null
-
-    // MARK: - Hybrid spec
 
     override fun start(): Promise<Unit> = Promise.async {
         started = true
@@ -142,8 +137,7 @@ class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
     override fun send(deviceId: String, frame: ArrayBuffer): Promise<Unit> = Promise.async {
         val session = sessions[deviceId]
             ?: throw RuntimeException("unknown device $deviceId")
-        // ArrayBuffer is non-owning across the boundary; copy into a ByteArray so
-        // the outbound write can run after this Promise returns.
+        // ArrayBuffer is non-owning across the JNI boundary; copy before the Promise returns.
         val bytes = frame.getBuffer(copyIfNeeded = true).let { byteBuffer ->
             ByteArray(byteBuffer.remaining()).also { byteBuffer.get(it) }
         }
@@ -185,8 +179,6 @@ class HybridBridgethingTransport : HybridBridgethingTransportSpec() {
     override fun setOnError(callback: (deviceId: String, description: String) -> Unit) {
         onError = callback
     }
-
-    // MARK: - internal session plumbing
 
     internal fun emitBytes(deviceId: String, bytes: ByteArray) {
         val cb = onBytes ?: return

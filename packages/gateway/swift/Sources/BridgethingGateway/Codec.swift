@@ -100,8 +100,8 @@ public struct FrameHeader: Sendable, Equatable {
 
 /// Frames and unframes bridgething wire messages over a transport (BLE, RFCOMM, EAAccessory).
 ///
-/// Encode: `T` → msgpack/json (encoding) → gzip/raw (compression) → 16-byte header + body.
-/// Decode: header → body → gunzip/raw → msgpack/json → `T`.
+/// Encode: `T` -> msgpack/json (encoding) -> gzip/raw (compression) -> 16-byte header + body.
+/// Decode: header -> body -> gunzip/raw -> msgpack/json -> `T`.
 ///
 /// UUID fields on the wire are 16-byte msgpack `bin`. The schema-generated
 /// types expose them as `Foundation.UUID`; `MsgpackUuid` in BridgethingSchema

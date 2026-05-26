@@ -82,12 +82,8 @@ impl Harness {
     &self.state
   }
 
-  /// Attach a real Android companion: open a duplex, hand the daemon one end
-  /// through the rfcomm inject channel (it sees a `GatewayType::Rfcomm` peer
-  /// indistinguishable from a real one), and drive the other end with the real
-  /// `bridgething-gateway` SDK over the same `GatewayEndec` framing a hardware
-  /// companion uses. Dropping the returned `Gateway` closes the duplex, which
-  /// the daemon observes as a companion disconnect.
+  /// Inject a duplex into the daemon's rfcomm channel and drive the other half
+  /// with the real gateway SDK. Dropping the returned [`Gateway`] disconnects.
   pub async fn connect_android(&self) -> Result<Gateway> {
     let (daemon_half, phone_half) = tokio::io::duplex(DUPLEX_BUF);
     let n = self.next_peer.fetch_add(1, Ordering::Relaxed);
@@ -96,19 +92,14 @@ impl Harness {
     Ok(Gateway::from_io(phone_half))
   }
 
-  /// Inject a raw iAP2 `SessionEvent` for `address` into the same channel
-  /// the real `Iap2Manager` feeds. The unmodified `Iap2EventRouter` routes
-  /// it through the real Player merge / stock translation / broadcast - no
-  /// Link, no session, no MFi. This is the iOS T1/T2 driver: the session
-  /// events are what a real iPhone's iAP2 session produces, minus the radio.
+  /// Inject a raw iAP2 `SessionEvent` into the daemon's event channel,
+  /// bypassing the link, session, and MFi layers.
   pub async fn inject_iap2(&self, address: Address, event: SessionEvent) -> Result<()> {
     self.inject.iap2.send(Iap2Event { address, event }).await?;
     Ok(())
   }
 
-  /// Deliver iAP2 artwork bytes (the FileTransfer the daemon pairs to a
-  /// prior now-playing delta's `artwork_id`). On a real iPhone these arrive
-  /// a beat after the metadata - the latency the cover-art bug rides.
+  /// Deliver iAP2 artwork bytes for `transfer_id`, as the daemon would receive after a now-playing delta.
   pub async fn iap2_artwork(&self, address: Address, transfer_id: u8, bytes: Vec<u8>) -> Result<()> {
     self
       .inject_iap2(
@@ -147,29 +138,20 @@ impl Harness {
     }
   }
 
-  /// Observe the daemon's egress frame mirror. Each frame is one
-  /// post-translation message the daemon sent to a client connection - the
-  /// observer side of the flicker bug, where the symptom is a broadcast
-  /// stream that oscillates even when settled state looks clean. Start
-  /// observing before driving a scenario; only frames sent afterward arrive.
+  /// Subscribe to the daemon's egress frame mirror. Only frames sent after this call arrive.
   pub fn observe_frames(&self) -> FrameObserver {
     FrameObserver {
       rx: self.state.client_man.subscribe_frames(),
     }
   }
 
-  /// Open a real modern-mode websocket to the daemon's bound modern port.
-  /// The daemon proactively pushes a capabilities snapshot to every new
-  /// modern client, so a connect alone produces an observable egress frame.
+  /// Open a modern-mode websocket to the daemon's bound modern port.
   pub async fn connect_modern_client(&self) -> Result<MockWsClient> {
     let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.modern)).await?;
     Ok(MockWsClient { stream })
   }
 
-  /// Open a real stock-mode websocket to the daemon's bound stock port. The
-  /// daemon broadcasts stock-translated now-playing to it like any client,
-  /// so a bare stock connection observes the merge/re-broadcast suspects.
-  /// (The serve-asset suspect is request-driven and needs the real SPA - T2.)
+  /// Open a stock-mode websocket to the daemon's bound stock port.
   pub async fn connect_stock_client(&self) -> Result<MockWsClient> {
     let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.stock)).await?;
     Ok(MockWsClient { stream })
@@ -182,10 +164,7 @@ impl Harness {
     ChromeView::launch(self.server_addrs.modern, self.server_addrs.stock.port()).await
   }
 
-  /// Observe egress frames through the daemon's frame-tap WS bridge instead of
-  /// the in-process broadcast. Same `FrameObserver`, fed by deserializing the
-  /// `TappedFrame`s the bridge ships - the observation transport a device rig
-  /// uses over the tunnel, validated here against the loopback daemon.
+  /// Observe egress frames via the daemon's frame-tap WS bridge rather than the in-process broadcast.
   pub async fn connect_frame_tap_ws(&self) -> Result<FrameObserver> {
     frame_tap_ws_observer(&format!("ws://{}/", self.server_addrs.frame_tap)).await
   }
@@ -238,11 +217,9 @@ impl FrameObserver {
   }
 }
 
-/// Connect to a daemon's frame-tap WS bridge and adapt it into a `FrameObserver`.
-/// A background task deserializes each `TappedFrame` the bridge ships and
-/// re-publishes it onto a local broadcast the observer drains, so the same
-/// assertions work whether frames arrive in-process or over a tunnel. The task
-/// ends (and the observer sees the channel close) when the WS connection drops.
+/// Connect to a daemon's frame-tap WS bridge and wrap it in a [`FrameObserver`].
+/// A background task deserializes inbound frames and re-publishes them on a local broadcast;
+/// the observer sees channel-close when the WS connection drops.
 pub async fn frame_tap_ws_observer(url: &str) -> Result<FrameObserver> {
   let (stream, _resp) = connect_async(url).await?;
   let (tx, _seed_rx) = broadcast::channel(FRAME_OBSERVER_CAPACITY);

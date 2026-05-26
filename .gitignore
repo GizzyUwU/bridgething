@@ -8,6 +8,7 @@ adapters/node/native
 # gradle
 /.gradle
 /local.properties
+crates/lib/kotlin/schema/bin/
 
 # nix
 result

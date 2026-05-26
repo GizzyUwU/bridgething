@@ -23,10 +23,9 @@ pub struct AssetGet {
   pub request_id: Uuid,
 }
 
-/// Webapp hint to warm the daemon's asset cache. The daemon issues an
-/// `AssetRequest` to the connected companion for each id that isn't
-/// already cached, in parallel; subsequent `Get` calls hit cache.
-/// Fire-and-forget - webapps observe completion via `Asset.Ready` events.
+/// Webapp hint to warm the asset cache for a set of ids so subsequent
+/// `Get` calls hit cache. Fire-and-forget; webapps observe completion
+/// via `Asset.Ready` events.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]

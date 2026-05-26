@@ -5,7 +5,7 @@
 //! directly (Auto) or holds a webapp-set level (Manual).
 //!
 //! The mainline tsl2772 driver boots the chip at minimum sensitivity
-//! (1x analog gain, single 2.73 ms ADC cycle, ~1024 max counts) — far
+//! (1x analog gain, single 2.73 ms ADC cycle, ~1024 max counts), far
 //! below useful range. The daemon writes `in_intensity0_calibscale` and
 //! `in_intensity0_integration_time` at startup to put the chip in a
 //! regime where typical room ambient produces tens of counts and direct

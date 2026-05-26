@@ -1,6 +1,5 @@
 //! Inbound iAP2 SessionEvent router.
 //!
-//! Replaces the manager-internal `observe_session_events` god-function.
 //! The iAP2 manager emits per-peer `Iap2Event`s upstream over a public
 //! mpsc; the daemon's main loop reads from that channel and calls
 //! `Iap2EventRouter::route` for each event. State mutation lives here,
@@ -399,7 +398,6 @@ fn evaluate_hint_against(entry: &mut HintCheckpoint, update: &NowPlayingUpdate, 
   if let Some(last) = entry.last_emit
     && now.duration_since(last) < HINT_DEBOUNCE
   {
-    // Suppressed for debounce
     return None;
   }
 
@@ -696,14 +694,12 @@ mod tests {
       evaluate_hint_against(&mut entry, &track_update("aa", true, "com.spotify.client"), t0).expect("first emits");
     assert_eq!(first.persistent_id.as_deref(), Some("iap2:track:aa"));
 
-    // 100ms later, track changes again. Inside 250ms window: suppressed,
-    // checkpoint left at the announced state ("aa") so the next post-window
-    // delta still notices the change.
+    // inside the debounce window the emit is suppressed but the checkpoint stays at the announced state,
+    // so the next post-window delta still notices the change.
     let t1 = t0 + Duration::from_millis(100);
     assert!(evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t1).is_none());
     assert_eq!(entry.pid_hex.as_deref(), Some("iap2:track:aa"));
 
-    // 300ms after the first emit, the new track is announced.
     let t2 = t0 + Duration::from_millis(300);
     let post = evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t2)
       .expect("post-window emits");

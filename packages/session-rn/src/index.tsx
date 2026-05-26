@@ -146,10 +146,9 @@ export class BridgethingSession {
   }
 
   /**
-   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond
-   * required for ANCS. Resolves once the picker-side outcome is known;
-   * the daemon-observed `authStatus` may transition asynchronously after
-   * — observe the session subscription for `ancsAuthStatusChanged`.
+   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond required for ANCS.
+   * Resolves once the picker-side outcome is known; `authStatus` may still transition
+   * asynchronously - observe the session for `ancsAuthStatusChanged`.
    */
   async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
     return this.native.enableAncsNotifications();
@@ -158,8 +157,6 @@ export class BridgethingSession {
   async ancsAuthStatus(): Promise<BridgethingAncsAuthStatus> {
     return this.native.ancsAuthStatus();
   }
-
-  // MARK: - Webapps (per-device)
 
   async listWebapps(deviceId: string): Promise<BridgethingWebappInfo[]> {
     return this.native.listWebapps(deviceId);
@@ -197,8 +194,6 @@ export class BridgethingSession {
     await this.native.deleteWebappConfigField(deviceId, id, key);
   }
 
-  // MARK: - Capability flags + OTA (no native persistence; JS owns it)
-
   async setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void> {
     await this.native.setCapabilityFlags(flags);
   }
@@ -215,22 +210,17 @@ export class BridgethingSession {
     return this.native.deviceMeta(deviceId);
   }
 
-  // MARK: - Host identity
-
   async hostInfo(): Promise<BridgethingHostInfo> {
     return this.native.hostInfo();
   }
 
   /**
-   * Cross-platform OS-mediated pair flow. iOS = AccessorySetupKit
-   * picker (iOS 18+). Android = CompanionDeviceManager picker (API 26+).
+   * OS-mediated pair flow: AccessorySetupKit (iOS 18+) or CompanionDeviceManager (Android API 26+).
    * Returns the chosen accessory, or null on cancel.
    */
   async presentPairPicker(): Promise<BridgethingBtDevice | null> {
     return this.native.presentPairPicker();
   }
-
-  // MARK: - Notification access (android-only)
 
   async isNotificationAccessGranted(): Promise<boolean> {
     return this.native.isNotificationAccessGranted();
@@ -241,28 +231,22 @@ export class BridgethingSession {
   }
 
   /**
-   * Drop a set of runtime permissions. Android 13+ queues the revoke
-   * for next process kill via `revokeSelfPermissionsOnKill`; older
-   * platforms + iOS return `false` and the caller bounces the user to
-   * system settings instead. Pass every related permission together
-   * (e.g. `ACCESS_BACKGROUND_LOCATION` + `ACCESS_FINE_LOCATION` +
-   * `ACCESS_COARSE_LOCATION`) to fully revoke - revoking the
-   * background-only one just downgrades the OS grant to "while using".
+   * Drop a set of runtime permissions. Android 13+ queues the revoke for next process kill
+   * via `revokeSelfPermissionsOnKill`; older Android and iOS return `false` (caller opens
+   * system settings). Pass all related permissions together - revoking only the background
+   * variant downgrades to "while using" instead of fully revoking.
    */
   async revokeRuntimePermissions(permissions: string[]): Promise<boolean> {
     return this.native.revokeRuntimePermissions(permissions);
   }
 
   /**
-   * Force-kill our own process. Use after `revokeRuntimePermissions`
-   * to apply the queued revoke immediately - the OS routes the user
-   * back to the launcher and the perm is gone when they reopen.
+   * Force-kill our own process to apply a queued `revokeSelfPermissionsOnKill`.
+   * The OS routes the user back to the launcher; the perm is gone on reopen.
    */
   async killApp(): Promise<void> {
     await this.native.killApp();
   }
-
-  // MARK: - Per-device proxy
 
   device(deviceId: string): BridgethingDevice {
     return new BridgethingDevice(this, deviceId);
@@ -357,23 +341,19 @@ export class BridgethingDevice {
 }
 
 /**
- * ArrayBuffer → base64 (no `data:` prefix). Used internally to bridge
- * RN webapp installs to native through a Swift-friendly string surface
- * (Nitro 0.35.5's Swift ArrayBuffer typealias breaks Swift→C++ header
- * interop). 33% inflation is acceptable for KB–MB-sized webapp bundles.
+ * ArrayBuffer to base64 without a `data:` prefix. The Swift `ArrayBuffer` typealias
+ * breaks Swift-to-C++ header interop, so installs go over a string surface instead.
+ * 33% inflation is acceptable for webapp bundle sizes.
  */
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  // 8 KiB chunks: avoids hitting the JS engine's call-stack limit on
-  // String.fromCharCode(...largeArray) for archives bigger than a few
-  // hundred KB.
+  // 8 KiB chunks avoid hitting the JS engine call-stack limit on String.fromCharCode with large arrays
   let binary = '';
   const chunk = 8192;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
-  // Hermes / RN ship `globalThis.btoa`; fall back to a tiny encoder if
-  // missing (some test environments).
+  // fall back to manual encoder in test environments that don't ship btoa
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g = globalThis as any;
   if (typeof g.btoa === 'function') return g.btoa(binary) as string;

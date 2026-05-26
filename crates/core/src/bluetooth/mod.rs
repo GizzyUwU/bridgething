@@ -20,14 +20,12 @@ use tokio::{
 };
 use uuid::Uuid;
 
-// protocol modules
 pub mod iap2;
 pub mod le;
 mod network;
 pub mod profiles;
 mod rfcomm;
 
-// general modules
 mod adapter;
 mod auth;
 #[cfg(debug_assertions)]

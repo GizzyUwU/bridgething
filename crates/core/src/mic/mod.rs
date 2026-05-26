@@ -3,8 +3,7 @@
 //! over the gateway Bulk lane to the connected companion. Frame
 //! cadence and format are constant per session; backpressure is
 //! propagated by dropping frames at the capture boundary rather than
-//! buffering (see [`project_chunked_transfer_rule.md`]: streams must
-//! never accumulate in memory).
+//! buffering, since streams must never accumulate in memory.
 //!
 //! Wire surface (gateway-bound, Bulk lane):
 //!   `BridgeToGatewayVoiceMsg::{StreamOpen, Frame, StreamClose}`

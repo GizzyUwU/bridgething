@@ -5,8 +5,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * Subset of the thinglabs discover-manifest schema the poll loop reads
- * when picking an OTA release. Mirror of Swift `OtaDiscoverManifest`;
- * the site-side validator owns the full schema.
+ * when picking an OTA release. The site-side validator owns the full schema.
  */
 @Serializable
 public data class OtaDiscoverManifest(
@@ -59,8 +58,7 @@ public data class OtaCompositeVersion(
 
 /**
  * Per-artifact URLs derived from the OTA root + channel + per-component
- * version + image variant. Mirror of Swift `OtaArtifactURLs`; matches the
- * on-disk R2 layout documented in `notes/release-pipeline.md`.
+ * version + image variant. Matches the on-disk R2 layout.
  */
 public data class OtaArtifactUrls(
     val daemonBinary: String,

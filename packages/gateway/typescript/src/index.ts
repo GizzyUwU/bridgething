@@ -23,10 +23,8 @@ export type AdapterEvent =
 export type AdapterListener = (event: AdapterEvent) => void;
 
 /**
- * Byte-level transport contract. Implementations plumb a specific Bluetooth
- * stack (EAAccessory on iOS, BluetoothSocket on Android, BLE elsewhere via the
- * Nitro module, plain BLE via ble-plx for legacy callers, etc.) and emit raw
- * chunks; framing, gzip, and msgpack live one layer up in the gateway.
+ * Byte-level transport contract. Implementations plumb a Bluetooth stack
+ * and emit raw chunks; framing and codec live one layer up in the gateway.
  *
  * Multi-device by design: a single `Adapter` instance can manage several
  * concurrent peers, addressed by the opaque `deviceId` from `Device.id`.
@@ -144,14 +142,11 @@ export class BridgethingGateway {
   }
 
   /**
-   * Encode and ship a fully-formed message. Caller is responsible for picking
-   * `meta` (`command`, `event`, etc.). For request/response, prefer `request`
-   * which handles id generation and awaiting the matching response.
+   * Encode and ship a fully-formed message. Caller picks `meta` (`command`, `event`, etc.).
+   * For request/response, prefer `request` which handles id generation and awaiting the reply.
    *
-   * `priority` is a transport-level scheduling hint - Bulk yields to Normal at
-   * frame boundaries so latency-sensitive traffic (NowPlaying deltas, like
-   * taps) interleaves between long bulk transfers (file/OTA chunks). Default
-   * is `'normal'`.
+   * `priority` is a transport-level scheduling hint: Bulk yields to Normal at frame boundaries
+   * so latency-sensitive traffic interleaves with long transfers. Defaults to `'normal'`.
    */
   async send(deviceId: string, message: GatewayToBridgeMsg, options: { priority?: Priority } = {}): Promise<void> {
     const frame = this.codec.encode(message, { priority: options.priority });
@@ -222,8 +217,7 @@ export class BridgethingGateway {
       try {
         frame = acc.nextFrame();
       } catch (err) {
-        // Lost framing - wipe the accumulator so subsequent bytes have a chance
-        // to resync if a new (well-framed) message lands at the next chunk.
+        // wipe the accumulator so the next well-framed message can resync
         this.buffers.set(deviceId, new FrameAccumulator());
         this.emit({ type: 'decodeError', deviceId, description: errorMessage(err) });
         return;
@@ -275,10 +269,7 @@ const GATEWAY_VERSION = `v${version}`;
 
 export { GATEWAY_VERSION };
 
-// Apply codegen-emitted prototype augmentations (`onTransport`, `onAsset...`,
-// `dispatch({...})`, etc.) to BridgethingGateway. Wrapped in a function call
-// rather than a side-effect import to defer until after the class is defined,
-// because dispatch.generated.ts needs `BridgethingGateway` as a value.
+// function call rather than a bare import so the class is defined before generated code references it
 import { applyDispatch } from './dispatch.generated';
 applyDispatch();
 

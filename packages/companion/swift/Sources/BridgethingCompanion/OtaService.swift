@@ -296,11 +296,8 @@ public actor OtaService {
             if release.yanked != nil || release.deprecated { return }
         }
 
-        // Snapshot current device list to a non-isolated copy so the
-        // checks below don't keep the actor blocked on each per-device
-        // download. Actor reentrancy on the `await`s in pushDaemon /
-        // pushUpdate is fine; subsequent polls observe the inFlight
-        // set and skip.
+        // Snapshot device list so per-device downloads don't keep the actor blocked; reentrant polls
+        // observe the inFlight set and skip.
         let snapshot = deviceMeta
         for (deviceId, meta) in snapshot {
             await reconcileDevice(
@@ -354,8 +351,7 @@ public actor OtaService {
                     gateway: gateway
                 )
             }
-            // Daemon push restarts the gateway link; the image check
-            // can wait for the next poll cycle when the link is back.
+            // Daemon push restarts the gateway link; the image check waits for the next poll cycle.
             return
         }
 
@@ -474,9 +470,8 @@ public actor OtaService {
         case let .failed(reason):
             eventContinuation.yield(.failed(deviceId: deviceId, kind: kind, reason: reason))
         case .idle, .streaming, .applying:
-            // Stream ended without a terminal snapshot - treat as
-            // success since `driveOta` only completes on the .reboot
-            // phase or an explicit failure path.
+            // Stream ended without a terminal snapshot; treat as success since `driveOta` only
+            // completes on the .reboot phase or an explicit failure path.
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         }
     }

@@ -13,12 +13,6 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Ident, Lit, spanned::Spanned};
 
-/// Resolve the path the macro should use to refer to the iap2 crate.
-/// In-crate (`crate_name` returns `Itself`) -> `crate`. External callers
-/// -> `::<their-imported-name>`. Falls back to `::bridgething_iap2`
-/// only if the lookup fails entirely (which would mean the crate isn't
-/// in `Cargo.toml`'s deps; in that case the generated code won't
-/// compile anyway and the fallback just gives a clearer error).
 fn iap2_crate_path() -> TokenStream2 {
   match crate_name("bridgething-iap2") {
     Ok(FoundCrate::Itself) => quote!(crate),

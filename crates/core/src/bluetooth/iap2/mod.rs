@@ -1,7 +1,6 @@
-//! iAP2 over RFCOMM. Sibling to `rfcomm/` (Android-native gateway) and
-//! `network/` (host iteration gateway). Registers the iAP2 accessory
-//! profile, accepts iPhone connect requests, and spawns one
-//! [`Iap2Session`] per active link. MFi chip access is required;
+//! iAP2 over RFCOMM. Registers the iAP2 accessory profile, accepts
+//! iPhone connect requests, and spawns one [`Iap2Session`] per active
+//! link. MFi chip access is required;
 //! initialization probes the chip first and skips profile registration
 //! entirely if the probe fails (Car Things without working MFi silicon
 //! still get a usable daemon, just no iOS support).

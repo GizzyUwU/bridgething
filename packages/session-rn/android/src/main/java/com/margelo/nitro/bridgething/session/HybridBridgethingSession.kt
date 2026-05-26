@@ -6,11 +6,10 @@ import com.margelo.nitro.core.NullType
 import com.margelo.nitro.core.Promise
 
 /**
- * Thin Nitro proxy. The library ships this; the host app installs a
- * [BridgethingSessionBackend] at launch via [installBackend]. Without a
- * backend installed, every method throws "backend not installed".
- * Callback setters are silently buffered until a backend is installed,
- * then re-applied. Mirror of the Swift `HybridBridgethingSession` proxy.
+ * Thin Nitro proxy. The host app installs a [BridgethingSessionBackend]
+ * at launch via [installBackend]. Without a backend, every method throws
+ * "backend not installed". Callback setters are buffered until a backend
+ * is installed, then re-applied.
  */
 @DoNotStrip
 public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
@@ -33,11 +32,9 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
 
         /**
-         * Load the BridgethingSession JNI lib + register the HybridObject
-         * with Nitro's runtime registry. Normally autolinking generates
-         * this call into the app's OnLoad.cpp, but bun workspace symlinks
-         * trip RN's autolinker so the host app calls this explicitly from
-         * MainApplication.onCreate. Idempotent; safe to call more than once.
+         * Loads the JNI lib and registers the HybridObject with Nitro's runtime.
+         * Called explicitly because bun workspace symlinks trip RN's autolinker.
+         * Idempotent.
          */
         @JvmStatic
         public fun initializeNitro() {
@@ -45,10 +42,9 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         }
 
         /**
-         * Host apps call this once at launch (before React Native starts)
-         * to wire up the real session backend that uses the bridgething
-         * Kotlin packages. Replays any callback setters JS may have
-         * already installed.
+         * Wire up the real session backend. Must be called once at launch,
+         * before React Native starts. Replays any callback setters JS may
+         * have already registered.
          */
         @JvmStatic
         public fun installBackend(b: BridgethingSessionBackend) {
@@ -110,12 +106,8 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val ota: ((BridgethingOtaEvent) -> Unit)?,
     )
 
-    // Lifecycle
-
     override fun start(): Promise<Unit> = Promise.async { require().start() }
     override fun stop(): Promise<Unit> = Promise.async { require().stop() }
-
-    // Provider selection
 
     override fun availableProviders(): Promise<Array<BridgethingProviderInfo>> = Promise.async {
         require().availableProviders()
@@ -150,8 +142,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         else Variant_NullType_BridgethingNowPlaying.First(NullType.NULL)
     }
 
-    // ANCS
-
     override fun enableAncsNotifications(): Promise<BridgethingAncsSetupResult> = Promise.async {
         backend?.enableAncsNotifications() ?: BridgethingAncsSetupResult(
             kind = BridgethingAncsSetupKind.UNSUPPORTED,
@@ -163,8 +153,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     override fun ancsAuthStatus(): Promise<BridgethingAncsAuthStatus> = Promise.async {
         backend?.ancsAuthStatus() ?: BridgethingAncsAuthStatus.UNKNOWN
     }
-
-    // Webapps (per-device)
 
     override fun listWebapps(deviceId: String): Promise<Array<BridgethingWebappInfo>> = Promise.async {
         require().listWebapps(deviceId)
@@ -206,13 +194,9 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().deleteWebappConfigField(deviceId, id, key)
     }
 
-    // Capability flags
-
     override fun setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<Unit> = Promise.async {
         backend?.setCapabilityFlags(flags)
     }
-
-    // OTA
 
     override fun setOtaPollConfig(config: Variant_NullType_BridgethingOtaPollConfig?): Promise<Unit> = Promise.async {
         val unwrapped: BridgethingOtaPollConfig? = config?.let { variant ->
@@ -232,8 +216,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         else Variant_NullType_BridgethingDeviceMeta.First(NullType.NULL)
     }
 
-    // Host identity
-
     override fun hostInfo(): Promise<BridgethingHostInfo> = Promise.async {
         backend?.hostInfo() ?: BridgethingHostInfo(
             appName = "bridgething",
@@ -247,15 +229,11 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         )
     }
 
-    // OS-mediated pair flow
-
     override fun presentPairPicker(): Promise<Variant_NullType_BridgethingBtDevice> = Promise.async {
         val device = require().presentPairPicker()
         if (device != null) Variant_NullType_BridgethingBtDevice.Second(device)
         else Variant_NullType_BridgethingBtDevice.First(NullType.NULL)
     }
-
-    // Notification access
 
     override fun isNotificationAccessGranted(): Promise<Boolean> = Promise.async {
         backend?.isNotificationAccessGranted() ?: false
@@ -272,8 +250,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     override fun killApp(): Promise<Unit> = Promise.async {
         backend?.killApp()
     }
-
-    // Callback setters
 
     override fun setOnProviderChanged(callback: (info: Variant_NullType_BridgethingProviderInfo?) -> Unit) {
         val wrapped: (BridgethingProviderInfo?) -> Unit = { info ->

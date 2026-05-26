@@ -37,10 +37,7 @@ use crate::{
   conn::{Connection, OutboundFrame},
 };
 
-/// Bytes per `OtaAssetRangeChunk` when serving range responses. 64 KiB
-/// matches the daemon's ChunkedTransfer write granularity and keeps
-/// peak memory bounded - the chunk we produce here is in flight on the
-/// wire before the next read happens.
+/// 64 KiB matches the daemon's ChunkedTransfer write granularity.
 const RANGE_CHUNK_BYTES: usize = 64 * 1024;
 
 pub async fn run_push_update(

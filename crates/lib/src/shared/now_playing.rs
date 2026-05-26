@@ -10,12 +10,12 @@
 //!   companion) sends a `GatewayToBridgeMsgData::NowPlayingUpdate`
 //!   carrying this struct.
 //!
-//! Every field is optional: producers populate only what they have
-//! fresh information about, and the daemon merges into stable internal
-//! state. This matches the iAP2 wire semantics (Apple emits a fresh
-//! `NowPlayingUpdate` whenever any subscribed attribute changes,
-//! sending only that attribute) and gives the Android companion the
-//! freedom to push partial updates without a full snapshot every time.
+//! Every field is optional: producers send partial updates populating
+//! only what changed, and unset fields keep their prior value. This
+//! matches the iAP2 wire semantics (Apple emits a fresh `NowPlayingUpdate`
+//! whenever any subscribed attribute changes, sending only that
+//! attribute) and lets the Android companion push partial updates
+//! without a full snapshot every time.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -70,10 +70,9 @@ pub enum MediaType {
 }
 
 /// Delta event the companion or iAP2 stream emits whenever a player
-/// attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
-/// (the only delta-shaped event in the protocol). Every field is
-/// optional: producers populate only what they have fresh information
-/// about, and the daemon merges into stable internal state.
+/// attribute changes. Every field is optional: producers send partial
+/// updates populating only what changed, and fields left unset keep
+/// their prior value.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]

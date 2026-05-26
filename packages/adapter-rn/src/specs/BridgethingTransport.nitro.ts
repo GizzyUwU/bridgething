@@ -1,8 +1,7 @@
 import type { HybridObject } from 'react-native-nitro-modules';
 
 /**
- * Wire-side identity for a connected bridgething peer. `id` is opaque to the
- * gateway and only meaningful to the underlying transport - `EAAccessory.serialNumber`
+ * Wire-side peer identity. `id` is opaque to the gateway: `EAAccessory.serialNumber`
  * (or `connectionID` fallback) on iOS, `BluetoothDevice.address` on Android.
  */
 export type BridgethingTransportDevice = {
@@ -11,22 +10,16 @@ export type BridgethingTransportDevice = {
 };
 
 /**
- * Transport-only contract between the RN adapter (TS side) and the native
- * EA/RFCOMM session manager. The native side ships raw bytes; framing, gzip,
- * and msgpack live in `@bridgething/lib` + `@bridgething/gateway` on the JS
- * side. Nitro maps this interface to a Swift `protocol` (iOS) and Kotlin
- * `interface` (Android) at codegen time; consumers don't touch either.
+ * Transport contract between the RN adapter (TS) and the native EA/RFCOMM session manager.
+ * Native ships raw bytes; framing and codec live in `@bridgething/lib` + `@bridgething/gateway`.
+ * Nitro maps this to Swift/Kotlin at codegen time.
  *
- * Single-listener-per-event by design: fan-out to multiple JS subscribers
- * happens in the TS wrapper one layer up.
+ * Single-listener-per-event; fan-out happens in the TS wrapper.
  */
 export interface BridgethingTransport extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   /**
-   * Begin observing the underlying transport.
-   *
-   * iOS: register for `EAAccessoryDidConnect`/`EAAccessoryDidDisconnect`.
-   * Android: prepare internal state; explicit `connect(deviceId)` calls open
-   * RFCOMM sessions afterwards.
+   * Begin observing the underlying transport. iOS registers for EA accessory events;
+   * Android prepares state and waits for explicit `connect(deviceId)` calls.
    */
   start(): Promise<void>;
 
@@ -34,35 +27,23 @@ export interface BridgethingTransport extends HybridObject<{ ios: 'swift'; andro
   stop(): Promise<void>;
 
   /**
-   * iOS: no-op (sessions auto-open when an EAAccessory connects with the
-   * matching protocol string). Returns the EAAccessory device once iOS
-   * surfaces it.
-   *
-   * Android: open an RFCOMM channel to the bonded `BluetoothDevice` whose
-   * MAC is `deviceId`. The device must already be paired via system settings.
+   * iOS: no-op; sessions auto-open on EAAccessory connect. Returns the device once surfaced.
+   * Android: open an RFCOMM channel to the bonded device at `deviceId` (must be system-paired).
    */
   connect(deviceId: string): Promise<BridgethingTransportDevice>;
 
   /** Close the session for `deviceId`. */
   disconnect(deviceId: string): Promise<void>;
 
-  /**
-   * Write a fully-framed bridgething wire frame to the peer. The buffer is
-   * read synchronously (it's non-owning); callers can reuse it after this
-   * promise resolves.
-   */
+  /** Write a framed wire frame to the peer. The buffer is read synchronously; callers can reuse it after resolve. */
   send(deviceId: string, frame: ArrayBuffer): Promise<void>;
 
   /**
-   * Snapshot of currently-connectable peers known to the OS:
-   * - iOS: registered EAAccessories matching our protocol string
-   * - Android: bonded BluetoothDevices (filtering by service is the consumer's
-   *   responsibility - the Bluetooth API exposes UUIDs only after connect on
-   *   most stacks)
+   * Snapshot of currently-connectable peers known to the OS. iOS returns registered EAAccessories;
+   * Android returns bonded devices (service filtering is the caller's responsibility, as UUIDs are
+   * only exposed after connect on most stacks).
    *
-   * Async because the underlying read is platform-isolated state - iOS's
-   * `EAAccessoryManager` snapshot is main-thread, Android's `bondedDevices`
-   * touches the binder bridge. The JS thread never blocks waiting on either.
+   * Async because the reads are platform-isolated (main-thread on iOS, binder bridge on Android).
    */
   getKnownDevices(): Promise<BridgethingTransportDevice[]>;
 

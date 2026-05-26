@@ -11,8 +11,8 @@ import Foundation
 ///
 /// Auth: the host supplies an `accessTokenProvider` closure (typically
 /// pointing at the daytona DeviceCodeAuthenticator's cached token). The
-/// resolver doesn't refresh on its own - a 401 surfaces as ResolveError;
-/// the host's auth layer is responsible for catching that and rotating.
+/// resolver doesn't refresh on its own; a 401 surfaces as ResolveError
+/// and the host's auth layer catches it and rotates.
 ///
 /// Cache: in-process LRU of size `cacheCapacity` (default 100) keyed by
 /// (entityType, normalizedQuery). Hits the same Spotify endpoint that
@@ -40,8 +40,7 @@ public actor SpotifyResolver {
         public let baseURL: URL
         public let cacheCapacity: Int
         /// Curated playlist URIs for mood / genre slots when no Spotify
-        /// search query maps cleanly. v0.1 ships a tiny seed table; richer
-        /// resolution waits on real catalog work.
+        /// search query maps cleanly. Seed table of common moods and genres.
         public let moodPlaylists: [String: String]
         public let genrePlaylists: [String: String]
 

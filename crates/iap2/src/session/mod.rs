@@ -2,18 +2,15 @@
 //!
 //! Sits above the link layer: subscribes to `Iap2Event` from a running
 //! [`Link`], dispatches inbound CSMs to per-feature flows, and emits
-//! [`SessionEvent`] upstream. Currently the auth + identification
-//! flows ship; later wedges (NowPlaying, HID, EA dispatch) layer on
-//! by adding a sibling `Flow` struct and threading it through
-//! [`Iap2Session::handle_csm`]'s dispatcher.
+//! [`SessionEvent`] upstream. Each feature is a sibling `Flow` struct
+//! threaded through [`Iap2Session::handle_csm`]'s dispatcher.
 //!
 //! Auth requires the MFi coprocessor; the chip is reached through the
 //! [`MfiAccess`] trait so production wires
 //! [`WorkerMfiAccess`] (a dedicated thread around `MfiAuth<LinuxI2c>`)
-//! and tests pass a fake. The session only invokes `cert()` once per
-//! RFCOMM connection and `sign()` once per challenge - per cleanroom
-//! doc `protocol/50_authentication.md` we must not retry auth on the
-//! same connection.
+//! and tests pass a fake. The session invokes `cert()` once per
+//! RFCOMM connection and `sign()` once per challenge; auth must not be
+//! retried on the same connection.
 //!
 //! Failure paths uniformly emit a terminal `SessionEvent::LinkDown`
 //! (or `AuthFailed` / `IdentificationRejected` followed by a
@@ -68,9 +65,7 @@ use crate::{
   link::{Iap2Command, Iap2Event},
 };
 
-/// Result alias for `MfiAccess` ops; uses the mfi crate's error type
-/// directly since the iap2 layer only translates the result, doesn't
-/// need to wrap.
+/// Result alias for `MfiAccess` ops, using the mfi crate's error type directly.
 pub type MfiResult<T> = std::result::Result<T, MfiError>;
 
 /// Async-trait surface over the MFi coprocessor.
@@ -80,26 +75,17 @@ pub trait MfiAccess: Send + 'static {
   async fn sign(&mut self, challenge: [u8; CHALLENGE_LEN]) -> MfiResult<[u8; RESPONSE_LEN]>;
 }
 
-/// iAP2 control-session id. Must match the entry declared in our
-/// `Lsp::accessory_default` and must NOT be 0: session_id 0 in the link
-/// header is reserved for "header-only / pure control" packets (per the
-/// link-layer doc), and the iPhone RSTs the link if the accessory's
-/// declared control session collides with that. wiomoc picks 10, stock
-/// picks 1; we pick 1 to match stock's wire profile.
+/// iAP2 control-session id. Must match the entry declared in our `Lsp::accessory_default`
+/// and must NOT be 0: session_id 0 in the link header is reserved for header-only / pure-control
+/// packets, and the iPhone RSTs the link if the declared control session collides with it.
 pub(crate) const CONTROL_SESSION_ID: u8 = 1;
 
-/// Events the session emits upstream. `LinkEstablished` carries the
-/// peer's negotiated LSP for any consumer that wants to log or
-/// surface negotiated parameters. `LinkDown` is always the final
-/// event before the task exits (success, peer disconnect, auth/ident
-/// failure, or hard error - all paths emit it).
+/// Events the session emits upstream. `LinkEstablished` carries the peer's negotiated LSP.
+/// `LinkDown` is always the final event before the task exits.
 ///
-/// `EaStreamOpened` carries the byte channels for an EA stream the
-/// iPhone just opened: `inbound_rx` yields per-stream byte chunks
-/// after the link layer's reassembly + EA-stream-id demux, and
-/// `outbound` is a pre-bound sender the consumer uses to push frames
-/// (chunked + tagged on the way out by the EA flow's chunker task).
-/// Not `Clone` because the channels live single-consumer.
+/// `EaStreamOpened` carries the byte channels for the EA stream the iPhone just opened:
+/// `inbound_rx` yields per-stream chunks after reassembly + EA-stream-id demux, and `outbound`
+/// is a pre-bound sender the consumer uses to push frames.
 #[derive(Debug)]
 pub enum SessionEvent {
   LinkEstablished(Lsp),
@@ -136,11 +122,8 @@ pub enum SessionEvent {
   LinkDown(String),
 }
 
-/// Top-level iAP2 session task. Constructed with the running link's
-/// event/command channels plus an [`MfiAccess`] impl and an
-/// [`IdentificationConfig`]; drive with `run().await`. Always emits a
-/// terminal `SessionEvent::LinkDown` before returning, regardless of
-/// success or failure path.
+/// Top-level iAP2 session task; drive with `run().await`. Always emits a terminal
+/// `SessionEvent::LinkDown` before returning, on any success or failure path.
 pub struct Iap2Session<M: MfiAccess> {
   identification: IdentificationConfig,
   app_launch_bundle_id: Option<String>,

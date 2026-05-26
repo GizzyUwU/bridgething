@@ -59,18 +59,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Real [BridgethingSessionBackend] impl for the bridgething host app.
- * Owns one [BridgethingCompanion] (which owns the gateway, the active
- * glue, and every dispatcher).
- *
- * Mirror of the iOS `HybridBridgethingSessionImpl`. Glue registration
- * happens before the backend is installed: [BridgethingApp.installBridgething]
- * populates [registry] with one [ProviderRegistration] per provider id.
- *
- * Webapp install / uninstall / icon / config flows are intentionally
- * stubbed in this slice; they need additional gateway surface plumbing
- * (the iOS side is ~500 LOC of surface calls) and land in a follow-up.
- * The companion + dispatcher core is fully wired.
+ * [BridgethingSessionBackend] impl. Owns one [BridgethingCompanion]
+ * (which owns the gateway, the active glue, and every dispatcher).
+ * Glue registration populates [registry] before the backend is installed.
  */
 public class HybridBridgethingSessionImpl(
     private val context: Context,
@@ -143,8 +134,6 @@ public class HybridBridgethingSessionImpl(
     @Volatile
     private var logStreamingDesired: Boolean = false
 
-    // ---- Lifecycle ----
-
     override suspend fun start() {
         stateLock.withLock {
             if (companion != null) return@withLock
@@ -172,12 +161,10 @@ public class HybridBridgethingSessionImpl(
             }
             companion = c
             btAdapter = adapter
-            // Let BridgethingNotificationListener find the live gateway.
             NotificationBridgeRegistry.companion = c
 
-            // Reopen RFCOMM sessions to every CDM-authorized device.
-            // CDM's association list is the user's pair gate - anything
-            // there is one they explicitly picked via the system picker.
+            // CDM's association list is the user's pair gate; reopen RFCOMM
+            // sessions for every device already authorized.
             reconnectAssociated(adapter)
         }
     }
@@ -218,8 +205,6 @@ public class HybridBridgethingSessionImpl(
             scope.launch { runCatching { adapter.connect(device) } }
         }
     }
-
-    // ---- Provider selection ----
 
     override suspend fun availableProviders(): Array<BridgethingProviderInfo> = registry.map {
         BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
@@ -279,8 +264,6 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun currentNowPlaying(): BridgethingNowPlaying? = lastNowPlaying
 
-    // ---- ANCS ----
-
     override suspend fun enableAncsNotifications(): BridgethingAncsSetupResult {
         val result = stateLock.withLock { companion }?.enableAncsNotifications()
             ?: return BridgethingAncsSetupResult(
@@ -304,8 +287,6 @@ public class HybridBridgethingSessionImpl(
     override suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus =
         toRnAncsAuthStatus(stateLock.withLock { companion }?.currentAncsAuthState() ?: AncsAuthState.Unknown)
 
-    // ---- Webapps (per-device) - stubbed in this slice ----
-
     override suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo> = TODO("android webapp install pipeline")
     override suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp? = null
     override suspend fun installWebappFromBase64(deviceId: String, archiveBase64: String): BridgethingWebappInfo = TODO("android webapp install pipeline")
@@ -315,8 +296,6 @@ public class HybridBridgethingSessionImpl(
     override suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry> = emptyArray()
     override suspend fun setWebappConfigField(deviceId: String, id: String, key: String, value: String): Unit = TODO("android webapp install pipeline")
     override suspend fun deleteWebappConfigField(deviceId: String, id: String, key: String): Unit = TODO("android webapp install pipeline")
-
-    // ---- Capability flags ----
 
     override suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags) {
         stateLock.withLock { companion }?.setCapabilityFlags(
@@ -329,8 +308,6 @@ public class HybridBridgethingSessionImpl(
             )
         )
     }
-
-    // ---- OTA ----
 
     override suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?) {
         val ota = stateLock.withLock { companion }?.ota ?: return
@@ -366,8 +343,6 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
-    // ---- Host identity ----
-
     override suspend fun hostInfo(): BridgethingHostInfo {
         val host = makeHostInfo()
         return BridgethingHostInfo(
@@ -391,8 +366,6 @@ public class HybridBridgethingSessionImpl(
         address = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "",
         adapterVersion = "rfcomm",
     )
-
-    // ---- Notification access ----
 
     override suspend fun isNotificationAccessGranted(): Boolean {
         val ctx = context.applicationContext
@@ -431,12 +404,9 @@ public class HybridBridgethingSessionImpl(
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    // ---- OS-mediated pair flow (CompanionDeviceManager) ----
-
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
-        // Kick the gateway to open an RFCOMM session so the new peer
-        // shows up in the dashboard without requiring an app restart.
+        // open an RFCOMM session immediately so the new peer appears without an app restart.
         val adapter = stateLock.withLock { btAdapter } ?: return picked
         scope.launch { reconnectAssociated(adapter) }
         return picked
@@ -446,8 +416,6 @@ public class HybridBridgethingSessionImpl(
         val ctx = context.applicationContext
         return (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     }
-
-    // ---- Callback setters ----
 
     override fun setOnProviderChanged(callback: (BridgethingProviderInfo?) -> Unit) { onProviderChanged = callback }
     override fun setOnAuthStateChanged(callback: (BridgethingAuthState) -> Unit) { onAuthStateChanged = callback }
@@ -470,8 +438,6 @@ public class HybridBridgethingSessionImpl(
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
-
-    // ---- Internal ----
 
     private fun handleGatewayEvent(event: GatewayEvent) {
         when (event) {

@@ -10,9 +10,8 @@
 //! channels the consumer will read/write. Inbound link DATA on
 //! session_id 3 is split by the leading u16-BE EA-stream-id and
 //! forwarded into the matching per-stream inbound channel. Outbound
-//! traffic rides the shared [`EaChunker`] (see [`super::ea_transport`]),
-//! which drains Normal-first and splits each frame at the link payload
-//! budget.
+//! traffic rides the shared [`EaChunker`], which drains Normal-first
+//! and splits each frame at the link payload budget.
 //!
 //! Stream close (peer Stop, link tear-down, or the consumer dropping the
 //! channel ends) tears down the per-stream state and emits
@@ -21,9 +20,9 @@
 //! `ensure_app_launch_requested` is the post-Identified hook the
 //! session calls once: it dispatches `RequestAppLaunch` with the
 //! configured bundle id (typically `com.bridgething.gateway`). iOS
-//! either foregrounds the matching app, opens a Settings deeplink
-//! (per the protocol's `match_action`), or silently no-ops if the app
-//! isn't installed. Idempotent; subsequent calls are no-ops.
+//! either foregrounds the matching app, opens a Settings deeplink, or
+//! silently no-ops if the app isn't installed. Idempotent; subsequent
+//! calls are no-ops.
 
 use std::collections::HashMap;
 
@@ -84,12 +83,9 @@ impl EaFlow {
       || msg_id == StopExternalAccessoryProtocolSession::CSM_MSG_ID
   }
 
-  /// Idempotent post-Identified kick. Sends `RequestAppLaunch` once
-  /// per session; subsequent calls are no-ops. The bundle id should
-  /// match an app declaring our EA protocol string in its
-  /// `UISupportedExternalAccessoryProtocols` Info.plist key. iOS
-  /// silently ignores the request if the app isn't installed or
-  /// doesn't list the protocol.
+  /// Idempotent post-Identified kick: sends `RequestAppLaunch` once per session. iOS silently
+  /// ignores it unless the bundle id names an installed app declaring our EA protocol string in
+  /// its `UISupportedExternalAccessoryProtocols` Info.plist key.
   pub(super) async fn ensure_app_launch_requested(
     &mut self,
     bundle_id: &str,
@@ -110,10 +106,8 @@ impl EaFlow {
     Ok(())
   }
 
-  /// Dispatch one EA-range control CSM. Returns `Ok(None)` for the
-  /// happy path; this layer never produces a terminal `SessionEvent`
-  /// itself - if the link falls over, the link layer surfaces
-  /// `LinkDown` directly.
+  /// Dispatch one EA-range control CSM. Always returns `Ok(None)`; this layer never produces a
+  /// terminal `SessionEvent`, the link layer surfaces `LinkDown` if the link falls over.
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,

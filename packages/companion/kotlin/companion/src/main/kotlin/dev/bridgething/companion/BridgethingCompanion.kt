@@ -57,7 +57,7 @@ public enum class CompanionLogLevel(public val raw: String) {
 
 /**
  * Version stamp the companion announces in `GatewayInfo`. Hardcoded to
- * match the Rust workspace `version` and bumped at release time.
+ * match the Rust workspace `version`, bumped at release time.
  */
 public object BridgethingCompanionVersion {
     public const val LIB: String = "0.1.0"
@@ -66,9 +66,9 @@ public object BridgethingCompanionVersion {
 
 /**
  * Identity the companion advertises in `GatewayCapabilities.gateway`.
- * Mirror of Swift `HostInfo`. Caller-supplied at companion init; on
- * Android the natural value for `address` is `Settings.Secure.ANDROID_ID`.
- * Empty string is acceptable when no stable identifier is available.
+ * Caller-supplied at companion init; on Android the natural value for
+ * `address` is `Settings.Secure.ANDROID_ID`. Empty string is acceptable
+ * when no stable identifier is available.
  */
 public data class HostInfo(
     val appName: String,
@@ -82,8 +82,7 @@ public data class HostInfo(
 /**
  * Capability flags the companion declares. Glue contributions
  * (`uriSchemes`, `musicProvider`, `lyricsSupported`) are mixed in by
- * [BridgethingCompanion] at announce time. Mirror of Swift
- * `CompanionCapabilityFlags`.
+ * [BridgethingCompanion] at announce time.
  */
 public data class CompanionCapabilityFlags(
     val geo: Boolean = true,
@@ -112,17 +111,16 @@ public data class AncsSetupResult(
 /**
  * Top-level orchestrator for the bridgething companion app on Android.
  *
- * Mirror of the Swift `BridgethingCompanion` actor. Owns one
- * [BridgethingGateway] over the supplied transport adapter, holds at
- * most one active [BridgethingGlue], and runs every companion-side
- * dispatcher as long-lived child coroutines while started: Player verbs
- * to glue, Lyrics requests with resolver fallback, Asset requests to
- * glue, Net (fetch/ws/stream) via OkHttp, Geo via FusedLocationProvider /
- * LocationManager fallback, Volume via AudioManager.
+ * Owns one [BridgethingGateway] over the supplied transport adapter,
+ * holds at most one active [BridgethingGlue], and runs every
+ * companion-side dispatcher as long-lived child coroutines while started:
+ * Player verbs to glue, Lyrics requests with resolver fallback, Asset
+ * requests to glue, Net (fetch/ws/stream) via OkHttp, Geo via
+ * FusedLocationProvider / LocationManager fallback, Volume via
+ * AudioManager.
  *
  * Concurrency model: a single supervisor scope owns every long-lived
  * dispatcher coroutine; per-state mutation flows through [stateMutex].
- * Mirrors the Swift actor isolation as closely as Kotlin allows.
  */
 public class BridgethingCompanion(
     public val context: Context,
@@ -160,9 +158,7 @@ public class BridgethingCompanion(
             started = true
         }
         log(CompanionLogLevel.Info, "companion started")
-        // Volume tracking starts opportunistically; if the AudioManager
-        // surfaces a snapshot the companion claims volume authority and
-        // announces an initial level.
+        // on the first AudioManager snapshot the companion claims volume authority and announces level.
         volumeMonitor.start { level, muted ->
             scope.launch {
                 broadcastVolume(level, muted)
@@ -271,8 +267,6 @@ public class BridgethingCompanion(
 
     public fun currentAncsAuthState(): AncsAuthState = AncsAuthState.Unknown
 
-    // ---- capability composition ----
-
     private suspend fun announceCapabilities() {
         val caps = composeCapabilities()
         runCatching { gateway.capabilities.announce(caps) }
@@ -307,8 +301,6 @@ public class BridgethingCompanion(
             musicProvider = glue?.musicProvider ?: MusicProvider.None,
         )
     }
-
-    // ---- dispatchers ----
 
     private fun spawnDispatchers() {
         dispatchers.add(scope.launch { runConnectAnnouncer() })
@@ -348,9 +340,7 @@ public class BridgethingCompanion(
         try {
             when (player) {
                 is BridgeToGatewayPlayerMsg.Play -> glue.play(player.data)
-                // glue.queue(...) is on the swift interface but not the
-                // kotlin BridgethingGlue stub yet; no-op until it lands.
-                // Daemon tolerates a missing reply on commands.
+                // glue has no queue verb; the daemon tolerates a missing reply on commands.
                 is BridgeToGatewayPlayerMsg.Queue -> Unit
                 BridgeToGatewayPlayerMsg.Pause -> glue.pause()
                 BridgeToGatewayPlayerMsg.Resume -> glue.resume()
@@ -362,7 +352,7 @@ public class BridgethingCompanion(
                 is BridgeToGatewayPlayerMsg.SetRepeat -> glue.setRepeat(player.data.mode)
                 is BridgeToGatewayPlayerMsg.SetSpeed -> glue.setSpeed(player.data.speed)
                 is BridgeToGatewayPlayerMsg.SetCrossfade -> glue.setCrossfade(player.data.durationMs)
-                is BridgeToGatewayPlayerMsg.Hint -> Unit // glue.handlePlaybackHint not on kotlin interface yet
+                is BridgeToGatewayPlayerMsg.Hint -> Unit // glue has no playback-hint verb
             }
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "player verb $player failed: ${e.message ?: e.toString()}")
@@ -427,11 +417,8 @@ public class BridgethingCompanion(
         }
     }
 
-    // ---- helpers ----
-
     private fun log(level: CompanionLogLevel, message: String) {
-        // android.util.Log fanout via the observer; the host app pipes
-        // these into its log surface (RN debug-log screen on the bridgething app).
+        // android.util.Log plus observer fanout; the host app pipes these into its own log surface.
         when (level) {
             CompanionLogLevel.Debug -> android.util.Log.d(TAG, message)
             CompanionLogLevel.Info -> android.util.Log.i(TAG, message)

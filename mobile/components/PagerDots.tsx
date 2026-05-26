@@ -7,8 +7,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 /**
- * Onboarding progress dots. The active dot stretches into a pill —
- * cheap and effective progress affordance.
+ * Onboarding progress dots. The active dot stretches into a pill.
  */
 export function PagerDots({ count, index }: { count: number; index: number }) {
   return (

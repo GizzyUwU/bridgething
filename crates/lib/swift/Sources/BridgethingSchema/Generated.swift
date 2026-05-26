@@ -115,8 +115,8 @@ public enum AssetRetention: Codable, Sendable {
 }
 
 /// Single-frame asset push for small, latency-critical, memory-resident
-/// assets (album art). Daemon-side checks: `bytes.len()` must be
-/// <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+/// assets (album art). The payload size must be at most
+/// `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
 /// `Persistent`. Larger payloads or persistent retention require the
 /// chunked `PushBegin`/`PushChunk` flow.
 public struct AssetPush: Codable, Sendable {
@@ -245,9 +245,8 @@ public struct AudioCapabilities: Codable, Sendable {
 
 /// One axis the companion can declare authority over. Each scope has a
 /// fallback source the daemon merges with when no claim is active or
-/// the claim has gone stale (see daemon-side merge in `core::player`).
-/// Unknown scopes arriving at an older daemon are stored opaquely and
-/// ignored.
+/// the claim has gone stale. Unknown scopes arriving at an older daemon
+/// are stored opaquely and ignored.
 public enum CompanionAuthorityScope: String, Codable, Sendable {
 	/// Track metadata: title, album, artist, persistent_id, artwork_id,
 	/// duration, liked. Excludes playback state. Companion claims when it
@@ -296,9 +295,8 @@ public struct BoolField: Codable, Sendable {
 }
 
 /// Bridge-side identity announce. Daemon sends one of these to every
-/// gateway on connect (companion needs to know what daemon it's talking
-/// to so it can opt out of unsupported surfaces). The companion's mirror
-/// is `GatewayCapabilities::Announce` over in `shared::capabilities`.
+/// gateway on connect so the companion knows what daemon it's talking to
+/// and can opt out of unsupported surfaces.
 public struct BridgeThingMeta: Codable, Sendable {
 	public let bridgethingVersion: String
 	public let libbridgethingVersion: String
@@ -761,8 +759,7 @@ public struct BrowseReply: Codable, Sendable {
 }
 
 /// Identity payload describing the companion peer the daemon is talking
-/// to. Replaces the old `GatewayMeta` and the old `GatewayStatus` bits.
-/// Address is the BT MAC the companion advertises; on transports without
+/// to. Address is the BT MAC the companion advertises; on transports without
 /// a stable MAC (the network gateway's `0xfe:fe:...` synthetic addrs) it
 /// is the synthetic address as a string.
 public struct GatewayInfo: Codable, Sendable {
@@ -938,8 +935,8 @@ public struct CommunicationsSnapshot: Codable, Sendable {
 }
 
 /// One key/value pair as exposed by config read APIs. `value` is always a
-/// string; consumers parse per the field's declared kind (number → parseFloat,
-/// boolean → "true"/"false", string/enum/secret → as-is).
+/// string; consumers parse per the field's declared kind (number -> parseFloat,
+/// boolean -> "true"/"false", string/enum/secret -> as-is).
 public struct ConfigEntry: Codable, Sendable {
 	public let key: String
 	public let value: String
@@ -1584,7 +1581,7 @@ public struct GeoGetOnceReply: Codable, Sendable {
 	}
 }
 
-/// Bridge → companion watch forward. The daemon aggregates webapp
+/// Bridge -> companion watch forward. The daemon aggregates webapp
 /// watches and re-issues this with the most-demanding accuracy +
 /// fastest interval. `min_interval_ms = 0` lets the gateway pick.
 public struct GeoWatch: Codable, Sendable {
@@ -1598,8 +1595,8 @@ public struct GeoWatch: Codable, Sendable {
 }
 
 /// Snapshot of the device's hardware-controlled surfaces. Sent on
-/// `hardware.state.get` and re-broadcast on any change. See
-/// `AmbientLightUpdate` for the ambient_level semantics.
+/// `hardware.state.get` and re-broadcast on any change. `ambient_level`
+/// is the 0-255 ambient light reading.
 public struct HardwareState: Codable, Sendable {
 	public let brightness: BrightnessState
 	public let ambientLevel: UInt8
@@ -2332,10 +2329,9 @@ public struct NetWsSend: Codable, Sendable {
 	}
 }
 
-/// Slot catalog. Every variant in `intents.yaml` projects through this
-/// flat shape; per-intent slot allowlists are enforced by the
-/// json_schema grammar at decode time, not by this struct. The wire
-/// payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+/// Slot catalog. Every intent projects through this flat shape;
+/// per-intent slot allowlists are enforced by the json_schema grammar at
+/// decode time, not by this struct. The wire payload omits absent slots,
 /// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
 /// 
 /// String values are passed through verbatim from the user's transcript
@@ -2410,12 +2406,9 @@ public struct NluAlternate: Codable, Sendable {
 	}
 }
 
-/// Closed intent enum the companion-side NLU pipeline emits. The full
-/// catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
-/// also encoded in `configs/grammar.strict.json` (the json_schema the
-/// LLM is decoded against). At the wire boundary we serialize as a
-/// string for forward-compat; the daemon dispatcher matches on the
-/// well-known SHOUTY_SNAKE values.
+/// Confidence the companion-side NLU pipeline attaches to a resolved
+/// intent: a coarse "low" | "medium" | "high" level per channel, one for
+/// the intent match and one for the extracted slots.
 public struct NluConfidence: Codable, Sendable {
 	/// "low" | "medium" | "high". The LLM emits one of these per channel.
 	public let intent: String
@@ -2631,10 +2624,9 @@ public struct PlaybackUpdate: Codable, Sendable {
 }
 
 /// Delta event the companion or iAP2 stream emits whenever a player
-/// attribute changes. Carried inside `GatewayToBridgePlayerMsg::Delta`
-/// (the only delta-shaped event in the protocol). Every field is
-/// optional: producers populate only what they have fresh information
-/// about, and the daemon merges into stable internal state.
+/// attribute changes. Every field is optional: producers send partial
+/// updates populating only what changed, and fields left unset keep
+/// their prior value.
 public struct NowPlayingUpdate: Codable, Sendable {
 	public let mediaItem: MediaItemUpdate?
 	public let playback: PlaybackUpdate?
@@ -4401,12 +4393,10 @@ public struct WebappInstallAbandon: Codable, Sendable {
 	}
 }
 
-/// Webapp-initiated chunked install. Mirrors `WebappInstallBegin` from
-/// the gateway surface line-for-line - same install_id (sha256 hex of
-/// the zip), same chunk shape, same terminal-event behavior. The same
-/// daemon-side install handler services both surfaces, so the
-/// `WebappInstalled` / `WebappInstallFailed` events broadcast to both
-/// gateway and webapp peers when either initiates an install.
+/// Webapp-initiated chunked install. `install_id` is the sha256 hex of
+/// the zip. The terminal `WebappInstalled` / `WebappInstallFailed`
+/// events broadcast to both gateway and webapp peers regardless of
+/// which surface initiated the install.
 public struct WebappInstallBegin: Codable, Sendable {
 	public let installId: String
 	public let expectedSha256: String
@@ -5445,7 +5435,7 @@ public enum BridgeToGatewayPhoneMsg: Codable, Sendable {
 	}
 }
 
-/// Bridge → gateway player verbs. The companion-side SDK dispatches each
+/// Bridge -> gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
 /// `Capabilities.uri_schemes` - daemon never forwards a URI no
@@ -6794,7 +6784,7 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	}
 }
 
-/// Gateway → bridge player events. `Snapshot` is the initial-state event
+/// Gateway -> bridge player events. `Snapshot` is the initial-state event
 /// fired at announce when the companion claims player authority;
 /// `Delta` is the ongoing partial-update stream (the only delta-shaped
 /// event in the wire protocol - every other surface uses snapshots).
@@ -7554,14 +7544,13 @@ public struct WireErrorHandlerFailedInner: Codable, Sendable {
 /// want to recover from) live inside the per-op response variant, not
 /// here.
 public enum WireError: Codable, Sendable {
-	/// Receiver does not recognize this request variant. Used by the codec
-	/// layer's auto-nack on a typed-decode failure (the variant the sender
-	/// names is not in the receiver's enum) and by handlers that explicitly
-	/// reject something they cannot map.
+	/// Receiver does not recognize this request variant, or recognizes it
+	/// but cannot map the request to any operation it serves.
 	case unsupported
 	/// Receiver recognizes the variant but the backend is not yet wired.
-	/// Distinct from `Unsupported` so SDK consumers can tell "you have the
-	/// wrong daemon version" from "this surface ships in a future slice".
+	/// Distinct from `Unsupported` so consumers can tell "you have the
+	/// wrong daemon version" from "this surface exists but is not yet
+	/// implemented".
 	case unimplemented
 	/// Receiver could not decode or validate the request payload.
 	case malformed(WireErrorMalformedInner)

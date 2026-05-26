@@ -213,8 +213,8 @@ impl ConfigField {
 }
 
 /// One key/value pair as exposed by config read APIs. `value` is always a
-/// string; consumers parse per the field's declared kind (number → parseFloat,
-/// boolean → "true"/"false", string/enum/secret → as-is).
+/// string; consumers parse per the field's declared kind (number -> parseFloat,
+/// boolean -> "true"/"false", string/enum/secret -> as-is).
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

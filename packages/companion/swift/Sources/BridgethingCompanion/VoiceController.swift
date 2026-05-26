@@ -7,16 +7,12 @@ import Foundation
 /// surface.
 ///
 /// Stage chain:
-///   1. `NluFastPath` regex match - bare PLAY/STOP/NEXT/VOLUME_*/PRESET.
+///   1. `NluFastPath` regex match: bare PLAY/STOP/NEXT/VOLUME_*/PRESET.
 ///   2. LLM (`NluOpenRouterClient` against Gemma + json_schema grammar).
-///   3. `NluIntentValidator.snapPrediction` - snap intent + filler-strip
+///   3. `NluIntentValidator.snapPrediction`: snap intent + filler-strip
 ///      raw_query.
 ///   4. SpotifyResolver decoration (Spotify Search -> uri). Wired
 ///      separately; resolver is opt-in.
-///
-/// Mirrors `nlu/scripts/pipeline.py` and `nlu/scripts/eval_reference_set.py`
-/// - any logic change here should land there too so the reference-set
-/// evaluator stays representative.
 public actor VoiceController {
     public struct Config: Sendable {
         public let model: String

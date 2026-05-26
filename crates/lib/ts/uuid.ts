@@ -8,7 +8,7 @@ export function uuidFromString(value: string): Uint8Array {
   return parse(value);
 }
 
-/** Time-ordered UUIDv7 as a hyphenated string; matches the daemon's `Uuid::now_v7()`. */
+/** Time-ordered UUIDv7 as a hyphenated string. */
 export function newUuid(): string {
   return v7();
 }

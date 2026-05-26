@@ -6,11 +6,11 @@ import Foundation
 
 /// Minimal OpenRouter chat-completions client for the voice-NLU LLM
 /// stage. Issues a single grammar-constrained completion against a model
-/// (default: Gemma-4-26B-A4B-IT) and returns the parsed JSON. Pure NLU -
+/// (default: Gemma-4-26B-A4B-IT) and returns the parsed JSON. Pure NLU:
 /// no streaming, no tool-use, no retries.
 ///
-/// `responseFormat` should be the contents of `nlu/configs/grammar.strict.json`
-/// to keep the model's output to the closed intent enum.
+/// `responseFormat` carries a strict-grammar schema that keeps the
+/// model's output to the closed intent enum.
 public actor NluOpenRouterClient {
     public enum ClientError: Error, CustomStringConvertible {
         case missingApiKey

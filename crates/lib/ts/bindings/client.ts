@@ -62,8 +62,7 @@ import type { MsgMeta, WireError } from './wire';
 
 /**
  * 0..=100 ambient-brightness indicator derived from the on-board ALS +
- * backlight curve. Low = dark room, high = bright room. The stock translation
- * layer inverts this at the edge for `sp-als-backlight`-compatible payloads.
+ * backlight curve. Low = dark room, high = bright room.
  */
 export type AmbientLightUpdate = { ambientLevel: number };
 
@@ -80,10 +79,9 @@ export type AssetGot = { requestId: string; id: string; bytes: Uint8Array; mime:
 export type AssetNotFound = { requestId: string; id: string };
 
 /**
- * Webapp hint to warm the daemon's asset cache. The daemon issues an
- * `AssetRequest` to the connected companion for each id that isn't
- * already cached, in parallel; subsequent `Get` calls hit cache.
- * Fire-and-forget - webapps observe completion via `Asset.Ready` events.
+ * Webapp hint to warm the asset cache for a set of ids so subsequent
+ * `Get` calls hit cache. Fire-and-forget; webapps observe completion
+ * via `Asset.Ready` events.
  */
 export type AssetPreload = { ids: Array<string> };
 
@@ -126,7 +124,7 @@ export type BridgeToClientBluetoothMsg =
   | { event: 'pairedDevices'; data: PairedDevicesMap };
 
 /**
- * Daemon → webapp capabilities surface. `Update` is the broadcast event
+ * Daemon -> webapp capabilities surface. `Update` is the broadcast event
  * fired on connect + on every change; `Snapshot` is the typed reply to
  * `CapabilitiesGet`. Webapps that auto-react to capability change
  * listen on `Update` and don't need to call `Get`.
@@ -221,7 +219,7 @@ export type BridgeToClientPhoneMsg =
   | { event: 'errorReply'; data: PhoneErrorReply };
 
 /**
- * Daemon → webapp player surface. `Snapshot` lands on connect with the
+ * Daemon -> webapp player surface. `Snapshot` lands on connect with the
  * current player state; `Delta` is the `NowPlayingUpdate` stream the
  * SDK auto-merges; `QueueChanged` fires when the queue mutates without
  * a track change. `StateReply`/`QueueReply` are the typed responses
@@ -529,9 +527,8 @@ export type LibraryBrowseReply = { result: BrowseResult };
 export type LibraryErrorReply = { error: LibraryError };
 
 /**
- * Batch "is each of these favorited?" lookup. Mirrors Spotify's
- * `GET /me/tracks/contains` - reply `liked` is index-aligned with the
- * request `uris`. Daemon caps `uris` at 50 per call.
+ * Batch "is each of these favorited?" lookup. Reply `liked` is
+ * index-aligned with the request `uris`, capped at 50 per call.
  */
 export type LibraryFavoritesContains = { uris: Array<string> };
 
@@ -542,9 +539,8 @@ export type LibraryFavoritesList = { limit: number; offset: number };
 export type LibraryFavoritesListReply = { page: FavoritesPage };
 
 /**
- * Recommendations seeded by up to 5 items. The daemon caps the seed
- * list at the platform-permissive limit (Spotify hard-caps at 5
- * combined seeds across tracks/artists/genres).
+ * Recommendations seeded by up to 5 items. Spotify hard-caps at 5
+ * combined seeds across tracks/artists/genres.
  */
 export type LibraryRecommendations = { seeds: Array<ItemRef>; kind: ItemKind | null; limit: number; offset: number };
 
@@ -565,8 +561,8 @@ export type LogsSubscribe = { source: LogSource; levels: Array<LogLevel>; filter
 export type LogsSubscribeReply = { token: string };
 
 /**
- * Pull a one-shot batch of recent log entries. Filtering happens
- * daemon-side before any wire allocation.
+ * Pull a one-shot batch of recent log entries. The source, levels, and
+ * filter narrow the returned entries.
  */
 export type LogsTail = { source: LogSource; levels: Array<LogLevel>; filter: string | null; maxLines: number };
 
@@ -616,14 +612,12 @@ export type NotificationRemoved = { id: string; reason: DismissReason };
 export type PairBluetooth = { mac: string };
 
 /**
- * Map of MAC string → `Device`. Wraps `HashMap` so codegen has a named
- * type to import for the typed request response.
+ * Map of MAC string to `Device`.
  */
 export type PairedDevicesMap = { [key in string]: Device };
 
 /**
- * Map of peer-id → `Peer`. Wraps `HashMap` so codegen has a named type
- * to expose for inbound listeners.
+ * Map of peer-id to `Peer`.
  */
 export type PeerSnapshotMap = { [key in string]: Peer };
 
@@ -733,12 +727,10 @@ export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
 export type WebappInstallAbandon = { installId: string };
 
 /**
- * Webapp-initiated chunked install. Mirrors `WebappInstallBegin` from
- * the gateway surface line-for-line - same install_id (sha256 hex of
- * the zip), same chunk shape, same terminal-event behavior. The same
- * daemon-side install handler services both surfaces, so the
- * `WebappInstalled` / `WebappInstallFailed` events broadcast to both
- * gateway and webapp peers when either initiates an install.
+ * Webapp-initiated chunked install. `install_id` is the sha256 hex of
+ * the zip. The terminal `WebappInstalled` / `WebappInstallFailed`
+ * events broadcast to both gateway and webapp peers regardless of
+ * which surface initiated the install.
  */
 export type WebappInstallBegin = { installId: string; expectedSha256: string; expectedSize: number };
 

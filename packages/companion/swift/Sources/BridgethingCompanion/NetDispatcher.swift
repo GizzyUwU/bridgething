@@ -5,7 +5,7 @@ import Foundation
     import FoundationNetworking
 #endif
 
-/// Net surface implementation: subscribes to bridge → gateway Net traffic
+/// Net surface implementation: subscribes to bridge -> gateway Net traffic
 /// (Fetch + WsOpen requests, WsClose / WsSend / StreamOpen / StreamCancel
 /// commands) and answers with `URLSession`.
 ///

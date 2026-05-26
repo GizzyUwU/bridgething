@@ -65,8 +65,7 @@ export function HeroPulse({
 
 function ringStyle(phase: number) {
   'worklet';
-  // sin(π · phase) gives a smooth 0 → peak → 0 envelope across the
-  // cycle, so the wrap from 1 back to 0 is always invisible.
+  // sin(pi * phase) gives a smooth 0 -> peak -> 0 envelope so the wrap from 1 back to 0 is invisible.
   const opacity = Math.sin(Math.PI * phase) * PEAK_OPACITY;
   const scale = 0.6 + phase * 1.0;
   return {

@@ -14,8 +14,7 @@ use crate::stock::StockSendMsg;
 /// Producers (PeerTracker, Player, TimeManager, TelephonyManager,
 /// CapabilitiesRegistry, Iap2EventRouter, &c.) hold this rather than
 /// `ClientMan` directly. The bus owns the chokepoint where wire events
-/// fan out to webapp connections; future per-webapp permission scoping
-/// and stale-event compaction land here.
+/// fan out to webapp connections.
 ///
 /// Connection lifecycle (accept, mode change, complete_pending,
 /// stock-mode sends) stays on `ClientMan` and is driven from the daemon

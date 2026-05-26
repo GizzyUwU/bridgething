@@ -134,7 +134,6 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
     }
 
-    // Surfaces with no stock equivalent yet
     BridgeToClientMsgData::Capabilities(_)
     | BridgeToClientMsgData::Config(_)
     | BridgeToClientMsgData::Geo(_)

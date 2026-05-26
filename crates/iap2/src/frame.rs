@@ -140,9 +140,8 @@ impl LinkPacket {
   }
 }
 
-/// Link Synchronization Payload: the body of a SYN packet. Each side
-/// proposes its parameters; the peer's proposal replaces our copy on
-/// receipt. See cleanroom doc `protocol/20_link_layer.md`.
+/// Link Synchronization Payload: the body of a SYN packet. The peer's
+/// proposal replaces our copy on receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lsp {
   pub version: u8,
@@ -163,18 +162,11 @@ pub struct SessionTriple {
 }
 
 impl Lsp {
-  /// Production accessory defaults. Conservative `max_outgoing` and
-  /// `max_len` plus generous timeouts; the iPhone replaces these with
-  /// its own proposal during SYN exchange.
-  ///
-  /// Session list mirrors stock's profile: control on id 1, file-transfer
-  /// on id 2 (version 2), external-accessory on id 3. The iPhone observes
-  /// the full session list before deciding to keep the link open past
-  /// NEGOTIATE - tearing down with only "control" on offer is what
-  /// produces the silent RST observed in early bring-up. File-transfer
-  /// version 2 is what stock advertises; iOS proactively pushes album-art
-  /// blobs into this session whenever a track changes (subscription is
-  /// implicit via NowPlayingUpdate's MediaItemAttribute 0x1A).
+  /// Production accessory defaults; the iPhone replaces these with its
+  /// own proposal during SYN exchange. Session list: control on id 1,
+  /// file-transfer on id 2 (version 2), external-accessory on id 3. The
+  /// full list is required to keep the link open past NEGOTIATE; offering
+  /// only "control" makes the iPhone RST silently.
   pub fn accessory_default() -> Self {
     Self {
       version: 1,
@@ -484,15 +476,12 @@ mod tests {
     let mut buf = BytesMut::new();
     let mut codec = LinkCodec;
     codec.encode(packet, &mut buf).unwrap();
-    // Corrupt the payload trailer (last byte is the payload checksum).
     let last = buf.len() - 1;
     buf[last] = buf[last].wrapping_add(1);
 
-    // Append a clean header-only packet after the corrupted one.
     let good = LinkPacket::header_only(ControlBits::ACK, 9, 10);
     codec.encode(good.clone(), &mut buf).unwrap();
 
-    // Decode should skip the corrupt frame and find the clean one.
     let decoded = codec.decode(&mut buf).unwrap().unwrap();
     assert_eq!(decoded, good);
   }

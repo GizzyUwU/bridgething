@@ -1,7 +1,5 @@
 //! Phone surface - telephony state from the connected companion (iAP2
-//! call CSMs on iOS, Android via gateway). Replaces the loose
-//! `PhoneCallInfo`/`PhoneCallAccept`/`PhoneCallEnd` shapes that lived on
-//! `system.rs`.
+//! call CSMs on iOS, Android via gateway).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

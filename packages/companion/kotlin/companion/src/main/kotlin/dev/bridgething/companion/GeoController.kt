@@ -34,7 +34,7 @@ import kotlinx.coroutines.sync.withLock
  * Geo surface implementation. Tries Google Play Services'
  * FusedLocationProvider first (best accuracy + battery); falls back to
  * AOSP [LocationManager] when Play Services is missing (degoogled phones,
- * GrapheneOS, etc). Mirror of Swift `GeoController`.
+ * GrapheneOS, etc).
  *
  * The fused provider is loaded reflectively so the companion module
  * doesn't have a hard compile-time dependency on play-services-location:
@@ -95,8 +95,6 @@ public class GeoController(
         }
     }
 
-    // MARK: - watch / unwatch
-
     private suspend fun handleWatch(watch: GeoWatch) {
         if (!hasLocationPermission()) return
         val gateway = gatewayRef ?: return
@@ -116,8 +114,6 @@ public class GeoController(
         legacy?.stopWatch()
         watching = false
     }
-
-    // MARK: - get-once
 
     private suspend fun handleGetOnce(handle: GeoGetOnceHandle, req: GeoGetOnce) {
         if (!hasLocationPermission()) {
@@ -139,8 +135,6 @@ public class GeoController(
             handle.respond(GeoGetOnceReply(position = makePosition(location)))
         }
     }
-
-    // MARK: - backends
 
     private fun ensureFused(): FusedBackend? {
         fused?.let { return it }
@@ -175,8 +169,6 @@ public class GeoController(
         )
     }
 }
-
-// ---- Fused (Google Play Services) backend, loaded reflectively. ----
 
 /**
  * Reflective wrapper over `com.google.android.gms.location.FusedLocationProviderClient`.
@@ -260,7 +252,6 @@ private class FusedBackend private constructor(
         val isComplete = taskCls.getMethod("isComplete")
         val isSuccessful = taskCls.getMethod("isSuccessful")
         val getResult = taskCls.getMethod("getResult")
-        // Spin lightly via a coroutine continuation by hooking a listener.
         val listenerCls = Class.forName("com.google.android.gms.tasks.OnCompleteListener")
         return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
             val listener = java.lang.reflect.Proxy.newProxyInstance(
@@ -327,9 +318,7 @@ private class FusedBackend private constructor(
             null
         }
 
-        // Reflective interface proxies need primitive defaults for the
-        // non-implemented methods (equals/hashCode/toString); java.lang.reflect.Proxy
-        // will pass them through to us. Return sensible primitives.
+        // reflective proxies must return primitive defaults for pass-through equals/hashCode/toString.
         fun defaultProxyReturn(method: java.lang.reflect.Method): Any? = when (method.returnType) {
             Boolean::class.javaPrimitiveType -> false
             Int::class.javaPrimitiveType -> 0
@@ -337,8 +326,6 @@ private class FusedBackend private constructor(
         }
     }
 }
-
-// ---- Legacy (AOSP LocationManager) backend. ----
 
 /**
  * AOSP fallback used when Play Services isn't on the device. Worse battery
@@ -374,8 +361,7 @@ private class LegacyBackend(
     suspend fun getOnce(accuracy: GeoAccuracy): Location? {
         if (!hasPermission()) return null
         val provider = pickProvider(accuracy) ?: return null
-        // Try last-known first; if missing fall back to a single-shot
-        // subscribe with a short timeout.
+        // last-known first; if missing, single-shot subscribe with a short timeout.
         try {
             val last = manager.getLastKnownLocation(provider)
             if (last != null) return last

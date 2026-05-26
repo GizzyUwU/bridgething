@@ -11,18 +11,15 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::link::Iap2Command;
 
-/// Link session id used by `Lsp::accessory_default` for EA traffic.
-/// Must match the `SessionTriple { session_type: 2, ... }` declared in
-/// the SYN.
+/// Link session id used by `Lsp::accessory_default` for EA traffic. Must match the
+/// `SessionTriple { session_type: 2, ... }` declared in the SYN.
 pub(crate) const EA_LINK_SESSION_ID: u8 = 3;
 
 const LANE_CAPACITY: usize = 16;
 
 type FramedBytes = (u16, Bytes);
 
-/// Lane priority hint a consumer attaches when sending bytes on an EA
-/// stream. Mirrors `libbridgething::Priority` semantically but is
-/// kept crate-local so the iap2 crate stays independent of lib.
+/// Lane priority hint a consumer attaches when sending bytes on an EA stream.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EaPriority {
   #[default]
@@ -36,10 +33,8 @@ pub enum EaSendError {
   ChannelClosed,
 }
 
-/// Outbound side of an EA stream. The consumer pre-binds its stream id
-/// when a stream opens; calling [`EaStreamSender::send`] tags each frame
-/// with that stream id and posts it to the matching priority lane on the
-/// chunker's fan-in.
+/// Outbound side of an EA stream, bound to one stream id. [`EaStreamSender::send`] tags each frame
+/// with that id and posts it to the matching priority lane on the chunker's fan-in.
 #[derive(Debug, Clone)]
 pub struct EaStreamSender {
   stream_id: u16,
@@ -107,9 +102,7 @@ pub(crate) fn split_stream_frame(payload: &Bytes) -> Option<(u16, Bytes)> {
 }
 
 const fn max_chunk_payload(peer_max_len: u16) -> usize {
-  // peer_max_len is the link's full DATA-packet budget. Each EA chunk
-  // uses 2 bytes for the stream-id prefix; the remainder is the payload
-  // we can hand to the iAP2 link layer.
+  // 2 bytes of the link budget go to the stream-id prefix.
   let total = peer_max_len as usize;
   if total <= 2 { 1 } else { total - 2 }
 }

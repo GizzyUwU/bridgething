@@ -8,16 +8,15 @@ import android.media.AudioManager
 
 /**
  * Host audio output volume + mute snapshot via Android's [AudioManager].
- * Android exposes `STREAM_MUSIC` as the media stream the daemon cares
- * about; `muted == true` follows [AudioManager.isStreamMute].
+ * `STREAM_MUSIC` is the media stream the daemon cares about;
+ * `muted == true` follows [AudioManager.isStreamMute].
  *
- * Mirror of Swift `VolumeMonitor`. Android-only: caller passes an app
- * [Context] at construction. Volume change events are observed via the
- * system `android.media.VOLUME_CHANGED_ACTION` sticky broadcast; this is
- * undocumented but widely relied on and far cheaper than the alternatives
- * (ContentObserver on `Settings.System` or polling). When [start] is
- * called we emit one snapshot immediately so the companion can announce
- * the current level + claim authority on connect.
+ * Caller passes an app [Context] at construction. Volume change events
+ * are observed via the system `android.media.VOLUME_CHANGED_ACTION`
+ * sticky broadcast; this is undocumented but far cheaper than a
+ * ContentObserver on `Settings.System` or polling. [start] emits one
+ * snapshot immediately so the companion can announce the current level
+ * and claim authority on connect.
  */
 public class VolumeMonitor(
     private val context: Context,
@@ -43,16 +42,14 @@ public class VolumeMonitor(
         }
         receiver = recv
         val filter = IntentFilter(VOLUME_CHANGED_ACTION)
-        // RECEIVER_NOT_EXPORTED on Tiramisu+; on older releases the
-        // overload without flags is the right one.
+        // RECEIVER_NOT_EXPORTED on Tiramisu+; older releases use the no-flags overload.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             ctx.registerReceiver(recv, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             ctx.registerReceiver(recv, filter)
         }
-        // Prime the callback with the current value so the companion can
-        // claim authority + announce volume on connect.
+        // prime the callback so the companion can claim authority and announce volume on connect.
         val (level, muted) = readSnapshot()
         callback.onVolumeChanged(level, muted)
     }
@@ -73,9 +70,8 @@ public class VolumeMonitor(
     }
 
     private companion object {
-        // android.media.AudioManager.VOLUME_CHANGED_ACTION is @hide; the
-        // string is stable across releases and required for receiving
-        // system volume change broadcasts.
+        // AudioManager.VOLUME_CHANGED_ACTION is @hide; the string is stable and required
+        // for receiving system volume change broadcasts.
         const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
         const val EXTRA_VOLUME_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
     }

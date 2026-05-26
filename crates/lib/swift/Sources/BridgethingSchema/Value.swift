@@ -1,10 +1,7 @@
 import Foundation
 
-/// `Value` is the typeshare placeholder for `serde_json::Value` in Rust.
-/// It carries the opaque payload of `ForwardMessage.json`, which is the
-/// arbitrary-data escape hatch in the bridgething wire protocol.
-///
-/// Implemented as a JSON-shaped enum that round-trips through Codable.
+/// Swift representation of `serde_json::Value`. Implemented as a JSON-shaped enum
+/// that round-trips through Codable.
 public enum Value: Codable, Equatable, Sendable {
   case null
   case bool(Bool)

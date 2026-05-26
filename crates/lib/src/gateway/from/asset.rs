@@ -15,8 +15,8 @@ use crate::AssetRetention;
 pub const ASSET_PUSH_SINGLE_FRAME_MAX_BYTES: usize = 256 * 1024;
 
 /// Single-frame asset push for small, latency-critical, memory-resident
-/// assets (album art). Daemon-side checks: `bytes.len()` must be
-/// <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+/// assets (album art). The payload size must be at most
+/// `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
 /// `Persistent`. Larger payloads or persistent retention require the
 /// chunked `PushBegin`/`PushChunk` flow.
 #[typeshare]

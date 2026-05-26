@@ -7,10 +7,9 @@ import kotlinx.coroutines.flow.consumeAsFlow
 /**
  * Test-only [Adapter] that lets a test drive byte/connection events into the
  * gateway and pull back outbound frames. The events flow is backed by an
- * unlimited Channel so simulate() before the gateway has had a chance to
- * subscribe still gets buffered - a SharedFlow with no replay drops events
- * for a not-yet-attached subscriber, which is exactly the race that bit the
- * forwards-events test on the first run.
+ * unlimited Channel so simulate() before the gateway subscribes still gets
+ * buffered - a SharedFlow with no replay drops events for a not-yet-attached
+ * subscriber.
  */
 internal class MockAdapter : Adapter {
     private val incomingEvents: Channel<AdapterEvent> = Channel(Channel.UNLIMITED)

@@ -2,12 +2,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
 
-/// Closed intent enum the companion-side NLU pipeline emits. The full
-/// catalog (47 intents) lives in `notes/voice/intent-schema.md` and is
-/// also encoded in `configs/grammar.strict.json` (the json_schema the
-/// LLM is decoded against). At the wire boundary we serialize as a
-/// string for forward-compat; the daemon dispatcher matches on the
-/// well-known SHOUTY_SNAKE values.
+/// Confidence the companion-side NLU pipeline attaches to a resolved
+/// intent: a coarse "low" | "medium" | "high" level per channel, one for
+/// the intent match and one for the extracted slots.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -33,10 +30,9 @@ pub struct NluAlternate {
   pub slots: Option<NluSlots>,
 }
 
-/// Slot catalog. Every variant in `intents.yaml` projects through this
-/// flat shape; per-intent slot allowlists are enforced by the
-/// json_schema grammar at decode time, not by this struct. The wire
-/// payload omits absent slots (`#[serde_with::skip_serializing_none]`)
+/// Slot catalog. Every intent projects through this flat shape;
+/// per-intent slot allowlists are enforced by the json_schema grammar at
+/// decode time, not by this struct. The wire payload omits absent slots,
 /// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
 ///
 /// String values are passed through verbatim from the user's transcript

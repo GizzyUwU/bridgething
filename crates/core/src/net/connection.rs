@@ -150,9 +150,7 @@ impl Connection {
       self.forward(ForwardMsg::ChangeMode(ClientMode::Stock)).await;
     };
 
-    // Daemon-initiated typed-request response interception. Mirrors the
-    // gateway dispatcher's response-meta short circuit: any modern
-    // inbound message tagged `MsgMeta::Response` is routed to
+    // any modern inbound message tagged `MsgMeta::Response` is routed to
     // `ClientManager::complete_pending` by the listener instead of the
     // normal handler dispatch path.
     if let PossibleRecvMsg::Modern(ClientToBridgeMsg {

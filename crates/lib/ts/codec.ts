@@ -59,7 +59,7 @@ export function writeFrameHeader(header: FrameHeader): Uint8Array {
   view.setUint8(4, header.encoding);
   view.setUint8(5, priorityToByte(header.priority));
   // bytes 6..8 reserved zero
-  // u64 BE length - JS can't address > 2^53 but BigInt path keeps the wire honest.
+  // u64 BE length via BigInt so the wire stays honest past 2^53.
   view.setBigUint64(8, BigInt(header.payloadLength), false);
   return buf;
 }
@@ -142,12 +142,12 @@ export function walkUuidFields(value: unknown, mode: 'decode' | 'encode'): unkno
 /**
  * Encode/decode bridgething wire messages.
  *
- * Encode: `T` → msgpack/json (encoding) → gzip/raw (compression) → 16-byte header + body.
- * Decode: header → body → gunzip/raw → msgpack/json → `T`.
+ * Encode: `T` -> msgpack/json (encoding) -> gzip/raw (compression) -> 16-byte header + body.
+ * Decode: header -> body -> gunzip/raw -> msgpack/json -> `T`.
  *
  * UUIDs travel as 16-byte msgpack `bin` on the gateway path and as
  * hyphenated strings on JSON. The codec exposes both as strings to the
- * SDK consumer; `walkUuidFields` does the bin ↔ string conversion at
+ * SDK consumer; `walkUuidFields` does the bin <-> string conversion at
  * codegen-known field names on the msgpack side. JSON is a no-op.
  */
 export class Codec {

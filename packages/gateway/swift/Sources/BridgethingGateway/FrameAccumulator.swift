@@ -36,7 +36,7 @@ public struct FrameAccumulator {
 
   /// Pops one complete frame from the head of the buffer if available.
   /// Returns nil when the buffer doesn't yet contain a full header + payload.
-  /// Throws on bad magic, unsupported header bytes, or oversized payloads -
+  /// Throws on bad magic, unsupported header bytes, or oversized payloads;
   /// the caller is expected to drop the connection in those cases since the
   /// stream has lost framing and there's no safe resync.
   public mutating func nextFrame() throws -> Data? {

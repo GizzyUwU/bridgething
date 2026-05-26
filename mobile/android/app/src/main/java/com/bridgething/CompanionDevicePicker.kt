@@ -13,17 +13,10 @@ import java.util.regex.Pattern
 import kotlinx.coroutines.CompletableDeferred
 
 /**
- * CompanionDeviceManager-backed pair flow. Mirror of the iOS
- * AccessorySetupKit `AccessoryPickerCoordinator` - same idea, same UX,
- * same Promise<BtDevice?> contract.
- *
- * Why CDM over the older `BluetoothAdapter.startDiscovery` +
- * `device.createBond` dance: the system picker handles scan + pair +
- * permission prompts in one OS-managed surface. No `BLUETOOTH_SCAN`
- * runtime grant, no `neverForLocation` workaround, no in-app picker UI
- * to maintain. The trade-off is needing the foreground Activity
- * (CDM's `IntentSender` is activity-launched) - hence
- * [BridgethingActivityRegistry].
+ * CompanionDeviceManager-backed pair flow. CDM handles scan + pair +
+ * permission prompts in one OS-managed surface, avoiding `BLUETOOTH_SCAN`
+ * runtime grants and custom picker UI. The trade-off is requiring a
+ * foreground Activity for CDM's `IntentSender` launch.
  */
 public object CompanionDevicePicker {
     private const val REQUEST_CDM_PICK = 0xBA01

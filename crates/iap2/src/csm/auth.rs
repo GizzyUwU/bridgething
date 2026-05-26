@@ -3,7 +3,7 @@
 //! Five messages exchanged on the control session, gated before
 //! `IdentificationAccepted` will arrive. iPhone drives certificate
 //! retrieval and challenge issuance; the accessory replies via the
-//! MFi coprocessor. See cleanroom doc `protocol/50_authentication.md`.
+//! MFi coprocessor.
 //!
 //! The auth CSMs are flat structs with at most a single `Bytes` field;
 //! the `Csm` derive generates `From<X> for CsmFrame` and
@@ -13,12 +13,10 @@ use bytes::Bytes;
 
 use super::Csm;
 
-/// CSMs the accessory sends. Empty: iAP2 treats auth (and
-/// identification) as framework-level messages that are implicitly
-/// allowed - including them in
-/// `IdentificationInformation::messages_sent_by_accessory` makes the
-/// iPhone return `IdentificationRejected` on params 6/7. Only
-/// app-level CSMs (NowPlaying, HID, EA, etc) belong in those lists.
+/// CSMs the accessory sends. Empty: auth is a framework-level message,
+/// and listing it in `IdentificationInformation::messages_sent_by_accessory`
+/// makes the iPhone return `IdentificationRejected` on params 6/7. Only
+/// app-level CSMs belong in those lists.
 pub const SENT_BY_ACCESSORY: &[u16] = &[];
 
 /// CSMs the accessory accepts. Empty for the same reason as

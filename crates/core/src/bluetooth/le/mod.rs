@@ -6,10 +6,10 @@
 //! parallel LE codepath.
 //!
 //! The LE link is iPhone-driven: the phone is LE central and connects to
-//! our advertised peripheral (`advertise.rs` + `pair_trigger.rs`, both
-//! registered for the daemon's lifetime); the accessory is GATT client
-//! reading ANCS/AMS. So the session's job is discovery + lifecycle, not
-//! connection management.
+//! our advertised peripheral (advertisement + pair-trigger GATT service,
+//! both registered for the daemon's lifetime); the accessory is GATT
+//! client reading ANCS/AMS. So the session's job is discovery + lifecycle,
+//! not connection management.
 //!
 //! Each consumer degrades independently: ANCS absent (notifications
 //! disabled) or unauthorized does not stop AMS, and AMS absent does not
@@ -395,7 +395,6 @@ async fn attempt(
     }
   };
 
-  // a working connection with at least one service: reset the reconnect backoff.
   *backoff = TRANSIENT_BACKOFF_INITIAL;
 
   let reprobe = time::sleep(ANCS_REPROBE_INTERVAL);

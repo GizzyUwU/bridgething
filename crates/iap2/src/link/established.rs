@@ -214,11 +214,7 @@ impl EstablishedState {
   pub(super) fn handle_inbound_ack(&mut self, ack_value: u8) {
     while let Some(front) = self.unacked.front() {
       let dist = ack_value.wrapping_sub(front.seq);
-      // iAP2 ack is "last received in sequence PSN" (NOT next-expected),
-      // so ack==seq means the peer has acknowledged exactly this packet
-      // and we should drain it. Distances 1..=127 ack later packets;
-      // 128..=255 are negative (ack is behind our seq) and we leave the
-      // entry in unacked for retransmit.
+      // ack is last-received-in-sequence psn; dist 0..=127 acks this entry, 128..=255 stays queued.
       if dist <= 127 {
         let p = self.unacked.pop_front().unwrap();
         self.last_acked_psn = p.seq;

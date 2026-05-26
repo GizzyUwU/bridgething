@@ -43,9 +43,8 @@ pub struct LibrarySearch {
   pub offset: u32,
 }
 
-/// Recommendations seeded by up to 5 items. The daemon caps the seed
-/// list at the platform-permissive limit (Spotify hard-caps at 5
-/// combined seeds across tracks/artists/genres).
+/// Recommendations seeded by up to 5 items. Spotify hard-caps at 5
+/// combined seeds across tracks/artists/genres.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]
@@ -84,9 +83,8 @@ pub struct LibraryFavoritesList {
   pub offset: u32,
 }
 
-/// Batch "is each of these favorited?" lookup. Mirrors Spotify's
-/// `GET /me/tracks/contains` - reply `liked` is index-aligned with the
-/// request `uris`. Daemon caps `uris` at 50 per call.
+/// Batch "is each of these favorited?" lookup. Reply `liked` is
+/// index-aligned with the request `uris`, capped at 50 per call.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]

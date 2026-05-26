@@ -1,20 +1,15 @@
 //! WebSocket-based gateway transport. Accepts WS connections on a
-//! caller-supplied bind address and carries the bridgething
-//! gateway protocol over `BridgeEndec`-framed binary messages. Mirrors
-//! `RfcommGateway`'s shape: per-connection reader/writer pair, a shared
-//! `OutboundPacker` for normal+bulk lanes, a single `recv()` loop owns
-//! the connection map and drives both inbound dispatch and outbound
-//! fan-out.
+//! caller-supplied bind address and carries the bridgething gateway
+//! protocol over `BridgeEndec`-framed binary messages. Per-connection
+//! reader/writer pair, a shared `OutboundPacker` for normal+bulk lanes,
+//! and a single `recv()` loop owning the connection map and driving both
+//! inbound dispatch and outbound fan-out.
 //!
 //! Synthetic addresses: bluetooth peers carry a real MAC; network peers
 //! don't, so connection bookkeeping uses a fake address under reserved
-//! prefix `0xfe:0xfe:...` with a per-connection counter. PeerTracker /
-//! authority routing key by address either way - the prefix keeps these
+//! prefix `0xfe:0xfe:...` with a per-connection counter. PeerTracker and
+//! authority routing key by address either way; the prefix keeps these
 //! distinguishable from real BlueZ peers without changing any consumer.
-//!
-//! Intended for dev iteration (host-side reference gateway against a
-//! local daemon), with a future real-companion path for Wi-Fi-attached
-//! desktops or DeskThing-as-gateway use cases.
 
 use std::{
   collections::HashMap,

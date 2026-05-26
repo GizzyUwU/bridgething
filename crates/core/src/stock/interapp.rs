@@ -185,7 +185,6 @@ pub enum StockInterAppRecv {
 pub struct StockInterAppSend {
   #[serde(rename = "msgId")]
   pub msg_id: Option<usize>,
-  // msg_type: String,
   #[serde(flatten)]
   pub data: StockInterAppSendPayload,
 }
@@ -213,7 +212,7 @@ pub enum StockInterAppSendPayload {
     playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: f64, // TODO: this is a float. i don't care right now.
+    playback_speed: f64,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
   SimplePlayerState {
@@ -225,7 +224,7 @@ pub enum StockInterAppSendPayload {
     playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: f64, // TODO: this is a float. i don't care right now.
+    playback_speed: f64,
     track: StockTrack,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
@@ -237,7 +236,7 @@ pub enum StockInterAppSendPayload {
     playback_options: StockPlaybackOptions,
     playback_position: usize,
     playback_restrictions: PlaybackRestrictions,
-    playback_speed: f64, // TODO: this is a float. i don't care right now.
+    playback_speed: f64,
     track: StockTrack,
   },
   #[serde(rename = "com.spotify.play_queue")]
@@ -676,7 +675,6 @@ impl RecvMsgData {
     };
 
     match data {
-      // ---- modern Player surface ----
       StockInterAppRecv::PlayUri { uri, .. } => {
         RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context: None }))
       }
@@ -715,7 +713,6 @@ impl RecvMsgData {
         }))
       }
 
-      // ---- modern Audio surface ----
       StockInterAppRecv::IncreaseVolume {} => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::VolumeUp),
       StockInterAppRecv::DecreaseVolume {} => RecvMsgData::Audio(ClientToBridgeAudioMsgCommand::VolumeDown),
       StockInterAppRecv::Earcon { earcon } => {
@@ -726,7 +723,6 @@ impl RecvMsgData {
         name: format!("spotify-stock:{file}"),
       })),
 
-      // ---- modern Phone surface ----
       // Stock doesn't carry a call_id; the phone surface uses an empty
       // string as a sentinel for "the active call".
       StockInterAppRecv::PhoneAnswer {} => RecvMsgData::Phone(ClientToBridgePhoneMsg::Answer(PhoneCallAction {
@@ -736,7 +732,6 @@ impl RecvMsgData {
         call_id: String::new(),
       })),
 
-      // ---- modern Library surface ----
       StockInterAppRecv::SetSaved { uri, id, saved } => match uri.or(id) {
         Some(uri) => RecvMsgData::Library(ClientToBridgeLibraryMsg::FavoritesSet(ClientFavoritesSet {
           item: ItemRef {
@@ -749,7 +744,6 @@ impl RecvMsgData {
         None => RecvMsgData::Hole,
       },
 
-      // ---- legacy stock-only verbs (no modern equivalent yet) ----
       StockInterAppRecv::GetImage { id } => RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetImage { id }),
       StockInterAppRecv::GetThumbnailImage { id } => {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::GetThumbnailImage { id })
@@ -811,11 +805,10 @@ impl RecvMsgData {
         RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyGetSessionState)
       }
 
-      // Stock declares these in InterappActions.ts but no store/component
-      // ever invokes them (verified by grepping superbird-webapp for call
-      // sites). Player-state derivatives are read off the SpotifyPlayerState
-      // payload; ratings were retired by Spotify; the rest are stubs for
-      // features that never shipped. Swallow rather than implement.
+      // Stock declares these verbs but no store/component ever invokes them.
+      // Player-state derivatives are read off the SpotifyPlayerState payload;
+      // ratings are retired by Spotify; the rest are stubs for features that
+      // never shipped. Swallow rather than implement.
       StockInterAppRecv::GetCapabilities {}
       | StockInterAppRecv::GetShuffle {}
       | StockInterAppRecv::GetRepeat {}

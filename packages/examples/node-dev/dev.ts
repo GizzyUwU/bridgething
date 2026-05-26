@@ -36,8 +36,7 @@ const handleEvent = (event: GatewayEvent) => {
       console.log('-- disconnected:', event.deviceId);
       break;
     case 'message':
-      // Domain-level events are surfaced via the typed surfaces below;
-      // the raw stream is only useful for diagnostics.
+      // domain-level events arrive via the typed surfaces below
       break;
     case 'decodeError':
       console.error('!! decode error on', event.deviceId, event.description);

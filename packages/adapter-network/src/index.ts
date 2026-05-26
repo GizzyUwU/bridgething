@@ -29,15 +29,9 @@ export type NetworkAdapterOptions = {
 };
 
 /**
- * Byte-level transport for `@bridgething/gateway` that speaks to the
- * daemon's network gateway over WebSocket. One adapter instance can hold
- * many peers; each `Endpoint` becomes a `Device` with the endpoint's
- * `id` as the gateway-visible `deviceId`.
- *
- * Replaces `@bridgething/adapter-node` and works uniformly across Node /
- * Bun / Deno / browsers (anywhere a `WebSocket` exists), making the
- * developer dev-tether flow (`ws://bridgething.local:8892/`) the canonical
- * "talk to the device from a host" path.
+ * Byte-level transport for `@bridgething/gateway` over the daemon's network gateway WebSocket.
+ * One instance can hold many peers; each `Endpoint` becomes a `Device` whose `id` is the
+ * gateway-visible `deviceId`. Works wherever a `WebSocket` exists.
  */
 export class NetworkAdapter implements Adapter {
   private readonly logger: Logger;
@@ -380,11 +374,8 @@ class Peer {
 }
 
 /**
- * `WebSocket.send` accepts `ArrayBuffer | ArrayBufferView`, but DOM type
- * checking rejects `Uint8Array<ArrayBufferLike>` because that union
- * includes `SharedArrayBuffer`. The codec only ever hands us
- * `ArrayBuffer`-backed views, so it's safe to slice into a guaranteed
- * `ArrayBuffer` here.
+ * DOM type checking rejects `Uint8Array<ArrayBufferLike>` because the union includes
+ * `SharedArrayBuffer`. The codec only produces `ArrayBuffer`-backed views, so this slice is safe.
  */
 function toArrayBufferSlice(frame: Uint8Array): ArrayBuffer {
   const buffer = frame.buffer;

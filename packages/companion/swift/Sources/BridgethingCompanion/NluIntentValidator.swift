@@ -5,10 +5,6 @@ import Foundation
 /// synonym map first (well-known close-misses mined from SFT failure tails),
 /// then a Levenshtein-3 fallback. Also strips fillers from WEBAPP_INTENT
 /// raw_query slots so the wire matches what a webapp grammar handler expects.
-///
-/// Mirrors `nlu/scripts/intent_validator.py::snap_prediction` - keep the
-/// synonym map in sync with the Python source when retraining surfaces new
-/// hallucination patterns.
 public enum NluIntentValidator {
     public static let synonymMap: [String: String] = [
         "SET_PLAYBACK_SPEED_1_2X": "SET_PLAYBACK_SPEED_1POINT2X",
@@ -172,8 +168,8 @@ public enum NluIntentValidator {
     }
 
     /// Apply intent snap + WEBAPP_INTENT raw_query filler-strip to a parsed
-    /// prediction. Returns `(snapped, reason)` mirroring the Python contract.
-    /// `nil` snapped means dispatch should fall back (no reasonable target).
+    /// prediction. Returns `(snapped, reason)`. `nil` snapped means dispatch
+    /// should fall back (no reasonable target).
     public static func snapPrediction(_ pred: NluPrediction?) -> (NluPrediction?, SnapReason) {
         guard let pred else { return (nil, .noMatch) }
         let (snapped, reason) = snapIntent(pred.intent)

@@ -7,10 +7,8 @@ public protocol LyricsResolver: Sendable {
     func lyrics(for track: TrackIdentity) async -> Lyrics?
 }
 
-/// Identifies a track for lyrics lookup. lrclib looks up by signature
-/// (artist + track + album + duration); future resolvers may use ISRC
-/// or platform-specific ids. All fields are populated when available;
-/// resolvers ignore what they don't need.
+/// Identifies a track for lyrics lookup. All fields are populated when available;
+/// resolvers use what they need and ignore the rest.
 public struct TrackIdentity: Sendable, Hashable {
     public let artist: String
     public let track: String

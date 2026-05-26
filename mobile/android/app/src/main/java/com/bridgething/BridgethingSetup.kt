@@ -9,15 +9,10 @@ import dev.bridgething.spotify.SpotifyGlue
 import dev.bridgething.tidal.TidalGlue
 
 /**
- * Wires the bridgething Nitro session module's static registry and
- * installs the real session backend before React Native starts.
- * [MainApplication.onCreate] calls [installBridgething] after the
- * default react host is built.
- *
- * Mirror of the iOS `BridgethingApp` setup. Provider registrations land
- * in `HybridBridgethingSessionImpl.registry`; each carries a factory
- * closure that produces a fresh glue plus a `signOut` hook that clears
- * the host's persisted credentials.
+ * Wires the Nitro session module's static registry and installs the real
+ * session backend before React Native starts. Each provider registration
+ * carries a factory closure that produces a fresh glue plus a `signOut`
+ * hook that clears persisted credentials.
  */
 public object BridgethingApp {
     public const val APP_NAME: String = "bridgething"
@@ -34,9 +29,8 @@ public object BridgethingApp {
         )
         HybridBridgethingSessionImpl.lyricsResolver = LrclibResolver()
 
-        // Spotify auth on Android lands in a follow-up; `SpotifyGlue.attach`
-        // throws `NotImplemented` for now so the registration is "available
-        // = false" until the real auth + dealer client is wired up.
+        // SpotifyGlue.attach throws NotImplemented; registration is available=false
+        // until auth + dealer client are wired up.
         HybridBridgethingSessionImpl.registry = listOf(
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id = "spotify",

@@ -8,10 +8,10 @@
 //! wire-direction listed in the `#[wire(...)]` attribute. Recognized
 //! direction tokens - exactly the four known by `BridgeEnum`:
 //!
-//! - `BridgeToGateway` → `BridgeToGatewayMsgData`
-//! - `GatewayToBridge` → `GatewayToBridgeMsgData`
-//! - `BridgeToClient`  → `BridgeToClientMsgData`
-//! - `ClientToBridge`  → `ClientToBridgeMsgData`
+//! - `BridgeToGateway` -> `BridgeToGatewayMsgData`
+//! - `GatewayToBridge` -> `GatewayToBridgeMsgData`
+//! - `BridgeToClient`  -> `BridgeToClientMsgData`
+//! - `ClientToBridge`  -> `ClientToBridgeMsgData`
 //!
 //! Usage:
 //!

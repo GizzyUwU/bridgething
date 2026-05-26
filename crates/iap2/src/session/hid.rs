@@ -12,10 +12,6 @@
 //! press frame with the chosen bit(s) set, then a release frame with all
 //! bits cleared. iOS treats a missing release as a held button. The
 //! release is delayed by [`TAP_RELEASE_DELAY`] to give iOS a clean edge.
-//!
-//! Cleanroom doc references: `protocol/30_control_session.md` (HID
-//! catalogue) and `bridgething/20_hid_descriptors.md` (descriptor
-//! strategy).
 
 use std::time::Duration;
 
@@ -36,28 +32,19 @@ use crate::{
 };
 
 /// Edge gap between the press frame and the release frame for one tap.
-/// 10ms is conservative and well clear of any iOS rate-limiting horizon
-/// while still being instant by human-perception standards.
 const TAP_RELEASE_DELAY: Duration = Duration::from_millis(10);
 
-/// Inter-tap gap when the controller asks for multiple sequential
-/// toggles (e.g. cycling repeat Off -> All -> One requires two
-/// toggles). Long enough that iOS's media stack registers each one as
-/// a discrete press, not a held-button repeat.
+/// Inter-tap gap when the controller asks for multiple sequential toggles. Long enough that iOS
+/// registers each as a discrete press, not a held-button repeat.
 const INTER_TAP_DELAY: Duration = Duration::from_millis(60);
 
-/// One outbound HID command. The controller emits one of these per
-/// webapp tap; the flow expands it into the right number of HID press
-/// frames on the wire.
+/// One outbound HID command; the flow expands it into the right number of HID press frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HidCommand {
-  /// Single press+release pulse with `mask` held during the press
-  /// frame. `mask` is any combination of [`super::super::csm::hid::report_bit`] flags;
-  /// the all-zero mask is a no-op.
+  /// Single press+release pulse with `mask` held during the press frame. `mask` is any combination
+  /// of [`super::super::csm::hid::report_bit`] flags; the all-zero mask is a no-op.
   Pulse(u8),
   /// `count` sequential pulses of `mask`, separated by [`INTER_TAP_DELAY`].
-  /// Used by the controller to drive HID toggles to a target state
-  /// (e.g. two `Repeat` toggles to traverse Off -> All -> One).
   Sequence { mask: u8, count: u8 },
 }
 
@@ -88,10 +75,8 @@ impl HidFlow {
     matches!(msg_id, 0x6801 | 0x6806 | 0x6807)
   }
 
-  /// Process one inbound HID-range CSM. The Car Thing's HID surface is
-  /// outbound-only - these inbound CSMs are decoded and logged, never
-  /// acted on. Decoding still validates the wire shape, which surfaces
-  /// peer protocol bugs early.
+  /// Process one inbound HID-range CSM. The HID surface is outbound-only; these are decoded
+  /// (which still validates the wire shape) and logged, never acted on.
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,
@@ -123,9 +108,7 @@ impl HidFlow {
     Ok(None)
   }
 
-  /// Send `StartHID` if we haven't yet. Idempotent; the session calls
-  /// this after every CSM dispatch as a "kick once identification is
-  /// accepted" check, mirroring `NowPlayingFlow::ensure_subscribed`.
+  /// Send `StartHID` if we haven't yet. Idempotent.
   pub(super) async fn ensure_started(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, HidState::Idle) {
       tracing::debug!("iap2 hid: sending StartHID");
@@ -141,17 +124,13 @@ impl HidFlow {
     Ok(())
   }
 
-  /// Pull the next command from the controller. The session's main
-  /// loop selects this alongside the link-event channel; returning
-  /// `None` means the controller's sender was dropped (and the session
-  /// can stop polling - HID becomes inert for the rest of the link).
+  /// Pull the next command from the controller. `None` means the controller's sender was dropped.
   pub(super) async fn recv(&mut self) -> Option<HidCommand> {
     self.rx.recv().await
   }
 
-  /// Translate a controller command into one or more press+release
-  /// HID report pairs. No-op if `StartHID` has not been sent (the
-  /// command is logged at warn so misordered traffic is observable).
+  /// Translate a controller command into one or more press+release HID report pairs. No-op (logged
+  /// at warn) if `StartHID` has not been sent.
   pub(super) async fn handle_command(
     &mut self,
     cmd: HidCommand,

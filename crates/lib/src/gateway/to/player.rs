@@ -102,7 +102,7 @@ pub struct PlaybackHint {
   pub duration_ms: Option<u32>,
 }
 
-/// Bridge → gateway player verbs. The companion-side SDK dispatches each
+/// Bridge -> gateway player verbs. The companion-side SDK dispatches each
 /// to its native player integration (Spotify SDK, Apple Music SDK,
 /// MediaSession). Routing for `Play(uri)` is gated on
 /// `Capabilities.uri_schemes` - daemon never forwards a URI no

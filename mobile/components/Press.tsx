@@ -24,9 +24,8 @@ type Props = Omit<PressableProps, 'children' | 'style'> & {
 
 /**
  * Pressable that springs slightly inward + dims while held. The base
- * affordance for every interactive surface in the app — wrap `Press` /
- * `PressFlat` around tiles, list rows, action buttons. Disabled mode
- * skips the animation entirely so you don't get a "tap-but-stuck" feel.
+ * affordance for every interactive surface in the app; wrap around tiles,
+ * list rows, action buttons. Disabled mode skips the animation entirely.
  */
 export const Press = forwardRef<typeof AnimatedPressable, Props>(function Press(
   { children, scaleTo = 0.97, fade = true, disabled, style, ...rest },

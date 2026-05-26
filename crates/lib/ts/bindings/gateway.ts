@@ -79,8 +79,8 @@ export type AssetNotFoundReply = { id: string };
 
 /**
  * Single-frame asset push for small, latency-critical, memory-resident
- * assets (album art). Daemon-side checks: `bytes.len()` must be
- * <= `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must NOT be
+ * assets (album art). The payload size must be at most
+ * `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
  * `Persistent`. Larger payloads or persistent retention require the
  * chunked `PushBegin`/`PushChunk` flow.
  */
@@ -228,7 +228,7 @@ export type BridgeToGatewayPhoneMsg =
   | { event: 'stateGet' };
 
 /**
- * Bridge → gateway player verbs. The companion-side SDK dispatches each
+ * Bridge -> gateway player verbs. The companion-side SDK dispatches each
  * to its native player integration (Spotify SDK, Apple Music SDK,
  * MediaSession). Routing for `Play(uri)` is gated on
  * `Capabilities.uri_schemes` - daemon never forwards a URI no
@@ -459,7 +459,7 @@ export type GatewayToBridgePhoneMsg =
   | { event: 'stateReply'; data: PhoneStateReply };
 
 /**
- * Gateway → bridge player events. `Snapshot` is the initial-state event
+ * Gateway -> bridge player events. `Snapshot` is the initial-state event
  * fired at announce when the companion claims player authority;
  * `Delta` is the ongoing partial-update stream (the only delta-shaped
  * event in the wire protocol - every other surface uses snapshots).
@@ -522,7 +522,7 @@ export type GeoGetOnce = { accuracy: GeoAccuracy };
 export type GeoGetOnceReply = { position: Position };
 
 /**
- * Bridge → companion watch forward. The daemon aggregates webapp
+ * Bridge -> companion watch forward. The daemon aggregates webapp
  * watches and re-issues this with the most-demanding accuracy +
  * fastest interval. `min_interval_ms = 0` lets the gateway pick.
  */
@@ -977,8 +977,7 @@ export type WebappInstallAbandon = { installId: string };
  * `WebappInstallFailed { install_id, error }` event on failure -
  * arrives asynchronously after the last chunk lands; between the last
  * `WebappInstallChunk` ack and the terminal event the install is
- * implicitly in "installing" state. Expect sub-second once the upload
- * finishes.
+ * implicitly in "installing" state.
  */
 export type WebappInstallBegin = { installId: string; expectedSha256: string; expectedSize: number };
 

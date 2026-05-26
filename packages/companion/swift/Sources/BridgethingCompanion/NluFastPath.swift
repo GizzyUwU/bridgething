@@ -4,9 +4,8 @@ import Foundation
 /// 25 fast-path intents; emits an intent + slots when matched, returns nil
 /// for fall-through to the LLM stage.
 ///
-/// Mirrors `nlu/scripts/fast_path.py`. Design invariant: FALSE POSITIVES
-/// are catastrophic - rules are conservative and fall through on any
-/// content beyond the closed command.
+/// Design invariant: FALSE POSITIVES are catastrophic, so rules are
+/// conservative and fall through on any content beyond the closed command.
 public enum NluFastPath {
     static let fillers: Set<String> = [
         "uh", "uhh", "uhhh", "uhhhh", "um", "umm", "hmm", "hmmm",

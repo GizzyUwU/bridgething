@@ -30,9 +30,6 @@ mod tests {
 
   use super::*;
 
-  // a self-contained fake protocol: envelopes are plain tuples, data is a
-  // string, so the driver machinery can be exercised with no real wire
-  // types or codec.
   #[derive(Clone)]
   struct Msg {
     id: Uuid,
@@ -60,7 +57,6 @@ mod tests {
     }
   }
 
-  // a typed request whose response is the echoed string.
   struct Echo(String);
   impl From<Echo> for String {
     fn from(e: Echo) -> String {
@@ -83,7 +79,6 @@ mod tests {
     }
   }
 
-  // a transport whose far end is a manually-driven pair of channels.
   struct ChanConnector {
     out: mpsc::UnboundedSender<Msg>,
     inn: mpsc::UnboundedReceiver<Msg>,
@@ -109,7 +104,6 @@ mod tests {
     }
   }
 
-  // far end: echoes requests back as responses, forwards events as-is.
   fn far_end(mut from_client: mpsc::UnboundedReceiver<Msg>, to_client: mpsc::UnboundedSender<Msg>) {
     tokio::spawn(async move {
       while let Some(msg) = from_client.recv().await {
@@ -200,7 +194,6 @@ mod tests {
   async fn request_times_out_when_no_response() {
     let (c_out, _fe_in) = mpsc::unbounded_channel();
     let (_fe_out, c_in) = mpsc::unbounded_channel();
-    // no far end: the request never gets a reply.
     let conn =
       Connection::spawn(ChanConnector { out: c_out, inn: c_in }).with_timeout(std::time::Duration::from_millis(50));
     let err = conn.request(Echo("x".into())).await.expect_err("should time out");

@@ -49,12 +49,9 @@ pub struct DeviceLanguageUpdate {
 }
 
 /// `0x4E0B` device -> accessory. Wall clock plus zone offsets.
-///
-/// `seconds_since_reference_date` is unix-epoch seconds (despite the
-/// name - Apple's "reference date" semantics for this CSM resolve to
-/// 1970-01-01 GMT on the wire). `tz_offset_minutes` is signed minutes
-/// of offset from GMT; `dst_offset_minutes` is the DST adjustment in
-/// minutes.
+/// `seconds_since_reference_date` is unix-epoch seconds (1970-01-01 GMT
+/// on the wire, despite the name). `tz_offset_minutes` is signed minutes
+/// from GMT; `dst_offset_minutes` is the DST adjustment in minutes.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4E0B)]
 pub struct DeviceTimeUpdate {

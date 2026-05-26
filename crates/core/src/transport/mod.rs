@@ -19,8 +19,6 @@
 //! to fire (0/1 for shuffle, 0/1/2 for repeat). When the snapshot lacks
 //! the field the controller refuses with a warn log and returns `Ok(())`
 //! so the webapp's UI doesn't error-spinner.
-//!
-//! Architecture and rationale: `notes/transport-controller.md`.
 
 use bridgething_iap2::{HidCommand, NowPlayingCommand};
 use libbridgething::{

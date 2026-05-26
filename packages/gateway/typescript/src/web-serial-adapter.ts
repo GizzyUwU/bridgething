@@ -5,21 +5,14 @@ import type { Adapter, AdapterEvent, AdapterListener, Device } from './index';
 /**
  * Web Serial adapter for the bridgething wire protocol.
  *
- * Chrome (desktop M117+, Android M138+) extended `navigator.serial` to
- * enumerate RFCOMM SPP services on already-paired Bluetooth Classic
- * devices, identifying them by `bluetoothServiceClassId`. We filter on
- * `BRIDGETHING_PROFILE_UUID` (the value the daemon advertises in its SDP
- * ServiceClassIDList) so the chooser only shows actual bridgething
- * devices rather than every paired SPP peer.
+ * Chrome (desktop M117+, Android M138+) extended `navigator.serial` to enumerate RFCOMM SPP
+ * services on already-paired Bluetooth Classic devices by `bluetoothServiceClassId`. We filter
+ * on `BRIDGETHING_PROFILE_UUID` so the chooser only shows actual bridgething peers.
  *
- * Pre-pairing required: Chrome does not pair devices itself. The user
- * pairs the Car Thing once via OS Bluetooth settings, then this adapter
- * lists / requests the port. On subsequent loads `getPorts()` returns
- * the already-permitted device without re-prompting.
+ * Pre-pairing required: the user pairs the Car Thing once via OS Bluetooth settings; subsequent
+ * page loads get the already-permitted device from `getPorts()` without re-prompting.
  *
- * iOS Safari has no Web Serial; consumers running on iOS must use the
- * companion app's iAP2 path. Firefox and other non-Chromium browsers
- * also have no Web Serial.
+ * iOS Safari and Firefox have no Web Serial; iOS consumers must use the companion app's iAP2 path.
  */
 
 declare global {
@@ -66,11 +59,7 @@ type SessionState = {
   disconnectListener: () => void;
 };
 
-/**
- * Web Serial is the Chrome-side path to RFCOMM SPP. `baudRate` is
- * required by the Web Serial spec but ignored by BR/EDR SPP, so any
- * value works; 9600 matches what other SPP-over-Web-Serial demos use.
- */
+// baudRate is required by the Web Serial spec but ignored by BR/EDR SPP.
 const SERIAL_BAUD_RATE = 9600;
 
 export type WebSerialAdapterOptions = {
@@ -106,11 +95,7 @@ export class WebSerialAdapter implements Adapter {
     }
     this.running = true;
 
-    // Auto-attach to already-permitted devices from prior sessions.
-    // requestPort() must be called from a user gesture; getPorts() is
-    // free-standing, so the typical app flow is: render a "connect"
-    // button that calls requestPort(), then on subsequent loads
-    // getPorts() reconnects silently.
+    // getPorts() doesn't need a user gesture; reconnects already-permitted devices silently
     const existing = await navigator.serial.getPorts();
     for (const port of existing) {
       if (this.isBridgethingPort(port)) {
@@ -158,7 +143,7 @@ export class WebSerialAdapter implements Adapter {
         allowedBluetoothServiceClassIds: [this.serviceUuid],
       });
     } catch (err) {
-      // User cancelled the chooser - normal flow, return null.
+      // user cancelled the chooser
       if (err instanceof DOMException && err.name === 'NotFoundError') return null;
       throw err;
     }
@@ -173,11 +158,7 @@ export class WebSerialAdapter implements Adapter {
   private async openSession(port: SerialPort): Promise<Device> {
     await port.open({ baudRate: SERIAL_BAUD_RATE });
     const info = port.getInfo();
-    // SerialPortInfo doesn't carry a stable device identifier. The
-    // bluetoothServiceClassId is what we filtered on, so multi-device
-    // sessions disambiguate via the port reference itself. Generate a
-    // session id from the port's getInfo() shape plus a counter - good
-    // enough for routing within a single page load.
+    // SerialPortInfo has no stable device identifier; the counter suffix disambiguates within a page load
     const deviceId = `web-serial:${info.bluetoothServiceClassId ?? 'unknown'}:${this.sessions.size}`;
     const device: Device = { id: deviceId, name: 'Bridgething' };
 

@@ -1,16 +1,8 @@
 import Foundation
 
-/// Codable property wrapper that bridges `Foundation.UUID` and the
-/// 16-byte msgpack `bin` shape on the gateway wire. UUID's stock
-/// Codable conformance rides as a hyphenated string, which would land
-/// as msgpack `str` and break the daemon-side serde-msgpack
-/// representation; this wrapper rides as `Data` instead.
-///
-/// JSON encoders see Codable's standard Data shape (base64 string).
-/// The bridgething JSON path goes through the local websocket - and
-/// the daemon's serde-json emits hyphenated UUID strings there - so
-/// this wrapper is gateway-only by construction (the JSON path doesn't
-/// flow through schema structs that use it).
+/// Codable property wrapper that bridges `Foundation.UUID` and the 16-byte msgpack `bin` shape.
+/// UUID's stock Codable conformance encodes as a hyphenated string (`str`), which breaks
+/// the daemon-side serde-msgpack representation; this wrapper encodes as `Data` (`bin`) instead.
 @propertyWrapper
 public struct MsgpackUuid: Codable, Sendable, Hashable {
   public var wrappedValue: UUID
@@ -44,9 +36,8 @@ public struct MsgpackUuid: Codable, Sendable, Hashable {
   }
 }
 
-/// Optional sibling of `MsgpackUuid` for Rust `Option<Uuid>` fields.
-/// Codable property-wrapper synthesis treats `nil` separately so the
-/// non-optional wrapper can't double-duty.
+/// Optional variant of `MsgpackUuid`. Property-wrapper synthesis treats `nil` separately,
+/// so the non-optional wrapper cannot serve both roles.
 @propertyWrapper
 public struct OptionalMsgpackUuid: Codable, Sendable, Hashable {
   public var wrappedValue: UUID?

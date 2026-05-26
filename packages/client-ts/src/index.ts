@@ -68,15 +68,11 @@ export type ClientOptions = {
 /**
  * Typed webapp-side facade over the on-device daemon's local WebSocket.
  *
- * Single-peer (the daemon), so no device proxy or broadcast machinery -
- * every method addresses the daemon implicitly. Holds one `WebSocket`
- * with auto-reconnect, JSON-encodes outbound `ClientToBridgeMsg`,
- * decodes inbound `BridgeToClientMsg`, and tracks in-flight requests so
- * callers can `await` a matching response by id.
+ * Single-peer (the daemon); every method addresses it implicitly. Holds one `WebSocket`
+ * with auto-reconnect, JSON-encodes outbound `ClientToBridgeMsg`, decodes inbound
+ * `BridgeToClientMsg`, and tracks in-flight requests so callers can `await` a reply by id.
  *
- * Surface methods (`client.player.onState`, `client.storage.get`, etc.)
- * are emitted by codegen into `dispatch.generated.ts` and applied to the
- * prototype at module-load via `applyDispatch()`.
+ * Surface methods are code-generated and applied to the prototype at module-load via `applyDispatch()`.
  */
 export interface BridgethingClient extends ClientSurfaces {}
 
@@ -126,8 +122,8 @@ export class BridgethingClient {
   }
 
   /**
-   * Open the WebSocket if it is not already open. Idempotent: if the
-   * socket is already connecting/open, returns the same in-flight promise.
+   * Open the WebSocket if it is not already open. Idempotent when
+   * already connecting or open.
    */
   connect(): void {
     if (this.state === 'open' || this.state === 'connecting') return;
@@ -159,13 +155,11 @@ export class BridgethingClient {
   }
 
   /**
-   * Encode and ship a fully-formed message. Caller is responsible for
-   * picking `meta` (`command`, `event`, etc.). For request/response,
-   * prefer `request` or one of the codegen-emitted typed query methods.
+   * Encode and ship a fully-formed message. Caller picks `meta` (`command`, `event`, etc.).
+   * For request/response, prefer `request` or a typed surface query method.
    *
-   * Sends issued before the socket finishes opening are queued and
-   * flushed in order on `open`. Once `intentionalClose` flips true (via
-   * `close()`), queued sends reject with `'shutdown'`.
+   * Sends before the socket opens are queued and flushed on `open`.
+   * After `close()`, queued sends reject with `'shutdown'`.
    */
   async send(message: ClientToBridgeMsg): Promise<void> {
     this.logger.trace('send', message);

@@ -63,8 +63,6 @@ impl ChromeView {
   }
 
   /// Poll a boolean javascript expression until it holds or the timeout elapses.
-  /// The daemon applies updates asynchronously and the SPA renders
-  /// asynchronously, so dom assertions converge rather than being instantaneous.
   pub async fn wait_for_js(&self, expr: &str, timeout: Duration) -> bool {
     let probe = format!("(() => {{ try {{ return !!({expr}); }} catch (e) {{ return false; }} }})()");
     let deadline = tokio::time::Instant::now() + timeout;

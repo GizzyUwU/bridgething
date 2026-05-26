@@ -7,16 +7,10 @@ import BridgethingTidalGlue
 import Foundation
 import Spotiny
 
-/// Wires the bridgething Nitro session module's static registry and
-/// installs the real session backend before React Native starts.
-/// AppDelegate calls `installBridgething()` from
-/// `application(_:didFinishLaunchingWithOptions:)`.
-///
-/// The host-app's Info.plist supplies `BRIDGETHING_DEVICE_CLIENT_ID`
-/// (gitignored xcconfig); when present the Spotify glue uses the
-/// device-code authenticator (system browser via SFSafariViewController),
-/// otherwise falls back to the WebView PKCE flow against a
-/// bridgething-owned client (`BRIDGETHING_PKCE_CLIENT_ID`).
+/// Populates the static provider registry and installs the session backend.
+/// Call from `application(_:didFinishLaunchingWithOptions:)` before React Native starts.
+/// When `BRIDGETHING_DEVICE_CLIENT_ID` is present in Info.plist, Spotify uses the device-code
+/// flow; otherwise falls back to WebView PKCE via `BRIDGETHING_PKCE_CLIENT_ID`.
 enum BridgethingApp {
     static let appName: String = "bridgething"
     static var appVersion: String {
@@ -98,10 +92,7 @@ enum BridgethingApp {
            !clientID.isEmpty
         {
             let deviceCodeURL = URL(string: "https://accounts.spotify.com/api/device/code")!
-            // Spotify's device-code endpoint requires `description` (the
-            // device label users see on spotify.com/pair). Match what the
-            // daytona / car-thing-device client sends — see
-            // `notes/spotify/AUTH_FLOW.md`.
+            // spotify's device-code endpoint requires `description` as the device label shown on spotify.com/pair
             let configuration = DeviceCodeConfiguration(
                 deviceCodeEndpoint: deviceCodeURL,
                 tokenEndpoint: tokenURL,
@@ -123,15 +114,13 @@ enum BridgethingApp {
             scopes: scopes
         )
         return { _ in
-            // PKCE drives the user through a WebView; no device-code
-            // prompt is ever produced, so the closure argument is unused.
+            // PKCE flow produces no device-code prompt; closure argument is unused
             WebViewPKCEAuthenticator(configuration: configuration)
         }
     }
 }
 
-/// Keychain-backed token persistence. Spotiny calls `onTokensRefreshed`
-/// every time it rotates tokens; the glue's init reads back on next start.
+/// Keychain-backed token persistence for Spotify credentials.
 private final class TokenStore: @unchecked Sendable {
     private let service: String
 

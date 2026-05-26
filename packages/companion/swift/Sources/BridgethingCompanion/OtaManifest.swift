@@ -66,10 +66,9 @@ public struct OtaCompositeVersion: Sendable, Equatable {
 }
 
 /// Per-artifact URLs derived from the OTA root + channel + per-component
-/// version + image variant. Mirrors the on-disk R2 layout documented in
-/// `notes/release-pipeline.md`. The daemon binary is the only
-/// daemon-kind artifact; images carry both .swu (full) and .zck (delta
-/// source the daemon's range proxy reads from).
+/// version + image variant, matching the on-disk R2 layout. The daemon
+/// binary is the only daemon-kind artifact; images carry both .swu (full)
+/// and .zck (delta source the daemon's range proxy reads from).
 public struct OtaArtifactURLs: Sendable, Equatable {
     public let daemonBinary: URL
     public let imageSwu: URL

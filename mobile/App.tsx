@@ -47,12 +47,9 @@ export default function App() {
 
   const [boot, setBoot] = useState<BootRoute | null>(null);
 
-  // Pick the initial route from the mmkv-stored "setup completed"
-  // flag, then start the session in the background. New users land on
-  // Setup; everyone else hits Dashboard with the status strip nudging
-  // them toward whatever's still missing. Bootstrap failures are
-  // logged but don't block the route — we'd rather render Setup with
-  // an in-screen error than stick on splash.
+  // pick the initial route from the mmkv-stored "setup completed" flag, then
+  // start the session in the background. bootstrap failures don't block the
+  // route - we'd rather render Setup with an in-screen error than stick on splash.
   useEffect(() => {
     let cancelled = false;
     setBoot(getSetupCompleted() ? 'Dashboard' : 'Setup');
@@ -65,9 +62,7 @@ export default function App() {
     };
   }, []);
 
-  // Drive the OAuth in-app browser off the auth-state event stream.
-  // When the glue lands on `pending` with a complete verification URL,
-  // open the browser; close it once auth resolves.
+  // drive the in-app browser off the auth-state event stream.
   useEffect(() => {
     const session = getSession();
     return session.subscribe(event => {
@@ -82,7 +77,7 @@ export default function App() {
           },
         );
       } else {
-        // authenticated / failed / idle all want the browser gone.
+        // authenticated / failed / idle: close the browser.
         dismissVerificationBrowser().catch(() => {});
       }
     });

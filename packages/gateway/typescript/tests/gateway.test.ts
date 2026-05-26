@@ -400,11 +400,9 @@ describe('BridgethingGateway', () => {
     await gateway.start();
     adapter.emit({ type: 'connected', device: DEVICE });
 
-    // Send 16 bytes with bad magic - accumulator throws on parseFrameHeader.
     adapter.emit({ type: 'bytes', deviceId: DEVICE.id, data: new Uint8Array(16) });
     expect(events.some(e => e.type === 'decodeError')).toBe(true);
 
-    // After resync, a real frame should decode.
     const msg: BridgeToGatewayMsg = {
       id: newUuid(),
       meta: { kind: 'event' },

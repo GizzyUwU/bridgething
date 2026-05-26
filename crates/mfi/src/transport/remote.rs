@@ -12,13 +12,13 @@
 //! [u8 tag][u32 length BE][N bytes payload]
 //! ```
 //!
-//! Request tags (host → device):
+//! Request tags (host -> device):
 //! - `0x01 PREPARE`     - payload `[cmd: u8]`
 //! - `0x02 SMBUS_READ`  - payload `[cmd: u8, len: u8]`
 //! - `0x03 SMBUS_WRITE` - payload `[cmd: u8, data...]`
 //! - `0x04 RAW_READ`    - payload `[len: u32 BE]`
 //!
-//! Response tags (device → host):
+//! Response tags (device -> host):
 //! - `0x80 OK`  - payload is response bytes (empty for prepare/write,
 //!   the requested bytes for reads)
 //! - `0x81 ERR` - payload is a UTF-8 error message

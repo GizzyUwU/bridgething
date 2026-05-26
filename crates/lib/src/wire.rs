@@ -1,12 +1,12 @@
 //! Wire-protocol primitives shared across the bridgething daemon's two
 //! transport surfaces:
 //!
-//! - **Gateway** (Bluetooth, msgpack+gzip-framed): companion ↔ daemon over
-//!   RFCOMM, BLE, or iAP2 EA. Pair: `BridgeToGatewayMsgData` (daemon → companion)
-//!   and `GatewayToBridgeMsgData` (companion → daemon).
-//! - **Client** (local WebSocket, JSON): on-device webapp ↔ daemon. Pair:
-//!   `BridgeToClientMsgData` (daemon → webapp) and `ClientToBridgeMsgData`
-//!   (webapp → daemon).
+//! - **Gateway** (Bluetooth, msgpack+gzip-framed): companion <-> daemon over
+//!   RFCOMM, BLE, or iAP2 EA. Pair: `BridgeToGatewayMsgData` (daemon -> companion)
+//!   and `GatewayToBridgeMsgData` (companion -> daemon).
+//! - **Client** (local WebSocket, JSON): on-device webapp <-> daemon. Pair:
+//!   `BridgeToClientMsgData` (daemon -> webapp) and `ClientToBridgeMsgData`
+//!   (webapp -> daemon).
 //!
 //! Both share a single message-meta vocabulary (`MsgMeta`), a single
 //! protocol-error catalog (`WireError`), and a single set of marker traits
@@ -56,14 +56,13 @@ pub enum MsgMeta {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "wire.ts")]
 pub enum WireError {
-  /// Receiver does not recognize this request variant. Used by the codec
-  /// layer's auto-nack on a typed-decode failure (the variant the sender
-  /// names is not in the receiver's enum) and by handlers that explicitly
-  /// reject something they cannot map.
+  /// Receiver does not recognize this request variant, or recognizes it
+  /// but cannot map the request to any operation it serves.
   Unsupported,
   /// Receiver recognizes the variant but the backend is not yet wired.
-  /// Distinct from `Unsupported` so SDK consumers can tell "you have the
-  /// wrong daemon version" from "this surface ships in a future slice".
+  /// Distinct from `Unsupported` so consumers can tell "you have the
+  /// wrong daemon version" from "this surface exists but is not yet
+  /// implemented".
   Unimplemented,
   /// Receiver could not decode or validate the request payload.
   Malformed { reason: String },
@@ -89,8 +88,8 @@ pub enum RequestError<E> {
 /// does whatever it wants with it; no reply is part of the contract.
 ///
 /// The `W` type parameter is the wire data type the event lifts into,
-/// e.g. `BridgeToGatewayMsgData` for daemon → companion or
-/// `BridgeToClientMsgData` for daemon → webapp. Daemon-side typed-send
+/// e.g. `BridgeToGatewayMsgData` for daemon -> companion or
+/// `BridgeToClientMsgData` for daemon -> webapp. Daemon-side typed-send
 /// surfaces use the bound to type-check the call site.
 pub trait WireEvent<W>: Into<W> {}
 
@@ -110,7 +109,7 @@ pub trait WireUnicast<W>: Into<W> {}
 /// data type the response arrives on (the opposite direction).
 ///
 /// Implementations are produced by `#[derive(WireRequest)]` keyed off
-/// `#[wire_request(...)]` (see `bridgething-macros::request`).
+/// `#[wire_request(...)]`.
 pub trait WireRequest: Sized + Into<Self::Outbound> {
   type Outbound;
   type Inbound;

@@ -5,7 +5,7 @@
 //!
 //! Carries `ServiceUUIDs = [PAIR_TRIGGER_SERVICE]` so the iOS companion
 //! app's `AccessorySetupKit` picker (and CoreBluetooth's
-//! `scanForPeripherals(withServices:)` filter) can find us — both match
+//! `scanForPeripherals(withServices:)` filter) can find us; both match
 //! against advertised service UUIDs, not the LE Service-Solicitation AD
 //! type. The legacy 31-byte ADV PDU can't fit a second 128-bit UUID
 //! alongside Flags + LocalName + tx-power; we drop ANCS solicit

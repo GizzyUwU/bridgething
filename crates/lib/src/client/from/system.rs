@@ -27,8 +27,8 @@ pub struct RequestVersion;
 )]
 pub struct DiagnosticsGet;
 
-/// Pull a one-shot batch of recent log entries. Filtering happens
-/// daemon-side before any wire allocation.
+/// Pull a one-shot batch of recent log entries. The source, levels, and
+/// filter narrow the returned entries.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
 #[serde(rename_all = "camelCase")]

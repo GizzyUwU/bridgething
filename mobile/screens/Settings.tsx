@@ -552,9 +552,7 @@ function GeoFlagRow({
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
-  // Pick the right OS-level permission constant for the running
-  // platform. Without this check the row tries to query an iOS
-  // permission on android and the toggle silently springs back.
+  // querying the wrong OS permission constant causes the toggle to silently spring back.
   const permission =
     Platform.OS === 'android'
       ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
@@ -622,11 +620,10 @@ function GeoFlagRow({
 }
 
 /**
- * Background-location toggle. Android 10+ requires a separate runtime
- * grant on top of foreground location; from API 30 on the request can't
- * pop a dialog and instead kicks the user to system Settings ("Allow
- * all the time"). The toggle reflects the OS-level state, not a user
- * preference - the OS owns the truth.
+ * Background-location toggle. Android 10+ requires a separate runtime grant
+ * on top of foreground location; from API 30 the request can't pop a dialog
+ * and instead opens system Settings ("Allow all the time"). Toggle reflects
+ * OS-level state - the OS owns the truth, not a user preference.
  */
 function BackgroundLocationRow() {
   const permission = PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
@@ -660,10 +657,9 @@ function BackgroundLocationRow() {
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // Revoking only the bg variant just downgrades to "while using"
-      // - drop fine+coarse together for a real revoke. Confirm first
-      // because the OS only applies the change on next process kill,
-      // so we have to restart ourselves to make it stick.
+      // revoking only the bg variant downgrades to "while using"; drop fine+coarse
+      // for a real revoke. the OS applies the change on next process kill, so a
+      // restart is required to make it stick.
       Alert.alert(
         'restart bridgething?',
         'to revoke location, android needs to kill + restart the app. revoke now?',
@@ -752,11 +748,9 @@ function BackgroundLocationRow() {
 }
 
 /**
- * NotificationListenerService access. The Android equivalent of iOS's
- * ANCS pair flow - the user has to toggle our app on under "Device & app
- * notifications" themselves; there is no programmatic grant. We poll
- * the enabled state every time the screen mounts (and after a Settings
- * trip) so the visual toggle matches the OS truth.
+ * NotificationListenerService access. No programmatic grant exists; the user
+ * must enable the app under "Device & app notifications" in system settings.
+ * OS state is polled on mount and after foreground transitions.
  */
 function NotificationListenerRow({
   value,
@@ -815,8 +809,7 @@ function NotificationListenerRow({
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // No programmatic revoke for NotificationListenerService - the
-      // user has to flip our app off in system settings.
+      // no programmatic revoke for NotificationListenerService; must use system settings.
       Alert.alert(
         'revoke in settings',
         'android only lets you revoke notification access from system settings. open it?',

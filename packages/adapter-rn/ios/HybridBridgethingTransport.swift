@@ -2,31 +2,11 @@ import ExternalAccessory
 import Foundation
 import NitroModules
 
-/**
- * iOS-side bridgething transport. Owns one `EASession` per active accessory
- * matching the bridgething EA protocol string and pumps raw bytes back to
- * JS via the Nitro callbacks set by the TS adapter.
- *
- * Lifecycle:
- *  1. `start()` registers EA notifications + auto-opens sessions for any
- *     accessories already connected.
- *  2. `EAAccessoryDidConnect` opens an `EASession`, schedules its streams
- *     on the main RunLoop, and emits `connected` to JS.
- *  3. Inbound bytes pump through `StreamDelegate.hasBytesAvailable` reads
- *     and surface as `onBytes(deviceId, ArrayBuffer)`.
- *  4. `send(deviceId, ArrayBuffer)` queues bytes on the session's outbound
- *     buffer; the `StreamDelegate.hasSpaceAvailable` drain loop empties it.
- *  5. `stop()` closes every active session and unregisters notifications.
- *
- * Threading: all session work hops to the main RunLoop because that's where
- * `EASession.inputStream`/`outputStream` deliver `StreamDelegate` callbacks.
- * Public Nitro methods are invoked from JS-thread; we marshal to main as
- * needed.
- */
+/// iOS EA transport. Owns one `EASession` per connected accessory and pumps bytes to JS
+/// via Nitro callbacks. All session work runs on the main RunLoop where `EASession` streams
+/// deliver their `StreamDelegate` callbacks.
 public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @unchecked Sendable {
-  /// The EA protocol string declared in the host app's Info.plist
-  /// (`UISupportedExternalAccessoryProtocols`). Final naming TBD; the
-  /// daemon side will declare the same string.
+  /// EA protocol string; must match `UISupportedExternalAccessoryProtocols` in Info.plist.
   public static var protocolString: String = "com.bridgething.gateway"
 
   private var sessions: [String: Session] = [:]
@@ -55,15 +35,12 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
   }
 
   public func connect(deviceId: String) throws -> Promise<BridgethingTransportDevice> {
-    // EA discovery is push-only on iOS; the consumer can't initiate connection.
-    // If the accessory is already connected, hand back its device record;
-    // otherwise wait briefly for iOS to surface it.
+    // EA discovery is push-only; if the accessory is already connected, return it immediately.
     return Promise.async { [self] in
       if let existing = await MainActor.run(body: { self.sessions[deviceId]?.device }) {
         return existing
       }
-      // iOS won't fire a notification for an accessory we missed; check the
-      // current connectedAccessories list and open synchronously if found.
+      // iOS won't fire a connect notification for accessories already present; check synchronously.
       if let device = await MainActor.run(body: { self.openIfConnected(deviceId: deviceId) }) {
         return device
       }
@@ -81,8 +58,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
   }
 
   public func send(deviceId: String, frame: ArrayBuffer) throws -> Promise<Void> {
-    // ArrayBuffer is non-owning across the boundary; copy into Data so the
-    // outbound write can run after this Promise returns.
+    // copy before the Promise returns; ArrayBuffer lifetime doesn't extend past the call
     let copy = Data(buffer: frame)
     return Promise.async { [self] in
       try await MainActor.run {
@@ -95,9 +71,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
   }
 
   public func getKnownDevices() throws -> Promise<[BridgethingTransportDevice]> {
-    // EAAccessoryManager state is owned by the main thread; hop there to read
-    // it rather than touching it from the JS thread. The Promise resolves
-    // back into JS via Nitro's normal callback path.
+    // EAAccessoryManager state is main-thread-owned
     return Promise.async {
       return await MainActor.run {
         EAAccessoryManager.shared().connectedAccessories
@@ -134,9 +108,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
     manager.registerForLocalNotifications()
 
     let center = NotificationCenter.default
-    // `queue: .main` guarantees these blocks run on the main thread; assert
-    // the actor isolation rather than detaching a Task so we stay on the
-    // same trampoline EA delivered the notification on.
+    // queue: .main keeps delivery on the same thread EA uses; assumeIsolated avoids a Task detach
     let connectObserver = center.addObserver(
       forName: .EAAccessoryDidConnect,
       object: nil,
@@ -247,9 +219,7 @@ public final class HybridBridgethingTransport: HybridBridgethingTransportSpec, @
   }
 
   private static func makeArrayBuffer(from data: Data) -> ArrayBuffer {
-    // The only failure mode is an empty `Data` (nil baseAddress); callers
-    // guard via the n > 0 check on stream reads, so this is a programmer
-    // error if it ever throws.
+    // callers guard n > 0 before reaching here; empty Data is a programmer error
     return try! ArrayBuffer.copy(data: data)
   }
 }
@@ -260,21 +230,15 @@ private extension Data {
   }
 }
 
-/**
- * Per-accessory streaming state. Owns the EASession's input/output streams,
- * a write queue, and a tiny StreamDelegate adapter that pumps reads/writes
- * on the main RunLoop.
- */
+/// Per-accessory streaming state. Owns the EASession's streams and a chunked write queue.
 @MainActor
 private final class Session {
   let device: BridgethingTransportDevice
   let session: EASession
   let delegate: StreamDelegateAdapter
 
-  // Chunked write queue. Each `enqueue` appends a `Data` to the back; `drain`
-  // pops from the front, advancing `firstOffset` to track partial writes.
-  // Avoids the O(N) shift cost of `Data.removeFirst(_:)` on the build-phase
-  // buffer when frames are large or arrive in bursts.
+  // `enqueue` appends to the back; `drain` pops from the front using `firstOffset` to track
+  // partial writes, avoiding the O(N) shift of `Data.removeFirst(_:)` on large frames.
   private var pendingChunks: [Data] = []
   private var firstOffset: Int = 0
   private var closed: Bool = false
@@ -312,10 +276,8 @@ private final class Session {
     drain()
   }
 
-  /// Drain as many bytes as the stream will accept right now. The stream
-  /// re-fires `Stream.Event.hasSpaceAvailable` whenever buffer space comes
-  /// back, which calls back into here - no flag bookkeeping needed; the
-  /// stream's `hasSpaceAvailable` property is the source of truth.
+  /// Drain as many bytes as the stream will accept. The stream re-fires `hasSpaceAvailable`
+  /// when buffer space returns, so no flag bookkeeping is needed.
   func drain() {
     guard let output = session.outputStream else { return }
     while let first = pendingChunks.first, output.hasSpaceAvailable {
@@ -370,10 +332,8 @@ private final class StreamDelegateAdapter: NSObject, StreamDelegate {
     self.onError = onError
   }
 
-  /// Streams are scheduled on the main RunLoop, so this protocol method is
-  /// invoked on the main thread. Assert the isolation rather than re-dispatch
-  /// through the main queue (which would add a runloop tick of latency between
-  /// every byte arriving and being delivered to JS).
+  /// Asserts main-actor isolation rather than re-dispatching through the main queue
+  /// to avoid a runloop tick of latency per byte.
   nonisolated func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
     MainActor.assumeIsolated { handle(stream: aStream, event: eventCode) }
   }
@@ -383,9 +343,7 @@ private final class StreamDelegateAdapter: NSObject, StreamDelegate {
     switch event {
     case .hasBytesAvailable:
       guard let input = stream as? InputStream else { return }
-      // Pump every available chunk in one trampoline; the stream only fires
-      // `hasBytesAvailable` once per readable transition, and missing a read
-      // means waiting for the next one (latency for nothing).
+      // the stream fires `hasBytesAvailable` once per readable transition; drain fully to avoid latency
       while input.hasBytesAvailable {
         let n = readBuffer.withUnsafeMutableBufferPointer { buf -> Int in
           guard let base = buf.baseAddress else { return 0 }

@@ -49,10 +49,8 @@ impl AuthFlow {
     self.state == AuthState::Authenticated
   }
 
-  /// Process one auth-range CSM. `Some(event)` from the return means
-  /// "emit this terminal event and disconnect the link"; `None` means
-  /// the flow handled the frame internally (and may have already
-  /// emitted a non-terminal event via `session_events_tx`).
+  /// Process one auth-range CSM. `Some(event)` means "emit this terminal event and disconnect
+  /// the link"; `None` means handled internally (may have emitted a non-terminal event already).
   pub(super) async fn handle<M: MfiAccess>(
     &mut self,
     frame: CsmFrame,

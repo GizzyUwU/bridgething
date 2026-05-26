@@ -9,7 +9,7 @@
   /// `EASession` on each match.
   ///
   /// Lifecycle on iOS:
-  /// 1. Pair the Car Thing once via Settings → Bluetooth (one-time MFi auth).
+  /// 1. Pair the Car Thing once via Settings -> Bluetooth (one-time MFi auth).
   /// 2. Declare the protocol string under `UISupportedExternalAccessoryProtocols`
   ///    in the consuming app's Info.plist.
   /// 3. For backgrounded operation also add `external-accessory` to
@@ -26,10 +26,8 @@
 
     private let protocolString: String
 
-    // The trailing state below is only ever read or mutated from the main
-    // thread - either from public methods (which always hop via MainActor.run)
-    // or from stream/notification callbacks (which fire on main because we
-    // scheduled them there).
+    // The trailing state is only read or mutated from the main thread: public methods hop via
+    // MainActor.run and stream/notification callbacks fire on main because we scheduled them there.
     private var sessions: [String: SessionState] = [:]
     private var observers: [NSObjectProtocol] = []
     private var started = false
@@ -139,11 +137,8 @@
       guard accessory.protocolStrings.contains(protocolString) else { return }
       let id = Self.deviceId(for: accessory)
       if sessions[id] != nil { return }
-      // Session creation can fail when iOS rejects the accessory (e.g. the
-      // protocol string isn't declared in `UISupportedExternalAccessoryProtocols`
-      // on the consuming Info.plist). No "connected" event was ever emitted, so
-      // there's nothing to roll back - surface nothing and let the caller
-      // diagnose via console logs.
+      // Session creation fails when iOS rejects the accessory (e.g. protocol string not declared in
+      // UISupportedExternalAccessoryProtocols). No "connected" event was emitted, so nothing to undo.
       guard let session = EASession(accessory: accessory, forProtocol: protocolString) else {
         return
       }

@@ -2,14 +2,9 @@ import Foundation
 
 /// Filler-strip helper for WEBAPP_INTENT raw_query slots.
 ///
-/// Matches the Python `raw_query_strip.strip_fillers` reference at
-/// `nlu/scripts/raw_query_strip.py`. Vocabulary is kept in sync with
-/// `nlu/scripts/build_perturbed_slices.py` so the vault's perturbation
-/// generator and the on-device strip share an alphabet.
-///
 /// Conservative on heavy disfluencies: removes single-word fillers,
 /// compound hedges, RESTART-verb prefixes, and the heavy-suffix tail.
-/// Does NOT resolve self-corrections (`turn off no wait turn on`) - that
+/// Does NOT resolve self-corrections (`turn off no wait turn on`); that
 /// needs a semantic pass.
 public enum NluFillerStrip {
     static let singleFillers: Set<String> = [

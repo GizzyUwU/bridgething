@@ -1,17 +1,15 @@
 import BridgethingSchema
 import Foundation
 
-/// Build the system prompt the LLM stage runs against. Mirrors
-/// `nlu/scripts/probe_music_knowledge.build_system_prompt`. The
+/// Build the system prompt the LLM stage runs against. The
 /// `activeWebapps` block is what makes WEBAPP_INTENT emission context-
-/// aware - without it, an utterance like "what's the weather" rationally
+/// aware; without it, an utterance like "what's the weather" rationally
 /// falls back to NO_INTENT because the model has no signal a weather
 /// webapp exists to route to.
 public enum NluSystemPrompt {
-    /// Closed intent enum the LLM is told to pick from. Kept in sync with
-    /// `configs/intents.yaml` and `NluIntentValidator.validIntents`. Surface
-    /// names (what the LLM emits) are listed; the snap layer maps any
-    /// close-misses back to this catalog.
+    /// Closed intent enum the LLM is told to pick from. These surface
+    /// names are what the LLM emits; the snap layer maps any close-misses
+    /// back to this catalog.
     public static let surfaceNames: [String] = [
         "ADD_TO_COLLECTION", "ADD_TO_QUEUE", "BAN_TRACK", "CANCEL_INTERACTION",
         "CLARIFY", "FOLLOW", "HELP", "MORE_LIKE_THIS", "MUTE", "NEXT",

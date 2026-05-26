@@ -159,7 +159,7 @@ private class Session(
                     owner.emitBytes(device.id, buf.copyOf(n))
                 }
             } catch (_: IOException) {
-                // Stream is dead; the finally below routes the disconnect.
+                // stream is dead; disconnect is routed in finally.
             } finally {
                 owner.emitDisconnected(device.id)
                 runCatching { socket.close() }

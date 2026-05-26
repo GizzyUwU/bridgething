@@ -11,7 +11,7 @@ pub struct CapabilitiesSnapshot {
   pub capabilities: Capabilities,
 }
 
-/// Daemon → webapp capabilities surface. `Update` is the broadcast event
+/// Daemon -> webapp capabilities surface. `Update` is the broadcast event
 /// fired on connect + on every change; `Snapshot` is the typed reply to
 /// `CapabilitiesGet`. Webapps that auto-react to capability change
 /// listen on `Update` and don't need to call `Get`.

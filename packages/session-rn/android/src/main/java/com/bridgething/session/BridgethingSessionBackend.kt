@@ -19,15 +19,9 @@ import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 
 /**
  * Backend protocol the host app implements. Decouples the Nitro
- * HybridObject (lives in this library, can't see gradle subprojects
- * outside its scope) from the orchestration logic (lives in the host
- * app target where the bridgething companion + glue packages are linked).
- *
- * The host app implements [BridgethingSessionBackend] and registers it
- * with [HybridBridgethingSession.installBackend] at app launch (before
- * any JS code runs). Mirror of the Swift `BridgethingSessionBackend`
- * protocol; same shape so the RN session API behaves identically across
- * platforms.
+ * HybridObject (in this library, with limited gradle visibility) from the
+ * orchestration logic in the host app. Registered via
+ * [HybridBridgethingSession.installBackend] at launch, before any JS runs.
  */
 public interface BridgethingSessionBackend {
     public suspend fun start()
@@ -44,7 +38,6 @@ public interface BridgethingSessionBackend {
     public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult
     public suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus
 
-    // Webapps (per-device)
     public suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo>
     public suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp?
     public suspend fun installWebappFromBase64(deviceId: String, archiveBase64: String): BridgethingWebappInfo
@@ -55,21 +48,16 @@ public interface BridgethingSessionBackend {
     public suspend fun setWebappConfigField(deviceId: String, id: String, key: String, value: String)
     public suspend fun deleteWebappConfigField(deviceId: String, id: String, key: String)
 
-    // Capability flags
     public suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags)
 
-    // OTA
     public suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?)
     public suspend fun pollOtaNow()
     public suspend fun deviceMeta(deviceId: String): BridgethingDeviceMeta?
 
-    // Host identity
     public suspend fun hostInfo(): BridgethingHostInfo
 
-    // OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
     public suspend fun presentPairPicker(): BridgethingBtDevice?
 
-    // Notification access (android only)
     public suspend fun isNotificationAccessGranted(): Boolean
     public suspend fun requestNotificationAccess()
 

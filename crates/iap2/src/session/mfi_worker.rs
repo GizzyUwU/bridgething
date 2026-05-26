@@ -26,10 +26,8 @@ enum MfiRequest {
   },
 }
 
-/// Lifecycle owner for the MFi worker thread. Construct with
-/// [`WorkerMfiAccess::spawn`]; call [`Self::handle`] to obtain a
-/// cloneable [`MfiHandle`] for each [`crate::Iap2Session`] task. The
-/// worker thread runs until every handle (and this owner) is dropped.
+/// Lifecycle owner for the MFi worker thread. [`Self::handle`] hands out a cloneable
+/// [`MfiHandle`] per [`crate::Iap2Session`]; the thread runs until every handle and this owner drop.
 #[derive(Debug)]
 pub struct WorkerMfiAccess {
   tx: mpsc::Sender<MfiRequest>,
@@ -56,9 +54,8 @@ impl WorkerMfiAccess {
   }
 }
 
-/// Cloneable [`MfiAccess`] handle backed by a [`WorkerMfiAccess`]
-/// worker thread. Multiple sessions can each own a clone; requests
-/// serialize naturally through the single mpsc to the worker.
+/// Cloneable [`MfiAccess`] handle backed by a [`WorkerMfiAccess`] thread. Requests from every
+/// clone serialize through the single mpsc to the worker.
 #[derive(Clone, Debug)]
 pub struct MfiHandle {
   tx: mpsc::Sender<MfiRequest>,

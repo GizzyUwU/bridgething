@@ -61,12 +61,10 @@ pub struct WebappIcon {
   pub id: Uuid,
 }
 
-/// Webapp-initiated chunked install. Mirrors `WebappInstallBegin` from
-/// the gateway surface line-for-line - same install_id (sha256 hex of
-/// the zip), same chunk shape, same terminal-event behavior. The same
-/// daemon-side install handler services both surfaces, so the
-/// `WebappInstalled` / `WebappInstallFailed` events broadcast to both
-/// gateway and webapp peers when either initiates an install.
+/// Webapp-initiated chunked install. `install_id` is the sha256 hex of
+/// the zip. The terminal `WebappInstalled` / `WebappInstallFailed`
+/// events broadcast to both gateway and webapp peers regardless of
+/// which surface initiated the install.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -130,9 +128,9 @@ pub enum ClientToBridgeWebappMsg {
   /// `InstallBeginAck { resume_from_offset }` or `WebappError`.
   #[bridge_request]
   InstallBegin(WebappInstallBegin),
-  /// command: streaming chunk for an in-flight install upload. Daemon
-  /// writes to disk via ChunkedTransfer; terminal `WebappInstalled` /
-  /// `WebappInstallFailed` event arrives after `last:true`.
+  /// command: streaming chunk for an in-flight install upload. The
+  /// terminal `WebappInstalled` / `WebappInstallFailed` event arrives
+  /// after `last:true`.
   #[bridge_command]
   InstallChunk(WebappInstallChunk),
   /// command: drop the daemon-side partial for `install_id`.

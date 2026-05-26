@@ -1,7 +1,6 @@
-//! Authority scopes a companion can claim. Lives in shared/ so both
-//! `gateway::AuthorityClaim`/`AuthorityRelease` (the inbound events that
-//! mutate the daemon's authority view) and `shared::Capabilities`
-//! (the outbound projection to webapps) reference one source of truth.
+//! Authority scopes a companion can claim. One source of truth shared by
+//! the inbound claim/release events that mutate the daemon's authority
+//! view and the outbound projection of authority to webapps.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -9,9 +8,8 @@ use typeshare::typeshare;
 
 /// One axis the companion can declare authority over. Each scope has a
 /// fallback source the daemon merges with when no claim is active or
-/// the claim has gone stale (see daemon-side merge in `core::player`).
-/// Unknown scopes arriving at an older daemon are stored opaquely and
-/// ignored.
+/// the claim has gone stale. Unknown scopes arriving at an older daemon
+/// are stored opaquely and ignored.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]

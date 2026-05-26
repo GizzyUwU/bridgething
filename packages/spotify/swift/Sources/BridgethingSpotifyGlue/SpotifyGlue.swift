@@ -79,8 +79,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
         self.gateway = gateway
 
-        // Tell the host we're starting; userCode prompt (if needed) will
-        // arrive on the device-code path before tokens come back.
+        // signal pending; the device-code userCode prompt (if any) arrives before tokens.
         authObserver?(.pending(nil))
 
         let authenticator = authenticatorFactory { [weak self] prompt in
@@ -95,21 +94,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         )
         self.client = client
 
-        // Run auth + dealer-socket connect in the background. We don't
-        // await it here because the daytona/device-code client_id has no
-        // dealer access — `socket.connect()` would block forever. Auth
-        // lifecycle reaches the host through the spotiny delegate
-        // (authDidRefresh / authDidFail), so blocking attach buys us
-        // nothing.
+        // Connect in the background, not awaited: the daytona/device-code
+        // client_id has no dealer access, so socket.connect() would block
+        // forever. Auth lifecycle reaches the host via the spotiny delegate.
         connectTask = Task { [weak client] in
             await client?.connect()
         }
     }
 
     public func detach() async {
-        // Stop emitting auth state once we're tearing down; cancellation
-        // races inside spotiny would otherwise fire authDidFail and emit
-        // a ghost `failed` after the host has already moved to idle.
+        // Stop emitting auth state while tearing down: cancellation races in
+        // spotiny would otherwise fire authDidFail and emit a ghost `failed`.
         authObserver = nil
 
         connectTask?.cancel()
@@ -202,8 +197,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     public func handlePlaybackHint(_ hint: PlaybackHint) async {
-        // Filter for Spotify-app activity only. Other-app hints are not
-        // ours to react to. Hints with an unset bundle (rare) also drop.
+        // Filter to Spotify-app hints only; other-app and unset-bundle hints drop.
         guard hint.appBundle == spotifyAppBundle else { return }
 
         hintFetchTask?.cancel()
@@ -368,9 +362,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 extension SpotifyGlue: SpotinyDelegate {
     public func authDidRefresh(accessToken: String, refreshToken: String) {
         onTokensRefreshed?(accessToken, refreshToken)
-        // Empty tokens here mean spotiny just cleared state because the
-        // current attempt failed; the matching `authDidFail` will follow.
-        // Don't emit `authenticated` until we actually have credentials.
+        // Empty tokens mean spotiny cleared state on a failed attempt (authDidFail
+        // follows); don't emit `authenticated` without credentials.
         if !accessToken.isEmpty {
             authObserver?(.authenticated)
         }

@@ -42,15 +42,13 @@ export type BridgethingAuthState = {
 
 export type BridgethingRepeatMode = 'off' | 'one' | 'all';
 
-/** Snapshot of the currently-playing track. All fields optional - the
- *  active glue may not know all of them. `null` track = nothing playing. */
+/** Snapshot of the currently-playing track. All fields optional; `null` track = nothing playing. */
 export type BridgethingNowPlayingTrack = {
   id?: string;
   title?: string;
   artist?: string;
   album?: string;
-  /** Raw https URL (bypasses the asset-cache indirection so RN's Image
-   *  component can load directly from the provider's CDN). */
+  /** Raw https URL; bypasses the asset cache so RN's Image loads directly from the provider's CDN. */
   artworkUrl?: string;
   durationMs?: number;
 };
@@ -70,14 +68,11 @@ export type BridgethingNowPlaying = {
 };
 
 /**
- * Daemon-observed ANCS authorization state. Mirrors the wire-protocol
- * `AncsAuthState` enum (see `crates/lib/src/shared/notifications.rs`).
+ * Daemon-observed ANCS authorization state.
  *
- * - `unknown`: no iAP2 link yet, or daemon hasn't probed ANCS yet.
- * - `authorized`: the iPhone has accepted notifications-sharing for this
- *   peer and ANCS attribute fetches are succeeding.
- * - `unauthorized`: the iPhone exposed ANCS but rejects content reads
- *   (no LE bond, or user declined the notifications-sharing prompt).
+ * - `unknown`: no iAP2 link yet, or daemon hasn't probed ANCS.
+ * - `authorized`: iPhone accepted notifications-sharing; ANCS attribute fetches are succeeding.
+ * - `unauthorized`: ANCS is exposed but content reads are rejected (no LE bond, or user declined).
  */
 export type BridgethingAncsAuthStatus = 'unknown' | 'probing' | 'authorized' | 'unauthorized';
 
@@ -85,19 +80,15 @@ export type BridgethingAncsAuthStatus = 'unknown' | 'probing' | 'authorized' | '
 export type BridgethingAncsSetupKind = 'paired' | 'alreadyPaired' | 'cancelled' | 'unsupported' | 'failed';
 
 /**
- * Result of triggering the AccessorySetupKit pair flow. `kind` describes
- * the picker-side outcome; `authStatus` is the daemon-reported state at
- * return time (may still transition shortly after — listen on
- * `setOnAncsAuthStatusChanged` for the final word).
+ * Result of the AccessorySetupKit pair flow. `kind` is the picker-side outcome;
+ * `authStatus` is the daemon-reported state at return (may still transition;
+ * observe `setOnAncsAuthStatusChanged` for the final word).
  *
- * - `kind === "paired"`: user picked the accessory and ASK paired LE.
- * - `kind === "alreadyPaired"`: the accessory was already in
- *   `ASAccessorySession.accessories`; no picker shown.
- * - `kind === "cancelled"`: user dismissed the picker.
- * - `kind === "unsupported"`: not iOS 18+, or the device this build
- *   targets has no AccessorySetupKit.
- * - `kind === "failed"`: ASK or CoreBluetooth surfaced an error;
- *   `message` carries it.
+ * - `"paired"`: user picked the accessory; ASK paired LE.
+ * - `"alreadyPaired"`: accessory already in `ASAccessorySession.accessories`; no picker shown.
+ * - `"cancelled"`: user dismissed the picker.
+ * - `"unsupported"`: not iOS 18+, or no AccessorySetupKit in this build.
+ * - `"failed"`: ASK or CoreBluetooth error; `message` carries it.
  */
 export type BridgethingAncsSetupResult = {
   kind: BridgethingAncsSetupKind;
@@ -113,10 +104,8 @@ export type BridgethingWebappSource = 'builtin' | 'installed';
 export type BridgethingWebappRole = 'standard' | 'launcher';
 
 /**
- * Subset of the wire-protocol `WebappInfo` projected into RN-friendly
- * shapes. UUIDs come across as canonical hyphenated strings; the
- * adjacent-tagged ConfigField enum is flattened into
- * `BridgethingConfigField`.
+ * Subset of the wire-protocol `WebappInfo` in RN-friendly shapes. UUIDs are canonical
+ * hyphenated strings; the adjacent-tagged ConfigField enum is flattened into `BridgethingConfigField`.
  */
 export type BridgethingWebappInfo = {
   /** UUIDv7 string baked into the bundle at scaffold time. */
@@ -175,27 +164,23 @@ export type BridgethingConfigEntry = {
   value: string;
 };
 
-/** Decoded webapp icon. The bytes have been written to a temp file the
- *  consumer can hand straight to RN's Image as `{ uri: fileUri }`. */
+/** Decoded webapp icon written to a temp file; hand `fileUri` directly to RN's Image. */
 export type BridgethingWebappIcon = {
-  /** `file://...` path to a freshly-written PNG/JPEG. The native side
-   *  re-uses this filename on subsequent fetches; consumers that diff on
-   *  uri may want to bust their own cache when the underlying icon could
-   *  have changed. */
+  /** `file://...` path to the written PNG/JPEG. Native re-uses the same filename on re-fetch;
+   *  consumers diffing on uri should bust their cache when the icon may have changed. */
   fileUri: string;
   mime?: string;
 };
 
 /**
- * Companion-side capability flags. The composed `SurfaceAvailability`
- * is announced to the daemon on each connect; flipping a flag here
- * triggers a re-announce.
+ * Companion-side capability flags. `SurfaceAvailability` is announced to the daemon on each
+ * connect; flipping a flag triggers a re-announce.
  *
- * - `geo`: forwarded location fixes from CoreLocation.
+ * - `geo`: forwarded CoreLocation fixes.
  * - `notifications`: ANCS bridging (read-only iPhone notifications).
- * - `netFetch`: gateway-side https fetch on behalf of webapps.
- * - `netWs`: gateway-side websocket proxy on behalf of webapps.
- * - `audioTts`: TTS earcon synthesis (off by default; phone-side voice).
+ * - `netFetch`: gateway-side https fetch for webapps.
+ * - `netWs`: gateway-side websocket proxy for webapps.
+ * - `audioTts`: TTS earcon synthesis; off by default.
  */
 export type BridgethingCapabilityFlags = {
   geo: boolean;
@@ -205,19 +190,14 @@ export type BridgethingCapabilityFlags = {
   audioTts: boolean;
 };
 
-/**
- * Configuration for the OTA manifest poll loop. JS persists this in
- * mmkv and reapplies on bootstrap; `setOtaPollConfig(null)` disables polling.
- */
+/** OTA manifest poll configuration. JS persists this in mmkv and reapplies on bootstrap. */
 export type BridgethingOtaPollConfig = {
-  /** Channel the user has selected (e.g. "stable" or "dev"). Channel
-   *  mismatches with the device's announced channel emit a
-   *  `channelMismatch` event instead of pushing. */
+  /** Channel selected by the user (e.g. "stable" or "dev"). Mismatches with the device's
+   *  announced channel emit `channelMismatch` instead of pushing. */
   channel: string;
   /** Seconds between polls. Floor of 60 enforced by the service. */
   intervalSeconds: number;
-  /** When false, only `updateAvailable` is emitted; the host app drives
-   *  the push via `pollOtaNow()` followed by a manual prompt. */
+  /** When false, only `updateAvailable` is emitted; the host app drives the push via `pollOtaNow()`. */
   autoPush: boolean;
   /** Override only for self-hosting; defaults to https://ota.bridgething.com */
   rootUrl?: string;
@@ -273,19 +253,12 @@ export type BridgethingOtaEvent = {
   configuredChannel?: string;
 };
 
-/**
- * Bond state returned by `presentPairPicker`. Always `bonded` on success
- * (both iOS ASK and android CDM only resolve after the system has
- * completed the pair). Kept as a typed field for future expansion.
- */
+/** Bond state returned by `presentPairPicker`. Always `bonded` on success; typed for future expansion. */
 export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
 
 /**
- * One Car Thing handed back by the OS-mediated pair picker
- * (AccessorySetupKit on iOS, CompanionDeviceManager on android).
- * `address` is the BT MAC on android and an opaque accessory identifier
- * on iOS - callers shouldn't interpret it beyond echoing back to the
- * wire protocol.
+ * Car Thing returned by the OS pair picker (AccessorySetupKit / CompanionDeviceManager).
+ * `address` is the BT MAC on Android and an opaque identifier on iOS; treat it as opaque.
  */
 export type BridgethingBtDevice = {
   address: string;
@@ -305,9 +278,7 @@ export type BridgethingDeviceMeta = {
   serialNumber: string;
 };
 
-/** Companion-side identity. Mirrors what the companion announces to the
- *  daemon as `GatewayInfo`; surfaced to RN so Settings can render real
- *  values instead of hardcoded strings. */
+/** Companion-side identity; mirrors what is announced to the daemon as `GatewayInfo`. */
 export type BridgethingHostInfo = {
   /** Display name (e.g. "bridgething"). Matches `CFBundleName`. */
   appName: string;
@@ -317,46 +288,32 @@ export type BridgethingHostInfo = {
   osName: string;
   /** OS version string (e.g. "26.0"). */
   osVersion: string;
-  /** Stable per-vendor identifier. iOS: `identifierForVendor` UUID. Empty
-   *  if the platform doesn't expose one. */
+  /** Stable per-vendor identifier (`identifierForVendor` on iOS). Empty if not exposed. */
   hostIdentifier: string;
   /** Version of the BridgethingCompanion Swift / Kotlin package. */
   libVersion: string;
   /** Version of the wire-protocol crate (libbridgething). */
   libbridgethingVersion: string;
-  /** Transport-adapter label, e.g. "eaccessory" on iOS, "rfcomm" on
-   *  macOS dev / Android. */
+  /** Transport-adapter label (e.g. "eaccessory" on iOS, "rfcomm" on Android). */
   adapterVersion: string;
 };
 
 /**
- * Native session module bridging the React Native UI shell to the Swift /
- * Kotlin `BridgethingCompanion`. The native side owns the gateway, the
- * iAP2 / RFCOMM transport, the active glue, and every dispatcher (Player,
- * Asset, Lyrics, Net, Geo, Volume). RN holds settings UI and observes
- * state through the callback setters below.
+ * Native session module bridging the RN shell to the Swift/Kotlin `BridgethingCompanion`.
+ * Native owns the gateway, iAP2/RFCOMM transport, active glue, and every dispatcher.
+ * RN owns settings UI and observes state via the callback setters below.
  *
- * Provider selection model: glues are registered by the host app's native
- * entry point at startup (one factory closure per provider id). RN calls
- * `setActiveProvider(id)` to switch - native instantiates the glue from
- * the registry and hands it to the companion.
+ * Provider selection: glues are registered at native startup (one factory per provider id);
+ * RN calls `setActiveProvider(id)` and native instantiates the glue from the registry.
  *
- * Webapp / OTA methods that touch a specific Car Thing take a
- * `deviceId` argument matching one of the ids returned by
- * `connectedPeers()`. Methods throw `noPeerConnected` if the deviceId
- * isn't currently in the connected set.
+ * Webapp/OTA methods take a `deviceId` from `connectedPeers()` and throw `noPeerConnected`
+ * if it's no longer in the connected set.
  *
- * Storage scope: the native module only persists what it must — Spotify
- * tokens go through Spotiny into Keychain because Spotiny owns the auth
- * lifecycle. Everything else (setup-completed flag, device nicknames,
- * capability flags, OTA poll config) lives in JS via mmkv; the JS layer
- * re-applies flags + poll config on each bootstrap.
+ * Storage: native persists tokens through provider-owned Keychain paths. Everything else
+ * (capability flags, OTA poll config) lives in mmkv on the JS side and is re-applied on bootstrap.
  */
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
-  /**
-   * Bring the gateway up: open the iAP2 / RFCOMM adapter, start every
-   * dispatcher, and announce capabilities (no provider yet).
-   */
+  /** Open the iAP2/RFCOMM adapter, start every dispatcher, and announce capabilities. */
   start(): Promise<void>;
 
   /** Tear down the gateway, dispatchers, and active glue (if any). */
@@ -366,25 +323,20 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   availableProviders(): Promise<BridgethingProviderInfo[]>;
 
   /**
-   * Detach the current glue and attach the one identified by `id`. Pass
-   * `null` to detach without replacing. Throws if `id` is unknown or the
-   * glue's `attach` (auth + dealer connect) failed.
+   * Detach the current glue and attach the one identified by `id`. Pass `null` to detach only.
+   * Throws if `id` is unknown or the glue's `attach` failed.
    */
   setActiveProvider(id: string | null): Promise<void>;
 
   /** The currently-attached glue's info, or null if none. */
   currentProvider(): Promise<BridgethingProviderInfo | null>;
 
-  /**
-   * Abort an in-flight auth attempt. No-op if no auth is pending. Used
-   * when the user backs out of the device-code pairing screen.
-   */
+  /** Abort an in-flight auth attempt. No-op if no auth is pending. */
   cancelAuth(): Promise<void>;
 
   /**
-   * Clear persisted auth state for the active provider (Keychain on iOS,
-   * EncryptedSharedPreferences on Android), detach the glue, and emit
-   * `authStateChanged({ kind: "idle" })`. Used by Settings → Sign out.
+   * Clear persisted auth state (Keychain on iOS, EncryptedSharedPreferences on Android),
+   * detach the glue, and emit `authStateChanged({ kind: "idle" })`. Used by Settings -> Sign out.
    */
   signOut(): Promise<void>;
 
@@ -395,160 +347,106 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   currentNowPlaying(): Promise<BridgethingNowPlaying | null>;
 
   /**
-   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond
-   * the daemon needs before ANCS will be exposed. Returns once the
-   * picker-side flow resolves; the actual ANCS authorization state may
-   * land asynchronously over the daemon's wire surface — observe
-   * `setOnAncsAuthStatusChanged` for the final word. iOS 18+ only;
-   * earlier iOS versions resolve as `kind: "unsupported"`. Android
-   * resolves as `unsupported` immediately.
+   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond ANCS requires.
+   * Returns once the picker resolves; ANCS auth state may transition asynchronously -
+   * observe `setOnAncsAuthStatusChanged`. iOS 18+ only; earlier iOS and Android resolve
+   * as `kind: "unsupported"`.
    */
   enableAncsNotifications(): Promise<BridgethingAncsSetupResult>;
 
   /** Latest daemon-reported ANCS auth state. `unknown` until the daemon emits one. */
   ancsAuthStatus(): Promise<BridgethingAncsAuthStatus>;
 
-  // MARK: - Webapps (per-device)
-
-  /** Installed bundles on `deviceId`. Filters out `launcher` role
-   *  bundles by default; the dashboard renders the rest. */
+  /** Installed bundles on `deviceId`, excluding `launcher` role bundles. */
   listWebapps(deviceId: string): Promise<BridgethingWebappInfo[]>;
 
   /** The currently-active bundle on `deviceId`, or null. */
   currentWebapp(deviceId: string): Promise<BridgethingActiveWebapp | null>;
 
   /**
-   * Install a `.zip` bundle the JS side has already downloaded. Pass
-   * the archive as a base64-encoded string (no `data:` prefix); the
-   * daemon validates `manifest.json` and rejects if invalid. To install
-   * on multiple devices, call this method per deviceId.
+   * Install a `.zip` bundle already downloaded by JS. Pass the archive as base64 (no `data:` prefix);
+   * the daemon validates `manifest.json` and rejects if invalid. Call per deviceId for multi-device.
    *
-   * Why base64 and not `ArrayBuffer`: Nitro 0.35.5's Swift-side
-   * `ArrayBuffer` typealias breaks Swift→C++ header interop on iOS
-   * for Swift HybridObjects. Webapp bundles are small (KBs–MBs) so
-   * the 33% base64 inflation is acceptable.
+   * Base64 rather than `ArrayBuffer` because the Swift `ArrayBuffer` typealias breaks
+   * Swift-to-C++ header interop on iOS; 33% inflation is acceptable for webapp bundle sizes.
    */
   installWebappFromBase64(deviceId: string, archiveBase64: string): Promise<BridgethingWebappInfo>;
 
-  /** Uninstall the bundle from `deviceId`. Builtin bundles cannot
-   *  be uninstalled. */
+  /** Uninstall the bundle from `deviceId`. Builtin bundles cannot be uninstalled. */
   uninstallWebapp(deviceId: string, id: string): Promise<void>;
 
-  /** Set the active bundle on `deviceId`. Triggers a kiosk reload
-   *  daemon-side. */
+  /** Set the active bundle on `deviceId`. Triggers a daemon-side kiosk reload. */
   switchWebapp(deviceId: string, id: string): Promise<void>;
 
   /**
-   * Fetch the bundle's icon from `deviceId` and write it to a temp
-   * file. Returns a `file://` URI suitable for RN's `Image` component.
-   * Returns `null` if the manifest doesn't declare an icon. The native
-   * side rewrites the same temp file on each call so the URI stays
-   * stable per `(deviceId, id)`.
+   * Fetch the bundle's icon from `deviceId` and write it to a temp file. Returns a `file://` URI
+   * for RN's `Image`, or `null` if the manifest declares no icon. The same temp file is reused
+   * per `(deviceId, id)` so the URI stays stable.
    */
   webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null>;
 
-  /** All stored config entries for a webapp on `deviceId`
-   *  (default-seeded at install). */
+  /** All stored config entries for a webapp on `deviceId`, default-seeded at install. */
   listWebappConfig(deviceId: string, id: string): Promise<BridgethingConfigEntry[]>;
 
   /**
-   * Write one config field on `deviceId`. `value` is the storage-format
-   * string the KV layer holds; the editor encodes per the field's
-   * `kind` (number => decimal, boolean => "true"/"false",
-   * string/enum/secret => as-is). Daemon validates against the
-   * manifest schema.
+   * Write one config field on `deviceId`. `value` is the storage-format string;
+   * encode per the field's `kind` (number => decimal, boolean => "true"/"false",
+   * string/enum/secret => as-is). Daemon validates against the manifest schema.
    */
   setWebappConfigField(deviceId: string, id: string, key: string, value: string): Promise<void>;
 
   /**
-   * Reset one config field on `deviceId` to the manifest default
-   * (or delete if no default declared). Daemon emits a `Changed`
-   * broadcast to the active webapp if it's the one being edited.
+   * Reset one config field to its manifest default (or delete if no default declared).
+   * Daemon broadcasts `Changed` to the active webapp on `deviceId`.
    */
   deleteWebappConfigField(deviceId: string, id: string, key: string): Promise<void>;
 
-  // MARK: - Capability flags
-
-  /** Apply capability flags and re-announce capabilities to the daemon.
-   *  JS owns the persisted copy in mmkv and calls this on bootstrap +
-   *  every change. */
+  /** Apply capability flags and re-announce to the daemon. JS owns the mmkv copy and calls this on bootstrap and change. */
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
-  // MARK: - OTA
-
   /**
-   * Set or replace the manifest poll configuration. Pass `null` to
-   * disable polling (manual `pollOtaNow()` and inbound range serving
-   * still work). JS owns the persisted copy in mmkv and re-applies on
-   * bootstrap.
+   * Set or replace the manifest poll configuration. Pass `null` to disable polling.
+   * JS owns the mmkv copy and re-applies on bootstrap.
    */
   setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void>;
 
-  /** Run one poll iteration immediately, regardless of where the
-   *  interval timer is. Useful when the user taps "Check for updates". */
+  /** Run one poll iteration immediately, regardless of the interval timer. */
   pollOtaNow(): Promise<void>;
 
-  /** Latest BridgeThingMeta the daemon announced for `deviceId`, or
-   *  null if none has been seen yet. Live updates arrive via
-   *  `setOnDeviceMetaChanged`. */
+  /** Latest `BridgeThingMeta` the daemon announced for `deviceId`, or null if not yet seen. */
   deviceMeta(deviceId: string): Promise<BridgethingDeviceMeta | null>;
 
-  /** Companion-side identity snapshot. Used by Settings → About to
-   *  render the real version instead of a hardcoded string. */
+  /** Companion-side identity snapshot. Used by Settings -> About. */
   hostInfo(): Promise<BridgethingHostInfo>;
 
   /**
-   * Cross-platform pair flow. The OS handles scan + picker + bond in
-   * a single system surface - no in-app perms, no manual list.
-   *
-   * - iOS: AccessorySetupKit picker (iOS 18+); rejects on earlier iOS.
-   * - Android: CompanionDeviceManager picker (API 26+).
-   *
-   * Returns the chosen accessory, or `null` when the user cancels.
+   * OS-mediated pair flow: AccessorySetupKit (iOS 18+) or CompanionDeviceManager (Android API 26+).
+   * Returns the chosen accessory, or `null` on cancel.
    */
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
 
-  // MARK: - Notification access (android only)
-
-  /** True when the app has been toggled on in Android's "Device & app
-   *  notifications" settings (the only way to grant access to a
-   *  NotificationListenerService). iOS treats notifications differently
-   *  (ANCS) and always reports false here. */
+  /** True when the app is toggled on in Android's "Device & app notifications" settings.
+   *  iOS uses ANCS instead and always returns false here. */
   isNotificationAccessGranted(): Promise<boolean>;
 
-  /** Open the system "Notification access" settings page so the user
-   *  can grant access manually - Android offers no programmatic prompt.
-   *  iOS rejects with `unsupported`. */
+  /** Open Android's "Notification access" settings page. iOS rejects with `unsupported`. */
   requestNotificationAccess(): Promise<void>;
 
   /**
-   * Drop a list of runtime permissions this app currently holds. On
-   * Android 13+ (API 33+) this uses `Context.revokeSelfPermissionsOnKill`,
-   * which queues the revoke for the next process kill - the user
-   * doesn't see a settings bounce. Returns `true` when the queued
-   * revoke was scheduled, `false` when the platform offers no
-   * programmatic path (Android <=12, iOS); callers fall back to
-   * opening app settings.
+   * Drop runtime permissions. Android 13+ (API 33+) uses `Context.revokeSelfPermissionsOnKill`
+   * to queue the revoke for the next process kill; returns `true`. Android <=12 and iOS return
+   * `false`; callers fall back to opening app settings.
    *
-   * Pass android.permission.* constants (e.g.
-   * `["android.permission.ACCESS_BACKGROUND_LOCATION",
-   *   "android.permission.ACCESS_FINE_LOCATION"]`).
-   *
-   * Revoking only the background variant leaves the foreground grant in
-   * place and the OS just downgrades to "while using"; pass every
-   * related permission together when the caller wants a full revoke.
+   * Pass `android.permission.*` constants. Revoking only the background variant downgrades to
+   * "while using" - pass all related permissions together for a full revoke.
    */
   revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
 
   /**
-   * Force-kill our own process so a queued
-   * `revokeSelfPermissionsOnKill` actually takes effect. The OS routes
-   * users back to the launcher; they reopen bridgething and the perm
-   * is gone. Android-only; iOS rejects.
+   * Force-kill our own process to apply a queued `revokeSelfPermissionsOnKill`.
+   * Android-only; iOS rejects.
    */
   killApp(): Promise<void>;
-
-  // MARK: - Callbacks
 
   setOnProviderChanged(callback: (info: BridgethingProviderInfo | null) => void): void;
   setOnAuthStateChanged(callback: (state: BridgethingAuthState) => void): void;
@@ -557,21 +455,15 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
-  /** Toggle the underlying log stream. Off by default; turn on only
-   *  while a UI is actively rendering log lines. Logs are high volume
-   *  and every line crosses JSI, so unconditional streaming pulls real
-   *  cost on a 512MB device. The JS session refcounts subscribers and
-   *  flips this automatically. */
+  /** Toggle the underlying log stream. Off by default; enable only while a UI actively renders
+   *  log lines. Every line crosses JSI, so unconditional streaming has real cost on a 512MB device.
+   *  The JS session refcounts subscribers and flips this automatically. */
   setLogStreamingEnabled(enabled: boolean): void;
 
-  /** Fires after any local action that mutates a device's webapp
-   *  registry (install / uninstall / switch). The deviceId identifies
-   *  which device's list to refresh. Active-webapp changes from
-   *  elsewhere (the stock webapp, daemon-side fallback) are not
-   *  surfaced today. */
+  /** Fires after install/uninstall/switch on `deviceId`. Active-webapp changes from the
+   *  stock webapp or daemon fallback are not surfaced here. */
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
-  /** Live per-device meta updates. Fires when a Car Thing announces
-   *  its `BridgeThingMeta` (on connect, after OTA, on reannounce). */
+  /** Live per-device meta updates (on connect, after OTA, on reannounce). */
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   /** Stream of OtaPollEvent translated to RN shape. */
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;

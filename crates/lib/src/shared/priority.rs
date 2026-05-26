@@ -1,14 +1,12 @@
 //! Wire-level priority lane for outbound frames. Senders annotate
 //! their messages and gateway writers drain Normal preferentially,
 //! filling remaining wire space with Bulk on every batch. The hint is
-//! one byte at codec header offset 5; default-zero on existing
-//! traffic decodes as Normal so the byte is non-breaking against
-//! pre-priority senders.
+//! one byte at codec header offset 5; a zero byte decodes as Normal.
 //!
-//! Producers of large payloads (file transfer, OTA, future image
-//! streams) chunk at the application layer into many small typed
-//! messages tagged Bulk - normal-priority traffic interleaves between
-//! frames without any reassembly state on the receiver side.
+//! Producers of large payloads (file transfer, OTA) chunk at the
+//! application layer into many small typed messages tagged Bulk -
+//! normal-priority traffic interleaves between frames without any
+//! reassembly state on the receiver side.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

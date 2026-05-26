@@ -21,10 +21,6 @@
 //! - [`StopHID`] (`0x6803`) - tear down the virtual HID device. Sent on
 //!   session teardown.
 //!
-//! Cleanroom doc references: `protocol/30_control_session.md` (HID CSM
-//! catalogue) and `bridgething/20_hid_descriptors.md` (descriptor
-//! strategy).
-//!
 //! `0x6804` (DeviceHIDReport, iPhone -> accessory) exists for iOS-side
 //! virtual HID devices but is not consumed by bridgething today.
 
@@ -44,23 +40,18 @@ pub const RECEIVED_BY_ACCESSORY: &[u16] = &[
   HIDComponentUpdate::CSM_MSG_ID,
 ];
 
-/// Identifier the accessory uses to address its virtual HID device. The
-/// value is opaque to iOS beyond uniqueness within a single iAP2 session;
-/// it is intentionally reused as the BluetoothTransportComponent
-/// identifier in `IdentificationInformation` so the two components share
-/// one cid (this is how factory Car Things wire their identification up
-/// and the shape iOS expects).
+/// Identifier the accessory uses to address its virtual HID device,
+/// opaque to iOS beyond uniqueness within a session. Reused as the
+/// BluetoothTransportComponent identifier in `IdentificationInformation`
+/// so the two components share one cid.
 pub const TRANSPORT_COMPONENT_ID: u16 = 5353;
 
-/// USB VID emitted on `StartHID` param 1. iOS rejects HID enablement
-/// silently when these are absent - the param shape is not optional in
-/// practice. `0x1D6B` is the Linux Foundation USB VID, openly published
-/// for open-source projects to use without registration.
+/// USB VID emitted on `StartHID` param 1. iOS silently fails HID
+/// enablement when absent. `0x1D6B` is the Linux Foundation USB VID.
 pub const VENDOR_ID: u16 = 0x1D6B;
 
-/// USB PID emitted on `StartHID` param 2. Bridgething-unique value;
-/// pairs with `VENDOR_ID` above. Not registered with anyone - iOS only
-/// validates that param 2 is present and well-formed, not the value.
+/// USB PID emitted on `StartHID` param 2. iOS validates only that the
+/// param is present and well-formed, not the value.
 pub const PRODUCT_ID: u16 = 0xB31D;
 
 /// USB-HID 1.11 descriptor for bridgething's outbound transport device.
@@ -76,10 +67,6 @@ pub const PRODUCT_ID: u16 = 0xB31D;
 /// | 0x10 | Volume Decrement    | 0xEA |
 /// | 0x20 | Mute                | 0xE2 |
 /// | 0x40..0x80 | constant padding (no actuation) |
-///
-/// Wheel rotation, presets, and other physical inputs are NOT in this
-/// descriptor; they are captured by the on-device webapp and never sent
-/// to iOS.
 pub const TRANSPORT_DESCRIPTOR: &[u8] = &[
   0x05, 0x0C, // Usage Page (Consumer)
   0x09, 0x01, // Usage (Consumer Control)
@@ -101,9 +88,8 @@ pub const TRANSPORT_DESCRIPTOR: &[u8] = &[
   0xC0, // End Collection
 ];
 
-/// Bit positions inside the single-byte HID report payload. The whole byte
-/// is the bitmap of currently-held buttons; multiple bits set in one report
-/// is legal and means simultaneous holds.
+/// Bit positions inside the single-byte HID report payload, a bitmap of
+/// currently-held buttons. Multiple bits set in one report is legal.
 pub mod report_bit {
   pub const PLAY_PAUSE: u8 = 0x01;
   pub const NEXT: u8 = 0x02;
@@ -111,23 +97,18 @@ pub mod report_bit {
   pub const VOLUME_UP: u8 = 0x08;
   pub const VOLUME_DOWN: u8 = 0x10;
   pub const MUTE: u8 = 0x20;
-  /// Bits 0x40 / 0x80 fall inside the descriptor's 2-bit constant padding
-  /// field. They will not actuate on iOS regardless of mask value; the
-  /// constants exist so the transport controller's bit-mask plumbing
-  /// stays compilable while shuffle / repeat live on other surfaces.
+  /// Bits 0x40 / 0x80 fall inside the descriptor's 2-bit constant
+  /// padding field and never actuate on iOS regardless of mask value.
   pub const SHUFFLE: u8 = 0x40;
   pub const REPEAT: u8 = 0x80;
 }
 
-/// `0x6800` accessory -> iPhone. Declares a virtual HID device with the
-/// given descriptor. iOS parses the descriptor and registers the device;
-/// subsequent [`AccessoryHIDReport`]s on the same `component_id` are
-/// dispatched to it.
+/// `0x6800` accessory -> iPhone. Declares a virtual HID device; later
+/// [`AccessoryHIDReport`]s on the same `component_id` dispatch to it.
 ///
-/// Param layout matches what iOS validates in practice: cid at 0, USB
-/// VID/PID at 1/2, and the descriptor at 4. iOS silently fails to enable
-/// the HID component when VID/PID are missing or when the descriptor
-/// lands at a different param id.
+/// Param layout: cid at 0, USB VID/PID at 1/2, descriptor at 4. iOS
+/// silently fails to enable the component when VID/PID are missing or
+/// the descriptor lands at a different param id.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x6800)]
 pub struct StartHID {
@@ -154,9 +135,8 @@ pub struct AccessoryHIDReport {
   pub report: Bytes,
 }
 
-/// `0x6803` accessory -> iPhone. Tears down the virtual HID device matching
-/// `component_id`. iOS will stop dispatching reports on that id; sending
-/// further [`AccessoryHIDReport`]s on it after a stop is a protocol error.
+/// `0x6803` accessory -> iPhone. Tears down the virtual HID device
+/// matching `component_id`; further reports on that id are a protocol error.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x6803)]
 pub struct StopHID {
@@ -164,9 +144,8 @@ pub struct StopHID {
   pub component_id: u16,
 }
 
-/// `0x6801` iPhone -> accessory. Inbound HID report dispatched to a HID
-/// component the accessory has declared. Same shape as outbound. Stock
-/// Car Thing logs and drops these; bridgething follows suit.
+/// `0x6801` iPhone -> accessory. Inbound HID report for a declared
+/// component, same shape as outbound. Logged and dropped.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x6801)]
 pub struct DeviceHIDReport {
@@ -182,9 +161,8 @@ pub struct DeviceHIDReport {
 #[csm(id = 0x6806)]
 pub struct StartNativeHID;
 
-/// `0x6807` iPhone -> accessory. The "device is ready to consume reports
-/// for this component" gate. Indicates whether the iPhone is willing to
-/// route HID reports through the named component.
+/// `0x6807` iPhone -> accessory. Gate signalling whether the iPhone
+/// will route HID reports through the named component.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x6807)]
 pub struct HIDComponentUpdate {
@@ -195,10 +173,9 @@ pub struct HIDComponentUpdate {
 }
 
 /// Build an [`AccessoryHIDReport`] for the bridgething transport
-/// component. The single-byte payload is `[mask]` where `mask` is any
-/// combination of [`report_bit`] flags (the all-zero mask is a release
-/// frame, used to follow press frames). No leading Report ID byte -
-/// the descriptor declares one report with no Report ID item.
+/// component. Payload is the single byte `[mask]`, any combination of
+/// [`report_bit`] flags; the all-zero mask is a release frame. No
+/// leading Report ID byte (the descriptor declares none).
 pub fn transport_report(mask: u8) -> AccessoryHIDReport {
   AccessoryHIDReport {
     component_id: TRANSPORT_COMPONENT_ID,

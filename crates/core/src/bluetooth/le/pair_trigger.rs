@@ -1,20 +1,18 @@
 //! Tiny LE GATT server hosting one read-only characteristic flagged
 //! `encrypt-read`. The service UUID is placed in the LE advertisement's
-//! `ServiceUUIDs` list (`advertise.rs`) so the iOS companion app's
-//! `AccessorySetupKit` discovery descriptor and CoreBluetooth's
-//! `scanForPeripherals(withServices:)` filter can find us — both match
+//! `ServiceUUIDs` list so the iOS companion app's `AccessorySetupKit`
+//! discovery descriptor and CoreBluetooth's
+//! `scanForPeripherals(withServices:)` filter can find us; both match
 //! advertised service UUIDs, not the LE Service-Solicitation AD type.
 //!
 //! `AccessorySetupKit` pairs LE inside the picker process itself, so
 //! the encrypt-read trick is not the SMP trigger on iOS 18+. The
 //! characteristic survives as a defensive fallback: any unbonded peer
 //! that reads it bounces with InsufficientAuthentication, forcing iOS
-//! to drive SMP. Empty value by design — the side effect of being
+//! to drive SMP. Empty value by design: the side effect of being
 //! unreadable until the link is encrypted is the only thing we want.
 //!
 //! Public so the companion-app SDKs can import the same constant.
-//! Once a stable wire-surface needs it, the constant moves to
-//! `libbridgething`.
 
 use bluer::{
   Adapter, Uuid,

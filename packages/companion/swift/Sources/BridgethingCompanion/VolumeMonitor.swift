@@ -15,8 +15,7 @@
 
         public func start(_ callback: @escaping Callback) async {
             stopObservation()
-            // KVO callback fires on whatever thread the framework posts on;
-            // the closure is Sendable so the caller can hop wherever it wants.
+            // KVO callback fires on an arbitrary framework thread; the closure is Sendable.
             observation = session.observe(\.outputVolume, options: [.initial, .new]) { session, _ in
                 let v = session.outputVolume
                 callback(v, v == 0)

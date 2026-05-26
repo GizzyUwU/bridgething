@@ -34,9 +34,8 @@ import kotlinx.serialization.json.longOrNull
  *    `MsgPackNullableDynamicSerializer`, which peeks msgpack tokens and
  *    dispatches per type.
  *
- * Apply via `@Contextual` at use sites so the runtime serializer lookup picks
- * this up instead of the default `JsonElementSerializer`. The schema's Justfile
- * post-process adds `@Contextual` on the `Forward.Json.data` field.
+ * Applied via `@Contextual` at use sites so the runtime serializer lookup picks
+ * this up instead of the default `JsonElementSerializer`.
  */
 public object UniversalValueSerializer : KSerializer<JsonElement> {
     @OptIn(InternalSerializationApi::class)

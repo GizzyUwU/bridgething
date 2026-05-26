@@ -87,8 +87,7 @@ final class GoldenTests: XCTestCase {
       XCTFail("expected .forward(.json), got \(msg.data)"); return
     }
 
-    // Rust's serde_json::to_value emitted:
-    // {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
+    // fixture json: {"kind":"playback-changed","payload":{"playing":true,"positionMs":12345}}
     guard case let .object(dict) = value else { XCTFail("expected object, got \(value)"); return }
     XCTAssertEqual(dict["kind"], .string("playback-changed"))
     guard case let .object(payload) = try XCTUnwrap(dict["payload"]) else {
@@ -136,9 +135,7 @@ final class GoldenTests: XCTestCase {
   // MARK: - fixture loading
 
   private func loadGoldens() throws -> GoldenFile {
-    // #filePath: …/packages/gateway/swift/Tests/BridgethingGatewayTests/GoldenTests.swift
-    // Up six levels lands at the repo root; the fixture file lives under
-    // crates/lib/fixtures/.
+    // Up six levels from this file lands at the repo root.
     let url = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent() // BridgethingGatewayTests
       .deletingLastPathComponent() // Tests

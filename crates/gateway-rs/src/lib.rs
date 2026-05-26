@@ -199,7 +199,6 @@ mod tests {
     let (client_io, daemon_io) = tokio::io::duplex(256 * 1024);
     tokio::spawn(async move {
       let mut framed = Framed::new(daemon_io, BridgeEndec::default());
-      // wait for the gateway's first outbound frame, then push an event back.
       let _ = framed.next().await;
       framed
         .send(BridgeToGatewayMsg {
@@ -238,7 +237,7 @@ mod tests {
     let (resp_tx, mut resp_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
       let mut framed = Framed::new(daemon_io, BridgeEndec::default());
-      let _ = framed.next().await; // gateway's announce - subscription is live by now
+      let _ = framed.next().await;
       let request = BridgeToGatewayMsg {
         id: req_id,
         meta: MsgMeta::Request,

@@ -9,7 +9,7 @@
 //! lands in one frame. Bulk priority on both legs keeps it from
 //! starving normal-lane traffic. **WebSocket** carries a `connection_id`
 //! the webapp's SDK assigns up front so reverse-direction event
-//! routing (server → webapp) is set up before the companion's ack
+//! routing (server -> webapp) is set up before the companion's ack
 //! arrives. **Stream** is a unidirectional command + event flow for
 //! cases where the webapp wants bytes incrementally as they arrive
 //! (video, large media, server-sent events).

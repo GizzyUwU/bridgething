@@ -44,7 +44,7 @@ final class GatewayTests: XCTestCase {
     adapter.simulate(.bytes(deviceId: testDevice.id, frame))
 
     var iter = gateway.events.makeAsyncIterator()
-    _ = await iter.next() // consume the .connected we already asserted in the prior test
+    _ = await iter.next() // .connected
     guard case .message(let id, let msg) = await iter.next() else {
       XCTFail("expected .message"); return
     }

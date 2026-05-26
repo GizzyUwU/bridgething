@@ -35,12 +35,10 @@
 //!
 //! The daemon-side handler implements the trait and the call site
 //! collapses to `msg.dispatch(&handler).await`. Variant-name to
-//! method-name conversion is PascalCase → snake_case.
+//! method-name conversion is PascalCase -> snake_case.
 //!
-//! Unsupported (today): multi-field tuple variants and struct-shaped
-//! (`Foo { a, b }`) variants. Lib enums consistently use unit or
-//! single-tuple variants for wire payloads; if a new variant doesn't
-//! fit, the macro errors at compile time.
+//! Multi-field tuple variants and struct-shaped (`Foo { a, b }`) variants
+//! are not supported; the macro errors at compile time.
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};

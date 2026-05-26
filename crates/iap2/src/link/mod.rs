@@ -35,8 +35,7 @@ pub struct LinkConfig {
   /// First sequence number we'll stamp on outbound packets. SYN consumes
   /// this PSN; the first DATA send increments and uses `initial_psn + 1`.
   pub initial_psn: u8,
-  /// What we propose in our SYN. The peer's proposal replaces this on
-  /// receipt; see cleanroom doc `protocol/20_link_layer.md`.
+  /// What we propose in our SYN. The peer's proposal replaces this on receipt.
   pub our_lsp: Lsp,
   /// How often to retransmit the detect marker until the peer responds.
   pub detect_interval: Duration,
@@ -62,8 +61,7 @@ pub enum Iap2Event {
   /// Link is going down for the reason given.
   LinkDown(String),
   /// One DATA chunk for `session_id` was delivered in-sequence. Sessions
-  /// reassemble across chunks using their own framing (CSMs are
-  /// length-prefixed; EA streams use stream-id headers).
+  /// reassemble across chunks using their own framing.
   DataReceived { session_id: u8, payload: Bytes },
 }
 
@@ -72,8 +70,7 @@ pub enum Iap2Command {
   /// Send a tear-down RST and exit cleanly.
   Disconnect,
   /// Enqueue `payload` for transmission on `session_id`. Payloads larger
-  /// than the negotiated `max_len` are chunked across multiple link
-  /// packets.
+  /// than the negotiated `max_len` are chunked across multiple link packets.
   Send { session_id: u8, payload: Bytes },
 }
 
@@ -115,9 +112,8 @@ impl Link {
     .await
   }
 
-  /// Device-half (iPhone-side) role for the emulator. Mirror of [`run`]:
-  /// the accessory initiates the SYN, so here we wait for it and reply
-  /// SYN|ACK. Detect and established phases are role-agnostic and shared.
+  /// Device-half (iPhone-side) role for the emulator. The accessory
+  /// initiates the SYN, so here we wait for it and reply SYN|ACK.
   #[cfg(feature = "emulator")]
   pub async fn run_device<S>(
     stream: S,
@@ -237,16 +233,12 @@ impl Link {
     }
   }
 
-  /// Device-role detect + negotiate, combined. The accessory needs to
-  /// drain at least one of our detect markers before it sends its SYN,
-  /// so unlike the accessory's `detect_phase` (which stops on the first
-  /// peer marker) we keep emitting detect markers on the interval until
-  /// the SYN actually arrives - otherwise whichever side stops first
-  /// can strand the other in Detecting. The codec skips the accessory's
-  /// detect markers (bad-magic resync) and surfaces only the SYN. We
-  /// reply SYN|ACK (seq = our PSN, ack = the accessory's PSN); the
-  /// accessory's trailing standalone ACK lands harmlessly in the
-  /// established phase. Returns the peer LSP + the accessory's PSN.
+  /// Device-role detect + negotiate, combined. Keeps emitting detect
+  /// markers on the interval until the SYN arrives (the accessory must
+  /// drain at least one of ours first). The codec skips the accessory's
+  /// detect markers via bad-magic resync and surfaces only the SYN. We
+  /// reply SYN|ACK (seq = our PSN, ack = the accessory's PSN). Returns
+  /// the peer LSP and the accessory's PSN.
   #[cfg(feature = "emulator")]
   async fn detect_and_negotiate_device<R, W>(
     reader: &mut R,

@@ -11,9 +11,7 @@ const TINT = {
 type Tint = keyof typeof TINT;
 
 /**
- * Decorative icon container — used at the top of detail screens, in
- * onboarding step cards, and other places where a row tile would be
- * too compact.
+ * Decorative icon container for detail screens and onboarding step cards.
  */
 export function IconBadge({
   icon: Icon,

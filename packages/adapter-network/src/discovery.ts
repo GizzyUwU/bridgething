@@ -1,20 +1,15 @@
 /**
- * A discoverer surfaces bridgething daemons reachable over the network
- * gateway WebSocket. The adapter consumes whatever the discoverer emits
- * and opens / closes connections per `Endpoint` lifecycle.
+ * A discoverer surfaces bridgething daemons reachable over the network gateway WebSocket.
+ * The adapter opens/closes connections as `Endpoint` lifecycle events arrive.
  *
- * Two bundled impls:
- *   - `StaticDiscoverer` — one fixed URL, works everywhere (browser too).
- *   - `MDNSDiscoverer` — browse `_bridgething._tcp` over multicast (Node /
- *     Bun only, optional `bonjour-service` peer dep).
+ * Two bundled implementations:
+ *   - `StaticDiscoverer`: one fixed URL, works everywhere including browsers.
+ *   - `MDNSDiscoverer`: browses `_bridgething._tcp` (Node/Bun only; optional `bonjour-service` peer dep).
  *
- * Callers can plug their own (e.g. a discoverer that polls a config file,
- * or one that resolves a list of known hostnames over plain DNS).
+ * Callers can supply their own (e.g. polling a config file, resolving hostnames over DNS).
  */
 
-/** A daemon reachable at `url`. `id` is stable for the lifetime of the
- *  endpoint and used as the adapter's `deviceId`. Re-announcing the same
- *  endpoint with the same id is a no-op. */
+/** A daemon reachable at `url`. `id` is stable for the endpoint's lifetime and used as the adapter's `deviceId`. */
 export type Endpoint = {
   id: string;
   url: string;
@@ -30,11 +25,8 @@ export interface Discoverer {
 }
 
 /**
- * Single fixed endpoint. The common case: a developer plugged a Car Thing
- * in over USB-CDC-ECM and wants to hit `bridgething.local:8892`. Works in
- * the browser (no native deps) and on any modern host whose resolver
- * understands `.local` (most do via systemd-resolved / mDNSResponder /
- * Windows DNS Client).
+ * Single fixed endpoint. The common case: USB-CDC-ECM tether with `bridgething.local:8892`.
+ * Works in the browser and on any host whose resolver understands `.local`.
  */
 export class StaticDiscoverer implements Discoverer {
   private readonly endpoint: Endpoint;

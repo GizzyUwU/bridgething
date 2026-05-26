@@ -17,8 +17,7 @@ const KEY = {
   otaPollConfig: 'ota.pollConfig', // JSON of OtaPollConfig | null marker
 } as const;
 
-/** Default capability-flag profile applied on first launch and used as
- *  the starting point for every settings toggle. Off by default — opt-in. */
+/** Default capability-flag profile. All off by default; opt-in per flag. */
 export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
   geo: false,
   notifications: false,
@@ -34,8 +33,6 @@ export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
   autoPush: true,
 };
 
-// First-run gate
-
 export function getSetupCompleted(): boolean {
   return storage.getBoolean(KEY.setupCompleted) ?? false;
 }
@@ -43,8 +40,6 @@ export function getSetupCompleted(): boolean {
 export function setSetupCompleted(value: boolean): void {
   storage.set(KEY.setupCompleted, value);
 }
-
-// Device nicknames
 
 type NicknameMap = Record<string, string>;
 
@@ -80,8 +75,6 @@ export function getAllNicknames(): NicknameMap {
   return readNicknameMap();
 }
 
-// Capability flags
-
 export function getCapabilityFlags(): BridgethingCapabilityFlags {
   const raw = storage.getString(KEY.capabilityFlags);
   if (!raw) return { ...DEFAULT_CAPABILITY_FLAGS };
@@ -97,8 +90,7 @@ export function setCapabilityFlags(flags: BridgethingCapabilityFlags): void {
   storage.set(KEY.capabilityFlags, JSON.stringify(flags));
 }
 
-// OTA poll config — null is a meaningful "user disabled polling" state.
-
+// null is a meaningful "user disabled polling" state.
 export function getOtaPollConfig(): BridgethingOtaPollConfig | null {
   const raw = storage.getString(KEY.otaPollConfig);
   if (raw == null) return null;

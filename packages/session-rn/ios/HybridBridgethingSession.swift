@@ -1,14 +1,9 @@
 import Foundation
 import NitroModules
 
-/// Backend protocol the host app implements. Decouples the Nitro
-/// HybridObject (lives in this pod, can't see SwiftPM packages) from
-/// the orchestration logic (lives in the host app target, where the
-/// bridgething Swift packages are linked via SPM).
-///
-/// The host app implements `BridgethingSessionBackend` and registers
-/// it with `HybridBridgethingSession.installBackend(_:)` at app launch
-/// (before any JS code runs).
+/// Backend protocol implemented by the host app. Decouples the Nitro HybridObject from
+/// orchestration logic that depends on SwiftPM packages unavailable in the pod target.
+/// Install before JS starts via `HybridBridgethingSession.installBackend(_:)`.
 public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func start() async throws
     func stop() async
@@ -24,7 +19,6 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
     func ancsAuthStatus() async -> BridgethingAncsAuthStatus
 
-    // Webapps (per-device)
     func listWebapps(deviceId: String) async throws -> [BridgethingWebappInfo]
     func currentWebapp(deviceId: String) async throws -> BridgethingActiveWebapp?
     func installWebappFromBase64(deviceId: String, archiveBase64: String) async throws -> BridgethingWebappInfo
@@ -35,25 +29,19 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setWebappConfigField(deviceId: String, id: String, key: String, value: String) async throws
     func deleteWebappConfigField(deviceId: String, id: String, key: String) async throws
 
-    // Capability flags
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
-    // OTA
     func setOtaPollConfig(config: BridgethingOtaPollConfig?) async
     func pollOtaNow() async
     func deviceMeta(deviceId: String) async -> BridgethingDeviceMeta?
 
-    // Host identity
     func hostInfo() async -> BridgethingHostInfo
 
-    // OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
     func presentPairPicker() async throws -> BridgethingBtDevice?
 
-    // Notification access (android-only in spec; iOS impls reject as unsupported)
     func isNotificationAccessGranted() async -> Bool
     func requestNotificationAccess() async throws
 
-    // Runtime perm revoke (android-only; iOS returns false / no-op)
     func revokeRuntimePermissions(permissions: [String]) async -> Bool
     func killApp() async
 
@@ -71,10 +59,8 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
 }
 
-/// Thin Nitro proxy. The pod ships this; the host app installs a
-/// `BridgethingSessionBackend` at launch. Without a backend installed,
-/// every method throws "backend not installed". Callback setters are
-/// silently buffered until a backend is installed, then re-applied.
+/// Thin Nitro proxy. Without a backend installed every method throws.
+/// Callback setters are buffered and replayed when the backend is installed.
 public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unchecked Sendable {
     private static let stateLock = NSLock()
     private static var _backend: (any BridgethingSessionBackend)?
@@ -90,10 +76,8 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
 
-    /// Host apps call this once at launch (before React Native starts)
-    /// to wire up the real session backend that uses the bridgething
-    /// Swift packages. Replays any callback setters JS may have already
-    /// installed.
+    /// Install the real session backend. Call before React Native starts.
+    /// Replays any callback setters already registered.
     public static func installBackend(_ backend: any BridgethingSessionBackend) {
         stateLock.lock()
         _backend = backend
@@ -416,8 +400,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     }
 
     public func setLogStreamingEnabled(enabled: Bool) throws {
-        // Pre-backend toggles are dropped; whoever installs the backend
-        // is responsible for the initial stream state.
+        // pre-backend toggles are dropped; the backend installer sets initial state
         Self.stateLock.lock()
         let backend = Self._backend
         Self.stateLock.unlock()

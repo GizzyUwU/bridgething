@@ -101,15 +101,12 @@ struct RequestAttr {
   request_variant: Ident,
   response: Type,
   response_variant: Ident,
-  /// Set when the response variant on the wire is `Variant(Box<T>)`
-  /// but the user wants `Self::Response = T`. The `extract` arm
-  /// auto-derefs the Box, `encode_response` auto-boxes, and the
-  /// cross-direction marker assertion checks `PhantomData<Box<T>>`.
+  /// Wire variant is `Variant(Box<T>)` but `Self::Response = T`. `extract` auto-derefs,
+  /// `encode_response` auto-boxes, and the cross-direction assertion checks `PhantomData<Box<T>>`.
   boxed_response: bool,
   error: Option<Type>,
   error_variant: Option<Ident>,
-  /// Same shape as `boxed_response` for the optional domain-error
-  /// variant.
+  /// Same as `boxed_response` for the domain-error variant.
   boxed_error: bool,
 }
 
@@ -201,9 +198,7 @@ fn lib_crate_path() -> TokenStream2 {
   }
 }
 
-/// Returns true if the request payload type is a unit struct (no
-/// fields). Unit structs map to unit-shaped request variants; anything
-/// else maps to tuple variants that carry the whole `Self`.
+/// Returns true if the request payload is a unit struct (no fields).
 fn is_unit_struct(ast: &DeriveInput) -> syn::Result<bool> {
   match &ast.data {
     Data::Struct(s) => match &s.fields {
@@ -229,8 +224,6 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
   let response_wire = response_dir.outer_wire(&lib);
   let response_inner = response_dir.inner_for(&lib, &attr.surface);
 
-  // Inner enum's ident lives at the same module path as `response_inner`;
-  // we derive its plain ident for the response-marker module name.
   let response_inner_ident = match response_dir {
     Direction::BridgeToGateway => format_ident!("BridgeToGateway{}Msg", attr.surface),
     Direction::GatewayToBridge => format_ident!("GatewayToBridge{}Msg", attr.surface),
@@ -247,9 +240,6 @@ pub(crate) fn expand(ast: &DeriveInput) -> syn::Result<TokenStream2> {
   let response_ty = &attr.response;
   let response_variant = &attr.response_variant;
 
-  // The outer wire data wraps the inner enum as
-  // `Self::<Surface>(inner)`; the `surface` ident is also the variant
-  // ident on the outer wire data.
   let surface_variant = &attr.surface;
 
   let from_impl = if unit_request {

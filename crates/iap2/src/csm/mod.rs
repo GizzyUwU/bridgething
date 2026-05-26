@@ -6,7 +6,6 @@
 //! a u16 message id) followed by zero or more parameter TLVs. Each
 //! parameter is its own length-prefixed block keyed by a u16 param id;
 //! repeated ids encode lists, empty payloads encode "presence" markers.
-//! See cleanroom doc `protocol/30_control_session.md`.
 //!
 //! [`CsmCodec`] implements `tokio_util::codec::{Decoder, Encoder}`. A
 //! session task drives a `BytesMut` from inbound link DATA chunks and
@@ -39,18 +38,16 @@ pub const CSM_START_MARKER: u16 = 0x4040;
 pub const CSM_OUTER_HEADER_LEN: usize = 6;
 pub const CSM_PARAM_HEADER_LEN: usize = 4;
 
-/// A decoded CSM: the message id plus its parameter TLVs in the order
-/// they appeared on the wire. Receivers index by [`CsmParam::id`];
-/// senders push in any order they like, the wire doesn't care.
+/// A decoded CSM: the message id plus its parameter TLVs in wire order.
+/// Receivers index by [`CsmParam::id`]; sender ordering is free.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsmFrame {
   pub msg_id: u16,
   pub params: Vec<CsmParam>,
 }
 
-/// One parameter inside a CSM. Payload is the raw bytes between the
-/// 4-byte parameter header and the next parameter (or end of frame);
-/// per-type interpretation is the consumer's job.
+/// One parameter inside a CSM. Payload is the raw bytes after the
+/// 4-byte parameter header; per-type interpretation is the consumer's job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CsmParam {
   pub id: u16,
@@ -83,9 +80,7 @@ impl CsmFrame {
   }
 }
 
-/// Errors produced while decoding a CSM frame from raw bytes or while
-/// converting a `CsmFrame` into a typed struct via the macro-generated
-/// `TryFrom` impl.
+/// Errors from decoding a CSM frame or converting one into a typed struct.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum CsmDecodeError {
   #[error("CSM start marker mismatch: got {got:#06x}, expected {:#06x}", CSM_START_MARKER)]
@@ -128,11 +123,10 @@ impl From<CsmDecodeError> for std::io::Error {
   }
 }
 
-/// Streaming codec for a CSM byte stream. Symmetric with `LinkCodec`:
-/// `decode` returns `Ok(None)` until enough bytes are buffered for a
-/// complete frame; on a malformed frame it returns an `Err` rather
-/// than trying to resync (CSM lives above the link layer's noise
-/// filter, so a corrupted CSM is a protocol violation, not garbage).
+/// Streaming codec for a CSM byte stream. `decode` returns `Ok(None)`
+/// until a complete frame is buffered; a malformed frame returns `Err`
+/// rather than resyncing, since a corrupted CSM above the link layer is
+/// a protocol violation, not noise.
 pub struct CsmCodec;
 
 impl Decoder for CsmCodec {
@@ -194,11 +188,8 @@ fn encode_params_into(params: Vec<CsmParam>, dst: &mut BytesMut) {
   }
 }
 
-/// Encode a list of parameters as a "group" payload (the same TLV
-/// shape used for the outer CSM body, minus the 6-byte outer header).
-/// Used by `IdentificationInformation`'s group-typed params (EA
-/// protocols, BT transport components) and by `NowPlayingUpdate`'s
-/// nested MediaItem / Playback attribute groups.
+/// Encode a list of parameters as a group payload: the same TLV shape
+/// as the outer CSM body, minus the 6-byte outer header.
 pub fn encode_param_block(params: Vec<CsmParam>) -> Bytes {
   let body_len: usize = params.iter().map(|p| CSM_PARAM_HEADER_LEN + p.payload.len()).sum();
   let mut out = BytesMut::with_capacity(body_len);
@@ -206,10 +197,8 @@ pub fn encode_param_block(params: Vec<CsmParam>) -> Bytes {
   out.freeze()
 }
 
-/// Decode a group-typed param's payload (a sub-block of CSM-format
-/// params, no outer 6-byte header) back into a `Vec<CsmParam>`.
-/// Inverse of [`encode_param_block`]; used to walk nested groups like
-/// `NowPlayingUpdate`'s MediaItem / Playback attribute lists.
+/// Decode a group-typed param payload (CSM-format params, no outer
+/// 6-byte header) back into a `Vec<CsmParam>`. Inverse of [`encode_param_block`].
 pub fn decode_param_block(body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {
   decode_params(body)
 }
@@ -246,18 +235,15 @@ fn decode_params(mut body: Bytes) -> Result<Vec<CsmParam>, CsmDecodeError> {
   Ok(params)
 }
 
-/// Type-driven encode hook used by the `Csm` derive. Implementations
-/// push 0..N param TLVs onto `out` for the given param id; `Bytes`
-/// pushes one, `Option<T>` pushes 0 or 1, `Vec<T>` pushes 0..N, `()`
-/// pushes one with empty payload (presence marker).
+/// Type-driven encode hook for the `Csm` derive: push 0..N param TLVs
+/// for the given param id. `Bytes` pushes one, `Option<T>` 0 or 1,
+/// `Vec<T>` 0..N, `()` one with empty payload (presence marker).
 pub trait CsmParamFieldEncode: Sized {
   fn encode_field(self, param_id: u16, out: &mut Vec<CsmParam>);
 }
 
-/// Type-driven decode hook used by the `Csm` derive. Implementations
-/// remove 0..N matching params from `params` (by id) and assemble the
-/// field value. Errors propagate the failure reason back through the
-/// generated `TryFrom` impl.
+/// Type-driven decode hook for the `Csm` derive: remove 0..N params
+/// matching the param id and assemble the field value.
 pub trait CsmParamFieldDecode: Sized {
   fn decode_field(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Self, CsmDecodeError>;
 }
@@ -460,9 +446,7 @@ impl CsmParamFieldDecode for Option<bool> {
     let Some(payload) = take_optional(param_id, params)? else {
       return Ok(None);
     };
-    // Tolerant decode: presence-only TLVs (empty payload) are treated as
-    // `true`, matching the iAP2 wire convention. Single-byte payloads
-    // decode as the underlying byte != 0.
+    // empty payload (presence-only) decodes true.
     if payload.is_empty() {
       Ok(Some(true))
     } else if payload.len() == 1 {

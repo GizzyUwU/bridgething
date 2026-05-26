@@ -45,10 +45,8 @@ impl IdentificationFlow {
     self.state == IdentState::Accepted
   }
 
-  /// Process one identification-range CSM. Same return-shape contract
-  /// as [`AuthFlow::handle`]: `Some` means "terminal, emit + tear down."
-  ///
-  /// [`AuthFlow::handle`]: super::auth::AuthFlow::handle
+  /// Process one identification-range CSM. `Some` means "terminal,
+  /// emit + tear down."
   pub(super) async fn handle(
     &mut self,
     frame: CsmFrame,

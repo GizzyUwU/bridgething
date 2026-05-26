@@ -59,7 +59,7 @@ pub enum BridgeToClientSystemMsg {
   OtaError(OtaError),
   #[bridge_response]
   DeviceNickname(DeviceNicknameReply),
-  /// event broadcast when the nickname changes (set via gateway)
+  /// event broadcast when the nickname changes, including changes made from another surface
   #[bridge_event]
   DeviceNicknameChanged(DeviceNicknameReply),
 }

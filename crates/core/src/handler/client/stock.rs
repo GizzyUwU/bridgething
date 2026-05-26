@@ -51,7 +51,6 @@ impl LegacyStockHandler {
       ClientLegacyStockCommand::GetThumbnailImage { id } => self.get_thumbnail_image(id).await,
       ClientLegacyStockCommand::GetNextTracks => self.get_next_tracks().await,
 
-      // spotify things
       ClientLegacyStockCommand::SpotifyGetChildren {
         parent_id,
         limit,

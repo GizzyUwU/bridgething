@@ -20,8 +20,7 @@
 //! sub-id is its own empty-payload TLV inside the outer group, with
 //! the sub-id sitting in the TLV's `param_id` field. iAP2 reuses
 //! "presence of empty parameter" as its boolean / flag pattern across
-//! the protocol; this is the same pattern applied to a list. See
-//! cleanroom doc `protocol/60_now_playing_inner.md`.
+//! the protocol; this is the same pattern applied to a list.
 //!
 //! Inbound updates are deltas: any attribute that changed shows up in
 //! a fresh `NowPlayingUpdate`, and the daemon merges into stable
@@ -33,22 +32,20 @@ use bytes::Bytes;
 
 use super::{Csm, CsmDecodeError, CsmFrame, CsmParam, CsmParamFieldDecode, decode_param_block, encode_param_block};
 
-/// CSMs the accessory sends in this layer. iPhone silently drops any
-/// CSM not in this list; identification merges these into param 6 of
-/// `IdentificationInformation`.
+/// CSMs the accessory sends in this layer. Merged into param 6 of
+/// `IdentificationInformation`; the iPhone drops any CSM not listed.
 pub const SENT_BY_ACCESSORY: &[u16] = &[
   StartNowPlayingUpdates::CSM_MSG_ID,
   StopNowPlayingUpdates::CSM_MSG_ID,
   SetNowPlayingInformation::CSM_MSG_ID,
 ];
 
-/// CSMs the accessory accepts in this layer. Identification merges
-/// these into param 7 of `IdentificationInformation`.
+/// CSMs the accessory accepts in this layer. Merged into param 7 of
+/// `IdentificationInformation`.
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[NowPlayingUpdate::CSM_MSG_ID];
 
-/// MediaItem attribute sub-ids the accessory subscribes to. iPhone
-/// only sends these back. See cleanroom `protocol/60_now_playing_inner.md`
-/// for the canonical attribute table.
+/// MediaItem attribute sub-ids the accessory subscribes to; the iPhone
+/// only pushes these back.
 pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_PERSISTENT_ID,
   MEDIA_ITEM_TITLE,
@@ -62,14 +59,10 @@ pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_ARTWORK_ID,
 ];
 
-/// Playback attribute sub-ids the accessory subscribes to.
-///
-/// The `PlaybackQueueList*` trio (`0x0E`/`0x0F`/`0x11`) is intentionally
-/// omitted. Those sub-ids require companion subscribe-side fields
-/// (`PlaybackQueueListContentTransferInfoRequest`,
-/// `PlaybackQueueListContentTransferSize`) that this CSM does not carry,
-/// and iOS silently rejects the entire subscribe when they are listed
-/// without the companions.
+/// Playback attribute sub-ids the accessory subscribes to. The
+/// `PlaybackQueueList*` trio (`0x0E`/`0x0F`/`0x11`) is omitted: those
+/// require companion subscribe-side fields this CSM does not carry, and
+/// iOS silently rejects the entire subscribe when they are listed alone.
 pub const PLAYBACK_SUBSCRIBE: &[u16] = &[
   PLAYBACK_STATE,
   PLAYBACK_POSITION_MS,
@@ -123,9 +116,7 @@ const NOW_PLAYING_PARAM_MEDIA_ITEM: u16 = 0;
 const NOW_PLAYING_PARAM_PLAYBACK: u16 = 1;
 
 /// `0x5000` accessory -> iPhone. Subscribes to the listed attribute
-/// ids; iPhone will only push back attributes whose sub-id appears
-/// here. Construct with [`StartNowPlayingUpdates::standard`] for the
-/// canonical Bridgething subscription set.
+/// ids; the iPhone only pushes back attributes whose sub-id appears here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartNowPlayingUpdates {
   pub media_item: Vec<u16>,
@@ -170,19 +161,14 @@ impl From<StartNowPlayingUpdates> for CsmFrame {
 pub struct StopNowPlayingUpdates;
 
 /// `0x5003` accessory -> iPhone. The only iAP2 way to seek absolutely
-/// or jump to a specific queue index. Must be sent only in response to
-/// a Direct User Action; cleanroom doc 80 spells out the gating.
+/// or jump to a queue index; send only in response to a Direct User Action.
 ///
-/// `elapsed_time_ms` is only honored when the most recent
-/// `NowPlayingUpdate.PlaybackSetElapsedTimeAvailable` was true; sending
-/// while false is silently ignored or rejected.
-///
-/// `queue_index` jumps the playback head to a specific queue position
-/// (0-based).
-///
+/// `elapsed_time_ms` is honored only when the most recent
+/// `NowPlayingUpdate.PlaybackSetElapsedTimeAvailable` was true.
+/// `queue_index` is 0-based.
 /// `queue_list_content_transfer_start_index` is the window-into-queue
-/// start for the file-transferred queue listing; `0xFFFF_FFFF` lets iOS
-/// center on the current track.
+/// start for the file-transferred listing; `0xFFFF_FFFF` centers on the
+/// current track.
 #[derive(Csm, Debug, Clone, Default, PartialEq, Eq)]
 #[csm(id = 0x5003)]
 pub struct SetNowPlayingInformation {
@@ -194,11 +180,9 @@ pub struct SetNowPlayingInformation {
   pub queue_list_content_transfer_start_index: Option<u32>,
 }
 
-/// `0x5001` iPhone -> accessory. Delta-shaped: any attribute the
-/// iPhone has fresh information about appears in the matching group;
-/// absent attributes mean "nothing to say about this field," not
-/// "field cleared." The session merges deltas into stable state; this
-/// type is just the wire-decode result.
+/// `0x5001` iPhone -> accessory. Delta-shaped: an attribute appears in
+/// its group only when the iPhone has fresh info; absent means "nothing
+/// to say about this field," not "field cleared."
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NowPlayingUpdate {
   pub media_item: Option<MediaItemAttributes>,
@@ -226,9 +210,8 @@ impl TryFrom<CsmFrame> for NowPlayingUpdate {
   }
 }
 
-/// MediaType is multi-typed: an item can carry more than one bit. iAP2
-/// encodes it as a u32 BE with each value contributing a distinct bit
-/// position; we expand it into a `Vec<MediaTypeKind>` for ergonomics.
+/// MediaType is a u32 BE bitfield (an item can carry multiple bits);
+/// expanded into a `Vec<MediaTypeKind>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaTypeKind {
   Music,
@@ -237,12 +220,9 @@ pub enum MediaTypeKind {
 }
 
 /// Per-track attributes carried inside the `NowPlayingUpdate` param-0
-/// group. All fields optional; iPhone sends only the ones that
-/// changed since the last update.
-///
-/// `artist` is the track-credited artist (sub-id 0x0C).
-/// `album_artist` (sub-id 0x0E) is the album-level credited artist and
-/// is semantically distinct.
+/// group. All fields optional. `artist` is the track-credited artist
+/// (sub-id 0x0C); `album_artist` (sub-id 0x0E) is the album-level
+/// artist and is semantically distinct.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MediaItemAttributes {
   pub persistent_id: Option<u64>,
@@ -264,11 +244,9 @@ pub struct MediaItemAttributes {
 }
 
 impl MediaItemAttributes {
-  /// Decode a single MediaItem parameter group from its inner payload
-  /// (the bytes inside a `param 0` of a `NowPlayingUpdate`, or one
-  /// element of a queue snapshot blob). The payload is the inner
-  /// CSM-format param block; the outer 4-byte param header is the
-  /// caller's responsibility.
+  /// Decode a single MediaItem parameter group from its inner payload:
+  /// the inner CSM-format param block, with the outer 4-byte param
+  /// header already stripped by the caller.
   pub fn decode_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
     Self::decode_group_inner(payload)
   }
@@ -314,11 +292,9 @@ impl MediaItemAttributes {
 
 /// Per-playback-session attributes carried inside the
 /// `NowPlayingUpdate` param-1 group. `app_bundle` is the iOS app's
-/// bundle identifier (e.g. `"com.spotify.client"`) - the most
-/// reliable signal for "what audio app is foregrounded right now."
-///
-/// `set_elapsed_time_available` is the load-bearing scrub gate; webapp
-/// scrub UI must be disabled when this is false.
+/// bundle identifier (e.g. `"com.spotify.client"`).
+/// `set_elapsed_time_available` is the scrub gate: absolute seek is
+/// only valid when it is true.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaybackAttributes {
   pub state: Option<PlaybackState>,
@@ -384,11 +360,8 @@ impl PlaybackAttributes {
 
 /// Decode the queue snapshot blob delivered over File Transfer Session
 /// id 2. Each element is a MediaItem parameter group wrapped as one
-/// CsmParam entry; the entry's id position carries no information for
-/// us (Apple uses it as a slot tag we ignore). Per-element decode is
-/// best-effort: malformed entries are dropped with a warn rather than
-/// aborting the whole parse - a partially-decoded queue is more useful
-/// than no queue.
+/// CsmParam entry whose id is a slot tag we ignore. Per-element decode
+/// is best-effort: malformed entries are dropped with a warn.
 pub fn decode_queue_snapshot(blob: Bytes) -> Result<Vec<MediaItemAttributes>, CsmDecodeError> {
   let entries = decode_param_block(blob)?;
   let mut out = Vec::with_capacity(entries.len());
@@ -403,10 +376,9 @@ pub fn decode_queue_snapshot(blob: Bytes) -> Result<Vec<MediaItemAttributes>, Cs
   Ok(out)
 }
 
-/// Three-state playback per cleanroom doc 60 catalogue: 0 stopped,
-/// 1 playing, 2 paused, 3 seek-forward, 4 seek-backward. We collapse
-/// the seeking states into Playing (the elapsed-time keeps changing
-/// either way).
+/// Wire playback states: 0 stopped, 1 playing, 2 paused, 3 seek-forward,
+/// 4 seek-backward. We collapse the seeking states into Playing (the
+/// elapsed-time keeps changing either way).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
   Stopped,
@@ -424,8 +396,8 @@ impl PlaybackState {
   }
 }
 
-/// Apple's repeat-mode convention: 0 off, 1 single track, 2 the whole
-/// context. Anything else lands in `Off` defensively.
+/// Wire repeat-mode: 0 off, 1 single track, 2 the whole context.
+/// Anything else lands in `Off` defensively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepeatMode {
   Off,
@@ -451,7 +423,7 @@ impl RepeatMode {
   }
 }
 
-/// Apple's shuffle-mode convention: 0 off, 1 songs (per-track), 2 albums.
+/// Wire shuffle-mode: 0 off, 1 songs (per-track), 2 albums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShuffleMode {
   Off,
@@ -474,9 +446,7 @@ impl ShuffleMode {
 }
 
 fn decode_media_types(bits: u32) -> Vec<MediaTypeKind> {
-  // iAP2 packs media types as a bitfield. Bit positions match the values
-  // in cleanroom doc 60: 0=Music, 1=Podcast, 2=AudioBook (a track may be
-  // tagged with multiple at once).
+  // bitfield: bit 0=Music, 1=Podcast, 2=AudioBook.
   let mut out = Vec::new();
   if bits & (1 << 0) != 0 {
     out.push(MediaTypeKind::Music);
@@ -614,10 +584,8 @@ fn take_optional_be_u64(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Opt
   Ok(Some(u64::from_be_bytes(buf)))
 }
 
-/// Presence-only marker: empty payload = present, omission = absent.
-/// Different from `take_optional_presence_bool` because the marker
-/// carries no truth value beyond its presence - an explicit `()` rather
-/// than a `bool`.
+/// Presence-only marker, carrying no truth value beyond presence: empty
+/// payload = `Some(())`, omission = `None`.
 fn take_optional_presence_marker(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<()>, CsmDecodeError> {
   let Some(payload) = take_optional(param_id, params)? else {
     return Ok(None);
@@ -632,9 +600,8 @@ fn take_optional_presence_marker(param_id: u16, params: &mut Vec<CsmParam>) -> R
   Ok(Some(()))
 }
 
-/// "Liked" / "shuffle" arrive as a presence-only marker (empty
-/// payload = true, omission = unknown) on iAP2's wire. This matches
-/// iAP2's broader convention of using empty-payload TLVs as flags.
+/// Presence-only flags like "Liked" arrive as empty-payload markers:
+/// empty payload = true, omission = unknown.
 fn take_optional_presence_bool(param_id: u16, params: &mut Vec<CsmParam>) -> Result<Option<bool>, CsmDecodeError> {
   let Some(payload) = take_optional(param_id, params)? else {
     return Ok(None);
@@ -647,10 +614,8 @@ fn take_optional_presence_bool(param_id: u16, params: &mut Vec<CsmParam>) -> Res
 }
 
 /// Device-side (iPhone) encoders for the emulator: the inverse of the
-/// decoders above. Lives here, gated, to reuse the private sub-id
-/// constants rather than re-export ~25 of them. Presence-only bools
-/// ride as empty-payload markers (the real iPhone never sends a `[0]`
-/// byte for these); a `Some(false)` therefore encodes as absence.
+/// decoders above. Presence-only bools ride as empty-payload markers,
+/// so `Some(false)` encodes as absence.
 #[cfg(feature = "emulator")]
 mod device_encode {
   use super::{
@@ -873,7 +838,6 @@ mod tests {
     };
     let frame: CsmFrame = csm.clone().into();
     assert_eq!(frame.msg_id, 0x5003);
-    // Only param 0 should be present.
     let ids: Vec<u16> = frame.params.iter().map(|p| p.id).collect();
     assert_eq!(ids, vec![0]);
     let decoded: SetNowPlayingInformation = frame.try_into().unwrap();
@@ -1169,8 +1133,7 @@ mod device_encode_tests {
       playback: None,
     };
     let decoded: NowPlayingUpdate = NowPlayingUpdate::try_from(CsmFrame::from(update)).unwrap();
-    // Presence-only bools cannot carry false on the wire; it round-trips
-    // to None (absence), matching the real iPhone's encoding.
+    // presence-only bools cannot carry false on the wire; false round-trips to None.
     assert_eq!(decoded.media_item.unwrap().liked, None);
   }
 }

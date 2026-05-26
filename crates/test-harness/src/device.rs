@@ -1,7 +1,6 @@
 //! Tier-3 host rig: drive a real booted Car Thing over the air.
 //!
-//! Two concretes the seam will later unify. The over-air RFCOMM dial (real host
-//! radio -> the device's BCM chip -> bluez SPP) feeds the same
+//! The over-air RFCOMM dial (real host radio -> the device's BCM chip -> bluez SPP) feeds the same
 //! `bridgething_gateway::Gateway` the in-process Android driver uses, and the
 //! tunneled frame-tap WS feeds the same `FrameObserver`. The device address
 //! comes from the environment so one rig points at whatever is on the bench.
@@ -72,21 +71,16 @@ impl DeviceHarness {
     Ok(MockWsClient { stream })
   }
 
-  /// Dial the device's bridgething SPP over the real radio and drive it with the
-  /// real gateway SDK - the lying BCM chip in the loop. Pairs Just Works (the
-  /// no-auth posture) and trusts on first run; bluez persists the bond.
+  /// Dial the device's bridgething SPP over the real radio and drive it with the real gateway SDK.
+  /// Pairs Just Works and trusts on first run; bluez persists the bond.
   pub async fn connect_over_air(&self) -> Result<Gateway> {
     let stream = self.dial(BRIDGETHING_RFCOMM_CHANNEL).await?;
     Ok(Gateway::from_io(stream))
   }
 
-  /// Dial the device's iAP2 accessory channel over the real radio and drive it
-  /// with the device-half emulator (`Link::run_device` + `DeviceEmulator`) plus
-  /// the real MFi chip on the accessory. The emulator walks auth, identification,
-  /// and opens the EA gateway stream when the daemon requests app launch; the
-  /// returned `Gateway` rides that EA stream, identical to the rfcomm companion
-  /// once it is up. The lying BCM chip and the real CP3.0 coprocessor are both in
-  /// the loop - the honest iAP2 transport test.
+  /// Dial the device's iAP2 channel over the real radio and drive it with the device-half emulator.
+  /// The emulator walks auth and identification, then opens the EA gateway stream when the daemon
+  /// requests app launch; the returned [`Gateway`] rides that stream.
   pub async fn connect_over_air_iap2(&self) -> Result<Gateway> {
     let stream = self.dial(IAP2_RFCOMM_CHANNEL).await?;
 
@@ -205,10 +199,7 @@ fn iap2_device_config() -> LinkConfig {
   config
 }
 
-/// Bridge an opened EA stream's byte channels into an `AsyncRead + AsyncWrite`
-/// the gateway SDK can drive. Two pump tasks shuttle bytes between the duplex
-/// and the EA stream: accessory-sent chunks become readable on the gateway end,
-/// and the gateway's writes ride the EA chunker back out on link session 3.
+/// Adapt a [`DeviceEaStream`] into a [`Gateway`] by bridging its channels through a duplex pair.
 fn bridge_ea_stream(stream: DeviceEaStream) -> Gateway {
   let DeviceEaStream {
     mut inbound_rx,

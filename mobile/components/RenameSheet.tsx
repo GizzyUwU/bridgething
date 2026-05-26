@@ -12,15 +12,8 @@ import {
 import { Button } from './Button';
 
 /**
- * Rename prompt built on RNR's `<AlertDialog>` (modal portal + focus
- * trap + focus-restore). Replaces `Alert.prompt` because:
- *   - `Alert.prompt` is iOS-only and looks dated
- *   - it doesn't render well in dark mode
- *   - the dialog pattern is consistent with the rest of the app
- *
- * Caller controls visibility via `visible` and reacts to `onSubmit`.
- * Submitting an empty string yields `null` (the convention for "clear
- * the nickname").
+ * Rename prompt built on RNR's `<AlertDialog>` (modal portal + focus trap).
+ * Submitting an empty string yields `null` (clears the nickname).
  */
 export function RenameSheet({
   visible,

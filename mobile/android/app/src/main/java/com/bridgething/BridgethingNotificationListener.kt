@@ -20,20 +20,16 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Mirror of the iOS ANCS path: listens to every notification the user
- * sees on the phone, translates `StatusBarNotification` into the
- * bridgething wire shape, and broadcasts it to every connected Car
- * Thing via the running companion's gateway.
+ * Listens to every notification the user sees on the phone, translates
+ * `StatusBarNotification` into the bridgething wire shape, and broadcasts
+ * it to every connected Car Thing via the running companion's gateway.
  *
  * The service is only live when the user has toggled this app on under
  * "Device & app notifications" - Android offers no programmatic grant.
- * `HybridBridgethingSessionImpl.requestNotificationAccess` deep-links
- * the user to that page.
  *
- * Lookup of the running [BridgethingCompanion] goes through a
- * process-wide singleton holder ([NotificationBridgeRegistry]) populated
- * by the impl on session start/stop, since the service is constructed
- * by the OS independently of the host app's coroutine scope.
+ * The running [BridgethingCompanion] is looked up through
+ * [NotificationBridgeRegistry] because the OS constructs this service
+ * independently of the host app's coroutine scope.
  */
 public class BridgethingNotificationListener : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -156,11 +152,7 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }
 }
 
-/**
- * Process-wide holder so [BridgethingNotificationListener] (constructed
- * by the OS) can find the running [BridgethingCompanion] without going
- * through DI. Populated by [HybridBridgethingSessionImpl] on start/stop.
- */
+/** Process-wide holder so the OS-constructed listener can find the running [BridgethingCompanion]. */
 public object NotificationBridgeRegistry {
     @Volatile
     public var companion: BridgethingCompanion? = null

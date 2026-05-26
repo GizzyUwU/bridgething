@@ -25,8 +25,8 @@ public struct AncsSetupResult: Sendable {
     import CoreBluetooth
 
     /// Service UUIDs the daemon advertises and hosts for the ANCS LE-bond
-    /// bring-up. These match `bridgething/crates/core/src/bluetooth/ancs/pair_trigger.rs`
-    /// byte-for-byte; do not change one without the other.
+    /// bring-up. These match the daemon's pair-trigger service byte-for-byte;
+    /// do not change one without the other.
     public enum AncsBluetooth {
         nonisolated(unsafe) public static let pairTriggerService =
             CBUUID(string: "B12BE732-C1D0-4001-8001-BB1D6E7A1C01")
@@ -45,8 +45,7 @@ public struct AncsSetupResult: Sendable {
     /// `CBConnectPeripheralOptionRequiresANCS = true` so iOS surfaces
     /// the ANCS authorization prompt while the app is foreground.
     ///
-    /// iOS 13–17 path is intentionally not implemented; the host app
-    /// targets iOS 18.
+    /// Only the iOS 18+ path is implemented; the host app targets iOS 18.
     @available(iOS 18.0, *)
     @MainActor
     final class AncsPairCoordinator: NSObject {
@@ -72,7 +71,7 @@ public struct AncsSetupResult: Sendable {
         /// Run the ASK pair flow. Returns once the picker-side outcome is
         /// known (paired / alreadyPaired / cancelled / failed). The
         /// daemon-observed ANCS authorization state may transition
-        /// asynchronously after — the caller subscribes to the wire
+        /// asynchronously after; the caller subscribes to the wire
         /// stream for the final word.
         func pair() async -> AncsSetupResult {
             await activateIfNeeded()
@@ -113,8 +112,7 @@ public struct AncsSetupResult: Sendable {
                 // User revoked from Settings or via removeAccessory.
                 lastAuthState = .unknown
             case .pickerDidDismiss:
-                // Resolves cancellations. If `accessoryAdded` already
-                // fired and resolved the continuation, this is a no-op.
+                // Resolves cancellations; no-op if accessoryAdded already resolved the continuation.
                 completePendingIfNeeded(.cancelled)
             default:
                 break
@@ -199,20 +197,15 @@ public struct AncsSetupResult: Sendable {
             else { return }
             connecting = peripheral
             peripheral.delegate = self
-            // `CBConnectPeripheralOptionRequiresANCS = true` tells iOS to
-            // gate the connection on ANCS being exposed. After SMP (which
-            // ASK already drove on the picker tap) iOS pops the
-            // notification-sharing prompt while the app is foreground.
-            // String key — no Swift constant for it.
+            // RequiresANCS gates the connection on ANCS being exposed; after SMP iOS pops the
+            // notification-sharing prompt while the app is foreground. String key, no Swift constant.
             let options: [String: Any] = ["kCBConnectOptionRequiresANCS": NSNumber(value: true)]
             central.connect(peripheral, options: options)
         }
 
-        // CB delivers all delegate callbacks on the main queue we configured,
-        // so `MainActor.assumeIsolated` below is a thread-checked no-op. The
-        // peripheral itself is held in `connecting` and re-looked-up on the
-        // MainActor side rather than passed across the isolation boundary
-        // (CBPeripheral is not Sendable under Swift 6 strict concurrency).
+        // CB delivers delegate callbacks on the main queue we configured, so assumeIsolated is a
+        // thread-checked no-op. The peripheral is held in `connecting` and re-looked-up MainActor-side
+        // rather than passed across the isolation boundary (CBPeripheral is not Sendable under Swift 6).
         nonisolated func centralManager(_: CBCentralManager, didConnect _: CBPeripheral) {
             MainActor.assumeIsolated { self.handleDidConnect() }
         }
@@ -227,9 +220,8 @@ public struct AncsSetupResult: Sendable {
             didFailToConnect _: CBPeripheral,
             error _: Error?
         ) {
-            // Connection failures here are non-fatal — the daemon will
-            // eventually observe ANCS authorization (or not) and emit
-            // the wire event.
+            // Connection failures here are non-fatal; the daemon eventually observes ANCS
+            // authorization (or not) and emits the wire event.
         }
 
         nonisolated func centralManager(_: CBCentralManager, didDisconnectPeripheral _: CBPeripheral, error _: Error?) {}
@@ -260,9 +252,7 @@ public struct AncsSetupResult: Sendable {
                   let svc = p.services?.first(where: { $0.uuid == AncsBluetooth.pairTriggerService }),
                   let ch = svc.characteristics?.first(where: { $0.uuid == AncsBluetooth.pairTriggerChar })
             else { return }
-            // Idempotent encrypt-read. ASK already drove SMP, so this
-            // succeeds; on the rare path where SMP didn't complete it
-            // forces it. Empty value either way.
+            // Idempotent encrypt-read; forces SMP on the rare path where it didn't complete. Empty value.
             p.readValue(for: ch)
         }
 

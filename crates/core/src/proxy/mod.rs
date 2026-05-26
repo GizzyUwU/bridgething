@@ -1,4 +1,4 @@
-//! SOCKS5 → Tunnel bridge. Binds 127.0.0.1:1080 by default. Chromium
+//! SOCKS5 -> Tunnel bridge. Binds 127.0.0.1:1080 by default. Chromium
 //! is launched with `--proxy-server=socks5://127.0.0.1:1080
 //! --proxy-bypass-list="<-loopback>"` so the kiosk's outbound TCP
 //! traffic lands here. Each accepted connection runs the SOCKS5
@@ -10,8 +10,7 @@
 //! Wire-inefficient when multiple peers are connected: `Tunnel.Open`
 //! request goes to every peer, and `Tunnel.Data` / `Tunnel.Close`
 //! commands broadcast on the Bulk lane. Companions that don't own
-//! the `tunnel_id` are expected to drop. Refine to per-peer routing
-//! once we care about multi-peer traffic.
+//! the `tunnel_id` are expected to drop.
 
 use std::{
   io,
@@ -232,7 +231,6 @@ async fn bridge(
 ) {
   let (mut socks_read, mut socks_write) = stream.into_split();
 
-  // gateway → SOCKS
   let inbound_tunnel_id = tunnel_id;
   let inbound_task = tokio::spawn(async move {
     while let Some(event) = inbound_rx.recv().await {
@@ -252,7 +250,6 @@ async fn bridge(
     false
   });
 
-  // SOCKS → gateway
   let bt_for_outbound = bluetooth.clone();
   let outbound_tunnel_id = tunnel_id;
   let outbound_task = tokio::spawn(async move {

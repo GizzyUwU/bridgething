@@ -95,8 +95,8 @@ public data class FrameHeader(
 /**
  * Frames and unframes bridgething wire messages over a transport (BLE, RFCOMM).
  *
- * Encode: `T` → msgpack/json (encoding) → gzip/raw (compression) → 16-byte header + body.
- * Decode: header → body → gunzip/raw → msgpack/json → `T`.
+ * Encode: `T` -> msgpack/json (encoding) -> gzip/raw (compression) -> 16-byte header + body.
+ * Decode: header -> body -> gunzip/raw -> msgpack/json -> `T`.
  *
  * UUID fields on the wire are 16-byte msgpack `bin`. The schema-generated
  * types expose them as `java.util.UUID`; `MsgpackUuidSerializer` in the

@@ -62,10 +62,8 @@ public class AdjacentTaggedSerializer<T : Any>(
       } else {
         val dataProp = sub.memberProperties.firstOrNull { it.name == "data" }
           ?: error("AdjacentTaggedSerializer: variant ${sub.simpleName} of ${baseClass.simpleName} must be `object` or `data class X(val data: ...)`")
-        // Honor a field-level @Serializable(with = ...) override on the
-        // `data` property, if present (e.g. UniversalValueSerializer for the
-        // JsonElement-typed Forward.Json variant). Fall back to the type's
-        // default serializer otherwise.
+        // honor a field-level @Serializable(with = ...) override on the `data`
+        // property if present, else fall back to the type's default serializer.
         val withClass = dataProp.findAnnotation<Serializable>()?.with
         if (withClass != null && withClass != KSerializer::class) {
           (withClass.objectInstance ?: withClass.createInstance()) as KSerializer<Any>
@@ -112,11 +110,9 @@ public class AdjacentTaggedSerializer<T : Any>(
           val tag = composite.decodeStringElement(descriptor, 0)
           info = variantsByTag[tag]
             ?: error("AdjacentTaggedSerializer: unknown tag '$tag' for ${baseClass.simpleName}")
-          // For unit variants, kotlinx-serialization-msgpack iterates the
-          // descriptor's elements sequentially regardless of wire content and
-          // would surface index 1 next (and subsequent decoding would consume
-          // bytes that belong to the parent map). Break early since we already
-          // have everything we need.
+          // for unit variants, kotlinx-serialization-msgpack iterates descriptor elements
+          // sequentially regardless of wire content and would surface index 1 next, consuming
+          // bytes that belong to the parent map. break early since there is no payload.
           if (info.payloadSerializer == null) break@loop
         }
         1 -> {

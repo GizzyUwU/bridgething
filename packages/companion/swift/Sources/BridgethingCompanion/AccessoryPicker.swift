@@ -5,8 +5,7 @@ import Foundation
 public struct AccessoryPickResult: Sendable, Equatable {
     /// Stable identifier for the chosen accessory. On iOS this is the
     /// AccessorySetupKit `bluetoothIdentifier` (CoreBluetooth peripheral
-    /// UUID); callers don't need to interpret it beyond echoing it back
-    /// to the wire protocol.
+    /// UUID); callers echo it back to the wire protocol.
     public let id: String
     /// Friendly name the picker surfaced. May be empty when the
     /// accessory only advertised an address.
@@ -22,12 +21,9 @@ public struct AccessoryPickResult: Sendable, Equatable {
     import AccessorySetupKit
 
     /// AccessorySetupKit coordinator for the general "pick a Car Thing"
-    /// flow. Sibling of `AncsPairCoordinator`: that one pairs an LE-only
-    /// service to enable ANCS, this one is the iOS happy-path equivalent
-    /// of the android `BluetoothPairPicker` component - surfaces every
-    /// in-range bridgething accessory in the system picker, returns the
-    /// chosen one. No CoreBluetooth follow-up; the picker tap is the
-    /// whole flow.
+    /// flow. Surfaces every in-range bridgething accessory in the system
+    /// picker and returns the chosen one. No CoreBluetooth follow-up;
+    /// the picker tap is the whole flow.
     @available(iOS 18.0, *)
     @MainActor
     final class AccessoryPickerCoordinator: NSObject {

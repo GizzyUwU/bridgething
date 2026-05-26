@@ -16,10 +16,8 @@ import kotlinx.serialization.encoding.Encoder
  */
 public object MsgpackUuidSerializer : KSerializer<UUID> {
   // kotlinx-msgpack pattern-matches on `ByteArraySerializer()` inside its
-  // `encode/decodeSerializableValue` to route through `bin` instead of the
-  // generic LIST path. Going through `encoder.encodeSerializableValue(
-  // ByteArraySerializer(), bytes)` rather than calling the delegate's
-  // serialize directly is what triggers that branch.
+  // encode/decodeSerializableValue to route through `bin` instead of the generic
+  // LIST path; going through encodeSerializableValue(delegate, bytes) triggers that branch.
   private val delegate = ByteArraySerializer()
   override val descriptor: SerialDescriptor = delegate.descriptor
 

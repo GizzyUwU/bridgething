@@ -4,15 +4,15 @@
   import IOBluetooth
 
   /// `Adapter` implementation for macOS that talks to the bridgething daemon
-  /// over a plain RFCOMM channel (the same SPP service Android consumes -
+  /// over a plain RFCOMM channel (the same SPP service Android consumes,
   /// `dead0000-854d-408e-81f0-fb6147f918fd`). The host Mac app constructs
   /// this in place of `EAAccessoryAdapter` (iOS-only) and hands it to
   /// `BridgethingCompanion(adapter:)`; everything above the `Adapter`
-  /// protocol - the manifest poll loop, OTA, glue, codegen - is platform
+  /// protocol (the manifest poll loop, OTA, glue, codegen) is platform
   /// agnostic and inherits Mac support for free.
   ///
   /// Lifecycle:
-  /// 1. The user pairs the Car Thing once via System Settings → Bluetooth.
+  /// 1. The user pairs the Car Thing once via System Settings -> Bluetooth.
   /// 2. `start()` enumerates paired devices, picks the ones whose SDP
   ///    records advertise the bridgething UUID, opens an RFCOMM channel to
   ///    each, and emits `.connected` per channel that opens.
@@ -25,8 +25,7 @@
   ///
   /// Threading: IOBluetooth callbacks fire on whichever thread opened the
   /// channel; we open on main and marshal every public method through
-  /// `MainActor.run` to keep state single-threaded - same pattern as
-  /// `EAAccessoryAdapter`.
+  /// `MainActor.run` to keep state single-threaded.
   public final class IOBluetoothRFCOMMAdapter: NSObject, Adapter, @unchecked Sendable {
     public nonisolated let events: AsyncStream<AdapterEvent>
     private let eventContinuation: AsyncStream<AdapterEvent>.Continuation
@@ -51,8 +50,7 @@
       super.init()
     }
 
-    /// Standard bridgething RFCOMM service UUID, mirrors the constant
-    /// `BRIDGETHING_PROFILE_UUID` in `crates/lib`.
+    /// Standard bridgething RFCOMM service UUID.
     nonisolated(unsafe) public static let bridgethingUUID: IOBluetoothSDPUUID = {
       var bytes: [UInt8] = [
         0xDE, 0xAD, 0x00, 0x00, 0x85, 0x4D, 0x40, 0x8E,
@@ -182,9 +180,8 @@
 
       let state = SessionState(device: device, channel: channel, owner: self)
       sessions[id] = state
-      // `.connected` fires after the channel actually opens
-      // (rfcommChannelOpenComplete), not here - opening is async and
-      // can still fail on the link-layer.
+      // `.connected` fires from rfcommChannelOpenComplete, not here; opening is async and can
+      // still fail on the link-layer.
     }
 
     fileprivate func handleChannelOpened(deviceId: String, name: String) {

@@ -1,4 +1,4 @@
-//! Device-half (iPhone-side) iAP2 emulator for T3 over-air testing.
+//! Device-half (iPhone-side) iAP2 emulator for over-air testing.
 //!
 //! Drives a real accessory through the iAP2 lifecycle the way an iPhone
 //! does: the device-role link ([`Link::run_device`]) completes the
@@ -49,35 +49,33 @@ use crate::{
 const CONTROL_SESSION_ID: u8 = 1;
 
 /// File Transfer link session id, matching the accessory's LSP triple
-/// `{ id: 2, type: 1 }`. SetupAck / CompleteAck for outbound artwork
-/// land here.
+/// `{ id: 2, type: 1 }`. Outbound artwork SetupAck / CompleteAck land here.
 const FILE_TRANSFER_SESSION_ID: u8 = 2;
 
-/// Challenge length the emulator issues in `RequestAuthenticationChallengeResponse`.
-/// The accessory's CP3.0 chip signs whatever we send; the bytes are
-/// arbitrary because we never validate the response.
+/// Challenge length the emulator issues in
+/// `RequestAuthenticationChallengeResponse`. Arbitrary bytes; the
+/// accessory's CP3.0 chip signs whatever we send and we never validate it.
 const CHALLENGE_LEN: usize = 32;
 
-/// Device-side milestones the emulator surfaces for tests and logging.
-/// The accessory's own [`crate::SessionEvent`] stream is the
-/// authoritative observation point; these mirror it from the device
-/// side. Not `Clone`/`Eq`: later variants carry channels.
+/// Device-side milestones the emulator surfaces for tests and logging,
+/// mirroring the accessory's [`crate::SessionEvent`] stream from the
+/// device side.
 #[derive(Debug)]
 pub enum EmulatorEvent {
   LinkEstablished,
   Authenticated,
   Identified,
   ArtworkSent(u8),
-  /// An EA gateway stream opened. Carries the byte channels a consumer
-  /// (e.g. a real gateway client) drives on top.
+  /// An EA gateway stream opened, carrying the byte channels a consumer
+  /// drives on top.
   EaStreamOpened(DeviceEaStream),
   LinkDown(String),
 }
 
 /// Scripted device-half session. Construct with the device-role link's
 /// command/event channels plus an observation channel, then `run()`.
-/// Use [`DeviceEmulator::with_now_playing`] / [`DeviceEmulator::with_artwork`]
-/// to script the media surface the accessory will observe.
+/// [`DeviceEmulator::with_now_playing`] / [`DeviceEmulator::with_artwork`]
+/// script the media surface the accessory observes.
 pub struct DeviceEmulator {
   link_command_tx: mpsc::Sender<Iap2Command>,
   link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -120,8 +118,7 @@ impl DeviceEmulator {
 
   /// Script an artwork blob delivered over File Transfer once the
   /// accessory subscribes. Patches the canned NowPlaying delta so its
-  /// `artwork_id` references the same transfer id, mirroring the real
-  /// iPhone pairing of NowPlaying art id and FTS transfer id.
+  /// `artwork_id` references the same transfer id, as the real iPhone does.
   pub fn with_artwork(mut self, transfer_id: u8, bytes: Bytes) -> Self {
     self.artwork = Some((transfer_id, bytes));
     let media = self
@@ -246,8 +243,7 @@ impl DeviceEmulator {
 
   /// Push the device-metadata CSMs an iPhone sends unsolicited right
   /// after `IdentificationAccepted` (subscribe-by-listing on param 7):
-  /// device name, language, wall clock, and stable UUID. The clock uses
-  /// the host's current time so a real accessory's clock syncs.
+  /// device name, language, wall clock (host's current time), stable UUID.
   async fn push_device_metadata(&self) -> Result<()> {
     self
       .send_csm(DeviceInformationUpdate {
@@ -274,10 +270,9 @@ impl DeviceEmulator {
     Ok(())
   }
 
-  /// Emulate the companion app launching and opening its EA session:
-  /// map the requested bundle id to the protocol the accessory declared
-  /// in identification, send `StartExternalAccessoryProtocolSession`, and
-  /// surface the opened stream's byte channels.
+  /// Emulate the companion app opening its EA session: map the bundle id
+  /// to the protocol the accessory declared, send
+  /// `StartExternalAccessoryProtocolSession`, surface the stream's channels.
   async fn open_ea_stream(&mut self, bundle_id: &str) -> Result<()> {
     let Some(protocol_id) = self.ea_protocols.iter().find(|p| p.name == bundle_id).map(|p| p.id) else {
       tracing::warn!(bundle = %bundle_id, "emulator: RequestAppLaunch for an undeclared EA protocol; ignoring");
@@ -318,9 +313,8 @@ impl DeviceEmulator {
   }
 }
 
-/// A small canned NowPlaying delta so a default emulator still drives a
-/// realistic subscribe response. Tests override via
-/// [`DeviceEmulator::with_now_playing`].
+/// Canned NowPlaying delta so a default emulator drives a realistic
+/// subscribe response. Override via [`DeviceEmulator::with_now_playing`].
 fn default_now_playing() -> NowPlayingUpdate {
   NowPlayingUpdate {
     media_item: Some(MediaItemAttributes {

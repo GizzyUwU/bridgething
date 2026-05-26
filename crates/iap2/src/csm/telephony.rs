@@ -1,4 +1,4 @@
-//! Typed CSMs for the iAP2 telephony surface (cleanroom doc 80).
+//! Typed CSMs for the iAP2 telephony surface.
 //!
 //! Two paired Start/Update/Stop families plus a set of accessory-driven
 //! action CSMs:
@@ -43,10 +43,8 @@ pub const SENT_BY_ACCESSORY: &[u16] = &[
 
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[CallStateUpdate::CSM_MSG_ID, CommunicationsUpdate::CSM_MSG_ID];
 
-/// Param IDs the accessory subscribes to inside `StartCallStateUpdates`.
-/// One empty-payload TLV per id, same encoding as
-/// `StartNowPlayingUpdates`. Slot 5 is genuinely unused per cleanroom
-/// doc 80; the rest are every documented param.
+/// Param IDs the accessory subscribes to inside `StartCallStateUpdates`,
+/// one empty-payload TLV per id. Slot 5 is unused.
 pub const CALL_STATE_SUBSCRIBE: &[u16] = &[0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
 /// Param IDs the accessory subscribes to inside
@@ -130,10 +128,8 @@ impl From<StartCommunicationsUpdates> for CsmFrame {
 pub struct StopCommunicationsUpdates;
 
 /// `0x4155` device -> accessory. Push of one call's current state. All
-/// fields optional; iOS sends only what changed since the last push.
-/// `status` and `direction` decode as raw `u8`; the daemon translation
-/// layer maps them to `libbridgething::PhoneCallStatus` /
-/// `PhoneCallDirection` enums.
+/// fields optional and delta-shaped. `status` and `direction` decode as
+/// raw `u8`.
 #[derive(Csm, Debug, Clone, Default, PartialEq, Eq)]
 #[csm(id = 0x4155)]
 pub struct CallStateUpdate {
@@ -270,7 +266,7 @@ pub struct MuteStatusUpdate {
 }
 
 /// `0x4161` accessory -> device. Play DTMF tone on the named call.
-/// `tone` matches `SendDTMFTone`: 0..9 = digit, 10=`*`, 11=`#`.
+/// `tone`: 0..9 = digit, 10=`*`, 11=`#`.
 #[derive(Csm, Debug, Clone, PartialEq, Eq)]
 #[csm(id = 0x4161)]
 pub struct SendDtmf {
@@ -280,8 +276,7 @@ pub struct SendDtmf {
   pub call_uuid: Option<String>,
 }
 
-/// Build a subscribe-list payload from a slice of param IDs. Mirrors
-/// `StartNowPlayingUpdates`'s encoding for unit-test parity.
+/// Build a subscribe-list payload from a slice of param IDs.
 #[allow(dead_code)]
 fn encode_subscribe_list(ids: &[u16]) -> Bytes {
   encode_param_block(

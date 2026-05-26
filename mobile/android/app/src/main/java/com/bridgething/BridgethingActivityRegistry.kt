@@ -7,15 +7,12 @@ import android.os.Bundle
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Process-wide pointer to the currently-resumed [Activity]. Populated by
- * [Application.registerActivityLifecycleCallbacks]; nitro modules read
- * from it when they need to launch an OS picker (e.g. the
- * CompanionDeviceManager flow needs `startIntentSenderForResult`, which
- * is an Activity-only API).
+ * Process-wide pointer to the currently-resumed [Activity]. Nitro modules
+ * read from it when they need to launch an OS picker; CompanionDeviceManager
+ * requires `startIntentSenderForResult`, which is an Activity-only API.
  *
- * Also routes `onActivityResult` callbacks back to whoever is waiting
- * on a specific request code, since `ReactActivity` doesn't expose a
- * pluggable per-request-code dispatch.
+ * Also routes `onActivityResult` back to one-shot handlers keyed by request
+ * code, since `ReactActivity` doesn't expose pluggable per-request-code dispatch.
  */
 public object BridgethingActivityRegistry {
     private val currentRef = AtomicReference<Activity?>(null)
@@ -50,7 +47,6 @@ public object BridgethingActivityRegistry {
         synchronized(handlers) { handlers[requestCode] = handler }
     }
 
-    /** Routed from [MainActivity.onActivityResult]. */
     public fun deliverResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         val handler = synchronized(handlers) { handlers.remove(requestCode) } ?: return false
         handler(resultCode, data)

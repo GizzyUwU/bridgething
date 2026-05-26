@@ -58,9 +58,7 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
     if (!trimmed) return;
     setInstalling(true);
     try {
-      // JS owns the download — fetch the bundle here, hand the bytes to
-      // native for the on-device install. Skipping the URLSession round
-      // trip on the Swift side keeps the install surface narrow.
+      // fetch the bundle in JS and hand the bytes to native for install.
       const response = await fetch(trimmed);
       if (!response.ok) {
         throw new Error(

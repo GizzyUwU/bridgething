@@ -1,7 +1,5 @@
-//! Power-state control via systemd's D-Bus surface. Replaces the prior
-//! `sudo reboot` / `sudo shutdown now` shell-outs - same behavior, no
-//! suid dependency, structured errors, no shell process spawn per
-//! request.
+//! Power-state control via systemd's D-Bus surface: no suid dependency,
+//! structured errors, no shell process spawn per request.
 //!
 //! Three callers today: webapp-driven `Reboot` / `PowerOff` system
 //! commands (`handler::client::system`), the OTA orchestrator's image

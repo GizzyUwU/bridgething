@@ -200,7 +200,7 @@ mod tests {
     tokio::spawn(async move {
       let (tcp, _) = listener.accept().await.unwrap();
       let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
-      let _ = ws.next().await; // wait for the client's first send
+      let _ = ws.next().await;
       let event = BridgeToClientMsg {
         id: uuid::Uuid::now_v7(),
         meta: MsgMeta::Event,

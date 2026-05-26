@@ -28,7 +28,7 @@ pub struct PlayerErrorReply {
   pub error: PlayerError,
 }
 
-/// Daemon → webapp player surface. `Snapshot` lands on connect with the
+/// Daemon -> webapp player surface. `Snapshot` lands on connect with the
 /// current player state; `Delta` is the `NowPlayingUpdate` stream the
 /// SDK auto-merges; `QueueChanged` fires when the queue mutates without
 /// a track change. `StateReply`/`QueueReply` are the typed responses

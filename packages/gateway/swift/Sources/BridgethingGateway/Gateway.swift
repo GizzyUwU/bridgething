@@ -41,7 +41,7 @@ public actor BridgethingGateway {
   /// subscribed to the underlying broadcaster, so multiple consumers
   /// (per-surface dispatch tasks, OTA poll-loop meta tracker, host-app
   /// observers) each receive every event independently. AsyncStream is
-  /// unicast at the iterator level - a single underlying stream would
+  /// unicast at the iterator level: a single underlying stream would
   /// silently partition events across concurrent `for await` loops, so
   /// the broadcaster fans yields out to each subscribed continuation.
   public nonisolated var events: AsyncStream<GatewayEvent> {
@@ -90,7 +90,7 @@ public actor BridgethingGateway {
   /// `meta` (`.command`, `.event`, etc.). For request/response, prefer
   /// `request(deviceId:_:timeout:)` which handles id generation and awaiting.
   ///
-  /// `priority` is a transport-level scheduling hint - Bulk yields to Normal at
+  /// `priority` is a transport-level scheduling hint: Bulk yields to Normal at
   /// frame boundaries so latency-sensitive traffic (NowPlaying deltas, like
   /// taps) interleaves between long bulk transfers (file/OTA chunks). Default
   /// is `.normal`.
@@ -192,8 +192,8 @@ public actor BridgethingGateway {
 ///    unicast across iterators, so without this fan-out concurrent
 ///    `for await event in gateway.events` loops would silently partition
 ///    events between consumers.
-/// 2. The startup race - `consumerTask` may emit events before the
-///    companion's dispatcher tasks finish subscribing - is closed by
+/// 2. The startup race (`consumerTask` may emit events before the
+///    companion's dispatcher tasks finish subscribing) is closed by
 ///    a bounded replay cache. Each new subscriber receives the buffered
 ///    history under the same lock that emit takes, so a concurrent
 ///    emit can't interleave between the replay and going live.
