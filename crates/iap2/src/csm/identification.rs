@@ -359,6 +359,61 @@ impl From<IdentificationInformation> for CsmFrame {
   }
 }
 
+/// Param id carrying one EA protocol group inside
+/// `IdentificationInformation`; repeated once per declared protocol.
+#[cfg(feature = "emulator")]
+const EA_PROTOCOL_PARAM: u16 = 10;
+
+#[cfg(feature = "emulator")]
+impl EaProtocolMatchAction {
+  fn from_u8(byte: u8) -> Option<Self> {
+    match byte {
+      0 => Some(Self::NoAction),
+      1 => Some(Self::OptionalAction),
+      2 => Some(Self::NoAlertAction),
+      _ => None,
+    }
+  }
+}
+
+#[cfg(feature = "emulator")]
+impl EaProtocol {
+  /// Decode one EA protocol group (the inverse of [`EaProtocol::into_group`]).
+  fn from_group(payload: Bytes) -> Result<Self, CsmDecodeError> {
+    use super::CsmParamFieldDecode;
+    let mut params = super::decode_param_block(payload)?;
+    let id = u8::decode_field(0, &mut params)?;
+    let name = String::decode_field(1, &mut params)?;
+    let match_action_byte = u8::decode_field(2, &mut params)?;
+    let match_action = EaProtocolMatchAction::from_u8(match_action_byte).ok_or(CsmDecodeError::ParamDecode {
+      param_id: 2,
+      detail: "EA protocol match action must be 0, 1, or 2",
+    })?;
+    let native_transport_component_identifier = Option::<u16>::decode_field(3, &mut params)?;
+    Ok(Self {
+      id,
+      name,
+      match_action,
+      native_transport_component_identifier,
+    })
+  }
+}
+
+/// Device-side: extract the EA protocols the accessory declared in a
+/// received `IdentificationInformation`. The emulator uses this to learn
+/// the gateway protocol id from the wire rather than hardcoding it, so
+/// it works against whatever the real daemon advertises.
+#[cfg(feature = "emulator")]
+pub(crate) fn parse_ea_protocols(frame: &CsmFrame) -> Result<Vec<EaProtocol>, CsmDecodeError> {
+  let mut out = Vec::new();
+  for param in &frame.params {
+    if param.id == EA_PROTOCOL_PARAM {
+      out.push(EaProtocol::from_group(param.payload.clone())?);
+    }
+  }
+  Ok(out)
+}
+
 fn merge_messages(builtin_groups: &[&[u16]], extra: &[u16]) -> Vec<u16> {
   let mut out: Vec<u16> = Vec::with_capacity(builtin_groups.iter().map(|g| g.len()).sum::<usize>() + extra.len());
   for g in builtin_groups {
@@ -573,5 +628,54 @@ mod tests {
     };
     let frame: CsmFrame = info.into();
     assert!(frame.find(11).is_none());
+  }
+}
+
+#[cfg(all(test, feature = "emulator"))]
+mod device_decode_tests {
+  use super::*;
+
+  #[test]
+  fn parse_ea_protocols_round_trips_each_entry() {
+    let mut cfg = IdentificationConfig::for_carthing(CarthingIdentification {
+      serial_number: "BT0001".into(),
+      firmware_version: "v0.1.0".into(),
+      bt_mac: [1, 2, 3, 4, 5, 6],
+    });
+    cfg.supported_external_accessory_protocols = vec![
+      EaProtocol {
+        id: 1,
+        name: "com.bridgething.gateway".into(),
+        match_action: EaProtocolMatchAction::NoAlertAction,
+        native_transport_component_identifier: None,
+      },
+      EaProtocol {
+        id: 2,
+        name: "com.bridgething.companion".into(),
+        match_action: EaProtocolMatchAction::OptionalAction,
+        native_transport_component_identifier: Some(5353),
+      },
+    ];
+    let frame: CsmFrame = IdentificationInformation { config: cfg }.into();
+    let parsed = parse_ea_protocols(&frame).unwrap();
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].id, 1);
+    assert_eq!(parsed[0].name, "com.bridgething.gateway");
+    assert_eq!(parsed[0].match_action, EaProtocolMatchAction::NoAlertAction);
+    assert_eq!(parsed[0].native_transport_component_identifier, None);
+    assert_eq!(parsed[1].id, 2);
+    assert_eq!(parsed[1].name, "com.bridgething.companion");
+    assert_eq!(parsed[1].native_transport_component_identifier, Some(5353));
+  }
+
+  #[test]
+  fn parse_ea_protocols_empty_when_none_declared() {
+    let cfg = IdentificationConfig::for_carthing(CarthingIdentification {
+      serial_number: "BT0001".into(),
+      firmware_version: "v0.1.0".into(),
+      bt_mac: [1, 2, 3, 4, 5, 6],
+    });
+    let frame: CsmFrame = IdentificationInformation { config: cfg }.into();
+    assert!(parse_ea_protocols(&frame).unwrap().is_empty());
   }
 }

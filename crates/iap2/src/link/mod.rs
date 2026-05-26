@@ -115,6 +115,44 @@ impl Link {
     .await
   }
 
+  /// Device-half (iPhone-side) role for the emulator. Mirror of [`run`]:
+  /// the accessory initiates the SYN, so here we wait for it and reply
+  /// SYN|ACK. Detect and established phases are role-agnostic and shared.
+  #[cfg(feature = "emulator")]
+  pub async fn run_device<S>(
+    stream: S,
+    config: LinkConfig,
+    events_tx: mpsc::Sender<Iap2Event>,
+    mut commands_rx: mpsc::Receiver<Iap2Command>,
+  ) -> Result<()>
+  where
+    S: AsyncRead + AsyncWrite + Unpin,
+  {
+    let (mut reader, mut writer) = tokio::io::split(stream);
+    let mut buf = BytesMut::with_capacity(READ_CAPACITY);
+    let mut codec = LinkCodec;
+
+    let (peer_lsp, peer_initial_psn) =
+      Self::detect_and_negotiate_device(&mut reader, &mut writer, &mut buf, &mut codec, &config).await?;
+
+    if events_tx.send(Iap2Event::Established(peer_lsp.clone())).await.is_err() {
+      tracing::debug!("iap2 events receiver dropped before Established could be delivered");
+    }
+    tracing::info!("iap2 device link Established");
+
+    let mut state = EstablishedState::new(config.initial_psn, peer_initial_psn, &peer_lsp);
+    Self::established_phase(
+      &mut reader,
+      &mut writer,
+      &mut buf,
+      &mut codec,
+      &mut state,
+      &events_tx,
+      &mut commands_rx,
+    )
+    .await
+  }
+
   async fn detect_phase<R, W>(reader: &mut R, writer: &mut W, buf: &mut BytesMut, config: &LinkConfig) -> Result<()>
   where
     R: AsyncRead + Unpin,
@@ -186,6 +224,76 @@ impl Link {
       }
 
       tokio::select! {
+        read = reader.read_buf(buf) => {
+          let n = read?;
+          if n == 0 {
+            return Err(Error::PeerDisconnectedDuringHandshake);
+          }
+        }
+        _ = &mut deadline => {
+          return Err(Error::HandshakeTimeout("Negotiating"));
+        }
+      }
+    }
+  }
+
+  /// Device-role detect + negotiate, combined. The accessory needs to
+  /// drain at least one of our detect markers before it sends its SYN,
+  /// so unlike the accessory's `detect_phase` (which stops on the first
+  /// peer marker) we keep emitting detect markers on the interval until
+  /// the SYN actually arrives - otherwise whichever side stops first
+  /// can strand the other in Detecting. The codec skips the accessory's
+  /// detect markers (bad-magic resync) and surfaces only the SYN. We
+  /// reply SYN|ACK (seq = our PSN, ack = the accessory's PSN); the
+  /// accessory's trailing standalone ACK lands harmlessly in the
+  /// established phase. Returns the peer LSP + the accessory's PSN.
+  #[cfg(feature = "emulator")]
+  async fn detect_and_negotiate_device<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    buf: &mut BytesMut,
+    codec: &mut LinkCodec,
+    config: &LinkConfig,
+  ) -> Result<(Lsp, u8)>
+  where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+  {
+    tracing::debug!("iap2 device link entering Detecting state");
+    let mut detect_interval = tokio::time::interval(config.detect_interval);
+    detect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let deadline = tokio::time::sleep(config.handshake_timeout);
+    tokio::pin!(deadline);
+
+    loop {
+      if let Some(pkt) = codec.decode(buf)? {
+        tracing::trace!("iap2 device negotiating: received {:?}", pkt.header);
+        if pkt.header.control.contains(ControlBits::RST) {
+          return Err(Error::PeerReset);
+        }
+        if pkt.header.control.contains(ControlBits::SYN) {
+          let lsp = Lsp::decode(&pkt.payload)?;
+          let peer_initial_psn = pkt.header.seq;
+          let syn_ack = LinkPacket::with_payload(
+            ControlBits::SYN | ControlBits::ACK,
+            config.initial_psn,
+            peer_initial_psn,
+            0,
+            config.our_lsp.encode(),
+          );
+          write_packet(writer, codec, syn_ack).await?;
+          tracing::trace!("iap2 device sent SYN|ACK");
+          return Ok((lsp, peer_initial_psn));
+        }
+        return Err(Error::UnexpectedHandshakePacket(pkt.header.control));
+      }
+
+      tokio::select! {
+        _ = detect_interval.tick() => {
+          tracing::trace!("iap2 device sending detect marker");
+          writer.write_all(&DETECT_MARKER).await?;
+          writer.flush().await?;
+        }
         read = reader.read_buf(buf) => {
           let n = read?;
           if n == 0 {

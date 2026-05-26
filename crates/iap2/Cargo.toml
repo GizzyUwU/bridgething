@@ -7,6 +7,12 @@ license.workspace = true
 authors.workspace = true
 homepage.workspace = true
 
+[features]
+# device-half (iPhone-side) iAP2 emulator for T3 over-air testing. Off in prod;
+# the daemon never enables it. Adds the responder link role + a scripted
+# device-side session driver under src/emulator/.
+emulator = []
+
 [dependencies]
 bridgething-macros = { path = "../macros" }
 bridgething-mfi = { path = "../mfi" }
@@ -28,3 +34,4 @@ uuid.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 futures = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

@@ -252,6 +252,131 @@ impl FileTransferFlow {
   }
 }
 
+#[cfg(feature = "emulator")]
+pub(crate) use device::DeviceFileTransfer;
+
+/// Device-half (iPhone-side) artwork sender: the inverse of
+/// [`FileTransferFlow`]. Lives here, gated, to reuse the private opcode
+/// constants and the link session id rather than re-export them.
+#[cfg(feature = "emulator")]
+mod device {
+  use std::collections::HashMap;
+
+  use bytes::{BufMut, Bytes, BytesMut};
+  use tokio::sync::mpsc;
+
+  use super::{
+    FILE_TRANSFER_LINK_SESSION_ID, FILE_TYPE_ARTWORK, OP_COMPLETE_ACK, OP_DATA, OP_FIRST_AND_ONLY, OP_FIRST_DATA,
+    OP_LAST_DATA, OP_SETUP, OP_SETUP_ACK,
+  };
+  use crate::{
+    error::{Error, Result},
+    frame::LINK_HEADER_LEN,
+    link::Iap2Command,
+  };
+
+  /// Per-packet bytes the file-transfer body shares with framing: the
+  /// link header, the link payload checksum trailer, and the `[id, op]`
+  /// file-transfer header. Bodies are chunked so each `[id, op, chunk]`
+  /// stays within the negotiated link payload budget; otherwise the
+  /// link layer re-chunks it and the accessory parses the spilled bytes
+  /// of the next packet as a bogus `[id, op]` header.
+  const PER_PACKET_OVERHEAD: usize = LINK_HEADER_LEN + 1 + 2;
+
+  pub(crate) struct DeviceFileTransfer {
+    link_command_tx: mpsc::Sender<Iap2Command>,
+    chunk_budget: usize,
+    pending: HashMap<u8, Bytes>,
+  }
+
+  impl DeviceFileTransfer {
+    pub(crate) fn new(link_command_tx: mpsc::Sender<Iap2Command>, peer_max_len: u16) -> Self {
+      let chunk_budget = (peer_max_len as usize).saturating_sub(PER_PACKET_OVERHEAD).max(1);
+      Self {
+        link_command_tx,
+        chunk_budget,
+        pending: HashMap::new(),
+      }
+    }
+
+    /// Begin an artwork transfer: send Setup (file type 2), stash the
+    /// body until the accessory's SetupAck arrives.
+    pub(crate) async fn begin_artwork(&mut self, transfer_id: u8, body: Bytes) -> Result<()> {
+      let mut setup = BytesMut::with_capacity(12);
+      setup.put_u8(transfer_id);
+      setup.put_u8(OP_SETUP);
+      setup.put_u64(body.len() as u64);
+      setup.put_u16(FILE_TYPE_ARTWORK);
+      tracing::debug!(transfer_id, size = body.len(), "device file-transfer: Setup");
+      self.send(setup.freeze()).await?;
+      self.pending.insert(transfer_id, body);
+      Ok(())
+    }
+
+    /// Route an inbound session-2 link payload. On SetupAck, stream the
+    /// stashed body; on CompleteAck, return the finished transfer id.
+    pub(crate) async fn on_link_data(&mut self, payload: Bytes) -> Result<Option<u8>> {
+      if payload.len() < 2 {
+        return Ok(None);
+      }
+      let id = payload[0];
+      match payload[1] {
+        OP_SETUP_ACK => {
+          self.send_body(id).await?;
+          Ok(None)
+        }
+        OP_COMPLETE_ACK => {
+          tracing::debug!(transfer_id = id, "device file-transfer: CompleteAck");
+          Ok(Some(id))
+        }
+        other => {
+          tracing::trace!(transfer_id = id, op = other, "device file-transfer: ignoring op");
+          Ok(None)
+        }
+      }
+    }
+
+    async fn send_body(&mut self, id: u8) -> Result<()> {
+      let Some(body) = self.pending.remove(&id) else {
+        tracing::warn!(transfer_id = id, "device file-transfer: SetupAck for unknown transfer");
+        return Ok(());
+      };
+      if body.len() <= self.chunk_budget {
+        self.send(frame(id, OP_FIRST_AND_ONLY, &body)).await?;
+        return Ok(());
+      }
+      let mut remaining = body;
+      let first = remaining.split_to(self.chunk_budget);
+      self.send(frame(id, OP_FIRST_DATA, &first)).await?;
+      while remaining.len() > self.chunk_budget {
+        let mid = remaining.split_to(self.chunk_budget);
+        self.send(frame(id, OP_DATA, &mid)).await?;
+      }
+      self.send(frame(id, OP_LAST_DATA, &remaining)).await?;
+      Ok(())
+    }
+
+    async fn send(&self, payload: Bytes) -> Result<()> {
+      self
+        .link_command_tx
+        .send(Iap2Command::Send {
+          session_id: FILE_TRANSFER_LINK_SESSION_ID,
+          payload,
+        })
+        .await
+        .map_err(|_| Error::LinkClosed)
+    }
+  }
+
+  fn frame(id: u8, op: u8, body: &[u8]) -> Bytes {
+    let mut p = BytesMut::with_capacity(2 + body.len());
+    p.put_u8(id);
+    p.put_u8(op);
+    p.put_slice(body);
+    p.freeze()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

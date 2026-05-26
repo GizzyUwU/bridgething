@@ -20,7 +20,7 @@ uuid = { workspace = true, features = ["v7"] }
 anyhow = "1.0"
 tempfile = "3.23.0"
 tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect"] }
-bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
+bridgething-iap2 = { version = "0.1.0", path = "../iap2", features = ["emulator"] }
 chromiumoxide = "0.9.1"
 serde.workspace = true
 serde_json.workspace = true

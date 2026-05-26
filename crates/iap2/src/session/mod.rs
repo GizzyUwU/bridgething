@@ -24,6 +24,7 @@
 
 mod auth;
 mod device;
+mod ea_transport;
 mod external_accessory;
 mod file_transfer;
 mod hid;
@@ -37,8 +38,12 @@ use auth::AuthFlow;
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
 use bytes::{Bytes, BytesMut};
 use device::DeviceFlow;
+#[cfg(feature = "emulator")]
+pub(crate) use ea_transport::{EA_LINK_SESSION_ID, EaChunker, split_stream_frame};
+pub use ea_transport::{EaPriority, EaSendError, EaStreamSender};
 use external_accessory::EaFlow;
-pub use external_accessory::{EaPriority, EaSendError, EaStreamSender};
+#[cfg(feature = "emulator")]
+pub(crate) use file_transfer::DeviceFileTransfer;
 use file_transfer::FileTransferFlow;
 pub use hid::HidCommand;
 use hid::HidFlow;
@@ -256,7 +261,7 @@ impl<M: MfiAccess> Iap2Session<M> {
           Some(Iap2Event::DataReceived { session_id, payload }) => {
             if session_id == CONTROL_SESSION_ID {
               control_buf.extend_from_slice(&payload);
-            } else if session_id == external_accessory::EA_LINK_SESSION_ID {
+            } else if session_id == ea_transport::EA_LINK_SESSION_ID {
               if let Some(ea) = self.ea.as_mut() {
                 ea.dispatch_link_data(payload).await;
               } else {

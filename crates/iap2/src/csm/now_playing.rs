@@ -646,6 +646,159 @@ fn take_optional_presence_bool(param_id: u16, params: &mut Vec<CsmParam>) -> Res
   }
 }
 
+/// Device-side (iPhone) encoders for the emulator: the inverse of the
+/// decoders above. Lives here, gated, to reuse the private sub-id
+/// constants rather than re-export ~25 of them. Presence-only bools
+/// ride as empty-payload markers (the real iPhone never sends a `[0]`
+/// byte for these); a `Some(false)` therefore encodes as absence.
+#[cfg(feature = "emulator")]
+mod device_encode {
+  use super::{
+    MEDIA_ITEM_ALBUM, MEDIA_ITEM_ALBUM_ARTIST, MEDIA_ITEM_ALBUM_TRACK_COUNT, MEDIA_ITEM_ALBUM_TRACK_NUMBER,
+    MEDIA_ITEM_ARTIST, MEDIA_ITEM_ARTWORK_ID, MEDIA_ITEM_BAN_SUPPORTED, MEDIA_ITEM_BANNED, MEDIA_ITEM_CHAPTER_COUNT,
+    MEDIA_ITEM_DURATION_MS, MEDIA_ITEM_LIKE_SUPPORTED, MEDIA_ITEM_LIKED, MEDIA_ITEM_MEDIA_TYPE,
+    MEDIA_ITEM_PERSISTENT_ID, MEDIA_ITEM_RESIDENT_ON_DEVICE, MEDIA_ITEM_TITLE, MediaItemAttributes, MediaTypeKind,
+    NOW_PLAYING_PARAM_MEDIA_ITEM, NOW_PLAYING_PARAM_PLAYBACK, NowPlayingUpdate, PLAYBACK_APP_BUNDLE,
+    PLAYBACK_APP_DISPLAY_NAME, PLAYBACK_LIBRARY_UNIQUE_ID, PLAYBACK_POSITION_MS, PLAYBACK_QUEUE_CHAPTER_INDEX,
+    PLAYBACK_QUEUE_COUNT, PLAYBACK_QUEUE_INDEX, PLAYBACK_QUEUE_LIST_AVAIL, PLAYBACK_QUEUE_LIST_CONTENT_TRANSFER,
+    PLAYBACK_QUEUE_LIST_TRANSFER_ID, PLAYBACK_RADIO_AD, PLAYBACK_RADIO_STATION_NAME, PLAYBACK_REPEAT,
+    PLAYBACK_SET_ELAPSED_TIME_AVAILABLE, PLAYBACK_SHUFFLE_MODE, PLAYBACK_SPEED, PLAYBACK_STATE, PlaybackAttributes,
+    PlaybackState, RepeatMode, ShuffleMode,
+  };
+  use crate::csm::{CsmFrame, CsmParam, CsmParamFieldEncode, encode_param_block};
+
+  impl From<NowPlayingUpdate> for CsmFrame {
+    fn from(value: NowPlayingUpdate) -> Self {
+      let mut params: Vec<CsmParam> = Vec::with_capacity(2);
+      if let Some(media) = value.media_item {
+        params.push(CsmParam {
+          id: NOW_PLAYING_PARAM_MEDIA_ITEM,
+          payload: media.encode_group(),
+        });
+      }
+      if let Some(playback) = value.playback {
+        params.push(CsmParam {
+          id: NOW_PLAYING_PARAM_PLAYBACK,
+          payload: playback.encode_group(),
+        });
+      }
+      Self {
+        msg_id: NowPlayingUpdate::CSM_MSG_ID,
+        params,
+      }
+    }
+  }
+
+  impl MediaItemAttributes {
+    fn encode_group(self) -> bytes::Bytes {
+      let mut p: Vec<CsmParam> = Vec::new();
+      self.persistent_id.encode_field(MEDIA_ITEM_PERSISTENT_ID, &mut p);
+      self.title.encode_field(MEDIA_ITEM_TITLE, &mut p);
+      if let Some(types) = self.media_types {
+        encode_media_types(&types).encode_field(MEDIA_ITEM_MEDIA_TYPE, &mut p);
+      }
+      self.duration_ms.encode_field(MEDIA_ITEM_DURATION_MS, &mut p);
+      self.album.encode_field(MEDIA_ITEM_ALBUM, &mut p);
+      self.track_number.encode_field(MEDIA_ITEM_ALBUM_TRACK_NUMBER, &mut p);
+      self.track_count.encode_field(MEDIA_ITEM_ALBUM_TRACK_COUNT, &mut p);
+      self.artist.encode_field(MEDIA_ITEM_ARTIST, &mut p);
+      self.album_artist.encode_field(MEDIA_ITEM_ALBUM_ARTIST, &mut p);
+      encode_presence(self.like_supported, MEDIA_ITEM_LIKE_SUPPORTED, &mut p);
+      encode_presence(self.ban_supported, MEDIA_ITEM_BAN_SUPPORTED, &mut p);
+      encode_presence(self.liked, MEDIA_ITEM_LIKED, &mut p);
+      encode_presence(self.banned, MEDIA_ITEM_BANNED, &mut p);
+      encode_presence(self.resident_on_device, MEDIA_ITEM_RESIDENT_ON_DEVICE, &mut p);
+      self.artwork_id.encode_field(MEDIA_ITEM_ARTWORK_ID, &mut p);
+      self.chapter_count.encode_field(MEDIA_ITEM_CHAPTER_COUNT, &mut p);
+      encode_param_block(p)
+    }
+  }
+
+  impl PlaybackAttributes {
+    fn encode_group(self) -> bytes::Bytes {
+      let mut p: Vec<CsmParam> = Vec::new();
+      if let Some(state) = self.state {
+        playback_state_byte(state).encode_field(PLAYBACK_STATE, &mut p);
+      }
+      self.position_ms.encode_field(PLAYBACK_POSITION_MS, &mut p);
+      self.queue_index.encode_field(PLAYBACK_QUEUE_INDEX, &mut p);
+      self.queue_count.encode_field(PLAYBACK_QUEUE_COUNT, &mut p);
+      self
+        .queue_chapter_index
+        .encode_field(PLAYBACK_QUEUE_CHAPTER_INDEX, &mut p);
+      if let Some(shuffle) = self.shuffle_mode {
+        shuffle_mode_byte(shuffle).encode_field(PLAYBACK_SHUFFLE_MODE, &mut p);
+      }
+      if let Some(repeat) = self.repeat {
+        repeat_mode_byte(repeat).encode_field(PLAYBACK_REPEAT, &mut p);
+      }
+      self.app_display_name.encode_field(PLAYBACK_APP_DISPLAY_NAME, &mut p);
+      self.library_unique_id.encode_field(PLAYBACK_LIBRARY_UNIQUE_ID, &mut p);
+      encode_presence(self.apple_music_radio_ad, PLAYBACK_RADIO_AD, &mut p);
+      self
+        .apple_music_radio_station_name
+        .encode_field(PLAYBACK_RADIO_STATION_NAME, &mut p);
+      self.playback_speed_hundredths.encode_field(PLAYBACK_SPEED, &mut p);
+      encode_presence(
+        self.set_elapsed_time_available,
+        PLAYBACK_SET_ELAPSED_TIME_AVAILABLE,
+        &mut p,
+      );
+      encode_presence(self.queue_list_avail, PLAYBACK_QUEUE_LIST_AVAIL, &mut p);
+      self
+        .queue_list_transfer_id
+        .encode_field(PLAYBACK_QUEUE_LIST_TRANSFER_ID, &mut p);
+      self.app_bundle.encode_field(PLAYBACK_APP_BUNDLE, &mut p);
+      if self.queue_list_content_transfer.is_some() {
+        ().encode_field(PLAYBACK_QUEUE_LIST_CONTENT_TRANSFER, &mut p);
+      }
+      encode_param_block(p)
+    }
+  }
+
+  fn encode_presence(value: Option<bool>, param_id: u16, out: &mut Vec<CsmParam>) {
+    if value == Some(true) {
+      ().encode_field(param_id, out);
+    }
+  }
+
+  fn encode_media_types(types: &[MediaTypeKind]) -> u32 {
+    let mut bits = 0u32;
+    for t in types {
+      bits |= match t {
+        MediaTypeKind::Music => 1 << 0,
+        MediaTypeKind::Podcast => 1 << 1,
+        MediaTypeKind::AudioBook => 1 << 2,
+      };
+    }
+    bits
+  }
+
+  fn playback_state_byte(state: PlaybackState) -> u8 {
+    match state {
+      PlaybackState::Stopped => 0,
+      PlaybackState::Playing => 1,
+      PlaybackState::Paused => 2,
+    }
+  }
+
+  fn shuffle_mode_byte(mode: ShuffleMode) -> u8 {
+    match mode {
+      ShuffleMode::Off => 0,
+      ShuffleMode::Songs => 1,
+      ShuffleMode::Albums => 2,
+    }
+  }
+
+  fn repeat_mode_byte(mode: RepeatMode) -> u8 {
+    match mode {
+      RepeatMode::Off => 0,
+      RepeatMode::Track => 1,
+      RepeatMode::All => 2,
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use bytes::{BufMut, BytesMut};
@@ -947,5 +1100,77 @@ mod tests {
   fn queue_snapshot_empty_blob_yields_empty_vec() {
     let items = decode_queue_snapshot(Bytes::new()).unwrap();
     assert!(items.is_empty());
+  }
+}
+
+#[cfg(all(test, feature = "emulator"))]
+mod device_encode_tests {
+  use bytes::BytesMut;
+  use tokio_util::codec::{Decoder, Encoder};
+
+  use super::*;
+  use crate::csm::CsmCodec;
+
+  #[test]
+  fn now_playing_update_round_trips_device_to_accessory() {
+    let original = NowPlayingUpdate {
+      media_item: Some(MediaItemAttributes {
+        persistent_id: Some(0x0A0B_0C0D_0E0F_1011),
+        title: Some("Side of Town".into()),
+        album: Some("Capital Soiree".into()),
+        artist: Some("Saint Blonde".into()),
+        duration_ms: Some(212_000),
+        track_number: Some(3),
+        liked: Some(true),
+        artwork_id: Some(129),
+        ..MediaItemAttributes::default()
+      }),
+      playback: Some(PlaybackAttributes {
+        state: Some(PlaybackState::Playing),
+        position_ms: Some(41_250),
+        shuffle_mode: Some(ShuffleMode::Off),
+        repeat: Some(RepeatMode::All),
+        set_elapsed_time_available: Some(true),
+        app_bundle: Some("com.spotify.client".into()),
+        ..PlaybackAttributes::default()
+      }),
+    };
+
+    let mut buf = BytesMut::new();
+    CsmCodec.encode(original.clone().into(), &mut buf).unwrap();
+    let decoded: NowPlayingUpdate = CsmCodec.decode(&mut buf).unwrap().unwrap().try_into().unwrap();
+
+    let media = decoded.media_item.expect("media_item");
+    assert_eq!(media.persistent_id, Some(0x0A0B_0C0D_0E0F_1011));
+    assert_eq!(media.title.as_deref(), Some("Side of Town"));
+    assert_eq!(media.album.as_deref(), Some("Capital Soiree"));
+    assert_eq!(media.artist.as_deref(), Some("Saint Blonde"));
+    assert_eq!(media.duration_ms, Some(212_000));
+    assert_eq!(media.track_number, Some(3));
+    assert_eq!(media.liked, Some(true));
+    assert_eq!(media.artwork_id, Some(129));
+
+    let play = decoded.playback.expect("playback");
+    assert_eq!(play.state, Some(PlaybackState::Playing));
+    assert_eq!(play.position_ms, Some(41_250));
+    assert_eq!(play.shuffle_mode, Some(ShuffleMode::Off));
+    assert_eq!(play.repeat, Some(RepeatMode::All));
+    assert_eq!(play.set_elapsed_time_available, Some(true));
+    assert_eq!(play.app_bundle.as_deref(), Some("com.spotify.client"));
+  }
+
+  #[test]
+  fn presence_false_encodes_as_absence() {
+    let update = NowPlayingUpdate {
+      media_item: Some(MediaItemAttributes {
+        liked: Some(false),
+        ..MediaItemAttributes::default()
+      }),
+      playback: None,
+    };
+    let decoded: NowPlayingUpdate = NowPlayingUpdate::try_from(CsmFrame::from(update)).unwrap();
+    // Presence-only bools cannot carry false on the wire; it round-trips
+    // to None (absence), matching the real iPhone's encoding.
+    assert_eq!(decoded.media_item.unwrap().liked, None);
   }
 }

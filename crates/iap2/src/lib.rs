@@ -13,11 +13,15 @@
 //! and steady-state CSM dispatch land in subsequent slices.
 
 pub mod csm;
+#[cfg(feature = "emulator")]
+pub mod emulator;
 mod error;
 mod frame;
 mod link;
 pub mod session;
 
+#[cfg(feature = "emulator")]
+pub use emulator::{DeviceEaStream, DeviceEmulator, EmulatorEvent};
 pub use error::{Error, Result};
 pub use frame::{
   ControlBits, DETECT_MARKER, LINK_HEADER_LEN, LINK_MAGIC, LinkCodec, LinkHeader, LinkPacket, Lsp, SessionTriple,
