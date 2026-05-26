@@ -48,6 +48,7 @@ yarn-error.log*
 .DS_Store
 *.pem
 
-# Local build-time overrides - never commit
+# Local build-time overrides
 *.local.xcconfig
 gradle.properties.local
+.swiftpm/

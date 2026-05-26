@@ -61,8 +61,9 @@ cross-build-test:
 push: cross-build
   scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
 
+# Cross-build the test-tap binary then push to /opt/bridgething/daemon/
 push-test: cross-build-test
-  scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/deps/bridgething
+  scripts/bridgething-push-daemon {{cross_target_dir}}/{{cross_target}}/release/bridgething
 
 # Push a webapp bundle into /var/bridgething/webapps/<name>/
 push-webapp local name="":
