@@ -35,11 +35,13 @@ use crate::{
 };
 
 const IDLE_PID_HEX: &str = "0000000000000000";
+const NONMUSIC_PID: &str = "nonmusic";
 const HINT_DEBOUNCE: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Default, Clone)]
 struct HintCheckpoint {
-  pid_hex: Option<String>,
+  track_pid_hex: Option<String>,
+  emitted_pid: Option<String>,
   playing: Option<bool>,
   app_bundle: Option<String>,
   duration_ms: Option<u32>,
@@ -160,17 +162,16 @@ impl Iap2EventRouter {
         let pid_hex = {
           let mut guard = self.hint_state.lock().await;
           let entry = guard.entry(address).or_default();
-          if let Some(pid) = update.media_item.as_ref().and_then(|m| m.persistent_id) {
-            let hex = format!("{pid:016x}");
-            let track_changed = entry.pid_hex.as_deref() != Some(&hex);
-            entry.pid_hex = Some(hex.clone());
+          if let Some(key) = delta_track_key(update.media_item.as_ref()) {
+            let track_changed = entry.track_pid_hex.as_deref() != Some(&key);
+            entry.track_pid_hex = Some(key.clone());
             drop(guard);
             if track_changed {
               self.pending_art.clear(address).await;
             }
-            Some(hex)
+            Some(key)
           } else {
-            entry.pid_hex.clone()
+            entry.track_pid_hex.clone()
           }
         };
         if let Some(pid_hex) = pid_hex.as_deref()
@@ -383,12 +384,12 @@ fn evaluate_hint_against(entry: &mut HintCheckpoint, update: &NowPlayingUpdate, 
   let incoming_bundle = update.playback.as_ref().and_then(|p| p.app_bundle.clone());
   let incoming_duration = update.media_item.as_ref().and_then(|m| m.duration_ms);
 
-  let pid_for_emit = incoming_pid.clone().or_else(|| entry.pid_hex.clone());
+  let pid_for_emit = incoming_pid.clone().or_else(|| entry.emitted_pid.clone());
   let playing_for_emit = incoming_playing.or(entry.playing);
   let bundle_for_emit = incoming_bundle.clone().or_else(|| entry.app_bundle.clone());
   let duration_for_emit = incoming_duration.or(entry.duration_ms);
 
-  let pid_changed = incoming_pid.is_some() && entry.pid_hex != incoming_pid;
+  let pid_changed = incoming_pid.is_some() && entry.emitted_pid != incoming_pid;
   let playing_changed = incoming_playing.is_some() && incoming_playing != entry.playing;
   let bundle_changed = incoming_bundle.is_some() && incoming_bundle != entry.app_bundle;
 
@@ -401,7 +402,7 @@ fn evaluate_hint_against(entry: &mut HintCheckpoint, update: &NowPlayingUpdate, 
     return None;
   }
 
-  entry.pid_hex = pid_for_emit.clone();
+  entry.emitted_pid = pid_for_emit.clone();
   entry.playing = playing_for_emit;
   entry.app_bundle = bundle_for_emit.clone();
   entry.duration_ms = duration_for_emit;
@@ -419,20 +420,27 @@ fn pid_is_idle(pid: &str) -> bool {
   pid == IDLE_PID_HEX || pid.ends_with(&format!(":{IDLE_PID_HEX}"))
 }
 
-fn translate_now_playing(update: Iap2NowPlayingUpdate, persistent_hex: Option<&str>) -> NowPlayingUpdate {
+fn delta_track_key(media: Option<&MediaItemAttributes>) -> Option<String> {
+  let media = media?;
+  let has_title = media.title.as_deref().is_some_and(|t| !t.is_empty());
+  match media.persistent_id {
+    Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
+    _ if has_title => Some(NONMUSIC_PID.to_string()),
+    Some(0) => Some(IDLE_PID_HEX.to_string()),
+    _ => None,
+  }
+}
+
+fn translate_now_playing(update: Iap2NowPlayingUpdate, track_key: Option<&str>) -> NowPlayingUpdate {
   NowPlayingUpdate {
-    media_item: update.media_item.map(|m| translate_media_item(m, persistent_hex)),
+    media_item: update.media_item.map(|m| translate_media_item(m, track_key)),
     playback: update.playback.map(translate_playback),
   }
 }
 
-fn translate_media_item(media: MediaItemAttributes, persistent_hex: Option<&str>) -> MediaItemUpdate {
-  let pid_hex = media
-    .persistent_id
-    .map(|id| format!("{id:016x}"))
-    .or_else(|| persistent_hex.map(str::to_string));
+fn translate_media_item(media: MediaItemAttributes, track_key: Option<&str>) -> MediaItemUpdate {
   MediaItemUpdate {
-    persistent_id: pid_hex.map(|hex| format!("iap2:track:{hex}")),
+    persistent_id: track_key.map(|key| format!("iap2:track:{key}")),
     title: media.title,
     album: media.album,
     album_artist: media.album_artist,
@@ -698,7 +706,7 @@ mod tests {
     // so the next post-window delta still notices the change.
     let t1 = t0 + Duration::from_millis(100);
     assert!(evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t1).is_none());
-    assert_eq!(entry.pid_hex.as_deref(), Some("iap2:track:aa"));
+    assert_eq!(entry.emitted_pid.as_deref(), Some("iap2:track:aa"));
 
     let t2 = t0 + Duration::from_millis(300);
     let post = evaluate_hint_against(&mut entry, &track_update("bb", true, "com.spotify.client"), t2)
@@ -717,7 +725,7 @@ mod tests {
       )
       .is_none()
     );
-    assert!(entry.pid_hex.is_none());
+    assert!(entry.emitted_pid.is_none());
   }
 
   #[test]

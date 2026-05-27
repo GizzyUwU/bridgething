@@ -4385,6 +4385,9 @@ public struct WebappInfo: Codable, Sendable {
 	}
 }
 
+/// Drop the daemon-side partial for `install_id`. The chunked-transfer
+/// subsystem also runs a 24h stale GC for partials that were never
+/// abandoned, so this is an explicit cleanup, not a correctness gate.
 public struct WebappInstallAbandon: Codable, Sendable {
 	public let installId: String
 
@@ -4393,10 +4396,21 @@ public struct WebappInstallAbandon: Codable, Sendable {
 	}
 }
 
-/// Webapp-initiated chunked install. `install_id` is the sha256 hex of
-/// the zip. The terminal `WebappInstalled` / `WebappInstallFailed`
-/// events broadcast to both gateway and webapp peers regardless of
-/// which surface initiated the install.
+/// Companion-initiated chunked webapp install: opens or resumes a
+/// streaming push of a zip bundle. Daemon responds with
+/// `WebappInstallBeginAck { resume_from_offset }` (the byte offset the
+/// next `WebappInstallChunk` should start at, 0 for fresh pushes) or a
+/// `WebappError` variant (already-running install, mismatched size/sha
+/// on conflicting in-flight install_id, etc).
+/// 
+/// `install_id` is the sha256 of the .zip, hex-encoded. Content-
+/// addressed so resume across daemon restarts and retries-after-failure
+/// both work without companion-side state to track. The terminal
+/// outcome - `WebappInstalled(WebappInfo)` event on success or
+/// `WebappInstallFailed { install_id, error }` event on failure -
+/// arrives asynchronously after the last chunk lands; between the last
+/// `WebappInstallChunk` ack and the terminal event the install is
+/// implicitly in "installing" state.
 public struct WebappInstallBegin: Codable, Sendable {
 	public let installId: String
 	public let expectedSha256: String
@@ -4421,6 +4435,13 @@ public struct WebappInstallBeginAck: Codable, Sendable {
 	}
 }
 
+/// Streaming chunk of a webapp install upload opened by
+/// `WebappInstallBegin`. `offset` must equal the daemon's current
+/// `received` for the transfer (chunks are strictly in-order; the
+/// companion learns the resume offset from `WebappInstallBeginAck`).
+/// `last:true` triggers post-stream verify (size + sha256) followed by
+/// extract + validate + install. Terminal outcome arrives as
+/// `WebappInstalled` event or `WebappInstallFailed` event.
 public struct WebappInstallChunk: Codable, Sendable {
 	public let installId: String
 	public let offset: UInt32
@@ -4434,6 +4455,7 @@ public struct WebappInstallChunk: Codable, Sendable {
 		self.last = last
 	}
 }
+
 
 /// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum
 public struct WebappErrorWebappNotFoundInner: Codable, Sendable {

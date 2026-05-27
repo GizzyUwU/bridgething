@@ -49,6 +49,8 @@ const IAP2_PROFILE_NAME: &str = "iAP2";
 const IAP2_CLIENT_PROFILE_NAME: &str = "iAP2 (device dial-in)";
 const IAP2_CHANNEL_CAPACITY: usize = 16;
 const IAP2_EVENTS_CAPACITY: usize = 64;
+#[cfg(feature = "test-tap")]
+const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
@@ -99,6 +101,9 @@ pub type Iap2EventsRx = mpsc::Receiver<Iap2Event>;
 
 #[cfg(feature = "test-tap")]
 pub type Iap2InjectTx = mpsc::Sender<Iap2Event>;
+
+#[cfg(feature = "test-tap")]
+pub type Iap2OutboundTapTx = tokio::sync::broadcast::Sender<Iap2TransportCommand>;
 
 #[derive(Debug)]
 struct ActiveSession {
@@ -214,12 +219,22 @@ pub(super) struct Iap2Bootstrap {
   events_tx: mpsc::Sender<Iap2Event>,
   session_dead_tx: mpsc::Sender<(Address, u64)>,
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
+  #[cfg(feature = "test-tap")]
+  outbound_tap_tx: Iap2OutboundTapTx,
 }
 
 #[cfg(feature = "test-tap")]
 impl Iap2Bootstrap {
   pub(super) fn events_tx(&self) -> Iap2InjectTx {
     self.events_tx.clone()
+  }
+
+  pub(super) fn outbound_tap_tx(&self) -> Iap2OutboundTapTx {
+    self.outbound_tap_tx.clone()
+  }
+
+  pub(super) fn into_headless_outbound(self) -> (mpsc::Receiver<Iap2TransportCommand>, Iap2OutboundTapTx) {
+    (self.transport_rx, self.outbound_tap_tx)
   }
 }
 
@@ -229,6 +244,8 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
   let (telephony_tx, telephony_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
   let (events_tx, events_rx) = mpsc::channel::<Iap2Event>(IAP2_EVENTS_CAPACITY);
   let (session_dead_tx, session_dead_rx) = mpsc::channel::<(Address, u64)>(SESSION_DEAD_CAPACITY);
+  #[cfg(feature = "test-tap")]
+  let (outbound_tap_tx, _) = tokio::sync::broadcast::channel::<Iap2TransportCommand>(IAP2_OUTBOUND_TAP_CAPACITY);
 
   let handles = Iap2Handles {
     reconnect: Iap2ReconnectHandle { tx: reconnect_tx },
@@ -242,6 +259,8 @@ pub(super) fn allocate_iap2() -> (Iap2Handles, Iap2EventsRx, Iap2Bootstrap) {
     events_tx,
     session_dead_tx,
     session_dead_rx,
+    #[cfg(feature = "test-tap")]
+    outbound_tap_tx,
   };
   (handles, events_rx, bootstrap)
 }
@@ -296,6 +315,8 @@ impl Iap2Manager {
       events_tx,
       session_dead_rx,
       session_dead_tx,
+      #[cfg(feature = "test-tap")]
+        outbound_tap_tx: _,
     } = bootstrap;
     let active_sessions = Iap2ActiveSessions::default();
 

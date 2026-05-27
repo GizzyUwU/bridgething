@@ -162,9 +162,6 @@ impl<'a> BluetoothSurface<'a> {
       .command(ClientToBridgeBluetoothMsgCommand::Connect(payload))
       .await
   }
-  pub async fn scan(&self) -> Result<(), SdkError> {
-    self.0.command(ClientToBridgeBluetoothMsgCommand::Scan).await
-  }
   pub async fn enable_discoverable(&self) -> Result<(), SdkError> {
     self
       .0
@@ -177,23 +174,8 @@ impl<'a> BluetoothSurface<'a> {
       .command(ClientToBridgeBluetoothMsgCommand::DisableDiscoverable)
       .await
   }
-  pub async fn pair(&self, payload: PairBluetooth) -> Result<(), SdkError> {
-    self.0.command(ClientToBridgeBluetoothMsgCommand::Pair(payload)).await
-  }
   pub async fn forget(&self, payload: ForgetBluetooth) -> Result<(), SdkError> {
     self.0.command(ClientToBridgeBluetoothMsgCommand::Forget(payload)).await
-  }
-  pub async fn enable_pan(&self, payload: EnablePan) -> Result<(), SdkError> {
-    self
-      .0
-      .command(ClientToBridgeBluetoothMsgCommand::EnablePan(payload))
-      .await
-  }
-  pub async fn disable_pan(&self, payload: DisablePan) -> Result<(), SdkError> {
-    self
-      .0
-      .command(ClientToBridgeBluetoothMsgCommand::DisablePan(payload))
-      .await
   }
   pub async fn set_alias(&self, payload: SetBluetoothAlias) -> Result<(), SdkError> {
     self
@@ -705,18 +687,6 @@ impl<'a> VoiceSurface<'a> {
 pub struct WebappSurface<'a>(&'a Client);
 
 impl<'a> WebappSurface<'a> {
-  pub async fn install_chunk(&self, payload: WebappInstallChunk) -> Result<(), SdkError> {
-    self
-      .0
-      .command(ClientToBridgeWebappMsgCommand::InstallChunk(payload))
-      .await
-  }
-  pub async fn install_abandon(&self, payload: WebappInstallAbandon) -> Result<(), SdkError> {
-    self
-      .0
-      .command(ClientToBridgeWebappMsgCommand::InstallAbandon(payload))
-      .await
-  }
   pub async fn list(&self) -> Result<WebappListReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(WebappList).await
   }
@@ -727,12 +697,6 @@ impl<'a> WebappSurface<'a> {
     self.0.request(request).await
   }
   pub async fn icon(&self, request: WebappIcon) -> Result<WebappIconReply, RequestFailure<WebappError>> {
-    self.0.request(request).await
-  }
-  pub async fn install_begin(
-    &self,
-    request: WebappInstallBegin,
-  ) -> Result<WebappInstallBeginAck, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
   /// Stream of `Webapp` events.

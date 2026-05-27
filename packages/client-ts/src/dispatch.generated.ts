@@ -41,11 +41,9 @@ import type {
   ConnectedDevice,
   DeviceNicknameReply,
   DiagnosticsReply,
-  DisablePan,
   DisplaySetLevel,
   DisplaySetMode,
   Earcon,
-  EnablePan,
   FavoriteChanged,
   FavoritesSet,
   FavoritesSetMany,
@@ -94,7 +92,6 @@ import type {
   NetWsSend,
   NotificationInvoke,
   NotificationRemoved,
-  PairBluetooth,
   PairedDevicesMap,
   PeerSnapshotMap,
   PhoneAcceptAction,
@@ -136,10 +133,6 @@ import type {
   WebappCurrentReply,
   WebappIcon,
   WebappIconReply,
-  WebappInstallAbandon,
-  WebappInstallBegin,
-  WebappInstallBeginAck,
-  WebappInstallChunk,
   WebappInstallFailed,
   WebappListReply,
   WebappUninstalled,
@@ -273,7 +266,6 @@ export type WebappInboundHandlers = {
   currentReply: (msg: WebappCurrentReply) => void;
   activeReply: (msg: WebappActiveReply) => void;
   iconReply: (msg: WebappIconReply) => void;
-  installBeginAck: (msg: WebappInstallBeginAck) => void;
   webappError: (msg: WebappError) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
   webappInstalled: (msg: WebappInfo) => void;
@@ -705,16 +697,6 @@ export class BluetoothSurface {
     await this._client.send(msg);
   }
 
-  /** Send `Bluetooth::Scan` to the daemon. */
-  async scan(): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'bluetooth', data: { event: 'scan' } },
-    };
-    await this._client.send(msg);
-  }
-
   /** Send `Bluetooth::EnableDiscoverable` to the daemon. */
   async enableDiscoverable(): Promise<void> {
     const msg: ClientToBridgeMsg = {
@@ -735,42 +717,12 @@ export class BluetoothSurface {
     await this._client.send(msg);
   }
 
-  /** Send `Bluetooth::Pair` to the daemon. */
-  async pair(payload: PairBluetooth): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'bluetooth', data: { event: 'pair', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
   /** Send `Bluetooth::Forget` to the daemon. */
   async forget(payload: ForgetBluetooth): Promise<void> {
     const msg: ClientToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'bluetooth', data: { event: 'forget', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Bluetooth::EnablePan` to the daemon. */
-  async enablePan(payload: EnablePan): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'bluetooth', data: { event: 'enablePan', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Bluetooth::DisablePan` to the daemon. */
-  async disablePan(payload: DisablePan): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'bluetooth', data: { event: 'disablePan', data: payload } },
     };
     await this._client.send(msg);
   }
@@ -2920,18 +2872,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::InstallBeginAck` from the daemon. */
-  onInstallBeginAck(handler: (msg: WebappInstallBeginAck) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'installBeginAck') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::WebappError` from the daemon. */
   onWebappError(handler: (msg: WebappError) => void): () => void {
     return this._client.on(event => {
@@ -3025,10 +2965,6 @@ export class WebappSurface {
           handlers.iconReply?.(inner.data);
           return;
         }
-        case 'installBeginAck': {
-          handlers.installBeginAck?.(inner.data);
-          return;
-        }
         case 'webappError': {
           handlers.webappError?.(inner.data);
           return;
@@ -3055,26 +2991,6 @@ export class WebappSurface {
         }
       }
     });
-  }
-
-  /** Send `Webapp::InstallChunk` to the daemon. */
-  async installChunk(payload: WebappInstallChunk): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
-    };
-    await this._client.send(msg);
-  }
-
-  /** Send `Webapp::InstallAbandon` to the daemon. */
-  async installAbandon(payload: WebappInstallAbandon): Promise<void> {
-    const msg: ClientToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
-    };
-    await this._client.send(msg);
   }
 
   /** Typed request to the daemon: webapp sends, daemon responds. */
@@ -3131,23 +3047,6 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'iconReply') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to the daemon: webapp sends, daemon responds. */
-  async installBegin(
-    req: WebappInstallBegin,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
-    const wireData: ClientToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
-    const response = await this._client.request(wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -4125,10 +4024,6 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'iconReply': {
             innerHandlers.iconReply?.(inner.data);
-            return;
-          }
-          case 'installBeginAck': {
-            innerHandlers.installBeginAck?.(inner.data);
             return;
           }
           case 'webappError': {

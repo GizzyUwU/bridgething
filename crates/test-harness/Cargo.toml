@@ -25,3 +25,8 @@ chromiumoxide = "0.9.1"
 serde.workspace = true
 serde_json.workspace = true
 bridgething-gateway = { version = "0.1.0", path = "../gateway-rs" }
+async-trait.workspace = true
+bridgething-client = { version = "0.1.0", path = "../client-rs" }
+
+[dev-dependencies]
+proptest = "1.11.0"

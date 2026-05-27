@@ -24,28 +24,7 @@ pub struct ConnectBluetooth {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
-pub struct PairBluetooth {
-  pub mac: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
 pub struct ForgetBluetooth {
-  pub mac: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-pub struct EnablePan {
-  pub mac: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-pub struct DisablePan {
   pub mac: String,
 }
 
@@ -67,19 +46,11 @@ pub enum ClientToBridgeBluetoothMsg {
   #[bridge_command]
   Connect(ConnectBluetooth),
   #[bridge_command]
-  Scan,
-  #[bridge_command]
   EnableDiscoverable,
   #[bridge_command]
   DisableDiscoverable,
   #[bridge_command]
-  Pair(PairBluetooth),
-  #[bridge_command]
   Forget(ForgetBluetooth),
-  #[bridge_command]
-  EnablePan(EnablePan),
-  #[bridge_command]
-  DisablePan(DisablePan),
   #[bridge_command]
   SetAlias(SetBluetoothAlias),
 }

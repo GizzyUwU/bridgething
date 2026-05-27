@@ -44,17 +44,6 @@ pub struct WebappActiveReply {
   pub name: Option<String>,
 }
 
-/// Successful response to `WebappInstallBegin`. The webapp's next
-/// `WebappInstallChunk` should start at `resume_from_offset`; 0 for a
-/// fresh push, or the byte count already on disk when resuming.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-pub struct WebappInstallBeginAck {
-  pub resume_from_offset: u32,
-}
-
 /// Asynchronous failure event for an install whose upload completed
 /// but failed verify / extract / validation. Pairs with the
 /// `WebappInstalled` event as the terminal-outcome duo.
@@ -94,9 +83,6 @@ pub enum BridgeToClientWebappMsg {
   ActiveReply(WebappActiveReply),
   #[bridge_response]
   IconReply(WebappIconReply),
-  /// response to InstallBegin indicating the resume offset for the next chunk
-  #[bridge_response]
-  InstallBeginAck(WebappInstallBeginAck),
   /// domain-level error response for any webapp op
   #[bridge_response]
   WebappError(WebappError),

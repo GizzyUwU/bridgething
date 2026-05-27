@@ -1,6 +1,6 @@
 use libbridgething::client::{
-  ClientToBridgeBluetoothMsgDispatch, ConnectBluetooth, DisablePan, EnablePan, ForgetBluetooth, ListBluetoothDevices,
-  PairBluetooth, PairedDevicesMap, SetBluetoothAlias,
+  ClientToBridgeBluetoothMsgDispatch, ConnectBluetooth, ForgetBluetooth, ListBluetoothDevices, PairedDevicesMap,
+  SetBluetoothAlias,
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -36,11 +36,6 @@ impl ClientToBridgeBluetoothMsgDispatch for BluetoothHandler {
     Ok(self.handle.bluetooth.connect(&mac).await?)
   }
 
-  async fn scan(&self) -> HandlerResult {
-    tracing::debug!("({}) scanning for devices", &self.handle.from);
-    Ok(())
-  }
-
   async fn enable_discoverable(&self) -> HandlerResult {
     tracing::debug!("({}) enabling discoverable mode", &self.handle.from);
     Ok(
@@ -69,12 +64,6 @@ impl ClientToBridgeBluetoothMsgDispatch for BluetoothHandler {
     )
   }
 
-  async fn pair(&self, params: PairBluetooth) -> HandlerResult {
-    let PairBluetooth { mac } = params;
-    tracing::debug!("({}) pairing with device with MAC: {}", &self.handle.from, mac);
-    Ok(())
-  }
-
   async fn forget(&self, params: ForgetBluetooth) -> HandlerResult {
     let ForgetBluetooth { mac } = params;
     tracing::debug!("({}) forgetting device with MAC: {}", &self.handle.from, mac);
@@ -88,18 +77,6 @@ impl ClientToBridgeBluetoothMsgDispatch for BluetoothHandler {
       .respond_to::<ListBluetoothDevices>(PairedDevicesMap(devices.into_iter().collect()))
       .await?;
 
-    Ok(())
-  }
-
-  async fn enable_pan(&self, params: EnablePan) -> HandlerResult {
-    let EnablePan { mac } = params;
-    tracing::debug!("({}) enabling PAN on device with MAC: {}", &self.handle.from, mac);
-    Ok(())
-  }
-
-  async fn disable_pan(&self, params: DisablePan) -> HandlerResult {
-    let DisablePan { mac } = params;
-    tracing::debug!("({}) disabling PAN on device with MAC: {}", &self.handle.from, mac);
     Ok(())
   }
 

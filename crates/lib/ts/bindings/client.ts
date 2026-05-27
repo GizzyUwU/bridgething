@@ -259,7 +259,6 @@ export type BridgeToClientWebappMsg =
   | { event: 'currentReply'; data: WebappCurrentReply }
   | { event: 'activeReply'; data: WebappActiveReply }
   | { event: 'iconReply'; data: WebappIconReply }
-  | { event: 'installBeginAck'; data: WebappInstallBeginAck }
   | { event: 'webappError'; data: WebappError }
   | { event: 'activeChanged'; data: WebappActiveChanged }
   | { event: 'webappInstalled'; data: WebappInfo }
@@ -287,13 +286,9 @@ export type ClientToBridgeAudioMsg =
 export type ClientToBridgeBluetoothMsg =
   | { event: 'list' }
   | { event: 'connect'; data: ConnectBluetooth }
-  | { event: 'scan' }
   | { event: 'enableDiscoverable' }
   | { event: 'disableDiscoverable' }
-  | { event: 'pair'; data: PairBluetooth }
   | { event: 'forget'; data: ForgetBluetooth }
-  | { event: 'enablePan'; data: EnablePan }
-  | { event: 'disablePan'; data: DisablePan }
   | { event: 'setAlias'; data: SetBluetoothAlias };
 
 export type ClientToBridgeCapabilitiesMsg = { event: 'get' };
@@ -420,10 +415,7 @@ export type ClientToBridgeWebappMsg =
   | { event: 'list' }
   | { event: 'current' }
   | { event: 'activate'; data: WebappActivate }
-  | { event: 'icon'; data: WebappIcon }
-  | { event: 'installBegin'; data: WebappInstallBegin }
-  | { event: 'installChunk'; data: WebappInstallChunk }
-  | { event: 'installAbandon'; data: WebappInstallAbandon };
+  | { event: 'icon'; data: WebappIcon };
 
 /**
  * Broadcast when the gateway writes a new value for the active webapp.
@@ -452,8 +444,6 @@ export type DeviceNicknameReply = { nickname: string | null };
 
 export type DiagnosticsReply = { diagnostics: Diagnostics };
 
-export type DisablePan = { mac: string };
-
 /**
  * Set the manual backlight level. Ignored unless `mode == Manual`;
  * callers should pair with `setMode({ Manual })` when forcing a level.
@@ -463,8 +453,6 @@ export type DisplaySetLevel = { level: number };
 export type DisplaySetMode = { mode: BrightnessMode };
 
 export type Earcon = { name: string };
-
-export type EnablePan = { mac: string };
 
 export type FavoriteChanged = { uri: string; liked: boolean };
 
@@ -609,8 +597,6 @@ export type NotificationInvoke = { id: string };
 
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
-export type PairBluetooth = { mac: string };
-
 /**
  * Map of MAC string to `Device`.
  */
@@ -723,25 +709,6 @@ export type WebappCurrentReply = { id: string | null; name: string | null };
 export type WebappIcon = { id: string };
 
 export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
-
-export type WebappInstallAbandon = { installId: string };
-
-/**
- * Webapp-initiated chunked install. `install_id` is the sha256 hex of
- * the zip. The terminal `WebappInstalled` / `WebappInstallFailed`
- * events broadcast to both gateway and webapp peers regardless of
- * which surface initiated the install.
- */
-export type WebappInstallBegin = { installId: string; expectedSha256: string; expectedSize: number };
-
-/**
- * Successful response to `WebappInstallBegin`. The webapp's next
- * `WebappInstallChunk` should start at `resume_from_offset`; 0 for a
- * fresh push, or the byte count already on disk when resuming.
- */
-export type WebappInstallBeginAck = { resumeFromOffset: number };
-
-export type WebappInstallChunk = { installId: string; offset: number; bytes: Uint8Array; last: boolean };
 
 /**
  * Asynchronous failure event for an install whose upload completed

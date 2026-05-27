@@ -9,7 +9,7 @@ use std::time::Duration;
 use bridgething::ClientMode;
 use bridgething_iap2::{
   SessionEvent,
-  csm::now_playing::{MediaItemAttributes, NowPlayingUpdate},
+  csm::now_playing::{MediaItemAttributes, NowPlayingUpdate, PlaybackAttributes, encode_queue_snapshot},
 };
 use bridgething_test_harness::Harness;
 
@@ -102,4 +102,89 @@ async fn iap2_artwork_resolves_and_appears_in_broadcast() {
     cached.is_some(),
     "iap2 artwork bytes never resolved into the asset cache"
   );
+}
+
+/// The queue snapshot path: a now-playing delta with `queue_list_avail` + a
+/// transfer id arms the daemon, then the FileTransfer blob (a CSM param block of
+/// wrapped media items) decodes into the merged queue. Flipping `queue_list_avail`
+/// to false clears it. Exercises the public `encode_queue_snapshot` codec, the
+/// router's per-peer queue context, and `decode_queue_snapshot`.
+#[tokio::test]
+async fn iap2_queue_snapshot_populates_then_clears_on_avail_flip() {
+  let harness = Harness::start().await.expect("harness start");
+  let phone = harness.iap2_peer();
+  let transfer_id = 7u8;
+
+  // arm: advertise an available queue list under transfer id 7.
+  harness
+    .inject_iap2(
+      phone,
+      SessionEvent::NowPlayingUpdate(NowPlayingUpdate {
+        media_item: Some(MediaItemAttributes {
+          persistent_id: Some(0xAAA0),
+          title: Some("Now Playing".into()),
+          ..Default::default()
+        }),
+        playback: Some(PlaybackAttributes {
+          queue_list_avail: Some(true),
+          queue_list_transfer_id: Some(transfer_id),
+          ..Default::default()
+        }),
+      }),
+    )
+    .await
+    .expect("arm queue list");
+
+  let snapshot = encode_queue_snapshot(vec![
+    MediaItemAttributes {
+      persistent_id: Some(0xAAA1),
+      title: Some("Queue One".into()),
+      artist: Some("Q Artist".into()),
+      ..Default::default()
+    },
+    MediaItemAttributes {
+      persistent_id: Some(0xAAA2),
+      title: Some("Queue Two".into()),
+      ..Default::default()
+    },
+  ]);
+  harness
+    .inject_iap2(
+      phone,
+      SessionEvent::QueueSnapshotBytes {
+        transfer_id,
+        bytes: snapshot,
+      },
+    )
+    .await
+    .expect("deliver queue snapshot");
+
+  let populated = harness
+    .wait_for(|state| state.player.queue_reply().items.len() == 2, CONVERGE)
+    .await;
+  assert!(populated, "queue snapshot never decoded into a 2-item queue");
+  let items = harness.state().player.queue_reply().items;
+  assert_eq!(items[0].uri, "iap2:track:000000000000aaa1");
+  assert_eq!(items[0].title.as_deref(), Some("Queue One"));
+  assert_eq!(items[1].title.as_deref(), Some("Queue Two"));
+
+  // flip availability off: the queue must clear.
+  harness
+    .inject_iap2(
+      phone,
+      SessionEvent::NowPlayingUpdate(NowPlayingUpdate {
+        media_item: None,
+        playback: Some(PlaybackAttributes {
+          queue_list_avail: Some(false),
+          ..Default::default()
+        }),
+      }),
+    )
+    .await
+    .expect("flip queue_list_avail off");
+
+  let cleared = harness
+    .wait_for(|state| state.player.queue_reply().items.is_empty(), CONVERGE)
+    .await;
+  assert!(cleared, "queue did not clear when queue_list_avail flipped to false");
 }

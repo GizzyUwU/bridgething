@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bridgething_iap2::{
-  DeviceEmulator, EmulatorEvent, Iap2Command, Iap2Session, Link, LinkConfig, Lsp, MfiAccess, SessionEvent,
-  SessionTriple,
+  DeviceEmulator, DeviceEmulatorHandle, EmulatorEvent, Iap2Command, Iap2Session, Link, LinkConfig, Lsp, MfiAccess,
+  SessionEvent, SessionTriple,
   csm::identification::{CarthingIdentification, IdentificationConfig},
 };
 use bridgething_mfi::{CHALLENGE_LEN, Error as MfiError, RESPONSE_LEN};
@@ -116,7 +116,7 @@ pub fn spawn<F>(
   ident: IdentificationConfig,
   app_launch_bundle: Option<String>,
   setup: F,
-) -> (EmuHarness, mpsc::Receiver<EmulatorEvent>)
+) -> (EmuHarness, mpsc::Receiver<EmulatorEvent>, DeviceEmulatorHandle)
 where
   F: FnOnce(DeviceEmulator) -> DeviceEmulator,
 {
@@ -159,6 +159,7 @@ where
 
   let (emu_ev_tx, emu_events) = mpsc::channel(64);
   let emulator = setup(DeviceEmulator::new(dev_cmd_tx, dev_link_ev_rx, emu_ev_tx));
+  let emu_handle = emulator.handle();
   let emulator = tokio::spawn(emulator.run());
 
   let harness = EmuHarness {
@@ -172,5 +173,5 @@ where
       _tel_tx: tel_tx,
     },
   };
-  (harness, emu_events)
+  (harness, emu_events, emu_handle)
 }

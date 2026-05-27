@@ -12,7 +12,7 @@ use libbridgething::{
   wire::{MsgMeta, RequestError, ResponseMeta, WireCommand, WireError, WireEvent, WireRequest},
 };
 use tokio::{
-  sync::oneshot,
+  sync::{mpsc::error::TrySendError, oneshot},
   task::{JoinHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
@@ -179,16 +179,19 @@ impl ClientManager {
       meta,
     };
 
-    let results: Vec<Result<(), WSError>> = self
-      .connections
-      .iter()
-      .map(|c| {
-        let msg = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None);
-        c.tx.try_send(msg).map_err(WSError::from)
-      })
-      .collect();
+    let mut errors: Vec<WSError> = Vec::new();
+    let mut closed: Vec<SocketAddr> = Vec::new();
+    for c in self.connections.iter() {
+      let out = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None);
+      if let Err(err) = c.tx.try_send(out) {
+        if matches!(err, TrySendError::Closed(_)) {
+          closed.push(*c.key());
+        }
+        errors.push(WSError::from(err));
+      }
+    }
+    self.prune_closed(&closed);
 
-    let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
   }
 
@@ -284,23 +287,31 @@ impl ClientManager {
   pub async fn broadcast_stock(&self, data: impl Into<StockSendMsg> + Clone) -> Result<(), Vec<WSError>> {
     let msg = data.into();
 
-    let results: Vec<Result<(), WSError>> = self
-      .connections
-      .iter()
-      .map(|c| {
-        if c.mode != ClientMode::Stock {
-          tracing::trace!("attempting to send stock message to non-stock device, ignoring...");
-          return Ok(());
-        };
+    let mut errors: Vec<WSError> = Vec::new();
+    let mut closed: Vec<SocketAddr> = Vec::new();
+    for c in self.connections.iter() {
+      if c.mode != ClientMode::Stock {
+        continue;
+      }
+      if let Err(err) = c.tx.try_send(PossibleSendMsg::Stock(msg.clone())) {
+        if matches!(err, TrySendError::Closed(_)) {
+          closed.push(*c.key());
+        }
+        errors.push(WSError::from(err));
+      }
+    }
+    self.prune_closed(&closed);
 
-        c.tx
-          .try_send(PossibleSendMsg::Stock(msg.clone()))
-          .map_err(WSError::from)
-      })
-      .collect();
-
-    let errors: Vec<WSError> = results.into_iter().filter_map(Result::err).collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
+  }
+
+  fn prune_closed(&self, closed: &[SocketAddr]) {
+    for addr in closed {
+      if let Some((_addr, dead)) = self.connections.remove(addr) {
+        dead.cancel_token.cancel();
+        tracing::debug!("pruned closed client {addr} during broadcast");
+      }
+    }
   }
 
   /// NOT cancel-safe

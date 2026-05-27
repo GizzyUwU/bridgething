@@ -20,7 +20,7 @@ async fn emulator_drives_accessory_to_identified() {
     .with_test_writer()
     .try_init();
 
-  let (mut harness, _emu_events) = emu::spawn(emu::identification_config(), None, |e| e);
+  let (mut harness, _emu_events, _emu_handle) = emu::spawn(emu::identification_config(), None, |e| e);
 
   // The accessory must reach Identified (through Authenticated), driven
   // entirely by the emulator's AA00/AA02/AA05 + 1D00/1D02 sequence.

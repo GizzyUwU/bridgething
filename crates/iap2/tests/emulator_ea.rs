@@ -36,7 +36,8 @@ fn gateway_identification() -> IdentificationConfig {
 
 #[tokio::test]
 async fn emulator_opens_ea_gateway_stream_and_round_trips_bytes() {
-  let (mut harness, mut emu_events) = emu::spawn(gateway_identification(), Some(GATEWAY_BUNDLE.into()), |e| e);
+  let (mut harness, mut emu_events, _emu_handle) =
+    emu::spawn(gateway_identification(), Some(GATEWAY_BUNDLE.into()), |e| e);
 
   // Accessory side of the stream, from the real EaFlow's own event.
   let (mut acc_inbound, acc_outbound) = loop {

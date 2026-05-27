@@ -2,8 +2,7 @@ use libbridgething::{
   WebappError,
   client::{
     ClientToBridgeWebappMsgDispatch, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappIcon,
-    WebappIconReply, WebappInstallAbandon, WebappInstallBegin, WebappInstallBeginAck, WebappInstallChunk, WebappList,
-    WebappListReply,
+    WebappIconReply, WebappList, WebappListReply,
   },
 };
 
@@ -99,67 +98,6 @@ impl ClientToBridgeWebappMsgDispatch for WebappHandler {
           .await?;
       }
     }
-    Ok(())
-  }
-
-  async fn install_begin(&self, params: WebappInstallBegin) -> HandlerResult {
-    let req = params;
-    tracing::info!(
-      "({:?}) WebappInstallBegin install_id={} sha256={} size={}",
-      &self.handle.from,
-      req.install_id,
-      req.expected_sha256,
-      req.expected_size,
-    );
-    match crate::install::install_begin(
-      &self.handle.state,
-      req.install_id,
-      req.expected_sha256,
-      req.expected_size,
-    )
-    .await
-    {
-      Ok(resume_from_offset) => {
-        self
-          .handle
-          .respond_to::<WebappInstallBegin>(WebappInstallBeginAck { resume_from_offset })
-          .await?
-      }
-      Err(err) => self.handle.respond_err::<WebappInstallBegin>(err).await?,
-    }
-    Ok(())
-  }
-
-  async fn install_chunk(&self, params: WebappInstallChunk) -> HandlerResult {
-    let chunk = params;
-    tracing::trace!(
-      "({:?}) WebappInstallChunk install_id={} offset={} len={} last={}",
-      &self.handle.from,
-      chunk.install_id,
-      chunk.offset,
-      chunk.bytes.len(),
-      chunk.last,
-    );
-    crate::install::accept_install_chunk(
-      &self.handle.state,
-      &self.handle.bluetooth,
-      chunk.install_id,
-      chunk.offset,
-      chunk.bytes,
-      chunk.last,
-    )
-    .await;
-    Ok(())
-  }
-
-  async fn install_abandon(&self, params: WebappInstallAbandon) -> HandlerResult {
-    let req = params;
-    tracing::info!(
-      "({:?}) WebappInstallAbandon install_id={}",
-      &self.handle.from,
-      req.install_id,
-    );
-    crate::install::install_abandon(&self.handle.state, req.install_id).await;
     Ok(())
   }
 }

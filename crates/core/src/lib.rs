@@ -34,7 +34,7 @@ use asset::{AssetCache, AssetIngest};
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothBringup, BluetoothDeps, BluetoothManager};
 #[cfg(feature = "test-tap")]
-pub use bluetooth::{Iap2Event, Iap2InjectTx};
+pub use bluetooth::{Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
 use capabilities::CapabilitiesRegistry;
 #[cfg(feature = "test-tap")]
 pub use handler::client::{ClientMode, PossibleSendMsg};
@@ -128,9 +128,16 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let installed_webapps_root = config.webapps_dir.clone().unwrap_or_else(paths::webapps_dir);
   let builtin_webapps_root = config.ro_webapps_dir.clone().unwrap_or_else(paths::ro_webapps_dir);
+  let seed_marker = installed_webapps_root
+    .parent()
+    .map(|p| p.join(".seeded"))
+    .unwrap_or_else(|| installed_webapps_root.join(".seeded"));
   let webapps = WebappRegistry::init(installed_webapps_root, builtin_webapps_root)
     .await
     .expect("failed to initialize webapp registry");
+  if let Some(examples_dir) = config.examples_dir.clone() {
+    install::seed_examples(&webapps, &examples_dir, &seed_marker).await;
+  }
   meta_store
     .enforce_active_webapp_exists(&webapps)
     .await
@@ -291,6 +298,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
       headless_inject = Some(HeadlessInject {
         rfcomm: inject_tx,
         iap2: bluetooth_bootstrap.iap2_inject_tx(),
+        iap2_outbound: bluetooth_bootstrap.iap2_outbound_tap(),
       });
       BluetoothBringup::Headless(inject_rx)
     }
@@ -370,6 +378,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 pub struct HeadlessInject {
   pub rfcomm: bluetooth::InjectConnectionTx,
   pub iap2: bluetooth::Iap2InjectTx,
+  pub iap2_outbound: bluetooth::Iap2OutboundTapTx,
 }
 
 pub enum BluetoothMode {
@@ -390,6 +399,8 @@ pub struct DaemonConfig {
   pub state_dir: Option<PathBuf>,
   pub webapps_dir: Option<PathBuf>,
   pub ro_webapps_dir: Option<PathBuf>,
+  // first-boot example-webapp seed source; None disables seeding (headless).
+  pub examples_dir: Option<PathBuf>,
 }
 
 impl DaemonConfig {
@@ -406,6 +417,7 @@ impl DaemonConfig {
       state_dir: None,
       webapps_dir: None,
       ro_webapps_dir: None,
+      examples_dir: Some(paths::examples_dir()),
     }
   }
 
@@ -421,6 +433,7 @@ impl DaemonConfig {
       install_logger: false,
       webapps_dir: Some(state_dir.join("webapps")),
       ro_webapps_dir: Some(state_dir.join("builtin")),
+      examples_dir: None,
       state_dir: Some(state_dir),
     }
   }

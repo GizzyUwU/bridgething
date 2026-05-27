@@ -116,6 +116,11 @@ impl Player {
   async fn send(&self, cmd: PlayerCommand) -> PlayerResult<()> {
     self.cmd_tx.send(cmd).await.map_err(|_| PlayerError::ActorDropped)
   }
+
+  #[cfg(feature = "test-tap")]
+  pub fn snapshot_watch(&self) -> watch::Receiver<PlayerSnapshot> {
+    self.snapshot_rx.clone()
+  }
 }
 
 fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {

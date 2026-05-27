@@ -13,14 +13,21 @@ use std::{
 
 mod chrome;
 mod device;
+pub mod model;
+mod seam;
 use anyhow::Result;
 use bluer::Address;
-use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, ServerAddrs, State, TappedFrame};
+use bridgething::{DaemonConfig, HeadlessInject, Iap2Event, Iap2TransportCommand, ServerAddrs, State, TappedFrame};
+use bridgething_client::Client as CommandClient;
 use bridgething_gateway::Gateway;
 use bridgething_iap2::SessionEvent;
 pub use chrome::ChromeView;
 pub use device::DeviceHarness;
 use futures::StreamExt;
+pub use seam::{
+  CommandDriver, DeviceIap2Source, DeviceTier, FrameObserve, GatewayDriver, HarnessIap2Source, Iap2OutboundObserve,
+  Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport,
+};
 use tokio::{net::TcpStream, sync::broadcast, task::JoinHandle};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
@@ -80,6 +87,25 @@ impl Harness {
   /// Direct read access to daemon state for assertions.
   pub fn state(&self) -> &State {
     &self.state
+  }
+
+  /// Restart the daemon on the same state dir: abort the running task, wait for
+  /// it to release its files, then re-assemble. The in-memory db resets, but the
+  /// on-disk blob + transfer dirs persist, so an in-flight chunked transfer's
+  /// `.partial` + `.meta` survive and drive resume. Consumes and returns self so
+  /// the tempdir stays alive across the swap; pre-restart clients are dead.
+  pub async fn restart(mut self) -> Result<Self> {
+    self._daemon.abort();
+    let _ = (&mut self._daemon).await;
+    let assembled = bridgething::init(DaemonConfig::headless(self._state_dir.path().to_path_buf())).await;
+    self.state = assembled.state.clone();
+    self.inject = assembled
+      .inject
+      .clone()
+      .expect("headless assembly must expose inject handles");
+    self.server_addrs = assembled.server_addrs;
+    self._daemon = tokio::spawn(assembled.run());
+    Ok(self)
   }
 
   /// Inject a duplex into the daemon's rfcomm channel and drive the other half
@@ -151,6 +177,22 @@ impl Harness {
     Ok(MockWsClient { stream })
   }
 
+  /// Connect the real client SDK to the daemon's modern port, so a scenario
+  /// issues webapp commands (player, net, asset, config, webapp, geo) through
+  /// the same surface a real on-device webapp uses.
+  pub async fn connect_command_client(&self) -> Result<CommandClient> {
+    Ok(CommandClient::connect(&format!("ws://{}/", self.server_addrs.modern)).await?)
+  }
+
+  /// Subscribe to the daemon's outbound iAP2 transport tap (headless drain of
+  /// the transport channel). Observes the HID pulses / SetNPI a command would
+  /// have sent to the iPhone, with no radio. Only frames after this call arrive.
+  pub fn observe_iap2_outbound(&self) -> Iap2OutboundObserver {
+    Iap2OutboundObserver {
+      rx: self.inject.iap2_outbound.subscribe(),
+    }
+  }
+
   /// Open a stock-mode websocket to the daemon's bound stock port.
   pub async fn connect_stock_client(&self) -> Result<MockWsClient> {
     let (stream, _resp) = connect_async(format!("ws://{}/", self.server_addrs.stock)).await?;
@@ -212,6 +254,52 @@ impl FrameObserver {
         Ok(Ok(frame)) => frames.push(frame),
         Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
         Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return frames,
+      }
+    }
+  }
+}
+
+/// Ergonomic view over the outbound iAP2 transport tap. Wraps the broadcast
+/// receiver with a predicate-wait helper scenarios assert outbound routing on.
+pub struct Iap2OutboundObserver {
+  rx: broadcast::Receiver<Iap2TransportCommand>,
+}
+
+impl Iap2OutboundObserver {
+  /// Wait for an outbound transport command matching `pred`, or None on timeout.
+  pub async fn wait_for<F>(&mut self, timeout: Duration, pred: F) -> Option<Iap2TransportCommand>
+  where
+    F: Fn(&Iap2TransportCommand) -> bool,
+  {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() {
+        return None;
+      }
+      match tokio::time::timeout(remaining, self.rx.recv()).await {
+        Ok(Ok(cmd)) if pred(&cmd) => return Some(cmd),
+        Ok(Ok(_)) => continue,
+        Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+        Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return None,
+      }
+    }
+  }
+
+  /// Collect every outbound transport command observed over `window`. Use to
+  /// assert that nothing was emitted (the refuse-toggle-on-unknown-state path).
+  pub async fn collect_for(&mut self, window: Duration) -> Vec<Iap2TransportCommand> {
+    let mut cmds = Vec::new();
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() {
+        return cmds;
+      }
+      match tokio::time::timeout(remaining, self.rx.recv()).await {
+        Ok(Ok(cmd)) => cmds.push(cmd),
+        Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+        Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return cmds,
       }
     }
   }

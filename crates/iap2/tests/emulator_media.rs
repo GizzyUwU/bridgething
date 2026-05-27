@@ -20,7 +20,7 @@ async fn emulator_pushes_now_playing_and_artwork() {
   // Larger than one link packet (accessory max_len 2048) so the file
   // transfer must chunk into FirstData/Data/LastData.
   let artwork = Bytes::from(vec![0x7Au8; 5000]);
-  let (mut harness, _emu_events) = emu::spawn(emu::identification_config(), None, {
+  let (mut harness, _emu_events, _emu_handle) = emu::spawn(emu::identification_config(), None, {
     let artwork = artwork.clone();
     move |emulator| emulator.with_artwork(129, artwork)
   });

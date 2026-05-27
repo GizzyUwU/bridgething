@@ -12,8 +12,8 @@ use bluer::{Adapter, AdapterEvent, Address, Device, Session, agent::Agent, rfcom
 use bridgething::FRAME_TAP_PORT;
 use bridgething_gateway::Gateway;
 use bridgething_iap2::{
-  DeviceEaStream, DeviceEmulator, EmulatorEvent, IAP2_RFCOMM_CHANNEL, Iap2Command, Link, LinkConfig, Lsp,
-  SessionTriple, session::EaPriority,
+  DeviceEaStream, DeviceEmulator, DeviceEmulatorHandle, EmulatorEvent, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event,
+  Link, LinkConfig, Lsp, SessionTriple, session::EaPriority,
 };
 use futures::StreamExt;
 use libbridgething::{BRIDGETHING_RFCOMM_CHANNEL, BRIDGETHING_WS_MODERN_PORT};
@@ -82,17 +82,7 @@ impl DeviceHarness {
   /// The emulator walks auth and identification, then opens the EA gateway stream when the daemon
   /// requests app launch; the returned [`Gateway`] rides that stream.
   pub async fn connect_over_air_iap2(&self) -> Result<Gateway> {
-    let stream = self.dial(IAP2_RFCOMM_CHANNEL).await?;
-
-    let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(64);
-    let (link_events_tx, link_events_rx) = mpsc::channel(64);
-    tokio::spawn(Link::run_device(
-      stream,
-      iap2_device_config(),
-      link_events_tx,
-      link_command_rx,
-    ));
-
+    let (link_command_tx, link_events_rx) = self.dial_iap2().await?;
     let (emu_events_tx, mut emu_events_rx) = mpsc::channel(64);
     tokio::spawn(DeviceEmulator::new(link_command_tx, link_events_rx, emu_events_tx).run());
 
@@ -109,6 +99,49 @@ impl DeviceHarness {
         Err(_) => bail!("emulator did not open an EA gateway stream within {EA_OPEN_TIMEOUT:?}"),
       }
     }
+  }
+
+  /// Dial the device's iAP2 channel and run the device-half emulator in driven mode (no canned
+  /// subscribe push), returning a handle that pushes control-session NowPlaying and artwork on
+  /// demand. Resolves once identification completes, so pushes land on a subscribed accessory.
+  pub async fn connect_iap2_emulator(&self) -> Result<DeviceEmulatorHandle> {
+    let (link_command_tx, link_events_rx) = self.dial_iap2().await?;
+    let (emu_events_tx, mut emu_events_rx) = mpsc::channel(64);
+    let emulator = DeviceEmulator::new(link_command_tx, link_events_rx, emu_events_tx).without_now_playing();
+    let handle = emulator.handle();
+    tokio::spawn(emulator.run());
+
+    let deadline = tokio::time::Instant::now() + EA_OPEN_TIMEOUT;
+    loop {
+      let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+      if remaining.is_zero() {
+        bail!("emulator did not reach identification within {EA_OPEN_TIMEOUT:?}");
+      }
+      match tokio::time::timeout(remaining, emu_events_rx.recv()).await {
+        Ok(Some(EmulatorEvent::Identified)) => break,
+        Ok(Some(_)) => continue,
+        Ok(None) => bail!("emulator exited before identification"),
+        Err(_) => bail!("emulator did not reach identification within {EA_OPEN_TIMEOUT:?}"),
+      }
+    }
+    // Keep draining later milestones so the emulator never blocks emitting them.
+    tokio::spawn(async move { while emu_events_rx.recv().await.is_some() {} });
+    Ok(handle)
+  }
+
+  /// Just-Works dial the iAP2 channel and run the device-role link, returning the command sender
+  /// and event receiver the emulator drives. Shared by the EA-gateway and driven-source paths.
+  async fn dial_iap2(&self) -> Result<(mpsc::Sender<Iap2Command>, mpsc::Receiver<Iap2Event>)> {
+    let stream = self.dial(IAP2_RFCOMM_CHANNEL).await?;
+    let (link_command_tx, link_command_rx) = mpsc::channel::<Iap2Command>(64);
+    let (link_events_tx, link_events_rx) = mpsc::channel(64);
+    tokio::spawn(Link::run_device(
+      stream,
+      iap2_device_config(),
+      link_events_tx,
+      link_command_rx,
+    ));
+    Ok((link_command_tx, link_events_rx))
   }
 
   /// Just-Works pair (the no-auth posture) + trust, then dial the given RFCOMM
@@ -135,6 +168,11 @@ impl DeviceHarness {
       device.pair().await.context("pair with device (just works)")?;
     }
     let _ = device.set_trusted(true).await;
+
+    // drop any lingering ACL first: an iAP2 session left by a prior scenario can
+    // poison a fresh rfcomm dial on the same link (host-side BT state, not the daemon).
+    let _ = device.disconnect().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     rfcomm::Stream::connect(rfcomm::SocketAddr::new(self.bt_addr, channel))
       .await

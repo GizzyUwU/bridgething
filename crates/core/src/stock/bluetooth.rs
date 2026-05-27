@@ -1,6 +1,6 @@
 use libbridgething::{
   Device, DeviceType,
-  client::{BridgeToClientBluetoothMsg, ClientToBridgeBluetoothMsg, ConnectBluetooth, ForgetBluetooth, PairBluetooth},
+  client::{BridgeToClientBluetoothMsg, ClientToBridgeBluetoothMsg, ConnectBluetooth, ForgetBluetooth},
 };
 use serde::{Deserialize, Serialize};
 
@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 pub enum StockBluetoothRecv {
   List,
   Select { mac: String },
-  Scan,
-  Pair { mac: String },
   Forget { mac: String },
   Discoverable { active: bool },
 }
@@ -20,8 +18,6 @@ impl From<StockBluetoothRecv> for ClientToBridgeBluetoothMsg {
     match data {
       StockBluetoothRecv::List => ClientToBridgeBluetoothMsg::List,
       StockBluetoothRecv::Select { mac } => ClientToBridgeBluetoothMsg::Connect(ConnectBluetooth { mac }),
-      StockBluetoothRecv::Scan => ClientToBridgeBluetoothMsg::Scan,
-      StockBluetoothRecv::Pair { mac } => ClientToBridgeBluetoothMsg::Pair(PairBluetooth { mac }),
       StockBluetoothRecv::Forget { mac } => ClientToBridgeBluetoothMsg::Forget(ForgetBluetooth { mac }),
       StockBluetoothRecv::Discoverable { active } => match active {
         true => ClientToBridgeBluetoothMsg::EnableDiscoverable,

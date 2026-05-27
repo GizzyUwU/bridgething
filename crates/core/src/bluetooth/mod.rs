@@ -34,7 +34,7 @@ mod packer;
 mod peer_owners;
 
 #[cfg(feature = "test-tap")]
-pub use iap2::{Iap2Event, Iap2InjectTx};
+pub use iap2::{Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
 use le::{LeBootstrap, LeManager};
 use network::NetworkGateway;
 pub(crate) use packer::OutboundPacker;
@@ -100,6 +100,12 @@ impl BluetoothBootstrap {
   pub(crate) fn iap2_inject_tx(&self) -> Iap2InjectTx {
     self.iap2_bootstrap.events_tx()
   }
+
+  /// Subscribe-able broadcast of outbound iAP2 transport commands, fed by the
+  /// headless coordinator's drain loop.
+  pub(crate) fn iap2_outbound_tap(&self) -> Iap2OutboundTapTx {
+    self.iap2_bootstrap.outbound_tap_tx()
+  }
 }
 
 impl BluetoothManager {
@@ -162,9 +168,20 @@ impl BluetoothManager {
         let BluetoothBootstrap {
           gateway,
           mut iap2_events_rx,
+          iap2_bootstrap,
           ..
         } = bootstrap;
         tracing::debug!("bringing up gateway transports + iap2 router with no radio (headless)");
+
+        // no live iAP2 session drains the outbound transport channel off-radio,
+        // so the coordinator drains it and rebroadcasts each command onto the
+        // tap a scenario observes (and keeps the bounded channel from backing up).
+        let (mut outbound_rx, outbound_tap_tx) = iap2_bootstrap.into_headless_outbound();
+        tokio::spawn(async move {
+          while let Some(cmd) = outbound_rx.recv().await {
+            let _ = outbound_tap_tx.send(cmd);
+          }
+        });
         let gateway_runtime = self
           .gateway_man
           .start(

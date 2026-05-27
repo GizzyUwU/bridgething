@@ -5,6 +5,7 @@
 cross_target := 'aarch64-unknown-linux-gnu'
 cross_target_dir := justfile_directory() / 'target-cross'
 device_host := env_var_or_default('SUPERBIRD_HOST', 'bridgething.local')
+device_bt_mac := env_var_or_default('SUPERBIRD_BT_MAC', '30:E3:D6:03:96:1E')
 ssh_args := '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR'
 
 # --- Local dev ---
@@ -47,6 +48,17 @@ spotify-codegen:
 
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
+
+# --- Test harness ---
+
+# Host tiers (T1 in-process + T2 chromium): no hardware, runs in parallel.
+test-host:
+  cargo test -p bridgething-test-harness
+
+# Over-air tier (T3): needs a booted Car Thing with the test-tap daemon + a host
+# BT radio. Serial (one radio, one iAP2 link), plus the no-radio bridge proof.
+test-device:
+  SUPERBIRD_BT_MAC={{device_bt_mac}} cargo test -p bridgething-test-harness --test seam --test t3_infra -- --ignored --test-threads=1 --nocapture
 
 # --- Device iteration ---
 

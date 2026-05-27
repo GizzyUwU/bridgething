@@ -632,6 +632,22 @@ mod device_encode {
   };
   use crate::csm::{CsmFrame, CsmParam, CsmParamFieldEncode, encode_param_block};
 
+  /// Encode a queue snapshot the way the device side delivers it over
+  /// FileTransfer: a top-level CSM param block, one wrapped media-item group
+  /// per slot. The inverse of [`super::decode_queue_snapshot`]; the slot id is
+  /// the entry index since the decoder keys off position, not id.
+  pub fn encode_queue_snapshot(items: Vec<MediaItemAttributes>) -> bytes::Bytes {
+    let params = items
+      .into_iter()
+      .enumerate()
+      .map(|(idx, item)| CsmParam {
+        id: idx as u16,
+        payload: item.encode_group(),
+      })
+      .collect();
+    encode_param_block(params)
+  }
+
   impl From<NowPlayingUpdate> for CsmFrame {
     fn from(value: NowPlayingUpdate) -> Self {
       let mut params: Vec<CsmParam> = Vec::with_capacity(2);
@@ -763,6 +779,9 @@ mod device_encode {
     }
   }
 }
+
+#[cfg(feature = "emulator")]
+pub use device_encode::encode_queue_snapshot;
 
 #[cfg(test)]
 mod tests {
