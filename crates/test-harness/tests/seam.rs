@@ -483,3 +483,176 @@ lift!(single_source_artwork_reaches_frame_tap, [t1, t3_emulator]);
 lift!(idle_sentinel_never_broadcasts_art_url, [t1, t3_emulator]);
 lift!(non_music_pid_zero_with_title_surfaces, [t1, t3_emulator]);
 lift!(non_music_artwork_reaches_frame_tap, [t1, t3_emulator]);
+lift!(spotify_pid_none_two_tracks_get_distinct_art_keys, [t1, t3_emulator]);
+lift!(position_resets_across_track_change, [t1, t3_emulator]);
+
+/// Field-reported: Spotify on iOS sends NowPlaying deltas with persistent_id absent
+/// (Spotify does not expose MPMediaItemPropertyPersistentID). Two consecutive
+/// Spotify-shape tracks with distinct title+artist but a re-used iAP2 transfer id
+/// must yield DISTINCT art keys on the egress stream - the daemon currently
+/// collapses every pid-absent track to the literal "nonmusic" slot, so both
+/// tracks share one asset url and track A's art bytes are clobbered by track B.
+async fn spotify_pid_none_two_tracks_get_distinct_art_keys<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
+{
+  let mut frames = observe_with_registered_client(tier).await?;
+  let source = tier.iap2_source().await?;
+  let transfer_id = 9u8;
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: None,
+        title: Some("Sanguirush".into()),
+        artist: Some("The Destruction Of The Cult Of The Sun".into()),
+        artwork_id: Some(transfer_id),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(transfer_id, vec![0xAA; 1024]).await?;
+
+  let track_a = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Sanguirush") && j.contains("iap2/art/")
+    })
+    .await;
+  let track_a = track_a.ok_or_else(|| anyhow::anyhow!("track A art never reached the frame-tap"))?;
+  let art_a = extract_substring_starting_with(track_a.json(), "iap2/art/")
+    .ok_or_else(|| anyhow::anyhow!("track A frame had no iap2/art/ url"))?;
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: None,
+        title: Some("Counterweight".into()),
+        artist: Some("Other Artist".into()),
+        artwork_id: Some(transfer_id),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+  source.push_artwork(transfer_id, vec![0xBB; 1024]).await?;
+
+  let track_b = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| {
+      let j = f.json();
+      j.contains("Counterweight") && j.contains("iap2/art/")
+    })
+    .await;
+  let track_b = track_b.ok_or_else(|| anyhow::anyhow!("track B art never reached the frame-tap"))?;
+  let art_b = extract_substring_starting_with(track_b.json(), "iap2/art/")
+    .ok_or_else(|| anyhow::anyhow!("track B frame had no iap2/art/ url"))?;
+
+  anyhow::ensure!(
+    art_a != art_b,
+    "two distinct pid=None tracks shared one art key ({art_a}) - the daemon collapsed them to the same nonmusic slot"
+  );
+  Ok(())
+}
+
+/// Field-reported: iOS sends a position delta for the OLD track immediately
+/// before the new media_item arrives, so when the daemon processes the track
+/// change it carries the old position forward onto the new track until the
+/// next position delta lands. The new track must NOT surface at the prior
+/// track's progress - position must reset on a track change.
+async fn position_resets_across_track_change<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: Iap2SourceDriver + FrameObserve + ModernClientDriver,
+{
+  use bridgething_iap2::csm::now_playing::{PlaybackAttributes, PlaybackState};
+
+  let mut frames = observe_with_registered_client(tier).await?;
+  let source = tier.iap2_source().await?;
+
+  // track A, three minutes in, playing.
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(0x1111),
+        title: Some("ThreeMinuteTrack".into()),
+        duration_ms: Some(240_000),
+        ..Default::default()
+      }),
+      playback: Some(PlaybackAttributes {
+        state: Some(PlaybackState::Playing),
+        position_ms: Some(180_000),
+        ..Default::default()
+      }),
+    })
+    .await?;
+  let _ = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| f.json().contains("ThreeMinuteTrack"))
+    .await
+    .ok_or_else(|| anyhow::anyhow!("track A never reached the frame-tap"))?;
+
+  // track B arrives with NO playback section, the exact shape iOS sends on a
+  // fast track change (media_item first, position follows on a later delta).
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: Some(Iap2MediaItem {
+        persistent_id: Some(0x2222),
+        title: Some("FreshTrack".into()),
+        duration_ms: Some(200_000),
+        ..Default::default()
+      }),
+      playback: None,
+    })
+    .await?;
+
+  // Collect frames for track B and inspect the broadcast position. The frame
+  // tap publishes the merged player state, so the position field reflects what
+  // the webapp renders.
+  let frame_b = frames
+    .wait_for(NOW_PLAYING_WAIT, |f| f.json().contains("FreshTrack"))
+    .await
+    .ok_or_else(|| anyhow::anyhow!("track B never reached the frame-tap"))?;
+  let position = position_ms_from_frame_json(frame_b.json())
+    .ok_or_else(|| anyhow::anyhow!("could not parse position_ms from track B frame: {}", frame_b.json()))?;
+  anyhow::ensure!(
+    position < 10_000,
+    "new track surfaced at {position} ms (carried over from the prior track at 180000 ms)"
+  );
+  Ok(())
+}
+
+/// Pull a contiguous non-whitespace substring out of `haystack` that starts with
+/// `prefix`. Used to grab an `iap2/art/...` asset url out of an egress JSON
+/// frame without committing to a fixed key shape.
+fn extract_substring_starting_with(haystack: &str, prefix: &str) -> Option<String> {
+  let start = haystack.find(prefix)?;
+  let tail = &haystack[start..];
+  let end = tail
+    .find(|c: char| c == '"' || c == '\\' || c.is_whitespace())
+    .unwrap_or(tail.len());
+  Some(tail[..end].to_string())
+}
+
+/// Walk every `"positionMs"` (modern wire) and `"position_ms"` (stock wire)
+/// occurrence in the JSON and return the largest. The frame may carry several
+/// nested player snapshots; the bug surface is "did ANY of them claim 180000",
+/// so we pick the worst case.
+fn position_ms_from_frame_json(json: &str) -> Option<u64> {
+  let mut largest: Option<u64> = None;
+  for key in ["\"positionMs\"", "\"position_ms\""] {
+    for (idx, _) in json.match_indices(key) {
+      let tail = &json[idx + key.len()..];
+      let Some(after_colon) = tail.find(':') else {
+        continue;
+      };
+      let after = tail[after_colon + 1..].trim_start();
+      let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+      if end == 0 {
+        continue;
+      }
+      if let Ok(value) = after[..end].parse::<u64>() {
+        largest = Some(largest.map_or(value, |prev| prev.max(value)));
+      }
+    }
+  }
+  largest
+}

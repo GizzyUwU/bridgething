@@ -35,7 +35,7 @@ use libbridgething::{
 };
 
 const IDLE_PID_HEX: &str = "0000000000000000";
-const NONMUSIC_PID: &str = "nonmusic";
+const NONMUSIC_PREFIX: &str = "nonmusic-";
 
 /// One atomic inbound event, applied identically to the model and (via the
 /// harness drivers) to the daemon.
@@ -239,6 +239,7 @@ impl Model {
         && meta_target.persistent_id.as_ref() != Some(new_pid)
       {
         *meta_target = MediaItemUpdate::default();
+        play_target.position_ms = Some(0);
       }
       accumulate_media(meta_target, media);
     }
@@ -403,14 +404,14 @@ impl Model {
 
     Projection {
       track_id: effective.map(|t| t.id.clone()),
-      title: effective.map(|t| t.name.clone()),
-      album: effective.map(|t| t.album.clone()),
-      artist: effective.map(|t| t.artist.clone()),
+      title: effective.and(merged_meta.title.clone()),
+      album: effective.and(merged_meta.album.clone()),
+      artist: effective.and(merged_meta.artist.clone()),
       album_artist: effective.and(merged_meta.album_artist.clone()),
       wire_artwork_id,
       current_artwork_id,
-      duration_ms: effective.map(|t| t.duration_ms),
-      liked: effective.map(|t| t.saved),
+      duration_ms: effective.and(merged_meta.duration_ms),
+      liked: effective.and(merged_meta.liked),
       playing: self.playing,
       shuffle: self.shuffle,
       shuffle_mode: merged_play.shuffle_mode,
@@ -454,15 +455,7 @@ enum NowPlayingSource {
 }
 
 fn default_track() -> TrackModel {
-  TrackModel {
-    id: "dummy-bridgething-default".to_string(),
-    name: "BridgeThing".to_string(),
-    album: "Thing Labs".to_string(),
-    artist: "Thing Labs".to_string(),
-    image_id: "bridgething:image:bridgething:image".to_string(),
-    duration_ms: 5000,
-    saved: true,
-  }
+  TrackModel::default()
 }
 
 /// Translate one raw iAP2 NowPlaying delta the way `handler/iap2.rs` does,
@@ -488,13 +481,23 @@ fn translate_now_playing(
 // mirror of the daemon's `handler/iap2.rs::delta_track_key` - the spec written twice.
 fn delta_track_key(media: Option<&MediaItemAttributes>) -> Option<String> {
   let media = media?;
-  let has_title = media.title.as_deref().is_some_and(|t| !t.is_empty());
+  let title = media.title.as_deref().filter(|t| !t.is_empty());
   match media.persistent_id {
     Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
-    _ if has_title => Some(NONMUSIC_PID.to_string()),
+    _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
     Some(0) => Some(IDLE_PID_HEX.to_string()),
     _ => None,
   }
+}
+
+fn nonmusic_key(title: &str, artist: Option<&str>) -> String {
+  use std::hash::{DefaultHasher, Hash, Hasher};
+  let mut hasher = DefaultHasher::new();
+  title.hash(&mut hasher);
+  if let Some(a) = artist {
+    a.hash(&mut hasher);
+  }
+  format!("{NONMUSIC_PREFIX}{:016x}", hasher.finish())
 }
 
 fn translate_media_item(media: &MediaItemAttributes, track_key: Option<&str>) -> MediaItemUpdate {

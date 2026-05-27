@@ -35,7 +35,7 @@ use crate::{
 };
 
 const IDLE_PID_HEX: &str = "0000000000000000";
-const NONMUSIC_PID: &str = "nonmusic";
+const NONMUSIC_PREFIX: &str = "nonmusic-";
 const HINT_DEBOUNCE: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Default, Clone)]
@@ -422,13 +422,25 @@ fn pid_is_idle(pid: &str) -> bool {
 
 fn delta_track_key(media: Option<&MediaItemAttributes>) -> Option<String> {
   let media = media?;
-  let has_title = media.title.as_deref().is_some_and(|t| !t.is_empty());
+  let title = media.title.as_deref().filter(|t| !t.is_empty());
   match media.persistent_id {
     Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
-    _ if has_title => Some(NONMUSIC_PID.to_string()),
+    _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
     Some(0) => Some(IDLE_PID_HEX.to_string()),
     _ => None,
   }
+}
+
+// pid-less tracks (Spotify-on-iOS, non-music apps) collide on the literal "nonmusic" slot
+// because iAP2's transfer-id is u8 and reused. Hash a stable content fingerprint instead.
+fn nonmusic_key(title: &str, artist: Option<&str>) -> String {
+  use std::hash::{DefaultHasher, Hash, Hasher};
+  let mut hasher = DefaultHasher::new();
+  title.hash(&mut hasher);
+  if let Some(a) = artist {
+    a.hash(&mut hasher);
+  }
+  format!("{NONMUSIC_PREFIX}{:016x}", hasher.finish())
 }
 
 fn translate_now_playing(update: Iap2NowPlayingUpdate, track_key: Option<&str>) -> NowPlayingUpdate {

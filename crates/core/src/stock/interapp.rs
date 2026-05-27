@@ -351,7 +351,7 @@ pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayloa
   let is_paused = !matches!(playback.state, PlaybackState::Playing);
   StockInterAppSendPayload::SpotifyPlayerState {
     context_uri: track.as_ref().and_then(|t| t.uri.clone()).unwrap_or_default(),
-    context_title: "BridgeThing".to_string(),
+    context_title: String::new(),
     is_paused,
     is_paused_bool: is_paused,
     playback_options: StockPlaybackOptions {

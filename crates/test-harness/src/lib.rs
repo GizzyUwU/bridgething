@@ -350,6 +350,14 @@ impl MockWsClient {
     }
     None
   }
+
+  /// Send a raw text frame, e.g. a stock-mode JSON message scenarios use to
+  /// drive `SpotifyGetPlayerState` and friends.
+  pub async fn send_text(&mut self, text: impl Into<String>) -> Result<()> {
+    use futures::SinkExt;
+    self.stream.send(Message::Text(text.into().into())).await?;
+    Ok(())
+  }
 }
 
 /// Symlink the real stock SPA dist into the headless daemon's builtin webapp

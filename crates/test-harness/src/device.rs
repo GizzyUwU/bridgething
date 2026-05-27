@@ -78,6 +78,15 @@ impl DeviceHarness {
     Ok(Gateway::from_io(stream))
   }
 
+  /// Dial the device's bridgething SPP over the SAME ACL as an existing
+  /// connection (e.g. a running iap2 emulator), so a scenario can drive both
+  /// the iap2 control session AND a companion gateway concurrently. Skips the
+  /// stale-ACL cleanup that `connect_over_air` does as its first step.
+  pub async fn connect_over_air_extra(&self) -> Result<Gateway> {
+    let stream = self.dial_extra(BRIDGETHING_RFCOMM_CHANNEL).await?;
+    Ok(Gateway::from_io(stream))
+  }
+
   /// Dial the device's iAP2 channel over the real radio and drive it with the device-half emulator.
   /// The emulator walks auth and identification, then opens the EA gateway stream when the daemon
   /// requests app launch; the returned [`Gateway`] rides that stream.
@@ -147,6 +156,17 @@ impl DeviceHarness {
   /// Just-Works pair (the no-auth posture) + trust, then dial the given RFCOMM
   /// channel. bluez persists the bond, so re-dials skip pairing.
   async fn dial(&self, channel: u8) -> Result<rfcomm::Stream> {
+    self.dial_inner(channel, true).await
+  }
+
+  /// Dial a second RFCOMM channel on the same ACL, without dropping the link
+  /// first. Use after a `dial()` to add another connection (e.g. running the
+  /// iap2 emulator AND a gateway companion against the same device).
+  pub async fn dial_extra(&self, channel: u8) -> Result<rfcomm::Stream> {
+    self.dial_inner(channel, false).await
+  }
+
+  async fn dial_inner(&self, channel: u8, drop_acl_first: bool) -> Result<rfcomm::Stream> {
     let session = Session::new().await.context("open bluez session")?;
     let adapter = session.default_adapter().await.context("default bt adapter")?;
     adapter.set_powered(true).await.context("power on adapter")?;
@@ -169,10 +189,12 @@ impl DeviceHarness {
     }
     let _ = device.set_trusted(true).await;
 
-    // drop any lingering ACL first: an iAP2 session left by a prior scenario can
-    // poison a fresh rfcomm dial on the same link (host-side BT state, not the daemon).
-    let _ = device.disconnect().await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    if drop_acl_first {
+      // drop any lingering ACL first: an iAP2 session left by a prior scenario can
+      // poison a fresh rfcomm dial on the same link (host-side BT state, not the daemon).
+      let _ = device.disconnect().await;
+      tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 
     rfcomm::Stream::connect(rfcomm::SocketAddr::new(self.bt_addr, channel))
       .await

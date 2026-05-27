@@ -12,7 +12,7 @@ pub const THUMBNAIL_SIZE: usize = 96;
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Track {
   pub id: String,
@@ -23,21 +23,6 @@ pub struct Track {
   pub duration_ms: u32,
   pub image_id: String,
   pub saved: bool,
-}
-
-impl Default for Track {
-  fn default() -> Self {
-    Self {
-      id: "dummy-bridgething-default".to_string(),
-      name: "BridgeThing".to_string(),
-      album: Album::default(),
-      artist: Artist::default(),
-      artists: vec![Artist::default()],
-      duration_ms: 5000,
-      image_id: "bridgething:image:bridgething:image".to_string(),
-      saved: true,
-    }
-  }
 }
 
 #[typeshare]
@@ -57,20 +42,11 @@ pub enum Image {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Album {
   pub id: String,
   pub name: String,
-}
-
-impl Default for Album {
-  fn default() -> Self {
-    Self {
-      name: "Thing Labs".to_string(),
-      id: "bridgething:album:bridgething".to_string(),
-    }
-  }
 }
 
 impl From<String> for Album {
@@ -84,20 +60,11 @@ impl From<String> for Album {
 
 #[typeshare]
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
 pub struct Artist {
   pub id: String,
   pub name: String,
-}
-
-impl Default for Artist {
-  fn default() -> Self {
-    Self {
-      name: "Thing Labs".to_string(),
-      id: "bridgething:artist:bridgething".to_string(),
-    }
-  }
 }
 
 impl From<String> for Artist {

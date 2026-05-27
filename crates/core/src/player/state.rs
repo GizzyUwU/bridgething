@@ -64,7 +64,7 @@ impl PlayerState {
 
       playing: false,
 
-      context_title: "BridgeThing".to_string(),
+      context_title: String::new(),
       context_id: None,
 
       position_ms: 0,
@@ -213,6 +213,7 @@ impl PlayerState {
         && meta_target.persistent_id.as_ref() != Some(new_pid)
       {
         *meta_target = MediaItemUpdate::default();
+        play_target.position_ms = Some(0);
       }
       accumulate_media(meta_target, media);
     }
@@ -508,44 +509,30 @@ impl PlayerState {
 }
 
 fn build_queue_item(track: &Track, merged: MediaItemUpdate) -> QueueItem {
-  let artwork_id = if track.image_id.is_empty() {
-    None
-  } else {
-    Some(track.image_id.clone())
-  };
+  let artwork_id = merged.artwork_id.filter(|s| !s.is_empty());
   QueueItem {
     uri: track.id.clone(),
-    title: merged.title.or_else(|| Some(track.name.clone())),
-    artist: merged
-      .artist
-      .or_else(|| Some(track.artist.name.clone()))
-      .filter(|s| !s.is_empty()),
-    album: merged
-      .album
-      .or_else(|| Some(track.album.name.clone()))
-      .filter(|s| !s.is_empty()),
+    title: merged.title,
+    artist: merged.artist,
+    album: merged.album,
     artwork_id,
-    duration_ms: merged.duration_ms.or(Some(track.duration_ms)),
+    duration_ms: merged.duration_ms,
     persistent_id: Some(track.id.clone()),
   }
 }
 
 fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
-  let artwork_id = if track.image_id.is_empty() {
-    None
-  } else {
-    Some(track.image_id.clone())
-  };
+  let artwork_id = merged.artwork_id.clone().filter(|s| !s.is_empty());
   MediaItem {
     uri: Some(track.id.clone()),
     persistent_id: Some(track.id.clone()),
-    title: Some(track.name.clone()),
-    album: Some(track.album.name.clone()),
+    title: merged.title.clone(),
+    album: merged.album.clone(),
     album_artist: merged.album_artist.clone(),
-    artist: Some(track.artist.name.clone()),
-    liked: Some(track.saved),
+    artist: merged.artist.clone(),
+    liked: merged.liked,
     artwork_id,
-    duration_ms: Some(track.duration_ms),
+    duration_ms: merged.duration_ms,
     media_types: merged.media_types.clone(),
     track_number: merged.track_number,
     track_count: merged.track_count,
