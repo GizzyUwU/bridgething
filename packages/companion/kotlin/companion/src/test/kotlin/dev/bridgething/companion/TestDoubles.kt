@@ -18,8 +18,8 @@ object NoOpVolumeSource : VolumeSource {
     override fun snapshot(): Pair<Float, Boolean> = 0f to false
 }
 
-/** Lyrics resolver that always falls through (no synced/plain lyrics). */
-class FakeLyricsResolver : LyricsResolver {
+/** Lyrics resolver that returns [canned] (null by default = falls through). */
+class FakeLyricsResolver(private val canned: Lyrics? = null) : LyricsResolver {
     override val name: String = "fake"
-    override suspend fun lyrics(track: TrackIdentity): Lyrics? = null
+    override suspend fun lyrics(track: TrackIdentity): Lyrics? = canned
 }
