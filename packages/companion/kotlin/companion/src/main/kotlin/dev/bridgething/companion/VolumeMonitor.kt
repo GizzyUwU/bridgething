@@ -20,15 +20,11 @@ import android.media.AudioManager
  */
 public class VolumeMonitor(
     private val context: Context,
-) {
-    public fun interface Callback {
-        public fun onVolumeChanged(level: Float, muted: Boolean)
-    }
-
+) : VolumeSource {
     private val audio = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var receiver: BroadcastReceiver? = null
 
-    public fun start(callback: Callback) {
+    public override fun start(callback: VolumeSource.Callback) {
         stop()
         val ctx = context.applicationContext
         val recv = object : BroadcastReceiver() {
@@ -54,12 +50,12 @@ public class VolumeMonitor(
         callback.onVolumeChanged(level, muted)
     }
 
-    public fun stop() {
+    public override fun stop() {
         receiver?.let { context.applicationContext.unregisterReceiver(it) }
         receiver = null
     }
 
-    public fun snapshot(): Pair<Float, Boolean> = readSnapshot()
+    public override fun snapshot(): Pair<Float, Boolean> = readSnapshot()
 
     private fun readSnapshot(): Pair<Float, Boolean> {
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)

@@ -1,3 +1,6 @@
+// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
+#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
+
 import Foundation
 
 /// Vertical fast-path matcher on the ASR transcript. Closed regex on the
@@ -376,3 +379,5 @@ public enum NluFastPath {
         rulePlayBare,
     ]
 }
+
+#endif

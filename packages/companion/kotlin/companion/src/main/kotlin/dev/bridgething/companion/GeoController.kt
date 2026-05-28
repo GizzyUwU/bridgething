@@ -43,7 +43,7 @@ import kotlinx.coroutines.sync.withLock
  */
 public class GeoController(
     private val context: Context,
-) {
+) : GeoSource {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
     private val callbackExecutor: Executor = Executors.newSingleThreadExecutor { r ->
@@ -59,7 +59,7 @@ public class GeoController(
     private var fused: FusedBackend? = null
     private var legacy: LegacyBackend? = null
 
-    public suspend fun start(gateway: BridgethingGateway) {
+    public override suspend fun start(gateway: BridgethingGateway) {
         mutex.withLock {
             gatewayRef = gateway
             watchJob?.cancel()
@@ -79,7 +79,7 @@ public class GeoController(
         }
     }
 
-    public suspend fun stop() {
+    public override suspend fun stop() {
         mutex.withLock {
             watchJob?.cancel(); watchJob = null
             unwatchJob?.cancel(); unwatchJob = null

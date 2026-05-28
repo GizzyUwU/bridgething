@@ -9,8 +9,6 @@ import Spotiny
 
 /// Populates the static provider registry and installs the session backend.
 /// Call from `application(_:didFinishLaunchingWithOptions:)` before React Native starts.
-/// When `BRIDGETHING_DEVICE_CLIENT_ID` is present in Info.plist, Spotify uses the device-code
-/// flow; otherwise falls back to WebView PKCE via `BRIDGETHING_PKCE_CLIENT_ID`.
 enum BridgethingApp {
     static let appName: String = "bridgething"
     static var appVersion: String {
@@ -88,17 +86,16 @@ enum BridgethingApp {
         let authorizeURL = URL(string: "https://accounts.spotify.com/authorize")!
         let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
 
-        if let clientID = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_DEVICE_CLIENT_ID") as? String,
-           !clientID.isEmpty
+        if let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String,
+           !psk.isEmpty
         {
-            let deviceCodeURL = URL(string: "https://accounts.spotify.com/api/device/code")!
-            // spotify's device-code endpoint requires `description` as the device label shown on spotify.com/pair
+            let worker = "https://thinglabs.sh/auth"
             let configuration = DeviceCodeConfiguration(
-                deviceCodeEndpoint: deviceCodeURL,
-                tokenEndpoint: tokenURL,
-                clientID: clientID,
+                deviceCodeEndpoint: URL(string: "\(worker)/api/device/code")!,
+                tokenEndpoint: URL(string: "\(worker)/api/token")!,
                 description: "car-thing-device",
-                scopes: scopes
+                scopes: scopes,
+                authorizationBearer: psk
             )
             return { onPrompt in
                 DeviceCodeAuthenticator(configuration: configuration, onPrompt: onPrompt)

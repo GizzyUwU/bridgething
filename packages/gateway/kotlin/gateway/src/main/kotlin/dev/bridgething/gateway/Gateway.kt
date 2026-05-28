@@ -14,10 +14,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -67,8 +69,18 @@ public class BridgethingGateway(
   private val pendingRequests = mutableMapOf<UUID, CompletableDeferred<BridgeToGatewayMsg>>()
   private var consumerJob: Job? = null
 
-  private val outboundEvents = Channel<GatewayEvent>(Channel.BUFFERED)
-  public val events: Flow<GatewayEvent> = outboundEvents.receiveAsFlow()
+  // Broadcast, not fan-out: every dispatcher collector must see every event. A
+  // `Channel.receiveAsFlow()` distributes each event to only ONE of the competing
+  // collectors, so the companion's many surface dispatchers would drop most events.
+  // replay lets a dispatcher that subscribes slightly after start() still catch recent
+  // events; all companion dispatchers subscribe at start before any peer connects, so
+  // replay never re-delivers in practice.
+  private val outboundEvents = MutableSharedFlow<GatewayEvent>(
+    replay = 16,
+    extraBufferCapacity = 256,
+    onBufferOverflow = BufferOverflow.SUSPEND,
+  )
+  public val events: Flow<GatewayEvent> = outboundEvents.asSharedFlow()
 
   public suspend fun start() {
     mutex.withLock {
@@ -93,7 +105,6 @@ public class BridgethingGateway(
     job?.cancelAndJoin()
     adapter.stop()
     deferreds.forEach { it.completeExceptionally(GatewayException.Shutdown()) }
-    outboundEvents.close()
     scope.cancel()
   }
 
@@ -166,11 +177,11 @@ public class BridgethingGateway(
     when (event) {
       is AdapterEvent.Connected -> {
         mutex.withLock { buffers[event.device.id] = FrameAccumulator() }
-        outboundEvents.send(GatewayEvent.Connected(event.device))
+        outboundEvents.emit(GatewayEvent.Connected(event.device))
       }
       is AdapterEvent.Disconnected -> {
         mutex.withLock { buffers.remove(event.deviceId) }
-        outboundEvents.send(GatewayEvent.Disconnected(event.deviceId))
+        outboundEvents.emit(GatewayEvent.Disconnected(event.deviceId))
       }
       is AdapterEvent.Bytes -> ingest(event.deviceId, event.data)
     }
@@ -185,13 +196,13 @@ public class BridgethingGateway(
         mutex.withLock { buffers[deviceId]?.nextFrame() } ?: return
       } catch (e: Throwable) {
         mutex.withLock { buffers[deviceId] = FrameAccumulator() }
-        outboundEvents.send(GatewayEvent.DecodeError(deviceId, e.message ?: e.toString()))
+        outboundEvents.emit(GatewayEvent.DecodeError(deviceId, e.message ?: e.toString()))
         return
       }
       val msg = try {
         codec.decode(BridgeToGatewayMsg.serializer(), frame)
       } catch (e: Throwable) {
-        outboundEvents.send(GatewayEvent.DecodeError(deviceId, e.message ?: e.toString()))
+        outboundEvents.emit(GatewayEvent.DecodeError(deviceId, e.message ?: e.toString()))
         continue
       }
       val resp = msg.meta as? MsgMeta.Response
@@ -202,7 +213,7 @@ public class BridgethingGateway(
         false
       }
       if (!resolved) {
-        outboundEvents.send(GatewayEvent.Message(deviceId, msg))
+        outboundEvents.emit(GatewayEvent.Message(deviceId, msg))
       }
     }
   }

@@ -48,6 +48,7 @@ dependencies {
   // chooses whether to ship it.
   compileOnly("com.google.android.gms:play-services-location:21.3.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+  testImplementation("io.mockk:mockk:1.13.13")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

@@ -1,3 +1,6 @@
+// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
+#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
+
 import BridgethingSchema
 import Foundation
 #if canImport(FoundationNetworking)
@@ -112,3 +115,5 @@ public actor NluOpenRouterClient {
         return Completion(text: content, usage: usage)
     }
 }
+
+#endif

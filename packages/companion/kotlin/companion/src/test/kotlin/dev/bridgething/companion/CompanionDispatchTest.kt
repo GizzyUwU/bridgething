@@ -1,0 +1,97 @@
+package dev.bridgething.companion
+
+import dev.bridgething.schema.BridgeToGatewayLibraryMsg
+import dev.bridgething.schema.BridgeToGatewayMsgData
+import dev.bridgething.schema.BridgeToGatewayPlayerMsg
+import dev.bridgething.schema.BrowseResult
+import dev.bridgething.schema.GatewayToBridgeLibraryMsg
+import dev.bridgething.schema.GatewayToBridgeMsgData
+import dev.bridgething.schema.LibraryBrowseRequest
+import dev.bridgething.schema.WireError
+import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Dispatch-layer tests: drive wire requests at the [FakeAdapter] seam exactly as
+ * the daemon would, through the real [BridgethingCompanion] + a [FakeGlue], and
+ * assert the response frames. Geo/volume are injected no-ops; the BT transport is
+ * the FakeAdapter. No Spotify, no Android.
+ */
+class CompanionDispatchTest {
+    private suspend fun boot(scope: CoroutineScope, glue: FakeGlue?): Pair<BridgethingCompanion, WireDriver> {
+        val adapter = FakeAdapter()
+        val companion = BridgethingCompanion(
+            context = mockk(relaxed = true),
+            adapter = adapter,
+            lyricsResolver = FakeLyricsResolver(),
+            host = HostInfo(appName = "test", appVersion = "0.0.1", osName = "test"),
+            geo = NoOpGeoSource,
+            volume = NoOpVolumeSource,
+        )
+        if (glue != null) companion.setActive(glue)
+        companion.start()
+        val driver = WireDriver(adapter)
+        driver.start(scope)
+        driver.connect()
+        return companion to driver
+    }
+
+    private fun browseReq() = BridgeToGatewayMsgData.Library(
+        BridgeToGatewayLibraryMsg.Browse(LibraryBrowseRequest(nodeId = null, limit = 20u, offset = 0u)),
+    )
+
+    @Test
+    fun `browse routes to the active glue and returns its result`() = runBlocking {
+        val glue = FakeGlue(onBrowse = { BrowseResult(entries = emptyList(), total = 7u, hasMore = false) })
+        val (companion, driver) = boot(this, glue)
+
+        val resp = driver.request(browseReq())
+        val lib = resp.data as GatewayToBridgeMsgData.Library
+        val reply = lib.data as GatewayToBridgeLibraryMsg.BrowseReply
+        assertEquals(7u, reply.data.result.total)
+        assertTrue(glue.calls.contains("browse"))
+
+        companion.stop()
+    }
+
+    @Test
+    fun `library request with no active glue returns a LibraryError`() = runBlocking {
+        val (companion, driver) = boot(this, null)
+
+        val resp = driver.request(browseReq())
+        val lib = resp.data as GatewayToBridgeMsgData.Library
+        assertTrue(lib.data is GatewayToBridgeLibraryMsg.LibraryErrorReply)
+
+        companion.stop()
+    }
+
+    @Test
+    fun `unimplemented library verb maps to a protocol Unimplemented error`() = runBlocking {
+        // FakeGlue with no onBrowse closure -> browse() throws GlueError.NotImplemented.
+        val (companion, driver) = boot(this, FakeGlue(onBrowse = null))
+
+        val resp = driver.request(browseReq())
+        val err = resp.data as GatewayToBridgeMsgData.Error
+        assertTrue(err.data is WireError.Unimplemented)
+
+        companion.stop()
+    }
+
+    @Test
+    fun `player command reaches the glue`() = runBlocking {
+        val glue = FakeGlue()
+        val (companion, driver) = boot(this, glue)
+
+        driver.send(BridgeToGatewayMsgData.Player(BridgeToGatewayPlayerMsg.Pause))
+        withTimeout(2.seconds) { while (!glue.calls.contains("pause")) delay(10) }
+
+        companion.stop()
+    }
+}

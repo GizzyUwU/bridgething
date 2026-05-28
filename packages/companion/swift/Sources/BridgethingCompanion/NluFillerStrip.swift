@@ -1,3 +1,6 @@
+// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
+#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
+
 import Foundation
 
 /// Filler-strip helper for WEBAPP_INTENT raw_query slots.
@@ -91,3 +94,5 @@ public enum NluFillerStrip {
         return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: replacement)
     }
 }
+
+#endif

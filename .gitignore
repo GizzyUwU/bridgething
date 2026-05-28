@@ -53,3 +53,7 @@ yarn-error.log*
 *.local.xcconfig
 gradle.properties.local
 .swiftpm/
+
+# Test suite: recorded Spotify HTTP cassettes + any local token cache
+**/Tests/**/Cassettes/
+*.spotify-tokens.json

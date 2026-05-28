@@ -49,6 +49,31 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.coroutineScope
+import dev.bridgething.gateway.library
+import dev.bridgething.gateway.LibraryBrowseRequestHandle
+import dev.bridgething.gateway.LibrarySearchRequestHandle
+import dev.bridgething.gateway.LibraryRecommendationsRequestHandle
+import dev.bridgething.gateway.LibraryFavoritesListRequestHandle
+import dev.bridgething.gateway.LibraryFavoritesContainsRequestHandle
+import dev.bridgething.glue.GlueError
+import dev.bridgething.schema.BrowseReply
+import dev.bridgething.schema.SearchReply
+import dev.bridgething.schema.RecommendationsReply
+import dev.bridgething.schema.FavoritesListReply
+import dev.bridgething.schema.FavoritesContainsReply
+import dev.bridgething.schema.LibraryErrorReply
+import dev.bridgething.schema.LibraryError
+import dev.bridgething.schema.LibraryErrorNotSupportedInner
+import dev.bridgething.schema.WireError
+import dev.bridgething.schema.LibraryBrowseRequest
+import dev.bridgething.schema.LibrarySearchRequest
+import dev.bridgething.schema.LibraryRecommendationsRequest
+import dev.bridgething.schema.LibraryFavoritesListRequest
+import dev.bridgething.schema.LibraryFavoritesContainsRequest
+import dev.bridgething.schema.FavoritesToggle
+import dev.bridgething.schema.FavoritesSet
+import dev.bridgething.schema.FavoritesSetMany
 
 /** Severity tag passed to the [BridgethingCompanion] log observer. */
 public enum class CompanionLogLevel(public val raw: String) {
@@ -129,13 +154,15 @@ public class BridgethingCompanion(
     private val host: HostInfo,
     capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags(),
     httpClient: okhttp3.OkHttpClient = okhttp3.OkHttpClient(),
+    geo: GeoSource = GeoController(context = context.applicationContext),
+    volume: VolumeSource = VolumeMonitor(context = context.applicationContext),
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
 
     private val netDispatcher = NetDispatcher(client = httpClient)
-    private val geoController = GeoController(context = context.applicationContext)
-    private val volumeMonitor = VolumeMonitor(context = context.applicationContext)
+    private val geoController: GeoSource = geo
+    private val volumeMonitor: VolumeSource = volume
 
     private val supervisor: CompletableJob = SupervisorJob()
     private val scope = CoroutineScope(supervisor + Dispatchers.Default + CoroutineName("bridgething-companion"))
@@ -308,6 +335,7 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })
         dispatchers.add(scope.launch { runAncsAuthDispatch() })
+        dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
@@ -408,6 +436,125 @@ public class BridgethingCompanion(
     private suspend fun runAncsAuthDispatch() {
         gateway.notifications.ancsAuthStateChanged.collect { (_, state) ->
             ancsAuthStateObserver?.invoke(state)
+        }
+    }
+
+    // MARK: - library dispatch
+
+    // Each surface collects on its own child; the enclosing coroutineScope keeps the
+    // tracked job alive so cancelling it (on stop()) tears down every collector.
+    private suspend fun runLibraryDispatch(): Unit = coroutineScope {
+        launch { gateway.library.browseRequests.collect { (handle, req) -> launch { handleBrowse(handle, req) } } }
+        launch { gateway.library.searchRequests.collect { (handle, req) -> launch { handleSearch(handle, req) } } }
+        launch { gateway.library.recommendationsRequests.collect { (handle, req) -> launch { handleRecommendations(handle, req) } } }
+        launch { gateway.library.favoritesListRequests.collect { (handle, req) -> launch { handleFavoritesList(handle, req) } } }
+        launch { gateway.library.favoritesContainsRequests.collect { (handle, req) -> launch { handleFavoritesContains(handle, req) } } }
+        launch { gateway.library.favoritesToggle.collect { (_, msg) -> launch { handleFavoritesToggle(msg) } } }
+        launch { gateway.library.favoritesSet.collect { (_, msg) -> launch { handleFavoritesSet(msg) } } }
+        launch { gateway.library.favoritesSetMany.collect { (_, msg) -> launch { handleFavoritesSetMany(msg) } } }
+    }
+
+    private suspend fun handleBrowse(handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val result = try {
+            glue.browse(req)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(BrowseReply(result)) }
+    }
+
+    private suspend fun handleSearch(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val result = try {
+            glue.search(req)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(SearchReply(result)) }
+    }
+
+    private suspend fun handleRecommendations(handle: LibraryRecommendationsRequestHandle, req: LibraryRecommendationsRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val result = try {
+            glue.recommendations(req)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(RecommendationsReply(result)) }
+    }
+
+    private suspend fun handleFavoritesList(handle: LibraryFavoritesListRequestHandle, req: LibraryFavoritesListRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val page = try {
+            glue.favoritesList(req)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(FavoritesListReply(page)) }
+    }
+
+    private suspend fun handleFavoritesContains(handle: LibraryFavoritesContainsRequestHandle, req: LibraryFavoritesContainsRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val liked = try {
+            glue.favoritesContains(req)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(FavoritesContainsReply(liked)) }
+    }
+
+    private suspend fun handleFavoritesToggle(msg: FavoritesToggle) {
+        val glue = activeGlue ?: return
+        try {
+            glue.favoritesToggle(msg.item)
+        } catch (e: Throwable) {
+            log(CompanionLogLevel.Warn, "favoritesToggle failed: ${e.message ?: e.toString()}")
+        }
+    }
+
+    private suspend fun handleFavoritesSet(msg: FavoritesSet) {
+        val glue = activeGlue ?: return
+        try {
+            glue.favoritesSet(msg.item, msg.liked)
+        } catch (e: Throwable) {
+            log(CompanionLogLevel.Warn, "favoritesSet failed: ${e.message ?: e.toString()}")
+        }
+    }
+
+    private suspend fun handleFavoritesSetMany(msg: FavoritesSetMany) {
+        val glue = activeGlue ?: return
+        try {
+            glue.favoritesSetMany(msg.entries)
+        } catch (e: Throwable) {
+            log(CompanionLogLevel.Warn, "favoritesSetMany failed: ${e.message ?: e.toString()}")
+        }
+    }
+
+    private fun noProviderReply(): LibraryErrorReply =
+        LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = "no active music provider")))
+
+    // notImplemented -> protocol Unimplemented (recognized verb, no backend); everything
+    // else -> a LibraryError domain reply. Mirrors the Swift companion's failLibrary.
+    private suspend fun respondLibraryError(
+        error: Throwable,
+        onProtocol: suspend (WireError) -> Unit,
+        onDomain: suspend (LibraryErrorReply) -> Unit,
+    ) {
+        when (error) {
+            is GlueError.NotImplemented -> onProtocol(WireError.Unimplemented)
+            is GlueError.NotAuthenticated -> onDomain(LibraryErrorReply(LibraryError.Unauthorized))
+            is GlueError.Detached ->
+                onDomain(LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = "music provider detached"))))
+            is GlueError.Underlying ->
+                onDomain(LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = error.cause?.toString() ?: error.toString()))))
+            else ->
+                onDomain(LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = error.toString()))))
         }
     }
 

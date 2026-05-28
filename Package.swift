@@ -15,6 +15,7 @@ let package = Package(
     .library(name: "BridgethingCompanion", targets: ["BridgethingCompanion"]),
     .library(name: "BridgethingAppleMusicGlue", targets: ["BridgethingAppleMusicGlue"]),
     .library(name: "BridgethingTidalGlue", targets: ["BridgethingTidalGlue"]),
+    .library(name: "BridgethingTestKit", targets: ["BridgethingTestKit"]),
   ],
   dependencies: [
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
@@ -42,7 +43,7 @@ let package = Package(
     ),
     .testTarget(
       name: "BridgethingGatewayTests",
-      dependencies: ["BridgethingGateway"],
+      dependencies: ["BridgethingGateway", "BridgethingTestKit"],
       path: "packages/gateway/swift/Tests/BridgethingGatewayTests"
     ),
     .target(
@@ -63,6 +64,16 @@ let package = Package(
       name: "BridgethingCompanion",
       dependencies: ["BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema"],
       path: "packages/companion/swift/Sources/BridgethingCompanion"
+    ),
+    .target(
+      name: "BridgethingTestKit",
+      dependencies: ["BridgethingGateway", "BridgethingSchema", "BridgethingGlue", "BridgethingLyrics"],
+      path: "packages/testkit/swift/Sources/BridgethingTestKit"
+    ),
+    .testTarget(
+      name: "BridgethingCompanionTests",
+      dependencies: ["BridgethingCompanion", "BridgethingTestKit"],
+      path: "packages/companion/swift/Tests/BridgethingCompanionTests"
     ),
     .target(
       name: "BridgethingAppleMusicGlue",

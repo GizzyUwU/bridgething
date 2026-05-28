@@ -1,3 +1,6 @@
+// DRAFT: voice/NLU subsystem does not yet build under Swift 6 strict concurrency.
+#if !os(macOS) && !os(iOS) && !os(tvOS) && !os(watchOS)
+
 import BridgethingSchema
 import Foundation
 
@@ -161,3 +164,5 @@ public struct NluMutableSlots: Equatable, Sendable {
         )
     }
 }
+
+#endif

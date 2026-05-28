@@ -29,7 +29,6 @@ public protocol BridgethingGlue: Sendable {
     func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
 
     /// Inbound transport-control verbs. Default impls throw `GlueError.notImplemented`;
-    /// concrete glues override the verbs they support.
     func play(_ uri: PlayUri) async throws
     func queue(_ req: QueueUri) async throws
     func pause() async throws
@@ -42,6 +41,16 @@ public protocol BridgethingGlue: Sendable {
     func setRepeat(_ mode: BridgethingSchema.RepeatMode) async throws
     func setSpeed(_ speed: Float) async throws
     func setCrossfade(_ durationMs: UInt32?) async throws
+
+    /// Library verbs; default impls throw `GlueError.notImplemented`.
+    func browse(_ req: LibraryBrowseRequest) async throws -> BrowseResult
+    func search(_ req: LibrarySearchRequest) async throws -> SearchResult
+    func recommendations(_ req: LibraryRecommendationsRequest) async throws -> RecommendationsResult
+    func favoritesList(_ req: LibraryFavoritesListRequest) async throws -> FavoritesPage
+    func favoritesContains(_ req: LibraryFavoritesContainsRequest) async throws -> [Bool]
+    func favoritesToggle(_ item: ItemRef) async throws
+    func favoritesSet(_ item: ItemRef, liked: Bool) async throws
+    func favoritesSetMany(_ entries: [FavoritesSet]) async throws
 
     /// Subscribe to auth-lifecycle updates. The glue drives the lifecycle:
     /// `pending(nil)` while negotiating, `pending(prompt)` once a device-code
@@ -73,6 +82,14 @@ public extension BridgethingGlue {
     func setRepeat(_: BridgethingSchema.RepeatMode) async throws { throw GlueError.notImplemented }
     func setSpeed(_: Float) async throws { throw GlueError.notImplemented }
     func setCrossfade(_: UInt32?) async throws { throw GlueError.notImplemented }
+    func browse(_: LibraryBrowseRequest) async throws -> BrowseResult { throw GlueError.notImplemented }
+    func search(_: LibrarySearchRequest) async throws -> SearchResult { throw GlueError.notImplemented }
+    func recommendations(_: LibraryRecommendationsRequest) async throws -> RecommendationsResult { throw GlueError.notImplemented }
+    func favoritesList(_: LibraryFavoritesListRequest) async throws -> FavoritesPage { throw GlueError.notImplemented }
+    func favoritesContains(_: LibraryFavoritesContainsRequest) async throws -> [Bool] { throw GlueError.notImplemented }
+    func favoritesToggle(_: ItemRef) async throws { throw GlueError.notImplemented }
+    func favoritesSet(_: ItemRef, liked _: Bool) async throws { throw GlueError.notImplemented }
+    func favoritesSetMany(_: [FavoritesSet]) async throws { throw GlueError.notImplemented }
     func handlePlaybackHint(_: PlaybackHint) async {}
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }

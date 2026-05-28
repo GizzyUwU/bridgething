@@ -110,7 +110,8 @@ public actor BridgethingCompanion {
         adapter: any Adapter,
         lyricsResolver: any LyricsResolver,
         host: HostInfo,
-        capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags()
+        capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags(),
+        geoProvider: (any GeoLocationProviding)? = nil
     ) {
         self.host = host
         self.lyricsResolver = lyricsResolver
@@ -119,7 +120,7 @@ public actor BridgethingCompanion {
         netDispatcher = NetDispatcher()
         ota = OtaService()
         #if canImport(CoreLocation)
-            geoController = GeoController()
+            geoController = GeoController(provider: geoProvider)
         #endif
         #if os(iOS)
             volumeMonitor = VolumeMonitor()
@@ -337,6 +338,7 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in await self?.runConnectAnnouncer() })
         tasks.append(Task { [weak self] in await self?.runPlayerDispatch() })
         tasks.append(Task { [weak self] in await self?.runAssetDispatch() })
+        tasks.append(Task { [weak self] in await self?.runLibraryDispatch() })
         tasks.append(Task { [weak self] in await self?.runLyricsDispatch() })
         tasks.append(Task { [weak self] in await self?.runAncsAuthDispatch() })
         tasks.append(Task { [weak self] in
@@ -433,6 +435,141 @@ public actor BridgethingCompanion {
             return
         }
         try? await handle.respond(AssetGotReply(id: id, bytes: bytes.bytes, mime: bytes.mime))
+    }
+
+    // MARK: - library dispatch
+
+    private func runLibraryDispatch() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in await self?.runLibraryBrowse() }
+            group.addTask { [weak self] in await self?.runLibrarySearch() }
+            group.addTask { [weak self] in await self?.runLibraryRecommendations() }
+            group.addTask { [weak self] in await self?.runLibraryFavoritesList() }
+            group.addTask { [weak self] in await self?.runLibraryFavoritesContains() }
+            group.addTask { [weak self] in await self?.runLibraryFavoritesToggle() }
+            group.addTask { [weak self] in await self?.runLibraryFavoritesSet() }
+            group.addTask { [weak self] in await self?.runLibraryFavoritesSetMany() }
+        }
+    }
+
+    private func runLibraryBrowse() async {
+        for await (handle, req) in gateway.library.browseRequests {
+            guard let glue = activeGlue else {
+                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            }
+            let result: BrowseResult
+            do { result = try await glue.browse(req) } catch {
+                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+            }
+            try? await handle.respond(BrowseReply(result: result))
+        }
+    }
+
+    private func runLibrarySearch() async {
+        for await (handle, req) in gateway.library.searchRequests {
+            guard let glue = activeGlue else {
+                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            }
+            let result: SearchResult
+            do { result = try await glue.search(req) } catch {
+                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+            }
+            try? await handle.respond(SearchReply(result: result))
+        }
+    }
+
+    private func runLibraryRecommendations() async {
+        for await (handle, req) in gateway.library.recommendationsRequests {
+            guard let glue = activeGlue else {
+                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            }
+            let result: RecommendationsResult
+            do { result = try await glue.recommendations(req) } catch {
+                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+            }
+            try? await handle.respond(RecommendationsReply(result: result))
+        }
+    }
+
+    private func runLibraryFavoritesList() async {
+        for await (handle, req) in gateway.library.favoritesListRequests {
+            guard let glue = activeGlue else {
+                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            }
+            let page: FavoritesPage
+            do { page = try await glue.favoritesList(req) } catch {
+                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+            }
+            try? await handle.respond(FavoritesListReply(page: page))
+        }
+    }
+
+    private func runLibraryFavoritesContains() async {
+        for await (handle, req) in gateway.library.favoritesContainsRequests {
+            guard let glue = activeGlue else {
+                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            }
+            let liked: [Bool]
+            do { liked = try await glue.favoritesContains(req) } catch {
+                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+            }
+            try? await handle.respond(FavoritesContainsReply(liked: liked))
+        }
+    }
+
+    private func runLibraryFavoritesToggle() async {
+        for await (_, msg) in gateway.library.favoritesToggle {
+            guard let glue = activeGlue else { continue }
+            do { try await glue.favoritesToggle(msg.item) } catch {
+                log(.warn, "favoritesToggle failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func runLibraryFavoritesSet() async {
+        for await (_, msg) in gateway.library.favoritesSet {
+            guard let glue = activeGlue else { continue }
+            do { try await glue.favoritesSet(msg.item, liked: msg.liked) } catch {
+                log(.warn, "favoritesSet failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func runLibraryFavoritesSetMany() async {
+        for await (_, msg) in gateway.library.favoritesSetMany {
+            guard let glue = activeGlue else { continue }
+            do { try await glue.favoritesSetMany(msg.entries) } catch {
+                log(.warn, "favoritesSetMany failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static let noProvider = LibraryError.notSupported(
+        LibraryErrorNotSupportedInner(reason: "no active music provider")
+    )
+
+    /// Map a glue error onto the right wire response: `notImplemented` -> a
+    /// protocol `Unimplemented` (recognized verb, no backend), everything else
+    /// -> a `LibraryError` domain reply.
+    private static func failLibrary(
+        _ error: Error,
+        onProtocol: (WireError) async -> Void,
+        onDomain: (LibraryErrorReply) async -> Void
+    ) async {
+        guard let glueError = error as? GlueError else {
+            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: error)))))
+            return
+        }
+        switch glueError {
+        case .notImplemented:
+            await onProtocol(.unimplemented)
+        case .notAuthenticated:
+            await onDomain(LibraryErrorReply(error: .unauthorized))
+        case .detached:
+            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: "music provider detached"))))
+        case let .underlying(inner):
+            await onDomain(LibraryErrorReply(error: .notSupported(LibraryErrorNotSupportedInner(reason: String(describing: inner)))))
+        }
     }
 
     private func runLyricsDispatch() async {

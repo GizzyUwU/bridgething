@@ -25,5 +25,26 @@ let package = Package(
       ],
       path: "Sources/BridgethingSpotifyGlue"
     ),
+    .executableTarget(
+      name: "spotify-login",
+      dependencies: [
+        .product(name: "Spotiny", package: "Spotiny"),
+        .product(name: "BridgethingTestKit", package: "Bridgething"),
+      ],
+      path: "Sources/SpotifyLogin"
+    ),
+    .testTarget(
+      name: "BridgethingSpotifyGlueTests",
+      dependencies: [
+        "BridgethingSpotifyGlue",
+        .product(name: "Spotiny", package: "Spotiny"),
+        .product(name: "BridgethingCompanion", package: "Bridgething"),
+        .product(name: "BridgethingTestKit", package: "Bridgething"),
+        .product(name: "BridgethingGateway", package: "Bridgething"),
+        .product(name: "BridgethingSchema", package: "Bridgething"),
+        .product(name: "BridgethingGlue", package: "Bridgething"),
+      ],
+      path: "Tests/BridgethingSpotifyGlueTests"
+    ),
   ]
 )

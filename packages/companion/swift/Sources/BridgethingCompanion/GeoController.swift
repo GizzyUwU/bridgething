@@ -1,154 +1,203 @@
+import BridgethingGateway
+import BridgethingSchema
+import Foundation
+
+/// Abstraction over the device location source (default: `CoreLocationProvider`).
+@MainActor
+public protocol GeoLocationProviding: AnyObject {
+    var onPosition: ((Position) -> Void)? { get set }
+    var onError: ((GeoError) -> Void)? { get set }
+
+    func configure(accuracy: GeoAccuracy)
+    func requestAuthorization()
+    func startUpdating()
+    func stopUpdating()
+    func requestOnce()
+}
+
+/// @MainActor: CoreLocation delegate callbacks fire on the main thread.
+@MainActor
+public final class GeoController {
+    private var provider: (any GeoLocationProviding)?
+    // Set once in init, read only on the main actor.
+    private nonisolated(unsafe) let injectedProvider: (any GeoLocationProviding)?
+
+    private var watchTask: Task<Void, Never>?
+    private var unwatchTask: Task<Void, Never>?
+    private var getOnceTask: Task<Void, Never>?
+
+    private var gatewayRef: BridgethingGateway?
+    private var watching: Bool = false
+    private var oneShotConts: [CheckedContinuation<Position, Error>] = []
+
+    // nil -> CoreLocation default when available.
+    public nonisolated init(provider: (any GeoLocationProviding)? = nil) {
+        injectedProvider = provider
+    }
+
+    private func ensureProvider() -> (any GeoLocationProviding)? {
+        if let provider { return provider }
+        guard let resolved = injectedProvider ?? Self.makeDefaultProvider() else { return nil }
+        resolved.onPosition = { [weak self] position in self?.didUpdate(position) }
+        resolved.onError = { [weak self] error in self?.didFail(error) }
+        provider = resolved
+        return resolved
+    }
+
+    private static func makeDefaultProvider() -> (any GeoLocationProviding)? {
+        #if canImport(CoreLocation)
+            return CoreLocationProvider()
+        #else
+            return nil
+        #endif
+    }
+
+    public func start(gateway: BridgethingGateway) async {
+        gatewayRef = gateway
+        _ = ensureProvider()
+
+        watchTask = Task { [weak self] in
+            for await (_, msg) in gateway.geo.watch {
+                await self?.handleWatch(msg)
+            }
+        }
+        unwatchTask = Task { [weak self] in
+            for await _ in gateway.geo.unwatch {
+                await self?.handleUnwatch()
+            }
+        }
+        getOnceTask = Task { [weak self] in
+            for await (handle, req) in gateway.geo.getOnceRequests {
+                await self?.handleGetOnce(handle: handle, req: req)
+            }
+        }
+    }
+
+    public func stop() async {
+        watchTask?.cancel(); watchTask = nil
+        unwatchTask?.cancel(); unwatchTask = nil
+        getOnceTask?.cancel(); getOnceTask = nil
+
+        if watching {
+            provider?.stopUpdating()
+            watching = false
+        }
+        for cont in oneShotConts {
+            cont.resume(throwing: GeoControllerError.cancelled)
+        }
+        oneShotConts.removeAll()
+        gatewayRef = nil
+    }
+
+    // MARK: - watch / unwatch
+
+    private func handleWatch(_ watch: GeoWatch) async {
+        guard let provider = ensureProvider() else { return }
+        provider.requestAuthorization()
+        provider.configure(accuracy: watch.accuracy)
+        if !watching {
+            watching = true
+            provider.startUpdating()
+        }
+    }
+
+    private func handleUnwatch() async {
+        if watching {
+            provider?.stopUpdating()
+            watching = false
+        }
+    }
+
+    // MARK: - get-once
+
+    private func handleGetOnce(handle: GeoGetOnceHandle, req: GeoGetOnce) async {
+        guard let provider = ensureProvider() else {
+            try? await handle.respondErr(GeoErrorReply(error: .unavailable))
+            return
+        }
+        provider.requestAuthorization()
+        provider.configure(accuracy: req.accuracy)
+        do {
+            let position = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Position, Error>) in
+                oneShotConts.append(cont)
+                provider.requestOnce()
+            }
+            try? await handle.respond(GeoGetOnceReply(position: position))
+        } catch {
+            let geoErr: GeoError = (error as? GeoFailure)?.error ?? .unavailable
+            try? await handle.respondErr(GeoErrorReply(error: geoErr))
+        }
+    }
+
+    // MARK: - provider callbacks
+
+    private func didUpdate(_ position: Position) {
+        if !oneShotConts.isEmpty {
+            oneShotConts.removeFirst().resume(returning: position)
+        }
+        if watching, let gw = gatewayRef {
+            Task { try? await gw.geo.position(position) }
+        }
+    }
+
+    private func didFail(_ error: GeoError) {
+        for cont in oneShotConts {
+            cont.resume(throwing: GeoFailure(error: error))
+        }
+        oneShotConts.removeAll()
+    }
+}
+
+private enum GeoControllerError: Error {
+    case cancelled
+}
+
+// Wraps a wire `GeoError`  so it can be thrown.
+private struct GeoFailure: Error {
+    let error: GeoError
+}
+
 #if canImport(CoreLocation)
-    import BridgethingGateway
-    import BridgethingSchema
     import CoreLocation
-    import Foundation
 
-    /// Geo surface implementation backed by `CoreLocation`.
-    ///
-    /// `CLLocationManager` requires main-thread isolation (delegate
-    /// callbacks fire there) so the controller is `@MainActor`-isolated.
-    /// `BridgethingCompanion` reaches in via `await`.
+    /// Default `GeoLocationProviding` backed by `CLLocationManager`.
     @MainActor
-    public final class GeoController {
-        private var manager: CLLocationManager?
-        private var delegate: Delegate?
+    public final class CoreLocationProvider: NSObject, GeoLocationProviding, CLLocationManagerDelegate {
+        public var onPosition: ((Position) -> Void)?
+        public var onError: ((GeoError) -> Void)?
 
-        private var watchTask: Task<Void, Never>?
-        private var unwatchTask: Task<Void, Never>?
-        private var getOnceTask: Task<Void, Never>?
-
-        private var gatewayRef: BridgethingGateway?
-        private var watching: Bool = false
-        private var oneShotConts: [CheckedContinuation<CLLocation, Error>] = []
-
-        public nonisolated init() {}
-
-        private func ensureSetup() -> CLLocationManager {
-            if let manager { return manager }
+        private lazy var manager: CLLocationManager = {
             let m = CLLocationManager()
-            let d = Delegate()
-            d.owner = self
-            m.delegate = d
-            manager = m
-            delegate = d
+            m.delegate = self
             return m
-        }
+        }()
 
-        public func start(gateway: BridgethingGateway) async {
-            _ = ensureSetup()
-            gatewayRef = gateway
+        override public init() { super.init() }
 
-            watchTask = Task { [weak self] in
-                for await (_, msg) in gateway.geo.watch {
-                    await self?.handleWatch(msg)
-                }
-            }
-            unwatchTask = Task { [weak self] in
-                for await _ in gateway.geo.unwatch {
-                    await self?.handleUnwatch()
-                }
-            }
-            getOnceTask = Task { [weak self] in
-                for await (handle, req) in gateway.geo.getOnceRequests {
-                    await self?.handleGetOnce(handle: handle, req: req)
-                }
+        public func configure(accuracy: GeoAccuracy) {
+            manager.desiredAccuracy = switch accuracy {
+            case .coarse: kCLLocationAccuracyHundredMeters
+            case .fine: kCLLocationAccuracyBest
             }
         }
 
-        public func stop() async {
-            watchTask?.cancel(); watchTask = nil
-            unwatchTask?.cancel(); unwatchTask = nil
-            getOnceTask?.cancel(); getOnceTask = nil
-
-            if watching, let manager {
-                manager.stopUpdatingLocation()
-                watching = false
-            }
-            for cont in oneShotConts {
-                cont.resume(throwing: GeoControllerError.cancelled)
-            }
-            oneShotConts.removeAll()
-            delegate?.owner = nil
-            gatewayRef = nil
-        }
-
-        // MARK: - watch / unwatch
-
-        private func handleWatch(_ watch: GeoWatch) async {
-            let manager = ensureSetup()
-            ensureAuthorized()
-            manager.desiredAccuracy = Self.accuracy(for: watch.accuracy)
-            if !watching {
-                watching = true
-                manager.startUpdatingLocation()
-            }
-        }
-
-        private func handleUnwatch() async {
-            if watching, let manager {
-                manager.stopUpdatingLocation()
-                watching = false
-            }
-        }
-
-        // MARK: - get-once
-
-        private func handleGetOnce(handle: GeoGetOnceHandle, req: GeoGetOnce) async {
-            let manager = ensureSetup()
-            ensureAuthorized()
-            manager.desiredAccuracy = Self.accuracy(for: req.accuracy)
-            do {
-                let loc = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CLLocation, Error>) in
-                    oneShotConts.append(cont)
-                    manager.requestLocation()
-                }
-                let position = Self.makePosition(from: loc)
-                try? await handle.respond(GeoGetOnceReply(position: position))
-            } catch {
-                let geoErr: GeoError = (error as? GeoControllerError)
-                    .map { Self.mapError($0) } ?? .unavailable
-                try? await handle.respondErr(GeoErrorReply(error: geoErr))
-            }
-        }
-
-        // MARK: - delegate routing
-
-        fileprivate func didUpdateLocation(_ location: CLLocation) {
-            if !oneShotConts.isEmpty {
-                let cont = oneShotConts.removeFirst()
-                cont.resume(returning: location)
-            }
-            if watching, let gw = gatewayRef {
-                let position = Self.makePosition(from: location)
-                Task {
-                    try? await gw.geo.position(position)
-                }
-            }
-        }
-
-        fileprivate func didFail(_ error: Error) {
-            for cont in oneShotConts {
-                cont.resume(throwing: GeoControllerError.failed(error))
-            }
-            oneShotConts.removeAll()
-        }
-
-        // MARK: - helpers
-
-        private func ensureAuthorized() {
-            guard let manager else { return }
-            let status = manager.authorizationStatus
-            if status == .notDetermined {
+        public func requestAuthorization() {
+            if manager.authorizationStatus == .notDetermined {
                 manager.requestWhenInUseAuthorization()
             }
         }
 
-        private static func accuracy(for accuracy: GeoAccuracy) -> CLLocationAccuracy {
-            switch accuracy {
-            case .coarse: kCLLocationAccuracyHundredMeters
-            case .fine: kCLLocationAccuracyBest
-            }
+        public func startUpdating() { manager.startUpdatingLocation() }
+        public func stopUpdating() { manager.stopUpdatingLocation() }
+        public func requestOnce() { manager.requestLocation() }
+
+        public nonisolated func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+            guard let last = locations.last else { return }
+            MainActor.assumeIsolated { self.onPosition?(Self.makePosition(from: last)) }
+        }
+
+        public nonisolated func locationManager(_: CLLocationManager, didFailWithError _: Error) {
+            MainActor.assumeIsolated { self.onError?(.unavailable) }
         }
 
         private static func makePosition(from location: CLLocation) -> Position {
@@ -161,39 +210,6 @@
                 headingDeg: location.course >= 0 ? Float(location.course) : nil,
                 tsUnixS: UInt32(max(location.timestamp.timeIntervalSince1970, 0))
             )
-        }
-
-        private static func mapError(_ err: GeoControllerError) -> GeoError {
-            switch err {
-            case .denied: .permissionDenied
-            case .unavailable: .unavailable
-            case .cancelled, .failed: .unavailable
-            }
-        }
-    }
-
-    private enum GeoControllerError: Error {
-        case denied
-        case unavailable
-        case cancelled
-        case failed(Error)
-    }
-
-    @MainActor
-    private final class Delegate: NSObject, CLLocationManagerDelegate {
-        weak var owner: GeoController?
-
-        nonisolated func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-            guard let last = locations.last else { return }
-            MainActor.assumeIsolated {
-                self.owner?.didUpdateLocation(last)
-            }
-        }
-
-        nonisolated func locationManager(_: CLLocationManager, didFailWithError error: Error) {
-            MainActor.assumeIsolated {
-                self.owner?.didFail(error)
-            }
         }
     }
 #endif

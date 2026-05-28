@@ -1,5 +1,6 @@
 import XCTest
 import BridgethingSchema
+import BridgethingTestKit
 @testable import BridgethingGateway
 
 final class GatewayTests: XCTestCase {
@@ -7,7 +8,7 @@ final class GatewayTests: XCTestCase {
   private let testDevice = Device(id: "carthing-1", name: "Car Thing")
 
   func testForwardsConnectAndDisconnectEvents() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
 
@@ -29,7 +30,7 @@ final class GatewayTests: XCTestCase {
   }
 
   func testDecodesIncomingFramesIntoMessages() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
 
@@ -60,7 +61,7 @@ final class GatewayTests: XCTestCase {
   }
 
   func testReassemblesFramesAcrossChunks() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
     adapter.simulate(.connected(testDevice))
@@ -86,7 +87,7 @@ final class GatewayTests: XCTestCase {
   }
 
   func testSendEncodesAndForwardsToAdapter() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
 
@@ -109,7 +110,7 @@ final class GatewayTests: XCTestCase {
   }
 
   func testRequestResponseCorrelation() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
     adapter.simulate(.connected(testDevice))
@@ -147,7 +148,7 @@ final class GatewayTests: XCTestCase {
   }
 
   func testRequestTimeoutFiresWhenNoResponseArrives() async throws {
-    let adapter = MockAdapter()
+    let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
     try await gateway.start()
     adapter.simulate(.connected(testDevice))

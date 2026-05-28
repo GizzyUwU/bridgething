@@ -3,10 +3,21 @@ package dev.bridgething.glue
 import dev.bridgething.gateway.BridgethingGateway
 import dev.bridgething.lyrics.Lyrics
 import dev.bridgething.lyrics.TrackIdentity
+import dev.bridgething.schema.BrowseResult
+import dev.bridgething.schema.FavoritesPage
+import dev.bridgething.schema.FavoritesSet
+import dev.bridgething.schema.ItemRef
+import dev.bridgething.schema.LibraryBrowseRequest
+import dev.bridgething.schema.LibraryFavoritesContainsRequest
+import dev.bridgething.schema.LibraryFavoritesListRequest
+import dev.bridgething.schema.LibraryRecommendationsRequest
+import dev.bridgething.schema.LibrarySearchRequest
 import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NowPlayingUpdate
 import dev.bridgething.schema.PlayUri
+import dev.bridgething.schema.RecommendationsResult
 import dev.bridgething.schema.RepeatMode
+import dev.bridgething.schema.SearchResult
 
 /**
  * Pluggable music-provider abstraction over a connected `BridgethingGateway`.
@@ -43,6 +54,17 @@ interface BridgethingGlue {
     suspend fun setRepeat(mode: RepeatMode): Unit = throw GlueError.NotImplemented
     suspend fun setSpeed(speed: Float): Unit = throw GlueError.NotImplemented
     suspend fun setCrossfade(durationMs: UInt?): Unit = throw GlueError.NotImplemented
+
+    // Library surface. Default impls throw NotImplemented; the companion maps that to a
+    // protocol `Unimplemented` reply (recognized verb, no backend) vs a domain LibraryError.
+    suspend fun browse(req: LibraryBrowseRequest): BrowseResult = throw GlueError.NotImplemented
+    suspend fun search(req: LibrarySearchRequest): SearchResult = throw GlueError.NotImplemented
+    suspend fun recommendations(req: LibraryRecommendationsRequest): RecommendationsResult = throw GlueError.NotImplemented
+    suspend fun favoritesList(req: LibraryFavoritesListRequest): FavoritesPage = throw GlueError.NotImplemented
+    suspend fun favoritesContains(req: LibraryFavoritesContainsRequest): List<Boolean> = throw GlueError.NotImplemented
+    suspend fun favoritesToggle(item: ItemRef): Unit = throw GlueError.NotImplemented
+    suspend fun favoritesSet(item: ItemRef, liked: Boolean): Unit = throw GlueError.NotImplemented
+    suspend fun favoritesSetMany(entries: List<FavoritesSet>): Unit = throw GlueError.NotImplemented
 
     /**
      * Bytes for an asset id this glue produced (e.g.
