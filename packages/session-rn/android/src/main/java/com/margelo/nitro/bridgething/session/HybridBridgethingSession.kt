@@ -151,8 +151,8 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         else Variant_NullType_BridgethingActiveWebapp.First(NullType.NULL)
     }
 
-    override fun installWebappFromBase64(deviceId: String, archiveBase64: String): Promise<BridgethingWebappInfo> = Promise.async {
-        require().installWebappFromBase64(deviceId, archiveBase64)
+    override fun installWebapp(deviceId: String, sourceUri: String): Promise<BridgethingWebappInfo> = Promise.async {
+        require().installWebapp(deviceId, sourceUri)
     }
 
     override fun uninstallWebapp(deviceId: String, id: String): Promise<Unit> = Promise.async {

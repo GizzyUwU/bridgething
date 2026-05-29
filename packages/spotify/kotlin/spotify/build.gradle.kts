@@ -42,6 +42,8 @@ dependencies {
   api("io.ktor:ktor-client-content-negotiation:3.0.0")
   api("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+  testImplementation("io.ktor:ktor-client-mock:3.0.0")
+  testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

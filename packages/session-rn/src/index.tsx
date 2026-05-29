@@ -139,8 +139,8 @@ export class BridgethingSession {
     return this.native.currentWebapp(deviceId);
   }
 
-  async installWebappFromBytes(deviceId: string, archive: ArrayBuffer): Promise<BridgethingWebappInfo> {
-    return this.native.installWebappFromBase64(deviceId, arrayBufferToBase64(archive));
+  async installWebappFromUri(deviceId: string, sourceUri: string): Promise<BridgethingWebappInfo> {
+    return this.native.installWebapp(deviceId, sourceUri);
   }
 
   async uninstallWebapp(deviceId: string, id: string): Promise<void> {
@@ -275,8 +275,8 @@ export class BridgethingDevice {
   currentWebapp() {
     return this.session.currentWebapp(this.id);
   }
-  installFromBytes(archive: ArrayBuffer) {
-    return this.session.installWebappFromBytes(this.id, archive);
+  installFromUri(sourceUri: string) {
+    return this.session.installWebappFromUri(this.id, sourceUri);
   }
   uninstall(webappId: string) {
     return this.session.uninstallWebapp(this.id, webappId);
@@ -299,39 +299,6 @@ export class BridgethingDevice {
   meta() {
     return this.session.deviceMeta(this.id);
   }
-}
-
-// Swift ArrayBuffer typealias breaks Swift-to-C++ header interop; base64 string surface avoids it.
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  // 8 KiB chunks avoid the JS call-stack limit on String.fromCharCode
-  let binary = '';
-  const chunk = 8192;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-  }
-  // test environments may not ship btoa
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const g = globalThis as any;
-  if (typeof g.btoa === 'function') return g.btoa(binary) as string;
-  return manualBtoa(binary);
-}
-
-const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-function manualBtoa(binary: string): string {
-  let out = '';
-  let i = 0;
-  while (i < binary.length) {
-    const a = binary.charCodeAt(i++);
-    const b = i < binary.length ? binary.charCodeAt(i++) : NaN;
-    const c = i < binary.length ? binary.charCodeAt(i++) : NaN;
-    out += B64_ALPHABET[a >> 2];
-    out += B64_ALPHABET[((a & 3) << 4) | (isNaN(b) ? 0 : b >> 4)];
-    out += isNaN(b) ? '=' : B64_ALPHABET[((b & 15) << 2) | (isNaN(c) ? 0 : c >> 6)];
-    out += isNaN(c) ? '=' : B64_ALPHABET[c & 63];
-  }
-  return out;
 }
 
 function createNativeSession(): NativeBridgethingSession {

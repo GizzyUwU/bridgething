@@ -91,6 +91,16 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+        // sourced from env, gradle property, or the gitignored local.properties; never committed.
+        def localProps = new Properties()
+        def localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) localPropsFile.withInputStream { localProps.load(it) }
+        buildConfigField "String", "BRIDGETHING_AUTH_PSK",
+            "\"${System.getenv("BRIDGETHING_AUTH_PSK") ?: project.findProperty("BRIDGETHING_AUTH_PSK") ?: localProps.getProperty("BRIDGETHING_AUTH_PSK") ?: ""}\""
+    }
+    buildFeatures {
+        buildConfig true
     }
     signingConfigs {
         debug {
@@ -140,4 +150,5 @@ dependencies {
     // back to AOSP LocationManager) but having it on the classpath gives
     // the better-battery + better-accuracy fused provider where available.
     implementation "com.google.android.gms:play-services-location:21.3.0"
+    implementation "androidx.security:security-crypto:1.1.0"
 }

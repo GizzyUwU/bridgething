@@ -87,7 +87,24 @@ interface BridgethingGlue {
      * no-op for stub glues.
      */
     suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) {}
+
+    /** default no-op; glues with interactive sign-in drive this to surface auth transitions. */
+    suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {}
 }
+
+/** Auth-lifecycle state an interactive glue reports to the companion. */
+sealed class GlueAuthState {
+    data class Pending(val prompt: GlueDeviceCodePrompt?) : GlueAuthState()
+    object Authenticated : GlueAuthState()
+    data class Failed(val reason: String) : GlueAuthState()
+}
+
+/** RFC 8628 device-code prompt the user completes in a browser. */
+data class GlueDeviceCodePrompt(
+    val userCode: String,
+    val verificationUrl: String,
+    val verificationUrlComplete: String?,
+)
 
 /**
  * NowPlaying snapshot the active glue surfaces to the companion. Wraps

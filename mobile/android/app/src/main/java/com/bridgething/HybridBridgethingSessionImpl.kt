@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import com.bridgething.session.BridgethingSessionBackend
 import com.margelo.nitro.bridgething.session.BridgethingActiveWebapp
@@ -15,6 +16,8 @@ import com.margelo.nitro.bridgething.session.BridgethingAuthKind
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
+import com.margelo.nitro.bridgething.session.BridgethingConfigField
+import com.margelo.nitro.bridgething.session.BridgethingConfigKind
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
 import com.margelo.nitro.bridgething.session.BridgethingHostInfo
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
@@ -30,6 +33,8 @@ import com.margelo.nitro.bridgething.session.BridgethingRepeatMode
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
+import com.margelo.nitro.bridgething.session.BridgethingWebappRole
+import com.margelo.nitro.bridgething.session.BridgethingWebappSource
 import dev.bridgething.companion.AncsSetupKind
 import dev.bridgething.companion.AndroidNotificationActionBackend
 import dev.bridgething.companion.AndroidPhoneBackend
@@ -43,23 +48,54 @@ import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import dev.bridgething.companion.OtaPollEvent
 import dev.bridgething.gateway.BluetoothSocketAdapter
 import dev.bridgething.gateway.GatewayEvent
+import dev.bridgething.gateway.RequestResult
+import dev.bridgething.gateway.device
+import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.BridgethingGlue
+import dev.bridgething.glue.GlueAuthState
 import dev.bridgething.glue.GlueNowPlaying
 import dev.bridgething.lyrics.LrclibResolver
 import dev.bridgething.lyrics.LyricsResolver
 import dev.bridgething.schema.AncsAuthState
+import dev.bridgething.schema.ConfigField
 import dev.bridgething.schema.OtaKind
 import dev.bridgething.schema.OtaPhase
+import dev.bridgething.schema.Priority
 import dev.bridgething.schema.RepeatMode
+import dev.bridgething.schema.WebappConfigDelete
+import dev.bridgething.schema.WebappConfigList
+import dev.bridgething.schema.WebappConfigSet
+import dev.bridgething.schema.WebappError
+import dev.bridgething.schema.WebappIcon
+import dev.bridgething.schema.WebappInfo
+import dev.bridgething.schema.WebappInstallBegin
+import dev.bridgething.schema.WebappInstallChunk
+import dev.bridgething.schema.WebappRole
+import dev.bridgething.schema.WebappSource
+import dev.bridgething.schema.WebappSwitchTo
+import dev.bridgething.schema.WebappUninstall
+import java.io.File
+import java.io.RandomAccessFile
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.nio.ByteBuffer
+import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** [BridgethingSessionBackend] impl that owns one [BridgethingCompanion]. */
 public class HybridBridgethingSessionImpl(
@@ -230,12 +266,31 @@ public class HybridBridgethingSessionImpl(
         emitAuth(authState(BridgethingAuthKind.PENDING))
         try {
             val glue = registration.factory()
+            glue.setAuthObserver { state -> handleGlueAuthState(state) }
             c.setActive(glue)
-            emitProvider(BridgethingProviderInfo(id = registration.id, displayName = registration.displayName, available = registration.available))
-            emitAuth(authState(BridgethingAuthKind.AUTHENTICATED))
         } catch (e: Throwable) {
             emitAuth(authState(BridgethingAuthKind.FAILED, message = e.message ?: e.toString()))
             throw e
+        }
+    }
+
+    private fun handleGlueAuthState(state: GlueAuthState) {
+        when (state) {
+            is GlueAuthState.Pending -> emitAuth(
+                authState(
+                    BridgethingAuthKind.PENDING,
+                    userCode = state.prompt?.userCode,
+                    verificationUrl = state.prompt?.verificationUrl,
+                    verificationUrlComplete = state.prompt?.verificationUrlComplete,
+                ),
+            )
+            is GlueAuthState.Authenticated -> {
+                activeRegistration?.let {
+                    emitProvider(BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available))
+                }
+                emitAuth(authState(BridgethingAuthKind.AUTHENTICATED))
+            }
+            is GlueAuthState.Failed -> emitAuth(authState(BridgethingAuthKind.FAILED, message = state.reason))
         }
     }
 
@@ -291,15 +346,108 @@ public class HybridBridgethingSessionImpl(
     override suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus =
         toRnAncsAuthStatus(stateLock.withLock { companion }?.currentAncsAuthState() ?: AncsAuthState.Unknown)
 
-    override suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo> = TODO("android webapp install pipeline")
-    override suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp? = null
-    override suspend fun installWebappFromBase64(deviceId: String, archiveBase64: String): BridgethingWebappInfo = TODO("android webapp install pipeline")
-    override suspend fun uninstallWebapp(deviceId: String, id: String): Unit = TODO("android webapp install pipeline")
-    override suspend fun switchWebapp(deviceId: String, id: String): Unit = TODO("android webapp install pipeline")
-    override suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon? = null
-    override suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry> = emptyArray()
-    override suspend fun setWebappConfigField(deviceId: String, id: String, key: String, value: String): Unit = TODO("android webapp install pipeline")
-    override suspend fun deleteWebappConfigField(deviceId: String, id: String, key: String): Unit = TODO("android webapp install pipeline")
+    override suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo> {
+        val c = requireCompanion(deviceId)
+        val value = unwrapVoid(c.gateway.webapp.list(deviceId), "listWebapps")
+        return value.webapps
+            .filter { it.role != WebappRole.Launcher }
+            .map(::toRnWebappInfo)
+            .toTypedArray()
+    }
+
+    override suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp? {
+        val c = requireCompanion(deviceId)
+        val value = unwrapVoid(c.gateway.webapp.getActive(deviceId), "currentWebapp")
+        val idBytes = value.id ?: return null
+        return BridgethingActiveWebapp(id = uuidFromBytes(idBytes).toString(), name = value.name)
+    }
+
+    override suspend fun installWebapp(deviceId: String, sourceUri: String): BridgethingWebappInfo {
+        val c = requireCompanion(deviceId)
+        val (archive, isTemporary) = resolveArchive(sourceUri)
+        try {
+            val size = archive.length()
+            require(size in 1..UInt.MAX_VALUE.toLong()) { "invalid archive" }
+            val installId = sha256HexOfFile(archive)
+            val ack = unwrapWebapp(
+                c.gateway.webapp.installBegin(deviceId, WebappInstallBegin(installId, installId, size.toUInt())),
+                "installBegin",
+            )
+
+            // subscribe before the last chunk to avoid racing the daemon's installed broadcast.
+            val installed = scope.async {
+                c.gateway.webapp.webappInstalled.first { it.first == deviceId }.second
+            }
+            val failed = scope.async {
+                c.gateway.webapp.webappInstallFailed
+                    .first { it.first == deviceId && it.second.installId == installId }.second.error
+            }
+            try {
+                streamInstallChunks(c, deviceId, installId, archive, size, ack.resumeFromOffset.toLong())
+                val info = withTimeoutOrNull(60_000L) {
+                    select<WebappInfo> {
+                        installed.onAwait { it }
+                        failed.onAwait { throw IllegalStateException("install failed: $it") }
+                    }
+                } ?: throw IllegalStateException("install timed out")
+                emitWebappsChanged(deviceId)
+                return toRnWebappInfo(info)
+            } finally {
+                installed.cancel()
+                failed.cancel()
+            }
+        } finally {
+            if (isTemporary) archive.delete()
+        }
+    }
+
+    override suspend fun uninstallWebapp(deviceId: String, id: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.uninstall(deviceId, WebappUninstall(uuid)), "uninstallWebapp")
+        emitWebappsChanged(deviceId)
+    }
+
+    override suspend fun switchWebapp(deviceId: String, id: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.switchTo(deviceId, WebappSwitchTo(uuid)), "switchWebapp")
+        emitWebappsChanged(deviceId)
+    }
+
+    override suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon? {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        return when (val result = c.gateway.webapp.icon(deviceId, WebappIcon(uuid))) {
+            is RequestResult.Ok -> {
+                val file = writeIconToCache(deviceId, id, result.response.mime, result.response.bytes)
+                BridgethingWebappIcon(fileUri = Uri.fromFile(file).toString(), mime = result.response.mime)
+            }
+            is RequestResult.DomainErr ->
+                if (result.error is WebappError.IconNotAvailable) null
+                else throw IllegalStateException("webappIcon: ${result.error}")
+            is RequestResult.ProtocolErr -> throw IllegalStateException("webappIcon: ${result.error}")
+        }
+    }
+
+    override suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry> {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        val reply = unwrapWebapp(c.gateway.webapp.configList(deviceId, WebappConfigList(uuid)), "listWebappConfig")
+        return reply.entries.map { BridgethingConfigEntry(it.key, it.value) }.toTypedArray()
+    }
+
+    override suspend fun setWebappConfigField(deviceId: String, id: String, key: String, value: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.configSet(deviceId, WebappConfigSet(uuid, key, value)), "setWebappConfigField")
+    }
+
+    override suspend fun deleteWebappConfigField(deviceId: String, id: String, key: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.configDelete(deviceId, WebappConfigDelete(uuid, key)), "deleteWebappConfigField")
+    }
 
     override suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags) {
         stateLock.withLock { companion }?.setCapabilityFlags(
@@ -475,6 +623,163 @@ public class HybridBridgethingSessionImpl(
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
 
+    private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
+        val c = stateLock.withLock { companion } ?: throw IllegalStateException("session not started")
+        if (!peers.containsKey(deviceId)) throw IllegalStateException("no peer connected: $deviceId")
+        return c
+    }
+
+    private fun parseUuid(id: String): UUID = try {
+        UUID.fromString(id)
+    } catch (e: IllegalArgumentException) {
+        throw IllegalArgumentException("invalid uuid: $id")
+    }
+
+    private fun uuidFromBytes(bytes: ByteArray): UUID {
+        val bb = ByteBuffer.wrap(bytes)
+        return UUID(bb.long, bb.long)
+    }
+
+    private fun emitWebappsChanged(deviceId: String) {
+        onWebappsChanged?.invoke(deviceId)
+    }
+
+    private fun <T> unwrapVoid(result: RequestResult<T, Nothing>, label: String): T = when (result) {
+        is RequestResult.Ok -> result.response
+        is RequestResult.DomainErr -> throw IllegalStateException("$label: unreachable")
+        is RequestResult.ProtocolErr -> throw IllegalStateException("$label: ${result.error}")
+    }
+
+    private fun <T> unwrapWebapp(result: RequestResult<T, WebappError>, label: String): T = when (result) {
+        is RequestResult.Ok -> result.response
+        is RequestResult.DomainErr -> throw IllegalStateException("$label: ${result.error}")
+        is RequestResult.ProtocolErr -> throw IllegalStateException("$label: ${result.error}")
+    }
+
+    private suspend fun resolveArchive(sourceUri: String): Pair<File, Boolean> = withContext(Dispatchers.IO) {
+        when (URI(sourceUri).scheme?.lowercase()) {
+            "file" -> File(URI(sourceUri)) to false
+            "http", "https" -> {
+                val conn = (URL(sourceUri).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 30_000
+                    readTimeout = 30_000
+                    instanceFollowRedirects = true
+                }
+                try {
+                    val code = conn.responseCode
+                    if (code !in 200..299) throw IllegalStateException("download failed: $code")
+                    val temp = File.createTempFile("webapp-install", ".zip", context.cacheDir)
+                    conn.inputStream.use { input -> temp.outputStream().use { out -> input.copyTo(out) } }
+                    temp to true
+                } finally {
+                    conn.disconnect()
+                }
+            }
+            else -> throw IllegalArgumentException("invalid archive uri")
+        }
+    }
+
+    private fun sha256HexOfFile(file: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(1024 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private suspend fun streamInstallChunks(
+        c: BridgethingCompanion,
+        deviceId: String,
+        installId: String,
+        archive: File,
+        total: Long,
+        startOffset: Long,
+    ) {
+        val device = c.gateway.device(deviceId).webapp
+        val chunkSize = 64 * 1024
+        RandomAccessFile(archive, "r").use { raf ->
+            raf.seek(startOffset)
+            var offset = startOffset
+            val buf = ByteArray(chunkSize)
+            while (offset < total) {
+                val want = minOf(chunkSize.toLong(), total - offset).toInt()
+                val n = raf.read(buf, 0, want)
+                if (n <= 0) throw IllegalStateException("invalid archive")
+                val end = offset + n
+                device.installChunk(
+                    WebappInstallChunk(installId, offset.toUInt(), buf.copyOf(n), end == total),
+                    Priority.Bulk,
+                )
+                offset = end
+            }
+        }
+    }
+
+    private fun writeIconToCache(deviceId: String, id: String, mime: String?, bytes: ByteArray): File {
+        val dir = File(context.cacheDir, "bridgething-webapp-icons").apply { mkdirs() }
+        val ext = when (mime) {
+            "image/png" -> "png"
+            "image/jpeg", "image/jpg" -> "jpg"
+            "image/webp" -> "webp"
+            "image/svg+xml" -> "svg"
+            else -> "bin"
+        }
+        val file = File(dir, "${deviceId.replace("/", "_")}__${id.replace("/", "_")}.$ext")
+        file.writeBytes(bytes)
+        return file
+    }
+
+    private fun toRnWebappInfo(info: WebappInfo): BridgethingWebappInfo = BridgethingWebappInfo(
+        id = info.id.toString(),
+        name = info.name,
+        source = if (info.source == WebappSource.Builtin) BridgethingWebappSource.BUILTIN else BridgethingWebappSource.INSTALLED,
+        role = if (info.role == WebappRole.Launcher) BridgethingWebappRole.LAUNCHER else BridgethingWebappRole.STANDARD,
+        version = info.version,
+        description = info.description,
+        iconAvailable = info.iconAvailable,
+        iconMime = info.iconMime,
+        config = info.config.map(::toRnConfigField).toTypedArray(),
+        permissions = info.permissions.toTypedArray(),
+    )
+
+    private fun toRnConfigField(field: ConfigField): BridgethingConfigField = when (field) {
+        is ConfigField.String -> field.data.let { f ->
+            BridgethingConfigField(
+                BridgethingConfigKind.STRING, f.key, f.label, f.pattern,
+                f.minLength?.toDouble(), f.maxLength?.toDouble(), null, null, null, null, f.default,
+            )
+        }
+        is ConfigField.Secret -> field.data.let { f ->
+            BridgethingConfigField(
+                BridgethingConfigKind.SECRET, f.key, f.label, f.pattern,
+                f.minLength?.toDouble(), f.maxLength?.toDouble(), null, null, null, null, f.default,
+            )
+        }
+        is ConfigField.Number -> field.data.let { f ->
+            BridgethingConfigField(
+                BridgethingConfigKind.NUMBER, f.key, f.label, null, null, null,
+                f.min, f.max, f.step, null, f.default?.toString(),
+            )
+        }
+        is ConfigField.Boolean -> field.data.let { f ->
+            BridgethingConfigField(
+                BridgethingConfigKind.BOOLEAN, f.key, f.label, null, null, null,
+                null, null, null, null, f.default?.let { if (it) "true" else "false" },
+            )
+        }
+        is ConfigField.Enum -> field.data.let { f ->
+            BridgethingConfigField(
+                BridgethingConfigKind.ENUM, f.key, f.label, null, null, null,
+                null, null, null, f.choices.toTypedArray(), f.default,
+            )
+        }
+    }
+
     private fun handleGatewayEvent(event: GatewayEvent) {
         when (event) {
             is GatewayEvent.Connected -> {
@@ -530,11 +835,14 @@ public class HybridBridgethingSessionImpl(
     private fun authState(
         kind: BridgethingAuthKind,
         message: String? = null,
+        userCode: String? = null,
+        verificationUrl: String? = null,
+        verificationUrlComplete: String? = null,
     ): BridgethingAuthState = BridgethingAuthState(
         kind = kind,
-        userCode = null,
-        verificationUrl = null,
-        verificationUrlComplete = null,
+        userCode = userCode,
+        verificationUrl = verificationUrl,
+        verificationUrlComplete = verificationUrlComplete,
         message = message,
     )
 

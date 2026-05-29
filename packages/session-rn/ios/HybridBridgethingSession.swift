@@ -19,7 +19,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func listWebapps(deviceId: String) async throws -> [BridgethingWebappInfo]
     func currentWebapp(deviceId: String) async throws -> BridgethingActiveWebapp?
-    func installWebappFromBase64(deviceId: String, archiveBase64: String) async throws -> BridgethingWebappInfo
+    func installWebapp(deviceId: String, sourceUri: String) async throws -> BridgethingWebappInfo
     func uninstallWebapp(deviceId: String, id: String) async throws
     func switchWebapp(deviceId: String, id: String) async throws
     func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon?
@@ -219,9 +219,9 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func installWebappFromBase64(deviceId: String, archiveBase64: String) throws -> Promise<BridgethingWebappInfo> {
+    public func installWebapp(deviceId: String, sourceUri: String) throws -> Promise<BridgethingWebappInfo> {
         Promise.async {
-            try await Self.backend().installWebappFromBase64(deviceId: deviceId, archiveBase64: archiveBase64)
+            try await Self.backend().installWebapp(deviceId: deviceId, sourceUri: sourceUri)
         }
     }
 

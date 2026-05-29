@@ -35,7 +35,7 @@ public interface BridgethingSessionBackend {
 
     public suspend fun listWebapps(deviceId: String): Array<BridgethingWebappInfo>
     public suspend fun currentWebapp(deviceId: String): BridgethingActiveWebapp?
-    public suspend fun installWebappFromBase64(deviceId: String, archiveBase64: String): BridgethingWebappInfo
+    public suspend fun installWebapp(deviceId: String, sourceUri: String): BridgethingWebappInfo
     public suspend fun uninstallWebapp(deviceId: String, id: String)
     public suspend fun switchWebapp(deviceId: String, id: String)
     public suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon?

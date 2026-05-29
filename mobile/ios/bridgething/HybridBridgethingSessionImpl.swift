@@ -258,19 +258,20 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         return BridgethingActiveWebapp(id: id.uuidString.lowercased(), name: value.name)
     }
 
-    public func installWebappFromBase64(deviceId: String, archiveBase64: String) async throws -> BridgethingWebappInfo {
-        guard let data = Data(base64Encoded: archiveBase64, options: .ignoreUnknownCharacters) else {
-            throw SessionError.invalidArchive
-        }
-        guard data.count <= Int(UInt32.max) else {
-            throw SessionError.invalidArchive
-        }
+    public func installWebapp(deviceId: String, sourceUri: String) async throws -> BridgethingWebappInfo {
         let companion = try requirePeerConnected(deviceId)
-        let installId = Self.sha256Hex(data)
+        let (archiveUrl, isTemporary) = try await Self.resolveArchive(sourceUri)
+        defer { if isTemporary { try? FileManager.default.removeItem(at: archiveUrl) } }
+
+        let size = try Self.fileSize(archiveUrl)
+        guard size <= Int(UInt32.max) else {
+            throw SessionError.invalidArchive
+        }
+        let installId = try Self.sha256HexOfFile(archiveUrl)
         let begin = WebappInstallBegin(
             installId: installId,
             expectedSha256: installId,
-            expectedSize: UInt32(data.count)
+            expectedSize: UInt32(size)
         )
         let beginResult = try await companion.gateway.webapp.installBegin(deviceId: deviceId, begin)
         let ack = try unwrapWebappErr(beginResult, label: "installBegin")
@@ -295,7 +296,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 gateway: companion.gateway,
                 deviceId: deviceId,
                 installId: installId,
-                data: data,
+                archiveUrl: archiveUrl,
+                total: size,
                 startOffset: ack.resumeFromOffset
             )
         } catch {
@@ -338,30 +340,58 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         gateway: BridgethingGateway,
         deviceId: String,
         installId: String,
-        data: Data,
+        archiveUrl: URL,
+        total: Int,
         startOffset: UInt32
     ) async throws {
         let chunkSize = 64 * 1024
-        let total = data.count
+        let handle = try FileHandle(forReadingFrom: archiveUrl)
+        defer { try? handle.close() }
         var offset = Int(startOffset)
+        try handle.seek(toOffset: UInt64(offset))
         while offset < total {
-            let end = min(offset + chunkSize, total)
-            let slice = data.subdata(in: offset..<end)
-            let last = end == total
+            let want = min(chunkSize, total - offset)
+            let slice = try handle.read(upToCount: want) ?? Data()
+            guard !slice.isEmpty else { throw SessionError.invalidArchive }
+            let end = offset + slice.count
             let chunk = WebappInstallChunk(
                 installId: installId,
                 offset: UInt32(offset),
                 bytes: slice,
-                last: last
+                last: end == total
             )
             try await gateway.device(deviceId).webapp.installChunk(chunk, priority: .bulk)
             offset = end
         }
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
+    private static func resolveArchive(_ sourceUri: String) async throws -> (URL, Bool) {
+        guard let url = URL(string: sourceUri) else { throw SessionError.invalidArchive }
+        if url.isFileURL { return (url, false) }
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw SessionError.invalidArchive
+        }
+        let (tempUrl, response) = try await URLSession.shared.download(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            try? FileManager.default.removeItem(at: tempUrl)
+            throw SessionError.downloadFailed("download failed: \(http.statusCode)")
+        }
+        return (tempUrl, true)
+    }
+
+    private static func fileSize(_ url: URL) throws -> Int {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        guard let size = values.fileSize else { throw SessionError.invalidArchive }
+        return size
+    }
+
+    private static func sha256HexOfFile(_ url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
         var hasher = SHA256()
-        hasher.update(data: data)
+        while let block = try handle.read(upToCount: 1024 * 1024), !block.isEmpty {
+            hasher.update(data: block)
+        }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
@@ -916,6 +946,7 @@ private enum SessionError: Error {
     case noPeerConnected(String)
     case invalidUuid(String)
     case invalidArchive
+    case downloadFailed(String)
     case installInterrupted
     case installTimedOut
     case webappError(WebappError)

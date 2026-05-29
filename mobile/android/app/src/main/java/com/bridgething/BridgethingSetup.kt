@@ -1,10 +1,15 @@
 package com.bridgething
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.margelo.nitro.bridgething.session.HybridBridgethingSession
 import dev.bridgething.applemusic.AppleMusicGlue
 import dev.bridgething.companion.HostInfo
 import dev.bridgething.lyrics.LrclibResolver
+import dev.bridgething.spotify.DeviceCodeAuthenticator
+import dev.bridgething.spotify.DeviceCodeConfig
 import dev.bridgething.spotify.SpotifyGlue
 import dev.bridgething.tidal.TidalGlue
 
@@ -17,7 +22,28 @@ import dev.bridgething.tidal.TidalGlue
 public object BridgethingApp {
     public const val APP_NAME: String = "bridgething"
 
+    private const val AUTH_WORKER_BASE_URL: String = "https://thinglabs.sh/auth"
+
+    private val SPOTIFY_SCOPES: List<String> = listOf(
+        "user-read-playback-state",
+        "user-modify-playback-state",
+        "user-read-currently-playing",
+        "user-read-playback-position",
+        "user-top-read",
+        "user-read-recently-played",
+        "playlist-read-private",
+        "playlist-read-collaborative",
+        "playlist-modify-private",
+        "playlist-modify-public",
+        "user-follow-modify",
+        "user-follow-read",
+        "user-library-read",
+        "user-library-modify",
+        "user-read-private",
+    )
+
     public fun installBridgething(context: Context) {
+        val app = context.applicationContext
         val pkg = try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
         } catch (_: android.content.pm.PackageManager.NameNotFoundException) { "0.0.0" }
@@ -29,15 +55,15 @@ public object BridgethingApp {
         )
         HybridBridgethingSessionImpl.lyricsResolver = LrclibResolver()
 
-        // SpotifyGlue.attach throws NotImplemented; registration is available=false
-        // until auth + dealer client are wired up.
+        val spotifyTokenStore = SpotifyTokenStore(app)
+
         HybridBridgethingSessionImpl.registry = listOf(
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id = "spotify",
                 displayName = "Spotify",
-                available = false,
-                factory = { stubSpotifyGlue() },
-                signOut = {},
+                available = true,
+                factory = { makeSpotifyGlue(spotifyTokenStore) },
+                signOut = { spotifyTokenStore.clear() },
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id = "appleMusic",
@@ -55,15 +81,57 @@ public object BridgethingApp {
             ),
         )
 
-        HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(context.applicationContext))
+        HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(app))
     }
 
-    private fun stubSpotifyGlue(): SpotifyGlue = SpotifyGlue(
-        authenticator = object : dev.bridgething.spotify.SpotifyAuthenticator {
-            override suspend fun authorize(): dev.bridgething.spotify.TokenBundle =
-                throw NotImplementedError("Spotify Android auth lands in a follow-up slice")
-            override suspend fun refreshAccessToken(refreshToken: String): dev.bridgething.spotify.TokenBundle =
-                throw NotImplementedError("Spotify Android auth lands in a follow-up slice")
-        },
-    )
+    private fun makeSpotifyGlue(store: SpotifyTokenStore): SpotifyGlue {
+        val config = DeviceCodeConfig(
+            workerBaseUrl = AUTH_WORKER_BASE_URL,
+            authorizationBearer = BuildConfig.BRIDGETHING_AUTH_PSK,
+            scopes = SPOTIFY_SCOPES,
+            description = "car-thing-device",
+        )
+        val seed = store.load()
+        return SpotifyGlue(
+            authenticatorFactory = { onPrompt -> DeviceCodeAuthenticator(config, onPrompt) },
+            accessToken = seed.access ?: "",
+            refreshToken = seed.refresh ?: "",
+            onTokensRefreshed = { access, refresh ->
+                store.save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
+            },
+        )
+    }
+}
+
+private class SpotifyTokenStore(private val context: Context) {
+    data class Tokens(val access: String?, val refresh: String?)
+
+    private val prefs: SharedPreferences by lazy {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        @Suppress("DEPRECATION")
+        EncryptedSharedPreferences.create(
+            context,
+            "dev.bridgething.spotify",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    fun load(): Tokens = Tokens(prefs.getString("access", null), prefs.getString("refresh", null))
+
+    fun save(tokens: Tokens) {
+        prefs.edit()
+            .apply {
+                if (tokens.access != null) putString("access", tokens.access) else remove("access")
+                if (tokens.refresh != null) putString("refresh", tokens.refresh) else remove("refresh")
+            }
+            .apply()
+    }
+
+    fun clear() {
+        prefs.edit().remove("access").remove("refresh").apply()
+    }
 }

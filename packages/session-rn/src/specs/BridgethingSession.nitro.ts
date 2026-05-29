@@ -79,7 +79,6 @@ export type BridgethingActiveWebapp = {
 
 export type BridgethingConfigKind = 'string' | 'number' | 'boolean' | 'enum' | 'secret';
 
-// flat with `kind` + per-kind optional fields; wire enum is adjacent-tagged and can't represent this shape directly.
 export type BridgethingConfigField = {
   kind: BridgethingConfigKind;
   key: string;
@@ -100,7 +99,6 @@ export type BridgethingConfigEntry = {
 };
 
 export type BridgethingWebappIcon = {
-  // native reuses the same filename on re-fetch; consumers diffing on uri must bust their cache when the icon changes.
   fileUri: string;
   mime?: string;
 };
@@ -204,8 +202,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   listWebapps(deviceId: string): Promise<BridgethingWebappInfo[]>;
   currentWebapp(deviceId: string): Promise<BridgethingActiveWebapp | null>;
-  // Swift ArrayBuffer typealias breaks Swift-to-C++ header interop; archive is passed as base64.
-  installWebappFromBase64(deviceId: string, archiveBase64: string): Promise<BridgethingWebappInfo>;
+  installWebapp(deviceId: string, sourceUri: string): Promise<BridgethingWebappInfo>;
   uninstallWebapp(deviceId: string, id: string): Promise<void>;
   switchWebapp(deviceId: string, id: string): Promise<void>;
   webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null>;
@@ -223,14 +220,10 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
 
-  // iOS uses ANCS instead and always returns false.
   isNotificationAccessGranted(): Promise<boolean>;
-  // iOS rejects with `unsupported`.
   requestNotificationAccess(): Promise<void>;
 
-  // iOS handles telephony over iAP2 and always returns false.
   isDefaultDialer(): Promise<boolean>;
-  // iOS rejects with `unsupported`.
   requestDefaultDialer(): Promise<void>;
 
   revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
@@ -243,7 +236,6 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
-  // every log line crosses JSI; real cost on a 512MB device -- enable only while a log UI is active.
   setLogStreamingEnabled(enabled: boolean): void;
 
   setOnWebappsChanged(callback: (deviceId: string) => void): void;

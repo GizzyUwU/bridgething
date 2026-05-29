@@ -58,15 +58,7 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
     if (!trimmed) return;
     setInstalling(true);
     try {
-      // fetch the bundle in JS and hand the bytes to native for install.
-      const response = await fetch(trimmed);
-      if (!response.ok) {
-        throw new Error(
-          `download failed: ${response.status} ${response.statusText || ''}`.trim(),
-        );
-      }
-      const archive = await response.arrayBuffer();
-      const info = await session.installWebappFromBytes(deviceId, archive);
+      const info = await session.installWebappFromUri(deviceId, trimmed);
       setUrl('');
       Alert.alert('Installed', `${info.name} ${info.version}`);
     } catch (err) {
