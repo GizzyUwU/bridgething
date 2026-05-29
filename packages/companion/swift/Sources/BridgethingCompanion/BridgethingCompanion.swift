@@ -7,23 +7,15 @@ import os
 
 private let osLog = Logger(subsystem: "dev.bridgething.companion", category: "core")
 
-/// Severity tag passed to the `BridgethingCompanion` log observer.
 public enum CompanionLogLevel: String, Sendable {
     case debug, info, warn, error
 }
 
-/// Version stamp the companion announces in `GatewayInfo`. Hardcoded to
-/// match the Rust workspace `version` and bumped at release time.
 public enum BridgethingCompanionVersion {
     public static let lib: String = "0.1.0"
     public static let libbridgething: String = "0.1.0"
 }
 
-/// Identity the companion advertises in `GatewayCapabilities.gateway`.
-/// Caller-supplied at companion init. The `address` is whatever stable
-/// identifier the host platform exposes for itself (iOS:
-/// `UIDevice.identifierForVendor`, Android: `Settings.Secure.ANDROID_ID`).
-/// Empty string is acceptable when no stable identifier is available.
 public struct HostInfo: Sendable {
     public let appName: String
     public let appVersion: String
@@ -49,9 +41,6 @@ public struct HostInfo: Sendable {
     }
 }
 
-/// Capability flags the companion declares. Glue contributions
-/// (`uriSchemes`, `musicProvider`, `lyricsSupported`) are mixed in by
-/// `BridgethingCompanion` at announce time.
 public struct CompanionCapabilityFlags: Sendable {
     public var geo: Bool
     public var notifications: Bool
@@ -64,7 +53,7 @@ public struct CompanionCapabilityFlags: Sendable {
         notifications: Bool = false,
         netFetch: Bool = true,
         netWs: Bool = true,
-        audioTts: Bool = false
+        audioTts: Bool = true
     ) {
         self.geo = geo
         self.notifications = notifications
@@ -74,14 +63,6 @@ public struct CompanionCapabilityFlags: Sendable {
     }
 }
 
-/// Top-level orchestrator for the bridgething companion app.
-///
-/// Owns one `BridgethingGateway` over the supplied transport adapter.
-/// Holds at most one active `BridgethingGlue`. Runs every companion-side
-/// dispatcher as long-lived child tasks while started: Player verbs to
-/// glue, Lyrics requests with resolver fallback, Asset requests to glue,
-/// Net (fetch/ws/stream) via URLSession, Geo via CoreLocation, Volume
-/// via AVAudioSession.
 public actor BridgethingCompanion {
     public nonisolated let gateway: BridgethingGateway
 
@@ -98,6 +79,9 @@ public actor BridgethingCompanion {
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
 
     private let netDispatcher: NetDispatcher
+    private let tunnelDispatcher: TunnelDispatcher
+    private let audioDispatcher: AudioDispatcher
+    private var timeChangeObservers: [NSObjectProtocol] = []
     public let ota: OtaService
     #if canImport(CoreLocation)
         private let geoController: GeoController
@@ -111,13 +95,20 @@ public actor BridgethingCompanion {
         lyricsResolver: any LyricsResolver,
         host: HostInfo,
         capabilities: CompanionCapabilityFlags = CompanionCapabilityFlags(),
-        geoProvider: (any GeoLocationProviding)? = nil
+        geoProvider: (any GeoLocationProviding)? = nil,
+        audioBackend: (any AudioBackend)? = nil
     ) {
         self.host = host
         self.lyricsResolver = lyricsResolver
         capFlags = capabilities
         gateway = BridgethingGateway(adapter: adapter)
         netDispatcher = NetDispatcher()
+        tunnelDispatcher = TunnelDispatcher()
+        #if canImport(AVFoundation)
+            audioDispatcher = AudioDispatcher(backend: audioBackend ?? AvAudioBackend())
+        #else
+            audioDispatcher = AudioDispatcher(backend: audioBackend ?? NoOpAudioBackend())
+        #endif
         ota = OtaService()
         #if canImport(CoreLocation)
             geoController = GeoController(provider: geoProvider)
@@ -134,6 +125,19 @@ public actor BridgethingCompanion {
         log(.info, "companion started")
 
         spawnDispatchers()
+
+        #if canImport(Darwin)
+            // The device has no battery RTC; re-seed its clock when the phone's
+            // timezone or wall clock changes mid-session.
+            for name in [Notification.Name.NSSystemTimeZoneDidChange, .NSSystemClockDidChange] {
+                let token = NotificationCenter.default.addObserver(
+                    forName: name, object: nil, queue: nil
+                ) { [weak self] _ in
+                    Task { await self?.emitTimeSnapshot() }
+                }
+                timeChangeObservers.append(token)
+            }
+        #endif
 
         #if os(iOS)
             await volumeMonitor.start { [weak self] level, muted in
@@ -159,7 +163,13 @@ public actor BridgethingCompanion {
         #if canImport(CoreLocation)
             await geoController.stop()
         #endif
+        #if canImport(Darwin)
+            for token in timeChangeObservers { NotificationCenter.default.removeObserver(token) }
+            timeChangeObservers.removeAll()
+        #endif
         await netDispatcher.stop()
+        await tunnelDispatcher.stop()
+        await audioDispatcher.stop()
         await ota.stop()
 
         if let glue = activeGlue {
@@ -172,7 +182,6 @@ public actor BridgethingCompanion {
         log(.info, "companion stopped")
     }
 
-    /// Actor-isolated convenience: capture the current observer + emit.
     private func log(_ level: CompanionLogLevel, _ message: String) {
         emitLog(level, message, observer: logObserver)
     }
@@ -203,9 +212,6 @@ public actor BridgethingCompanion {
         activeGlue
     }
 
-    /// Subscribe to NowPlaying mirror updates from whichever glue is
-    /// active. Replacing the observer takes effect immediately for the
-    /// active glue and persists across `setActive` swaps.
     public func setNowPlayingObserver(_ observer: (@Sendable (GlueNowPlaying?) -> Void)?) async {
         nowPlayingObserver = observer
         if let glue = activeGlue {
@@ -213,16 +219,10 @@ public actor BridgethingCompanion {
         }
     }
 
-    /// Subscribe to ANCS authorization-state transitions reported by the
-    /// daemon. iOS-only signal; on Android the observer never fires.
     public func setAncsAuthStateObserver(_ observer: (@Sendable (AncsAuthState) -> Void)?) {
         ancsAuthStateObserver = observer
     }
 
-    /// Subscribe to companion-side log events. Replaces / un-installs
-    /// the previous observer. Companion still emits to `os.Logger`
-    /// regardless; the observer is for surfacing to a host UI (e.g. the
-    /// RN debug-log screen).
     public func setLogObserver(_ observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
         logObserver = observer
     }
@@ -237,15 +237,10 @@ public actor BridgethingCompanion {
         observer?(level, message)
     }
 
-    /// Last daemon-reported ANCS auth state. `unknown` until the daemon
-    /// emits one (no iAP2 link yet, or session task hasn't probed).
     public func currentAncsAuthState() -> AncsAuthState {
         ancsAuthState
     }
 
-    /// Drive the AccessorySetupKit pair flow that creates the LE bond
-    /// the daemon needs before iOS will expose ANCS. iOS 18+ only;
-    /// returns `unsupported` on Android / earlier iOS.
     public func enableAncsNotifications() async -> AncsSetupResult {
         #if os(iOS)
             let coordinator = await makeOrReuseCoordinator()
@@ -275,10 +270,6 @@ public actor BridgethingCompanion {
         }
     #endif
 
-    /// Present AccessorySetupKit's system picker (iOS 18+) and return
-    /// the chosen accessory, or `nil` on cancel. iOS <=17 and non-iOS
-    /// platforms return `nil` immediately - callers branch on
-    /// `Platform.OS` and use the in-app picker on android.
     public func presentPairPicker() async -> AccessoryPickResult? {
         #if os(iOS)
             if #available(iOS 18.0, *) {
@@ -347,6 +338,14 @@ public actor BridgethingCompanion {
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }
+            await tunnelDispatcher.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            await audioDispatcher.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
             await ota.start(gateway: gateway)
         })
         #if canImport(CoreLocation)
@@ -363,6 +362,7 @@ public actor BridgethingCompanion {
             case let .connected(device):
                 log(.info, "peer connected: \(device.name) [\(device.id)]")
                 await announceCapabilities()
+                await emitTimeSnapshot()
             case let .disconnected(id):
                 log(.info, "peer disconnected: \(id)")
             case let .decodeError(id, description):
@@ -548,9 +548,6 @@ public actor BridgethingCompanion {
         LibraryErrorNotSupportedInner(reason: "no active music provider")
     )
 
-    /// Map a glue error onto the right wire response: `notImplemented` -> a
-    /// protocol `Unimplemented` (recognized verb, no backend), everything else
-    /// -> a `LibraryError` domain reply.
     private static func failLibrary(
         _ error: Error,
         onProtocol: (WireError) async -> Void,
@@ -624,6 +621,23 @@ public actor BridgethingCompanion {
 
     private func broadcastVolume(level: Float, muted: Bool) async {
         try? await gateway.audio.volumeChanged(VolumeChanged(level: level, muted: muted))
+    }
+
+    // the device has no battery-backed RTC; the companion is the wall-clock authority.
+    private func emitTimeSnapshot() async {
+        try? await gateway.time.snapshot(Self.currentTimeInfo())
+    }
+
+    private static func currentTimeInfo() -> TimeInfo {
+        let now = Date()
+        let tz = TimeZone.current
+        return TimeInfo(
+            tzIana: tz.identifier,
+            locale: Locale.current.identifier,
+            wallClockUnixS: UInt32(clamping: Int(now.timeIntervalSince1970)),
+            utcOffsetMinutes: Int16(clamping: tz.secondsFromGMT(for: now) / 60),
+            dstOffsetMinutes: Int8(clamping: Int(tz.daylightSavingTimeOffset(for: now)) / 60)
+        )
     }
 
     // MARK: - helpers

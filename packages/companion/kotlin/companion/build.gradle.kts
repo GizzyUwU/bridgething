@@ -10,6 +10,7 @@ android {
 
   defaultConfig {
     minSdk = 26
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   compileOptions {
@@ -39,19 +40,20 @@ dependencies {
   api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
   api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
   api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
-  // OkHttp drives net fetch / ws / stream + OTA artifact + manifest fetches.
   api("com.squareup.okhttp3:okhttp:4.12.0")
   api("androidx.core:core-ktx:1.13.1")
-  // Play Services Location is loaded reflectively at runtime so the
-  // companion still works on degoogled devices; declare as compileOnly so
-  // it shows up on the classpath for IDE / type-checking but the host app
-  // chooses whether to ship it.
+  // loaded reflectively so the companion works on degoogled devices; compileOnly so the
+  // host app decides whether to ship it.
   compileOnly("com.google.android.gms:play-services-location:21.3.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
   testImplementation("io.mockk:mockk:1.13.13")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+  androidTestImplementation("androidx.test.ext:junit:1.2.1")
+  androidTestImplementation("androidx.test:runner:1.6.2")
+  androidTestImplementation("androidx.test:core-ktx:1.6.1")
 }
 
+// JUnit Platform applies to JVM unit tests only; instrumented tests use AndroidJUnitRunner.
 tasks.withType<Test>().configureEach {
   useJUnitPlatform()
 }

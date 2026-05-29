@@ -1,6 +1,9 @@
 package dev.bridgething.companion
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import dev.bridgething.gateway.Adapter
 import dev.bridgething.gateway.AssetRequestHandle
 import dev.bridgething.gateway.BridgethingGateway
@@ -12,6 +15,7 @@ import dev.bridgething.gateway.authority
 import dev.bridgething.gateway.capabilities
 import dev.bridgething.gateway.lyrics
 import dev.bridgething.gateway.notifications
+import dev.bridgething.gateway.time
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueNowPlaying
@@ -39,6 +43,7 @@ import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NetworkInfo
 import dev.bridgething.schema.NetworkKind
 import dev.bridgething.schema.SurfaceAvailability
+import dev.bridgething.schema.TimeInfo
 import dev.bridgething.schema.VolumeChanged
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineName
@@ -80,10 +85,7 @@ public enum class CompanionLogLevel(public val raw: String) {
     Debug("debug"), Info("info"), Warn("warn"), Error("error"),
 }
 
-/**
- * Version stamp the companion announces in `GatewayInfo`. Hardcoded to
- * match the Rust workspace `version`, bumped at release time.
- */
+/** version stamps the companion announces in `GatewayInfo`. */
 public object BridgethingCompanionVersion {
     public const val LIB: String = "0.1.0"
     public const val LIBBRIDGETHING: String = "0.1.0"
@@ -114,15 +116,10 @@ public data class CompanionCapabilityFlags(
     val notifications: Boolean = false,
     val netFetch: Boolean = true,
     val netWs: Boolean = true,
-    val audioTts: Boolean = false,
+    val audioTts: Boolean = true,
 )
 
-/**
- * Outcome of an attempted ANCS pair flow. Android has no AccessorySetupKit
- * equivalent (ANCS itself is iOS-specific), so [enableAncsNotifications]
- * always returns [AncsSetupKind.Unsupported] here. The shape mirrors
- * iOS so the host app's RN bridge can remain platform-agnostic.
- */
+/** outcome of an attempted ANCS pair flow; Android has no AccessorySetupKit equivalent so always [Unsupported] here. */
 public enum class AncsSetupKind {
     Paired, AlreadyPaired, Cancelled, Unsupported, Failed
 }
@@ -134,18 +131,8 @@ public data class AncsSetupResult(
 )
 
 /**
- * Top-level orchestrator for the bridgething companion app on Android.
- *
- * Owns one [BridgethingGateway] over the supplied transport adapter,
- * holds at most one active [BridgethingGlue], and runs every
- * companion-side dispatcher as long-lived child coroutines while started:
- * Player verbs to glue, Lyrics requests with resolver fallback, Asset
- * requests to glue, Net (fetch/ws/stream) via OkHttp, Geo via
- * FusedLocationProvider / LocationManager fallback, Volume via
- * AudioManager.
- *
- * Concurrency model: a single supervisor scope owns every long-lived
- * dispatcher coroutine; per-state mutation flows through [stateMutex].
+ * Top-level orchestrator for the bridgething companion on Android. Owns one [BridgethingGateway] over the
+ * supplied adapter and holds at most one active [BridgethingGlue]; per-state mutation flows through [stateMutex].
  */
 public class BridgethingCompanion(
     public val context: Context,
@@ -156,11 +143,18 @@ public class BridgethingCompanion(
     httpClient: okhttp3.OkHttpClient = okhttp3.OkHttpClient(),
     geo: GeoSource = GeoController(context = context.applicationContext),
     volume: VolumeSource = VolumeMonitor(context = context.applicationContext),
+    audio: AudioBackend = AndroidAudioBackend(context = context.applicationContext),
+    notificationActions: NotificationActionBackend = NoOpNotificationActionBackend,
+    phone: PhoneBackend = NoOpPhoneBackend,
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
 
     private val netDispatcher = NetDispatcher(client = httpClient)
+    private val tunnelDispatcher = TunnelDispatcher()
+    private val audioDispatcher = AudioDispatcher(backend = audio)
+    private val phoneDispatcher = PhoneDispatcher(backend = phone)
+    private val notificationActions: NotificationActionBackend = notificationActions
     private val geoController: GeoSource = geo
     private val volumeMonitor: VolumeSource = volume
 
@@ -176,6 +170,7 @@ public class BridgethingCompanion(
     private var ancsAuthStateObserver: ((AncsAuthState) -> Unit)? = null
     private var logObserver: ((CompanionLogLevel, String) -> Unit)? = null
     private var volumeClaimed: Boolean = false
+    private var timeChangeReceiver: BroadcastReceiver? = null
 
     public suspend fun start() {
         stateMutex.withLock {
@@ -185,7 +180,18 @@ public class BridgethingCompanion(
             started = true
         }
         log(CompanionLogLevel.Info, "companion started")
-        // on the first AudioManager snapshot the companion claims volume authority and announces level.
+        // the device has no battery RTC; re-seed its clock on tz/wall-clock changes.
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                scope.launch { emitTimeSnapshot() }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+        }
+        runCatching { context.registerReceiver(receiver, filter) }
+        timeChangeReceiver = receiver
         volumeMonitor.start { level, muted ->
             scope.launch {
                 broadcastVolume(level, muted)
@@ -209,6 +215,9 @@ public class BridgethingCompanion(
         }
         for (job in toCancel) job.cancel()
 
+        timeChangeReceiver?.let { runCatching { context.unregisterReceiver(it) } }
+        timeChangeReceiver = null
+
         volumeMonitor.stop()
         if (volumeClaimed) {
             runCatching { gateway.authority.release(AuthorityRelease(scope = CompanionAuthorityScope.Volume)) }
@@ -217,6 +226,9 @@ public class BridgethingCompanion(
 
         runCatching { geoController.stop() }
         runCatching { netDispatcher.stop() }
+        runCatching { tunnelDispatcher.stop() }
+        runCatching { audioDispatcher.stop() }
+        runCatching { phoneDispatcher.stop() }
         runCatching { ota.stop() }
 
         if (glue != null) runCatching { glue.detach() }
@@ -256,11 +268,7 @@ public class BridgethingCompanion(
         announceCapabilities()
     }
 
-    /**
-     * Subscribe to NowPlaying mirror updates from whichever glue is
-     * active. Replacing the observer takes effect immediately for the
-     * active glue and persists across [setActive] swaps.
-     */
+    /** observer persists across [setActive] swaps and takes effect immediately for the current glue. */
     public suspend fun setNowPlayingObserver(observer: ((GlueNowPlaying?) -> Unit)?) {
         val glue = stateMutex.withLock {
             nowPlayingObserver = observer
@@ -269,12 +277,7 @@ public class BridgethingCompanion(
         glue?.setNowPlayingObserver(observer ?: { _ -> })
     }
 
-    /**
-     * Subscribe to ANCS authorization-state transitions reported by the
-     * daemon. iOS-only signal in practice; on Android the observer never
-     * fires from a daemon-side ANCS event, but the companion still wires
-     * up the gateway flow so a future ANCS-bridge implementation slots in.
-     */
+    /** iOS-only signal in practice; on Android the observer never fires from a daemon-side ANCS event. */
     public fun setAncsAuthStateObserver(observer: ((AncsAuthState) -> Unit)?) {
         ancsAuthStateObserver = observer
     }
@@ -283,12 +286,7 @@ public class BridgethingCompanion(
         logObserver = observer
     }
 
-    /**
-     * Drive the platform pair flow that creates the LE bond the daemon
-     * needs before iOS will expose ANCS. iOS 18+ only on Apple; on
-     * Android there is no equivalent so this always resolves as
-     * [AncsSetupKind.Unsupported].
-     */
+    /** Android has no equivalent to the iOS ANCS pair flow; always resolves [AncsSetupKind.Unsupported]. */
     public fun enableAncsNotifications(): AncsSetupResult =
         AncsSetupResult(kind = AncsSetupKind.Unsupported, authState = AncsAuthState.Unknown)
 
@@ -335,8 +333,12 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })
         dispatchers.add(scope.launch { runAncsAuthDispatch() })
+        dispatchers.add(scope.launch { runNotificationInvokeDispatch() })
         dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
+        dispatchers.add(scope.launch { tunnelDispatcher.start(gateway) })
+        dispatchers.add(scope.launch { audioDispatcher.start(gateway) })
+        dispatchers.add(scope.launch { phoneDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
     }
@@ -347,12 +349,32 @@ public class BridgethingCompanion(
                 is GatewayEvent.Connected -> {
                     log(CompanionLogLevel.Info, "peer connected: ${event.device.name} [${event.device.id}]")
                     announceCapabilities()
+                    emitTimeSnapshot()
+                    phoneDispatcher.announce(gateway)
                 }
                 is GatewayEvent.Disconnected -> log(CompanionLogLevel.Info, "peer disconnected: ${event.deviceId}")
                 is GatewayEvent.DecodeError -> log(CompanionLogLevel.Warn, "[${event.deviceId}] decode error: ${event.description}")
                 is GatewayEvent.Message -> Unit
             }
         }
+    }
+
+    // the device has no battery-backed RTC; the companion is the wall-clock authority.
+    private suspend fun emitTimeSnapshot() {
+        runCatching { gateway.time.snapshot(currentTimeInfo()) }
+    }
+
+    private fun currentTimeInfo(): TimeInfo {
+        val nowMs = System.currentTimeMillis()
+        val tz = java.util.TimeZone.getDefault()
+        val dstMs = if (tz.inDaylightTime(java.util.Date(nowMs))) tz.dstSavings else 0
+        return TimeInfo(
+            tzIana = tz.id,
+            locale = java.util.Locale.getDefault().toLanguageTag(),
+            wallClockUnixS = (nowMs / 1000L).coerceIn(0L, UInt.MAX_VALUE.toLong()).toUInt(),
+            utcOffsetMinutes = (tz.getOffset(nowMs) / 60000).toShort(),
+            dstOffsetMinutes = (dstMs / 60000).toByte(),
+        )
     }
 
     private suspend fun runPlayerDispatch() {
@@ -439,10 +461,14 @@ public class BridgethingCompanion(
         }
     }
 
+    // iOS routes notification actions over ANCS, so this path is Android-only.
+    private suspend fun runNotificationInvokeDispatch(): Unit = coroutineScope {
+        launch { gateway.notifications.invokePositive.collect { (_, msg) -> launch { notificationActions.invokePositive(msg.id) } } }
+        launch { gateway.notifications.invokeNegative.collect { (_, msg) -> launch { notificationActions.invokeNegative(msg.id) } } }
+    }
+
     // MARK: - library dispatch
 
-    // Each surface collects on its own child; the enclosing coroutineScope keeps the
-    // tracked job alive so cancelling it (on stop()) tears down every collector.
     private suspend fun runLibraryDispatch(): Unit = coroutineScope {
         launch { gateway.library.browseRequests.collect { (handle, req) -> launch { handleBrowse(handle, req) } } }
         launch { gateway.library.searchRequests.collect { (handle, req) -> launch { handleSearch(handle, req) } } }
@@ -539,8 +565,7 @@ public class BridgethingCompanion(
     private fun noProviderReply(): LibraryErrorReply =
         LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = "no active music provider")))
 
-    // notImplemented -> protocol Unimplemented (recognized verb, no backend); everything
-    // else -> a LibraryError domain reply. Mirrors the Swift companion's failLibrary.
+    // notImplemented maps to protocol Unimplemented (recognized verb, no backend); all other errors become domain replies.
     private suspend fun respondLibraryError(
         error: Throwable,
         onProtocol: suspend (WireError) -> Unit,
@@ -565,7 +590,6 @@ public class BridgethingCompanion(
     }
 
     private fun log(level: CompanionLogLevel, message: String) {
-        // android.util.Log plus observer fanout; the host app pipes these into its own log surface.
         when (level) {
             CompanionLogLevel.Debug -> android.util.Log.d(TAG, message)
             CompanionLogLevel.Info -> android.util.Log.i(TAG, message)

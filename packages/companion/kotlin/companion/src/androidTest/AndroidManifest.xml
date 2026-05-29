@@ -1,0 +1,31 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Dialer-eligibility stub for the real-tier telephony test. Telecom only
+      lets a package become the default dialer (and thus bind our
+      InCallService) if it has an activity handling ACTION_DIAL. The
+      InCallService + telephony perms come from the library main manifest,
+      merged into this self-instrumenting test APK.
+    -->
+    <application>
+      <activity
+        android:name="dev.bridgething.companion.TestDialerActivity"
+        android:exported="true">
+        <intent-filter>
+          <action android:name="android.intent.action.DIAL" />
+          <category android:name="android.intent.category.DEFAULT" />
+        </intent-filter>
+        <intent-filter>
+          <action android:name="android.intent.action.DIAL" />
+          <category android:name="android.intent.category.DEFAULT" />
+          <data android:scheme="tel" />
+        </intent-filter>
+        <intent-filter>
+          <action android:name="android.intent.action.VIEW" />
+          <action android:name="android.intent.action.DIAL" />
+          <category android:name="android.intent.category.DEFAULT" />
+          <category android:name="android.intent.category.BROWSABLE" />
+          <data android:scheme="tel" />
+        </intent-filter>
+      </activity>
+    </application>
+</manifest>

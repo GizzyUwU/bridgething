@@ -15,26 +15,36 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
-        // Schema + glue + companion packages declare
-        // `kotlin("plugin.serialization")` in their build.gradle.kts;
-        // ship the plugin classpath so they resolve when built from
-        // mobile/android (root build.gradle.kts ships its own copy).
         classpath("org.jetbrains.kotlin:kotlin-serialization:2.1.20")
     }
 }
 
-// session-rn isn't picked up by RN autolinking (bun workspace symlink),
-// so the autolinker doesn't inject the nitro modules dep substitution
-// for it. Add it manually before the RN root plugin evaluates anything,
-// otherwise `evaluationDependsOn(:app)` runs first and project
-// configurations get locked.
+// nitro autolinks only the native side, not the kotlin classpath; substitute here so the
+// version-less nitro coord resolves to the local project.
 subprojects { sub ->
   sub.configurations.all { config ->
     config.resolutionStrategy.dependencySubstitution {
       substitute(module("com.margelo.nitro:react-native-nitro-modules"))
         .using(project(":react-native-nitro-modules"))
-        .because("session-rn isn't autolinked but still needs the nitro modules JNI")
+        .because("nitro autolinks only the native side, not the kotlin classpath")
     }
+  }
+  // bare container projects carry newArchEnabled only via gradle.properties inheritance;
+  // pre-register as ext so the RN rootproject plugin's setProperty call doesn't throw.
+  sub.extensions.extraProperties.set("newArchEnabled", "true")
+  sub.extensions.extraProperties.set("react.newArchEnabled", "true")
+}
+
+// on a cold build session-rn's per-abi cmake configure can run before nitro-modules has
+// packaged that abi's prefab, leaving the imported target empty and dropping libNitroModules.so;
+// force the producer's prefab tasks to complete first.
+gradle.projectsEvaluated {
+  def nitro = findProject(":react-native-nitro-modules")
+  def session = findProject(":bridgething_session-react-native")
+  if (nitro != null && session != null) {
+    def prefabTasks = nitro.tasks.matching { it.name.toLowerCase().contains("prefab") }
+    session.tasks.matching { it.name.startsWith("configureCMake") || it.name.startsWith("buildCMake") }
+      .configureEach { dependsOn prefabTasks }
   }
 }
 

@@ -17,12 +17,7 @@ import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 
-/**
- * Backend protocol the host app implements. Decouples the Nitro
- * HybridObject (in this library, with limited gradle visibility) from the
- * orchestration logic in the host app. Registered via
- * [HybridBridgethingSession.installBackend] at launch, before any JS runs.
- */
+/** backend protocol the host app implements; decouples the Nitro HybridObject from host-app orchestration logic. */
 public interface BridgethingSessionBackend {
     public suspend fun start()
     public suspend fun stop()
@@ -60,6 +55,9 @@ public interface BridgethingSessionBackend {
 
     public suspend fun isNotificationAccessGranted(): Boolean
     public suspend fun requestNotificationAccess()
+
+    public suspend fun isDefaultDialer(): Boolean
+    public suspend fun requestDefaultDialer()
 
     public suspend fun revokeRuntimePermissions(permissions: Array<String>): Boolean
     public suspend fun killApp()

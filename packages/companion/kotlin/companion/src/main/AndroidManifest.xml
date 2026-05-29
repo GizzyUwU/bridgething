@@ -10,4 +10,30 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!--
+      Telephony surface. The host app must request the default-dialer role
+      (RoleManager.ROLE_DIALER) before the OS binds the InCallService; the
+      runtime perms (CALL_PHONE, ANSWER_PHONE_CALLS, READ_CALL_LOG) gate
+      placing / answering / redial respectively.
+    -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+
+    <application>
+      <service
+        android:name="dev.bridgething.companion.BridgethingInCallService"
+        android:permission="android.permission.BIND_INCALL_SERVICE"
+        android:exported="true">
+        <meta-data
+          android:name="android.telecom.IN_CALL_SERVICE_UI"
+          android:value="true" />
+        <intent-filter>
+          <action android:name="android.telecom.InCallService" />
+        </intent-filter>
+      </service>
+    </application>
 </manifest>

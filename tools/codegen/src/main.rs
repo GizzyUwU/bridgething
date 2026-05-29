@@ -36,14 +36,29 @@ fn main() -> Result<()> {
     "swift" => gen_swift()?,
     "kotlin" => gen_kotlin()?,
     "rust" => gen_rust()?,
+    "manifest" => gen_manifests()?,
     "all" => {
       gen_typescript()?;
       gen_swift()?;
       gen_kotlin()?;
       gen_rust()?;
     }
-    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, rust, all"),
+    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, rust, manifest, all"),
   }
+  Ok(())
+}
+
+/// Emit only the wire-surface coverage manifests (Swift + Kotlin) without
+/// the typeshare DTO regeneration, so they can be refreshed on hosts that
+/// lack the typeshare CLI. The canonical `swift`/`kotlin`/`all` targets also
+/// emit these as part of their flow.
+fn gen_manifests() -> Result<()> {
+  println!("==> manifests");
+  let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  let plan = dispatch::build_plan_for(&inv, dispatch::Protocol::Gateway).context("dispatch plan")?;
+  dispatch::emit_swift_manifest(&plan).context("emit swift wire-surface manifest")?;
+  dispatch::emit_kotlin_manifest(&plan).context("emit kotlin wire-surface manifest")?;
+  println!("    emitted Swift + Kotlin WireSurfaceManifest");
   Ok(())
 }
 
@@ -187,6 +202,7 @@ fn gen_swift() -> Result<()> {
   println!("    emitting swift dispatch helpers");
   let plan = dispatch::build_plan_for(&inv, dispatch::Protocol::Gateway).context("dispatch plan")?;
   dispatch::emit_swift(&plan).context("emit swift dispatch")?;
+  dispatch::emit_swift_manifest(&plan).context("emit swift wire-surface manifest")?;
   Ok(())
 }
 
@@ -225,6 +241,7 @@ fn gen_kotlin() -> Result<()> {
   println!("    emitting kotlin dispatch helpers");
   let plan = dispatch::build_plan_for(&inv, dispatch::Protocol::Gateway).context("dispatch plan")?;
   dispatch::emit_kotlin(&plan).context("emit kotlin dispatch")?;
+  dispatch::emit_kotlin_manifest(&plan).context("emit kotlin wire-surface manifest")?;
   Ok(())
 }
 

@@ -34,9 +34,10 @@ class WireDriver(
 ) {
     private val pending = ConcurrentHashMap<UUID, CompletableDeferred<GatewayToBridgeMsg>>()
     private val outbound = Channel<GatewayToBridgeMsg>(Channel.UNLIMITED)
+    // non-matching frames are retained so a later waitOutbound finds out-of-order events
+    private val buffered = ArrayDeque<GatewayToBridgeMsg>()
     private var pump: Job? = null
 
-    /** Begin draining outbound frames. Call once, after the companion is started. */
     fun start(scope: CoroutineScope) {
         pump = scope.launch {
             for ((_, frame) in adapter.sentFrames) {
@@ -55,7 +56,6 @@ class WireDriver(
         adapter.simulate(AdapterEvent.Connected(Device(deviceId, name)))
     }
 
-    /** Send a `.request` frame and await the matching `.response`, or throw on timeout. */
     suspend fun request(data: BridgeToGatewayMsgData, timeout: Duration = 5.seconds): GatewayToBridgeMsg {
         val id = UUID.randomUUID()
         val deferred = CompletableDeferred<GatewayToBridgeMsg>()
@@ -68,7 +68,6 @@ class WireDriver(
         return withTimeout(timeout) { deferred.await() }
     }
 
-    /** Send a fire-and-forget command/event frame (no response expected). */
     suspend fun send(data: BridgeToGatewayMsgData, meta: MsgMeta = MsgMeta.Command) {
         val frame = codec.encode(
             BridgeToGatewayMsg.serializer(),
@@ -77,13 +76,17 @@ class WireDriver(
         adapter.simulate(AdapterEvent.Bytes(deviceId, frame))
     }
 
-    /** Await the next outbound frame matching [predicate]. */
     suspend fun waitOutbound(
         timeout: Duration = 5.seconds,
         predicate: (GatewayToBridgeMsg) -> Boolean,
     ): GatewayToBridgeMsg = withTimeout(timeout) {
+        val hit = buffered.indexOfFirst(predicate)
+        if (hit >= 0) return@withTimeout buffered.removeAt(hit)
         var msg = outbound.receive()
-        while (!predicate(msg)) msg = outbound.receive()
+        while (!predicate(msg)) {
+            buffered.addLast(msg)
+            msg = outbound.receive()
+        }
         msg
     }
 

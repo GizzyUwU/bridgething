@@ -5,12 +5,7 @@ import com.facebook.proguard.annotations.DoNotStrip
 import com.margelo.nitro.core.NullType
 import com.margelo.nitro.core.Promise
 
-/**
- * Thin Nitro proxy. The host app installs a [BridgethingSessionBackend]
- * at launch via [installBackend]. Without a backend, every method throws
- * "backend not installed". Callback setters are buffered until a backend
- * is installed, then re-applied.
- */
+/** thin Nitro proxy; buffers callback setters until a backend is installed via [installBackend]. */
 @DoNotStrip
 public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
@@ -31,21 +26,13 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
 
-        /**
-         * Loads the JNI lib and registers the HybridObject with Nitro's runtime.
-         * Called explicitly because bun workspace symlinks trip RN's autolinker.
-         * Idempotent.
-         */
+        /** explicit init because bun workspace symlinks trip RN's autolinker. idempotent. */
         @JvmStatic
         public fun initializeNitro() {
             BridgethingSessionOnLoad.initializeNative()
         }
 
-        /**
-         * Wire up the real session backend. Must be called once at launch,
-         * before React Native starts. Replays any callback setters JS may
-         * have already registered.
-         */
+        /** install the backend; must be called before RN starts. replays any already-registered callback setters. */
         @JvmStatic
         public fun installBackend(b: BridgethingSessionBackend) {
             val replay = synchronized(stateLock) {
@@ -241,6 +228,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun requestNotificationAccess(): Promise<Unit> = Promise.async {
         require().requestNotificationAccess()
+    }
+
+    override fun isDefaultDialer(): Promise<Boolean> = Promise.async {
+        backend?.isDefaultDialer() ?: false
+    }
+
+    override fun requestDefaultDialer(): Promise<Unit> = Promise.async {
+        require().requestDefaultDialer()
     }
 
     override fun revokeRuntimePermissions(permissions: Array<String>): Promise<Boolean> = Promise.async {

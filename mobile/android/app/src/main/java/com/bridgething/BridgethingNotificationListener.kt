@@ -1,6 +1,7 @@
 package com.bridgething
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.pm.PackageManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -8,6 +9,7 @@ import android.util.Log
 import dev.bridgething.companion.BridgethingCompanion
 import dev.bridgething.gateway.notifications
 import dev.bridgething.schema.DismissReason
+import dev.bridgething.schema.NotificationAction
 import dev.bridgething.schema.NotificationApp
 import dev.bridgething.schema.NotificationCategory
 import dev.bridgething.schema.NotificationFlags
@@ -20,33 +22,34 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Listens to every notification the user sees on the phone, translates
- * `StatusBarNotification` into the bridgething wire shape, and broadcasts
- * it to every connected Car Thing via the running companion's gateway.
- *
- * The service is only live when the user has toggled this app on under
- * "Device & app notifications" - Android offers no programmatic grant.
- *
- * The running [BridgethingCompanion] is looked up through
- * [NotificationBridgeRegistry] because the OS constructs this service
- * independently of the host app's coroutine scope.
+ * Forwards notifications to every connected Car Thing via the running companion's gateway.
+ * The OS constructs this service independently of the host app, so the companion is looked
+ * up through [NotificationBridgeRegistry] rather than injected directly.
  */
 public class BridgethingNotificationListener : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        NotificationBridgeRegistry.listener = this
         Log.i(TAG, "notification listener connected")
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        if (NotificationBridgeRegistry.listener === this) NotificationBridgeRegistry.listener = null
         Log.i(TAG, "notification listener disconnected")
     }
 
     override fun onDestroy() {
+        if (NotificationBridgeRegistry.listener === this) NotificationBridgeRegistry.listener = null
         scope.cancel()
         super.onDestroy()
+    }
+
+    fun actionIntent(id: String, positive: Boolean): PendingIntent? {
+        val sbn = activeNotifications?.firstOrNull { it.key == id } ?: return null
+        return sbn.notification?.actions?.getOrNull(if (positive) 0 else 1)?.actionIntent
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -75,10 +78,9 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }
 
     private fun shouldSkip(sbn: StatusBarNotification): Boolean {
-        // Don't fan our own notifications back to the Car Thing (loop).
+        // skip our own package to prevent looping notifications back to the device.
         if (sbn.packageName == applicationContext.packageName) return true
-        // Skip group summaries and ongoing notifications (e.g. media,
-        // foreground services) - they're not user-facing alerts.
+        // group summaries and ongoing events (media, foreground services) are not user-facing alerts.
         val n = sbn.notification ?: return true
         if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return true
         if ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0) return true
@@ -106,16 +108,18 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         val subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
         val displayName = resolveAppLabel(sbn.packageName)
 
-        // n.priority is post-API-26 deprecated in favour of channel
-        // importance, but it's still what every legacy notification
-        // populates; channel lookup would need NotificationManager
-        // round-trips per event.
+        // n.priority is deprecated post-api-26 but still populated by legacy notifications; channel
+        // importance lookup would need NotificationManager round-trips per event.
         @Suppress("DEPRECATION")
         val flags = NotificationFlags(
             silent = (n.flags and Notification.FLAG_NO_CLEAR) != 0,
             important = n.priority >= Notification.PRIORITY_HIGH,
             preExisting = false,
         )
+
+        val actions = n.actions
+        fun actionSlot(index: Int): NotificationAction? =
+            actions?.getOrNull(index)?.title?.toString()?.takeIf { it.isNotEmpty() }?.let { NotificationAction(label = it) }
 
         return WireNotification(
             id = sbn.key,
@@ -130,8 +134,8 @@ public class BridgethingNotificationListener : NotificationListenerService() {
             message = text,
             timestampUnixS = (sbn.postTime / 1000L).coerceIn(0L, UInt.MAX_VALUE.toLong()).toUInt(),
             flags = flags,
-            positiveAction = null,
-            negativeAction = null,
+            positiveAction = actionSlot(0),
+            negativeAction = actionSlot(1),
         )
     }
 
@@ -152,8 +156,11 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }
 }
 
-/** Process-wide holder so the OS-constructed listener can find the running [BridgethingCompanion]. */
+/** bridges the OS-constructed listener to the running companion. */
 public object NotificationBridgeRegistry {
     @Volatile
     public var companion: BridgethingCompanion? = null
+
+    @Volatile
+    public var listener: BridgethingNotificationListener? = null
 }

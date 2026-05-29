@@ -19,6 +19,7 @@
 
 pub mod inventory;
 pub mod kotlin;
+pub mod manifest;
 pub mod plan;
 pub mod rust;
 pub mod swift;
@@ -27,6 +28,7 @@ pub mod typescript_client;
 
 pub use inventory::{Protocol, inventory};
 pub use kotlin::emit_kotlin;
+pub use manifest::{emit_kotlin_manifest, emit_swift_manifest};
 pub use plan::{build_plan_for, build_plans};
 pub use rust::{RustTarget, emit_rust};
 pub use swift::emit_swift;

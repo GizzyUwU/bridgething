@@ -29,13 +29,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
-/**
- * Breadth coverage for the Kotlin dispatch layer: asset got/not-found, lyrics
- * glue->resolver fallthrough, library search/favorites routing, and an outbound
- * (capabilities announce) assertion - driven through the real
- * [BridgethingCompanion] + [FakeGlue] at the [FakeAdapter] seam, mirroring the
- * Swift `AssetLyricsDispatchTests`.
- */
+/** breadth coverage for asset, lyrics, library, and outbound capabilities dispatch. */
 class LibraryAssetDispatchTest {
     private suspend fun boot(
         scope: CoroutineScope,
@@ -50,6 +44,7 @@ class LibraryAssetDispatchTest {
             host = HostInfo(appName = "test", appVersion = "0.0.1", osName = "test"),
             geo = NoOpGeoSource,
             volume = NoOpVolumeSource,
+            audio = NoOpAudioBackend,
         )
         if (glue != null) companion.setActive(glue)
         companion.start()
@@ -83,7 +78,7 @@ class LibraryAssetDispatchTest {
 
     @Test
     fun `asset miss returns notFound`() = runBlocking {
-        // FakeGlue with no onAsset closure returns null -> notFound (not a hang).
+        // fakeglue with no onAsset returns null -> notFound, not a hang
         val (companion, driver) = boot(this, FakeGlue())
 
         val resp = driver.request(BridgeToGatewayMsgData.Asset(BridgeToGatewayAssetMsg.Request(AssetRequest(id = "art:missing", requestId = UUID.randomUUID()))))
@@ -98,7 +93,6 @@ class LibraryAssetDispatchTest {
 
     @Test
     fun `lyrics falls through to resolver`() = runBlocking {
-        // FakeGlue.lyrics returns null; the resolver chain supplies the hit.
         val canned = DomainLyrics(synced = listOf(LyricLine(0, "one more time")), plain = null, source = "fake-resolver")
         val (companion, driver) = boot(this, FakeGlue(), FakeLyricsResolver(canned))
 
@@ -117,8 +111,6 @@ class LibraryAssetDispatchTest {
 
     @Test
     fun `lyrics no hit returns nil reply`() = runBlocking {
-        // Neither glue nor resolver has lyrics -> a reply with lyrics == null
-        // (distinct from an error reply).
         val (companion, driver) = boot(this, FakeGlue(), FakeLyricsResolver(null))
 
         val resp = driver.request(

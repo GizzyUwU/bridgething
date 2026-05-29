@@ -1,9 +1,7 @@
 import Foundation
 import NitroModules
 
-/// Backend protocol implemented by the host app. Decouples the Nitro HybridObject from
-/// orchestration logic that depends on SwiftPM packages unavailable in the pod target.
-/// Install before JS starts via `HybridBridgethingSession.installBackend(_:)`.
+/// backend protocol the host app implements; decouples the Nitro HybridObject from host-app orchestration logic.
 public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func start() async throws
     func stop() async
@@ -42,6 +40,9 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func isNotificationAccessGranted() async -> Bool
     func requestNotificationAccess() async throws
 
+    func isDefaultDialer() async -> Bool
+    func requestDefaultDialer() async throws
+
     func revokeRuntimePermissions(permissions: [String]) async -> Bool
     func killApp() async
 
@@ -59,8 +60,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
 }
 
-/// Thin Nitro proxy. Without a backend installed every method throws.
-/// Callback setters are buffered and replayed when the backend is installed.
+/// thin Nitro proxy; buffers callback setters until a backend is installed via `installBackend(_:)`.
 public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unchecked Sendable {
     private static let stateLock = NSLock()
     private static var _backend: (any BridgethingSessionBackend)?
@@ -76,8 +76,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
 
-    /// Install the real session backend. Call before React Native starts.
-    /// Replays any callback setters already registered.
+    /// install the backend; must be called before RN starts. replays any already-registered callback setters.
     public static func installBackend(_ backend: any BridgethingSessionBackend) {
         stateLock.lock()
         _backend = backend
@@ -304,13 +303,16 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    // MARK: - OS-mediated pair flow (iOS = ASK, android = CompanionDeviceManager)
+    // MARK: - Pair picker
 
-    public func presentPairPicker() throws -> Promise<BridgethingBtDevice?> {
-        Promise.async { try await Self.backend().presentPairPicker() }
+    public func presentPairPicker() throws -> Promise<Variant_NullType_BridgethingBtDevice> {
+        Promise.async {
+            let device = try await Self.backend().presentPairPicker()
+            return device.map { .second($0) } ?? .first(NullType.null)
+        }
     }
 
-    // MARK: - Notification access (android-only in spec)
+    // MARK: - Notification access
 
     public func isNotificationAccessGranted() throws -> Promise<Bool> {
         Promise.async { await (try Self.backend()).isNotificationAccessGranted() }
@@ -320,7 +322,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async { try await Self.backend().requestNotificationAccess() }
     }
 
-    // MARK: - Runtime perm revoke (android-only)
+    public func isDefaultDialer() throws -> Promise<Bool> {
+        Promise.async { await (try Self.backend()).isDefaultDialer() }
+    }
+
+    public func requestDefaultDialer() throws -> Promise<Void> {
+        Promise.async { try await Self.backend().requestDefaultDialer() }
+    }
+
+    // MARK: - Runtime permission revoke
 
     public func revokeRuntimePermissions(permissions: [String]) throws -> Promise<Bool> {
         Promise.async { await (try Self.backend()).revokeRuntimePermissions(permissions: permissions) }

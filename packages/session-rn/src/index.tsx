@@ -56,21 +56,6 @@ export type SessionEvent =
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
   | { type: 'log'; level: string; message: string };
 
-/**
- * Thin TS facade over the Nitro `BridgethingSession`. The native side owns
- * the EA / iAP2 transport, the Spotify glue + Keychain tokens, the gateway,
- * and the dispatchers. JS owns its own state (mmkv-backed preferences,
- * device nicknames, capability flags, OTA poll config) and treats this
- * class as a typed remote.
- *
- * Lifecycle: construct once at app boot, call `start()`. The exposed
- * `subscribe(handler)` channel emits a `SessionEvent` for every native
- * callback; consumers wire it into their store of choice (zustand etc.).
- *
- * Multi-device: webapp / OTA methods take a `deviceId` matching one of
- * the ids returned by `connectedPeers()`. Use `session.device(id)` for
- * a per-device convenience proxy with the deviceId pre-bound.
- */
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
   private readonly listeners: Set<(event: SessionEvent) => void> = new Set();
@@ -81,12 +66,6 @@ export class BridgethingSession {
     this.wire();
   }
 
-  /**
-   * Subscribe to every native callback as a typed event. Returns an
-   * unsubscribe disposer. `log` is special-cased: native log streaming
-   * is disabled until at least one subscriber asks for it via
-   * `setLogStreamingEnabled(true)` (refcounted by the session).
-   */
   subscribe(listener: (event: SessionEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -94,7 +73,6 @@ export class BridgethingSession {
     };
   }
 
-  /** Toggle native log streaming. Refcounted by the caller. */
   setLogStreamingEnabled(enabled: boolean): void {
     if (enabled) {
       this.logSubscriberCount += 1;
@@ -145,11 +123,6 @@ export class BridgethingSession {
     return this.native.currentNowPlaying();
   }
 
-  /**
-   * Drive the iOS AccessorySetupKit pair flow that creates the LE bond required for ANCS.
-   * Resolves once the picker-side outcome is known; `authStatus` may still transition
-   * asynchronously - observe the session for `ancsAuthStatusChanged`.
-   */
   async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
     return this.native.enableAncsNotifications();
   }
@@ -214,10 +187,6 @@ export class BridgethingSession {
     return this.native.hostInfo();
   }
 
-  /**
-   * OS-mediated pair flow: AccessorySetupKit (iOS 18+) or CompanionDeviceManager (Android API 26+).
-   * Returns the chosen accessory, or null on cancel.
-   */
   async presentPairPicker(): Promise<BridgethingBtDevice | null> {
     return this.native.presentPairPicker();
   }
@@ -230,20 +199,18 @@ export class BridgethingSession {
     await this.native.requestNotificationAccess();
   }
 
-  /**
-   * Drop a set of runtime permissions. Android 13+ queues the revoke for next process kill
-   * via `revokeSelfPermissionsOnKill`; older Android and iOS return `false` (caller opens
-   * system settings). Pass all related permissions together - revoking only the background
-   * variant downgrades to "while using" instead of fully revoking.
-   */
+  async isDefaultDialer(): Promise<boolean> {
+    return this.native.isDefaultDialer();
+  }
+
+  async requestDefaultDialer(): Promise<void> {
+    await this.native.requestDefaultDialer();
+  }
+
   async revokeRuntimePermissions(permissions: string[]): Promise<boolean> {
     return this.native.revokeRuntimePermissions(permissions);
   }
 
-  /**
-   * Force-kill our own process to apply a queued `revokeSelfPermissionsOnKill`.
-   * The OS routes the user back to the launcher; the perm is gone on reopen.
-   */
   async killApp(): Promise<void> {
     await this.native.killApp();
   }
@@ -296,12 +263,6 @@ export class BridgethingSession {
   }
 }
 
-/**
- * Per-device convenience proxy returned by `session.device(id)`. Mirrors
- * the Swift gateway's `gateway.device(id).webapp.X()` shape so screens
- * working against a single device don't have to thread `deviceId`
- * through every call.
- */
 export class BridgethingDevice {
   constructor(
     private readonly session: BridgethingSession,
@@ -340,20 +301,16 @@ export class BridgethingDevice {
   }
 }
 
-/**
- * ArrayBuffer to base64 without a `data:` prefix. The Swift `ArrayBuffer` typealias
- * breaks Swift-to-C++ header interop, so installs go over a string surface instead.
- * 33% inflation is acceptable for webapp bundle sizes.
- */
+// Swift ArrayBuffer typealias breaks Swift-to-C++ header interop; base64 string surface avoids it.
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  // 8 KiB chunks avoid hitting the JS engine call-stack limit on String.fromCharCode with large arrays
+  // 8 KiB chunks avoid the JS call-stack limit on String.fromCharCode
   let binary = '';
   const chunk = 8192;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
-  // fall back to manual encoder in test environments that don't ship btoa
+  // test environments may not ship btoa
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g = globalThis as any;
   if (typeof g.btoa === 'function') return g.btoa(binary) as string;

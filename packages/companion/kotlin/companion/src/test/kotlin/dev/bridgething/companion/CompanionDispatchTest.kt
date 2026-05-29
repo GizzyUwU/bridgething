@@ -18,12 +18,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * Dispatch-layer tests: drive wire requests at the [FakeAdapter] seam exactly as
- * the daemon would, through the real [BridgethingCompanion] + a [FakeGlue], and
- * assert the response frames. Geo/volume are injected no-ops; the BT transport is
- * the FakeAdapter. No Spotify, no Android.
- */
+/** companion dispatch: drives wire requests through [BridgethingCompanion] + [FakeGlue] at the [FakeAdapter] seam and asserts response frames. */
 class CompanionDispatchTest {
     private suspend fun boot(scope: CoroutineScope, glue: FakeGlue?): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -34,6 +29,7 @@ class CompanionDispatchTest {
             host = HostInfo(appName = "test", appVersion = "0.0.1", osName = "test"),
             geo = NoOpGeoSource,
             volume = NoOpVolumeSource,
+            audio = NoOpAudioBackend,
         )
         if (glue != null) companion.setActive(glue)
         companion.start()
@@ -74,7 +70,6 @@ class CompanionDispatchTest {
 
     @Test
     fun `unimplemented library verb maps to a protocol Unimplemented error`() = runBlocking {
-        // FakeGlue with no onBrowse closure -> browse() throws GlueError.NotImplemented.
         val (companion, driver) = boot(this, FakeGlue(onBrowse = null))
 
         val resp = driver.request(browseReq())

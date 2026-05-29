@@ -31,6 +31,8 @@ import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import dev.bridgething.companion.AncsSetupKind
+import dev.bridgething.companion.AndroidNotificationActionBackend
+import dev.bridgething.companion.AndroidPhoneBackend
 import dev.bridgething.companion.BridgethingCompanion
 import dev.bridgething.companion.BridgethingCompanionVersion
 import dev.bridgething.companion.CompanionCapabilityFlags
@@ -50,6 +52,7 @@ import dev.bridgething.schema.OtaKind
 import dev.bridgething.schema.OtaPhase
 import dev.bridgething.schema.RepeatMode
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -58,11 +61,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * [BridgethingSessionBackend] impl. Owns one [BridgethingCompanion]
- * (which owns the gateway, the active glue, and every dispatcher).
- * Glue registration populates [registry] before the backend is installed.
- */
+/** [BridgethingSessionBackend] impl that owns one [BridgethingCompanion]. */
 public class HybridBridgethingSessionImpl(
     private val context: Context,
 ) : BridgethingSessionBackend {
@@ -83,6 +82,8 @@ public class HybridBridgethingSessionImpl(
             osName = "Android",
         )
         public var lyricsResolver: LyricsResolver = LrclibResolver()
+
+        private const val REQUEST_DIALER_ROLE = 0xBA02
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -145,6 +146,10 @@ public class HybridBridgethingSessionImpl(
                 lyricsResolver = lyricsResolver,
                 host = host,
                 capabilities = CompanionCapabilityFlags(),
+                notificationActions = AndroidNotificationActionBackend { id, positive ->
+                    NotificationBridgeRegistry.listener?.actionIntent(id, positive)
+                },
+                phone = AndroidPhoneBackend(context.applicationContext),
             )
             c.setNowPlayingObserver { np -> handleNowPlaying(np) }
             c.setAncsAuthStateObserver { state -> emitAncsAuthStatus(toRnAncsAuthStatus(state)) }
@@ -163,8 +168,7 @@ public class HybridBridgethingSessionImpl(
             btAdapter = adapter
             NotificationBridgeRegistry.companion = c
 
-            // CDM's association list is the user's pair gate; reopen RFCOMM
-            // sessions for every device already authorized.
+            // reopen RFCOMM for every device already authorized in CDM's association list.
             reconnectAssociated(adapter)
         }
     }
@@ -381,6 +385,39 @@ public class HybridBridgethingSessionImpl(
         ctx.startActivity(intent)
     }
 
+    override suspend fun isDefaultDialer(): Boolean {
+        val ctx = context.applicationContext
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            ctx.getSystemService(android.app.role.RoleManager::class.java)
+                ?.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER) == true
+        } else {
+            val telecom = ctx.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            telecom?.defaultDialerPackage == ctx.packageName
+        }
+    }
+
+    override suspend fun requestDefaultDialer() {
+        val ctx = context.applicationContext
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val roleManager = ctx.getSystemService(android.app.role.RoleManager::class.java) ?: return
+            if (!roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)) return
+            // RoleManager's request dialog is an activity-result api; await its close so the
+            // caller can re-check isDefaultDialer.
+            val activity = BridgethingActivityRegistry.currentActivity ?: return
+            val intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+            val done = CompletableDeferred<Unit>()
+            BridgethingActivityRegistry.expectResult(REQUEST_DIALER_ROLE) { _, _ -> done.complete(Unit) }
+            activity.startActivityForResult(intent, REQUEST_DIALER_ROLE)
+            done.await()
+        } else {
+            @Suppress("DEPRECATION")
+            val intent = Intent(android.telecom.TelecomManager.ACTION_CHANGE_DEFAULT_DIALER)
+                .putExtra(android.telecom.TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, ctx.packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+        }
+    }
+
     override suspend fun revokeRuntimePermissions(permissions: Array<String>): Boolean {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
             return false
@@ -399,14 +436,13 @@ public class HybridBridgethingSessionImpl(
     }
 
     override suspend fun killApp() {
-        // finishAffinity() doesn't drop the pid, so the queued
-        // revokeSelfPermissionsOnKill grants would never apply.
+        // finishAffinity doesn't drop the pid so the queued revoke never applies.
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
-        // open an RFCOMM session immediately so the new peer appears without an app restart.
+        // connect immediately so the new peer appears without an app restart.
         val adapter = stateLock.withLock { btAdapter } ?: return picked
         scope.launch { reconnectAssociated(adapter) }
         return picked
@@ -478,8 +514,7 @@ public class HybridBridgethingSessionImpl(
                 appName = update.playback?.appDisplayName,
             )
         }
-        // Glues tick handleNowPlaying once a second on the position
-        // update; skip the JS bridge hop when nothing visible changed.
+        // glues tick once a second on position; skip the JS bridge hop when nothing visible changed.
         if (mapped == lastNowPlaying) return
         lastNowPlaying = mapped
         emitNowPlaying(mapped)
@@ -570,6 +605,7 @@ public class HybridBridgethingSessionImpl(
     private fun toRnOtaKind(kind: OtaKind): BridgethingOtaKind = when (kind) {
         OtaKind.Image -> BridgethingOtaKind.IMAGE
         OtaKind.Daemon -> BridgethingOtaKind.DAEMON
+        OtaKind.BuiltinWebapp -> BridgethingOtaKind.BUILTINWEBAPP
     }
 
     private fun makeOtaEvent(

@@ -18,6 +18,7 @@ import {
   LogOut,
   MapPin,
   MoonStar,
+  Phone,
   Plus,
   RadioTower,
   RefreshCw,
@@ -131,8 +132,6 @@ export function SettingsScreen({ navigation }: Props) {
     refresh();
   }, [refresh]);
 
-  // Live-update meta as the daemon reannounces it; drop entries on
-  // disconnect so the rows reflect actual session state.
   useEffect(() => {
     return session.subscribe(event => {
       if (event.type === 'deviceMetaChanged') {
@@ -438,6 +437,7 @@ export function SettingsScreen({ navigation }: Props) {
                     }
                   />
                 ) : null}
+                {Platform.OS === 'android' ? <DefaultDialerRow /> : null}
                 <FlagRow
                   icon={Globe}
                   title="HTTP proxy"
@@ -539,12 +539,6 @@ function FlagRow({
   );
 }
 
-/**
- * Geo flag row that gates the toggle on OS-level location permission.
- * Flipping ON when permission is undetermined triggers the system
- * prompt; if denied or restricted, the row stays off and offers to
- * open Settings so the user can flip it themselves.
- */
 function GeoFlagRow({
   value,
   onChange,
@@ -552,7 +546,7 @@ function GeoFlagRow({
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
-  // querying the wrong OS permission constant causes the toggle to silently spring back.
+  // using the wrong permission constant causes the toggle to silently spring back.
   const permission =
     Platform.OS === 'android'
       ? PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION
@@ -619,12 +613,6 @@ function GeoFlagRow({
   );
 }
 
-/**
- * Background-location toggle. Android 10+ requires a separate runtime grant
- * on top of foreground location; from API 30 the request can't pop a dialog
- * and instead opens system Settings ("Allow all the time"). Toggle reflects
- * OS-level state - the OS owns the truth, not a user preference.
- */
 function BackgroundLocationRow() {
   const permission = PERMISSIONS.ANDROID.ACCESS_BACKGROUND_LOCATION;
   const [status, setStatus] = useState<PermissionStatus | null>(null);
@@ -638,8 +626,7 @@ function BackgroundLocationRow() {
     refresh();
   }, [refresh]);
 
-  // Foreground transitions re-check OS state (user may have flipped
-  // the perm from system settings without our knowledge).
+  // recheck on foreground; user may have changed the permission in system settings.
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -657,9 +644,7 @@ function BackgroundLocationRow() {
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // revoking only the bg variant downgrades to "while using"; drop fine+coarse
-      // for a real revoke. the OS applies the change on next process kill, so a
-      // restart is required to make it stick.
+      // revoking only the bg variant downgrades to while-using; drop fine+coarse for a full revoke.
       Alert.alert(
         'restart bridgething?',
         'to revoke location, android needs to kill + restart the app. revoke now?',
@@ -695,7 +680,7 @@ function BackgroundLocationRow() {
                   'restarting bridgething…',
                   ToastAndroid.SHORT,
                 );
-                // Give the toast a beat to render, then kill ourselves.
+                // give the toast a beat to render before killing the process.
                 setTimeout(() => {
                   session.killApp().catch(() => {});
                 }, 500);
@@ -747,11 +732,6 @@ function BackgroundLocationRow() {
   );
 }
 
-/**
- * NotificationListenerService access. No programmatic grant exists; the user
- * must enable the app under "Device & app notifications" in system settings.
- * OS state is polled on mount and after foreground transitions.
- */
 function NotificationListenerRow({
   value,
   onChange,
@@ -775,8 +755,7 @@ function NotificationListenerRow({
     refresh();
   }, [refresh]);
 
-  // Re-check whenever the app comes back to the foreground (the user
-  // most likely just toggled the switch in the system settings page).
+  // recheck on foreground; user may have toggled access in system settings.
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -809,7 +788,7 @@ function NotificationListenerRow({
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // no programmatic revoke for NotificationListenerService; must use system settings.
+      // no programmatic revoke for NotificationListenerService.
       Alert.alert(
         'revoke in settings',
         'android only lets you revoke notification access from system settings. open it?',
@@ -849,6 +828,78 @@ function NotificationListenerRow({
       trailing={
         <Switch
           value={Boolean(value && granted)}
+          onValueChange={handleToggle}
+          disabled={busy}
+        />
+      }
+    />
+  );
+}
+
+function DefaultDialerRow() {
+  const session = getSession();
+  const [granted, setGranted] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setGranted(await session.isDefaultDialer());
+    } catch {
+      setGranted(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const subtitle = granted
+    ? 'mirroring calls to the Car Thing'
+    : 'tap to make bridgething your default phone app';
+
+  const request = async () => {
+    setBusy(true);
+    try {
+      await session.requestDefaultDialer();
+      await refresh();
+    } catch (err) {
+      Alert.alert(
+        'failed to request',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggle = async (next: boolean) => {
+    if (!next) {
+      Alert.alert(
+        'change in settings',
+        'android only lets you change the default phone app from system settings.',
+      );
+      return;
+    }
+    if (!granted) await request();
+  };
+
+  return (
+    <ListRow
+      icon={Phone}
+      iconTint="default"
+      title="phone calls"
+      subtitle={subtitle}
+      onPress={!granted ? request : undefined}
+      trailing={
+        <Switch
+          value={Boolean(granted)}
           onValueChange={handleToggle}
           disabled={busy}
         />
