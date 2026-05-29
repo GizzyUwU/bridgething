@@ -3,6 +3,7 @@
   "name": "Calendar",
   "version": "0.1.0",
   "description": "Upcoming events from an iCalendar (.ics) feed.",
+  "icon": "icon.svg",
   "config": [
     {
       "type": "string",

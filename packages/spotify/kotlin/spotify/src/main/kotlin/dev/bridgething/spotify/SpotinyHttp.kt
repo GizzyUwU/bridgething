@@ -14,6 +14,12 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.KSerializer
@@ -33,6 +39,8 @@ class SpotinyHttp(private val client: SpotinyClient, engine: HttpClientEngine? =
     }
 
     private val rateLimiter = RateLimiter()
+    private val healthScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var recoverJob: Job? = null
 
     // engine is injectable so tests can drive canned responses; prod uses CIO.
     private val http: HttpClient = engine?.let { HttpClient(it) } ?: HttpClient(CIO)
@@ -210,7 +218,14 @@ class SpotinyHttp(private val client: SpotinyClient, engine: HttpClientEngine? =
         }
 
         if (statusCode == 429) {
+            val seconds = response.headers["Retry-After"]?.toIntOrNull() ?: 60
             rateLimiter.markLimited(response.headers["Retry-After"])
+            client.delegate?.serviceDidRateLimit(seconds)
+            recoverJob?.cancel()
+            recoverJob = healthScope.launch {
+                delay(seconds * 1000L)
+                client.delegate?.serviceDidRecover()
+            }
             return null
         }
 

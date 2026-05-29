@@ -17,13 +17,14 @@ const KEY = {
   otaPollConfig: 'ota.pollConfig', // JSON of OtaPollConfig | null marker
 } as const;
 
-/** Default capability-flag profile. All off by default; opt-in per flag. */
+/** Default capability-flag profile. On by default; the Advanced menu is for
+ *  opting out. OS-gated surfaces (geo) still require their system grant. */
 export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
-  geo: false,
-  notifications: false,
-  netFetch: false,
-  netWs: false,
-  audioTts: false,
+  geo: true,
+  notifications: true,
+  netFetch: true,
+  netWs: true,
+  audioTts: true,
 };
 
 /** Default OTA poll config when the user hasn't picked one yet. */

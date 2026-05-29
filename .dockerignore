@@ -1,0 +1,9 @@
+target
+target-cross
+**/target
+node_modules
+**/node_modules
+.git
+mobile
+.turbo
+**/.turbo

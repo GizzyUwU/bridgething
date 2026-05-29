@@ -43,6 +43,9 @@ public protocol AudioBackend: Sendable {
             voice: String?,
             onStart: @escaping @Sendable () -> Void
         ) async -> Bool {
+            #if os(iOS)
+                CompanionAudioSession.activateMixedPlayback()
+            #endif
             let utterance = AVSpeechUtterance(string: text)
             if let voice {
                 utterance.voice = AVSpeechSynthesisVoice(identifier: voice) ?? AVSpeechSynthesisVoice(language: voice)
@@ -62,6 +65,9 @@ public protocol AudioBackend: Sendable {
         }
 
         public func playEarcon(name: String) async -> Bool {
+            #if os(iOS)
+                CompanionAudioSession.activateMixedPlayback()
+            #endif
             let exts = ["wav", "caf", "aiff", "m4a", "mp3"]
             let bundle = earconBundle
             let url = exts.lazy

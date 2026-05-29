@@ -13,6 +13,7 @@ import UIKit
 public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unchecked Sendable {
     public typealias GlueFactory = @Sendable () -> any BridgethingGlue
     public typealias SignOutFn = @Sendable () -> Void
+    public typealias HasCredentialsFn = @Sendable () -> Bool
 
     public struct ProviderRegistration: Sendable {
         public let id: String
@@ -20,19 +21,22 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         public let available: Bool
         public let factory: GlueFactory
         public let signOut: SignOutFn
+        public let hasCredentials: HasCredentialsFn
 
         public init(
             id: String,
             displayName: String,
             available: Bool,
             factory: @escaping GlueFactory,
-            signOut: @escaping SignOutFn
+            signOut: @escaping SignOutFn,
+            hasCredentials: @escaping HasCredentialsFn = { false }
         ) {
             self.id = id
             self.displayName = displayName
             self.available = available
             self.factory = factory
             self.signOut = signOut
+            self.hasCredentials = hasCredentials
         }
     }
 
@@ -52,6 +56,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private var onProviderChanged: (@Sendable (BridgethingProviderInfo?) -> Void)?
     private var onAuthStateChanged: (@Sendable (BridgethingAuthState) -> Void)?
+    private var onServiceHealthChanged: (@Sendable (BridgethingServiceHealth) -> Void)?
     private var onPeerConnected: (@Sendable (BridgethingSessionPeer) -> Void)?
     private var onPeerDisconnected: (@Sendable (String) -> Void)?
     private var onNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
@@ -70,7 +75,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         if stateLock.withLock({ self.companion != nil }) { return }
         let adapter = EAAccessoryAdapter(protocolString: Self.eaProtocolString)
         let host = Self.makeHostInfo()
-        // capability flags start all-off; js reapplies them on bootstrap.
         let companion = BridgethingCompanion(
             adapter: adapter,
             lyricsResolver: Self.lyricsResolver,
@@ -110,6 +114,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         eventsTask = task
         otaEventsTask = otaTask
         stateLock.unlock()
+
+        if let restore = Self.registry.first(where: { $0.available && $0.hasCredentials() }) {
+            try? await setActiveProvider(id: restore.id)
+        }
     }
 
     public func stop() async {
@@ -144,6 +152,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             BridgethingProviderInfo(id: $0.id, displayName: $0.displayName, available: $0.available)
         }
     }
+
+    public func spotifyAuthMethod() async -> String { BridgethingApp.effectiveSpotifyAuthMethod }
+    public func spotifyAuthMethodsAvailable() async -> [String] { BridgethingApp.availableSpotifyAuthMethods }
+    public func setSpotifyAuthMethod(method: String) async { BridgethingApp.setSpotifyAuthMethod(method) }
 
     public func setActiveProvider(id: String?) async throws {
         stateLock.lock(); let prevTask = authTask; stateLock.unlock()
@@ -185,22 +197,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public func signOut() async {
         stateLock.lock()
         let task = authTask
+        let registration = activeRegistration
         activeRegistration = nil
         stateLock.unlock()
         task?.cancel()
 
+        // clear persisted credentials for the signed-in provider so it doesn't auto-restore.
+        registration?.signOut()
+
         let companion = stateLock.withLock { self.companion }
-        let glue = await companion?.current()
-
-        if let glue {
-            let providerId = type(of: glue).name
-            if let registration = Self.registry.first(where: { $0.id == providerId }) {
-                registration.signOut()
-            }
-        }
-
         try? await companion?.setActive(nil)
         emitProvider(nil)
+        emitServiceHealth(toRNServiceHealth(.ok))
         emitAuth(.idleState())
     }
 
@@ -420,8 +428,11 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let result = try await companion.gateway.webapp.icon(deviceId: deviceId, req)
         switch result {
         case let .ok(reply):
+            if reply.mime == "image/svg+xml", let svg = String(data: reply.bytes, encoding: .utf8) {
+                return BridgethingWebappIcon(fileUri: nil, svg: svg, mime: reply.mime)
+            }
             let url = try Self.writeIconToCache(deviceId: deviceId, id: id, mime: reply.mime, bytes: reply.bytes)
-            return BridgethingWebappIcon(fileUri: url.absoluteString, mime: reply.mime)
+            return BridgethingWebappIcon(fileUri: url.absoluteString, svg: nil, mime: reply.mime)
         case let .domain(err):
             if case .iconNotAvailable = err { return nil }
             throw SessionError.webappError(err)
@@ -541,6 +552,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onAuthStateChanged = callback }
     }
 
+    public func setOnServiceHealthChanged(_ callback: @escaping @Sendable (BridgethingServiceHealth) -> Void) {
+        stateLock.withLock { onServiceHealthChanged = callback }
+    }
+
     public func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void) {
         stateLock.withLock { onPeerConnected = callback }
     }
@@ -632,6 +647,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             // subscribe before setActive; glue may emit authenticated synchronously during attach.
             await glue.setAuthObserver { [weak self] state in
                 self?.handleGlueAuthState(state)
+            }
+            await glue.setServiceHealthObserver { [weak self] health in
+                self?.emitServiceHealth(toRNServiceHealth(health))
             }
             try await companion.setActive(glue)
             try Task.checkCancellation()
@@ -768,6 +786,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private func emitProvider(_ info: BridgethingProviderInfo?) {
         stateLock.withLock { onProviderChanged }?(info)
+    }
+
+    private func emitServiceHealth(_ health: BridgethingServiceHealth) {
+        stateLock.withLock { onServiceHealthChanged }?(health)
     }
 
     private func emitAuth(_ state: BridgethingAuthState) {
@@ -988,6 +1010,17 @@ private func toRNAncsAuthStatus(_ state: AncsAuthState) -> BridgethingAncsAuthSt
     case .probing: .probing
     case .authorized: .authorized
     case .unauthorized: .unauthorized
+    }
+}
+
+private func toRNServiceHealth(_ health: GlueServiceHealth) -> BridgethingServiceHealth {
+    switch health {
+    case .ok:
+        BridgethingServiceHealth(kind: .ok, retryAfterSeconds: nil)
+    case let .rateLimited(retryAfterSeconds):
+        BridgethingServiceHealth(kind: .ratelimited, retryAfterSeconds: Double(retryAfterSeconds))
+    case .unreachable:
+        BridgethingServiceHealth(kind: .unreachable, retryAfterSeconds: nil)
     }
 }
 

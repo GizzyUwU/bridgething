@@ -12,6 +12,7 @@ import type {
   BridgethingOtaEvent,
   BridgethingOtaPollConfig,
   BridgethingProviderInfo,
+  BridgethingServiceHealth,
   BridgethingSessionPeer,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
@@ -39,6 +40,8 @@ export type {
   BridgethingOtaPollConfig,
   BridgethingProviderInfo,
   BridgethingRepeatMode,
+  BridgethingServiceHealth,
+  BridgethingServiceHealthKind,
   BridgethingSessionPeer,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
@@ -47,6 +50,7 @@ export type {
 export type SessionEvent =
   | { type: 'providerChanged'; provider: BridgethingProviderInfo | null }
   | { type: 'authStateChanged'; state: BridgethingAuthState }
+  | { type: 'serviceHealthChanged'; health: BridgethingServiceHealth }
   | { type: 'peerConnected'; peer: BridgethingSessionPeer }
   | { type: 'peerDisconnected'; peerId: string }
   | { type: 'nowPlayingChanged'; nowPlaying: BridgethingNowPlaying | null }
@@ -109,6 +113,18 @@ export class BridgethingSession {
 
   async signOut(): Promise<void> {
     await this.native.signOut();
+  }
+
+  async spotifyAuthMethod(): Promise<string> {
+    return this.native.spotifyAuthMethod();
+  }
+
+  async spotifyAuthMethodsAvailable(): Promise<string[]> {
+    return this.native.spotifyAuthMethodsAvailable();
+  }
+
+  async setSpotifyAuthMethod(method: string): Promise<void> {
+    await this.native.setSpotifyAuthMethod(method);
   }
 
   async currentProvider(): Promise<BridgethingProviderInfo | null> {
@@ -235,6 +251,9 @@ export class BridgethingSession {
     });
     this.native.setOnAuthStateChanged(state => {
       this.dispatch({ type: 'authStateChanged', state });
+    });
+    this.native.setOnServiceHealthChanged(health => {
+      this.dispatch({ type: 'serviceHealthChanged', health });
     });
     this.native.setOnPeerConnected(peer => {
       this.dispatch({ type: 'peerConnected', peer });

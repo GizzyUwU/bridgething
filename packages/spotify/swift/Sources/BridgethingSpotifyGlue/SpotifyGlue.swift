@@ -51,12 +51,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private let onTokensRefreshed: TokenCallback?
     private let urlSession: URLSession
     private let httpExecutor: (any SpotinyHTTPExecutor)?
+    private let usesDealer: Bool
 
     private var client: SpotinyClient?
     private var gateway: BridgethingGateway?
     private var authorityHeld: Bool = false
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
     private var authObserver: (@Sendable (GlueAuthState) -> Void)?
+    private var serviceHealthObserver: (@Sendable (GlueServiceHealth) -> Void)?
     private var hintFetchTask: Task<Void, Never>?
     private var baselinePollTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
@@ -67,7 +69,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         refreshToken: String = "",
         onTokensRefreshed: TokenCallback? = nil,
         urlSession: URLSession = .shared,
-        httpExecutor: (any SpotinyHTTPExecutor)? = nil
+        httpExecutor: (any SpotinyHTTPExecutor)? = nil,
+        usesDealer: Bool = false
     ) {
         self.authenticatorFactory = authenticatorFactory
         initialAccessToken = accessToken
@@ -75,6 +78,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         self.onTokensRefreshed = onTokensRefreshed
         self.urlSession = urlSession
         self.httpExecutor = httpExecutor
+        self.usesDealer = usesDealer
     }
 
     public func attach(gateway: BridgethingGateway) async throws {
@@ -82,8 +86,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
         self.gateway = gateway
 
-        // signal pending; the device-code userCode prompt (if any) arrives before tokens.
-        authObserver?(.pending(nil))
+        if initialRefreshToken.isEmpty {
+            authObserver?(.pending(nil))
+        } else {
+            authObserver?(.authenticated)
+        }
 
         let authenticator = authenticatorFactory { [weak self] prompt in
             self?.handleDeviceCodePrompt(prompt)
@@ -98,11 +105,16 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         )
         self.client = client
 
-        // Connect in the background, not awaited: the daytona/device-code
-        // client_id has no dealer access, so socket.connect() would block
-        // forever. Auth lifecycle reaches the host via the spotiny delegate.
+        // Not awaited: auth lifecycle reaches the host via the spotiny delegate.
+        // Device-code has no dealer access, so authenticate only (no socket) to
+        // avoid the dealer 401 churn; dealer-capable flows (PKCE) open the socket.
+        let dealer = usesDealer
         connectTask = Task { [weak client] in
-            await client?.connect()
+            if dealer {
+                await client?.connect()
+            } else {
+                _ = await client?.authenticate()
+            }
         }
     }
 
@@ -110,6 +122,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         // Stop emitting auth state while tearing down: cancellation races in
         // spotiny would otherwise fire authDidFail and emit a ghost `failed`.
         authObserver = nil
+        serviceHealthObserver = nil
 
         connectTask?.cancel()
         connectTask = nil
@@ -137,6 +150,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
         authObserver = observer
+    }
+
+    public func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async {
+        serviceHealthObserver = observer
+        observer(.ok)
     }
 
     // MARK: - inbound dispatch
@@ -702,5 +720,13 @@ extension SpotifyGlue: SpotinyDelegate {
 
     public func playerStateUpdated(oldState _: Spotiny.PlayerState?, newState: Spotiny.PlayerState) {
         handleStateUpdate(newState)
+    }
+
+    public func serviceDidRateLimit(retryAfterSeconds: Int) {
+        serviceHealthObserver?(.rateLimited(retryAfterSeconds: retryAfterSeconds))
+    }
+
+    public func serviceDidRecover() {
+        serviceHealthObserver?(.ok)
     }
 }

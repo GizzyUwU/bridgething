@@ -1,0 +1,62 @@
+import Foundation
+
+#if os(iOS)
+    import AVFoundation
+
+    enum CompanionAudioSession {
+        static func activateMixedPlayback() {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? session.setActive(true)
+        }
+    }
+
+    actor BackgroundAudioKeepAlive {
+        private var player: AVAudioPlayer?
+
+        func activate() {
+            guard player == nil else { return }
+            CompanionAudioSession.activateMixedPlayback()
+            do {
+                let p = try AVAudioPlayer(data: Self.silence)
+                p.numberOfLoops = -1
+                p.volume = 0
+                p.play()
+                player = p
+            } catch {
+                player = nil
+            }
+        }
+
+        func deactivate() {
+            player?.stop()
+            player = nil
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+
+        private static let silence: Data = {
+            let sampleRate = 8000
+            let dataBytes = sampleRate * 2
+            func le32(_ v: UInt32) -> [UInt8] {
+                [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)]
+            }
+            func le16(_ v: UInt16) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)] }
+            var d = Data()
+            d.append(contentsOf: Array("RIFF".utf8))
+            d.append(contentsOf: le32(UInt32(36 + dataBytes)))
+            d.append(contentsOf: Array("WAVE".utf8))
+            d.append(contentsOf: Array("fmt ".utf8))
+            d.append(contentsOf: le32(16))
+            d.append(contentsOf: le16(1))
+            d.append(contentsOf: le16(1))
+            d.append(contentsOf: le32(UInt32(sampleRate)))
+            d.append(contentsOf: le32(UInt32(sampleRate * 2)))
+            d.append(contentsOf: le16(2))
+            d.append(contentsOf: le16(16))
+            d.append(contentsOf: Array("data".utf8))
+            d.append(contentsOf: le32(UInt32(dataBytes)))
+            d.append(Data(count: dataBytes))
+            return d
+        }()
+    }
+#endif

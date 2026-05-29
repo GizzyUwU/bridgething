@@ -32,6 +32,7 @@ mod auth;
 mod debug;
 mod packer;
 mod peer_owners;
+mod scan;
 
 #[cfg(feature = "test-tap")]
 pub use iap2::{Iap2Event, Iap2InjectTx, Iap2OutboundTapTx, Iap2TransportCommand};
@@ -236,6 +237,9 @@ impl BluetoothManager {
 
         adapter.set_discoverable_timeout(0).await?;
         adapter.set_discoverable(true).await?;
+        if let Err(err) = scan::apply_fast_inquiry_scan(&adapter) {
+          tracing::warn!(?err, "failed to apply fast inquiry scan params");
+        }
 
         #[cfg(debug_assertions)]
         debug::query_adapter(&adapter).await?;

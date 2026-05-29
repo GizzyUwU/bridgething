@@ -4,6 +4,9 @@ import BridgethingLyrics
 import BridgethingSchema
 import Foundation
 import os
+#if os(iOS)
+    import ExternalAccessory
+#endif
 
 private let osLog = Logger(subsystem: "dev.bridgething.companion", category: "core")
 
@@ -88,6 +91,8 @@ public actor BridgethingCompanion {
     #endif
     #if os(iOS)
         private let volumeMonitor: VolumeMonitor
+        private let audioKeepAlive = BackgroundAudioKeepAlive()
+        private var connectedPeerCount = 0
     #endif
 
     public init(
@@ -158,6 +163,8 @@ public actor BridgethingCompanion {
 
         #if os(iOS)
             await volumeMonitor.stop()
+            await audioKeepAlive.deactivate()
+            connectedPeerCount = 0
             try? await gateway.authority.release(AuthorityRelease(scope: .volume))
         #endif
         #if canImport(CoreLocation)
@@ -243,9 +250,12 @@ public actor BridgethingCompanion {
 
     public func enableAncsNotifications() async -> AncsSetupResult {
         #if os(iOS)
+            log(.info, "enableAncsNotifications: acquiring coordinator")
             let coordinator = await makeOrReuseCoordinator()
             await coordinator.setLastAuthState(ancsAuthState)
-            return await coordinator.pair()
+            let result = await coordinator.pair()
+            log(.info, "enableAncsNotifications: result \(String(describing: result.kind))")
+            return result
         #else
             return AncsSetupResult(kind: .unsupported, authState: ancsAuthState)
         #endif
@@ -253,7 +263,6 @@ public actor BridgethingCompanion {
 
     #if os(iOS)
         private var ancsCoordinator: AncsPairCoordinator?
-        private var pickerCoordinator: AccessoryPickerCoordinator?
 
         private func makeOrReuseCoordinator() async -> AncsPairCoordinator {
             if let existing = ancsCoordinator { return existing }
@@ -262,24 +271,41 @@ public actor BridgethingCompanion {
             return coordinator
         }
 
-        private func makeOrReusePicker() async -> AccessoryPickerCoordinator {
-            if let existing = pickerCoordinator { return existing }
-            let coordinator = await MainActor.run { AccessoryPickerCoordinator() }
-            pickerCoordinator = coordinator
-            return coordinator
+        private func reestablishAncsLink() async {
+            let coordinator = await makeOrReuseCoordinator()
+            await coordinator.setLastAuthState(ancsAuthState)
+            await coordinator.reconnectIfPaired()
         }
     #endif
 
     public func presentPairPicker() async -> AccessoryPickResult? {
         #if os(iOS)
-            if #available(iOS 18.0, *) {
-                return await makeOrReusePicker().pick()
-            }
-            return nil
+            // the gateway rides iAP2/EA over BR/EDR, which needs a classic bond + MFi auth that
+            // AccessorySetupKit (LE/wifi only) can't do; the EA picker is the path for an MFi accessory.
+            return await Self.presentBluetoothAccessoryPicker()
         #else
             return nil
         #endif
     }
+
+    #if os(iOS)
+        private static func presentBluetoothAccessoryPicker() async -> AccessoryPickResult? {
+            await withCheckedContinuation { (cont: CheckedContinuation<AccessoryPickResult?, Never>) in
+                Task { @MainActor in
+                    osLog.info("presenting EA bluetooth accessory picker")
+                    EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: nil) { error in
+                        if let error {
+                            osLog.warning("EA picker dismissed: \(error.localizedDescription, privacy: .public)")
+                            cont.resume(returning: nil)
+                        } else {
+                            osLog.info("EA picker completed")
+                            cont.resume(returning: AccessoryPickResult(id: "", name: "Bridgething"))
+                        }
+                    }
+                }
+            }
+        }
+    #endif
 
     public func setCapabilityFlags(_ flags: CompanionCapabilityFlags) async {
         capFlags = flags
@@ -363,8 +389,17 @@ public actor BridgethingCompanion {
                 log(.info, "peer connected: \(device.name) [\(device.id)]")
                 await announceCapabilities()
                 await emitTimeSnapshot()
+                #if os(iOS)
+                    await reestablishAncsLink()
+                    connectedPeerCount += 1
+                    if connectedPeerCount == 1 { await audioKeepAlive.activate() }
+                #endif
             case let .disconnected(id):
                 log(.info, "peer disconnected: \(id)")
+                #if os(iOS)
+                    connectedPeerCount = max(0, connectedPeerCount - 1)
+                    if connectedPeerCount == 0 { await audioKeepAlive.deactivate() }
+                #endif
             case let .decodeError(id, description):
                 log(.warn, "[\(id)] decode error: \(description)")
             case .message:

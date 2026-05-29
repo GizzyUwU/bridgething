@@ -90,6 +90,11 @@ interface BridgethingGlue {
 
     /** default no-op; glues with interactive sign-in drive this to surface auth transitions. */
     suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {}
+
+    /** default healthy; glues with a remote API drive this to surface degraded states. */
+    suspend fun setServiceHealthObserver(observer: (GlueServiceHealth) -> Unit) {
+        observer(GlueServiceHealth.Ok)
+    }
 }
 
 /** Auth-lifecycle state an interactive glue reports to the companion. */
@@ -97,6 +102,13 @@ sealed class GlueAuthState {
     data class Pending(val prompt: GlueDeviceCodePrompt?) : GlueAuthState()
     object Authenticated : GlueAuthState()
     data class Failed(val reason: String) : GlueAuthState()
+}
+
+/** Provider service health, surfaced alongside (not inside) auth state. */
+sealed class GlueServiceHealth {
+    object Ok : GlueServiceHealth()
+    data class RateLimited(val retryAfterSeconds: Int) : GlueServiceHealth()
+    object Unreachable : GlueServiceHealth()
 }
 
 /** RFC 8628 device-code prompt the user completes in a browser. */

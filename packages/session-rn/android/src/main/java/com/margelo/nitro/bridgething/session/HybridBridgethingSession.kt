@@ -17,6 +17,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
         private var pendingProviderChanged: ((BridgethingProviderInfo?) -> Unit)? = null
         private var pendingAuthStateChanged: ((BridgethingAuthState) -> Unit)? = null
+        private var pendingServiceHealthChanged: ((BridgethingServiceHealth) -> Unit)? = null
         private var pendingPeerConnected: ((BridgethingSessionPeer) -> Unit)? = null
         private var pendingPeerDisconnected: ((String) -> Unit)? = null
         private var pendingNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
@@ -40,6 +41,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 val snapshot = Replay(
                     provider = pendingProviderChanged,
                     auth = pendingAuthStateChanged,
+                    serviceHealth = pendingServiceHealthChanged,
                     peerConnected = pendingPeerConnected,
                     peerDisconnected = pendingPeerDisconnected,
                     nowPlaying = pendingNowPlayingChanged,
@@ -51,6 +53,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 )
                 pendingProviderChanged = null
                 pendingAuthStateChanged = null
+                pendingServiceHealthChanged = null
                 pendingPeerConnected = null
                 pendingPeerDisconnected = null
                 pendingNowPlayingChanged = null
@@ -63,6 +66,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             }
             replay.provider?.let(b::setOnProviderChanged)
             replay.auth?.let(b::setOnAuthStateChanged)
+            replay.serviceHealth?.let(b::setOnServiceHealthChanged)
             replay.peerConnected?.let(b::setOnPeerConnected)
             replay.peerDisconnected?.let(b::setOnPeerDisconnected)
             replay.nowPlaying?.let(b::setOnNowPlayingChanged)
@@ -83,6 +87,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     private data class Replay(
         val provider: ((BridgethingProviderInfo?) -> Unit)?,
         val auth: ((BridgethingAuthState) -> Unit)?,
+        val serviceHealth: ((BridgethingServiceHealth) -> Unit)?,
         val peerConnected: ((BridgethingSessionPeer) -> Unit)?,
         val peerDisconnected: ((String) -> Unit)?,
         val nowPlaying: ((BridgethingNowPlaying?) -> Unit)?,
@@ -118,6 +123,18 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun cancelAuth(): Promise<Unit> = Promise.async { backend?.cancelAuth() }
     override fun signOut(): Promise<Unit> = Promise.async { backend?.signOut() }
+
+    override fun spotifyAuthMethod(): Promise<String> = Promise.async {
+        require().spotifyAuthMethod()
+    }
+
+    override fun spotifyAuthMethodsAvailable(): Promise<Array<String>> = Promise.async {
+        require().spotifyAuthMethodsAvailable()
+    }
+
+    override fun setSpotifyAuthMethod(method: String): Promise<Unit> = Promise.async {
+        require().setSpotifyAuthMethod(method)
+    }
 
     override fun connectedPeers(): Promise<Array<BridgethingSessionPeer>> = Promise.async {
         backend?.connectedPeers() ?: emptyArray()
@@ -257,6 +274,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnAuthStateChanged(callback: (state: BridgethingAuthState) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnAuthStateChanged) { pendingAuthStateChanged = it }
+    }
+
+    override fun setOnServiceHealthChanged(callback: (health: BridgethingServiceHealth) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnServiceHealthChanged) { pendingServiceHealthChanged = it }
     }
 
     override fun setOnPeerConnected(callback: (peer: BridgethingSessionPeer) -> Unit) {

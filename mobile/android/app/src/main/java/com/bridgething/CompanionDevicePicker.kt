@@ -96,6 +96,24 @@ public object CompanionDevicePicker {
         } catch (_: Throwable) { emptySet() }
     }
 
+    /**
+     * Ask the system to bind our [BridgethingPresenceService] when an associated
+     * Car Thing comes into BT range, so the app wakes from cold and reconnects
+     * without the user opening it. API 31+ only; older versions rely on the app
+     * being opened to start the connection service.
+     */
+    public fun startObservingPresence(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        val manager = context.applicationContext
+            .getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager ?: return
+        for (mac in associations(context)) {
+            runCatching {
+                @Suppress("DEPRECATION")
+                manager.startObservingDevicePresence(mac)
+            }
+        }
+    }
+
     private fun toWireDevice(device: BluetoothDevice): BridgethingBtDevice {
         val name = try { device.name } catch (_: SecurityException) { null }
         return BridgethingBtDevice(

@@ -23,6 +23,10 @@ public struct AncsSetupResult: Sendable {
 #if os(iOS)
     import AccessorySetupKit
     import CoreBluetooth
+    import os
+    import UIKit
+
+    private let askLog = Logger(subsystem: "dev.bridgething.companion", category: "ancs")
 
     /// Service UUIDs the daemon advertises and hosts for the ANCS LE-bond
     /// bring-up. These match the daemon's pair-trigger service byte-for-byte;
@@ -53,6 +57,7 @@ public struct AncsSetupResult: Sendable {
         private var central: CBCentralManager?
         private var centralDelegate: CentralDelegate?
         private var sessionActivated = false
+        private var activationContinuation: CheckedContinuation<Void, Never>?
         private var pendingPair: PendingPair?
         private var lastAuthState: AncsAuthState = .unknown
 
@@ -74,7 +79,13 @@ public struct AncsSetupResult: Sendable {
         /// asynchronously after; the caller subscribes to the wire
         /// stream for the final word.
         func pair() async -> AncsSetupResult {
+            askLog.info("pair() begin")
             await activateIfNeeded()
+            guard sessionActivated else {
+                askLog.error("pair() aborting: session never activated")
+                return AncsSetupResult(kind: .failed("accessory session failed to activate"), authState: lastAuthState)
+            }
+            askLog.info("pair() activated; existingAccessory=\(self.hasMatchingExistingAccessory(), privacy: .public)")
 
             if hasMatchingExistingAccessory() {
                 let accessory = currentAccessory()
@@ -90,19 +101,49 @@ public struct AncsSetupResult: Sendable {
             }
         }
 
+        // re-drive the bond for an already-paired accessory, picker-less; the bond gates both ancs and ams.
+        func reconnectIfPaired() async {
+            await activateIfNeeded()
+            guard sessionActivated, let accessory = currentAccessory() else { return }
+            triggerAncsConnect(for: accessory)
+        }
+
         // MARK: - ASK plumbing
 
         private func activateIfNeeded() async {
             if sessionActivated { return }
-            sessionActivated = true
-            session.activate(on: .main) { [weak self] event in
-                guard let self else { return }
-                MainActor.assumeIsolated { self.handleSessionEvent(event) }
+            askLog.info("activating ASAccessorySession")
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                activationContinuation = continuation
+                session.activate(on: .main) { [weak self] event in
+                    guard let self else { return }
+                    MainActor.assumeIsolated { self.handleSessionEvent(event) }
+                }
+                // don't spin forever if activation never reports back; surface a failure instead.
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    guard let self, self.activationContinuation != nil else { return }
+                    askLog.error("activation timed out: no .activated event in 8s")
+                    self.finishActivation()
+                }
             }
         }
 
+        private func finishActivation() {
+            guard let continuation = activationContinuation else { return }
+            activationContinuation = nil
+            continuation.resume()
+        }
+
         private func handleSessionEvent(_ event: ASAccessoryEvent) {
+            askLog.info("session event: \(String(describing: event.eventType), privacy: .public)")
             switch event.eventType {
+            case .activated:
+                // showPicker and accessory enumeration are invalid before this fires.
+                sessionActivated = true
+                finishActivation()
+            case .invalidated:
+                finishActivation()
             case .accessoryAdded:
                 if let accessory = event.accessory {
                     triggerAncsConnect(for: accessory)
@@ -124,18 +165,32 @@ public struct AncsSetupResult: Sendable {
             descriptor.bluetoothServiceUUID = AncsBluetooth.pairTriggerService
             descriptor.bluetoothNameSubstring = AncsBluetooth.advertisedName
 
+            // ASK rejects a display item with an empty image ("ignoring invalid display items"),
+            // and silently never launches the picker, so the product image must be renderable.
             let item = ASPickerDisplayItem(
                 name: AncsBluetooth.advertisedName,
-                productImage: UIImage(),
+                productImage: Self.pickerImage(),
                 descriptor: descriptor
             )
+            askLog.info("showPicker presenting")
             session.showPicker(for: [item]) { [weak self] error in
                 guard let self else { return }
                 if let error {
+                    askLog.error("showPicker error: \(String(describing: error), privacy: .public)")
                     MainActor.assumeIsolated {
                         self.completePending(.failed(String(describing: error)))
                     }
+                } else {
+                    askLog.info("showPicker completion: no error")
                 }
+            }
+        }
+
+        private static func pickerImage() -> UIImage {
+            let size = CGSize(width: 60, height: 60)
+            return UIGraphicsImageRenderer(size: size).image { _ in
+                UIColor(red: 0.0, green: 0.6, blue: 0.86, alpha: 1.0).setFill()
+                UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 13).fill()
             }
         }
 

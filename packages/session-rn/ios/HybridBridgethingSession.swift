@@ -11,6 +11,9 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func cancelAuth() async
     func signOut() async
     func currentProvider() async -> BridgethingProviderInfo?
+    func spotifyAuthMethod() async -> String
+    func spotifyAuthMethodsAvailable() async -> [String]
+    func setSpotifyAuthMethod(method: String) async
     func connectedPeers() async -> [BridgethingSessionPeer]
     func currentNowPlaying() async -> BridgethingNowPlaying?
 
@@ -48,6 +51,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void)
     func setOnAuthStateChanged(_ callback: @escaping @Sendable (BridgethingAuthState) -> Void)
+    func setOnServiceHealthChanged(_ callback: @escaping @Sendable (BridgethingServiceHealth) -> Void)
     func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnPeerDisconnected(_ callback: @escaping @Sendable (String) -> Void)
     func setOnNowPlayingChanged(_ callback: @escaping @Sendable (BridgethingNowPlaying?) -> Void)
@@ -67,6 +71,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     private static var pendingProviderChanged: (@Sendable (BridgethingProviderInfo?) -> Void)?
     private static var pendingAuthStateChanged: (@Sendable (BridgethingAuthState) -> Void)?
+    private static var pendingServiceHealthChanged: (@Sendable (BridgethingServiceHealth) -> Void)?
     private static var pendingPeerConnected: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingPeerDisconnected: (@Sendable (String) -> Void)?
     private static var pendingNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
@@ -82,6 +87,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         _backend = backend
         let providerCb = pendingProviderChanged
         let authCb = pendingAuthStateChanged
+        let healthCb = pendingServiceHealthChanged
         let peerConnCb = pendingPeerConnected
         let peerDisconnCb = pendingPeerDisconnected
         let nowPlayingCb = pendingNowPlayingChanged
@@ -92,6 +98,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let otaCb = pendingOtaEvent
         pendingProviderChanged = nil
         pendingAuthStateChanged = nil
+        pendingServiceHealthChanged = nil
         pendingPeerConnected = nil
         pendingPeerDisconnected = nil
         pendingNowPlayingChanged = nil
@@ -104,6 +111,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
         if let providerCb { backend.setOnProviderChanged(providerCb) }
         if let authCb { backend.setOnAuthStateChanged(authCb) }
+        if let healthCb { backend.setOnServiceHealthChanged(healthCb) }
         if let peerConnCb { backend.setOnPeerConnected(peerConnCb) }
         if let peerDisconnCb { backend.setOnPeerDisconnected(peerDisconnCb) }
         if let nowPlayingCb { backend.setOnNowPlayingChanged(nowPlayingCb) }
@@ -168,6 +176,18 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async {
             await (try Self.backend()).signOut()
         }
+    }
+
+    public func spotifyAuthMethod() throws -> Promise<String> {
+        Promise.async { await (try Self.backend()).spotifyAuthMethod() }
+    }
+
+    public func spotifyAuthMethodsAvailable() throws -> Promise<[String]> {
+        Promise.async { await (try Self.backend()).spotifyAuthMethodsAvailable() }
+    }
+
+    public func setSpotifyAuthMethod(method: String) throws -> Promise<Void> {
+        Promise.async { await (try Self.backend()).setSpotifyAuthMethod(method: method) }
     }
 
     public func currentProvider() throws -> Promise<Variant_NullType_BridgethingProviderInfo> {
@@ -360,6 +380,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingAuthStateChanged = wrapped }
         Self.stateLock.unlock()
         backend?.setOnAuthStateChanged(wrapped)
+    }
+
+    public func setOnServiceHealthChanged(callback: @escaping (BridgethingServiceHealth) -> Void) throws {
+        let wrapped: @Sendable (BridgethingServiceHealth) -> Void = { health in callback(health) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingServiceHealthChanged = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnServiceHealthChanged(wrapped)
     }
 
     public func setOnPeerConnected(callback: @escaping (BridgethingSessionPeer) -> Void) throws {

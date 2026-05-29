@@ -22,6 +22,15 @@ export type BridgethingAuthState = {
   message?: string;
 };
 
+// signed-in but degraded: the provider's API is throttling or unreachable.
+// distinct from auth (tokens are still valid), so the UI keeps "signed in".
+export type BridgethingServiceHealthKind = 'ok' | 'rateLimited' | 'unreachable';
+
+export type BridgethingServiceHealth = {
+  kind: BridgethingServiceHealthKind;
+  retryAfterSeconds?: number;
+};
+
 export type BridgethingRepeatMode = 'off' | 'one' | 'all';
 
 export type BridgethingNowPlayingTrack = {
@@ -99,7 +108,8 @@ export type BridgethingConfigEntry = {
 };
 
 export type BridgethingWebappIcon = {
-  fileUri: string;
+  fileUri?: string;
+  svg?: string;
   mime?: string;
 };
 
@@ -194,6 +204,12 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   cancelAuth(): Promise<void>;
   signOut(): Promise<void>;
 
+  // Spotify sign-in flow selection. 'deviceCode' | 'pkce'. available reflects
+  // which the build is configured for; switching takes effect on next sign-in.
+  spotifyAuthMethod(): Promise<string>;
+  spotifyAuthMethodsAvailable(): Promise<string[]>;
+  setSpotifyAuthMethod(method: string): Promise<void>;
+
   connectedPeers(): Promise<BridgethingSessionPeer[]>;
   currentNowPlaying(): Promise<BridgethingNowPlaying | null>;
 
@@ -231,6 +247,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   setOnProviderChanged(callback: (info: BridgethingProviderInfo | null) => void): void;
   setOnAuthStateChanged(callback: (state: BridgethingAuthState) => void): void;
+  setOnServiceHealthChanged(callback: (health: BridgethingServiceHealth) => void): void;
   setOnPeerConnected(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnPeerDisconnected(callback: (peerId: string) => void): void;
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;

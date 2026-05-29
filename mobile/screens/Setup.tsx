@@ -1,6 +1,12 @@
 import type { BridgethingProviderInfo } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowRight, BellRing, Check, ChevronLeft } from 'lucide-react-native';
+import {
+  ArrowRight,
+  BellRing,
+  Check,
+  ChevronLeft,
+  MapPin,
+} from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -24,13 +30,19 @@ import { IconBadge } from '../components/IconBadge';
 import { PagerDots } from '../components/PagerDots';
 import { PendingAuth } from '../components/PendingAuth';
 import { Press } from '../components/Press';
+import {
+  locationStatus,
+  openAppSettings,
+  type PermissionState,
+  requestLocation,
+} from '../lib/permissions';
 import { getSession, useSession } from '../lib/session';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Setup'>;
 
-const STEP_COUNT = 2;
+const STEP_COUNT = 3;
 
 export function SetupScreen({ navigation, route }: Props) {
   const session = getSession();
@@ -55,15 +67,12 @@ export function SetupScreen({ navigation, route }: Props) {
 
   const provider = useSession(s => s.provider);
   const authState = useSession(s => s.authState);
-  const ancsStatus = useSession(s => s.ancsAuthStatus);
   const peers = useSession(s => s.peers);
 
-  // iOS uses ANCS auth state as the pair signal (LE bond from ASK
-  // landed). Android has no ANCS - we treat any live RFCOMM peer as
-  // paired, since CompanionDeviceManager only resolves successfully
-  // after the system has already completed the BR/EDR bond.
-  const paired =
-    Platform.OS === 'android' ? peers.length > 0 : ancsStatus !== 'unknown';
+  // a connected gateway peer is the real "paired" signal on both platforms:
+  // the EA/iAP2 session on iOS, the RFCOMM socket on Android. ANCS (LE) is a
+  // secondary bond and doesn't gate the gateway, so it doesn't gate this.
+  const paired = peers.length > 0;
   const signedIn = authState.kind === 'authenticated' && provider != null;
 
   useEffect(() => {
@@ -126,11 +135,15 @@ export function SetupScreen({ navigation, route }: Props) {
         await session.presentPairPicker();
         return;
       }
+      // iOS: pair the gateway over iAP2/EA first (BR/EDR classic + MFi), which
+      // is what brings up a connected peer. Then set up ANCS (LE) for
+      // notifications as a best-effort follow-on.
+      await session.presentPairPicker();
       const result = await session.enableAncsNotifications();
       if (result.kind === 'failed') {
         Alert.alert(
-          'pairing failed',
-          result.message ?? 'something went wrong while pairing.',
+          'notifications setup failed',
+          result.message ?? 'pairing worked, but enabling notifications did not.',
         );
       }
     } catch (err) {
@@ -188,8 +201,11 @@ export function SetupScreen({ navigation, route }: Props) {
               paired={paired}
               busy={pairBusy}
               onPair={pair}
-              onFinish={finish}
+              onContinue={() => setStep(2)}
             />
+          </Page>
+          <Page width={width}>
+            <PermissionsPage onFinish={finish} />
           </Page>
         </Animated.View>
       </View>
@@ -232,7 +248,7 @@ function SignInPage({
       showsVerticalScrollIndicator={false}
     >
       <Text className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.18em] text-primary">
-        step 1 of 2
+        step 1 of 3
       </Text>
       <Text
         className="text-foreground"
@@ -391,12 +407,12 @@ function PairPage({
   paired,
   busy,
   onPair,
-  onFinish,
+  onContinue,
 }: {
   paired: boolean;
   busy: boolean;
   onPair: () => void;
-  onFinish: () => void;
+  onContinue: () => void;
 }) {
   return (
     <ScrollView
@@ -405,7 +421,7 @@ function PairPage({
     >
       <View className="flex-1">
         <Text className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.18em] text-primary">
-          step 2 of 2
+          step 2 of 3
         </Text>
         <Text
           className="text-foreground"
@@ -419,8 +435,9 @@ function PairPage({
           pair your Car Thing
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-          turn on your Car Thing and tap pair. you&apos;ll see a system picker -
-          choose your device to finish.
+          turn on your Car Thing and tap pair. a system picker opens — it can
+          take a few seconds for your Car Thing to appear, then choose it to
+          finish.
         </Text>
 
         <View className="my-10 items-center">
@@ -439,16 +456,92 @@ function PairPage({
 
       <View className="gap-2.5">
         {paired ? (
-          <Button onPress={onFinish} icon={ArrowRight} size="lg">
-            open dashboard
+          <Button onPress={onContinue} icon={ArrowRight} size="lg">
+            continue
           </Button>
         ) : (
           <>
             <Button onPress={onPair} loading={busy} size="lg" icon={BellRing}>
               pair
             </Button>
-            <Button onPress={onFinish} variant="ghost" size="md">
+            <Button onPress={onContinue} variant="ghost" size="md">
               skip — i&apos;ll pair later
+            </Button>
+          </>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+function PermissionsPage({ onFinish }: { onFinish: () => void }) {
+  const [status, setStatus] = useState<PermissionState>('denied');
+
+  useEffect(() => {
+    let cancelled = false;
+    locationStatus().then(s => {
+      if (!cancelled) setStatus(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const grant = async () => {
+    if (status === 'blocked') {
+      openAppSettings();
+      return;
+    }
+    setStatus(await requestLocation());
+  };
+
+  const granted = status === 'granted';
+  return (
+    <ScrollView
+      contentContainerClassName="flex-1 px-7 pb-8 pt-6"
+      showsVerticalScrollIndicator={false}
+    >
+      <View className="flex-1">
+        <Text className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.18em] text-primary">
+          step 3 of 3
+        </Text>
+        <Text
+          className="text-foreground"
+          style={{
+            fontFamily: 'Outfit-Medium',
+            fontSize: 30,
+            lineHeight: 34,
+            letterSpacing: -0.9,
+          }}
+        >
+          let apps use your location
+        </Text>
+        <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
+          some Car Thing apps (weather, maps) work better with your location.
+          it stays on your phone and you can turn it off anytime in settings.
+        </Text>
+
+        <View className="my-10 items-center">
+          <IconBadge
+            icon={granted ? Check : MapPin}
+            tint={granted ? 'success' : 'primary'}
+            size={88}
+          />
+        </View>
+      </View>
+
+      <View className="gap-2.5">
+        {granted ? (
+          <Button onPress={onFinish} icon={ArrowRight} size="lg">
+            open dashboard
+          </Button>
+        ) : (
+          <>
+            <Button onPress={grant} size="lg" icon={MapPin}>
+              {status === 'blocked' ? 'open settings' : 'allow location'}
+            </Button>
+            <Button onPress={onFinish} variant="ghost" size="md">
+              not now
             </Button>
           </>
         )}

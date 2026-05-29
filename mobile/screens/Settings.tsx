@@ -56,6 +56,7 @@ import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { Segmented } from '../components/Segmented';
 import {
   getSession,
@@ -239,6 +240,7 @@ export function SettingsScreen({ navigation }: Props) {
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <ScrollView contentContainerClassName="px-5 pb-12 pt-2">
         <ScreenHeader title="settings" />
+        <ServiceHealthBanner />
 
         <View className="mb-7">
           <SectionHeader title="account" />
@@ -460,6 +462,7 @@ export function SettingsScreen({ navigation }: Props) {
                   onChange={audioTts => writeFlags({ ...flags, audioTts })}
                 />
               </ListGroup>
+              <SpotifyAuthMethodControl />
             </View>
           ) : null}
         </View>
@@ -536,6 +539,74 @@ function FlagRow({
       subtitle={subtitle}
       trailing={<Switch value={value} onValueChange={onChange} />}
     />
+  );
+}
+
+/** Power-user control to switch the Spotify sign-in flow. Hidden unless the
+ *  build ships more than one method. Switching signs out so the next sign-in
+ *  uses the chosen flow. */
+function SpotifyAuthMethodControl() {
+  const session = getSession();
+  const [available, setAvailable] = useState<string[]>([]);
+  const [method, setMethod] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [avail, current] = await Promise.all([
+        session.spotifyAuthMethodsAvailable(),
+        session.spotifyAuthMethod(),
+      ]);
+      if (!cancelled) {
+        setAvailable(avail);
+        setMethod(current);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  if (available.length < 2 || method == null) return null;
+
+  const change = (next: string) => {
+    if (next === method) return;
+    Alert.alert(
+      'switch sign-in method?',
+      "this signs you out of Spotify; you'll sign in again with the new method.",
+      [
+        { text: 'cancel', style: 'cancel' },
+        {
+          text: 'switch',
+          style: 'destructive',
+          onPress: () => {
+            (async () => {
+              await session.setSpotifyAuthMethod(next);
+              await session.signOut();
+              setMethod(next);
+            })().catch(() => {});
+          },
+        },
+      ],
+    );
+  };
+
+  const options = [
+    { value: 'deviceCode', label: 'device code' },
+    { value: 'pkce', label: 'browser' },
+  ].filter(o => available.includes(o.value));
+
+  return (
+    <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
+      <Text className="mb-2 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+        Spotify sign-in
+      </Text>
+      <Segmented options={options} value={method} onChange={change} />
+      <Text className="mt-2 text-[12px] leading-[16px] text-muted-foreground">
+        device code uses a code on spotify.com; browser signs in through a web
+        flow. most people can leave this alone.
+      </Text>
+    </View>
   );
 }
 

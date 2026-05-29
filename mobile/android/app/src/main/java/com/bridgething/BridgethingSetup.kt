@@ -24,6 +24,13 @@ public object BridgethingApp {
 
     private const val AUTH_WORKER_BASE_URL: String = "https://thinglabs.sh/auth"
 
+    public const val DEVICE_CODE_METHOD: String = "deviceCode"
+
+    // only device-code is ported to android (pkce/discord is not), so there is nothing to switch to.
+    public fun availableSpotifyAuthMethods(): Array<String> = arrayOf(DEVICE_CODE_METHOD)
+    public fun effectiveSpotifyAuthMethod(): String = DEVICE_CODE_METHOD
+    public fun setSpotifyAuthMethod(method: String) {}
+
     private val SPOTIFY_SCOPES: List<String> = listOf(
         "user-read-playback-state",
         "user-modify-playback-state",
@@ -64,6 +71,7 @@ public object BridgethingApp {
                 available = true,
                 factory = { makeSpotifyGlue(spotifyTokenStore) },
                 signOut = { spotifyTokenStore.clear() },
+                hasCredentials = { !spotifyTokenStore.load().refresh.isNullOrEmpty() },
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id = "appleMusic",

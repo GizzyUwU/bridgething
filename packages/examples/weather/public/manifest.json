@@ -3,6 +3,7 @@
   "name": "Weather",
   "version": "0.1.0",
   "description": "Current conditions and a short forecast.",
+  "icon": "icon.svg",
   "config": [
     {
       "type": "enum",

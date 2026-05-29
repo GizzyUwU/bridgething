@@ -4,9 +4,9 @@ import {
   type BridgethingWebappInfo,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AppWindow, Cable, Pencil, Plus, RefreshCw } from 'lucide-react-native';
+import { Cable, Pencil, Plus, RefreshCw } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HeroPulse } from '../components/HeroPulse';
@@ -14,7 +14,9 @@ import { Press } from '../components/Press';
 import { RenameSheet } from '../components/RenameSheet';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionHeader } from '../components/SectionHeader';
+import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { StatusStrip } from '../components/StatusStrip';
+import { WebappIcon } from '../components/WebappIcon';
 import {
   getSession,
   peerDisplayName,
@@ -47,6 +49,7 @@ export function DashboardScreen({ navigation }: Props) {
           title="your bridge"
           subtitle="bridgething is running on this phone."
         />
+        <ServiceHealthBanner />
 
         <View className="mb-5">
           <StatusStrip
@@ -326,7 +329,14 @@ function AppTile({
               }
         }
       >
-        <WebappIcon deviceId={deviceId} webapp={webapp} />
+        <WebappIcon
+          deviceId={deviceId}
+          id={webapp.id}
+          iconAvailable={webapp.iconAvailable}
+          name={webapp.name}
+          size={48}
+          fallbackTextClass="text-[18px] font-extrabold text-foreground"
+        />
         <Text
           numberOfLines={2}
           className={`mt-2.5 text-center text-[12px] font-semibold leading-[15px] ${
@@ -363,51 +373,3 @@ function AddTile({ onPress }: { onPress: () => void }) {
   );
 }
 
-function WebappIcon({
-  deviceId,
-  webapp,
-}: {
-  deviceId: string;
-  webapp: BridgethingWebappInfo;
-}) {
-  const session = getSession();
-  const [uri, setUri] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!webapp.iconAvailable) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const icon = await session.webappIcon(deviceId, webapp.id);
-        if (cancelled || !icon) return;
-        setUri(icon.fileUri);
-      } catch {
-        // icon load failure is non-fatal
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceId, session, webapp.iconAvailable, webapp.id]);
-
-  if (uri) {
-    return (
-      <Image
-        source={{ uri }}
-        className="h-12 w-12 rounded-xl"
-        resizeMode="cover"
-      />
-    );
-  }
-  return (
-    <View className="h-12 w-12 items-center justify-center rounded-xl bg-secondary">
-      {webapp.name ? (
-        <Text className="text-[18px] font-extrabold text-foreground">
-          {webapp.name.slice(0, 1).toUpperCase()}
-        </Text>
-      ) : (
-        <AppWindow size={20} color="hsl(215 14% 38%)" strokeWidth={2.2} />
-      )}
-    </View>
-  );
-}

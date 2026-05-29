@@ -1,7 +1,5 @@
 package com.bridgething
 
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -30,14 +28,14 @@ import com.margelo.nitro.bridgething.session.BridgethingOtaPhase
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
 import com.margelo.nitro.bridgething.session.BridgethingRepeatMode
+import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
+import com.margelo.nitro.bridgething.session.BridgethingServiceHealthKind
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappRole
 import com.margelo.nitro.bridgething.session.BridgethingWebappSource
 import dev.bridgething.companion.AncsSetupKind
-import dev.bridgething.companion.AndroidNotificationActionBackend
-import dev.bridgething.companion.AndroidPhoneBackend
 import dev.bridgething.companion.BridgethingCompanion
 import dev.bridgething.companion.BridgethingCompanionVersion
 import dev.bridgething.companion.CompanionCapabilityFlags
@@ -46,7 +44,6 @@ import dev.bridgething.companion.HostInfo
 import dev.bridgething.companion.OtaPhaseSnapshot
 import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import dev.bridgething.companion.OtaPollEvent
-import dev.bridgething.gateway.BluetoothSocketAdapter
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.device
@@ -54,6 +51,7 @@ import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueAuthState
 import dev.bridgething.glue.GlueNowPlaying
+import dev.bridgething.glue.GlueServiceHealth
 import dev.bridgething.lyrics.LrclibResolver
 import dev.bridgething.lyrics.LyricsResolver
 import dev.bridgething.schema.AncsAuthState
@@ -108,6 +106,7 @@ public class HybridBridgethingSessionImpl(
         val available: Boolean,
         val factory: () -> BridgethingGlue,
         val signOut: () -> Unit,
+        val hasCredentials: () -> Boolean = { false },
     )
 
     public companion object {
@@ -125,7 +124,6 @@ public class HybridBridgethingSessionImpl(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val stateLock = Mutex()
     private var companion: BridgethingCompanion? = null
-    private var btAdapter: BluetoothSocketAdapter? = null
     private var eventsJob: Job? = null
     private var otaJob: Job? = null
     private var authJob: Job? = null
@@ -143,6 +141,7 @@ public class HybridBridgethingSessionImpl(
 
     @Volatile
     private var onAuthStateChanged: ((BridgethingAuthState) -> Unit)? = null
+    private var onServiceHealthChanged: ((BridgethingServiceHealth) -> Unit)? = null
 
     @Volatile
     private var onPeerConnected: ((BridgethingSessionPeer) -> Unit)? = null
@@ -172,55 +171,46 @@ public class HybridBridgethingSessionImpl(
     private var logStreamingDesired: Boolean = false
 
     override suspend fun start() {
-        stateLock.withLock {
-            if (companion != null) return@withLock
-            val adapter = BluetoothSocketAdapter()
-            val host = makeHostInfo()
-            val c = BridgethingCompanion(
-                context = context.applicationContext,
-                adapter = adapter,
-                lyricsResolver = lyricsResolver,
-                host = host,
-                capabilities = CompanionCapabilityFlags(),
-                notificationActions = AndroidNotificationActionBackend { id, positive ->
-                    NotificationBridgeRegistry.listener?.actionIntent(id, positive)
-                },
-                phone = AndroidPhoneBackend(context.applicationContext),
-            )
-            c.setNowPlayingObserver { np -> handleNowPlaying(np) }
-            c.setAncsAuthStateObserver { state -> emitAncsAuthStatus(toRnAncsAuthStatus(state)) }
-            if (logStreamingDesired) {
-                c.setLogObserver { level, message -> onLog?.invoke(level.raw, message) }
-            }
-            c.start()
-
-            eventsJob = scope.launch {
-                c.gateway.events.collect { event -> handleGatewayEvent(event) }
-            }
-            otaJob = scope.launch {
-                c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) }
-            }
+        // the foreground service owns the companion's lifetime; the UI just borrows the reference.
+        val c = CompanionHolder.ensureStarted(context)
+        val firstAttach = stateLock.withLock {
+            if (companion != null) return@withLock false
             companion = c
-            btAdapter = adapter
-            NotificationBridgeRegistry.companion = c
+            true
+        }
+        if (!firstAttach) return
 
-            // reopen RFCOMM for every device already authorized in CDM's association list.
-            reconnectAssociated(adapter)
+        c.setNowPlayingObserver { np -> handleNowPlaying(np) }
+        c.setAncsAuthStateObserver { state -> emitAncsAuthStatus(toRnAncsAuthStatus(state)) }
+        if (logStreamingDesired) {
+            c.setLogObserver { level, message -> onLog?.invoke(level.raw, message) }
+        }
+        eventsJob = scope.launch { c.gateway.events.collect { event -> handleGatewayEvent(event) } }
+        otaJob = scope.launch { c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) } }
+
+        // wake-from-cold on presence + keep the link alive while a device is set up.
+        CompanionDevicePicker.startObservingPresence(context)
+        if (CompanionDevicePicker.associations(context.applicationContext).isNotEmpty()) {
+            BridgethingConnectionService.start(context)
+        }
+
+        // restore the last signed-in provider so the app opens already authenticated.
+        registry.firstOrNull { it.available && it.hasCredentials() }?.let {
+            runCatching { setActiveProvider(it.id) }
         }
     }
 
     override suspend fun stop() {
-        var priorCompanion: BridgethingCompanion? = null
         var priorEvents: Job? = null
         var priorOta: Job? = null
         var priorAuth: Job? = null
+        var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
-            priorCompanion = companion
             priorEvents = eventsJob
             priorOta = otaJob
             priorAuth = authJob
+            priorCompanion = companion
             companion = null
-            btAdapter = null
             eventsJob = null
             otaJob = null
             authJob = null
@@ -228,27 +218,22 @@ public class HybridBridgethingSessionImpl(
         priorEvents?.cancel()
         priorOta?.cancel()
         priorAuth?.cancel()
-        try {
-            priorCompanion?.stop()
-        } finally {
-            NotificationBridgeRegistry.companion = null
-            peers.clear()
-            lastNowPlaying = null
-            emitNowPlaying(null)
-        }
-    }
-
-    private fun reconnectAssociated(adapter: BluetoothSocketAdapter) {
-        val ba = bluetoothAdapter() ?: return
-        for (mac in CompanionDevicePicker.associations(context.applicationContext)) {
-            val device = runCatching { ba.getRemoteDevice(mac) }.getOrNull() ?: continue
-            scope.launch { runCatching { adapter.connect(device) } }
-        }
+        // detach UI observers but leave the companion running in the foreground service.
+        priorCompanion?.setNowPlayingObserver(null)
+        priorCompanion?.setAncsAuthStateObserver(null)
+        priorCompanion?.setLogObserver(null)
+        peers.clear()
+        lastNowPlaying = null
+        emitNowPlaying(null)
     }
 
     override suspend fun availableProviders(): Array<BridgethingProviderInfo> = registry.map {
         BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
     }.toTypedArray()
+
+    override suspend fun spotifyAuthMethod(): String = BridgethingApp.effectiveSpotifyAuthMethod()
+    override suspend fun spotifyAuthMethodsAvailable(): Array<String> = BridgethingApp.availableSpotifyAuthMethods()
+    override suspend fun setSpotifyAuthMethod(method: String) = BridgethingApp.setSpotifyAuthMethod(method)
 
     override suspend fun setActiveProvider(id: String?) {
         authJob?.cancel()
@@ -267,6 +252,7 @@ public class HybridBridgethingSessionImpl(
         try {
             val glue = registration.factory()
             glue.setAuthObserver { state -> handleGlueAuthState(state) }
+            glue.setServiceHealthObserver { health -> emitServiceHealth(toRnServiceHealth(health)) }
             c.setActive(glue)
         } catch (e: Throwable) {
             emitAuth(authState(BridgethingAuthKind.FAILED, message = e.message ?: e.toString()))
@@ -309,6 +295,7 @@ public class HybridBridgethingSessionImpl(
         runCatching { reg?.signOut?.invoke() }
         stateLock.withLock { companion }?.setActive(null)
         emitProvider(null)
+        emitServiceHealth(toRnServiceHealth(GlueServiceHealth.Ok))
         emitAuth(idleState())
     }
 
@@ -420,8 +407,17 @@ public class HybridBridgethingSessionImpl(
         val c = requireCompanion(deviceId)
         return when (val result = c.gateway.webapp.icon(deviceId, WebappIcon(uuid))) {
             is RequestResult.Ok -> {
-                val file = writeIconToCache(deviceId, id, result.response.mime, result.response.bytes)
-                BridgethingWebappIcon(fileUri = Uri.fromFile(file).toString(), mime = result.response.mime)
+                // svg ships inline as markup for <SvgXml>; raster goes through the file cache for <Image>.
+                if (result.response.mime == "image/svg+xml") {
+                    BridgethingWebappIcon(
+                        fileUri = null,
+                        svg = result.response.bytes.toString(Charsets.UTF_8),
+                        mime = result.response.mime,
+                    )
+                } else {
+                    val file = writeIconToCache(deviceId, id, result.response.mime, result.response.bytes)
+                    BridgethingWebappIcon(fileUri = Uri.fromFile(file).toString(), svg = null, mime = result.response.mime)
+                }
             }
             is RequestResult.DomainErr ->
                 if (result.error is WebappError.IconNotAvailable) null
@@ -509,15 +505,7 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
-    @Suppress("HardwareIds")
-    private fun makeHostInfo(): HostInfo = HostInfo(
-        appName = hostInfo.appName,
-        appVersion = hostInfo.appVersion,
-        osName = "Android",
-        osVersion = android.os.Build.VERSION.RELEASE ?: "",
-        address = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "",
-        adapterVersion = "rfcomm",
-    )
+    private fun makeHostInfo(): HostInfo = CompanionHolder.makeHostInfo(context)
 
     override suspend fun isNotificationAccessGranted(): Boolean {
         val ctx = context.applicationContext
@@ -590,19 +578,17 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
-        // connect immediately so the new peer appears without an app restart.
-        val adapter = stateLock.withLock { btAdapter } ?: return picked
-        scope.launch { reconnectAssociated(adapter) }
+        // observe the new association, keep it alive, and connect now so the peer appears
+        // without an app restart.
+        CompanionDevicePicker.startObservingPresence(context)
+        BridgethingConnectionService.start(context)
+        CompanionHolder.reconnectAssociated(context)
         return picked
-    }
-
-    private fun bluetoothAdapter(): BluetoothAdapter? {
-        val ctx = context.applicationContext
-        return (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     }
 
     override fun setOnProviderChanged(callback: (BridgethingProviderInfo?) -> Unit) { onProviderChanged = callback }
     override fun setOnAuthStateChanged(callback: (BridgethingAuthState) -> Unit) { onAuthStateChanged = callback }
+    override fun setOnServiceHealthChanged(callback: (BridgethingServiceHealth) -> Unit) { onServiceHealthChanged = callback }
     override fun setOnPeerConnected(callback: (BridgethingSessionPeer) -> Unit) { onPeerConnected = callback }
     override fun setOnPeerDisconnected(callback: (String) -> Unit) { onPeerDisconnected = callback }
     override fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit) { onNowPlayingChanged = callback }
@@ -827,6 +813,14 @@ public class HybridBridgethingSessionImpl(
 
     private fun emitProvider(info: BridgethingProviderInfo?) { onProviderChanged?.invoke(info) }
     private fun emitAuth(state: BridgethingAuthState) { onAuthStateChanged?.invoke(state) }
+    private fun emitServiceHealth(health: BridgethingServiceHealth) { onServiceHealthChanged?.invoke(health) }
+
+    private fun toRnServiceHealth(health: GlueServiceHealth): BridgethingServiceHealth = when (health) {
+        is GlueServiceHealth.Ok -> BridgethingServiceHealth(BridgethingServiceHealthKind.OK, null)
+        is GlueServiceHealth.RateLimited ->
+            BridgethingServiceHealth(BridgethingServiceHealthKind.RATELIMITED, health.retryAfterSeconds.toDouble())
+        is GlueServiceHealth.Unreachable -> BridgethingServiceHealth(BridgethingServiceHealthKind.UNREACHABLE, null)
+    }
     private fun emitNowPlaying(np: BridgethingNowPlaying?) { onNowPlayingChanged?.invoke(np) }
     private fun emitAncsAuthStatus(status: BridgethingAncsAuthStatus) { onAncsAuthStatusChanged?.invoke(status) }
 

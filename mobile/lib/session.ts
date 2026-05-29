@@ -5,6 +5,7 @@ import {
   type BridgethingDeviceMeta,
   type BridgethingNowPlaying,
   type BridgethingProviderInfo,
+  type BridgethingServiceHealth,
   type BridgethingSessionPeer,
   type SessionEvent,
 } from '@bridgething/session-react-native';
@@ -40,6 +41,8 @@ type SessionState = {
 
   provider: BridgethingProviderInfo | null;
   authState: BridgethingAuthState;
+  /** Provider API health while signed in (ok / rate-limited / unreachable). */
+  serviceHealth: BridgethingServiceHealth;
   peers: BridgethingSessionPeer[];
   ancsAuthStatus: BridgethingAncsAuthStatus;
   nowPlaying: BridgethingNowPlaying | null;
@@ -59,6 +62,7 @@ const initial: Omit<SessionState, 'apply' | 'reset'> = {
   started: false,
   provider: null,
   authState: { kind: 'idle' },
+  serviceHealth: { kind: 'ok' },
   peers: [],
   ancsAuthStatus: 'unknown',
   nowPlaying: null,
@@ -77,6 +81,9 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
         return;
       case 'authStateChanged':
         set({ authState: event.state });
+        return;
+      case 'serviceHealthChanged':
+        set({ serviceHealth: event.health });
         return;
       case 'peerConnected':
         set(s => {

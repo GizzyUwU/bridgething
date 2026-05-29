@@ -1,6 +1,7 @@
 package dev.bridgething.companion
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
@@ -23,9 +24,16 @@ public class AndroidAudioBackend(
     private val ready = CompletableDeferred<Boolean>()
     private val callbacks = ConcurrentHashMap<String, Lifecycle>()
 
+    // usage media + speech keeps spotify playing under tts (ducks, never pauses).
+    private val speechAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
     private val tts = TextToSpeech(appContext) { status ->
         ready.complete(status == TextToSpeech.SUCCESS)
     }.apply {
+        setAudioAttributes(speechAttributes)
         setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 utteranceId?.let { callbacks[it]?.onStart?.invoke() }

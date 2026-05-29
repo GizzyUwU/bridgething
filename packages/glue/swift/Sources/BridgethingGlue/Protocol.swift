@@ -57,6 +57,10 @@ public protocol BridgethingGlue: Sendable {
     /// prompt is available, `authenticated` after token exchange, `failed` on error.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async
 
+    /// Subscribe to service-health updates: `ok` when the provider's API is
+    /// responsive, `rateLimited`/`unreachable` when degraded. Distinct from auth.
+    func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async
+
     /// Daemon-observed iAP2 playback hint. The hint is not authoritative; the glue
     /// should fetch from its own data source and push back via `gateway.player.delta`.
     /// Filter on `appBundle` to avoid spurious fetches from other apps. Default impl is a no-op.
@@ -99,6 +103,11 @@ public extension BridgethingGlue {
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {
         observer(.authenticated)
     }
+
+    /// Default for glues without a health surface: always healthy.
+    func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async {
+        observer(.ok)
+    }
 }
 
 /// Auth lifecycle state surfaced to the host. Intentionally narrower than the wire types
@@ -107,6 +116,13 @@ public enum GlueAuthState: Sendable {
     case pending(GlueDeviceCodePrompt?)
     case authenticated
     case failed(String)
+}
+
+/// Provider service health, surfaced alongside (not inside) auth state.
+public enum GlueServiceHealth: Sendable {
+    case ok
+    case rateLimited(retryAfterSeconds: Int)
+    case unreachable
 }
 
 public struct GlueDeviceCodePrompt: Sendable {

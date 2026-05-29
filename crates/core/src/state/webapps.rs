@@ -12,6 +12,7 @@ use super::StateResult;
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
+const STOCK_ICON_SVG: &str = include_str!("stock_icon.svg");
 
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
 pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
@@ -228,6 +229,9 @@ impl WebappRegistry {
 
   pub async fn read_icon(&self, id: Uuid) -> Option<(Vec<u8>, Option<String>)> {
     let bundle = self.bundle(id).await?;
+    if id == STOCK_WEBAPP_ID {
+      return Some((STOCK_ICON_SVG.as_bytes().to_vec(), Some("image/svg+xml".to_string())));
+    }
     let rel = bundle.manifest.icon.as_deref()?;
     bundle.icon_size?;
     let path = bundle.path.join(rel);
@@ -344,6 +348,12 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
   };
 
   let bundle_hash = compute_bundle_hash(path).await;
+
+  let (icon_mime, icon_size) = if manifest.id == STOCK_WEBAPP_ID {
+    (Some("image/svg+xml".to_string()), Some(STOCK_ICON_SVG.len() as u64))
+  } else {
+    (icon_mime, icon_size)
+  };
 
   Some(WebappBundle {
     path: path.to_path_buf(),

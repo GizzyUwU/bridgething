@@ -10,6 +10,7 @@ import dev.bridgething.glue.GlueCapability
 import dev.bridgething.glue.GlueDeviceCodePrompt
 import dev.bridgething.glue.GlueError
 import dev.bridgething.glue.GlueNowPlaying
+import dev.bridgething.glue.GlueServiceHealth
 import dev.bridgething.schema.AuthorityClaim
 import dev.bridgething.schema.AuthorityRelease
 import dev.bridgething.schema.BrowseEntry
@@ -101,6 +102,7 @@ class SpotifyGlue(
     private var authorityHeld: Boolean = false
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
     private var authObserver: ((GlueAuthState) -> Unit)? = null
+    private var serviceHealthObserver: ((GlueServiceHealth) -> Unit)? = null
     private var hintFetchJob: Job? = null
     private var baselinePollJob: Job? = null
     private var connectJob: Job? = null
@@ -110,7 +112,13 @@ class SpotifyGlue(
 
         this.gateway = gateway
 
-        authObserver?.invoke(GlueAuthState.Pending(null))
+        // optimistic: a saved refresh token means we were signed in, so show authenticated up-front;
+        // the background refresh downgrades to failed only if it actually fails. cold start stays pending.
+        if (refreshToken.isEmpty()) {
+            authObserver?.invoke(GlueAuthState.Pending(null))
+        } else {
+            authObserver?.invoke(GlueAuthState.Authenticated)
+        }
 
         val authenticator = authenticatorFactory { prompt -> handleDeviceCodePrompt(prompt) }
 
@@ -127,6 +135,7 @@ class SpotifyGlue(
 
     override suspend fun detach() {
         authObserver = null
+        serviceHealthObserver = null
 
         connectJob?.cancel()
         connectJob = null
@@ -155,6 +164,11 @@ class SpotifyGlue(
 
     override suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {
         authObserver = observer
+    }
+
+    override suspend fun setServiceHealthObserver(observer: (GlueServiceHealth) -> Unit) {
+        serviceHealthObserver = observer
+        observer(GlueServiceHealth.Ok)
     }
 
     override suspend fun play(uri: PlayUri) {
@@ -546,6 +560,14 @@ class SpotifyGlue(
 
     override fun playerStateUpdated(oldState: PlayerState?, newState: PlayerState) {
         handleStateUpdate(newState)
+    }
+
+    override fun serviceDidRateLimit(retryAfterSeconds: Int) {
+        serviceHealthObserver?.invoke(GlueServiceHealth.RateLimited(retryAfterSeconds))
+    }
+
+    override fun serviceDidRecover() {
+        serviceHealthObserver?.invoke(GlueServiceHealth.Ok)
     }
 
     private companion object {

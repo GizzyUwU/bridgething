@@ -10,6 +10,10 @@ interface SpotinyDelegate {
     fun playerStateUpdated(oldState: PlayerState?, newState: PlayerState)
     fun socketDidConnect()
     fun socketDidDisconnect()
+
+    // service health: the web api throttled us (429), and later recovered.
+    fun serviceDidRateLimit(retryAfterSeconds: Int) {}
+    fun serviceDidRecover() {}
 }
 
 /**

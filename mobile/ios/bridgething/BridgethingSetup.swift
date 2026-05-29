@@ -32,7 +32,12 @@ enum BridgethingApp {
                 displayName: SpotifyGlue.displayName,
                 available: true,
                 factory: { makeSpotifyGlue() },
-                signOut: { spotifyTokenStore.clear() }
+                // clear BOTH stores: ours and spotiny's own keychain, which it reads as a fallback.
+                signOut: {
+                    spotifyTokenStore.clear()
+                    SpotinyClient.eraseTokens()
+                },
+                hasCredentials: { spotifyTokenStore.load().refresh?.isEmpty == false }
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id: AppleMusicGlue.name,
@@ -53,6 +58,43 @@ enum BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl())
     }
 
+    static let deviceCodeMethod = "deviceCode"
+    static let pkceMethod = "pkce"
+    private static let authMethodKey = "bridgething.spotify.authMethod"
+
+    private static var hasAuthPsk: Bool {
+        let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String
+        return !(psk ?? "").isEmpty
+    }
+
+    private static var hasPkceClientID: Bool {
+        let id = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String
+        return !(id ?? "").isEmpty
+    }
+
+    /// Which Spotify sign-in flows this build is configured for.
+    static var availableSpotifyAuthMethods: [String] {
+        var out: [String] = []
+        if hasAuthPsk { out.append(deviceCodeMethod) }
+        if hasPkceClientID { out.append(pkceMethod) }
+        return out
+    }
+
+    /// The flow used for sign-in: the user's stored choice if still available,
+    /// otherwise device-code when configured, otherwise pkce.
+    static var effectiveSpotifyAuthMethod: String {
+        let available = availableSpotifyAuthMethods
+        if let stored = UserDefaults.standard.string(forKey: authMethodKey), available.contains(stored) {
+            return stored
+        }
+        return available.contains(deviceCodeMethod) ? deviceCodeMethod : pkceMethod
+    }
+
+    static func setSpotifyAuthMethod(_ method: String) {
+        guard availableSpotifyAuthMethods.contains(method) else { return }
+        UserDefaults.standard.set(method, forKey: authMethodKey)
+    }
+
     private static func makeSpotifyGlue() -> SpotifyGlue {
         let initial = spotifyTokenStore.load()
         return SpotifyGlue(
@@ -61,7 +103,9 @@ enum BridgethingApp {
             refreshToken: initial.refresh ?? "",
             onTokensRefreshed: { access, refresh in
                 spotifyTokenStore.save(access: access, refresh: refresh)
-            }
+            },
+            // only pkce/discord has dealer access; device-code authenticates without the socket.
+            usesDealer: effectiveSpotifyAuthMethod == pkceMethod
         )
     }
 
@@ -86,7 +130,8 @@ enum BridgethingApp {
         let authorizeURL = URL(string: "https://accounts.spotify.com/authorize")!
         let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
 
-        if let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String,
+        if effectiveSpotifyAuthMethod == deviceCodeMethod,
+           let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String,
            !psk.isEmpty
         {
             let worker = "https://thinglabs.sh/auth"

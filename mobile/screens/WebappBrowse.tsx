@@ -7,7 +7,7 @@ import {
   Lock,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, Text, View } from 'react-native';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
@@ -16,6 +16,7 @@ import { ListGroup } from '../components/ListGroup';
 import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { WebappIcon } from '../components/WebappIcon';
 import { getSession, peerDisplayName, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
@@ -145,40 +146,18 @@ function InstalledRow({
   deviceId: string;
   onPress: () => void;
 }) {
-  const session = getSession();
-  const [iconUri, setIconUri] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!webapp.iconAvailable) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const icon = await session.webappIcon(deviceId, webapp.id);
-        if (!cancelled && icon) {
-          setIconUri(icon.fileUri);
-        }
-      } catch {
-        /* non-fatal */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceId, session, webapp.iconAvailable, webapp.id]);
-
   const builtin = webapp.source === 'builtin';
   return (
     <Press onPress={onPress} fade={false} scaleTo={1}>
       <View className="flex-row items-center gap-3 px-4 py-3.5">
-        <View className="h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-secondary">
-          {iconUri ? (
-            <Image source={{ uri: iconUri }} className="h-11 w-11" />
-          ) : (
-            <Text className="text-[16px] font-extrabold text-foreground">
-              {webapp.name.slice(0, 1).toUpperCase()}
-            </Text>
-          )}
-        </View>
+        <WebappIcon
+          deviceId={deviceId}
+          id={webapp.id}
+          iconAvailable={webapp.iconAvailable}
+          name={webapp.name}
+          size={44}
+          fallbackTextClass="text-[16px] font-extrabold text-foreground"
+        />
         <View className="flex-1">
           <View className="flex-row items-center gap-2">
             <Text

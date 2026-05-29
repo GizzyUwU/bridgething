@@ -13,6 +13,7 @@ import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
+import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
@@ -27,6 +28,9 @@ public interface BridgethingSessionBackend {
     public suspend fun cancelAuth()
     public suspend fun signOut()
     public suspend fun currentProvider(): BridgethingProviderInfo?
+    public suspend fun spotifyAuthMethod(): String
+    public suspend fun spotifyAuthMethodsAvailable(): Array<String>
+    public suspend fun setSpotifyAuthMethod(method: String)
     public suspend fun connectedPeers(): Array<BridgethingSessionPeer>
     public suspend fun currentNowPlaying(): BridgethingNowPlaying?
 
@@ -64,6 +68,7 @@ public interface BridgethingSessionBackend {
 
     public fun setOnProviderChanged(callback: (BridgethingProviderInfo?) -> Unit)
     public fun setOnAuthStateChanged(callback: (BridgethingAuthState) -> Unit)
+    public fun setOnServiceHealthChanged(callback: (BridgethingServiceHealth) -> Unit)
     public fun setOnPeerConnected(callback: (BridgethingSessionPeer) -> Unit)
     public fun setOnPeerDisconnected(callback: (String) -> Unit)
     public fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit)

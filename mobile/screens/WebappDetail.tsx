@@ -22,7 +22,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   ScrollView,
   Switch,
@@ -37,6 +36,7 @@ import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { WebappIcon } from '../components/WebappIcon';
 import { getSession, peerDisplayName, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
@@ -50,7 +50,6 @@ export function WebappDetailScreen({ navigation, route }: Props) {
   const nicknames = useSession(s => s.nicknames);
 
   const [info, setInfo] = useState<BridgethingWebappInfo | null>(null);
-  const [iconUri, setIconUri] = useState<string | null>(null);
   const [entries, setEntries] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<'switch' | 'uninstall' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -61,10 +60,6 @@ export function WebappDetailScreen({ navigation, route }: Props) {
       const list = await session.listWebapps(deviceId);
       const match = list.find(w => w.id === id) ?? null;
       setInfo(match);
-      if (match?.iconAvailable) {
-        const icon = await session.webappIcon(deviceId, match.id);
-        if (icon) setIconUri(icon.fileUri);
-      }
       const config = await session.listWebappConfig(deviceId, id);
       setEntries(toMap(config));
     } catch (err) {
@@ -176,18 +171,15 @@ export function WebappDetailScreen({ navigation, route }: Props) {
             shadowOffset: { width: 0, height: 6 },
           }}
         >
-          {iconUri ? (
-            <Image
-              source={{ uri: iconUri }}
-              className="h-[64px] w-[64px] rounded-2xl"
-            />
-          ) : (
-            <View className="h-[64px] w-[64px] items-center justify-center rounded-2xl bg-secondary">
-              <Text className="text-[24px] font-extrabold text-foreground">
-                {info.name.slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <WebappIcon
+            deviceId={deviceId}
+            id={info.id}
+            iconAvailable={info.iconAvailable}
+            name={info.name}
+            size={64}
+            radiusClass="rounded-2xl"
+            fallbackTextClass="text-[24px] font-extrabold text-foreground"
+          />
           <View className="flex-1">
             <Text
               className="text-[20px] font-extrabold leading-[24px] text-foreground"
