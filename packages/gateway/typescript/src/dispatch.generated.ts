@@ -5,6 +5,7 @@ import type {
   AncsAuthState,
   BridgeThingMeta,
   GatewayCapabilities,
+  LogEntry,
   Notification,
   NowPlayingUpdate,
   OtaError,
@@ -61,6 +62,11 @@ import type {
   LibraryFavoritesListRequest,
   LibraryRecommendationsRequest,
   LibrarySearchRequest,
+  LogsSubscribe,
+  LogsSubscribeReply,
+  LogsTail,
+  LogsTailReply,
+  LogsUnsubscribe,
   LyricsErrorReply,
   LyricsReply,
   LyricsRequest,
@@ -326,6 +332,9 @@ export type SystemInboundHandlers = {
   deviceNickname: (deviceId: string, msg: DeviceNicknameReply) => void;
   deviceNicknameRejected: (deviceId: string, msg: DeviceNicknameRejected) => void;
   deviceNicknameChanged: (deviceId: string, msg: DeviceNicknameReply) => void;
+  logsTailReply: (deviceId: string, msg: LogsTailReply) => void;
+  logsSubscribeReply: (deviceId: string, msg: LogsSubscribeReply) => void;
+  logEntry: (deviceId: string, msg: LogEntry) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
@@ -338,6 +347,9 @@ export type SystemDeviceInboundHandlers = {
   deviceNickname: (msg: DeviceNicknameReply) => void;
   deviceNicknameRejected: (msg: DeviceNicknameRejected) => void;
   deviceNicknameChanged: (msg: DeviceNicknameReply) => void;
+  logsTailReply: (msg: LogsTailReply) => void;
+  logsSubscribeReply: (msg: LogsSubscribeReply) => void;
+  logEntry: (msg: LogEntry) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
 };
 
@@ -2127,6 +2139,42 @@ export class SystemSurface {
     });
   }
 
+  /** Subscribe to `System::LogsTailReply` across all peers. */
+  onLogsTailReply(handler: (deviceId: string, msg: LogsTailReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logsTailReply') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::LogsSubscribeReply` across all peers. */
+  onLogsSubscribeReply(handler: (deviceId: string, msg: LogsSubscribeReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logsSubscribeReply') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `System::LogEntry` across all peers. */
+  onLogEntry(handler: (deviceId: string, msg: LogEntry) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logEntry') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Typed inbound `OtaAssetRange` request: handler is given a typed handle for the response. */
   onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -2194,6 +2242,18 @@ export class SystemSurface {
         }
         case 'deviceNicknameChanged': {
           handlers.deviceNicknameChanged?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'logsTailReply': {
+          handlers.logsTailReply?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'logsSubscribeReply': {
+          handlers.logsSubscribeReply?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'logEntry': {
+          handlers.logEntry?.(event.deviceId, inner.data);
           return;
         }
         case 'otaAssetRange': {
@@ -2278,6 +2338,21 @@ export class SystemSurface {
     );
   }
 
+  /** Send `System::LogsUnsubscribe` to every connected peer (broadcast). */
+  async logsUnsubscribe(payload: LogsUnsubscribe, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'command' },
+          data: { type: 'system', data: { event: 'logsUnsubscribe', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
   /** Typed request to a specific peer: companion sends, daemon responds. */
   async otaBegin(
     deviceId: string,
@@ -2325,6 +2400,40 @@ export class SystemSurface {
       const inner = d.data;
       if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
       if (inner.event === 'deviceNicknameRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async logsTail(
+    deviceId: string,
+    req: LogsTail,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LogsTailReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'logsTail', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsTailReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async logsSubscribe(
+    deviceId: string,
+    req: LogsSubscribe,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LogsSubscribeReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'logsSubscribe', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsSubscribeReply') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -5027,6 +5136,45 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `System::LogsTailReply` from this peer. */
+  onLogsTailReply(handler: (msg: LogsTailReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logsTailReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::LogsSubscribeReply` from this peer. */
+  onLogsSubscribeReply(handler: (msg: LogsSubscribeReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logsSubscribeReply') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `System::LogEntry` from this peer. */
+  onLogEntry(handler: (msg: LogEntry) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'logEntry') return;
+      handler(inner.data);
+    });
+  }
+
   /** Typed inbound `OtaAssetRange` request from this peer: handler is given a typed handle for the response. */
   onOtaAssetRange(handler: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void): () => void {
     return this._gateway.on(event => {
@@ -5098,6 +5246,18 @@ export class SystemSurfaceForDevice {
           handlers.deviceNicknameChanged?.(inner.data);
           return;
         }
+        case 'logsTailReply': {
+          handlers.logsTailReply?.(inner.data);
+          return;
+        }
+        case 'logsSubscribeReply': {
+          handlers.logsSubscribeReply?.(inner.data);
+          return;
+        }
+        case 'logEntry': {
+          handlers.logEntry?.(inner.data);
+          return;
+        }
         case 'otaAssetRange': {
           if (event.message.meta.kind !== 'request') return;
           const handler = handlers.otaAssetRange;
@@ -5160,6 +5320,16 @@ export class SystemSurfaceForDevice {
     await this._gateway.send(this.deviceId, msg, options);
   }
 
+  /** Send `System::LogsUnsubscribe` to this peer. */
+  async logsUnsubscribe(payload: LogsUnsubscribe, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'system', data: { event: 'logsUnsubscribe', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
   /** Typed request to this peer: companion sends, daemon responds. */
   async otaBegin(
     req: OtaBegin,
@@ -5202,6 +5372,35 @@ export class SystemSurfaceForDevice {
       const inner = d.data;
       if (inner.event === 'deviceNickname') return { ok: true, response: inner.data };
       if (inner.event === 'deviceNicknameRejected') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async logsTail(req: LogsTail, options?: { timeoutMs?: number }): Promise<TypedRequestResult<LogsTailReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'logsTail', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsTailReply') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async logsSubscribe(
+    req: LogsSubscribe,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<LogsSubscribeReply, never>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'system', data: { event: 'logsSubscribe', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'system') {
+      const inner = d.data;
+      if (inner.event === 'logsSubscribeReply') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -7495,6 +7694,18 @@ function outerSubscribeGateway(
             innerHandlers.deviceNicknameChanged?.(event.deviceId, inner.data);
             return;
           }
+          case 'logsTailReply': {
+            innerHandlers.logsTailReply?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'logsSubscribeReply': {
+            innerHandlers.logsSubscribeReply?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'logEntry': {
+            innerHandlers.logEntry?.(event.deviceId, inner.data);
+            return;
+          }
           case 'otaAssetRange': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.otaAssetRange;
@@ -8157,6 +8368,18 @@ function outerSubscribeDevice(
           }
           case 'deviceNicknameChanged': {
             innerHandlers.deviceNicknameChanged?.(inner.data);
+            return;
+          }
+          case 'logsTailReply': {
+            innerHandlers.logsTailReply?.(inner.data);
+            return;
+          }
+          case 'logsSubscribeReply': {
+            innerHandlers.logsSubscribeReply?.(inner.data);
+            return;
+          }
+          case 'logEntry': {
+            innerHandlers.logEntry?.(inner.data);
             return;
           }
           case 'otaAssetRange': {

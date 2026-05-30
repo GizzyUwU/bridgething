@@ -36,7 +36,12 @@ import {
   type PermissionState,
   requestLocation,
 } from '../lib/permissions';
-import { getSession, useSession, waitForPeer } from '../lib/session';
+import {
+  getSession,
+  presentPairWithGuidance,
+  useSession,
+  waitForPeer,
+} from '../lib/session';
 import { cancelSignIn, signIn as signInSpotify } from '../lib/spotify-auth';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
@@ -51,14 +56,13 @@ export function SetupScreen({ navigation, route }: Props) {
 
   const initialStep =
     route.params?.step ?? (route.params?.startAt === 'pair' ? 1 : 0);
-  const [step, setStepState] = useState(initialStep);
-  const setStep = (next: number | ((prev: number) => number)) => {
-    setStepState(prev => {
-      const value = typeof next === 'function' ? next(prev) : next;
-      navigation.setParams({ step: value });
-      return value;
-    });
-  };
+  const [step, setStep] = useState(initialStep);
+
+  // mirror progress into route params so it survives a remount, off the render path
+  useEffect(() => {
+    navigation.setParams({ step });
+  }, [step, navigation]);
+
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
   const [busyProviderId, setBusyProviderId] = useState<string | null>(null);
   const [pairBusy, setPairBusy] = useState(false);
@@ -129,9 +133,15 @@ export function SetupScreen({ navigation, route }: Props) {
         await session.presentPairPicker();
         return;
       }
-      await session.presentPairPicker();
+      if (!(await presentPairWithGuidance())) return;
       const connected = await waitForPeer(20000);
-      if (!connected) return;
+      if (!connected) {
+        Alert.alert(
+          'could not connect',
+          'pairing finished but your Car Thing did not connect. make sure it is powered on and nearby, then try again.',
+        );
+        return;
+      }
       const result = await session.enableAncsNotifications();
       if (result.kind === 'failed') {
         Alert.alert(

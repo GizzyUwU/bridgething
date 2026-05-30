@@ -1801,6 +1801,73 @@ public struct LogEntry: Codable, Sendable {
 	}
 }
 
+/// What stream of log records a subscription pulls from. `Daemon` is the
+/// bridgething tracing subscriber; `System` is the `journald` view; `All`
+/// merges both in arrival order.
+public enum LogSource: String, Codable, Sendable {
+	case daemon
+	case system
+	case all
+}
+
+/// Open a streaming daemon-log subscription over the gateway. The daemon
+/// returns an opaque token; the companion releases it via `LogsUnsubscribe`.
+/// Scoped to the gateway peer - auto-released when the peer disconnects.
+public struct LogsSubscribe: Codable, Sendable {
+	public let source: LogSource
+	public let levels: [LogLevel]
+	public let filter: String?
+
+	public init(source: LogSource, levels: [LogLevel], filter: String?) {
+		self.source = source
+		self.levels = levels
+		self.filter = filter
+	}
+}
+
+/// Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
+/// `LogsUnsubscribe`.
+public struct LogsSubscribeReply: Codable, Sendable {
+	public let token: String
+
+	public init(token: String) {
+		self.token = token
+	}
+}
+
+/// Pull a one-shot batch of recent daemon log entries over the gateway.
+/// Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
+public struct LogsTail: Codable, Sendable {
+	public let source: LogSource
+	public let levels: [LogLevel]
+	public let filter: String?
+	public let maxLines: UInt32
+
+	public init(source: LogSource, levels: [LogLevel], filter: String?, maxLines: UInt32) {
+		self.source = source
+		self.levels = levels
+		self.filter = filter
+		self.maxLines = maxLines
+	}
+}
+
+/// One-shot reply to a gateway `LogsTail`.
+public struct LogsTailReply: Codable, Sendable {
+	public let entries: [LogEntry]
+
+	public init(entries: [LogEntry]) {
+		self.entries = entries
+	}
+}
+
+public struct LogsUnsubscribe: Codable, Sendable {
+	public let token: String
+
+	public init(token: String) {
+		self.token = token
+	}
+}
+
 public struct LyricLine: Codable, Sendable {
 	public let startMs: UInt32
 	public let text: String
@@ -5616,6 +5683,9 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case deviceNicknameRejected(DeviceNicknameRejected)
 	/// event broadcast when the nickname changes
 	case deviceNicknameChanged(DeviceNicknameReply)
+	case logsTailReply(LogsTailReply)
+	case logsSubscribeReply(LogsSubscribeReply)
+	case logEntry(LogEntry)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
@@ -5626,7 +5696,10 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			otaAssetRangeAbandon,
 			deviceNickname,
 			deviceNicknameRejected,
-			deviceNicknameChanged
+			deviceNicknameChanged,
+			logsTailReply,
+			logsSubscribeReply,
+			logEntry
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5682,6 +5755,21 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 					self = .deviceNicknameChanged(content)
 					return
 				}
+			case .logsTailReply:
+				if let content = try? container.decode(LogsTailReply.self, forKey: .data) {
+					self = .logsTailReply(content)
+					return
+				}
+			case .logsSubscribeReply:
+				if let content = try? container.decode(LogsSubscribeReply.self, forKey: .data) {
+					self = .logsSubscribeReply(content)
+					return
+				}
+			case .logEntry:
+				if let content = try? container.decode(LogEntry.self, forKey: .data) {
+					self = .logEntry(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewaySystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewaySystemMsg"))
@@ -5716,6 +5804,15 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .deviceNicknameChanged(let content):
 			try container.encode(CodingKeys.deviceNicknameChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logsTailReply(let content):
+			try container.encode(CodingKeys.logsTailReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logsSubscribeReply(let content):
+			try container.encode(CodingKeys.logsSubscribeReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logEntry(let content):
+			try container.encode(CodingKeys.logEntry, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6877,6 +6974,9 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	case otaAssetRangeChunk(OtaAssetRangeChunk)
 	case deviceGetNickname
 	case deviceSetNickname(DeviceSetNickname)
+	case logsTail(LogsTail)
+	case logsSubscribe(LogsSubscribe)
+	case logsUnsubscribe(LogsUnsubscribe)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaBegin,
@@ -6887,7 +6987,10 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			otaAssetRangeRejected,
 			otaAssetRangeChunk,
 			deviceGetNickname,
-			deviceSetNickname
+			deviceSetNickname,
+			logsTail,
+			logsSubscribe,
+			logsUnsubscribe
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6939,6 +7042,21 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 					self = .deviceSetNickname(content)
 					return
 				}
+			case .logsTail:
+				if let content = try? container.decode(LogsTail.self, forKey: .data) {
+					self = .logsTail(content)
+					return
+				}
+			case .logsSubscribe:
+				if let content = try? container.decode(LogsSubscribe.self, forKey: .data) {
+					self = .logsSubscribe(content)
+					return
+				}
+			case .logsUnsubscribe:
+				if let content = try? container.decode(LogsUnsubscribe.self, forKey: .data) {
+					self = .logsUnsubscribe(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeSystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeSystemMsg"))
@@ -6971,6 +7089,15 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			try container.encode(CodingKeys.deviceGetNickname, forKey: .event)
 		case .deviceSetNickname(let content):
 			try container.encode(CodingKeys.deviceSetNickname, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logsTail(let content):
+			try container.encode(CodingKeys.logsTail, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logsSubscribe(let content):
+			try container.encode(CodingKeys.logsSubscribe, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .logsUnsubscribe(let content):
+			try container.encode(CodingKeys.logsUnsubscribe, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -7335,15 +7462,6 @@ public enum Image: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		}
 	}
-}
-
-/// What stream of log records a subscription pulls from. `Daemon` is the
-/// bridgething tracing subscriber; `System` is the `journald` view; `All`
-/// merges both in arrival order.
-public enum LogSource: String, Codable, Sendable {
-	case daemon
-	case system
-	case all
 }
 
 

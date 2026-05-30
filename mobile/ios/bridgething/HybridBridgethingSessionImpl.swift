@@ -98,6 +98,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             await companion.setLogObserver { [weak self] level, message in
                 self?.emitLog(level.rawValue, message)
             }
+            await companion.setDeviceLogStreaming(true)
         }
 
         try await companion.start()
@@ -798,9 +799,11 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 await companion.setLogObserver { [weak self] level, message in
                     self?.emitLog(level.rawValue, message)
                 }
+                await companion.setDeviceLogStreaming(true)
             }
         } else {
             Task {
+                await companion.setDeviceLogStreaming(false)
                 await companion.setLogObserver(nil)
             }
         }
@@ -1102,7 +1105,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
     private static func toRNOtaManifest(_ m: OtaDiscoverManifest) -> BridgethingOtaManifest {
-        let channels = m.channels.values.map { ch -> BridgethingOtaChannelInfo in
+        let channels = m.channels.map { (slug, ch) -> BridgethingOtaChannelInfo in
             let releases = ch.releases.compactMap { v -> BridgethingOtaRelease? in
                 guard let composite = OtaCompositeVersion.parse(v) else { return nil }
                 let rel = m.releases[v]
@@ -1115,6 +1118,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 )
             }
             return BridgethingOtaChannelInfo(
+                slug: slug,
                 name: ch.name,
                 stability: ch.stability,
                 isDefault: ch.isDefault,

@@ -203,10 +203,7 @@ function FeedRow({ line }: { line: FeedLine }) {
       >
         {line.tag}
       </Text>
-      <Text
-        className="flex-1 font-mono text-[11px] text-[rgba(255,255,255,0.9)]"
-        numberOfLines={1}
-      >
+      <Text className="flex-1 font-mono text-[11px] text-[rgba(255,255,255,0.9)]">
         {line.text}
       </Text>
     </View>

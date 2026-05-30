@@ -22,6 +22,9 @@ import type {
   ItemKind,
   ItemRef,
   LibraryError,
+  LogEntry,
+  LogLevel,
+  LogSource,
   NetError,
   NetFetchRequest,
   NetFetchResponse,
@@ -258,7 +261,10 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'otaAssetRangeAbandon'; data: OtaAssetRangeAbandon }
   | { event: 'deviceNickname'; data: DeviceNicknameReply }
   | { event: 'deviceNicknameRejected'; data: DeviceNicknameRejected }
-  | { event: 'deviceNicknameChanged'; data: DeviceNicknameReply };
+  | { event: 'deviceNicknameChanged'; data: DeviceNicknameReply }
+  | { event: 'logsTailReply'; data: LogsTailReply }
+  | { event: 'logsSubscribeReply'; data: LogsSubscribeReply }
+  | { event: 'logEntry'; data: LogEntry };
 
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
@@ -480,7 +486,10 @@ export type GatewayToBridgeSystemMsg =
   | { event: 'otaAssetRangeRejected'; data: OtaAssetRangeRejected }
   | { event: 'otaAssetRangeChunk'; data: OtaAssetRangeChunk }
   | { event: 'deviceGetNickname' }
-  | { event: 'deviceSetNickname'; data: DeviceSetNickname };
+  | { event: 'deviceSetNickname'; data: DeviceSetNickname }
+  | { event: 'logsTail'; data: LogsTail }
+  | { event: 'logsSubscribe'; data: LogsSubscribe }
+  | { event: 'logsUnsubscribe'; data: LogsUnsubscribe };
 
 /**
  * Companion-driven time surface. Companion sends `Snapshot` at announce
@@ -562,6 +571,32 @@ export type LibraryRecommendationsRequest = {
 };
 
 export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
+
+/**
+ * Open a streaming daemon-log subscription over the gateway. The daemon
+ * returns an opaque token; the companion releases it via `LogsUnsubscribe`.
+ * Scoped to the gateway peer - auto-released when the peer disconnects.
+ */
+export type LogsSubscribe = { source: LogSource; levels: Array<LogLevel>; filter: string | null };
+
+/**
+ * Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
+ * `LogsUnsubscribe`.
+ */
+export type LogsSubscribeReply = { token: string };
+
+/**
+ * Pull a one-shot batch of recent daemon log entries over the gateway.
+ * Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
+ */
+export type LogsTail = { source: LogSource; levels: Array<LogLevel>; filter: string | null; maxLines: number };
+
+/**
+ * One-shot reply to a gateway `LogsTail`.
+ */
+export type LogsTailReply = { entries: Array<LogEntry> };
+
+export type LogsUnsubscribe = { token: string };
 
 export type LyricLine = { startMs: number; text: string };
 

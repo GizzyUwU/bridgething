@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{OtaError, OtaProgress, RangeSpec};
+use crate::{LogEntry, OtaError, OtaProgress, RangeSpec};
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte
 /// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
@@ -95,6 +95,27 @@ pub struct OtaAssetRangeAbandon {
   pub request_id: Uuid,
 }
 
+/// One-shot reply to a gateway `LogsTail`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct LogsTailReply {
+  pub entries: Vec<LogEntry>,
+}
+
+/// Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
+/// `LogsUnsubscribe`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct LogsSubscribeReply {
+  pub token: String,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -121,4 +142,10 @@ pub enum BridgeToGatewaySystemMsg {
   /// event broadcast when the nickname changes
   #[bridge_event]
   DeviceNicknameChanged(DeviceNicknameReply),
+  #[bridge_response]
+  LogsTailReply(LogsTailReply),
+  #[bridge_response]
+  LogsSubscribeReply(LogsSubscribeReply),
+  #[bridge_event]
+  LogEntry(LogEntry),
 }

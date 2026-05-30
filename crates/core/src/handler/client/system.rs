@@ -1,14 +1,20 @@
+use std::{future::Future, pin::Pin};
+
 use libbridgething::{
   Diagnostics,
   client::{
-    ClientToBridgeSystemMsgDispatch, DeviceGetNickname, DeviceNicknameReply, DiagnosticsGet, DiagnosticsReply,
-    LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe, RequestVersion,
+    BridgeToClientSystemMsgEvent, ClientToBridgeSystemMsgDispatch, DeviceGetNickname, DeviceNicknameReply,
+    DiagnosticsGet, DiagnosticsReply, LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe,
+    RequestVersion,
   },
 };
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::systemd::power;
+use crate::{
+  state::log_tap::{LogOwner, LogSink},
+  systemd::power,
+};
 
 pub struct SystemHandler {
   handle: MsgHandle,
@@ -63,9 +69,20 @@ impl ClientToBridgeSystemMsgDispatch for SystemHandler {
   }
 
   async fn logs_subscribe(&self, params: LogsSubscribe) -> HandlerResult {
+    let bus = self.handle.state.bus.clone();
+    let owner = self.handle.from;
+    let sink: LogSink = Box::new(move |entry| {
+      let bus = bus.clone();
+      Box::pin(async move {
+        bus
+          .send_event(owner, BridgeToClientSystemMsgEvent::LogEntry((*entry).clone()))
+          .await
+          .is_ok()
+      }) as Pin<Box<dyn Future<Output = bool> + Send>>
+    });
     let token = self.handle.state.log_tap.subscribe(
-      self.handle.state.bus.clone(),
-      self.handle.from,
+      LogOwner::Client(owner),
+      sink,
       params.source,
       params.levels,
       params.filter,

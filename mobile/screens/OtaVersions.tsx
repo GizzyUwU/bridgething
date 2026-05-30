@@ -29,7 +29,7 @@ export function OtaVersionsScreen({ route, navigation }: Props) {
     setError(null);
     try {
       const manifest = await getSession().fetchOtaManifest(null);
-      const ch = manifest.channels.find(c => c.name === channel);
+      const ch = manifest.channels.find(c => c.slug === channel);
       if (!ch) {
         setError(`channel '${channel}' is not in the manifest`);
         setReleases([]);

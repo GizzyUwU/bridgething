@@ -35,7 +35,7 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   player::Player,
-  state::{AudioManager, RouteTable},
+  state::{AudioManager, LogTap, RouteTable, log_tap::LogOwner},
   stock::{broadcast_stock_connection, broadcast_stock_disconnection},
 };
 
@@ -99,6 +99,7 @@ pub struct PeerTracker {
 }
 
 impl PeerTracker {
+  #[allow(clippy::too_many_arguments)]
   pub fn new(
     bus: WireEventBus,
     player: Player,
@@ -106,6 +107,7 @@ impl PeerTracker {
     capabilities: CapabilitiesRegistry,
     ws_routes: RouteTable,
     stream_routes: RouteTable,
+    log_tap: LogTap,
   ) -> Self {
     let (cmd_tx, cmd_rx) = mpsc::channel(PEER_CMD_CAPACITY);
     let (snapshot_tx, snapshot_rx) = watch::channel(PeerSnapshot::default());
@@ -118,6 +120,7 @@ impl PeerTracker {
       capabilities,
       ws_routes,
       stream_routes,
+      log_tap,
     ));
     Self { cmd_tx, snapshot_rx }
   }
@@ -213,6 +216,7 @@ struct PeerActor {
   capabilities: CapabilitiesRegistry,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
+  log_tap: LogTap,
   snapshot_tx: watch::Sender<PeerSnapshot>,
 }
 
@@ -226,6 +230,7 @@ async fn run_actor(
   capabilities: CapabilitiesRegistry,
   ws_routes: RouteTable,
   stream_routes: RouteTable,
+  log_tap: LogTap,
 ) {
   let mut actor = PeerActor {
     peers: HashMap::new(),
@@ -236,6 +241,7 @@ async fn run_actor(
     capabilities,
     ws_routes,
     stream_routes,
+    log_tap,
     snapshot_tx,
   };
 
@@ -500,6 +506,12 @@ impl PeerActor {
     if let Some(addr) = diff.companion_lost {
       if let Err(err) = self.capabilities.clear_companion(addr).await {
         tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
+      }
+      // drop any log-tap streams the companion opened so the broadcast receiver +
+      // pump task don't leak across reconnects (memory is shared with chromium).
+      let drained = self.log_tap.drain_for_owner(LogOwner::Gateway(Some(addr)));
+      if !drained.is_empty() {
+        tracing::debug!(count = drained.len(), %addr, "drained gateway log subscriptions on companion disconnect");
       }
       self.tear_down_net_routes().await;
     }

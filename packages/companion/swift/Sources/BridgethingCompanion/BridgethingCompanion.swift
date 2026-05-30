@@ -80,6 +80,10 @@ public actor BridgethingCompanion {
     private var ancsAuthStateObserver: (@Sendable (AncsAuthState) -> Void)?
     private var ancsAuthState: AncsAuthState = .unknown
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
+    private var deviceLogStreaming = false
+    private var connectedDeviceIds: Set<String> = []
+    private var deviceLogTokens: [String: String] = [:]
+    private var deviceLogTask: Task<Void, Never>?
 
     private let netDispatcher: NetDispatcher
     private let tunnelDispatcher: TunnelDispatcher
@@ -161,6 +165,12 @@ public actor BridgethingCompanion {
         }
         tasks.removeAll()
 
+        deviceLogTask?.cancel()
+        deviceLogTask = nil
+        deviceLogTokens.removeAll()
+        connectedDeviceIds.removeAll()
+        deviceLogStreaming = false
+
         #if os(iOS)
             await volumeMonitor.stop()
             await audioKeepAlive.deactivate()
@@ -234,6 +244,59 @@ public actor BridgethingCompanion {
         logObserver = observer
     }
 
+    // MARK: - device log streaming
+
+    /// Subscribes to the daemon's tracing log over the gateway and forwards entries through
+    /// `logObserver`.
+    public func setDeviceLogStreaming(_ enabled: Bool) async {
+        guard enabled != deviceLogStreaming else { return }
+        deviceLogStreaming = enabled
+        if enabled {
+            startDeviceLogConsumer()
+            for id in connectedDeviceIds {
+                await subscribeDeviceLogs(id)
+            }
+        } else {
+            deviceLogTask?.cancel()
+            deviceLogTask = nil
+            let tokens = deviceLogTokens
+            deviceLogTokens.removeAll()
+            for token in tokens.values {
+                try? await gateway.system.logsUnsubscribe(LogsUnsubscribe(token: token))
+            }
+        }
+    }
+
+    private func startDeviceLogConsumer() {
+        guard deviceLogTask == nil else { return }
+        let stream = gateway.system.logEntry
+        deviceLogTask = Task { [weak self] in
+            for await (_, entry) in stream {
+                await self?.forwardDeviceLog(entry)
+            }
+        }
+    }
+
+    private func subscribeDeviceLogs(_ deviceId: String) async {
+        let result = try? await gateway.system.logsSubscribe(
+            deviceId: deviceId,
+            LogsSubscribe(source: .daemon, levels: [], filter: nil)
+        )
+        if case .ok(let reply) = result {
+            deviceLogTokens[deviceId] = reply.token
+        }
+    }
+
+    private func forwardDeviceLog(_ entry: LogEntry) {
+        let level: CompanionLogLevel = switch entry.level {
+        case .trace, .debug: .debug
+        case .info: .info
+        case .warn: .warn
+        case .error: .error
+        }
+        logObserver?(level, "[\(entry.target)] \(entry.message)")
+    }
+
     nonisolated func emitLog(_ level: CompanionLogLevel, _ message: String, observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
         switch level {
         case .debug: osLog.debug("\(message)")
@@ -294,13 +357,34 @@ public actor BridgethingCompanion {
                 Task { @MainActor in
                     osLog.info("presenting EA bluetooth accessory picker")
                     EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: nil) { error in
-                        if let error {
-                            osLog.warning("EA picker dismissed: \(error.localizedDescription)")
-                            cont.resume(returning: nil)
-                        } else {
+                        guard let error else {
                             osLog.info("EA picker completed")
                             cont.resume(returning: AccessoryPickResult(id: "", name: "Bridgething"))
+                            return
                         }
+                        let ns = error as NSError
+                        if ns.domain == EABluetoothAccessoryPickerErrorDomain,
+                            let code = EABluetoothAccessoryPickerError.Code(rawValue: ns.code)
+                        {
+                            switch code {
+                            case .alreadyConnected:
+                                osLog.info("EA picker: accessory already connected")
+                                cont.resume(returning: AccessoryPickResult(id: "", name: "Bridgething"))
+                                return
+                            case .resultNotFound:
+                                osLog.warning("EA picker: no accessory found")
+                            case .resultCancelled:
+                                // ios returns cancelled for both a user dismiss and a select-then-bond/auth failure
+                                osLog.warning("EA picker dismissed without pairing")
+                            case .resultFailed:
+                                osLog.warning("EA picker: pairing failed")
+                            @unknown default:
+                                osLog.warning("EA picker error: \(error.localizedDescription)")
+                            }
+                        } else {
+                            osLog.warning("EA picker error: \(error.localizedDescription)")
+                        }
+                        cont.resume(returning: nil)
                     }
                 }
             }
@@ -387,6 +471,8 @@ public actor BridgethingCompanion {
             switch event {
             case let .connected(device):
                 log(.info, "peer connected: \(device.name) [\(device.id)]")
+                connectedDeviceIds.insert(device.id)
+                if deviceLogStreaming { await subscribeDeviceLogs(device.id) }
                 await announceCapabilities()
                 await emitTimeSnapshot()
                 #if os(iOS)
@@ -396,6 +482,8 @@ public actor BridgethingCompanion {
                 #endif
             case let .disconnected(id):
                 log(.info, "peer disconnected: \(id)")
+                connectedDeviceIds.remove(id)
+                deviceLogTokens.removeValue(forKey: id)
                 #if os(iOS)
                     connectedPeerCount = max(0, connectedPeerCount - 1)
                     if connectedPeerCount == 0 { await audioKeepAlive.deactivate() }

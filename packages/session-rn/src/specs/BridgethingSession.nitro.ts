@@ -189,6 +189,7 @@ export type BridgethingOtaRelease = {
 };
 
 export type BridgethingOtaChannelInfo = {
+  slug: string;
   name: string;
   stability: string;
   isDefault: boolean;

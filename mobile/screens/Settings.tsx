@@ -31,7 +31,6 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  type AlertButton,
   AppState,
   Linking,
   Platform,
@@ -50,6 +49,7 @@ import {
 } from 'react-native-permissions';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ActionMenu, type MenuAction } from '../components/ActionMenu';
 import { Button } from '../components/Button';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
@@ -69,6 +69,7 @@ import {
   type KnownDevice,
   knownDevices,
   peerDisplayName,
+  presentPairWithGuidance,
   updateCapabilityFlags,
   updateNickname,
   updateOtaPollConfig,
@@ -119,7 +120,7 @@ export function SettingsScreen({ navigation }: Props) {
     if (addDeviceBusy) return;
     setAddDeviceBusy(true);
     try {
-      await session.presentPairPicker();
+      await presentPairWithGuidance();
     } catch (err) {
       Alert.alert(
         'pair failed',
@@ -179,7 +180,7 @@ export function SettingsScreen({ navigation }: Props) {
     try {
       const manifest = await session.fetchOtaManifest(null);
       const latest = manifest.channels.find(
-        c => c.name === selectedChannel,
+        c => c.slug === selectedChannel,
       )?.latest;
       if (latest) {
         await session.applyOtaUpdate(deviceId, selectedChannel, latest, null);
@@ -540,23 +541,20 @@ function DeviceRow({
   meta?: BridgethingDeviceMeta;
 }) {
   const [renameOpen, setRenameOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const connected = device.peer?.status === 'connected';
   const linkFailed = device.peer?.status === 'linkFailed';
 
-  const openMenu = () => {
-    const buttons: AlertButton[] = [
-      { text: 'rename', onPress: () => setRenameOpen(true) },
-    ];
-    if (!connected && !linkFailed) {
-      buttons.push({
-        text: 'forget this device',
-        style: 'destructive',
-        onPress: () => forgetKnownDevice(device.id),
-      });
-    }
-    buttons.push({ text: 'cancel', style: 'cancel' });
-    Alert.alert(device.displayName, undefined, buttons);
-  };
+  const menuActions: MenuAction[] = [
+    { label: 'rename', onPress: () => setRenameOpen(true) },
+  ];
+  if (!connected && !linkFailed) {
+    menuActions.push({
+      label: 'forget this device',
+      destructive: true,
+      onPress: () => forgetKnownDevice(device.id),
+    });
+  }
 
   const subtitle = connected
     ? meta
@@ -570,6 +568,12 @@ function DeviceRow({
 
   return (
     <>
+      <ActionMenu
+        visible={menuOpen}
+        title={device.displayName}
+        actions={menuActions}
+        onClose={() => setMenuOpen(false)}
+      />
       <RenameSheet
         visible={renameOpen}
         title="rename your Car Thing"
@@ -596,7 +600,7 @@ function DeviceRow({
             strokeWidth={2.2}
           />
         }
-        onPress={openMenu}
+        onPress={() => setMenuOpen(true)}
       />
     </>
   );

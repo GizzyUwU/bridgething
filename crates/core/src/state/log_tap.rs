@@ -9,22 +9,37 @@
 
 use std::{
   collections::{HashMap, VecDeque},
+  future::Future,
   net::SocketAddr,
+  pin::Pin,
   sync::{Arc, Mutex, RwLock},
   time::SystemTime,
 };
 
-use libbridgething::{LogEntry, LogLevel, LogSource, client::BridgeToClientSystemMsgEvent};
+use bluer::Address;
+use libbridgething::{LogEntry, LogLevel, LogSource};
 use tokio::{sync::broadcast, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{Event, Subscriber, field::Visit};
 use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 use uuid::Uuid;
 
-use crate::net::WireEventBus;
-
 const RING_CAPACITY: usize = 512;
 const BROADCAST_CAPACITY: usize = 256;
+
+/// Identifies a subscription's owner so its streams drain when that peer goes
+/// away. Client subscribers are keyed by websocket addr, gateway subscribers
+/// by the companion's bt address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogOwner {
+  Client(SocketAddr),
+  Gateway(Option<Address>),
+}
+
+/// Pushes one entry to a subscriber's transport. Returns false when the send
+/// fails terminally and the subscription should close. Lets one `LogTap` feed
+/// both the client websocket and gateway peers without knowing either transport.
+pub type LogSink = Box<dyn Fn(Arc<LogEntry>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct LogTap {
@@ -40,7 +55,7 @@ struct LogTapInner {
 
 #[derive(Debug)]
 struct SubscriberEntry {
-  owner: SocketAddr,
+  owner: LogOwner,
   cancel: CancellationToken,
   _handle: JoinHandle<()>,
 }
@@ -77,8 +92,8 @@ impl LogTap {
 
   pub fn subscribe(
     &self,
-    bus: WireEventBus,
-    owner: SocketAddr,
+    owner: LogOwner,
+    sink: LogSink,
     _source: LogSource,
     levels: Vec<LogLevel>,
     filter: Option<String>,
@@ -97,14 +112,13 @@ impl LogTap {
               if !matches(&entry, &levels, filter.as_deref()) {
                 continue;
               }
-              let event = BridgeToClientSystemMsgEvent::LogEntry((*entry).clone());
-              if let Err(err) = bus.send_event(owner, event).await {
-                tracing::trace!(?err, %owner, "log tap subscriber send failed; closing subscription");
+              if !sink(entry).await {
+                tracing::trace!("log tap subscriber send failed; closing subscription");
                 break;
               }
             }
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
-              tracing::trace!(%owner, %skipped, "log tap subscriber lagged");
+              tracing::trace!(%skipped, "log tap subscriber lagged");
               continue;
             }
             Err(broadcast::error::RecvError::Closed) => break,
@@ -143,7 +157,7 @@ impl LogTap {
     }
   }
 
-  pub fn drain_for_owner(&self, owner: SocketAddr) -> Vec<Uuid> {
+  pub fn drain_for_owner(&self, owner: LogOwner) -> Vec<Uuid> {
     let mut guard = self.inner.subscribers.write().expect("log tap subscribers poisoned");
     let tokens: Vec<Uuid> = guard
       .iter()

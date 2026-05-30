@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{OtaKind, RangePart};
+use crate::{LogLevel, LogSource, OtaKind, RangePart};
 
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
@@ -169,6 +169,57 @@ pub struct DeviceSetNickname {
   pub nickname: String,
 }
 
+/// Pull a one-shot batch of recent daemon log entries over the gateway.
+/// Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = System,
+  request_variant = LogsTail,
+  response = crate::gateway::LogsTailReply,
+  response_variant = LogsTailReply,
+)]
+pub struct LogsTail {
+  pub source: LogSource,
+  pub levels: Vec<LogLevel>,
+  pub filter: Option<String>,
+  pub max_lines: u32,
+}
+
+/// Open a streaming daemon-log subscription over the gateway. The daemon
+/// returns an opaque token; the companion releases it via `LogsUnsubscribe`.
+/// Scoped to the gateway peer - auto-released when the peer disconnects.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = GatewayToBridge,
+  surface = System,
+  request_variant = LogsSubscribe,
+  response = crate::gateway::LogsSubscribeReply,
+  response_variant = LogsSubscribeReply,
+)]
+pub struct LogsSubscribe {
+  pub source: LogSource,
+  pub levels: Vec<LogLevel>,
+  pub filter: Option<String>,
+}
+
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct LogsUnsubscribe {
+  pub token: String,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -194,4 +245,10 @@ pub enum GatewayToBridgeSystemMsg {
   DeviceGetNickname,
   #[bridge_request]
   DeviceSetNickname(DeviceSetNickname),
+  #[bridge_request]
+  LogsTail(LogsTail),
+  #[bridge_request]
+  LogsSubscribe(LogsSubscribe),
+  #[bridge_command]
+  LogsUnsubscribe(LogsUnsubscribe),
 }

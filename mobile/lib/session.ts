@@ -11,6 +11,7 @@ import {
   type BridgethingSessionSnapshot,
   type SessionEvent,
 } from '@bridgething/session-react-native';
+import { Alert, Platform } from 'react-native';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -205,6 +206,17 @@ export function updateNickname(
 
 export function forgetKnownDevice(deviceId: string): void {
   useSessionStore.setState({ ledger: persistForget(deviceId) });
+}
+
+export async function presentPairWithGuidance(): Promise<boolean> {
+  const picked = await getSession().presentPairPicker();
+  if (picked == null && Platform.OS === 'ios') {
+    Alert.alert(
+      'pairing did not finish',
+      `if your Car Thing was paired to this phone before, forget it first: open Settings > Bluetooth, tap your Car Thing, choose "Forget This Device", then pair again.`,
+    );
+  }
+  return picked != null;
 }
 
 export function waitForPeer(timeoutMs: number): Promise<boolean> {

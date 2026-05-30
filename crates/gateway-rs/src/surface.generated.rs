@@ -247,6 +247,12 @@ impl<'a> SystemSurface<'a> {
       .event(GatewayToBridgeSystemMsgEvent::OtaAssetRangeChunk(payload))
       .await
   }
+  pub async fn logs_unsubscribe(&self, payload: LogsUnsubscribe) -> Result<(), SdkError> {
+    self
+      .0
+      .command(GatewayToBridgeSystemMsgCommand::LogsUnsubscribe(payload))
+      .await
+  }
   pub async fn ota_begin(&self, request: OtaBegin) -> Result<OtaBeginAck, RequestFailure<OtaBeginRejected>> {
     self.0.request(request).await
   }
@@ -257,6 +263,18 @@ impl<'a> SystemSurface<'a> {
     &self,
     request: DeviceSetNickname,
   ) -> Result<DeviceNicknameReply, RequestFailure<DeviceNicknameRejected>> {
+    self.0.request(request).await
+  }
+  pub async fn logs_tail(
+    &self,
+    request: LogsTail,
+  ) -> Result<LogsTailReply, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(request).await
+  }
+  pub async fn logs_subscribe(
+    &self,
+    request: LogsSubscribe,
+  ) -> Result<LogsSubscribeReply, RequestFailure<::core::convert::Infallible>> {
     self.0.request(request).await
   }
   /// Stream of `System` events.

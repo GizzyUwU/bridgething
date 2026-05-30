@@ -388,8 +388,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             return RecommendationsResult(items: tracks.map { .track(Self.mapTrack($0)) }, total: nil, hasMore: false)
         }
 
-        // `/v1/recommendations` is gone for new client_ids; fall back to an
-        // artist seed's top tracks so the surface still returns something useful.
         if let artistSeed = req.seeds.first(where: { $0.kind == .artist }), let uri = SpotifyURI(artistSeed.uri) {
             let top = Array((await client.artists.getArtistTopTracks(uri: uri)).prefix(limit))
             return RecommendationsResult(items: top.map { .track(Self.mapTrack($0)) }, total: nil, hasMore: false)
@@ -476,9 +474,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         return AssetBytes(bytes: data, mime: mime)
     }
 
-    /// Pull the canonical playback state from `/v1/me/player` and route
-    /// it through the same path dealer-WS pushes take. Both hint-driven
-    /// and baseline-poll fetches funnel here.
     fileprivate func fetchAndDispatch(reason: String) async {
         guard let client else { return }
         guard let state = await client.player.getPlaybackState() else { return }
@@ -504,6 +499,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 ("playing", String(nowPlaying)),
             ]
         )
+
+        #if !os(iOS)
         Task { [weak self] in
             try? await gateway.player.delta(update)
             guard let self else { return }
@@ -525,6 +522,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 stopBaselinePoll()
             }
         }
+        #endif
     }
 
     fileprivate func handleSocketDown() {

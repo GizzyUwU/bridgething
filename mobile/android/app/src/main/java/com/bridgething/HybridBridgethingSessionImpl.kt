@@ -593,7 +593,7 @@ public class HybridBridgethingSessionImpl(
     private fun otaRootUrl(raw: String?): String = raw ?: "https://ota.bridgething.com"
 
     private fun toRnOtaManifest(m: OtaDiscoverManifest): BridgethingOtaManifest {
-        val channels = m.channels.values.map { ch ->
+        val channels = m.channels.map { (slug, ch) ->
             val releases = ch.releases.mapNotNull { v ->
                 val composite = OtaCompositeVersion.parse(v) ?: return@mapNotNull null
                 val rel = m.releases[v]
@@ -606,6 +606,7 @@ public class HybridBridgethingSessionImpl(
                 )
             }.toTypedArray()
             BridgethingOtaChannelInfo(
+                slug = slug,
                 name = ch.name,
                 stability = ch.stability,
                 isDefault = ch.isDefault,

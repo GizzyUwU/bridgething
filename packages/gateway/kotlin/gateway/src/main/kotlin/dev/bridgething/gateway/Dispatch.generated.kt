@@ -1040,6 +1040,33 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `System::LogsTailReply` messages. */
+  public val logsTailReply: Flow<Pair<String, LogsTailReply>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogsTailReply ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `System::LogsSubscribeReply` messages. */
+  public val logsSubscribeReply: Flow<Pair<String, LogsSubscribeReply>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogsSubscribeReply ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Cross-peer stream of `System::LogEntry` messages. */
+  public val logEntry: Flow<Pair<String, LogEntry>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogEntry ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Send `System::OtaChunk` to every connected peer (broadcast). */
   public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -1108,6 +1135,23 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `System::LogsUnsubscribe` to every connected peer (broadcast). */
+  public suspend fun logsUnsubscribe(payload: LogsUnsubscribe, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsUnsubscribe(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
   /** Typed request to a specific peer: companion sends, daemon responds. */
   public suspend fun otaBegin(deviceId: String, req: OtaBegin, timeout: Duration = 30.seconds): RequestResult<OtaBeginAck, OtaBeginRejected> {
     val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaBegin(req))
@@ -1145,6 +1189,34 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
         is BridgeToGatewaySystemMsg.DeviceNickname -> RequestResult.Ok(inner.data)
         is BridgeToGatewaySystemMsg.DeviceNicknameRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun logsTail(deviceId: String, req: LogsTail, timeout: Duration = 30.seconds): RequestResult<LogsTailReply, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsTail(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.LogsTailReply -> RequestResult.Ok(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  public suspend fun logsSubscribe(deviceId: String, req: LogsSubscribe, timeout: Duration = 30.seconds): RequestResult<LogsSubscribeReply, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsSubscribe(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.LogsSubscribeReply -> RequestResult.Ok(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
@@ -2819,6 +2891,36 @@ public class SystemSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `System::LogsTailReply` from this peer. */
+  public val logsTailReply: Flow<LogsTailReply> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogsTailReply ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `System::LogsSubscribeReply` from this peer. */
+  public val logsSubscribeReply: Flow<LogsSubscribeReply> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogsSubscribeReply ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Stream of `System::LogEntry` from this peer. */
+  public val logEntry: Flow<LogEntry> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.LogEntry ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Send `System::OtaChunk` to this peer. */
   public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2855,6 +2957,16 @@ public class SystemSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeChunk(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `System::LogsUnsubscribe` to this peer. */
+  public suspend fun logsUnsubscribe(payload: LogsUnsubscribe, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsUnsubscribe(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2896,6 +3008,34 @@ public class SystemSurfaceForDevice(
       is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
         is BridgeToGatewaySystemMsg.DeviceNickname -> RequestResult.Ok(inner.data)
         is BridgeToGatewaySystemMsg.DeviceNicknameRejected -> RequestResult.DomainErr(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun logsTail(req: LogsTail, timeout: Duration = 30.seconds): RequestResult<LogsTailReply, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsTail(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.LogsTailReply -> RequestResult.Ok(inner.data)
+        else -> RequestResult.ProtocolErr(WireError.Unsupported)
+      }
+      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
+      else -> RequestResult.ProtocolErr(WireError.Unsupported)
+    }
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  public suspend fun logsSubscribe(req: LogsSubscribe, timeout: Duration = 30.seconds): RequestResult<LogsSubscribeReply, Nothing> {
+    val outboundData = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.LogsSubscribe(req))
+    val response = gateway.request(deviceId, outboundData, timeout)
+    return when (val d = response.data) {
+      is BridgeToGatewayMsgData.System -> when (val inner = d.data) {
+        is BridgeToGatewaySystemMsg.LogsSubscribeReply -> RequestResult.Ok(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
       is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)

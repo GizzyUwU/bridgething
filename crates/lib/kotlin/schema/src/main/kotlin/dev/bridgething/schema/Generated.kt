@@ -1012,6 +1012,57 @@ data class LogEntry (
 	val message: String
 )
 
+/// What stream of log records a subscription pulls from. `Daemon` is the
+/// bridgething tracing subscriber; `System` is the `journald` view; `All`
+/// merges both in arrival order.
+@Serializable
+enum class LogSource(val string: String) {
+	@SerialName("daemon")
+	Daemon("daemon"),
+	@SerialName("system")
+	System("system"),
+	@SerialName("all")
+	All("all"),
+}
+
+/// Open a streaming daemon-log subscription over the gateway. The daemon
+/// returns an opaque token; the companion releases it via `LogsUnsubscribe`.
+/// Scoped to the gateway peer - auto-released when the peer disconnects.
+@Serializable
+data class LogsSubscribe (
+	val source: LogSource,
+	val levels: List<LogLevel>,
+	val filter: String? = null
+)
+
+/// Reply to a gateway `LogsSubscribe`: the opaque token to pass back to
+/// `LogsUnsubscribe`.
+@Serializable
+data class LogsSubscribeReply (
+	val token: String
+)
+
+/// Pull a one-shot batch of recent daemon log entries over the gateway.
+/// Mirrors the client `LogsTail`; both feed the same `LogTap` ring.
+@Serializable
+data class LogsTail (
+	val source: LogSource,
+	val levels: List<LogLevel>,
+	val filter: String? = null,
+	val maxLines: UInt
+)
+
+/// One-shot reply to a gateway `LogsTail`.
+@Serializable
+data class LogsTailReply (
+	val entries: List<LogEntry>
+)
+
+@Serializable
+data class LogsUnsubscribe (
+	val token: String
+)
+
 @Serializable
 data class LyricLine (
 	val startMs: UInt,
@@ -3258,6 +3309,15 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("deviceNicknameChanged")
 	data class DeviceNicknameChanged(val data: DeviceNicknameReply): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("logsTailReply")
+	data class LogsTailReply(val data: dev.bridgething.schema.LogsTailReply): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("logsSubscribeReply")
+	data class LogsSubscribeReply(val data: dev.bridgething.schema.LogsSubscribeReply): BridgeToGatewaySystemMsg()
+	@Serializable
+	@SerialName("logEntry")
+	data class LogEntry(val data: dev.bridgething.schema.LogEntry): BridgeToGatewaySystemMsg()
 }
 
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
@@ -3595,6 +3655,15 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("deviceSetNickname")
 	data class DeviceSetNickname(val data: dev.bridgething.schema.DeviceSetNickname): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("logsTail")
+	data class LogsTail(val data: dev.bridgething.schema.LogsTail): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("logsSubscribe")
+	data class LogsSubscribe(val data: dev.bridgething.schema.LogsSubscribe): GatewayToBridgeSystemMsg()
+	@Serializable
+	@SerialName("logsUnsubscribe")
+	data class LogsUnsubscribe(val data: dev.bridgething.schema.LogsUnsubscribe): GatewayToBridgeSystemMsg()
 }
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce
@@ -3709,19 +3778,6 @@ sealed class Image {
 	@Serializable
 	@SerialName("bytes")
 	data class Bytes(val data: ByteArray): Image()
-}
-
-/// What stream of log records a subscription pulls from. `Daemon` is the
-/// bridgething tracing subscriber; `System` is the `journald` view; `All`
-/// merges both in arrival order.
-@Serializable
-enum class LogSource(val string: String) {
-	@SerialName("daemon")
-	Daemon("daemon"),
-	@SerialName("system")
-	System("system"),
-	@SerialName("all")
-	All("all"),
 }
 
 /// Generated type representing the anonymous struct variant `CallNotFound` of the `PhoneError` Rust enum

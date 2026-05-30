@@ -1,11 +1,23 @@
-use libbridgething::gateway::{
-  DeviceGetNickname, DeviceNicknameRejected, DeviceNicknameReply, DeviceSetNickname,
-  GatewayToBridgeSystemMsgCommandDispatch, GatewayToBridgeSystemMsgEventDispatch,
-  GatewayToBridgeSystemMsgRequestDispatch, OtaAbandon, OtaAssetRangeChunk, OtaBegin, OtaChunk,
+use std::{future::Future, pin::Pin};
+
+use libbridgething::{
+  gateway::{
+    BridgeToGatewayMsg, BridgeToGatewaySystemMsg, DeviceGetNickname, DeviceNicknameRejected, DeviceNicknameReply,
+    DeviceSetNickname, GatewayToBridgeSystemMsgCommandDispatch, GatewayToBridgeSystemMsgEventDispatch,
+    GatewayToBridgeSystemMsgRequestDispatch, LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply,
+    LogsUnsubscribe, OtaAbandon, OtaAssetRangeChunk, OtaBegin, OtaChunk,
+  },
+  wire::MsgMeta,
 };
+use uuid::Uuid;
 
 use super::handle::MsgHandle;
-use crate::{handler::HandlerResult, ota::OtaOrchestrator};
+use crate::{
+  bluetooth::OutboundGatewayMessage,
+  handler::HandlerResult,
+  ota::OtaOrchestrator,
+  state::log_tap::{LogOwner, LogSink},
+};
 
 const NICKNAME_MAX_LEN: usize = 64;
 
@@ -33,6 +45,18 @@ impl GatewayToBridgeSystemMsgCommandDispatch for SystemHandler {
   async fn cancel_update(&self) -> HandlerResult {
     tracing::info!("({:?}) CancelUpdate received", &self.handle.address);
     self.ota.cancel().await;
+    Ok(())
+  }
+
+  async fn logs_unsubscribe(&self, params: LogsUnsubscribe) -> HandlerResult {
+    let LogsUnsubscribe { token } = params;
+    let Ok(uuid) = Uuid::parse_str(&token) else {
+      tracing::trace!(%token, "({:?}) gateway logsUnsubscribe malformed token; dropping", &self.handle.address);
+      return Ok(());
+    };
+    if !self.handle.state.log_tap.unsubscribe(uuid) {
+      tracing::trace!(%token, "({:?}) gateway logsUnsubscribe unknown token; dropping", &self.handle.address);
+    }
     Ok(())
   }
 }
@@ -126,6 +150,53 @@ impl GatewayToBridgeSystemMsgRequestDispatch for SystemHandler {
     self
       .handle
       .respond_to::<DeviceSetNickname>(DeviceNicknameReply { nickname: next })
+      .await;
+    Ok(())
+  }
+
+  async fn logs_tail(&self, params: LogsTail) -> HandlerResult {
+    let entries = self.handle.state.log_tap.tail(
+      params.source,
+      &params.levels,
+      params.filter.as_deref(),
+      params.max_lines,
+    );
+    self.handle.respond_to::<LogsTail>(LogsTailReply { entries }).await;
+    Ok(())
+  }
+
+  async fn logs_subscribe(&self, params: LogsSubscribe) -> HandlerResult {
+    let bluetooth = self.handle.bluetooth.clone();
+    let address = self.handle.address;
+    let sink: LogSink = Box::new(move |entry| {
+      let bluetooth = bluetooth.clone();
+      Box::pin(async move {
+        bluetooth
+          .gateway_man
+          .send_all(OutboundGatewayMessage::new(
+            address,
+            BridgeToGatewayMsg {
+              id: Uuid::now_v7(),
+              meta: MsgMeta::Event,
+              data: BridgeToGatewaySystemMsg::LogEntry((*entry).clone()).into(),
+            },
+          ))
+          .await;
+        true
+      }) as Pin<Box<dyn Future<Output = bool> + Send>>
+    });
+    let token = self.handle.state.log_tap.subscribe(
+      LogOwner::Gateway(address),
+      sink,
+      params.source,
+      params.levels,
+      params.filter,
+    );
+    self
+      .handle
+      .respond_to::<LogsSubscribe>(LogsSubscribeReply {
+        token: token.to_string(),
+      })
       .await;
     Ok(())
   }

@@ -1480,6 +1480,57 @@ public struct SystemSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `System::LogsTailReply` messages.
+  public var logsTailReply: AsyncStream<(deviceId: String, msg: LogsTailReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .logsTailReply(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::LogsSubscribeReply` messages.
+  public var logsSubscribeReply: AsyncStream<(deviceId: String, msg: LogsSubscribeReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .logsSubscribeReply(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `System::LogEntry` messages.
+  public var logEntry: AsyncStream<(deviceId: String, msg: LogEntry)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .system(let outer) = message.data,
+             case .logEntry(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `OtaAssetRange` requests with handles for typed responses.
   public var otaAssetRangeRequests: AsyncStream<(handle: OtaAssetRangeHandle, req: OtaAssetRange)> {
     AsyncStream { continuation in
@@ -1554,6 +1605,20 @@ public struct SystemSurface: Sendable {
     }
   }
 
+  /// Send `System::LogsUnsubscribe` to every connected peer (broadcast).
+  public func logsUnsubscribe(_ payload: LogsUnsubscribe, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.logsUnsubscribe(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
   /// Typed request to a specific peer: companion sends, daemon responds.
   public func otaBegin(deviceId: String, _ req: OtaBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<OtaBeginAck, OtaBeginRejected> {
     let response = try await gateway.request(deviceId: deviceId, .system(.otaBegin(req)), timeout: timeout)
@@ -1591,6 +1656,34 @@ public struct SystemSurface: Sendable {
       switch inner {
       case .deviceNickname(let value): return .ok(value)
       case .deviceNicknameRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func logsTail(deviceId: String, _ req: LogsTail, timeout: Duration = .seconds(30)) async throws -> RequestResult<LogsTailReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.logsTail(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .logsTailReply(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func logsSubscribe(deviceId: String, _ req: LogsSubscribe, timeout: Duration = .seconds(30)) async throws -> RequestResult<LogsSubscribeReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.logsSubscribe(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .logsSubscribeReply(let value): return .ok(value)
       default: return .protocolError(.unsupported)
       }
     case .error(let err): return .protocolError(err)
@@ -3834,6 +3927,60 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `System::LogsTailReply` from this peer.
+  public var logsTailReply: AsyncStream<LogsTailReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .logsTailReply(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::LogsSubscribeReply` from this peer.
+  public var logsSubscribeReply: AsyncStream<LogsSubscribeReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .logsSubscribeReply(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `System::LogEntry` from this peer.
+  public var logEntry: AsyncStream<LogEntry> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .system(let outer) = message.data,
+             case .logEntry(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `OtaAssetRange` requests with handles for typed responses.
   public var otaAssetRangeRequests: AsyncStream<(handle: OtaAssetRangeHandle, req: OtaAssetRange)> {
     AsyncStream { continuation in
@@ -3877,6 +4024,12 @@ public struct SystemSurfaceForDevice: Sendable {
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
+  /// Send `System::LogsUnsubscribe` to this peer.
+  public func logsUnsubscribe(_ payload: LogsUnsubscribe, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.logsUnsubscribe(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
   /// Typed request to this peer: companion sends, daemon responds.
   public func otaBegin(_ req: OtaBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<OtaBeginAck, OtaBeginRejected> {
     let response = try await gateway.request(deviceId: deviceId, .system(.otaBegin(req)), timeout: timeout)
@@ -3914,6 +4067,34 @@ public struct SystemSurfaceForDevice: Sendable {
       switch inner {
       case .deviceNickname(let value): return .ok(value)
       case .deviceNicknameRejected(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func logsTail(_ req: LogsTail, timeout: Duration = .seconds(30)) async throws -> RequestResult<LogsTailReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.logsTail(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .logsTailReply(let value): return .ok(value)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func logsSubscribe(_ req: LogsSubscribe, timeout: Duration = .seconds(30)) async throws -> RequestResult<LogsSubscribeReply, Never> {
+    let response = try await gateway.request(deviceId: deviceId, .system(.logsSubscribe(req)), timeout: timeout)
+    switch response.data {
+    case .system(let inner):
+      switch inner {
+      case .logsSubscribeReply(let value): return .ok(value)
       default: return .protocolError(.unsupported)
       }
     case .error(let err): return .protocolError(err)

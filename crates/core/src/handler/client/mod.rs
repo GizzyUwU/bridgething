@@ -212,7 +212,10 @@ impl ClientHandler {
         );
         net::cleanup_owner_routes(&handle).await;
         geo::cleanup_owner_watchers(&handle).await;
-        handle.state.log_tap.drain_for_owner(handle.from);
+        handle
+          .state
+          .log_tap
+          .drain_for_owner(crate::state::log_tap::LogOwner::Client(handle.from));
       }
       RecvMsgData::Error(error) => {
         tracing::error!("({}) failed to receive message: {:?}", &handle.from, error);

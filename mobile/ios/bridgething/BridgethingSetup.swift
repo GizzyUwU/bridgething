@@ -92,7 +92,7 @@ enum BridgethingApp {
         BridgethingSpotifyAuthConfig(
             scopes: spotifyScopes,
             pkceClientId: pkceClientID,
-            pkceRedirectUri: "bridgething://oauth",
+            pkceRedirectUri: "https://discord.com/api/connections/spotify/callback",
             pkceAuthorizeUrl: "https://accounts.spotify.com/authorize",
             pkceTokenUrl: "https://accounts.spotify.com/api/token",
             deviceCodePsk: authPsk,
@@ -135,7 +135,7 @@ enum BridgethingApp {
             authorizationEndpoint: URL(string: "https://accounts.spotify.com/authorize")!,
             tokenEndpoint: URL(string: "https://accounts.spotify.com/api/token")!,
             clientID: pkceClientID,
-            redirectURI: "bridgething://oauth",
+            redirectURI: "https://discord.com/api/connections/spotify/callback",
             scopes: spotifyScopes
         )
         return { WebViewPKCEAuthenticator(configuration: configuration) }

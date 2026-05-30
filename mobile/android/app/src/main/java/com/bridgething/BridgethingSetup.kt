@@ -48,7 +48,7 @@ public object BridgethingApp {
     public fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingSpotifyAuthConfig(
         scopes = SPOTIFY_SCOPES.toTypedArray(),
         pkceClientId = "",
-        pkceRedirectUri = "bridgething://oauth",
+        pkceRedirectUri = "https://discord.com/api/connections/spotify/callback",
         pkceAuthorizeUrl = "https://accounts.spotify.com/authorize",
         pkceTokenUrl = "https://accounts.spotify.com/api/token",
         deviceCodePsk = BuildConfig.BRIDGETHING_AUTH_PSK,

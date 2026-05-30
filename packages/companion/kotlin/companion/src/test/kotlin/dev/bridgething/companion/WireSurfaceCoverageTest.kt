@@ -121,6 +121,8 @@ class WireSurfaceCoverageTest {
         "system.otaBeginRejected", "system.otaAssetRangeAbandon",
         // system nicknames
         "system.deviceNickname", "system.deviceNicknameChanged", "system.deviceNicknameRejected",
+        // system logs
+        "system.logEntry", "system.logsTailReply", "system.logsSubscribeReply",
         // voice
         "voice.streamOpen", "voice.frame", "voice.streamClose", "voice.dispatched", "voice.dispatchFailed",
         // webapp
