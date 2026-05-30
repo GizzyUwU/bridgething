@@ -1,8 +1,12 @@
 import type { HybridObject } from 'react-native-nitro-modules';
 
+export type BridgethingPeerLinkStatus = 'connected' | 'linkFailed';
+
 export type BridgethingSessionPeer = {
   id: string;
   name: string;
+  status: BridgethingPeerLinkStatus;
+  linkError?: string;
 };
 
 export type BridgethingProviderInfo = {
@@ -20,6 +24,19 @@ export type BridgethingAuthState = {
   verificationUrl?: string;
   verificationUrlComplete?: string;
   message?: string;
+};
+
+// build-injected Spotify auth config handed to the RN sign-in layer
+export type BridgethingSpotifyAuthConfig = {
+  scopes: string[];
+  pkceClientId: string;
+  pkceRedirectUri: string;
+  pkceAuthorizeUrl: string;
+  pkceTokenUrl: string;
+  deviceCodePsk: string;
+  deviceCodeUrl: string;
+  deviceCodeTokenUrl: string;
+  deviceCodeDescription: string;
 };
 
 // signed-in but degraded: the provider's API is throttling or unreachable.
@@ -163,6 +180,27 @@ export type BridgethingOtaEvent = {
   configuredChannel?: string;
 };
 
+export type BridgethingOtaRelease = {
+  version: string;
+  daemonVersion: string;
+  imageVersion: string;
+  yanked: boolean;
+  deprecated: boolean;
+};
+
+export type BridgethingOtaChannelInfo = {
+  name: string;
+  stability: string;
+  isDefault: boolean;
+  latest: string;
+  releases: BridgethingOtaRelease[];
+};
+
+export type BridgethingOtaManifest = {
+  updatedAt: string;
+  channels: BridgethingOtaChannelInfo[];
+};
+
 export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
 
 // `address` is a BT MAC on Android and an opaque identifier on iOS.
@@ -175,6 +213,7 @@ export type BridgethingBtDevice = {
 
 export type BridgethingDeviceMeta = {
   daemonVersion: string;
+  imageVersion: string;
   appName: string;
   osName: string;
   osVersion: string;
@@ -194,6 +233,58 @@ export type BridgethingHostInfo = {
   adapterVersion: string;
 };
 
+export type BridgethingDeviceMetaEntry = {
+  deviceId: string;
+  meta: BridgethingDeviceMeta;
+};
+
+export type BridgethingSessionSnapshot = {
+  hostInfo: BridgethingHostInfo;
+  provider?: BridgethingProviderInfo;
+  authState: BridgethingAuthState;
+  serviceHealth: BridgethingServiceHealth;
+  peers: BridgethingSessionPeer[];
+  ancsAuthStatus: BridgethingAncsAuthStatus;
+  nowPlaying?: BridgethingNowPlaying;
+  deviceMeta: BridgethingDeviceMetaEntry[];
+  capabilityFlags: BridgethingCapabilityFlags;
+  otaPollConfig?: BridgethingOtaPollConfig;
+};
+
+export type BridgethingDiagKind = 'frame' | 'log' | 'breadcrumb';
+export type BridgethingDiagDirection = 'outbound' | 'inbound';
+export type BridgethingDiagFrameKind = 'request' | 'response' | 'event' | 'command';
+
+export type BridgethingDiagEntry = {
+  seq: number;
+  ts: number;
+  kind: BridgethingDiagKind;
+
+  deviceId?: string;
+  direction?: BridgethingDiagDirection;
+  frameKind?: BridgethingDiagFrameKind;
+  surface?: string;
+  byteSize?: number;
+  requestId?: string;
+  latencyMs?: number;
+
+  level?: string;
+  target?: string;
+  message?: string;
+
+  category?: string;
+  detail?: string;
+  fields?: BridgethingConfigEntry[];
+};
+
+export type BridgethingCompanionDebug = {
+  authorityPlaybackHeld: boolean;
+  authorityMetadataHeld: boolean;
+  baselinePollActive: boolean;
+  hintFetchActive: boolean;
+  ancsAuthStatus: BridgethingAncsAuthStatus;
+};
+
 export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -204,14 +295,13 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   cancelAuth(): Promise<void>;
   signOut(): Promise<void>;
 
-  // Spotify sign-in flow selection. 'deviceCode' | 'pkce'. available reflects
-  // which the build is configured for; switching takes effect on next sign-in.
-  spotifyAuthMethod(): Promise<string>;
-  spotifyAuthMethodsAvailable(): Promise<string[]>;
-  setSpotifyAuthMethod(method: string): Promise<void>;
+  spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig>;
+  completeSpotifySignIn(accessToken: string, refreshToken: string, usesDealer: boolean): Promise<void>;
 
-  connectedPeers(): Promise<BridgethingSessionPeer[]>;
-  currentNowPlaying(): Promise<BridgethingNowPlaying | null>;
+  snapshot(): Promise<BridgethingSessionSnapshot>;
+
+  diagnosticsSnapshot(limit: number): Promise<BridgethingDiagEntry[]>;
+  companionDebug(): Promise<BridgethingCompanionDebug>;
 
   enableAncsNotifications(): Promise<BridgethingAncsSetupResult>;
   ancsAuthStatus(): Promise<BridgethingAncsAuthStatus>;
@@ -229,10 +319,11 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
   setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void>;
-  pollOtaNow(): Promise<void>;
-  deviceMeta(deviceId: string): Promise<BridgethingDeviceMeta | null>;
+  checkForOtaUpdate(channel: string, rootUrl: string | null): Promise<void>;
+  fetchOtaManifest(rootUrl: string | null): Promise<BridgethingOtaManifest>;
+  applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string | null): Promise<void>;
 
-  hostInfo(): Promise<BridgethingHostInfo>;
+  reconnectPeer(deviceId: string): Promise<void>;
 
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
 
@@ -250,10 +341,12 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnServiceHealthChanged(callback: (health: BridgethingServiceHealth) => void): void;
   setOnPeerConnected(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnPeerDisconnected(callback: (peerId: string) => void): void;
+  setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) => void): void;
   setOnNowPlayingChanged(callback: (now: BridgethingNowPlaying | null) => void): void;
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
+  setOnDiagEntry(callback: (entry: BridgethingDiagEntry) => void): void;
 
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;

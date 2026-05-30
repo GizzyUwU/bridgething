@@ -44,9 +44,7 @@ impl ProfileManager {
   pub async fn set_discoverable(&self, discoverable: bool) -> bluer::Result<()> {
     tracing::debug!("setting bluetooth discoverable to {:?}", &discoverable);
     self.adapter.set_discoverable(discoverable).await?;
-    if discoverable
-      && let Err(err) = super::scan::apply_fast_inquiry_scan(&self.adapter)
-    {
+    if discoverable && let Err(err) = super::scan::apply_fast_inquiry_scan(&self.adapter) {
       tracing::warn!(?err, "failed to apply fast inquiry scan params");
     }
     Ok(())

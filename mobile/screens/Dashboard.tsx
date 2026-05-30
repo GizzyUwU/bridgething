@@ -4,7 +4,13 @@ import {
   type BridgethingWebappInfo,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Cable, Pencil, Plus, RefreshCw } from 'lucide-react-native';
+import {
+  Cable,
+  Pencil,
+  Plus,
+  RefreshCw,
+  TriangleAlert,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,7 +23,9 @@ import { SectionHeader } from '../components/SectionHeader';
 import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { StatusStrip } from '../components/StatusStrip';
 import { WebappIcon } from '../components/WebappIcon';
+import { Button } from '../components/Button';
 import {
+  connectedPeers,
   getSession,
   peerDisplayName,
   updateNickname,
@@ -30,17 +38,14 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 export function DashboardScreen({ navigation }: Props) {
   const peers = useSession(s => s.peers);
   const provider = useSession(s => s.provider);
-  const ancsStatus = useSession(s => s.ancsAuthStatus);
-  const nicknames = useSession(s => s.nicknames);
+  const ledger = useSession(s => s.ledger);
 
-  const paired = ancsStatus !== 'unknown';
+  const live = connectedPeers(peers);
+  const linkFailed = peers.filter(p => p.status === 'linkFailed');
+  const hasPeer = live.length > 0;
   const signedIn = provider != null;
 
-  const status = describeStatus({
-    signedIn,
-    paired,
-    hasPeer: peers.length > 0,
-  });
+  const status = describeStatus({ signedIn, hasPeer });
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
@@ -64,12 +69,15 @@ export function DashboardScreen({ navigation }: Props) {
           />
         </View>
 
-        {peers.length === 0 ? <NoDeviceHero paired={paired} /> : null}
-        {peers.map(peer => (
+        {peers.length === 0 ? <NoDeviceHero /> : null}
+        {linkFailed.map(peer => (
+          <LinkFailedCard key={peer.id} peer={peer} />
+        ))}
+        {live.map(peer => (
           <DeviceSection
             key={peer.id}
             peer={peer}
-            nickname={nicknames[peer.id]}
+            nickname={ledger[peer.id]?.nickname ?? undefined}
             onAddApp={() =>
               navigation.navigate('WebappBrowse', { deviceId: peer.id })
             }
@@ -95,11 +103,9 @@ type StatusDescriptor = {
 
 function describeStatus({
   signedIn,
-  paired,
   hasPeer,
 }: {
   signedIn: boolean;
-  paired: boolean;
   hasPeer: boolean;
 }): StatusDescriptor {
   if (!signedIn) {
@@ -110,19 +116,12 @@ function describeStatus({
       action: 'signIn',
     };
   }
-  if (!paired) {
-    return {
-      tone: 'warn',
-      title: 'pair your Car Thing',
-      subtitle: 'tap to pair when your Car Thing is on',
-      action: 'pair',
-    };
-  }
   if (!hasPeer) {
     return {
-      tone: 'info',
-      title: 'Car Thing not in range',
-      subtitle: 'we’ll connect as soon as it powers on',
+      tone: 'warn',
+      title: 'connect your Car Thing',
+      subtitle: 'tap to pair when your Car Thing is on',
+      action: 'pair',
     };
   }
   return {
@@ -132,7 +131,7 @@ function describeStatus({
   };
 }
 
-function NoDeviceHero({ paired }: { paired: boolean }) {
+function NoDeviceHero() {
   return (
     <View className="mb-8 items-center px-2 py-10">
       <HeroPulse tint="primary" />
@@ -145,13 +144,58 @@ function NoDeviceHero({ paired }: { paired: boolean }) {
           letterSpacing: -0.5,
         }}
       >
-        {paired ? 'Car Thing not in range' : 'no Car Thing yet'}
+        no Car Thing connected
       </Text>
       <Text className="mt-2 text-center text-[14px] leading-[20px] text-muted-foreground">
-        {paired
-          ? 'plug it in or wake it up. the bridge auto-connects when it’s within Bluetooth range.'
-          : 'pair your Car Thing from the status strip above to get going.'}
+        pair it from the status strip above, or plug it in — the bridge
+        auto-connects when it’s within Bluetooth range.
       </Text>
+    </View>
+  );
+}
+
+function LinkFailedCard({ peer }: { peer: BridgethingSessionPeer }) {
+  const ledger = useSession(s => s.ledger);
+  const [busy, setBusy] = useState(false);
+
+  const reconnect = async () => {
+    setBusy(true);
+    try {
+      await getSession().reconnectPeer(peer.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View className="mb-8 rounded-2xl border border-border bg-surface p-4">
+      <View className="flex-row items-center gap-3">
+        <View className="h-11 w-11 items-center justify-center rounded-2xl bg-secondary">
+          <TriangleAlert size={20} color="hsl(38 92% 50%)" strokeWidth={2.2} />
+        </View>
+        <View className="flex-1">
+          <Text
+            className="text-[17px] font-extrabold text-foreground"
+            numberOfLines={1}
+            style={{ letterSpacing: -0.3 }}
+          >
+            {peerDisplayName(peer, ledger)}
+          </Text>
+          <Text className="mt-1 text-[12px] text-muted-foreground">
+            attached, but the link did not open
+          </Text>
+        </View>
+      </View>
+      {peer.linkError ? (
+        <Text className="mt-3 text-[12px] text-muted-foreground">
+          {peer.linkError}
+        </Text>
+      ) : null}
+      <View className="mt-3">
+        <Button onPress={reconnect} loading={busy} variant="tonal" size="md">
+          try reconnect
+        </Button>
+      </View>
     </View>
   );
 }
@@ -168,7 +212,7 @@ function DeviceSection({
   onTapApp: (appId: string) => void;
 }) {
   const session = getSession();
-  const nicknames = useSession(s => s.nicknames);
+  const ledger = useSession(s => s.ledger);
   const [webapps, setWebapps] = useState<BridgethingWebappInfo[]>([]);
   const [active, setActive] = useState<BridgethingActiveWebapp | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -236,7 +280,7 @@ function DeviceSection({
             numberOfLines={1}
             style={{ letterSpacing: -0.3 }}
           >
-            {peerDisplayName(peer, nicknames)}
+            {peerDisplayName(peer, ledger)}
           </Text>
           <View className="mt-1 flex-row items-center gap-1.5">
             <View className="h-1.5 w-1.5 rounded-full bg-success" />
@@ -372,4 +416,3 @@ function AddTile({ onPress }: { onPress: () => void }) {
     </Press>
   );
 }
-

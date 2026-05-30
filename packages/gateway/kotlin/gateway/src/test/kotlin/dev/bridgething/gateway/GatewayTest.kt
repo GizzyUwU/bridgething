@@ -43,6 +43,18 @@ class GatewayTest {
   }
 
   @Test
+  fun `reconnect forwards to adapter`() = runBlocking {
+    val adapter = MockAdapter()
+    val gateway = BridgethingGateway(adapter, codec)
+    gateway.start()
+
+    gateway.reconnect(testDevice.id)
+    assertEquals(listOf(testDevice.id), adapter.reconnectCalls)
+
+    gateway.stop()
+  }
+
+  @Test
   fun `decodes incoming frames into messages`() = runBlocking {
     val adapter = MockAdapter()
     val gateway = BridgethingGateway(adapter, codec)

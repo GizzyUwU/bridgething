@@ -90,13 +90,7 @@ fn send_command(sock: &OwnedFd, opcode: u16, params: &[u8]) -> io::Result<()> {
   packet.extend_from_slice(params);
 
   // SAFETY: writing our owned buffer to the bound raw HCI socket fd.
-  let written = unsafe {
-    libc::write(
-      sock.as_raw_fd(),
-      packet.as_ptr() as *const libc::c_void,
-      packet.len(),
-    )
-  };
+  let written = unsafe { libc::write(sock.as_raw_fd(), packet.as_ptr() as *const libc::c_void, packet.len()) };
   if written < 0 {
     return Err(io::Error::last_os_error());
   }

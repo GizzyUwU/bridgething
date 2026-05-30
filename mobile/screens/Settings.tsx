@@ -1,12 +1,12 @@
 import {
   type BridgethingCapabilityFlags,
   type BridgethingDeviceMeta,
-  type BridgethingHostInfo,
   type BridgethingOtaPollConfig,
   type BridgethingProviderInfo,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  Activity,
   Bell,
   Cable,
   ChevronDown,
@@ -18,6 +18,7 @@ import {
   LogOut,
   MapPin,
   MoonStar,
+  MoreHorizontal,
   Phone,
   Plus,
   RadioTower,
@@ -30,6 +31,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  type AlertButton,
   AppState,
   Linking,
   Platform,
@@ -54,17 +56,33 @@ import { ListRow } from '../components/ListRow';
 import { PendingAuth } from '../components/PendingAuth';
 import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
+import { RenameSheet } from '../components/RenameSheet';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { Segmented } from '../components/Segmented';
+import { type OtaDeviceStatus, useOta } from '../lib/ota';
 import {
+  connectedPeers,
+  forgetKnownDevice,
   getSession,
+  type KnownDevice,
+  knownDevices,
   peerDisplayName,
   updateCapabilityFlags,
+  updateNickname,
   updateOtaPollConfig,
   useSession,
 } from '../lib/session';
+import { relativeTime } from '../lib/utils';
+import {
+  type SpotifyAuthMethod,
+  availableAuthMethods,
+  cancelSignIn,
+  effectiveAuthMethod,
+  setPreferredAuthMethod,
+  signIn as signInSpotify,
+} from '../lib/spotify-auth';
 import { DEFAULT_OTA_POLL_CONFIG } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
@@ -81,12 +99,15 @@ export function SettingsScreen({ navigation }: Props) {
   const authState = useSession(s => s.authState);
   const flags = useSession(s => s.capabilityFlags);
   const pollConfig = useSession(s => s.otaPollConfig);
-  const nicknames = useSession(s => s.nicknames);
+  const ledger = useSession(s => s.ledger);
+  const metaByDevice = useSession(s => s.deviceMeta);
+  const host = useSession(s => s.hostInfo);
+  const otaByDevice = useOta(s => s.byDevice);
 
-  const [metaByDevice, setMetaByDevice] = useState<
-    Record<string, BridgethingDeviceMeta>
-  >({});
-  const [host, setHost] = useState<BridgethingHostInfo | null>(null);
+  const livePeers = connectedPeers(peers);
+  const known = knownDevices(ledger, peers);
+  const selectedChannel = (pollConfig?.channel as 'stable' | 'dev') ?? 'stable';
+
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
   const [providers, setProviders] = useState<BridgethingProviderInfo[]>([]);
@@ -110,42 +131,12 @@ export function SettingsScreen({ navigation }: Props) {
   };
 
   const refresh = useCallback(async () => {
-    const [h, providerList] = await Promise.all([
-      session.hostInfo(),
-      session.availableProviders(),
-    ]);
-    setHost(h);
-    setProviders(providerList);
-    const metaEntries = await Promise.all(
-      peers.map(async peer => {
-        const meta = await session.deviceMeta(peer.id);
-        return [peer.id, meta] as const;
-      }),
-    );
-    const next: Record<string, BridgethingDeviceMeta> = {};
-    for (const [peerId, meta] of metaEntries) {
-      if (meta) next[peerId] = meta;
-    }
-    setMetaByDevice(next);
-  }, [peers, session]);
+    setProviders(await session.availableProviders());
+  }, [session]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    return session.subscribe(event => {
-      if (event.type === 'deviceMetaChanged') {
-        setMetaByDevice(prev => ({ ...prev, [event.deviceId]: event.meta }));
-      } else if (event.type === 'peerDisconnected') {
-        setMetaByDevice(prev => {
-          const next = { ...prev };
-          delete next[event.peerId];
-          return next;
-        });
-      }
-    });
-  }, [session]);
 
   const writeFlags = async (next: BridgethingCapabilityFlags) => {
     try {
@@ -158,37 +149,46 @@ export function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  const setChannel = async (channel: 'stable' | 'dev') => {
+  // autoPush defaults OFF when a config is first created so picking a channel
+  // (or any background check) never silently opts the user into auto-install.
+  const writePollConfig = async (
+    partial: Partial<BridgethingOtaPollConfig>,
+  ) => {
     const next: BridgethingOtaPollConfig = {
-      channel,
+      channel: partial.channel ?? pollConfig?.channel ?? selectedChannel,
       intervalSeconds:
-        pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
-      autoPush: pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush,
-      rootUrl: pollConfig?.rootUrl,
-    };
-    await updateOtaPollConfig(next);
-  };
-
-  const toggleAutoPush = async (autoPush: boolean) => {
-    const next: BridgethingOtaPollConfig = {
-      channel: pollConfig?.channel ?? DEFAULT_OTA_POLL_CONFIG.channel,
-      intervalSeconds:
-        pollConfig?.intervalSeconds ?? DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
-      autoPush,
-      rootUrl: pollConfig?.rootUrl,
+        partial.intervalSeconds ??
+        pollConfig?.intervalSeconds ??
+        DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
+      autoPush: partial.autoPush ?? pollConfig?.autoPush ?? false,
+      rootUrl: partial.rootUrl ?? pollConfig?.rootUrl,
     };
     await updateOtaPollConfig(next);
   };
 
   const checkForUpdate = async () => {
-    if (!pollConfig) {
-      await updateOtaPollConfig({ ...DEFAULT_OTA_POLL_CONFIG });
-    }
     setPollBusy(true);
     try {
-      await session.pollOtaNow();
+      await session.checkForOtaUpdate(selectedChannel, null);
     } finally {
       setPollBusy(false);
+    }
+  };
+
+  const installLatest = async (deviceId: string) => {
+    try {
+      const manifest = await session.fetchOtaManifest(null);
+      const latest = manifest.channels.find(
+        c => c.name === selectedChannel,
+      )?.latest;
+      if (latest) {
+        await session.applyOtaUpdate(deviceId, selectedChannel, latest, null);
+      }
+    } catch (err) {
+      Alert.alert(
+        'install failed',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   };
 
@@ -196,16 +196,17 @@ export function SettingsScreen({ navigation }: Props) {
     if (signInBusy) return;
     setSignInBusy(id);
     try {
-      await session.setActiveProvider(id);
+      if (id === 'spotify') await signInSpotify();
+      else await session.setActiveProvider(id);
     } catch {
-      // setActiveProvider routes failures via authStateChanged
+      // failures surface via authState
     } finally {
       setSignInBusy(null);
     }
   };
 
-  const cancelAuth = async () => {
-    await session.cancelAuth();
+  const cancelAuth = () => {
+    cancelSignIn();
     setSignInBusy(null);
   };
 
@@ -304,27 +305,17 @@ export function SettingsScreen({ navigation }: Props) {
 
         <View className="mb-7">
           <SectionHeader title="devices" />
-          {peers.length === 0 ? (
+          {known.length === 0 ? (
             <SectionEmpty>connect a Car Thing to see its details</SectionEmpty>
           ) : (
             <ListGroup>
-              {peers.map(peer => {
-                const meta = metaByDevice[peer.id];
-                return (
-                  <ListRow
-                    key={peer.id}
-                    icon={Cable}
-                    iconTint="primary"
-                    title={peerDisplayName(peer, nicknames)}
-                    subtitle={
-                      meta
-                        ? `${meta.modelName} · ${meta.osName}`
-                        : 'reading device info…'
-                    }
-                    value={meta ? `daemon ${meta.daemonVersion}` : undefined}
-                  />
-                );
-              })}
+              {known.map(device => (
+                <DeviceRow
+                  key={device.id}
+                  device={device}
+                  meta={metaByDevice[device.id]}
+                />
+              ))}
             </ListGroup>
           )}
           <View className="mt-3">
@@ -351,8 +342,8 @@ export function SettingsScreen({ navigation }: Props) {
             </Text>
             <Segmented
               options={CHANNELS}
-              value={(pollConfig?.channel as 'stable' | 'dev') ?? 'stable'}
-              onChange={c => setChannel(c)}
+              value={selectedChannel}
+              onChange={c => writePollConfig({ channel: c })}
             />
             <View className="mt-4 flex-row items-center justify-between">
               <View className="flex-1 pr-3">
@@ -365,7 +356,7 @@ export function SettingsScreen({ navigation }: Props) {
               </View>
               <Switch
                 value={pollConfig?.autoPush ?? false}
-                onValueChange={toggleAutoPush}
+                onValueChange={autoPush => writePollConfig({ autoPush })}
               />
             </View>
           </View>
@@ -380,6 +371,21 @@ export function SettingsScreen({ navigation }: Props) {
               check for updates now
             </Button>
           </View>
+
+          {livePeers.map(peer => (
+            <OtaDeviceCard
+              key={peer.id}
+              name={peerDisplayName(peer, ledger)}
+              status={otaByDevice[peer.id]}
+              onInstall={() => installLatest(peer.id)}
+              onPickVersion={() =>
+                navigation.navigate('OtaVersions', {
+                  deviceId: peer.id,
+                  channel: selectedChannel,
+                })
+              }
+            />
+          ))}
         </View>
 
         <View className="mb-7">
@@ -471,10 +477,18 @@ export function SettingsScreen({ navigation }: Props) {
           <SectionHeader title="diagnostics" />
           <ListGroup>
             <ListRow
+              icon={Activity}
+              iconTint="default"
+              title="debug inspector"
+              subtitle="now-playing merge, wire frames, companion state"
+              chevron
+              onPress={() => navigation.navigate('Debug')}
+            />
+            <ListRow
               icon={TerminalSquare}
               iconTint="default"
               title="live log stream"
-              subtitle="for debugging — pulls real cost while open"
+              subtitle="device logs over Bluetooth — pulls real cost while on"
               chevron
               onPress={() => navigation.navigate('Logs')}
             />
@@ -518,6 +532,131 @@ export function SettingsScreen({ navigation }: Props) {
   );
 }
 
+function DeviceRow({
+  device,
+  meta,
+}: {
+  device: KnownDevice;
+  meta?: BridgethingDeviceMeta;
+}) {
+  const [renameOpen, setRenameOpen] = useState(false);
+  const connected = device.peer?.status === 'connected';
+  const linkFailed = device.peer?.status === 'linkFailed';
+
+  const openMenu = () => {
+    const buttons: AlertButton[] = [
+      { text: 'rename', onPress: () => setRenameOpen(true) },
+    ];
+    if (!connected && !linkFailed) {
+      buttons.push({
+        text: 'forget this device',
+        style: 'destructive',
+        onPress: () => forgetKnownDevice(device.id),
+      });
+    }
+    buttons.push({ text: 'cancel', style: 'cancel' });
+    Alert.alert(device.displayName, undefined, buttons);
+  };
+
+  const subtitle = connected
+    ? meta
+      ? `${meta.modelName} · ${meta.osName}`
+      : 'reading device info…'
+    : linkFailed
+      ? 'attached, but the link did not open'
+      : device.lastConnectedAt > 0
+        ? `last connected ${relativeTime(device.lastConnectedAt)}`
+        : 'not connected';
+
+  return (
+    <>
+      <RenameSheet
+        visible={renameOpen}
+        title="rename your Car Thing"
+        message="this nickname only shows up here on your phone."
+        initialValue={device.nickname ?? ''}
+        placeholder={device.peer?.name ?? device.displayName}
+        onSubmit={value => updateNickname(device.id, value)}
+        onClose={() => setRenameOpen(false)}
+      />
+      <ListRow
+        icon={Cable}
+        iconTint={connected ? 'primary' : 'default'}
+        title={device.displayName}
+        subtitle={subtitle}
+        value={
+          connected && meta
+            ? `${meta.daemonVersion}+${meta.imageVersion}`
+            : undefined
+        }
+        trailing={
+          <MoreHorizontal
+            size={18}
+            color="hsl(215 14% 60%)"
+            strokeWidth={2.2}
+          />
+        }
+        onPress={openMenu}
+      />
+    </>
+  );
+}
+
+function OtaDeviceCard({
+  name,
+  status,
+  onInstall,
+  onPickVersion,
+}: {
+  name: string;
+  status?: OtaDeviceStatus;
+  onInstall: () => void;
+  onPickVersion: () => void;
+}) {
+  const available = status?.availableTo ?? null;
+  const installing = status?.installing ?? false;
+
+  return (
+    <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
+      <Text className="text-[14px] font-semibold text-foreground">{name}</Text>
+      {installing ? (
+        <Text className="mt-1 text-[12px] text-muted-foreground">
+          {status?.phase ?? 'installing'} · {status?.percent ?? 0}%
+        </Text>
+      ) : available ? (
+        <View className="mt-2">
+          <Text className="mb-2 text-[12px] text-muted-foreground">
+            update available: {available}
+          </Text>
+          <Button onPress={onInstall} size="md">
+            install update
+          </Button>
+        </View>
+      ) : status?.phase === 'completed' ? (
+        <Text className="mt-1 text-[12px] text-muted-foreground">
+          updated — Car Thing is rebooting
+        </Text>
+      ) : null}
+      {status?.error ? (
+        <Text className="mt-2 text-[12px] text-destructive">
+          {status.error}
+        </Text>
+      ) : null}
+      <Press
+        onPress={onPickVersion}
+        scaleTo={0.99}
+        fade={false}
+        className="mt-3 flex-row items-center gap-1 py-1"
+      >
+        <Text className="text-[13px] font-semibold text-primary">
+          choose a specific version
+        </Text>
+        <ChevronRight size={14} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+      </Press>
+    </View>
+  );
+}
+
 function FlagRow({
   icon,
   title,
@@ -542,20 +681,17 @@ function FlagRow({
   );
 }
 
-/** Power-user control to switch the Spotify sign-in flow. Hidden unless the
- *  build ships more than one method. Switching signs out so the next sign-in
- *  uses the chosen flow. */
 function SpotifyAuthMethodControl() {
   const session = getSession();
-  const [available, setAvailable] = useState<string[]>([]);
-  const [method, setMethod] = useState<string | null>(null);
+  const [available, setAvailable] = useState<SpotifyAuthMethod[]>([]);
+  const [method, setMethod] = useState<SpotifyAuthMethod | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const [avail, current] = await Promise.all([
-        session.spotifyAuthMethodsAvailable(),
-        session.spotifyAuthMethod(),
+        availableAuthMethods(),
+        effectiveAuthMethod(),
       ]);
       if (!cancelled) {
         setAvailable(avail);
@@ -565,7 +701,7 @@ function SpotifyAuthMethodControl() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, []);
 
   if (available.length < 2 || method == null) return null;
 
@@ -581,9 +717,9 @@ function SpotifyAuthMethodControl() {
           style: 'destructive',
           onPress: () => {
             (async () => {
-              await session.setSpotifyAuthMethod(next);
+              setPreferredAuthMethod(next as SpotifyAuthMethod);
               await session.signOut();
-              setMethod(next);
+              setMethod(next as SpotifyAuthMethod);
             })().catch(() => {});
           },
         },
@@ -594,7 +730,7 @@ function SpotifyAuthMethodControl() {
   const options = [
     { value: 'deviceCode', label: 'device code' },
     { value: 'pkce', label: 'browser' },
-  ].filter(o => available.includes(o.value));
+  ].filter(o => available.includes(o.value as SpotifyAuthMethod));
 
   return (
     <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
@@ -697,7 +833,7 @@ function BackgroundLocationRow() {
     refresh();
   }, [refresh]);
 
-  // recheck on foreground; user may have changed the permission in system settings.
+  // recheck on foreground; user may have changed the permission in system settings
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -715,7 +851,7 @@ function BackgroundLocationRow() {
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // revoking only the bg variant downgrades to while-using; drop fine+coarse for a full revoke.
+      // revoking only the bg variant downgrades to while-using; drop fine+coarse for a full revoke
       Alert.alert(
         'restart bridgething?',
         'to revoke location, android needs to kill + restart the app. revoke now?',
@@ -751,7 +887,7 @@ function BackgroundLocationRow() {
                   'restarting bridgething…',
                   ToastAndroid.SHORT,
                 );
-                // give the toast a beat to render before killing the process.
+                // give the toast a beat to render before killing the process
                 setTimeout(() => {
                   session.killApp().catch(() => {});
                 }, 500);
@@ -826,7 +962,7 @@ function NotificationListenerRow({
     refresh();
   }, [refresh]);
 
-  // recheck on foreground; user may have toggled access in system settings.
+  // recheck on foreground; user may have toggled access in system settings
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -859,7 +995,7 @@ function NotificationListenerRow({
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // no programmatic revoke for NotificationListenerService.
+      // no programmatic revoke for NotificationListenerService
       Alert.alert(
         'revoke in settings',
         'android only lets you revoke notification access from system settings. open it?',

@@ -16,6 +16,13 @@
   ///    `UIBackgroundModes`. App Store distribution gates `external-accessory`
   ///    background mode through review; sideloaded apps still get it.
   ///
+  /// iOS reports `.EAAccessoryDidConnect` (and lists the accessory in
+  /// `connectedAccessories` at cold launch) before the MFi session is actually
+  /// ready, so `EASession(accessory:forProtocol:)` returns nil for a few seconds.
+  /// Opens therefore retry with backoff, and the peer is reported connected only
+  /// once both streams reach `.openCompleted` (not when the session object is
+  /// created). Exhausting the retries yields `.linkFailed`.
+  ///
   /// Threading: streams are scheduled on the main RunLoop, so all stream
   /// delegate callbacks run on the main thread. Public Adapter methods marshal
   /// onto the main thread via `MainActor.run`. RFCOMM bandwidth (~700 kbps peak)
@@ -25,10 +32,12 @@
     private let eventContinuation: AsyncStream<AdapterEvent>.Continuation
 
     private let protocolString: String
+    private let maxOpenAttempts = 6
 
     // The trailing state is only read or mutated from the main thread: public methods hop via
     // MainActor.run and stream/notification callbacks fire on main because we scheduled them there.
     private var sessions: [String: SessionState] = [:]
+    private var retryTasks: [String: Task<Void, Never>] = [:]
     private var observers: [NSObjectProtocol] = []
     private var started = false
 
@@ -83,6 +92,8 @@
         self.observers.removeAll()
         EAAccessoryManager.shared().unregisterForLocalNotifications()
 
+        for (_, task) in self.retryTasks { task.cancel() }
+        self.retryTasks.removeAll()
         for (_, session) in self.sessions {
           session.tearDown()
         }
@@ -94,6 +105,7 @@
 
     public func disconnect(deviceId: String) async throws {
       let known = await MainActor.run { () -> Bool in
+        self.retryTasks.removeValue(forKey: deviceId)?.cancel()
         guard let session = self.sessions.removeValue(forKey: deviceId) else { return false }
         session.tearDown()
         self.eventContinuation.yield(.disconnected(deviceId: deviceId))
@@ -102,9 +114,20 @@
       if !known { throw AdapterError.unknownDevice(deviceId) }
     }
 
+    public func reconnect(deviceId: String) async throws {
+      try await MainActor.run {
+        self.retryTasks.removeValue(forKey: deviceId)?.cancel()
+        self.sessions.removeValue(forKey: deviceId)?.tearDown()
+        guard let accessory = EAAccessoryManager.shared().connectedAccessories
+          .first(where: { Self.deviceId(for: $0) == deviceId })
+        else { throw AdapterError.unknownDevice(deviceId) }
+        self.tryOpenSession(for: accessory)
+      }
+    }
+
     public func send(deviceId: String, frame: Data) async throws {
       let result: Result<Void, AdapterError> = await MainActor.run {
-        guard let session = self.sessions[deviceId] else {
+        guard let session = self.sessions[deviceId], session.isLinkedUp else {
           return .failure(.unknownDevice(deviceId))
         }
         session.enqueueWrite(frame)
@@ -119,6 +142,26 @@
       eventContinuation.yield(.bytes(deviceId: deviceId, bytes))
     }
 
+    /// Both streams reached `.openCompleted`; the link is usable.
+    fileprivate func linkUp(_ state: SessionState) {
+      let id = state.deviceId
+      guard sessions[id] === state else { return }
+      retryTasks.removeValue(forKey: id)?.cancel()
+      DiagnosticsBuffer.shared.recordBreadcrumb(
+        category: "ea.link", detail: "link up", fields: [("device", id)]
+      )
+      eventContinuation.yield(.connected(Device(id: id, name: state.accessory.name)))
+    }
+
+    /// A stream errored or closed before the link came up; tear down and retry.
+    fileprivate func linkOpenFailed(_ state: SessionState, reason: String) {
+      let id = state.deviceId
+      if sessions[id] === state { sessions.removeValue(forKey: id) }
+      state.tearDown()
+      scheduleRetryOrFail(accessory: state.accessory, attempt: state.attempt, reason: reason)
+    }
+
+    /// Stream end after the link was up: a normal disconnect.
     fileprivate func handleStreamEnd(deviceId: String) {
       if let session = sessions.removeValue(forKey: deviceId) {
         session.tearDown()
@@ -127,24 +170,56 @@
     }
 
     private func handleDisconnect(deviceId: String) {
+      retryTasks.removeValue(forKey: deviceId)?.cancel()
       if let session = sessions.removeValue(forKey: deviceId) {
         session.tearDown()
         eventContinuation.yield(.disconnected(deviceId: deviceId))
       }
     }
 
-    private func tryOpenSession(for accessory: EAAccessory) {
+    private func tryOpenSession(for accessory: EAAccessory, attempt: Int = 0) {
       guard accessory.protocolStrings.contains(protocolString) else { return }
       let id = Self.deviceId(for: accessory)
       if sessions[id] != nil { return }
-      // Session creation fails when iOS rejects the accessory (e.g. protocol string not declared in
-      // UISupportedExternalAccessoryProtocols). No "connected" event was emitted, so nothing to undo.
+
       guard let session = EASession(accessory: accessory, forProtocol: protocolString) else {
+        scheduleRetryOrFail(
+          accessory: accessory, attempt: attempt,
+          reason: "EASession(accessory:forProtocol:) returned nil"
+        )
         return
       }
-      let state = SessionState(accessory: accessory, session: session, owner: self)
-      sessions[id] = state
-      eventContinuation.yield(.connected(Device(id: id, name: accessory.name)))
+      sessions[id] = SessionState(accessory: accessory, session: session, owner: self, attempt: attempt)
+    }
+
+    private func scheduleRetryOrFail(accessory: EAAccessory, attempt: Int, reason: String) {
+      let id = Self.deviceId(for: accessory)
+      DiagnosticsBuffer.shared.recordBreadcrumb(
+        category: "ea.link",
+        detail: "open attempt \(attempt + 1) failed: \(reason)",
+        fields: [("device", id)]
+      )
+      guard attempt + 1 < maxOpenAttempts else {
+        DiagnosticsBuffer.shared.recordLog(
+          level: "error", target: "ea",
+          message: "link failed for \(id) after \(attempt + 1) attempts: \(reason)"
+        )
+        eventContinuation.yield(.linkFailed(deviceId: id, name: accessory.name, reason: reason))
+        return
+      }
+      let delay = min(0.5 * pow(2.0, Double(attempt)), 4.0)
+      retryTasks[id]?.cancel()
+      // re-resolve the accessory by id inside the task rather than capturing the
+      // non-Sendable EAAccessory across the actor hop; if it's gone, give up.
+      retryTasks[id] = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        guard let self, !Task.isCancelled else { return }
+        self.retryTasks.removeValue(forKey: id)
+        guard let next = EAAccessoryManager.shared().connectedAccessories
+          .first(where: { Self.deviceId(for: $0) == id })
+        else { return }
+        self.tryOpenSession(for: next, attempt: attempt + 1)
+      }
     }
 
     private static func deviceId(for accessory: EAAccessory) -> String {
@@ -156,18 +231,25 @@
   private final class SessionState: NSObject, StreamDelegate, @unchecked Sendable {
     let accessory: EAAccessory
     let session: EASession
+    let attempt: Int
     weak var owner: EAAccessoryAdapter?
     var pendingWrites = Data()
+
+    private var inputOpen = false
+    private var outputOpen = false
+    private(set) var isLinkedUp = false
+    private var openFailed = false
 
     var deviceId: String {
       let serial = accessory.serialNumber
       return serial.isEmpty ? "ea-\(accessory.connectionID)" : serial
     }
 
-    init(accessory: EAAccessory, session: EASession, owner: EAAccessoryAdapter) {
+    init(accessory: EAAccessory, session: EASession, owner: EAAccessoryAdapter, attempt: Int) {
       self.accessory = accessory
       self.session = session
       self.owner = owner
+      self.attempt = attempt
       super.init()
       if let input = session.inputStream {
         input.delegate = self
@@ -213,6 +295,13 @@
 
     func stream(_ aStream: Stream, handle eventCode: Stream.Event) {
       switch eventCode {
+      case .openCompleted:
+        if aStream === session.inputStream { inputOpen = true }
+        if aStream === session.outputStream { outputOpen = true }
+        if inputOpen, outputOpen, !isLinkedUp {
+          isLinkedUp = true
+          owner?.linkUp(self)
+        }
       case .hasBytesAvailable:
         guard let input = aStream as? InputStream else { return }
         var buffer = [UInt8](repeating: 0, count: 4096)
@@ -227,7 +316,13 @@
       case .hasSpaceAvailable:
         drainOutput()
       case .endEncountered, .errorOccurred:
-        owner?.handleStreamEnd(deviceId: deviceId)
+        if isLinkedUp {
+          owner?.handleStreamEnd(deviceId: deviceId)
+        } else if !openFailed {
+          openFailed = true
+          let reason = eventCode == .errorOccurred ? "stream error during open" : "stream closed during open"
+          owner?.linkOpenFailed(self, reason: reason)
+        }
       default:
         break
       }

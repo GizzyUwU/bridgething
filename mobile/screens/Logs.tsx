@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pause, Play, Share2, Trash2 } from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,65 +13,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Press } from '../components/Press';
 import { Segmented } from '../components/Segmented';
-import { getSession } from '../lib/session';
+import { type DeviceLogLine, useDiagnostics } from '../lib/diagnostics';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Logs'>;
 
-type LogEntry = {
-  id: number;
-  ts: number;
-  level: string;
-  message: string;
-};
-
 const LEVELS = ['all', 'debug', 'info', 'warn', 'error'] as const;
 type LevelFilter = (typeof LEVELS)[number];
 
-const BUFFER_LIMIT = 500;
-
 export function LogsScreen({}: Props) {
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const entries = useDiagnostics(s => s.deviceLogs);
+  const streaming = useDiagnostics(s => s.logStreaming);
+  const setStreaming = useDiagnostics(s => s.setLogStreaming);
+  const clearLogs = useDiagnostics(s => s.clearDeviceLogs);
   const [filter, setFilter] = useState<LevelFilter>('all');
-  const [paused, setPaused] = useState(false);
-  const counter = useRef(0);
-
-  // Subscribe to native log events while not paused. Pausing decrements
-  // the native streaming refcount via setLogStreamingEnabled(false), so
-  // the daemon stops shipping lines rather than us just dropping them.
-  useEffect(() => {
-    if (paused) return undefined;
-    const session = getSession();
-    session.setLogStreamingEnabled(true);
-    const off = session.subscribe(event => {
-      if (event.type !== 'log') return;
-      setEntries(prev => {
-        const next = [
-          ...prev,
-          {
-            id: counter.current++,
-            ts: Date.now(),
-            level: event.level,
-            message: event.message,
-          },
-        ];
-        if (next.length > BUFFER_LIMIT)
-          next.splice(0, next.length - BUFFER_LIMIT);
-        return next;
-      });
-    });
-    return () => {
-      off();
-      session.setLogStreamingEnabled(false);
-    };
-  }, [paused]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return entries;
     return entries.filter(e => e.level === filter);
   }, [entries, filter]);
-
-  const clear = () => setEntries([]);
 
   const share = async () => {
     if (entries.length === 0) {
@@ -103,19 +63,19 @@ export function LogsScreen({}: Props) {
         <View className="mt-3 flex-row items-center justify-between">
           <Text className="text-[12px] text-muted-foreground">
             {filtered.length} / {entries.length} entries
-            {paused ? ' · paused' : ''}
+            {streaming ? ' · streaming' : ' · stopped'}
           </Text>
           <View className="flex-row gap-1.5">
             <ToolbarBtn
-              icon={paused ? Play : Pause}
-              label={paused ? 'resume' : 'pause'}
-              onPress={() => setPaused(p => !p)}
+              icon={streaming ? Pause : Play}
+              label={streaming ? 'stop' : 'start'}
+              onPress={() => setStreaming(!streaming)}
             />
             <ToolbarBtn icon={Share2} label="share" onPress={share} />
             <ToolbarBtn
               icon={Trash2}
               label="clear"
-              onPress={clear}
+              onPress={clearLogs}
               destructive
             />
           </View>
@@ -125,7 +85,9 @@ export function LogsScreen({}: Props) {
         <View className="flex-1 items-center justify-center p-6">
           <Text className="text-center text-[14px] text-muted-foreground">
             {entries.length === 0
-              ? 'no log lines yet'
+              ? streaming
+                ? 'streaming — no log lines yet'
+                : 'press start to stream device logs'
               : 'no entries match this filter'}
           </Text>
         </View>
@@ -173,7 +135,7 @@ function ToolbarBtn({
   );
 }
 
-function renderRow({ item }: ListRenderItemInfo<LogEntry>) {
+function renderRow({ item }: ListRenderItemInfo<DeviceLogLine>) {
   return (
     <View className="border-b border-border/50 py-1.5">
       <View className="flex-row items-center gap-2">
@@ -234,6 +196,6 @@ function formatTime(ts: number): string {
   );
 }
 
-function formatEntry(e: LogEntry): string {
+function formatEntry(e: DeviceLogLine): string {
   return `[${formatTime(e.ts)}] ${e.level.toUpperCase().padEnd(5)} ${e.message}`;
 }

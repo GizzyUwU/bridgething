@@ -265,6 +265,56 @@ public class OtaService(
         if (cfg != null && gw != null) poll(cfg, gw)
     }
 
+    /**
+     * One-shot "check now": polls the channel and emits UpdateAvailable /
+     * ChannelMismatch for connected devices without persisting config or
+     * auto-pushing. Independent of the background poll loop.
+     */
+    public suspend fun checkNow(channel: String, rootUrl: String) {
+        val gw = mutex.withLock { attachedGateway } ?: return
+        poll(OtaPollConfig(rootUrl = rootUrl, channel = channel, autoPush = false), gw)
+    }
+
+    /** Full discover manifest for the version picker. */
+    public suspend fun discoverManifest(rootUrl: String): OtaDiscoverManifest =
+        fetchManifest("${rootUrl.trimEnd('/')}/manifest.json")
+
+    /**
+     * Manual install of a specific composite version. Pushes the daemon delta
+     * first (image rides the next poll once the daemon restarts), then the
+     * image delta. Reuses the auto-push engine; ignores `autoPush`.
+     */
+    public suspend fun applyVersion(deviceId: String, channel: String, version: String, rootUrl: String) {
+        val gateway = mutex.withLock { attachedGateway } ?: run {
+            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "gateway not attached"))
+            return
+        }
+        val composite = OtaCompositeVersion.parse(version) ?: run {
+            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "'$version' is not a composite version"))
+            return
+        }
+        val meta = deviceMetaMutex.withLock { deviceMeta[deviceId] } ?: run {
+            eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "device meta not yet known"))
+            return
+        }
+        if (mutex.withLock { deviceId in inFlight }) return
+        val config = OtaPollConfig(rootUrl = rootUrl, channel = channel)
+        val urls = OtaArtifactUrls.build(
+            rootUrl = rootUrl,
+            channel = channel,
+            daemonVersion = composite.daemon,
+            imageVersion = composite.image,
+            imageVariant = meta.imageVariant,
+        )
+        if (meta.appVersion != composite.daemon) {
+            runDaemonAuto(deviceId, composite.daemon, urls.daemonBinary, config, gateway)
+            return
+        }
+        if (meta.imageVersion != composite.image) {
+            runImageAuto(deviceId, composite.image, urls.imageSwu, urls.imageZck, config, gateway)
+        }
+    }
+
     private suspend fun runPollLoop(config: OtaPollConfig) {
         while (scope.isActive) {
             val gw = mutex.withLock { attachedGateway }

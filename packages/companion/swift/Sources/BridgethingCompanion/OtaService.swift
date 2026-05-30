@@ -253,6 +253,58 @@ public actor OtaService {
         await poll(config: config, gateway: gateway)
     }
 
+    /// One-shot "check now": polls the channel and emits `updateAvailable` /
+    /// `channelMismatch` for connected devices without persisting config or
+    /// auto-pushing. Independent of the background poll loop.
+    public func checkNow(channel: String, rootURL: URL) async {
+        guard let gateway = attachedGateway else { return }
+        let transient = OtaPollConfig(rootURL: rootURL, channel: channel, autoPush: false)
+        await poll(config: transient, gateway: gateway)
+    }
+
+    /// Full discover manifest for the version picker.
+    public func discoverManifest(rootURL: URL) async throws -> OtaDiscoverManifest {
+        try await fetchManifest(url: rootURL.appendingPathComponent("manifest.json"))
+    }
+
+    /// Manual install of a specific composite version. Pushes the daemon delta
+    /// first (the image check rides the next poll once the daemon restarts),
+    /// then the image delta. Reuses the auto-push engine; ignores `autoPush`.
+    public func applyVersion(deviceId: String, channel: String, version: String, rootURL: URL) async {
+        guard let gateway = attachedGateway else {
+            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "gateway not attached"))
+            return
+        }
+        guard let composite = OtaCompositeVersion.parse(version) else {
+            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "'\(version)' is not a composite version"))
+            return
+        }
+        guard let meta = deviceMeta[deviceId] else {
+            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "device meta not yet known"))
+            return
+        }
+        if inFlight.contains(deviceId) { return }
+        let config = OtaPollConfig(rootURL: rootURL, channel: channel)
+        let urls = OtaArtifactURLs(
+            rootURL: rootURL, channel: channel,
+            daemonVersion: composite.daemon, imageVersion: composite.image,
+            imageVariant: meta.imageVariant
+        )
+        if meta.appVersion != composite.daemon {
+            await runDaemonAuto(
+                deviceId: deviceId, targetVersion: composite.daemon,
+                binaryURL: urls.daemonBinary, config: config, gateway: gateway
+            )
+            return
+        }
+        if meta.imageVersion != composite.image {
+            await runImageAuto(
+                deviceId: deviceId, targetVersion: composite.image,
+                swuURL: urls.imageSwu, zckURL: urls.imageZck, config: config, gateway: gateway
+            )
+        }
+    }
+
     private func runPollLoop(config: OtaPollConfig) async {
         // First poll fires immediately so a freshly-launched app
         // checks before the interval clock first ticks.

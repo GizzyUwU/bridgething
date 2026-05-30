@@ -11,11 +11,12 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func cancelAuth() async
     func signOut() async
     func currentProvider() async -> BridgethingProviderInfo?
-    func spotifyAuthMethod() async -> String
-    func spotifyAuthMethodsAvailable() async -> [String]
-    func setSpotifyAuthMethod(method: String) async
-    func connectedPeers() async -> [BridgethingSessionPeer]
-    func currentNowPlaying() async -> BridgethingNowPlaying?
+    func spotifyAuthConfig() async -> BridgethingSpotifyAuthConfig
+    func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) async throws
+
+    func snapshot() async -> BridgethingSessionSnapshot
+    func diagnosticsSnapshot(limit: Double) async -> [BridgethingDiagEntry]
+    func companionDebug() async -> BridgethingCompanionDebug
 
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
     func ancsAuthStatus() async -> BridgethingAncsAuthStatus
@@ -33,10 +34,11 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
     func setOtaPollConfig(config: BridgethingOtaPollConfig?) async
-    func pollOtaNow() async
-    func deviceMeta(deviceId: String) async -> BridgethingDeviceMeta?
+    func checkForOtaUpdate(channel: String, rootUrl: String?) async
+    func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest
+    func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) async throws
 
-    func hostInfo() async -> BridgethingHostInfo
+    func reconnectPeer(deviceId: String) async throws
 
     func presentPairPicker() async throws -> BridgethingBtDevice?
 
@@ -54,6 +56,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnServiceHealthChanged(_ callback: @escaping @Sendable (BridgethingServiceHealth) -> Void)
     func setOnPeerConnected(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnPeerDisconnected(_ callback: @escaping @Sendable (String) -> Void)
+    func setOnPeerLinkFailed(_ callback: @escaping @Sendable (BridgethingSessionPeer) -> Void)
     func setOnNowPlayingChanged(_ callback: @escaping @Sendable (BridgethingNowPlaying?) -> Void)
     func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (BridgethingAncsAuthStatus) -> Void)
     func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void)
@@ -62,6 +65,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
+    func setOnDiagEntry(_ callback: @escaping @Sendable (BridgethingDiagEntry) -> Void)
 }
 
 /// thin Nitro proxy; buffers callback setters until a backend is installed via `installBackend(_:)`.
@@ -74,12 +78,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingServiceHealthChanged: (@Sendable (BridgethingServiceHealth) -> Void)?
     private static var pendingPeerConnected: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingPeerDisconnected: (@Sendable (String) -> Void)?
+    private static var pendingPeerLinkFailed: (@Sendable (BridgethingSessionPeer) -> Void)?
     private static var pendingNowPlayingChanged: (@Sendable (BridgethingNowPlaying?) -> Void)?
     private static var pendingAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
     private static var pendingLog: (@Sendable (String, String) -> Void)?
     private static var pendingWebappsChanged: (@Sendable (String) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
+    private static var pendingDiagEntry: (@Sendable (BridgethingDiagEntry) -> Void)?
 
     /// install the backend; must be called before RN starts. replays any already-registered callback setters.
     public static func installBackend(_ backend: any BridgethingSessionBackend) {
@@ -90,23 +96,27 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let healthCb = pendingServiceHealthChanged
         let peerConnCb = pendingPeerConnected
         let peerDisconnCb = pendingPeerDisconnected
+        let peerLinkFailedCb = pendingPeerLinkFailed
         let nowPlayingCb = pendingNowPlayingChanged
         let ancsCb = pendingAncsAuthStatusChanged
         let logCb = pendingLog
         let webappsCb = pendingWebappsChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
+        let diagCb = pendingDiagEntry
         pendingProviderChanged = nil
         pendingAuthStateChanged = nil
         pendingServiceHealthChanged = nil
         pendingPeerConnected = nil
         pendingPeerDisconnected = nil
+        pendingPeerLinkFailed = nil
         pendingNowPlayingChanged = nil
         pendingAncsAuthStatusChanged = nil
         pendingLog = nil
         pendingWebappsChanged = nil
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
+        pendingDiagEntry = nil
         stateLock.unlock()
 
         if let providerCb { backend.setOnProviderChanged(providerCb) }
@@ -114,12 +124,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let healthCb { backend.setOnServiceHealthChanged(healthCb) }
         if let peerConnCb { backend.setOnPeerConnected(peerConnCb) }
         if let peerDisconnCb { backend.setOnPeerDisconnected(peerDisconnCb) }
+        if let peerLinkFailedCb { backend.setOnPeerLinkFailed(peerLinkFailedCb) }
         if let nowPlayingCb { backend.setOnNowPlayingChanged(nowPlayingCb) }
         if let ancsCb { backend.setOnAncsAuthStatusChanged(ancsCb) }
         if let logCb { backend.setOnLog(logCb) }
         if let webappsCb { backend.setOnWebappsChanged(webappsCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
+        if let diagCb { backend.setOnDiagEntry(diagCb) }
     }
 
     private static func backend() throws -> any BridgethingSessionBackend {
@@ -128,6 +140,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
             throw RuntimeError.error(withMessage: "BridgethingSession backend not installed - host app must call HybridBridgethingSession.installBackend(_:) before React Native starts")
         }
         return b
+    }
+
+    private static func unwrapString(_ variant: Variant_NullType_String?) -> String? {
+        variant.flatMap { v in
+            switch v {
+            case .first: nil
+            case let .second(value): value
+            }
+        }
     }
 
     override public init() { super.init() }
@@ -178,16 +199,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func spotifyAuthMethod() throws -> Promise<String> {
-        Promise.async { await (try Self.backend()).spotifyAuthMethod() }
+    public func spotifyAuthConfig() throws -> Promise<BridgethingSpotifyAuthConfig> {
+        Promise.async { await (try Self.backend()).spotifyAuthConfig() }
     }
 
-    public func spotifyAuthMethodsAvailable() throws -> Promise<[String]> {
-        Promise.async { await (try Self.backend()).spotifyAuthMethodsAvailable() }
-    }
-
-    public func setSpotifyAuthMethod(method: String) throws -> Promise<Void> {
-        Promise.async { await (try Self.backend()).setSpotifyAuthMethod(method: method) }
+    public func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().completeSpotifySignIn(accessToken: accessToken, refreshToken: refreshToken, usesDealer: usesDealer)
+        }
     }
 
     public func currentProvider() throws -> Promise<Variant_NullType_BridgethingProviderInfo> {
@@ -197,16 +216,21 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func connectedPeers() throws -> Promise<[BridgethingSessionPeer]> {
+    public func snapshot() throws -> Promise<BridgethingSessionSnapshot> {
         Promise.async {
-            await (try Self.backend()).connectedPeers()
+            await (try Self.backend()).snapshot()
         }
     }
 
-    public func currentNowPlaying() throws -> Promise<Variant_NullType_BridgethingNowPlaying> {
+    public func diagnosticsSnapshot(limit: Double) throws -> Promise<[BridgethingDiagEntry]> {
         Promise.async {
-            let np = await (try Self.backend()).currentNowPlaying()
-            return np.map { .second($0) } ?? .first(NullType.null)
+            await (try Self.backend()).diagnosticsSnapshot(limit: limit)
+        }
+    }
+
+    public func companionDebug() throws -> Promise<BridgethingCompanionDebug> {
+        Promise.async {
+            await (try Self.backend()).companionDebug()
         }
     }
 
@@ -304,22 +328,32 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func pollOtaNow() throws -> Promise<Void> {
-        Promise.async {
-            await (try Self.backend()).pollOtaNow()
+    public func checkForOtaUpdate(channel: String, rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
+        let url = Self.unwrapString(rootUrl)
+        return Promise.async {
+            await (try Self.backend()).checkForOtaUpdate(channel: channel, rootUrl: url)
         }
     }
 
-    public func deviceMeta(deviceId: String) throws -> Promise<Variant_NullType_BridgethingDeviceMeta> {
-        Promise.async {
-            let meta = await (try Self.backend()).deviceMeta(deviceId: deviceId)
-            return meta.map { .second($0) } ?? .first(NullType.null)
+    public func fetchOtaManifest(rootUrl: Variant_NullType_String?) throws -> Promise<BridgethingOtaManifest> {
+        let url = Self.unwrapString(rootUrl)
+        return Promise.async {
+            try await Self.backend().fetchOtaManifest(rootUrl: url)
         }
     }
 
-    public func hostInfo() throws -> Promise<BridgethingHostInfo> {
+    public func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
+        let url = Self.unwrapString(rootUrl)
+        return Promise.async {
+            try await Self.backend().applyOtaUpdate(deviceId: deviceId, channel: channel, version: version, rootUrl: url)
+        }
+    }
+
+    // MARK: - Peer reconnect
+
+    public func reconnectPeer(deviceId: String) throws -> Promise<Void> {
         Promise.async {
-            await (try Self.backend()).hostInfo()
+            try await Self.backend().reconnectPeer(deviceId: deviceId)
         }
     }
 
@@ -409,6 +443,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         backend?.setOnPeerDisconnected(wrapped)
     }
 
+    public func setOnPeerLinkFailed(callback: @escaping (BridgethingSessionPeer) -> Void) throws {
+        let wrapped: @Sendable (BridgethingSessionPeer) -> Void = { peer in callback(peer) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingPeerLinkFailed = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnPeerLinkFailed(wrapped)
+    }
+
     public func setOnNowPlayingChanged(callback: @escaping (Variant_NullType_BridgethingNowPlaying?) -> Void) throws {
         let wrapped: @Sendable (BridgethingNowPlaying?) -> Void = { np in
             callback(np.map { .second($0) } ?? .first(NullType.null))
@@ -471,5 +514,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingOtaEvent = wrapped }
         Self.stateLock.unlock()
         backend?.setOnOtaEvent(wrapped)
+    }
+
+    public func setOnDiagEntry(callback: @escaping (BridgethingDiagEntry) -> Void) throws {
+        let wrapped: @Sendable (BridgethingDiagEntry) -> Void = { entry in callback(entry) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingDiagEntry = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnDiagEntry(wrapped)
     }
 }

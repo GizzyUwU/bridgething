@@ -6,15 +6,19 @@ import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
+import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
-import com.margelo.nitro.bridgething.session.BridgethingHostInfo
+import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
+import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
+import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
+import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 
@@ -28,11 +32,12 @@ public interface BridgethingSessionBackend {
     public suspend fun cancelAuth()
     public suspend fun signOut()
     public suspend fun currentProvider(): BridgethingProviderInfo?
-    public suspend fun spotifyAuthMethod(): String
-    public suspend fun spotifyAuthMethodsAvailable(): Array<String>
-    public suspend fun setSpotifyAuthMethod(method: String)
-    public suspend fun connectedPeers(): Array<BridgethingSessionPeer>
-    public suspend fun currentNowPlaying(): BridgethingNowPlaying?
+    public suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig
+    public suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean)
+
+    public suspend fun snapshot(): BridgethingSessionSnapshot
+    public suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry>
+    public suspend fun companionDebug(): BridgethingCompanionDebug
 
     public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult
     public suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus
@@ -50,10 +55,11 @@ public interface BridgethingSessionBackend {
     public suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags)
 
     public suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?)
-    public suspend fun pollOtaNow()
-    public suspend fun deviceMeta(deviceId: String): BridgethingDeviceMeta?
+    public suspend fun checkForOtaUpdate(channel: String, rootUrl: String?)
+    public suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest
+    public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?)
 
-    public suspend fun hostInfo(): BridgethingHostInfo
+    public suspend fun reconnectPeer(deviceId: String)
 
     public suspend fun presentPairPicker(): BridgethingBtDevice?
 
@@ -71,6 +77,7 @@ public interface BridgethingSessionBackend {
     public fun setOnServiceHealthChanged(callback: (BridgethingServiceHealth) -> Unit)
     public fun setOnPeerConnected(callback: (BridgethingSessionPeer) -> Unit)
     public fun setOnPeerDisconnected(callback: (String) -> Unit)
+    public fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit)
     public fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit)
     public fun setOnAncsAuthStatusChanged(callback: (BridgethingAncsAuthStatus) -> Unit)
     public fun setOnLog(callback: (String, String) -> Unit)
@@ -78,4 +85,5 @@ public interface BridgethingSessionBackend {
     public fun setOnWebappsChanged(callback: (String) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
+    public fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit)
 }

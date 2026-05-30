@@ -3,12 +3,12 @@ import BridgethingGlue
 import BridgethingLyrics
 import BridgethingSchema
 import Foundation
-import os
+import Logging
 #if os(iOS)
     import ExternalAccessory
 #endif
 
-private let osLog = Logger(subsystem: "dev.bridgething.companion", category: "core")
+private let osLog = Logger(label: "dev.bridgething.companion.core")
 
 public enum CompanionLogLevel: String, Sendable {
     case debug, info, warn, error
@@ -236,10 +236,10 @@ public actor BridgethingCompanion {
 
     nonisolated func emitLog(_ level: CompanionLogLevel, _ message: String, observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
         switch level {
-        case .debug: osLog.debug("\(message, privacy: .public)")
-        case .info: osLog.info("\(message, privacy: .public)")
-        case .warn: osLog.warning("\(message, privacy: .public)")
-        case .error: osLog.error("\(message, privacy: .public)")
+        case .debug: osLog.debug("\(message)")
+        case .info: osLog.info("\(message)")
+        case .warn: osLog.warning("\(message)")
+        case .error: osLog.error("\(message)")
         }
         observer?(level, message)
     }
@@ -295,7 +295,7 @@ public actor BridgethingCompanion {
                     osLog.info("presenting EA bluetooth accessory picker")
                     EAAccessoryManager.shared().showBluetoothAccessoryPicker(withNameFilter: nil) { error in
                         if let error {
-                            osLog.warning("EA picker dismissed: \(error.localizedDescription, privacy: .public)")
+                            osLog.warning("EA picker dismissed: \(error.localizedDescription)")
                             cont.resume(returning: nil)
                         } else {
                             osLog.info("EA picker completed")
@@ -400,6 +400,8 @@ public actor BridgethingCompanion {
                     connectedPeerCount = max(0, connectedPeerCount - 1)
                     if connectedPeerCount == 0 { await audioKeepAlive.deactivate() }
                 #endif
+            case let .linkFailed(device, reason):
+                log(.warn, "peer link failed: \(device.name) [\(device.id)]: \(reason)")
             case let .decodeError(id, description):
                 log(.warn, "[\(id)] decode error: \(description)")
             case .message:

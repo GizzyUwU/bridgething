@@ -20,6 +20,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/fumoboy007/msgpack-swift", from: "2.0.6"),
     .package(url: "https://github.com/1024jp/GzipSwift", from: "6.1.0"),
+    .package(url: "https://github.com/apple/swift-log", from: "1.6.0"),
   ],
   targets: [
     .target(
@@ -32,6 +33,7 @@ let package = Package(
         "BridgethingSchema",
         .product(name: "DMMessagePack", package: "msgpack-swift"),
         .product(name: "Gzip", package: "GzipSwift"),
+        .product(name: "Logging", package: "swift-log"),
       ],
       path: "packages/gateway/swift/Sources/BridgethingGateway",
       linkerSettings: [
@@ -62,8 +64,12 @@ let package = Package(
     ),
     .target(
       name: "BridgethingCompanion",
-      dependencies: ["BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema"],
-      path: "packages/companion/swift/Sources/BridgethingCompanion"
+      dependencies: [
+        "BridgethingGateway", "BridgethingGlue", "BridgethingLyrics", "BridgethingSchema",
+        .product(name: "Logging", package: "swift-log"),
+      ],
+      path: "packages/companion/swift/Sources/BridgethingCompanion",
+      resources: [.process("Resources")]
     ),
     .target(
       name: "BridgethingTestKit",

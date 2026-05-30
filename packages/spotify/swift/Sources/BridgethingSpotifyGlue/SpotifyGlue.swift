@@ -16,14 +16,8 @@ private let hintDebounceNanos: UInt64 = 250_000_000
 private let pollIntervalNanos: UInt64 = 60_000_000_000
 private let spotifyAppBundle = "com.spotify.client"
 
-/// Closure the host supplies so the glue can build whichever
-/// `OAuthAuthenticator` the host has configured (device-code or PKCE)
-/// while still wiring the device-code prompt through the glue's own
-/// auth-lifecycle observer. PKCE authenticators ignore the closure
-/// argument (they present a WebView directly).
-public typealias SpotifyAuthenticatorFactory = @Sendable (
-    _ onPrompt: @escaping @Sendable (DeviceCodePrompt) async -> Void
-) -> any OAuthAuthenticator
+/// Builds the refresh-only `OAuthAuthenticator` the host configured.
+public typealias SpotifyAuthenticatorFactory = @Sendable () -> any OAuthAuthenticator
 
 public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public static let name: String = "spotify"
@@ -86,18 +80,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
         self.gateway = gateway
 
-        if initialRefreshToken.isEmpty {
+        guard !initialAccessToken.isEmpty || !initialRefreshToken.isEmpty else {
+            // no tokens yet
             authObserver?(.pending(nil))
-        } else {
-            authObserver?(.authenticated)
+            return
         }
-
-        let authenticator = authenticatorFactory { [weak self] prompt in
-            self?.handleDeviceCodePrompt(prompt)
-        }
+        authObserver?(.authenticated)
 
         let client = SpotinyClient(
-            authenticator: authenticator,
+            authenticator: authenticatorFactory(),
             delegate: self,
             accessToken: initialAccessToken,
             refreshToken: initialRefreshToken,
@@ -106,8 +97,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         self.client = client
 
         // Not awaited: auth lifecycle reaches the host via the spotiny delegate.
-        // Device-code has no dealer access, so authenticate only (no socket) to
-        // avoid the dealer 401 churn; dealer-capable flows (PKCE) open the socket.
         let dealer = usesDealer
         connectTask = Task { [weak client] in
             if dealer {
@@ -455,12 +444,26 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         // Filter to Spotify-app hints only; other-app and unset-bundle hints drop.
         guard hint.appBundle == spotifyAppBundle else { return }
 
+        DiagnosticsBuffer.shared.recordBreadcrumb(
+            category: "spotify.merge",
+            detail: "iap2 playback hint",
+            fields: [("source", "iap2BackProp")]
+        )
         hintFetchTask?.cancel()
         hintFetchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: hintDebounceNanos)
             if Task.isCancelled { return }
-            await self?.fetchAndDispatch()
+            await self?.fetchAndDispatch(reason: "hint")
         }
+    }
+
+    public func debugState() async -> GlueDebugState {
+        GlueDebugState(
+            authorityPlaybackHeld: authorityHeld,
+            authorityMetadataHeld: authorityHeld,
+            baselinePollActive: baselinePollTask != nil,
+            hintFetchActive: hintFetchTask != nil
+        )
     }
 
     public func asset(id: String) async throws -> AssetBytes? {
@@ -476,21 +479,31 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     /// Pull the canonical playback state from `/v1/me/player` and route
     /// it through the same path dealer-WS pushes take. Both hint-driven
     /// and baseline-poll fetches funnel here.
-    fileprivate func fetchAndDispatch() async {
+    fileprivate func fetchAndDispatch(reason: String) async {
         guard let client else { return }
         guard let state = await client.player.getPlaybackState() else { return }
-        handleStateUpdate(state)
+        handleStateUpdate(state, reason: reason)
     }
 
     // MARK: - outbound
 
-    fileprivate func handleStateUpdate(_ state: Spotiny.PlayerState) {
+    fileprivate func handleStateUpdate(_ state: Spotiny.PlayerState, reason: String) {
         guard let gateway else { return }
         let update = Self.makeUpdate(from: state)
         let artworkUrl = state.item.flatMap(Self.rawArtworkURL(for:))
         nowPlayingObserver?(GlueNowPlaying(update: update, artworkUrl: artworkUrl))
 
         let nowPlaying = state.is_playing
+        DiagnosticsBuffer.shared.recordBreadcrumb(
+            category: "spotify.merge",
+            detail: "augmented now-playing",
+            fields: [
+                ("source", "companionAugmented"),
+                ("reason", reason),
+                ("track", state.item?.name ?? ""),
+                ("playing", String(nowPlaying)),
+            ]
+        )
         Task { [weak self] in
             try? await gateway.player.delta(update)
             guard let self else { return }
@@ -498,11 +511,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingPlayback))
                 try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingMetadata))
                 authorityHeld = true
+                DiagnosticsBuffer.shared.recordBreadcrumb(
+                    category: "spotify.authority", detail: "claimed playback+metadata"
+                )
                 startBaselinePollIfNeeded()
             } else if authorityHeld {
                 try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
                 try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
                 authorityHeld = false
+                DiagnosticsBuffer.shared.recordBreadcrumb(
+                    category: "spotify.authority", detail: "released playback+metadata"
+                )
                 stopBaselinePoll()
             }
         }
@@ -519,21 +538,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
     }
 
-    private func handleDeviceCodePrompt(_ prompt: DeviceCodePrompt) {
-        authObserver?(.pending(GlueDeviceCodePrompt(
-            userCode: prompt.userCode,
-            verificationURL: prompt.verificationURL,
-            verificationURLComplete: prompt.verificationURLPrefilled
-        )))
-    }
-
     private func startBaselinePollIfNeeded() {
         guard baselinePollTask == nil else { return }
         baselinePollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pollIntervalNanos)
                 if Task.isCancelled { return }
-                await self?.fetchAndDispatch()
+                await self?.fetchAndDispatch(reason: "poll")
             }
         }
     }
@@ -719,7 +730,7 @@ extension SpotifyGlue: SpotinyDelegate {
     }
 
     public func playerStateUpdated(oldState _: Spotiny.PlayerState?, newState: Spotiny.PlayerState) {
-        handleStateUpdate(newState)
+        handleStateUpdate(newState, reason: "dealer")
     }
 
     public func serviceDidRateLimit(retryAfterSeconds: Int) {

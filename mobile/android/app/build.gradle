@@ -79,11 +79,6 @@ android {
 
     namespace "com.bridgething"
     defaultConfig {
-        // Fork builds that want their own Play Store entry can override via
-        // env (`BRIDGETHING_APPLICATION_ID=com.your.fork ./gradlew ...`) or
-        // gradle property (`-PBRIDGETHING_APPLICATION_ID=...`). Local
-        // sideload doesn't need an override - Android's package id has no
-        // global team gate at the OS level.
         applicationId(System.getenv("BRIDGETHING_APPLICATION_ID")
             ?: project.findProperty("BRIDGETHING_APPLICATION_ID")
             ?: "com.bridgething.gateway")
@@ -92,7 +87,8 @@ android {
         versionCode 1
         versionName "1.0"
 
-        // sourced from env, gradle property, or the gitignored local.properties; never committed.
+        manifestPlaceholders = [appAuthRedirectScheme: 'bridgething']
+
         def localProps = new Properties()
         def localPropsFile = rootProject.file("local.properties")
         if (localPropsFile.exists()) localPropsFile.withInputStream { localProps.load(it) }
@@ -134,11 +130,6 @@ dependencies {
         implementation jscFlavor
     }
 
-    // bridgething packages: companion owns the gateway + dispatchers; the
-    // session-rn module is the nitro proxy the JS shell talks to. Same
-    // colon paths as the root settings.gradle.kts so each package's
-    // build.gradle.kts (which uses these paths internally) resolves
-    // identically whether built from root or from mobile/android.
     implementation project(":packages:companion:kotlin:companion")
     implementation project(":packages:gateway:kotlin:gateway")
     implementation project(":packages:glue:kotlin:glue")
@@ -146,9 +137,6 @@ dependencies {
     implementation project(":packages:spotify:kotlin:spotify")
     implementation project(":packages:apple-music:kotlin:apple-music")
     implementation project(":packages:tidal:kotlin:tidal")
-    // play-services-location is optional at runtime (GeoController falls
-    // back to AOSP LocationManager) but having it on the classpath gives
-    // the better-battery + better-accuracy fused provider where available.
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "androidx.security:security-crypto:1.1.0"
 }

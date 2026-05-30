@@ -46,7 +46,7 @@ final class SpotifyGlueIntegrationTests: XCTestCase {
         let access = tokens?.accessToken ?? "replay-placeholder"
 
         let glue = SpotifyGlue(
-            authenticatorFactory: { _ in StubAuthenticator(accessToken: access) },
+            authenticatorFactory: { StubAuthenticator(accessToken: access) },
             accessToken: access,
             refreshToken: "",
             httpExecutor: executor

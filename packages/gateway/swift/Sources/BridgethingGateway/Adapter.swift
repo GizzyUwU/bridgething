@@ -23,6 +23,7 @@ public struct Device: Sendable, Equatable, Hashable {
 public enum AdapterEvent: Sendable {
   case connected(Device)
   case disconnected(deviceId: String)
+  case linkFailed(deviceId: String, name: String, reason: String)
   case bytes(deviceId: String, Data)
 }
 
@@ -48,4 +49,9 @@ public protocol Adapter: AnyObject, Sendable {
   func stop() async
   func disconnect(deviceId: String) async throws
   func send(deviceId: String, frame: Data) async throws
+  func reconnect(deviceId: String) async throws
+}
+
+public extension Adapter {
+  func reconnect(deviceId _: String) async throws {}
 }

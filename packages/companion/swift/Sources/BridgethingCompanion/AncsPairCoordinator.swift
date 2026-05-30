@@ -23,10 +23,10 @@ public struct AncsSetupResult: Sendable {
 #if os(iOS)
     import AccessorySetupKit
     import CoreBluetooth
-    import os
+    import Logging
     import UIKit
 
-    private let askLog = Logger(subsystem: "dev.bridgething.companion", category: "ancs")
+    private let askLog = Logger(label: "dev.bridgething.companion.ancs")
 
     /// Service UUIDs the daemon advertises and hosts for the ANCS LE-bond
     /// bring-up. These match the daemon's pair-trigger service byte-for-byte;
@@ -85,7 +85,7 @@ public struct AncsSetupResult: Sendable {
                 askLog.error("pair() aborting: session never activated")
                 return AncsSetupResult(kind: .failed("accessory session failed to activate"), authState: lastAuthState)
             }
-            askLog.info("pair() activated; existingAccessory=\(self.hasMatchingExistingAccessory(), privacy: .public)")
+            askLog.info("pair() activated; existingAccessory=\(self.hasMatchingExistingAccessory())")
 
             if hasMatchingExistingAccessory() {
                 let accessory = currentAccessory()
@@ -136,7 +136,7 @@ public struct AncsSetupResult: Sendable {
         }
 
         private func handleSessionEvent(_ event: ASAccessoryEvent) {
-            askLog.info("session event: \(String(describing: event.eventType), privacy: .public)")
+            askLog.info("session event: \(String(describing: event.eventType))")
             switch event.eventType {
             case .activated:
                 // showPicker and accessory enumeration are invalid before this fires.
@@ -176,7 +176,7 @@ public struct AncsSetupResult: Sendable {
             session.showPicker(for: [item]) { [weak self] error in
                 guard let self else { return }
                 if let error {
-                    askLog.error("showPicker error: \(String(describing: error), privacy: .public)")
+                    askLog.error("showPicker error: \(String(describing: error))")
                     MainActor.assumeIsolated {
                         self.completePending(.failed(String(describing: error)))
                     }
@@ -187,6 +187,9 @@ public struct AncsSetupResult: Sendable {
         }
 
         private static func pickerImage() -> UIImage {
+            if let icon = UIImage(named: "AncsPickerIcon", in: .module, compatibleWith: nil) {
+                return icon
+            }
             let size = CGSize(width: 60, height: 60)
             return UIGraphicsImageRenderer(size: size).image { _ in
                 UIColor(red: 0.0, green: 0.6, blue: 0.86, alpha: 1.0).setFill()

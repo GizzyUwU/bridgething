@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.HybridBridgethingSession
 import dev.bridgething.applemusic.AppleMusicGlue
 import dev.bridgething.companion.HostInfo
@@ -24,12 +25,7 @@ public object BridgethingApp {
 
     private const val AUTH_WORKER_BASE_URL: String = "https://thinglabs.sh/auth"
 
-    public const val DEVICE_CODE_METHOD: String = "deviceCode"
-
-    // only device-code is ported to android (pkce/discord is not), so there is nothing to switch to.
-    public fun availableSpotifyAuthMethods(): Array<String> = arrayOf(DEVICE_CODE_METHOD)
-    public fun effectiveSpotifyAuthMethod(): String = DEVICE_CODE_METHOD
-    public fun setSpotifyAuthMethod(method: String) {}
+    public const val SPOTIFY_PROVIDER_ID: String = "spotify"
 
     private val SPOTIFY_SCOPES: List<String> = listOf(
         "user-read-playback-state",
@@ -48,6 +44,23 @@ public object BridgethingApp {
         "user-library-modify",
         "user-read-private",
     )
+
+    public fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingSpotifyAuthConfig(
+        scopes = SPOTIFY_SCOPES.toTypedArray(),
+        pkceClientId = "",
+        pkceRedirectUri = "bridgething://oauth",
+        pkceAuthorizeUrl = "https://accounts.spotify.com/authorize",
+        pkceTokenUrl = "https://accounts.spotify.com/api/token",
+        deviceCodePsk = BuildConfig.BRIDGETHING_AUTH_PSK,
+        deviceCodeUrl = "$AUTH_WORKER_BASE_URL/api/device/code",
+        deviceCodeTokenUrl = "$AUTH_WORKER_BASE_URL/api/token",
+        deviceCodeDescription = "car-thing-device",
+    )
+
+    public fun persistSpotifyTokens(context: Context, access: String, refresh: String) {
+        SpotifyTokenStore(context.applicationContext)
+            .save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
+    }
 
     public fun installBridgething(context: Context) {
         val app = context.applicationContext
@@ -101,7 +114,7 @@ public object BridgethingApp {
         )
         val seed = store.load()
         return SpotifyGlue(
-            authenticatorFactory = { onPrompt -> DeviceCodeAuthenticator(config, onPrompt) },
+            authenticatorFactory = { DeviceCodeAuthenticator(config) },
             accessToken = seed.access ?: "",
             refreshToken = seed.refresh ?: "",
             onTokensRefreshed = { access, refresh ->

@@ -1,11 +1,14 @@
+import BridgethingGateway
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import UIKit
 
 @main
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, RNAppAuthAuthorizationFlowManager {
   var window: UIWindow?
+
+  public weak var authorizationFlowManagerDelegate: RNAppAuthAuthorizationFlowManagerDelegate?
 
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
@@ -14,6 +17,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    bootstrapDiagnosticsLogging()
     BridgethingApp.installBridgething()
 
     let delegate = ReactNativeDelegate()
@@ -32,6 +36,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     )
 
     return true
+  }
+
+  func application(
+    _: UIApplication,
+    open url: URL,
+    options _: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    authorizationFlowManagerDelegate?.resumeExternalUserAgentFlow(with: url) ?? false
   }
 }
 

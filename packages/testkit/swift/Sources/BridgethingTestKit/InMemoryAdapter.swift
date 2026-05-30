@@ -13,6 +13,7 @@ public final class InMemoryAdapter: Adapter, @unchecked Sendable {
         var startCalled = false
         var stopCalled = false
         var disconnectCalls: [String] = []
+        var reconnectCalls: [String] = []
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -20,6 +21,7 @@ public final class InMemoryAdapter: Adapter, @unchecked Sendable {
     public var startCalled: Bool { state.withLock { $0.startCalled } }
     public var stopCalled: Bool { state.withLock { $0.stopCalled } }
     public var disconnectCalls: [String] { state.withLock { $0.disconnectCalls } }
+    public var reconnectCalls: [String] { state.withLock { $0.reconnectCalls } }
 
     public init() {
         let (e, ec) = AsyncStream.makeStream(of: AdapterEvent.self)
@@ -42,6 +44,10 @@ public final class InMemoryAdapter: Adapter, @unchecked Sendable {
 
     public func disconnect(deviceId: String) async throws {
         state.withLock { $0.disconnectCalls.append(deviceId) }
+    }
+
+    public func reconnect(deviceId: String) async throws {
+        state.withLock { $0.reconnectCalls.append(deviceId) }
     }
 
     public func send(deviceId: String, frame: Data) async throws {

@@ -30,7 +30,7 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
   const [installed, setInstalled] = useState<BridgethingWebappInfo[]>([]);
 
   const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
-  const nicknames = useSession(s => s.nicknames);
+  const ledger = useSession(s => s.ledger);
 
   const refresh = useCallback(async () => {
     try {
@@ -82,7 +82,7 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
           title="install a webapp"
           subtitle={
             peer
-              ? `paste a link to a webapp bundle and we'll install it on ${peerDisplayName(peer, nicknames)}.`
+              ? `paste a link to a webapp bundle and we'll install it on ${peerDisplayName(peer, ledger)}.`
               : 'paste a link to a webapp bundle to install it.'
           }
         />

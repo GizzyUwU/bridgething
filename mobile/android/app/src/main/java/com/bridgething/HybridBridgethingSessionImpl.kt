@@ -13,24 +13,36 @@ import com.margelo.nitro.bridgething.session.BridgethingAuthState
 import com.margelo.nitro.bridgething.session.BridgethingAuthKind
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
+import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingConfigField
 import com.margelo.nitro.bridgething.session.BridgethingConfigKind
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
+import com.margelo.nitro.bridgething.session.BridgethingDeviceMetaEntry
+import com.margelo.nitro.bridgething.session.BridgethingDiagDirection
+import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
+import com.margelo.nitro.bridgething.session.BridgethingDiagFrameKind
+import com.margelo.nitro.bridgething.session.BridgethingDiagKind
 import com.margelo.nitro.bridgething.session.BridgethingHostInfo
+import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingPlayback
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingTrack
+import com.margelo.nitro.bridgething.session.BridgethingOtaChannelInfo
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaEventKind
 import com.margelo.nitro.bridgething.session.BridgethingOtaKind
+import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
 import com.margelo.nitro.bridgething.session.BridgethingOtaPhase
 import com.margelo.nitro.bridgething.session.BridgethingOtaPollConfig
+import com.margelo.nitro.bridgething.session.BridgethingOtaRelease
+import com.margelo.nitro.bridgething.session.BridgethingPeerLinkStatus
 import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
 import com.margelo.nitro.bridgething.session.BridgethingRepeatMode
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealthKind
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
+import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappRole
@@ -41,16 +53,22 @@ import dev.bridgething.companion.BridgethingCompanionVersion
 import dev.bridgething.companion.CompanionCapabilityFlags
 import dev.bridgething.companion.CompanionLogLevel
 import dev.bridgething.companion.HostInfo
+import dev.bridgething.companion.OtaCompositeVersion
+import dev.bridgething.companion.OtaDiscoverManifest
 import dev.bridgething.companion.OtaPhaseSnapshot
 import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import dev.bridgething.companion.OtaPollEvent
+import dev.bridgething.gateway.DiagRecord
+import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.device
 import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueAuthState
+import dev.bridgething.glue.GlueDebugState
 import dev.bridgething.glue.GlueNowPlaying
+import dev.bridgething.schema.BridgeThingMeta
 import dev.bridgething.glue.GlueServiceHealth
 import dev.bridgething.lyrics.LrclibResolver
 import dev.bridgething.lyrics.LyricsResolver
@@ -150,6 +168,9 @@ public class HybridBridgethingSessionImpl(
     private var onPeerDisconnected: ((String) -> Unit)? = null
 
     @Volatile
+    private var onPeerLinkFailed: ((BridgethingSessionPeer) -> Unit)? = null
+
+    @Volatile
     private var onNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
 
     @Volatile
@@ -166,6 +187,20 @@ public class HybridBridgethingSessionImpl(
 
     @Volatile
     private var onOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
+
+    @Volatile
+    private var onDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
+    private var diagJob: Job? = null
+
+    @Volatile
+    private var lastAuthState: BridgethingAuthState = idleState()
+
+    @Volatile
+    private var lastServiceHealth: BridgethingServiceHealth = toRnServiceHealth(GlueServiceHealth.Ok)
+
+    private val prefs by lazy {
+        context.applicationContext.getSharedPreferences("bridgething.session", Context.MODE_PRIVATE)
+    }
 
     @Volatile
     private var logStreamingDesired: Boolean = false
@@ -187,6 +222,10 @@ public class HybridBridgethingSessionImpl(
         }
         eventsJob = scope.launch { c.gateway.events.collect { event -> handleGatewayEvent(event) } }
         otaJob = scope.launch { c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) } }
+        diagJob = scope.launch { DiagnosticsBuffer.stream.collect { rec -> onDiagEntry?.invoke(toRnDiagEntry(rec)) } }
+
+        runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
+        runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
 
         // wake-from-cold on presence + keep the link alive while a device is set up.
         CompanionDevicePicker.startObservingPresence(context)
@@ -204,20 +243,24 @@ public class HybridBridgethingSessionImpl(
         var priorEvents: Job? = null
         var priorOta: Job? = null
         var priorAuth: Job? = null
+        var priorDiag: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
             priorEvents = eventsJob
             priorOta = otaJob
             priorAuth = authJob
+            priorDiag = diagJob
             priorCompanion = companion
             companion = null
             eventsJob = null
             otaJob = null
             authJob = null
+            diagJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
         priorAuth?.cancel()
+        priorDiag?.cancel()
         // detach UI observers but leave the companion running in the foreground service.
         priorCompanion?.setNowPlayingObserver(null)
         priorCompanion?.setAncsAuthStateObserver(null)
@@ -231,9 +274,12 @@ public class HybridBridgethingSessionImpl(
         BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
     }.toTypedArray()
 
-    override suspend fun spotifyAuthMethod(): String = BridgethingApp.effectiveSpotifyAuthMethod()
-    override suspend fun spotifyAuthMethodsAvailable(): Array<String> = BridgethingApp.availableSpotifyAuthMethods()
-    override suspend fun setSpotifyAuthMethod(method: String) = BridgethingApp.setSpotifyAuthMethod(method)
+    override suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingApp.spotifyAuthConfig()
+
+    override suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean) {
+        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken)
+        setActiveProvider(BridgethingApp.SPOTIFY_PROVIDER_ID)
+    }
 
     override suspend fun setActiveProvider(id: String?) {
         authJob?.cancel()
@@ -306,9 +352,51 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    override suspend fun connectedPeers(): Array<BridgethingSessionPeer> = peers.values.toTypedArray()
+    override suspend fun snapshot(): BridgethingSessionSnapshot {
+        val c = stateLock.withLock { companion }
+        val glue = c?.current()
+        val provider = glue?.let { g ->
+            registry.firstOrNull { it.id == g.name }?.let {
+                BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
+            }
+        }
+        val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
+        val deviceMetaEntries = mutableListOf<BridgethingDeviceMetaEntry>()
+        if (c != null) {
+            for (id in peers.keys) {
+                val meta = c.ota.meta(id) ?: continue
+                deviceMetaEntries.add(BridgethingDeviceMetaEntry(deviceId = id, meta = toRnDeviceMeta(meta)))
+            }
+        }
+        return BridgethingSessionSnapshot(
+            hostInfo = rnHostInfo(),
+            provider = provider,
+            authState = lastAuthState,
+            serviceHealth = lastServiceHealth,
+            peers = peers.values.toTypedArray(),
+            ancsAuthStatus = ancs,
+            nowPlaying = lastNowPlaying,
+            deviceMeta = deviceMetaEntries.toTypedArray(),
+            capabilityFlags = loadCapabilityFlags(),
+            otaPollConfig = loadOtaPollConfig(),
+        )
+    }
 
-    override suspend fun currentNowPlaying(): BridgethingNowPlaying? = lastNowPlaying
+    override suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry> =
+        DiagnosticsBuffer.tail(limit.toInt()).map(::toRnDiagEntry).toTypedArray()
+
+    override suspend fun companionDebug(): BridgethingCompanionDebug {
+        val c = stateLock.withLock { companion }
+        val debug = c?.current()?.debugState() ?: GlueDebugState()
+        val ancs = toRnAncsAuthStatus(c?.currentAncsAuthState() ?: AncsAuthState.Unknown)
+        return BridgethingCompanionDebug(
+            authorityPlaybackHeld = debug.authorityPlaybackHeld,
+            authorityMetadataHeld = debug.authorityMetadataHeld,
+            baselinePollActive = debug.baselinePollActive,
+            hintFetchActive = debug.hintFetchActive,
+            ancsAuthStatus = ancs,
+        )
+    }
 
     override suspend fun enableAncsNotifications(): BridgethingAncsSetupResult {
         val result = stateLock.withLock { companion }?.enableAncsNotifications()
@@ -446,6 +534,11 @@ public class HybridBridgethingSessionImpl(
     }
 
     override suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags) {
+        saveCapabilityFlags(flags)
+        applyCapabilityFlags(flags)
+    }
+
+    private suspend fun applyCapabilityFlags(flags: BridgethingCapabilityFlags) {
         stateLock.withLock { companion }?.setCapabilityFlags(
             CompanionCapabilityFlags(
                 geo = flags.geo,
@@ -458,6 +551,11 @@ public class HybridBridgethingSessionImpl(
     }
 
     override suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?) {
+        saveOtaPollConfig(config)
+        applyOtaPollConfig(config)
+    }
+
+    private suspend fun applyOtaPollConfig(config: BridgethingOtaPollConfig?) {
         val ota = stateLock.withLock { companion }?.ota ?: return
         if (config == null) {
             ota.setPollConfig(null)
@@ -474,24 +572,62 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    override suspend fun pollOtaNow() {
-        stateLock.withLock { companion }?.ota?.pollNow()
+    override suspend fun checkForOtaUpdate(channel: String, rootUrl: String?) {
+        stateLock.withLock { companion }?.ota?.checkNow(channel, otaRootUrl(rootUrl))
     }
 
-    override suspend fun deviceMeta(deviceId: String): BridgethingDeviceMeta? {
-        val meta = stateLock.withLock { companion }?.ota?.meta(deviceId) ?: return null
-        return BridgethingDeviceMeta(
-            daemonVersion = meta.appVersion,
-            appName = meta.appName,
-            osName = meta.osName,
-            osVersion = meta.osVersion,
-            channel = meta.channel,
-            modelName = meta.modelName,
-            serialNumber = meta.serialNumber,
-        )
+    override suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest {
+        val ota = stateLock.withLock { companion }?.ota
+            ?: return BridgethingOtaManifest(updatedAt = "", channels = emptyArray())
+        return toRnOtaManifest(ota.discoverManifest(otaRootUrl(rootUrl)))
     }
 
-    override suspend fun hostInfo(): BridgethingHostInfo {
+    override suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) {
+        stateLock.withLock { companion }?.ota?.applyVersion(deviceId, channel, version, otaRootUrl(rootUrl))
+    }
+
+    override suspend fun reconnectPeer(deviceId: String) {
+        stateLock.withLock { companion }?.gateway?.reconnect(deviceId)
+    }
+
+    private fun otaRootUrl(raw: String?): String = raw ?: "https://ota.bridgething.com"
+
+    private fun toRnOtaManifest(m: OtaDiscoverManifest): BridgethingOtaManifest {
+        val channels = m.channels.values.map { ch ->
+            val releases = ch.releases.mapNotNull { v ->
+                val composite = OtaCompositeVersion.parse(v) ?: return@mapNotNull null
+                val rel = m.releases[v]
+                BridgethingOtaRelease(
+                    version = v,
+                    daemonVersion = composite.daemon,
+                    imageVersion = composite.image,
+                    yanked = rel?.yanked != null,
+                    deprecated = rel?.deprecated ?: false,
+                )
+            }.toTypedArray()
+            BridgethingOtaChannelInfo(
+                name = ch.name,
+                stability = ch.stability,
+                isDefault = ch.isDefault,
+                latest = ch.latest,
+                releases = releases,
+            )
+        }.toTypedArray()
+        return BridgethingOtaManifest(updatedAt = m.updatedAt, channels = channels)
+    }
+
+    private fun toRnDeviceMeta(meta: BridgeThingMeta): BridgethingDeviceMeta = BridgethingDeviceMeta(
+        daemonVersion = meta.appVersion,
+        imageVersion = meta.imageVersion,
+        appName = meta.appName,
+        osName = meta.osName,
+        osVersion = meta.osVersion,
+        channel = meta.channel,
+        modelName = meta.modelName,
+        serialNumber = meta.serialNumber,
+    )
+
+    private fun rnHostInfo(): BridgethingHostInfo {
         val host = makeHostInfo()
         return BridgethingHostInfo(
             appName = host.appName,
@@ -506,6 +642,96 @@ public class HybridBridgethingSessionImpl(
     }
 
     private fun makeHostInfo(): HostInfo = CompanionHolder.makeHostInfo(context)
+
+    // --- native-authoritative persistence ---
+
+    private fun loadCapabilityFlags(): BridgethingCapabilityFlags {
+        if (!prefs.getBoolean("caps.configured", false)) {
+            return BridgethingCapabilityFlags(
+                geo = true, notifications = true, netFetch = true, netWs = true, audioTts = true,
+            )
+        }
+        return BridgethingCapabilityFlags(
+            geo = prefs.getBoolean("caps.geo", true),
+            notifications = prefs.getBoolean("caps.notifications", true),
+            netFetch = prefs.getBoolean("caps.netFetch", true),
+            netWs = prefs.getBoolean("caps.netWs", true),
+            audioTts = prefs.getBoolean("caps.audioTts", true),
+        )
+    }
+
+    private fun saveCapabilityFlags(f: BridgethingCapabilityFlags) {
+        prefs.edit()
+            .putBoolean("caps.configured", true)
+            .putBoolean("caps.geo", f.geo)
+            .putBoolean("caps.notifications", f.notifications)
+            .putBoolean("caps.netFetch", f.netFetch)
+            .putBoolean("caps.netWs", f.netWs)
+            .putBoolean("caps.audioTts", f.audioTts)
+            .apply()
+    }
+
+    private fun loadOtaPollConfig(): BridgethingOtaPollConfig? {
+        if (!prefs.getBoolean("ota.configured", false)) return null
+        val root = prefs.getString("ota.rootUrl", null)
+        return BridgethingOtaPollConfig(
+            channel = prefs.getString("ota.channel", "stable") ?: "stable",
+            intervalSeconds = prefs.getLong("ota.intervalSeconds", 21600L).toDouble(),
+            autoPush = prefs.getBoolean("ota.autoPush", false),
+            rootUrl = if (root.isNullOrEmpty()) null else root,
+        )
+    }
+
+    private fun saveOtaPollConfig(config: BridgethingOtaPollConfig?) {
+        if (config == null) {
+            prefs.edit().putBoolean("ota.configured", false).apply()
+            return
+        }
+        prefs.edit()
+            .putBoolean("ota.configured", true)
+            .putString("ota.channel", config.channel)
+            .putLong("ota.intervalSeconds", config.intervalSeconds.toLong())
+            .putBoolean("ota.autoPush", config.autoPush)
+            .putString("ota.rootUrl", config.rootUrl)
+            .apply()
+    }
+
+    // --- diagnostics record conversion ---
+
+    private fun toRnDiagEntry(r: DiagRecord): BridgethingDiagEntry = BridgethingDiagEntry(
+        seq = r.seq.toDouble(),
+        ts = r.timestampMs,
+        kind = when (r.kind) {
+            DiagRecord.Kind.FRAME -> BridgethingDiagKind.FRAME
+            DiagRecord.Kind.LOG -> BridgethingDiagKind.LOG
+            DiagRecord.Kind.BREADCRUMB -> BridgethingDiagKind.BREADCRUMB
+        },
+        deviceId = r.deviceId,
+        direction = r.direction?.let {
+            when (it) {
+                DiagRecord.Direction.OUTBOUND -> BridgethingDiagDirection.OUTBOUND
+                DiagRecord.Direction.INBOUND -> BridgethingDiagDirection.INBOUND
+            }
+        },
+        frameKind = r.frameKind?.let {
+            when (it) {
+                DiagRecord.FrameKind.REQUEST -> BridgethingDiagFrameKind.REQUEST
+                DiagRecord.FrameKind.RESPONSE -> BridgethingDiagFrameKind.RESPONSE
+                DiagRecord.FrameKind.EVENT -> BridgethingDiagFrameKind.EVENT
+                DiagRecord.FrameKind.COMMAND -> BridgethingDiagFrameKind.COMMAND
+            }
+        },
+        surface = r.surface,
+        byteSize = r.byteSize?.toDouble(),
+        requestId = r.requestId,
+        latencyMs = r.latencyMs,
+        level = r.level,
+        target = r.target,
+        message = r.message,
+        category = r.category,
+        detail = r.detail,
+        fields = r.fields?.map { BridgethingConfigEntry(it.first, it.second) }?.toTypedArray(),
+    )
 
     override suspend fun isNotificationAccessGranted(): Boolean {
         val ctx = context.applicationContext
@@ -591,6 +817,7 @@ public class HybridBridgethingSessionImpl(
     override fun setOnServiceHealthChanged(callback: (BridgethingServiceHealth) -> Unit) { onServiceHealthChanged = callback }
     override fun setOnPeerConnected(callback: (BridgethingSessionPeer) -> Unit) { onPeerConnected = callback }
     override fun setOnPeerDisconnected(callback: (String) -> Unit) { onPeerDisconnected = callback }
+    override fun setOnPeerLinkFailed(callback: (BridgethingSessionPeer) -> Unit) { onPeerLinkFailed = callback }
     override fun setOnNowPlayingChanged(callback: (BridgethingNowPlaying?) -> Unit) { onNowPlayingChanged = callback }
     override fun setOnAncsAuthStatusChanged(callback: (BridgethingAncsAuthStatus) -> Unit) { onAncsAuthStatusChanged = callback }
     override fun setOnLog(callback: (String, String) -> Unit) { onLog = callback }
@@ -608,6 +835,7 @@ public class HybridBridgethingSessionImpl(
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
+    override fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit) { onDiagEntry = callback }
 
     private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
         val c = stateLock.withLock { companion } ?: throw IllegalStateException("session not started")
@@ -769,7 +997,12 @@ public class HybridBridgethingSessionImpl(
     private fun handleGatewayEvent(event: GatewayEvent) {
         when (event) {
             is GatewayEvent.Connected -> {
-                val peer = BridgethingSessionPeer(id = event.device.id, name = event.device.name)
+                val peer = BridgethingSessionPeer(
+                    id = event.device.id,
+                    name = event.device.name,
+                    status = BridgethingPeerLinkStatus.CONNECTED,
+                    linkError = null,
+                )
                 peers[event.device.id] = peer
                 onPeerConnected?.invoke(peer)
             }
@@ -812,8 +1045,11 @@ public class HybridBridgethingSessionImpl(
     }
 
     private fun emitProvider(info: BridgethingProviderInfo?) { onProviderChanged?.invoke(info) }
-    private fun emitAuth(state: BridgethingAuthState) { onAuthStateChanged?.invoke(state) }
-    private fun emitServiceHealth(health: BridgethingServiceHealth) { onServiceHealthChanged?.invoke(health) }
+    private fun emitAuth(state: BridgethingAuthState) { lastAuthState = state; onAuthStateChanged?.invoke(state) }
+    private fun emitServiceHealth(health: BridgethingServiceHealth) {
+        lastServiceHealth = health
+        onServiceHealthChanged?.invoke(health)
+    }
 
     private fun toRnServiceHealth(health: GlueServiceHealth): BridgethingServiceHealth = when (health) {
         is GlueServiceHealth.Ok -> BridgethingServiceHealth(BridgethingServiceHealthKind.OK, null)

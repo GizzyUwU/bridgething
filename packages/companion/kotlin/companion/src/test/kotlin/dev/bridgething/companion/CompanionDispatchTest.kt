@@ -1,5 +1,7 @@
 package dev.bridgething.companion
 
+import dev.bridgething.gateway.DiagRecord
+import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.schema.BridgeToGatewayLibraryMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.BridgeToGatewayPlayerMsg
@@ -42,6 +44,18 @@ class CompanionDispatchTest {
     private fun browseReq() = BridgeToGatewayMsgData.Library(
         BridgeToGatewayLibraryMsg.Browse(LibraryBrowseRequest(nodeId = null, limit = 20u, offset = 0u)),
     )
+
+    @Test
+    fun `companion logs tee into the diagnostics buffer`() = runBlocking {
+        val (companion, _) = boot(this, null)
+        val logged = DiagnosticsBuffer.tail(512).any {
+            it.kind == DiagRecord.Kind.LOG &&
+                it.target == "bridgething.companion" &&
+                it.message == "companion started"
+        }
+        assertTrue(logged)
+        companion.stop()
+    }
 
     @Test
     fun `browse routes to the active glue and returns its result`() = runBlocking {

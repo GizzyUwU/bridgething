@@ -36,7 +36,8 @@ import {
   type PermissionState,
   requestLocation,
 } from '../lib/permissions';
-import { getSession, useSession } from '../lib/session';
+import { getSession, useSession, waitForPeer } from '../lib/session';
+import { cancelSignIn, signIn as signInSpotify } from '../lib/spotify-auth';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
@@ -48,9 +49,6 @@ export function SetupScreen({ navigation, route }: Props) {
   const session = getSession();
   const { width } = useWindowDimensions();
 
-  // Step is mirrored to route params so it survives a screen remount
-  // (react-native-screens detaches us while a system activity like the
-  // CDM picker is in the foreground).
   const initialStep =
     route.params?.step ?? (route.params?.startAt === 'pair' ? 1 : 0);
   const [step, setStepState] = useState(initialStep);
@@ -69,10 +67,7 @@ export function SetupScreen({ navigation, route }: Props) {
   const authState = useSession(s => s.authState);
   const peers = useSession(s => s.peers);
 
-  // a connected gateway peer is the real "paired" signal on both platforms:
-  // the EA/iAP2 session on iOS, the RFCOMM socket on Android. ANCS (LE) is a
-  // secondary bond and doesn't gate the gateway, so it doesn't gate this.
-  const paired = peers.length > 0;
+  const paired = peers.some(p => p.status === 'connected');
   const signedIn = authState.kind === 'authenticated' && provider != null;
 
   useEffect(() => {
@@ -86,7 +81,7 @@ export function SetupScreen({ navigation, route }: Props) {
     };
   }, [session]);
 
-  // Auto-advance to step 2 the moment tokens land for the first time.
+  // Auto-advance to step 2 the moment tokens land for the first time
   useEffect(() => {
     if (authState.kind === 'idle') setBusyProviderId(null);
     if (authState.kind === 'authenticated' && step === 0) {
@@ -112,16 +107,17 @@ export function SetupScreen({ navigation, route }: Props) {
     if (busyProviderId || !provider.available) return;
     setBusyProviderId(provider.id);
     try {
-      await session.setActiveProvider(provider.id);
+      if (provider.id === 'spotify') await signInSpotify();
+      else await session.setActiveProvider(provider.id);
     } catch {
-      // setActiveProvider routes failures via authStateChanged.
+      // failures surface via authState
     } finally {
       setBusyProviderId(null);
     }
   };
 
-  const cancelAuth = async () => {
-    await session.cancelAuth();
+  const cancelAuth = () => {
+    cancelSignIn();
     setBusyProviderId(null);
   };
 
@@ -130,20 +126,18 @@ export function SetupScreen({ navigation, route }: Props) {
     setPairBusy(true);
     try {
       if (Platform.OS === 'android') {
-        // CompanionDeviceManager picker. Returns the chosen accessory
-        // or null on cancel - no error handling needed.
         await session.presentPairPicker();
         return;
       }
-      // iOS: pair the gateway over iAP2/EA first (BR/EDR classic + MFi), which
-      // is what brings up a connected peer. Then set up ANCS (LE) for
-      // notifications as a best-effort follow-on.
       await session.presentPairPicker();
+      const connected = await waitForPeer(20000);
+      if (!connected) return;
       const result = await session.enableAncsNotifications();
       if (result.kind === 'failed') {
         Alert.alert(
           'notifications setup failed',
-          result.message ?? 'pairing worked, but enabling notifications did not.',
+          result.message ??
+            'pairing worked, but enabling notifications did not.',
         );
       }
     } catch (err) {
@@ -517,8 +511,8 @@ function PermissionsPage({ onFinish }: { onFinish: () => void }) {
           let apps use your location
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-          some Car Thing apps (weather, maps) work better with your location.
-          it stays on your phone and you can turn it off anytime in settings.
+          some Car Thing apps (weather, maps) work better with your location. it
+          stays on your phone and you can turn it off anytime in settings.
         </Text>
 
         <View className="my-10 items-center">

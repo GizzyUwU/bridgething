@@ -1,13 +1,14 @@
 package dev.bridgething.spotify
 
 import dev.bridgething.gateway.BridgethingGateway
+import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.authority
 import dev.bridgething.gateway.player
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueAuthState
 import dev.bridgething.glue.GlueCapability
-import dev.bridgething.glue.GlueDeviceCodePrompt
+import dev.bridgething.glue.GlueDebugState
 import dev.bridgething.glue.GlueError
 import dev.bridgething.glue.GlueNowPlaying
 import dev.bridgething.glue.GlueServiceHealth
@@ -68,7 +69,7 @@ private const val HINT_DEBOUNCE_MS = 250L
 private const val POLL_INTERVAL_MS = 60_000L
 private const val SPOTIFY_APP_BUNDLE = "com.spotify.client"
 
-typealias SpotifyAuthenticatorFactory = (onPrompt: (DeviceCodePrompt) -> Unit) -> SpotifyAuthenticator
+typealias SpotifyAuthenticatorFactory = () -> SpotifyAuthenticator
 
 /** `BridgethingGlue` impl; no dealer websocket, so now-playing is driven by playback hints plus a baseline poll. */
 class SpotifyGlue(
@@ -112,18 +113,17 @@ class SpotifyGlue(
 
         this.gateway = gateway
 
-        // optimistic: a saved refresh token means we were signed in, so show authenticated up-front;
-        // the background refresh downgrades to failed only if it actually fails. cold start stays pending.
-        if (refreshToken.isEmpty()) {
+        if (accessToken.isEmpty() && refreshToken.isEmpty()) {
+            // no tokens yet: RN drives interactive sign-in and re-attaches via completeSpotifySignIn.
             authObserver?.invoke(GlueAuthState.Pending(null))
-        } else {
-            authObserver?.invoke(GlueAuthState.Authenticated)
+            return
         }
-
-        val authenticator = authenticatorFactory { prompt -> handleDeviceCodePrompt(prompt) }
+        // optimistic: tokens present means we were signed in, so show authenticated up-front;
+        // the background refresh downgrades to failed only if it actually fails.
+        authObserver?.invoke(GlueAuthState.Authenticated)
 
         val client = SpotinyClient(
-            authenticator = authenticator,
+            authenticator = authenticatorFactory(),
             delegate = this,
             accessToken = accessToken,
             refreshToken = refreshToken,
@@ -453,13 +453,25 @@ class SpotifyGlue(
     suspend fun handlePlaybackHint(hint: PlaybackHint) {
         if (hint.appBundle != SPOTIFY_APP_BUNDLE) return
 
+        DiagnosticsBuffer.recordBreadcrumb(
+            category = "spotify.merge",
+            detail = "iap2 playback hint",
+            fields = listOf("source" to "iap2BackProp"),
+        )
         hintFetchJob?.cancel()
         hintFetchJob = scope.launch {
             delay(HINT_DEBOUNCE_MS)
             if (!isActive) return@launch
-            fetchAndDispatch()
+            fetchAndDispatch("hint")
         }
     }
+
+    override suspend fun debugState(): GlueDebugState = GlueDebugState(
+        authorityPlaybackHeld = authorityHeld,
+        authorityMetadataHeld = authorityHeld,
+        baselinePollActive = baselinePollJob != null,
+        hintFetchActive = hintFetchJob != null,
+    )
 
     override suspend fun asset(id: String): AssetBytes? {
         if (!id.startsWith(ASSET_ID_PREFIX)) return null
@@ -471,30 +483,42 @@ class SpotifyGlue(
         return AssetBytes(bytes = response.bodyAsBytes(), mime = mime)
     }
 
-    private suspend fun fetchAndDispatch() {
+    private suspend fun fetchAndDispatch(reason: String) {
         val client = client ?: return
         val state = client.player.getPlaybackState() ?: return
-        handleStateUpdate(state)
+        handleStateUpdate(state, reason)
     }
 
-    private fun handleStateUpdate(state: PlayerState) {
+    private fun handleStateUpdate(state: PlayerState, reason: String) {
         val gateway = gateway ?: return
         val update = makeUpdate(state)
         val artworkUrl = state.item?.let { rawArtworkUrl(it) }
         nowPlayingObserver?.invoke(GlueNowPlaying(update = update, artworkUrl = artworkUrl))
 
         val nowPlaying = state.isPlaying
+        DiagnosticsBuffer.recordBreadcrumb(
+            category = "spotify.merge",
+            detail = "augmented now-playing",
+            fields = listOf(
+                "source" to "companionAugmented",
+                "reason" to reason,
+                "track" to (state.item?.name ?: ""),
+                "playing" to nowPlaying.toString(),
+            ),
+        )
         scope.launch {
             runCatching { gateway.player.delta(update) }
             if (nowPlaying) {
                 runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingPlayback)) }
                 runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingMetadata)) }
                 authorityHeld = true
+                DiagnosticsBuffer.recordBreadcrumb("spotify.authority", "claimed playback+metadata")
                 startBaselinePollIfNeeded()
             } else if (authorityHeld) {
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingPlayback)) }
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingMetadata)) }
                 authorityHeld = false
+                DiagnosticsBuffer.recordBreadcrumb("spotify.authority", "released playback+metadata")
                 stopBaselinePoll()
             }
         }
@@ -512,25 +536,13 @@ class SpotifyGlue(
         }
     }
 
-    private fun handleDeviceCodePrompt(prompt: DeviceCodePrompt) {
-        authObserver?.invoke(
-            GlueAuthState.Pending(
-                GlueDeviceCodePrompt(
-                    userCode = prompt.userCode,
-                    verificationUrl = prompt.verificationUrl,
-                    verificationUrlComplete = prompt.verificationUrlComplete,
-                ),
-            ),
-        )
-    }
-
     private fun startBaselinePollIfNeeded() {
         if (baselinePollJob != null) return
         baselinePollJob = scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
                 if (!isActive) return@launch
-                fetchAndDispatch()
+                fetchAndDispatch("poll")
             }
         }
     }
@@ -559,7 +571,7 @@ class SpotifyGlue(
     }
 
     override fun playerStateUpdated(oldState: PlayerState?, newState: PlayerState) {
-        handleStateUpdate(newState)
+        handleStateUpdate(newState, "dealer")
     }
 
     override fun serviceDidRateLimit(retryAfterSeconds: Int) {

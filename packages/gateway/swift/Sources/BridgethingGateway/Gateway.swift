@@ -5,12 +5,8 @@ public enum GatewayEvent: Sendable {
   case connected(Device)
   case disconnected(deviceId: String)
   case message(deviceId: String, BridgeToGatewayMsg)
-  /// Surfaced when a frame fails to parse or decode. The peer is still
-  /// considered connected; consumers may choose to disconnect on repeated
-  /// errors. `description` carries the underlying error rendered as a string
-  /// (we don't expose the live `Error` because not every error type on the
-  /// codec/decoder path is `Sendable`).
   case decodeError(deviceId: String, description: String)
+  case linkFailed(device: Device, reason: String)
 }
 
 public enum BridgethingGatewayError: Error, Sendable {
@@ -34,6 +30,7 @@ public actor BridgethingGateway {
   private var consumerTask: Task<Void, Never>?
   private var buffers: [String: FrameAccumulator] = [:]
   private var pendingRequests: [UUID: CheckedContinuation<BridgeToGatewayMsg, Error>] = [:]
+  private var requestSentAt: [UUID: Double] = [:]
 
   private let broadcaster = EventBroadcaster()
 
@@ -100,6 +97,15 @@ public actor BridgethingGateway {
     priority: Priority = .normal
   ) async throws {
     let frame = try codec.encode(message, priority: priority)
+    DiagnosticsBuffer.shared.recordFrame(
+      deviceId: deviceId,
+      direction: .outbound,
+      frameKind: diagFrameKind(message.meta),
+      surface: diagSurfaceLabel(message.data),
+      byteSize: frame.count,
+      requestId: diagRequestId(message.meta, id: message.id),
+      latencyMs: nil
+    )
     try await adapter.send(deviceId: deviceId, frame: frame)
   }
 
@@ -120,6 +126,16 @@ public actor BridgethingGateway {
     let id = UUID()
     let msg = GatewayToBridgeMsg(id: id, meta: .request, data: data)
     let frame = try codec.encode(msg)
+    requestSentAt[id] = Date().timeIntervalSince1970 * 1000
+    DiagnosticsBuffer.shared.recordFrame(
+      deviceId: deviceId,
+      direction: .outbound,
+      frameKind: .request,
+      surface: diagSurfaceLabel(data),
+      byteSize: frame.count,
+      requestId: id.uuidString,
+      latencyMs: nil
+    )
 
     return try await withCheckedThrowingContinuation { cont in
       pendingRequests[id] = cont
@@ -142,6 +158,7 @@ public actor BridgethingGateway {
   // MARK: - private
 
   private func failPendingRequest(id: UUID, with error: Error) {
+    requestSentAt.removeValue(forKey: id)
     if let cont = pendingRequests.removeValue(forKey: id) {
       cont.resume(throwing: error)
     }
@@ -161,9 +178,16 @@ public actor BridgethingGateway {
     case let .disconnected(id):
       buffers.removeValue(forKey: id)
       broadcaster.emit(.disconnected(deviceId: id))
+    case let .linkFailed(id, name, reason):
+      buffers.removeValue(forKey: id)
+      broadcaster.emit(.linkFailed(device: Device(id: id, name: name), reason: reason))
     case let .bytes(id, chunk):
       ingest(deviceId: id, chunk: chunk)
     }
+  }
+
+  public func reconnect(deviceId: String) async throws {
+    try await adapter.reconnect(deviceId: deviceId)
   }
 
   private func ingest(deviceId: String, chunk: Data) {
@@ -172,6 +196,25 @@ public actor BridgethingGateway {
     do {
       while let frame = try accumulator.nextFrame() {
         let msg = try codec.decode(BridgeToGatewayMsg.self, from: frame)
+        var latencyMs: Double?
+        var requestId: String?
+        if case let .response(r) = msg.meta {
+          requestId = r.requestId.uuidString
+          if let sentAt = requestSentAt.removeValue(forKey: r.requestId) {
+            latencyMs = Date().timeIntervalSince1970 * 1000 - sentAt
+          }
+        } else if case .request = msg.meta {
+          requestId = msg.id.uuidString
+        }
+        DiagnosticsBuffer.shared.recordFrame(
+          deviceId: deviceId,
+          direction: .inbound,
+          frameKind: diagFrameKind(msg.meta),
+          surface: diagSurfaceLabel(msg.data),
+          byteSize: frame.count,
+          requestId: requestId,
+          latencyMs: latencyMs
+        )
         if case let .response(r) = msg.meta, completePendingRequest(id: r.requestId, with: msg) {
           continue
         }
@@ -256,4 +299,30 @@ final class EventBroadcaster: @unchecked Sendable {
       c.finish()
     }
   }
+}
+
+private func diagFrameKind(_ meta: MsgMeta) -> DiagRecord.FrameKind {
+  switch meta {
+  case .command: .command
+  case .event: .event
+  case .request: .request
+  case .response: .response
+  }
+}
+
+private func diagRequestId(_ meta: MsgMeta, id: UUID) -> String? {
+  switch meta {
+  case .request: id.uuidString
+  case let .response(r): r.requestId.uuidString
+  case .command, .event: nil
+  }
+}
+
+private func diagSurfaceLabel(_ value: Any) -> String {
+  let mirror = Mirror(reflecting: value)
+  if mirror.displayStyle == .enum {
+    if let label = mirror.children.first?.label { return label }
+    return String(describing: value)
+  }
+  return String(describing: type(of: value))
 }

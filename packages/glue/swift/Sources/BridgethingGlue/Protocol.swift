@@ -71,9 +71,34 @@ public protocol BridgethingGlue: Sendable {
 
     /// Provider-native lyrics path. Return nil to fall through to the companion's `LyricsResolver`.
     func lyrics(for track: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics?
+
+    /// Live augmentation state for the debug surface. Default is all-false.
+    func debugState() async -> GlueDebugState
+}
+
+/// Snapshot of a glue's now-playing augmentation, surfaced to the debug page.
+public struct GlueDebugState: Sendable {
+    public let authorityPlaybackHeld: Bool
+    public let authorityMetadataHeld: Bool
+    public let baselinePollActive: Bool
+    public let hintFetchActive: Bool
+
+    public init(
+        authorityPlaybackHeld: Bool = false,
+        authorityMetadataHeld: Bool = false,
+        baselinePollActive: Bool = false,
+        hintFetchActive: Bool = false
+    ) {
+        self.authorityPlaybackHeld = authorityPlaybackHeld
+        self.authorityMetadataHeld = authorityMetadataHeld
+        self.baselinePollActive = baselinePollActive
+        self.hintFetchActive = hintFetchActive
+    }
 }
 
 public extension BridgethingGlue {
+    func debugState() async -> GlueDebugState { GlueDebugState() }
+
     func play(_: PlayUri) async throws { throw GlueError.notImplemented }
     func queue(_: QueueUri) async throws { throw GlueError.notImplemented }
     func pause() async throws { throw GlueError.notImplemented }

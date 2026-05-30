@@ -58,7 +58,7 @@ data class DeviceCodeConfig(
 
 class DeviceCodeAuthenticator(
     private val config: DeviceCodeConfig,
-    private val onPrompt: (DeviceCodePrompt) -> Unit,
+    private val onPrompt: (DeviceCodePrompt) -> Unit = {},
 ) : SpotifyAuthenticator {
 
     private val deviceCodeEndpoint: String = "${config.workerBaseUrl.trimEnd('/')}/api/device/code"

@@ -20,6 +20,7 @@ internal class MockAdapter : Adapter {
     var startCalled: Boolean = false
     var stopCalled: Boolean = false
     val disconnectCalls: MutableList<String> = mutableListOf()
+    val reconnectCalls: MutableList<String> = mutableListOf()
 
     override suspend fun start() {
         startCalled = true
@@ -33,6 +34,10 @@ internal class MockAdapter : Adapter {
 
     override suspend fun disconnect(deviceId: String) {
         disconnectCalls.add(deviceId)
+    }
+
+    override suspend fun reconnect(deviceId: String) {
+        reconnectCalls.add(deviceId)
     }
 
     override suspend fun send(deviceId: String, frame: ByteArray) {

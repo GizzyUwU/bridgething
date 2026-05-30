@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import dev.bridgething.gateway.Adapter
 import dev.bridgething.gateway.AssetRequestHandle
 import dev.bridgething.gateway.BridgethingGateway
+import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.LyricsRequestHandle
 import dev.bridgething.gateway.asset
@@ -596,6 +597,7 @@ public class BridgethingCompanion(
             CompanionLogLevel.Warn -> android.util.Log.w(TAG, message)
             CompanionLogLevel.Error -> android.util.Log.e(TAG, message)
         }
+        DiagnosticsBuffer.recordLog(level = level.raw, target = TAG, message = message)
         logObserver?.invoke(level, message)
     }
 

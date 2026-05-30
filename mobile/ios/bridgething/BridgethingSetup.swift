@@ -58,107 +58,87 @@ enum BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl())
     }
 
-    static let deviceCodeMethod = "deviceCode"
-    static let pkceMethod = "pkce"
-    private static let authMethodKey = "bridgething.spotify.authMethod"
+    static let spotifyProviderId = SpotifyGlue.name
 
-    private static var hasAuthPsk: Bool {
-        let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String
-        return !(psk ?? "").isEmpty
+    private static let spotifyWorker = "https://thinglabs.sh/auth"
+
+    private static let spotifyScopes: [String] = [
+        "user-read-playback-state",
+        "user-modify-playback-state",
+        "user-read-currently-playing",
+        "user-read-playback-position",
+        "user-top-read",
+        "user-read-recently-played",
+        "playlist-read-private",
+        "playlist-read-collaborative",
+        "playlist-modify-private",
+        "playlist-modify-public",
+        "user-follow-modify",
+        "user-follow-read",
+        "user-library-read",
+        "user-library-modify",
+        "user-read-private",
+    ]
+
+    private static var authPsk: String {
+        (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String) ?? ""
     }
 
-    private static var hasPkceClientID: Bool {
-        let id = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String
-        return !(id ?? "").isEmpty
+    private static var pkceClientID: String {
+        (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String) ?? ""
     }
 
-    /// Which Spotify sign-in flows this build is configured for.
-    static var availableSpotifyAuthMethods: [String] {
-        var out: [String] = []
-        if hasAuthPsk { out.append(deviceCodeMethod) }
-        if hasPkceClientID { out.append(pkceMethod) }
-        return out
+    static func spotifyAuthConfig() -> BridgethingSpotifyAuthConfig {
+        BridgethingSpotifyAuthConfig(
+            scopes: spotifyScopes,
+            pkceClientId: pkceClientID,
+            pkceRedirectUri: "bridgething://oauth",
+            pkceAuthorizeUrl: "https://accounts.spotify.com/authorize",
+            pkceTokenUrl: "https://accounts.spotify.com/api/token",
+            deviceCodePsk: authPsk,
+            deviceCodeUrl: "\(spotifyWorker)/api/device/code",
+            deviceCodeTokenUrl: "\(spotifyWorker)/api/token",
+            deviceCodeDescription: "car-thing-device"
+        )
     }
 
-    /// The flow used for sign-in: the user's stored choice if still available,
-    /// otherwise device-code when configured, otherwise pkce.
-    static var effectiveSpotifyAuthMethod: String {
-        let available = availableSpotifyAuthMethods
-        if let stored = UserDefaults.standard.string(forKey: authMethodKey), available.contains(stored) {
-            return stored
-        }
-        return available.contains(deviceCodeMethod) ? deviceCodeMethod : pkceMethod
-    }
-
-    static func setSpotifyAuthMethod(_ method: String) {
-        guard availableSpotifyAuthMethods.contains(method) else { return }
-        UserDefaults.standard.set(method, forKey: authMethodKey)
+    static func persistSpotifyTokens(access: String, refresh: String, usesDealer: Bool) {
+        spotifyTokenStore.save(access: access, refresh: refresh)
+        spotifyTokenStore.setUsesDealer(usesDealer)
     }
 
     private static func makeSpotifyGlue() -> SpotifyGlue {
         let initial = spotifyTokenStore.load()
         return SpotifyGlue(
-            authenticatorFactory: spotifyAuthenticatorFactory(),
+            authenticatorFactory: spotifyAuthenticatorFactory(usesDealer: initial.usesDealer),
             accessToken: initial.access ?? "",
             refreshToken: initial.refresh ?? "",
             onTokensRefreshed: { access, refresh in
                 spotifyTokenStore.save(access: access, refresh: refresh)
             },
-            // only pkce/discord has dealer access; device-code authenticates without the socket.
-            usesDealer: effectiveSpotifyAuthMethod == pkceMethod
+            usesDealer: initial.usesDealer
         )
     }
 
-    private static func spotifyAuthenticatorFactory() -> SpotifyAuthenticatorFactory {
-        let scopes: [String] = [
-            "user-read-playback-state",
-            "user-modify-playback-state",
-            "user-read-currently-playing",
-            "user-read-playback-position",
-            "user-top-read",
-            "user-read-recently-played",
-            "playlist-read-private",
-            "playlist-read-collaborative",
-            "playlist-modify-private",
-            "playlist-modify-public",
-            "user-follow-modify",
-            "user-follow-read",
-            "user-library-read",
-            "user-library-modify",
-            "user-read-private",
-        ]
-        let authorizeURL = URL(string: "https://accounts.spotify.com/authorize")!
-        let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
-
-        if effectiveSpotifyAuthMethod == deviceCodeMethod,
-           let psk = Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String,
-           !psk.isEmpty
-        {
-            let worker = "https://thinglabs.sh/auth"
+    private static func spotifyAuthenticatorFactory(usesDealer: Bool) -> SpotifyAuthenticatorFactory {
+        if !usesDealer {
             let configuration = DeviceCodeConfiguration(
-                deviceCodeEndpoint: URL(string: "\(worker)/api/device/code")!,
-                tokenEndpoint: URL(string: "\(worker)/api/token")!,
+                deviceCodeEndpoint: URL(string: "\(spotifyWorker)/api/device/code")!,
+                tokenEndpoint: URL(string: "\(spotifyWorker)/api/token")!,
                 description: "car-thing-device",
-                scopes: scopes,
-                authorizationBearer: psk
+                scopes: spotifyScopes,
+                authorizationBearer: authPsk
             )
-            return { onPrompt in
-                DeviceCodeAuthenticator(configuration: configuration, onPrompt: onPrompt)
-            }
+            return { DeviceCodeAuthenticator(configuration: configuration) }
         }
-
-        let pkceClientID = (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String) ?? ""
         let configuration = OAuthConfiguration(
-            authorizationEndpoint: authorizeURL,
-            tokenEndpoint: tokenURL,
+            authorizationEndpoint: URL(string: "https://accounts.spotify.com/authorize")!,
+            tokenEndpoint: URL(string: "https://accounts.spotify.com/api/token")!,
             clientID: pkceClientID,
             redirectURI: "bridgething://oauth",
-            scopes: scopes
+            scopes: spotifyScopes
         )
-        return { _ in
-            // PKCE flow produces no device-code prompt; closure argument is unused
-            WebViewPKCEAuthenticator(configuration: configuration)
-        }
+        return { WebViewPKCEAuthenticator(configuration: configuration) }
     }
 }
 
@@ -173,10 +153,15 @@ private final class TokenStore: @unchecked Sendable {
     struct Tokens {
         let access: String?
         let refresh: String?
+        let usesDealer: Bool
     }
 
     func load() -> Tokens {
-        Tokens(access: read(account: "access"), refresh: read(account: "refresh"))
+        Tokens(
+            access: read(account: "access"),
+            refresh: read(account: "refresh"),
+            usesDealer: read(account: "dealer") == "1"
+        )
     }
 
     func save(access: String, refresh: String) {
@@ -184,9 +169,14 @@ private final class TokenStore: @unchecked Sendable {
         write(account: "refresh", value: refresh)
     }
 
+    func setUsesDealer(_ value: Bool) {
+        write(account: "dealer", value: value ? "1" : "0")
+    }
+
     func clear() {
         delete(account: "access")
         delete(account: "refresh")
+        delete(account: "dealer")
     }
 
     private func read(account: String) -> String? {

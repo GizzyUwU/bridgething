@@ -58,4 +58,5 @@ public interface Adapter {
     public suspend fun stop()
     public suspend fun disconnect(deviceId: String)
     public suspend fun send(deviceId: String, frame: ByteArray)
+    public suspend fun reconnect(deviceId: String) {}
 }

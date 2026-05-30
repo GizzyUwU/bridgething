@@ -9,7 +9,8 @@ const LOCATION =
     : PERMISSIONS.IOS.LOCATION_WHEN_IN_USE;
 
 function toState(result: string): PermissionState {
-  if (result === RESULTS.GRANTED || result === RESULTS.LIMITED) return 'granted';
+  if (result === RESULTS.GRANTED || result === RESULTS.LIMITED)
+    return 'granted';
   if (result === RESULTS.BLOCKED) return 'blocked';
   if (result === RESULTS.UNAVAILABLE) return 'unavailable';
   return 'denied';
@@ -23,8 +24,6 @@ export async function requestLocation(): Promise<PermissionState> {
   return toState(await request(LOCATION));
 }
 
-/** iOS will not re-prompt after a denial, so a blocked permission can only be
- *  re-granted from the system Settings app. */
 export function openAppSettings(): void {
   Linking.openSettings().catch(() => {});
 }

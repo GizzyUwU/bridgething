@@ -3,62 +3,61 @@ import {
   type BridgethingAncsAuthStatus,
   type BridgethingAuthState,
   type BridgethingDeviceMeta,
+  type BridgethingHostInfo,
   type BridgethingNowPlaying,
   type BridgethingProviderInfo,
   type BridgethingServiceHealth,
   type BridgethingSessionPeer,
+  type BridgethingSessionSnapshot,
   type SessionEvent,
 } from '@bridgething/session-react-native';
-import { useEffect } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
+import { startDiagnostics } from './diagnostics';
+import { startOta } from './ota';
 import {
   DEFAULT_CAPABILITY_FLAGS,
   DEFAULT_OTA_POLL_CONFIG,
-  getAllNicknames,
-  getCapabilityFlags,
-  getOtaPollConfig,
-  setCapabilityFlags as persistCapabilityFlags,
-  setNickname as persistNickname,
-  setOtaPollConfig as persistOtaPollConfig,
+  type DeviceLedgerEntry,
+  forgetDevice as persistForget,
+  getLedger,
+  recordDeviceSeen,
+  setDeviceNickname,
 } from './storage';
 
 let sessionSingleton: BridgethingSession | null = null;
 
-/** Process-wide session instance. Lazy so RN hot reloads don't double-
- *  register Nitro callbacks. */
 export function getSession(): BridgethingSession {
   if (!sessionSingleton) sessionSingleton = new BridgethingSession();
   return sessionSingleton;
 }
 
 type SessionState = {
-  /** Lazily mutated by `bootstrapSession`. UI gates on this to
-   *  decide initial route and whether settings/dashboard can talk
-   *  to the companion yet. */
   started: boolean;
 
   provider: BridgethingProviderInfo | null;
   authState: BridgethingAuthState;
-  /** Provider API health while signed in (ok / rate-limited / unreachable). */
   serviceHealth: BridgethingServiceHealth;
   peers: BridgethingSessionPeer[];
   ancsAuthStatus: BridgethingAncsAuthStatus;
   nowPlaying: BridgethingNowPlaying | null;
   deviceMeta: Record<string, BridgethingDeviceMeta>;
-  /** User-assigned nicknames keyed by deviceId. Mirrors mmkv. */
-  nicknames: Record<string, string>;
-  /** Live snapshot of capability flags as JS sees them. Mirrors mmkv. */
+  hostInfo: BridgethingHostInfo | null;
+  ledger: Record<string, DeviceLedgerEntry>;
   capabilityFlags: typeof DEFAULT_CAPABILITY_FLAGS;
-  /** Null = polling disabled. Mirrors mmkv. */
   otaPollConfig: typeof DEFAULT_OTA_POLL_CONFIG | null;
 
   apply(event: SessionEvent): void;
+  reconcile(snapshot: BridgethingSessionSnapshot): void;
+  setAuthState(state: BridgethingAuthState): void;
   reset(): void;
 };
 
-const initial: Omit<SessionState, 'apply' | 'reset'> = {
+const initial: Omit<
+  SessionState,
+  'apply' | 'reconcile' | 'reset' | 'setAuthState'
+> = {
   started: false,
   provider: null,
   authState: { kind: 'idle' },
@@ -67,9 +66,10 @@ const initial: Omit<SessionState, 'apply' | 'reset'> = {
   ancsAuthStatus: 'unknown',
   nowPlaying: null,
   deviceMeta: {},
-  nicknames: getAllNicknames(),
-  capabilityFlags: getCapabilityFlags(),
-  otaPollConfig: getOtaPollConfig(),
+  hostInfo: null,
+  ledger: getLedger(),
+  capabilityFlags: { ...DEFAULT_CAPABILITY_FLAGS },
+  otaPollConfig: null,
 };
 
 export const useSessionStore = create<SessionState>((set, _get) => ({
@@ -86,6 +86,17 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
         set({ serviceHealth: event.health });
         return;
       case 'peerConnected':
+        set(s => {
+          const others = s.peers.filter(p => p.id !== event.peer.id);
+          const ledger = recordDeviceSeen(
+            event.peer.id,
+            event.peer.name,
+            Date.now(),
+          );
+          return { peers: [...others, event.peer], ledger };
+        });
+        return;
+      case 'peerLinkFailed':
         set(s => {
           const others = s.peers.filter(p => p.id !== event.peer.id);
           return { peers: [...others, event.peer] };
@@ -111,24 +122,40 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       case 'webappsChanged':
       case 'otaEvent':
       case 'log':
-        // Observed by dedicated selectors / subscriptions on the dashboard
-        // and ad-hoc consumers in their own components.
+      case 'diagEntry':
         return;
     }
   },
+  reconcile: snapshot => {
+    const now = Date.now();
+    let ledger = getLedger();
+    for (const peer of snapshot.peers) {
+      if (peer.status === 'connected') {
+        ledger = recordDeviceSeen(peer.id, peer.name, now);
+      }
+    }
+    set({
+      provider: snapshot.provider ?? null,
+      authState: snapshot.authState,
+      serviceHealth: snapshot.serviceHealth,
+      peers: snapshot.peers,
+      ancsAuthStatus: snapshot.ancsAuthStatus,
+      nowPlaying: snapshot.nowPlaying ?? null,
+      deviceMeta: Object.fromEntries(
+        snapshot.deviceMeta.map(e => [e.deviceId, e.meta]),
+      ),
+      hostInfo: snapshot.hostInfo,
+      capabilityFlags: snapshot.capabilityFlags,
+      otaPollConfig: snapshot.otaPollConfig ?? null,
+      ledger,
+    });
+  },
+  setAuthState: state => set({ authState: state }),
   reset: () => set({ ...initial }),
 }));
 
 let wired = false;
 
-/**
- * Subscribe the zustand store to the native event stream once and start
- * the session. Idempotent across hot reloads. Called from App.tsx.
- *
- * Also pushes mmkv-resident config (capability flags, OTA poll config)
- * down to native after start, so the companion ends up with the user's
- * choices instead of the all-off defaults the Swift impl boots with.
- */
 export async function bootstrapSession(): Promise<void> {
   const session = getSession();
   const store = useSessionStore.getState();
@@ -141,26 +168,24 @@ export async function bootstrapSession(): Promise<void> {
   if (store.started) return;
   await session.start();
   useSessionStore.setState({ started: true });
+  await reconcileSnapshot();
+  await startDiagnostics();
+  startOta();
+}
 
-  // apply persisted preferences; errors are non-fatal.
+export async function reconcileSnapshot(): Promise<void> {
   try {
-    await session.setCapabilityFlags(store.capabilityFlags);
+    const snapshot = await getSession().snapshot();
+    useSessionStore.getState().reconcile(snapshot);
   } catch (err) {
-    console.warn('[bridgething] setCapabilityFlags on bootstrap failed', err);
-  }
-  try {
-    await session.setOtaPollConfig(store.otaPollConfig);
-  } catch (err) {
-    console.warn('[bridgething] setOtaPollConfig on bootstrap failed', err);
+    console.warn('[bridgething] snapshot reconcile failed', err);
   }
 }
 
-/** Push a flag change to native and mmkv at the same time; optimistic store update lands first so toggles feel instant. */
 export async function updateCapabilityFlags(
   flags: typeof DEFAULT_CAPABILITY_FLAGS,
 ): Promise<void> {
   useSessionStore.setState({ capabilityFlags: flags });
-  persistCapabilityFlags(flags);
   await getSession().setCapabilityFlags(flags);
 }
 
@@ -168,63 +193,95 @@ export async function updateOtaPollConfig(
   config: typeof DEFAULT_OTA_POLL_CONFIG | null,
 ): Promise<void> {
   useSessionStore.setState({ otaPollConfig: config });
-  persistOtaPollConfig(config);
   await getSession().setOtaPollConfig(config);
 }
 
-/** JS-only nickname update. Mirrors to mmkv. The store layer reads
- *  nicknames by id when rendering peer rows. */
 export function updateNickname(
   deviceId: string,
   nickname: string | null,
 ): void {
-  useSessionStore.setState(s => {
-    const next = { ...s.nicknames };
-    const trimmed = nickname?.trim();
-    if (trimmed && trimmed.length > 0) next[deviceId] = trimmed;
-    else delete next[deviceId];
-    return { nicknames: next };
-  });
-  persistNickname(deviceId, nickname);
+  useSessionStore.setState({ ledger: setDeviceNickname(deviceId, nickname) });
 }
 
-/** Nickname when set, BT-advertised name otherwise. */
+export function forgetKnownDevice(deviceId: string): void {
+  useSessionStore.setState({ ledger: persistForget(deviceId) });
+}
+
+export function waitForPeer(timeoutMs: number): Promise<boolean> {
+  const connected = useSessionStore
+    .getState()
+    .peers.some(p => p.status === 'connected');
+  if (connected) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let unsub: (() => void) | null = null;
+    const done = (ok: boolean) => {
+      unsub?.();
+      unsub = null;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    unsub = getSession().subscribe(event => {
+      if (event.type === 'peerConnected') done(true);
+    });
+  });
+}
+
+export function connectedPeers(
+  peers: BridgethingSessionPeer[],
+): BridgethingSessionPeer[] {
+  return peers.filter(p => p.status === 'connected');
+}
+
 export function peerDisplayName(
   peer: BridgethingSessionPeer,
-  nicknames: Record<string, string>,
+  ledger: Record<string, DeviceLedgerEntry>,
 ): string {
-  return nicknames[peer.id] ?? peer.name;
+  return ledger[peer.id]?.nickname ?? peer.name;
 }
 
-/**
- * Subscribe to a slice of session state. `selector` is wrapped in
- * `useShallow` so consumers can return arrays / objects without the
- * fresh-allocation infinite-loop trap.
- */
+export type KnownDevice = {
+  id: string;
+  displayName: string;
+  nickname: string | null;
+  lastConnectedAt: number;
+  peer: BridgethingSessionPeer | null;
+};
+
+export function knownDevices(
+  ledger: Record<string, DeviceLedgerEntry>,
+  peers: BridgethingSessionPeer[],
+): KnownDevice[] {
+  const byId = new Map<string, KnownDevice>();
+  for (const entry of Object.values(ledger)) {
+    byId.set(entry.id, {
+      id: entry.id,
+      displayName: entry.nickname ?? entry.lastName,
+      nickname: entry.nickname,
+      lastConnectedAt: entry.lastConnectedAt,
+      peer: null,
+    });
+  }
+  for (const peer of peers) {
+    const prior = byId.get(peer.id);
+    byId.set(peer.id, {
+      id: peer.id,
+      displayName: prior?.nickname ?? peer.name,
+      nickname: prior?.nickname ?? null,
+      lastConnectedAt: prior?.lastConnectedAt ?? 0,
+      peer,
+    });
+  }
+  return [...byId.values()].sort((a, b) => {
+    const aConn = a.peer?.status === 'connected' ? 1 : 0;
+    const bConn = b.peer?.status === 'connected' ? 1 : 0;
+    if (aConn !== bConn) return bConn - aConn;
+    return b.lastConnectedAt - a.lastConnectedAt;
+  });
+}
+
 export function useSession<T>(selector: (state: SessionState) => T): T {
   return useSessionStore(useShallow(selector));
-}
-
-/**
- * Push the native log stream on while the calling screen is mounted.
- * Refcounted across multiple Logs screens (multi-window etc.).
- */
-export function useLogStream(
-  handler: (level: string, message: string) => void,
-): void {
-  const session = getSession();
-  useEffect(() => {
-    session.setLogStreamingEnabled(true);
-    const off = session.subscribe(event => {
-      if (event.type === 'log') handler(event.level, event.message);
-    });
-    return () => {
-      off();
-      session.setLogStreamingEnabled(false);
-    };
-    // handler is captured by the subscriber; consumers should pass a
-    // stable callback (useCallback) when the inner state changes.
-  }, [handler, session]);
 }
 
 function omit<T extends object>(obj: T, key: keyof T | string): T {

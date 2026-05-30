@@ -5,20 +5,14 @@ import type {
   BridgethingOtaPollConfig,
 } from '@bridgething/session-react-native';
 
-/** Single mmkv instance for everything the JS side persists. mmkv is
- *  fast enough that we don't need to lazy-instantiate per domain;
- *  prefix keys instead. */
 export const storage = createMMKV({ id: 'bridgething' });
 
 const KEY = {
   setupCompleted: 'setup.completed',
-  nicknames: 'device.nicknames', // JSON { [deviceId]: nickname }
-  capabilityFlags: 'flags.capabilities', // JSON of CapabilityFlags
-  otaPollConfig: 'ota.pollConfig', // JSON of OtaPollConfig | null marker
+  ledger: 'device.ledger', // JSON { [deviceId]: DeviceLedgerEntry }
+  spotifyAuthMethod: 'spotify.authMethod', // 'deviceCode' | 'pkce'
 } as const;
 
-/** Default capability-flag profile. On by default; the Advanced menu is for
- *  opting out. OS-gated surfaces (geo) still require their system grant. */
 export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
   geo: true,
   notifications: true,
@@ -27,12 +21,20 @@ export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
   audioTts: true,
 };
 
-/** Default OTA poll config when the user hasn't picked one yet. */
 export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
   channel: 'stable',
   intervalSeconds: 21600,
-  autoPush: true,
+  autoPush: false,
 };
+
+export function getPreferredAuthMethod(): 'deviceCode' | 'pkce' | null {
+  const v = storage.getString(KEY.spotifyAuthMethod);
+  return v === 'deviceCode' || v === 'pkce' ? v : null;
+}
+
+export function setPreferredAuthMethod(method: 'deviceCode' | 'pkce'): void {
+  storage.set(KEY.spotifyAuthMethod, method);
+}
 
 export function getSetupCompleted(): boolean {
   return storage.getBoolean(KEY.setupCompleted) ?? false;
@@ -42,72 +44,66 @@ export function setSetupCompleted(value: boolean): void {
   storage.set(KEY.setupCompleted, value);
 }
 
-type NicknameMap = Record<string, string>;
+export type DeviceLedgerEntry = {
+  id: string;
+  lastName: string;
+  nickname: string | null;
+  lastConnectedAt: number;
+};
 
-function readNicknameMap(): NicknameMap {
-  const raw = storage.getString(KEY.nicknames);
+type Ledger = Record<string, DeviceLedgerEntry>;
+
+function readLedger(): Ledger {
+  const raw = storage.getString(KEY.ledger);
   if (!raw) return {};
   try {
-    return JSON.parse(raw) as NicknameMap;
+    return JSON.parse(raw) as Ledger;
   } catch {
     return {};
   }
 }
 
-function writeNicknameMap(map: NicknameMap): void {
-  storage.set(KEY.nicknames, JSON.stringify(map));
+function writeLedger(ledger: Ledger): void {
+  storage.set(KEY.ledger, JSON.stringify(ledger));
 }
 
-export function getNickname(deviceId: string): string | null {
-  return readNicknameMap()[deviceId] ?? null;
+export function getLedger(): Ledger {
+  return readLedger();
 }
 
-export function setNickname(deviceId: string, nickname: string | null): void {
-  const map = readNicknameMap();
-  if (nickname && nickname.trim().length > 0) {
-    map[deviceId] = nickname.trim();
-  } else {
-    delete map[deviceId];
-  }
-  writeNicknameMap(map);
+export function recordDeviceSeen(
+  id: string,
+  name: string,
+  atMs: number,
+): Ledger {
+  const ledger = readLedger();
+  ledger[id] = {
+    id,
+    lastName: name,
+    nickname: ledger[id]?.nickname ?? null,
+    lastConnectedAt: atMs,
+  };
+  writeLedger(ledger);
+  return ledger;
 }
 
-export function getAllNicknames(): NicknameMap {
-  return readNicknameMap();
+export function setDeviceNickname(id: string, nickname: string | null): Ledger {
+  const ledger = readLedger();
+  const prior = ledger[id];
+  const trimmed = nickname?.trim();
+  ledger[id] = {
+    id,
+    lastName: prior?.lastName ?? '',
+    nickname: trimmed && trimmed.length > 0 ? trimmed : null,
+    lastConnectedAt: prior?.lastConnectedAt ?? 0,
+  };
+  writeLedger(ledger);
+  return ledger;
 }
 
-export function getCapabilityFlags(): BridgethingCapabilityFlags {
-  const raw = storage.getString(KEY.capabilityFlags);
-  if (!raw) return { ...DEFAULT_CAPABILITY_FLAGS };
-  try {
-    const stored = JSON.parse(raw) as Partial<BridgethingCapabilityFlags>;
-    return { ...DEFAULT_CAPABILITY_FLAGS, ...stored };
-  } catch {
-    return { ...DEFAULT_CAPABILITY_FLAGS };
-  }
-}
-
-export function setCapabilityFlags(flags: BridgethingCapabilityFlags): void {
-  storage.set(KEY.capabilityFlags, JSON.stringify(flags));
-}
-
-// null is a meaningful "user disabled polling" state.
-export function getOtaPollConfig(): BridgethingOtaPollConfig | null {
-  const raw = storage.getString(KEY.otaPollConfig);
-  if (raw == null) return null;
-  if (raw === 'null') return null;
-  try {
-    return JSON.parse(raw) as BridgethingOtaPollConfig;
-  } catch {
-    return null;
-  }
-}
-
-export function setOtaPollConfig(
-  config: BridgethingOtaPollConfig | null,
-): void {
-  storage.set(
-    KEY.otaPollConfig,
-    config == null ? 'null' : JSON.stringify(config),
-  );
+export function forgetDevice(id: string): Ledger {
+  const ledger = readLedger();
+  delete ledger[id];
+  writeLedger(ledger);
+  return ledger;
 }

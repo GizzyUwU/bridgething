@@ -11,6 +11,7 @@ import { Settings as SettingsIcon } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Platform,
   StatusBar,
   useColorScheme,
@@ -18,18 +19,17 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { DebugOverlay } from './components/DebugOverlay';
 import { Press } from './components/Press';
 import { Wordmark } from './components/Wordmark';
-import {
-  dismissVerificationBrowser,
-  openVerificationBrowser,
-} from './lib/auth-browser';
-import { bootstrapSession, getSession } from './lib/session';
+import { bootstrapSession, reconcileSnapshot } from './lib/session';
 import { getSetupCompleted } from './lib/storage';
 import { PALETTE } from './lib/theme';
 import type { RootStackParamList } from './navigation';
 import { DashboardScreen } from './screens/Dashboard';
+import { DebugScreen } from './screens/Debug';
 import { LogsScreen } from './screens/Logs';
+import { OtaVersionsScreen } from './screens/OtaVersions';
 import { SettingsScreen } from './screens/Settings';
 import { SetupScreen } from './screens/Setup';
 import { WebappBrowseScreen } from './screens/WebappBrowse';
@@ -62,25 +62,11 @@ export default function App() {
     };
   }, []);
 
-  // drive the in-app browser off the auth-state event stream.
   useEffect(() => {
-    const session = getSession();
-    return session.subscribe(event => {
-      if (event.type !== 'authStateChanged') return;
-      if (
-        event.state.kind === 'pending' &&
-        event.state.verificationUrlComplete
-      ) {
-        openVerificationBrowser(event.state.verificationUrlComplete).catch(
-          err => {
-            console.warn('[bridgething] verification browser open failed', err);
-          },
-        );
-      } else {
-        // authenticated / failed / idle: close the browser.
-        dismissVerificationBrowser().catch(() => {});
-      }
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') reconcileSnapshot();
     });
+    return () => sub.remove();
   }, []);
 
   if (boot == null) {
@@ -175,6 +161,15 @@ export default function App() {
             options={{ title: 'settings', headerRight: undefined }}
           />
           <Stack.Screen
+            name="OtaVersions"
+            component={OtaVersionsScreen}
+            options={{
+              title: 'choose version',
+              headerRight: undefined,
+              ...(Platform.OS === 'ios' ? { headerLargeTitle: false } : {}),
+            }}
+          />
+          <Stack.Screen
             name="Logs"
             component={LogsScreen}
             options={{
@@ -183,8 +178,18 @@ export default function App() {
               ...(Platform.OS === 'ios' ? { headerLargeTitle: false } : {}),
             }}
           />
+          <Stack.Screen
+            name="Debug"
+            component={DebugScreen}
+            options={{
+              title: 'debug',
+              headerRight: undefined,
+              ...(Platform.OS === 'ios' ? { headerLargeTitle: false } : {}),
+            }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
+      <DebugOverlay />
     </SafeAreaProvider>
   );
 }

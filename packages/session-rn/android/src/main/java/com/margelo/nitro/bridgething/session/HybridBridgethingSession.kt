@@ -20,12 +20,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingServiceHealthChanged: ((BridgethingServiceHealth) -> Unit)? = null
         private var pendingPeerConnected: ((BridgethingSessionPeer) -> Unit)? = null
         private var pendingPeerDisconnected: ((String) -> Unit)? = null
+        private var pendingPeerLinkFailed: ((BridgethingSessionPeer) -> Unit)? = null
         private var pendingNowPlayingChanged: ((BridgethingNowPlaying?) -> Unit)? = null
         private var pendingAncsAuthStatusChanged: ((BridgethingAncsAuthStatus) -> Unit)? = null
         private var pendingLog: ((String, String) -> Unit)? = null
         private var pendingWebappsChanged: ((String) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
+        private var pendingDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
 
         /** explicit init because bun workspace symlinks trip RN's autolinker. idempotent. */
         @JvmStatic
@@ -44,24 +46,28 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     serviceHealth = pendingServiceHealthChanged,
                     peerConnected = pendingPeerConnected,
                     peerDisconnected = pendingPeerDisconnected,
+                    peerLinkFailed = pendingPeerLinkFailed,
                     nowPlaying = pendingNowPlayingChanged,
                     ancs = pendingAncsAuthStatusChanged,
                     log = pendingLog,
                     webapps = pendingWebappsChanged,
                     deviceMeta = pendingDeviceMetaChanged,
                     ota = pendingOtaEvent,
+                    diag = pendingDiagEntry,
                 )
                 pendingProviderChanged = null
                 pendingAuthStateChanged = null
                 pendingServiceHealthChanged = null
                 pendingPeerConnected = null
                 pendingPeerDisconnected = null
+                pendingPeerLinkFailed = null
                 pendingNowPlayingChanged = null
                 pendingAncsAuthStatusChanged = null
                 pendingLog = null
                 pendingWebappsChanged = null
                 pendingDeviceMetaChanged = null
                 pendingOtaEvent = null
+                pendingDiagEntry = null
                 snapshot
             }
             replay.provider?.let(b::setOnProviderChanged)
@@ -69,12 +75,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.serviceHealth?.let(b::setOnServiceHealthChanged)
             replay.peerConnected?.let(b::setOnPeerConnected)
             replay.peerDisconnected?.let(b::setOnPeerDisconnected)
+            replay.peerLinkFailed?.let(b::setOnPeerLinkFailed)
             replay.nowPlaying?.let(b::setOnNowPlayingChanged)
             replay.ancs?.let(b::setOnAncsAuthStatusChanged)
             replay.log?.let(b::setOnLog)
             replay.webapps?.let(b::setOnWebappsChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.ota?.let(b::setOnOtaEvent)
+            replay.diag?.let(b::setOnDiagEntry)
         }
 
         private fun require(): BridgethingSessionBackend = backend
@@ -90,12 +98,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val serviceHealth: ((BridgethingServiceHealth) -> Unit)?,
         val peerConnected: ((BridgethingSessionPeer) -> Unit)?,
         val peerDisconnected: ((String) -> Unit)?,
+        val peerLinkFailed: ((BridgethingSessionPeer) -> Unit)?,
         val nowPlaying: ((BridgethingNowPlaying?) -> Unit)?,
         val ancs: ((BridgethingAncsAuthStatus) -> Unit)?,
         val log: ((String, String) -> Unit)?,
         val webapps: ((String) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val ota: ((BridgethingOtaEvent) -> Unit)?,
+        val diag: ((BridgethingDiagEntry) -> Unit)?,
     )
 
     override fun start(): Promise<Unit> = Promise.async { require().start() }
@@ -124,26 +134,24 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     override fun cancelAuth(): Promise<Unit> = Promise.async { backend?.cancelAuth() }
     override fun signOut(): Promise<Unit> = Promise.async { backend?.signOut() }
 
-    override fun spotifyAuthMethod(): Promise<String> = Promise.async {
-        require().spotifyAuthMethod()
+    override fun spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig> = Promise.async {
+        require().spotifyAuthConfig()
     }
 
-    override fun spotifyAuthMethodsAvailable(): Promise<Array<String>> = Promise.async {
-        require().spotifyAuthMethodsAvailable()
+    override fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean): Promise<Unit> = Promise.async {
+        require().completeSpotifySignIn(accessToken, refreshToken, usesDealer)
     }
 
-    override fun setSpotifyAuthMethod(method: String): Promise<Unit> = Promise.async {
-        require().setSpotifyAuthMethod(method)
+    override fun snapshot(): Promise<BridgethingSessionSnapshot> = Promise.async {
+        require().snapshot()
     }
 
-    override fun connectedPeers(): Promise<Array<BridgethingSessionPeer>> = Promise.async {
-        backend?.connectedPeers() ?: emptyArray()
+    override fun diagnosticsSnapshot(limit: Double): Promise<Array<BridgethingDiagEntry>> = Promise.async {
+        backend?.diagnosticsSnapshot(limit) ?: emptyArray()
     }
 
-    override fun currentNowPlaying(): Promise<Variant_NullType_BridgethingNowPlaying> = Promise.async {
-        val np = backend?.currentNowPlaying()
-        if (np != null) Variant_NullType_BridgethingNowPlaying.Second(np)
-        else Variant_NullType_BridgethingNowPlaying.First(NullType.NULL)
+    override fun companionDebug(): Promise<BridgethingCompanionDebug> = Promise.async {
+        require().companionDebug()
     }
 
     override fun enableAncsNotifications(): Promise<BridgethingAncsSetupResult> = Promise.async {
@@ -212,25 +220,20 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setOtaPollConfig(unwrapped)
     }
 
-    override fun pollOtaNow(): Promise<Unit> = Promise.async { backend?.pollOtaNow() }
-
-    override fun deviceMeta(deviceId: String): Promise<Variant_NullType_BridgethingDeviceMeta> = Promise.async {
-        val meta = backend?.deviceMeta(deviceId)
-        if (meta != null) Variant_NullType_BridgethingDeviceMeta.Second(meta)
-        else Variant_NullType_BridgethingDeviceMeta.First(NullType.NULL)
+    override fun checkForOtaUpdate(channel: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
+        backend?.checkForOtaUpdate(channel, unwrapString(rootUrl))
     }
 
-    override fun hostInfo(): Promise<BridgethingHostInfo> = Promise.async {
-        backend?.hostInfo() ?: BridgethingHostInfo(
-            appName = "bridgething",
-            appVersion = "0.0.0",
-            osName = "Android",
-            osVersion = "",
-            hostIdentifier = "",
-            libVersion = "",
-            libbridgethingVersion = "",
-            adapterVersion = "rfcomm",
-        )
+    override fun fetchOtaManifest(rootUrl: Variant_NullType_String?): Promise<BridgethingOtaManifest> = Promise.async {
+        require().fetchOtaManifest(unwrapString(rootUrl))
+    }
+
+    override fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
+        backend?.applyOtaUpdate(deviceId, channel, version, unwrapString(rootUrl))
+    }
+
+    override fun reconnectPeer(deviceId: String): Promise<Unit> = Promise.async {
+        backend?.reconnectPeer(deviceId)
     }
 
     override fun presentPairPicker(): Promise<Variant_NullType_BridgethingBtDevice> = Promise.async {
@@ -288,6 +291,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnPeerDisconnected) { pendingPeerDisconnected = it }
     }
 
+    override fun setOnPeerLinkFailed(callback: (peer: BridgethingSessionPeer) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnPeerLinkFailed) { pendingPeerLinkFailed = it }
+    }
+
     override fun setOnNowPlayingChanged(callback: (now: Variant_NullType_BridgethingNowPlaying?) -> Unit) {
         val wrapped: (BridgethingNowPlaying?) -> Unit = { np ->
             val variant = if (np != null) Variant_NullType_BridgethingNowPlaying.Second(np)
@@ -319,6 +326,17 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnOtaEvent(callback: (event: BridgethingOtaEvent) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaEvent) { pendingOtaEvent = it }
+    }
+
+    override fun setOnDiagEntry(callback: (entry: BridgethingDiagEntry) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnDiagEntry) { pendingDiagEntry = it }
+    }
+
+    private fun unwrapString(variant: Variant_NullType_String?): String? = variant?.let {
+        when (it) {
+            is Variant_NullType_String.First -> null
+            is Variant_NullType_String.Second -> it.value
+        }
     }
 
     private inline fun <C> forwardOrBuffer(

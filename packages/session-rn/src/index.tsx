@@ -5,15 +5,19 @@ import type {
   BridgethingAuthState,
   BridgethingBtDevice,
   BridgethingCapabilityFlags,
+  BridgethingCompanionDebug,
   BridgethingConfigEntry,
   BridgethingDeviceMeta,
-  BridgethingHostInfo,
+  BridgethingDiagEntry,
   BridgethingNowPlaying,
   BridgethingOtaEvent,
+  BridgethingOtaManifest,
   BridgethingOtaPollConfig,
   BridgethingProviderInfo,
   BridgethingServiceHealth,
   BridgethingSessionPeer,
+  BridgethingSessionSnapshot,
+  BridgethingSpotifyAuthConfig,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingSession as NativeBridgethingSession,
@@ -29,20 +33,35 @@ export type {
   BridgethingBtBondState,
   BridgethingBtDevice,
   BridgethingCapabilityFlags,
+  BridgethingCompanionDebug,
   BridgethingConfigEntry,
   BridgethingConfigField,
   BridgethingDeviceMeta,
+  BridgethingDeviceMetaEntry,
+  BridgethingDiagDirection,
+  BridgethingDiagEntry,
+  BridgethingDiagFrameKind,
+  BridgethingDiagKind,
   BridgethingHostInfo,
   BridgethingNowPlaying,
   BridgethingNowPlayingPlayback,
   BridgethingNowPlayingTrack,
+  BridgethingOtaChannelInfo,
   BridgethingOtaEvent,
+  BridgethingOtaEventKind,
+  BridgethingOtaKind,
+  BridgethingOtaManifest,
+  BridgethingOtaPhase,
   BridgethingOtaPollConfig,
+  BridgethingOtaRelease,
+  BridgethingPeerLinkStatus,
   BridgethingProviderInfo,
   BridgethingRepeatMode,
   BridgethingServiceHealth,
   BridgethingServiceHealthKind,
   BridgethingSessionPeer,
+  BridgethingSessionSnapshot,
+  BridgethingSpotifyAuthConfig,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
 } from './specs/BridgethingSession.nitro';
@@ -53,12 +72,14 @@ export type SessionEvent =
   | { type: 'serviceHealthChanged'; health: BridgethingServiceHealth }
   | { type: 'peerConnected'; peer: BridgethingSessionPeer }
   | { type: 'peerDisconnected'; peerId: string }
+  | { type: 'peerLinkFailed'; peer: BridgethingSessionPeer }
   | { type: 'nowPlayingChanged'; nowPlaying: BridgethingNowPlaying | null }
   | { type: 'ancsAuthStatusChanged'; status: BridgethingAncsAuthStatus }
   | { type: 'webappsChanged'; deviceId: string }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
-  | { type: 'log'; level: string; message: string };
+  | { type: 'log'; level: string; message: string }
+  | { type: 'diagEntry'; entry: BridgethingDiagEntry };
 
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
@@ -115,28 +136,28 @@ export class BridgethingSession {
     await this.native.signOut();
   }
 
-  async spotifyAuthMethod(): Promise<string> {
-    return this.native.spotifyAuthMethod();
+  async spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig> {
+    return this.native.spotifyAuthConfig();
   }
 
-  async spotifyAuthMethodsAvailable(): Promise<string[]> {
-    return this.native.spotifyAuthMethodsAvailable();
-  }
-
-  async setSpotifyAuthMethod(method: string): Promise<void> {
-    await this.native.setSpotifyAuthMethod(method);
+  async completeSpotifySignIn(accessToken: string, refreshToken: string, usesDealer: boolean): Promise<void> {
+    await this.native.completeSpotifySignIn(accessToken, refreshToken, usesDealer);
   }
 
   async currentProvider(): Promise<BridgethingProviderInfo | null> {
     return this.native.currentProvider();
   }
 
-  async connectedPeers(): Promise<BridgethingSessionPeer[]> {
-    return this.native.connectedPeers();
+  async snapshot(): Promise<BridgethingSessionSnapshot> {
+    return this.native.snapshot();
   }
 
-  async currentNowPlaying(): Promise<BridgethingNowPlaying | null> {
-    return this.native.currentNowPlaying();
+  async diagnosticsSnapshot(limit: number): Promise<BridgethingDiagEntry[]> {
+    return this.native.diagnosticsSnapshot(limit);
+  }
+
+  async companionDebug(): Promise<BridgethingCompanionDebug> {
+    return this.native.companionDebug();
   }
 
   async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
@@ -191,16 +212,25 @@ export class BridgethingSession {
     await this.native.setOtaPollConfig(config);
   }
 
-  async pollOtaNow(): Promise<void> {
-    await this.native.pollOtaNow();
+  async checkForOtaUpdate(channel: string, rootUrl: string | null = null): Promise<void> {
+    await this.native.checkForOtaUpdate(channel, rootUrl);
   }
 
-  async deviceMeta(deviceId: string): Promise<BridgethingDeviceMeta | null> {
-    return this.native.deviceMeta(deviceId);
+  async fetchOtaManifest(rootUrl: string | null = null): Promise<BridgethingOtaManifest> {
+    return this.native.fetchOtaManifest(rootUrl);
   }
 
-  async hostInfo(): Promise<BridgethingHostInfo> {
-    return this.native.hostInfo();
+  async applyOtaUpdate(
+    deviceId: string,
+    channel: string,
+    version: string,
+    rootUrl: string | null = null,
+  ): Promise<void> {
+    await this.native.applyOtaUpdate(deviceId, channel, version, rootUrl);
+  }
+
+  async reconnectPeer(deviceId: string): Promise<void> {
+    await this.native.reconnectPeer(deviceId);
   }
 
   async presentPairPicker(): Promise<BridgethingBtDevice | null> {
@@ -261,6 +291,9 @@ export class BridgethingSession {
     this.native.setOnPeerDisconnected(peerId => {
       this.dispatch({ type: 'peerDisconnected', peerId });
     });
+    this.native.setOnPeerLinkFailed(peer => {
+      this.dispatch({ type: 'peerLinkFailed', peer });
+    });
     this.native.setOnNowPlayingChanged(nowPlaying => {
       this.dispatch({ type: 'nowPlayingChanged', nowPlaying });
     });
@@ -278,6 +311,9 @@ export class BridgethingSession {
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });
+    });
+    this.native.setOnDiagEntry(entry => {
+      this.dispatch({ type: 'diagEntry', entry });
     });
   }
 }
@@ -314,9 +350,6 @@ export class BridgethingDevice {
   }
   deleteConfigField(webappId: string, key: string) {
     return this.session.deleteWebappConfigField(this.id, webappId, key);
-  }
-  meta() {
-    return this.session.deviceMeta(this.id);
   }
 }
 

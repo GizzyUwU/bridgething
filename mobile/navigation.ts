@@ -11,5 +11,7 @@ export type RootStackParamList = {
   WebappBrowse: { deviceId: string };
   WebappDetail: { deviceId: string; id: string };
   Settings: undefined;
+  OtaVersions: { deviceId: string; channel: string };
   Logs: undefined;
+  Debug: undefined;
 };

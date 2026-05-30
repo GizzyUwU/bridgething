@@ -47,7 +47,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
   const { deviceId, id } = route.params;
 
   const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
-  const nicknames = useSession(s => s.nicknames);
+  const ledger = useSession(s => s.ledger);
 
   const [info, setInfo] = useState<BridgethingWebappInfo | null>(null);
   const [entries, setEntries] = useState<Record<string, string>>({});
@@ -199,7 +199,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
               )}
               {peer ? (
                 <Pill tone="neutral" dot={false}>
-                  {peerDisplayName(peer, nicknames)}
+                  {peerDisplayName(peer, ledger)}
                 </Pill>
               ) : null}
             </View>

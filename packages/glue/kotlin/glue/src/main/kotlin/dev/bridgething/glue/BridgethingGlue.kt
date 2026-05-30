@@ -95,7 +95,18 @@ interface BridgethingGlue {
     suspend fun setServiceHealthObserver(observer: (GlueServiceHealth) -> Unit) {
         observer(GlueServiceHealth.Ok)
     }
+
+    /** Live augmentation state for the debug surface. Default is all-false. */
+    suspend fun debugState(): GlueDebugState = GlueDebugState()
 }
+
+/** Snapshot of a glue's now-playing augmentation, surfaced to the debug page. */
+data class GlueDebugState(
+    val authorityPlaybackHeld: Boolean = false,
+    val authorityMetadataHeld: Boolean = false,
+    val baselinePollActive: Boolean = false,
+    val hintFetchActive: Boolean = false,
+)
 
 /** Auth-lifecycle state an interactive glue reports to the companion. */
 sealed class GlueAuthState {

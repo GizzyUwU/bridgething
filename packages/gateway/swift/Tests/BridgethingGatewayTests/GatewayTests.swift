@@ -29,6 +29,34 @@ final class GatewayTests: XCTestCase {
     await gateway.stop()
   }
 
+  func testForwardsLinkFailedEvent() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+
+    adapter.simulate(.linkFailed(deviceId: testDevice.id, name: testDevice.name, reason: "boom"))
+
+    var iter = gateway.events.makeAsyncIterator()
+    guard case .linkFailed(let device, let reason) = await iter.next() else {
+      XCTFail("expected .linkFailed"); return
+    }
+    XCTAssertEqual(device, testDevice)
+    XCTAssertEqual(reason, "boom")
+
+    await gateway.stop()
+  }
+
+  func testReconnectForwardsToAdapter() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+
+    try await gateway.reconnect(deviceId: testDevice.id)
+    XCTAssertEqual(adapter.reconnectCalls, [testDevice.id])
+
+    await gateway.stop()
+  }
+
   func testDecodesIncomingFramesIntoMessages() async throws {
     let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
