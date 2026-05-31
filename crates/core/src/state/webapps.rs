@@ -16,7 +16,8 @@ const STOCK_ICON_SVG: &str = include_str!("stock_icon.svg");
 
 pub const STOCK_WEBAPP_ID: Uuid = Uuid::from_u128(0xb12b_e731_416c_4cf7_8a91_3d2f_19a4_5e21);
 pub const HUB_WEBAPP_ID: Uuid = Uuid::from_u128(0x019693c0_5c6a_71f0_a89d_7e2a4d9c0a01);
-const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID, HUB_WEBAPP_ID];
+pub const BROWSER_WEBAPP_ID: Uuid = Uuid::from_u128(0x019e7f1a_bcea_7187_a438_53e486c4d950);
+const RESERVED_BUILTIN_IDS: &[Uuid] = &[STOCK_WEBAPP_ID, HUB_WEBAPP_ID, BROWSER_WEBAPP_ID];
 const DEV_SHADOW_NAMESPACE: Uuid = Uuid::from_u128(0x019759e0_dec0_5ade_8000_b71d6e7de5af);
 
 fn is_reserved(id: Uuid) -> bool {

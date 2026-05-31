@@ -126,6 +126,26 @@
         "react-native-nitro-modules": "*",
       },
     },
+    "packages/browser-webapp": {
+      "name": "@bridgething/browser-webapp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bridgething/client": "workspace:*",
+        "@bridgething/webapp-shared": "workspace:*",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+      },
+      "devDependencies": {
+        "@msgpack/msgpack": "^3.1.3",
+        "@tailwindcss/vite": "^4.1.16",
+        "@types/react": "^19.2.10",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^5.1.1",
+        "tailwindcss": "^4.1.16",
+        "typescript": "^6.0.3",
+        "vite": "^7.1.13",
+      },
+    },
     "packages/client-ts": {
       "name": "@bridgething/client",
       "version": "0.1.0",
@@ -155,6 +175,26 @@
     },
     "packages/examples/calendar": {
       "name": "@bridgething/example-calendar",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bridgething/client": "workspace:*",
+        "@bridgething/webapp-shared": "workspace:*",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+      },
+      "devDependencies": {
+        "@msgpack/msgpack": "^3.1.3",
+        "@tailwindcss/vite": "^4.1.16",
+        "@types/react": "^19.2.10",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^5.1.1",
+        "tailwindcss": "^4.1.16",
+        "typescript": "^6.0.3",
+        "vite": "^7.1.13",
+      },
+    },
+    "packages/examples/home-assistant": {
+      "name": "@bridgething/example-home-assistant",
       "version": "0.1.0",
       "dependencies": {
         "@bridgething/client": "workspace:*",
@@ -514,9 +554,13 @@
 
     "@bridgething/adapter-react-native": ["@bridgething/adapter-react-native@workspace:packages/adapter-rn"],
 
+    "@bridgething/browser-webapp": ["@bridgething/browser-webapp@workspace:packages/browser-webapp"],
+
     "@bridgething/client": ["@bridgething/client@workspace:packages/client-ts"],
 
     "@bridgething/example-calendar": ["@bridgething/example-calendar@workspace:packages/examples/calendar"],
+
+    "@bridgething/example-home-assistant": ["@bridgething/example-home-assistant@workspace:packages/examples/home-assistant"],
 
     "@bridgething/example-node-dev": ["@bridgething/example-node-dev@workspace:packages/examples/node-dev"],
 

@@ -1,9 +1,9 @@
 //! SOCKS5 -> Tunnel bridge. Binds 127.0.0.1:1080 by default. Chromium
-//! is launched with `--proxy-server=socks5://127.0.0.1:1080
-//! --proxy-bypass-list="<-loopback>"` so the kiosk's outbound TCP
-//! traffic lands here. Each accepted connection runs the SOCKS5
-//! handshake, checks the active webapp's manifest for the
-//! `net.proxy` permission, then opens a tunnel through the connected
+//! is launched with `--proxy-server=socks5://127.0.0.1:1080`; its
+//! default loopback bypass keeps the webapp bundle and local websocket
+//! direct, so only external egress lands here. Each accepted connection
+//! runs the SOCKS5 handshake, checks the active webapp's manifest for
+//! the `net.proxy` permission, then opens a tunnel through the connected
 //! companion via the gateway-side `Tunnel` surface and bridges bytes
 //! both ways.
 //!

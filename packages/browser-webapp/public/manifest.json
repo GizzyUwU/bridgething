@@ -1,0 +1,17 @@
+{
+  "id": "019e7f1a-bcea-7187-a438-53e486c4d950",
+  "name": "Browser",
+  "version": "0.1.0",
+  "description": "Open any site through the phone proxy.",
+  "icon": "icon.svg",
+  "config": [
+    {
+      "type": "string",
+      "data": {
+        "key": "bookmarks",
+        "label": "Bookmarks - one per line or comma separated, each as Name|https://url"
+      }
+    }
+  ],
+  "permissions": ["net.proxy"]
+}
