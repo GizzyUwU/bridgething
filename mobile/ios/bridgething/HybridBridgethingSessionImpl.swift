@@ -50,6 +50,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var eventsTask: Task<Void, Never>?
     private var authTask: Task<Void, Never>?
     private var otaEventsTask: Task<Void, Never>?
+    private var catalogEventsTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
     private var activeRegistration: ProviderRegistration?
@@ -66,6 +67,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onWebappsChanged: (@Sendable (String) -> Void)?
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
+    private var onCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
     private var onDiagEntry: (@Sendable (BridgethingDiagEntry) -> Void)?
     private var diagTask: Task<Void, Never>?
     private var logStreamingDesired: Bool = false
@@ -116,6 +118,12 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 self?.emitOtaEvent(toRNOtaEvent(event))
             }
         }
+        let catalogStream = await companion.catalog.events
+        let catalogTask = Task { [weak self] in
+            for await event in catalogStream {
+                self?.emitCatalogEvent(toRNCatalogEvent(event))
+            }
+        }
         let diagStream = DiagnosticsBuffer.shared.stream
         let diagTask = Task { [weak self] in
             for await record in diagStream {
@@ -127,6 +135,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.lock()
         eventsTask = task
         otaEventsTask = otaTask
+        catalogEventsTask = catalogTask
         self.diagTask = diagTask
         stateLock.unlock()
 
@@ -142,11 +151,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let auth = authTask
         let events = eventsTask
         let ota = otaEventsTask
+        let catalog = catalogEventsTask
         let diag = diagTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
         otaEventsTask = nil
+        catalogEventsTask = nil
         authTask = nil
         diagTask = nil
         stateLock.unlock()
@@ -154,6 +165,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         auth?.cancel()
         events?.cancel()
         ota?.cancel()
+        catalog?.cancel()
         diag?.cancel()
 
         await companion?.stop()
@@ -283,6 +295,12 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         DiagnosticsBuffer.shared.tail(limit: Int(limit)).map(Self.toRNDiagEntry)
     }
 
+    public func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine] {
+        DeviceLogRing.shared.tail(limit: Int(limit)).map {
+            BridgethingDeviceLogLine(seq: Double($0.seq), ts: $0.timestampMs, level: $0.level, message: $0.message)
+        }
+    }
+
     public func companionDebug() async -> BridgethingCompanionDebug {
         let companion = stateLock.withLock { self.companion }
         let glue = await companion?.current()
@@ -343,105 +361,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let (archiveUrl, isTemporary) = try await Self.resolveArchive(sourceUri)
         defer { if isTemporary { try? FileManager.default.removeItem(at: archiveUrl) } }
 
-        let size = try Self.fileSize(archiveUrl)
-        guard size <= Int(UInt32.max) else {
-            throw SessionError.invalidArchive
-        }
-        let installId = try Self.sha256HexOfFile(archiveUrl)
-        let begin = WebappInstallBegin(
-            installId: installId,
-            expectedSha256: installId,
-            expectedSize: UInt32(size)
+        let ota = await companion.ota
+        let result = await ota.installWebapp(
+            gateway: companion.gateway,
+            deviceId: deviceId,
+            bundlePath: archiveUrl
         )
-        let beginResult = try await companion.gateway.webapp.installBegin(deviceId: deviceId, begin)
-        let ack = try unwrapWebappErr(beginResult, label: "installBegin")
-
-        // subscribe before the last chunk to avoid racing the daemon's installed broadcast.
-        let installedTask = Task<WebappInfo, Error> {
-            for await pair in companion.gateway.webapp.webappInstalled where pair.deviceId == deviceId {
-                return pair.msg
-            }
-            throw SessionError.installInterrupted
-        }
-        let failedTask = Task<WebappError, Error> {
-            for await pair in companion.gateway.webapp.webappInstallFailed
-                where pair.deviceId == deviceId && pair.msg.installId == installId {
-                return pair.msg.error
-            }
-            throw SessionError.installInterrupted
-        }
-
-        do {
-            try await streamInstallChunks(
-                gateway: companion.gateway,
-                deviceId: deviceId,
-                installId: installId,
-                archiveUrl: archiveUrl,
-                total: size,
-                startOffset: ack.resumeFromOffset
-            )
-        } catch {
-            installedTask.cancel()
-            failedTask.cancel()
-            throw error
-        }
-
-        let info: WebappInfo
-        do {
-            info = try await withThrowingTaskGroup(of: InstallOutcome.self) { group in
-                group.addTask { .installed(try await installedTask.value) }
-                group.addTask { .failed(try await failedTask.value) }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: 60_000_000_000)
-                    throw SessionError.installTimedOut
-                }
-                defer { group.cancelAll() }
-                guard let first = try await group.next() else {
-                    throw SessionError.installInterrupted
-                }
-                switch first {
-                case let .installed(value):
-                    return value
-                case let .failed(err):
-                    throw SessionError.webappError(err)
-                }
-            }
-        } catch {
-            installedTask.cancel()
-            failedTask.cancel()
-            throw error
-        }
-
-        emitWebappsChanged(deviceId)
-        return Self.toRNWebappInfo(info)
-    }
-
-    private func streamInstallChunks(
-        gateway: BridgethingGateway,
-        deviceId: String,
-        installId: String,
-        archiveUrl: URL,
-        total: Int,
-        startOffset: UInt32
-    ) async throws {
-        let chunkSize = 64 * 1024
-        let handle = try FileHandle(forReadingFrom: archiveUrl)
-        defer { try? handle.close() }
-        var offset = Int(startOffset)
-        try handle.seek(toOffset: UInt64(offset))
-        while offset < total {
-            let want = min(chunkSize, total - offset)
-            let slice = try handle.read(upToCount: want) ?? Data()
-            guard !slice.isEmpty else { throw SessionError.invalidArchive }
-            let end = offset + slice.count
-            let chunk = WebappInstallChunk(
-                installId: installId,
-                offset: UInt32(offset),
-                bytes: slice,
-                last: end == total
-            )
-            try await gateway.device(deviceId).webapp.installChunk(chunk, priority: .bulk)
-            offset = end
+        switch result {
+        case let .installed(info):
+            emitWebappsChanged(deviceId)
+            return Self.toRNWebappInfo(info)
+        case let .failed(reason):
+            throw SessionError.installFailed(reason)
         }
     }
 
@@ -457,22 +388,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             throw SessionError.downloadFailed("download failed: \(http.statusCode)")
         }
         return (tempUrl, true)
-    }
-
-    private static func fileSize(_ url: URL) throws -> Int {
-        let values = try url.resourceValues(forKeys: [.fileSizeKey])
-        guard let size = values.fileSize else { throw SessionError.invalidArchive }
-        return size
-    }
-
-    private static func sha256HexOfFile(_ url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while let block = try handle.read(upToCount: 1024 * 1024), !block.isEmpty {
-            hasher.update(data: block)
-        }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     public func uninstallWebapp(deviceId: String, id: String) async throws {
@@ -587,6 +502,70 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let companion = stateLock.withLock { self.companion }
         let ota = await companion?.ota
         await ota?.applyVersion(deviceId: deviceId, channel: channel, version: version, rootURL: Self.otaRootURL(rootUrl))
+    }
+
+    // MARK: - Catalog
+
+    public func catalogSources() async -> [String] {
+        guard let companion = stateLock.withLock({ self.companion }) else { return [] }
+        return await companion.catalog.sources().map(\.absoluteString)
+    }
+
+    public func addCatalogSource(url: String) async {
+        guard let companion = stateLock.withLock({ self.companion }), let parsed = URL(string: url) else { return }
+        await companion.catalog.addSource(parsed)
+    }
+
+    public func removeCatalogSource(url: String) async {
+        guard let companion = stateLock.withLock({ self.companion }), let parsed = URL(string: url) else { return }
+        await companion.catalog.removeSource(parsed)
+    }
+
+    public func refreshCatalog() async {
+        guard let companion = stateLock.withLock({ self.companion }) else { return }
+        await companion.catalog.refresh()
+    }
+
+    public func availableCatalogApps(deviceId: String) async -> String {
+        guard let companion = stateLock.withLock({ self.companion }) else { return "[]" }
+        let listings = await companion.catalog.availableApps(deviceId: deviceId)
+        return Self.jsonString(listings) ?? "[]"
+    }
+
+    public func checkForCatalogUpdates(deviceId: String) async -> String {
+        guard let companion = stateLock.withLock({ self.companion }) else { return "[]" }
+        let updates = await companion.catalog.checkForUpdates(deviceId: deviceId)
+        return Self.jsonString(updates) ?? "[]"
+    }
+
+    public func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) async throws -> BridgethingWebappInfo {
+        let companion = try requirePeerConnected(deviceId)
+        guard let source = URL(string: sourceUrl) else { throw SessionError.invalidArchive }
+        let result = await companion.catalog.install(deviceId: deviceId, appId: appId, version: version, sourceURL: source)
+        switch result {
+        case let .installed(info):
+            emitWebappsChanged(deviceId)
+            return Self.toRNWebappInfo(info)
+        case let .failed(reason):
+            throw SessionError.installFailed(reason)
+        }
+    }
+
+    public func setCatalogPollConfig(config: BridgethingCatalogPollConfig?) async {
+        guard let companion = stateLock.withLock({ self.companion }) else { return }
+        if let config {
+            await companion.catalog.setPollConfig(CatalogPollConfig(
+                intervalSeconds: max(60, config.intervalSeconds),
+                autoInstall: config.autoInstall
+            ))
+        } else {
+            await companion.catalog.setPollConfig(nil)
+        }
+    }
+
+    private static func jsonString<T: Encodable>(_ value: T) -> String? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     public func reconnectPeer(deviceId: String) async throws {
@@ -717,6 +696,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             byteSize: r.byteSize.map(Double.init),
             requestId: r.requestId,
             latencyMs: r.latencyMs,
+            payload: r.payload,
             level: r.level,
             target: r.target,
             message: r.message,
@@ -815,6 +795,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void) {
         stateLock.withLock { onDeviceMetaChanged = callback }
+    }
+
+    public func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void) {
+        stateLock.withLock { onCatalogEvent = callback }
     }
 
     public func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void) {
@@ -1058,6 +1042,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onDeviceMetaChanged }?(deviceId, meta)
     }
 
+    private func emitCatalogEvent(_ event: BridgethingCatalogEvent) {
+        stateLock.withLock { onCatalogEvent }?(event)
+    }
+
     private func emitOtaEvent(_ event: BridgethingOtaEvent) {
         stateLock.withLock { onOtaEvent }?(event)
     }
@@ -1229,16 +1217,10 @@ private enum SessionError: Error {
     case invalidUuid(String)
     case invalidArchive
     case downloadFailed(String)
-    case installInterrupted
-    case installTimedOut
+    case installFailed(String)
     case webappError(WebappError)
     case protocolError(WireError)
     case unsupportedOnPlatform
-}
-
-private enum InstallOutcome {
-    case installed(WebappInfo)
-    case failed(WebappError)
 }
 
 private extension BridgethingAuthState {
@@ -1299,6 +1281,42 @@ private func toRNAncsSetupResult(_ result: AncsSetupResult) -> BridgethingAncsSe
     )
 }
 
+private func toRNCatalogEvent(_ event: CatalogEvent) -> BridgethingCatalogEvent {
+    switch event {
+    case let .refreshed(sourceCount, appCount):
+        return BridgethingCatalogEvent(
+            kind: .refreshed, sourceCount: Double(sourceCount), appCount: Double(appCount),
+            url: nil, reason: nil, deviceId: nil, appId: nil, name: nil,
+            fromVersion: nil, toVersion: nil, version: nil
+        )
+    case let .sourceFailed(url, reason):
+        return BridgethingCatalogEvent(
+            kind: .sourcefailed, sourceCount: nil, appCount: nil,
+            url: url.absoluteString, reason: reason, deviceId: nil, appId: nil, name: nil,
+            fromVersion: nil, toVersion: nil, version: nil
+        )
+    case let .updateAvailable(deviceId, update):
+        return BridgethingCatalogEvent(
+            kind: .updateavailable, sourceCount: nil, appCount: nil,
+            url: update.sourceURL.absoluteString, reason: nil, deviceId: deviceId,
+            appId: update.appId, name: update.name,
+            fromVersion: update.installedVersion, toVersion: update.target.version, version: nil
+        )
+    case let .installed(deviceId, appId, version):
+        return BridgethingCatalogEvent(
+            kind: .installed, sourceCount: nil, appCount: nil,
+            url: nil, reason: nil, deviceId: deviceId, appId: appId, name: nil,
+            fromVersion: nil, toVersion: nil, version: version
+        )
+    case let .installFailed(deviceId, appId, reason):
+        return BridgethingCatalogEvent(
+            kind: .installfailed, sourceCount: nil, appCount: nil,
+            url: nil, reason: reason, deviceId: deviceId, appId: appId, name: nil,
+            fromVersion: nil, toVersion: nil, version: nil
+        )
+    }
+}
+
 private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
     switch event {
     case let .manifestPolled(updatedAt):
@@ -1348,6 +1366,7 @@ private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
                 case .reboot: .reboot
                 }
                 return (mapped, Double(p), nil)
+            case .staged: return (.writing, 100, nil)
             case .completed: return (.completed, 100, nil)
             case let .failed(r): return (.failed, 0, r)
             }

@@ -67,11 +67,16 @@ impl BridgeThingMeta {
 /// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
 /// streams a zip bundle of hub or stock, validates the manifest id is
 /// one of the reserved built-ins, atomic-rotates the bundle dir on the
-/// bandaid bind-mount, restarts the service.
+/// bandaid bind-mount, restarts the service. `InstalledWebapp` streams
+/// a zip bundle of a third-party (non-reserved) webapp and installs it
+/// into the writable registry; it neither stages on the bandaid nor
+/// restarts, and is never part of an `OtaActivate` batch.
 ///
 /// Companions key reboot expectations off this: image means the device
 /// power-cycles; daemon and builtin-webapp mean the daemon process
-/// restarts and the gateway link drops and reconnects.
+/// restarts and the gateway link drops and reconnects; installed-webapp
+/// applies in place with no restart, and the terminal signal is the
+/// `WebappInstalled` event (or an `OtaError`).
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -80,6 +85,7 @@ pub enum OtaKind {
   Image,
   Daemon,
   BuiltinWebapp,
+  InstalledWebapp,
 }
 
 /// Stage of the OTA orchestrator. The phase set is shared between
@@ -88,9 +94,16 @@ pub enum OtaKind {
 /// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
 /// -> `Confirming` (try-counter reset) -> `Reboot`.
 ///
-/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`
-/// (atomic rotate on the bandaid bind-mount) -> `Reboot` (systemctl
-/// restart of bridgething.service). `Confirming` is image-only.
+/// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
+/// where `Writing`/100 means the piece is validated and staged on the
+/// bandaid (not yet live). The atomic rotate and the single `systemctl
+/// restart` happen later, on `OtaActivate`, which emits the terminal
+/// `Reboot` for the whole batch. `Confirming` is image-only.
+///
+/// InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
+/// bundle installs into the writable registry. There is no `Writing`/100,
+/// no `Confirming`, and no `Reboot`; the terminal signal is the
+/// `WebappInstalled` event (or an `OtaError`).
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

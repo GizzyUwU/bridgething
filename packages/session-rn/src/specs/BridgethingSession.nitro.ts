@@ -202,6 +202,33 @@ export type BridgethingOtaManifest = {
   channels: BridgethingOtaChannelInfo[];
 };
 
+export type BridgethingCatalogPollConfig = {
+  intervalSeconds: number;
+  autoInstall: boolean;
+};
+
+export type BridgethingCatalogEventKind =
+  | 'refreshed'
+  | 'sourceFailed'
+  | 'updateAvailable'
+  | 'installed'
+  | 'installFailed';
+
+// flat for the same reason as BridgethingOtaEvent: Nitro can't represent a tagged union.
+export type BridgethingCatalogEvent = {
+  kind: BridgethingCatalogEventKind;
+  sourceCount?: number;
+  appCount?: number;
+  url?: string;
+  reason?: string;
+  deviceId?: string;
+  appId?: string;
+  name?: string;
+  fromVersion?: string;
+  toVersion?: string;
+  version?: string;
+};
+
 export type BridgethingBtBondState = 'none' | 'bonding' | 'bonded';
 
 // `address` is a BT MAC on Android and an opaque identifier on iOS.
@@ -268,6 +295,7 @@ export type BridgethingDiagEntry = {
   byteSize?: number;
   requestId?: string;
   latencyMs?: number;
+  payload?: string;
 
   level?: string;
   target?: string;
@@ -276,6 +304,13 @@ export type BridgethingDiagEntry = {
   category?: string;
   detail?: string;
   fields?: BridgethingConfigEntry[];
+};
+
+export type BridgethingDeviceLogLine = {
+  seq: number;
+  ts: number;
+  level: string;
+  message: string;
 };
 
 export type BridgethingCompanionDebug = {
@@ -302,6 +337,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   snapshot(): Promise<BridgethingSessionSnapshot>;
 
   diagnosticsSnapshot(limit: number): Promise<BridgethingDiagEntry[]>;
+  deviceLogSnapshot(limit: number): Promise<BridgethingDeviceLogLine[]>;
   companionDebug(): Promise<BridgethingCompanionDebug>;
 
   enableAncsNotifications(): Promise<BridgethingAncsSetupResult>;
@@ -323,6 +359,20 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   checkForOtaUpdate(channel: string, rootUrl: string | null): Promise<void>;
   fetchOtaManifest(rootUrl: string | null): Promise<BridgethingOtaManifest>;
   applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string | null): Promise<void>;
+
+  catalogSources(): Promise<string[]>;
+  addCatalogSource(url: string): Promise<void>;
+  removeCatalogSource(url: string): Promise<void>;
+  refreshCatalog(): Promise<void>;
+  availableCatalogApps(deviceId: string): Promise<string>;
+  checkForCatalogUpdates(deviceId: string): Promise<string>;
+  installCatalogApp(
+    deviceId: string,
+    appId: string,
+    version: string,
+    sourceUrl: string,
+  ): Promise<BridgethingWebappInfo>;
+  setCatalogPollConfig(config: BridgethingCatalogPollConfig | null): Promise<void>;
 
   reconnectPeer(deviceId: string): Promise<void>;
 
@@ -352,4 +402,5 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
+  setOnCatalogEvent(callback: (event: BridgethingCatalogEvent) => void): void;
 }

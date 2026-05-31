@@ -16,6 +16,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func snapshot() async -> BridgethingSessionSnapshot
     func diagnosticsSnapshot(limit: Double) async -> [BridgethingDiagEntry]
+    func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
     func companionDebug() async -> BridgethingCompanionDebug
 
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
@@ -37,6 +38,15 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func checkForOtaUpdate(channel: String, rootUrl: String?) async
     func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest
     func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) async throws
+
+    func catalogSources() async -> [String]
+    func addCatalogSource(url: String) async
+    func removeCatalogSource(url: String) async
+    func refreshCatalog() async
+    func availableCatalogApps(deviceId: String) async -> String
+    func checkForCatalogUpdates(deviceId: String) async -> String
+    func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) async throws -> BridgethingWebappInfo
+    func setCatalogPollConfig(config: BridgethingCatalogPollConfig?) async
 
     func reconnectPeer(deviceId: String) async throws
 
@@ -65,6 +75,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
+    func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void)
     func setOnDiagEntry(_ callback: @escaping @Sendable (BridgethingDiagEntry) -> Void)
 }
 
@@ -85,6 +96,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingWebappsChanged: (@Sendable (String) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
+    private static var pendingCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
     private static var pendingDiagEntry: (@Sendable (BridgethingDiagEntry) -> Void)?
 
     /// install the backend; must be called before RN starts. replays any already-registered callback setters.
@@ -103,6 +115,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let webappsCb = pendingWebappsChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
+        let catalogCb = pendingCatalogEvent
         let diagCb = pendingDiagEntry
         pendingProviderChanged = nil
         pendingAuthStateChanged = nil
@@ -116,6 +129,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingWebappsChanged = nil
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
+        pendingCatalogEvent = nil
         pendingDiagEntry = nil
         stateLock.unlock()
 
@@ -131,6 +145,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let webappsCb { backend.setOnWebappsChanged(webappsCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
+        if let catalogCb { backend.setOnCatalogEvent(catalogCb) }
         if let diagCb { backend.setOnDiagEntry(diagCb) }
     }
 
@@ -225,6 +240,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func diagnosticsSnapshot(limit: Double) throws -> Promise<[BridgethingDiagEntry]> {
         Promise.async {
             await (try Self.backend()).diagnosticsSnapshot(limit: limit)
+        }
+    }
+
+    public func deviceLogSnapshot(limit: Double) throws -> Promise<[BridgethingDeviceLogLine]> {
+        Promise.async {
+            await (try Self.backend()).deviceLogSnapshot(limit: limit)
         }
     }
 
@@ -346,6 +367,50 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let url = Self.unwrapString(rootUrl)
         return Promise.async {
             try await Self.backend().applyOtaUpdate(deviceId: deviceId, channel: channel, version: version, rootUrl: url)
+        }
+    }
+
+    // MARK: - Catalog
+
+    public func catalogSources() throws -> Promise<[String]> {
+        Promise.async { await (try Self.backend()).catalogSources() }
+    }
+
+    public func addCatalogSource(url: String) throws -> Promise<Void> {
+        Promise.async { await (try Self.backend()).addCatalogSource(url: url) }
+    }
+
+    public func removeCatalogSource(url: String) throws -> Promise<Void> {
+        Promise.async { await (try Self.backend()).removeCatalogSource(url: url) }
+    }
+
+    public func refreshCatalog() throws -> Promise<Void> {
+        Promise.async { await (try Self.backend()).refreshCatalog() }
+    }
+
+    public func availableCatalogApps(deviceId: String) throws -> Promise<String> {
+        Promise.async { await (try Self.backend()).availableCatalogApps(deviceId: deviceId) }
+    }
+
+    public func checkForCatalogUpdates(deviceId: String) throws -> Promise<String> {
+        Promise.async { await (try Self.backend()).checkForCatalogUpdates(deviceId: deviceId) }
+    }
+
+    public func installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String) throws -> Promise<BridgethingWebappInfo> {
+        Promise.async {
+            try await Self.backend().installCatalogApp(deviceId: deviceId, appId: appId, version: version, sourceUrl: sourceUrl)
+        }
+    }
+
+    public func setCatalogPollConfig(config: Variant_NullType_BridgethingCatalogPollConfig?) throws -> Promise<Void> {
+        let unwrapped: BridgethingCatalogPollConfig? = config.flatMap { variant in
+            switch variant {
+            case .first: nil
+            case let .second(value): value
+            }
+        }
+        return Promise.async {
+            await (try Self.backend()).setCatalogPollConfig(config: unwrapped)
         }
     }
 
@@ -514,6 +579,15 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingOtaEvent = wrapped }
         Self.stateLock.unlock()
         backend?.setOnOtaEvent(wrapped)
+    }
+
+    public func setOnCatalogEvent(callback: @escaping (BridgethingCatalogEvent) -> Void) throws {
+        let wrapped: @Sendable (BridgethingCatalogEvent) -> Void = { event in callback(event) }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingCatalogEvent = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnCatalogEvent(wrapped)
     }
 
     public func setOnDiagEntry(callback: @escaping (BridgethingDiagEntry) -> Void) throws {

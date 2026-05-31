@@ -5,7 +5,7 @@ use libbridgething::{
     BridgeToGatewayMsg, BridgeToGatewaySystemMsg, DeviceGetNickname, DeviceNicknameRejected, DeviceNicknameReply,
     DeviceSetNickname, GatewayToBridgeSystemMsgCommandDispatch, GatewayToBridgeSystemMsgEventDispatch,
     GatewayToBridgeSystemMsgRequestDispatch, LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply,
-    LogsUnsubscribe, OtaAbandon, OtaAssetRangeChunk, OtaBegin, OtaChunk,
+    LogsUnsubscribe, OtaAbandon, OtaActivate, OtaAssetRangeChunk, OtaBegin, OtaChunk,
   },
   wire::MsgMeta,
 };
@@ -39,6 +39,16 @@ impl GatewayToBridgeSystemMsgCommandDispatch for SystemHandler {
   async fn ota_abandon(&self, params: OtaAbandon) -> HandlerResult {
     tracing::info!("({:?}) OtaAbandon update_id={}", &self.handle.address, params.update_id);
     self.ota.abandon(params.update_id).await;
+    Ok(())
+  }
+
+  async fn ota_activate(&self, params: OtaActivate) -> HandlerResult {
+    tracing::info!(
+      "({:?}) OtaActivate expected={} staged piece(s)",
+      &self.handle.address,
+      params.expected.len()
+    );
+    self.ota.activate(params.expected).await;
     Ok(())
   }
 

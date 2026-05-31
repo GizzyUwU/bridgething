@@ -20,6 +20,7 @@ import com.margelo.nitro.bridgething.session.BridgethingConfigKind
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMetaEntry
 import com.margelo.nitro.bridgething.session.BridgethingDiagDirection
+import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
 import com.margelo.nitro.bridgething.session.BridgethingDiagFrameKind
 import com.margelo.nitro.bridgething.session.BridgethingDiagKind
@@ -28,6 +29,9 @@ import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingPlayback
 import com.margelo.nitro.bridgething.session.BridgethingNowPlayingTrack
+import com.margelo.nitro.bridgething.session.BridgethingCatalogEvent
+import com.margelo.nitro.bridgething.session.BridgethingCatalogEventKind
+import com.margelo.nitro.bridgething.session.BridgethingCatalogPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingOtaChannelInfo
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaEventKind
@@ -50,14 +54,20 @@ import com.margelo.nitro.bridgething.session.BridgethingWebappSource
 import dev.bridgething.companion.AncsSetupKind
 import dev.bridgething.companion.BridgethingCompanion
 import dev.bridgething.companion.BridgethingCompanionVersion
+import dev.bridgething.companion.CatalogAppListing
+import dev.bridgething.companion.CatalogAppUpdate
+import dev.bridgething.companion.CatalogEvent
+import dev.bridgething.companion.CatalogPollConfig as KCatalogPollConfig
 import dev.bridgething.companion.CompanionCapabilityFlags
 import dev.bridgething.companion.CompanionLogLevel
+import dev.bridgething.companion.DeviceLogRing
 import dev.bridgething.companion.HostInfo
 import dev.bridgething.companion.OtaCompositeVersion
 import dev.bridgething.companion.OtaDiscoverManifest
 import dev.bridgething.companion.OtaPhaseSnapshot
 import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import dev.bridgething.companion.OtaPollEvent
+import dev.bridgething.companion.WebappInstallResult
 import dev.bridgething.gateway.DiagRecord
 import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
@@ -84,19 +94,15 @@ import dev.bridgething.schema.WebappConfigSet
 import dev.bridgething.schema.WebappError
 import dev.bridgething.schema.WebappIcon
 import dev.bridgething.schema.WebappInfo
-import dev.bridgething.schema.WebappInstallBegin
-import dev.bridgething.schema.WebappInstallChunk
 import dev.bridgething.schema.WebappRole
 import dev.bridgething.schema.WebappSource
 import dev.bridgething.schema.WebappSwitchTo
 import dev.bridgething.schema.WebappUninstall
 import java.io.File
-import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.nio.ByteBuffer
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -104,14 +110,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 
 /** [BridgethingSessionBackend] impl that owns one [BridgethingCompanion]. */
 public class HybridBridgethingSessionImpl(
@@ -144,6 +148,7 @@ public class HybridBridgethingSessionImpl(
     private var companion: BridgethingCompanion? = null
     private var eventsJob: Job? = null
     private var otaJob: Job? = null
+    private var catalogJob: Job? = null
     private var authJob: Job? = null
 
     private val peers = ConcurrentHashMap<String, BridgethingSessionPeer>()
@@ -189,6 +194,9 @@ public class HybridBridgethingSessionImpl(
     private var onOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
 
     @Volatile
+    private var onCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
+
+    @Volatile
     private var onDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
     private var diagJob: Job? = null
 
@@ -219,9 +227,11 @@ public class HybridBridgethingSessionImpl(
         c.setAncsAuthStateObserver { state -> emitAncsAuthStatus(toRnAncsAuthStatus(state)) }
         if (logStreamingDesired) {
             c.setLogObserver { level, message -> onLog?.invoke(level.raw, message) }
+            scope.launch { c.setDeviceLogStreaming(true) }
         }
         eventsJob = scope.launch { c.gateway.events.collect { event -> handleGatewayEvent(event) } }
         otaJob = scope.launch { c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) } }
+        catalogJob = scope.launch { c.catalog.events.collect { ev -> onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } }
         diagJob = scope.launch { DiagnosticsBuffer.stream.collect { rec -> onDiagEntry?.invoke(toRnDiagEntry(rec)) } }
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
@@ -242,23 +252,27 @@ public class HybridBridgethingSessionImpl(
     override suspend fun stop() {
         var priorEvents: Job? = null
         var priorOta: Job? = null
+        var priorCatalog: Job? = null
         var priorAuth: Job? = null
         var priorDiag: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
             priorEvents = eventsJob
             priorOta = otaJob
+            priorCatalog = catalogJob
             priorAuth = authJob
             priorDiag = diagJob
             priorCompanion = companion
             companion = null
             eventsJob = null
             otaJob = null
+            catalogJob = null
             authJob = null
             diagJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
+        priorCatalog?.cancel()
         priorAuth?.cancel()
         priorDiag?.cancel()
         // detach UI observers but leave the companion running in the foreground service.
@@ -385,6 +399,11 @@ public class HybridBridgethingSessionImpl(
     override suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry> =
         DiagnosticsBuffer.tail(limit.toInt()).map(::toRnDiagEntry).toTypedArray()
 
+    override suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine> =
+        DeviceLogRing.tail(limit.toInt())
+            .map { BridgethingDeviceLogLine(seq = it.seq.toDouble(), ts = it.timestampMs, level = it.level, message = it.message) }
+            .toTypedArray()
+
     override suspend fun companionDebug(): BridgethingCompanionDebug {
         val c = stateLock.withLock { companion }
         val debug = c?.current()?.debugState() ?: GlueDebugState()
@@ -441,35 +460,12 @@ public class HybridBridgethingSessionImpl(
         val c = requireCompanion(deviceId)
         val (archive, isTemporary) = resolveArchive(sourceUri)
         try {
-            val size = archive.length()
-            require(size in 1..UInt.MAX_VALUE.toLong()) { "invalid archive" }
-            val installId = sha256HexOfFile(archive)
-            val ack = unwrapWebapp(
-                c.gateway.webapp.installBegin(deviceId, WebappInstallBegin(installId, installId, size.toUInt())),
-                "installBegin",
-            )
-
-            // subscribe before the last chunk to avoid racing the daemon's installed broadcast.
-            val installed = scope.async {
-                c.gateway.webapp.webappInstalled.first { it.first == deviceId }.second
-            }
-            val failed = scope.async {
-                c.gateway.webapp.webappInstallFailed
-                    .first { it.first == deviceId && it.second.installId == installId }.second.error
-            }
-            try {
-                streamInstallChunks(c, deviceId, installId, archive, size, ack.resumeFromOffset.toLong())
-                val info = withTimeoutOrNull(60_000L) {
-                    select<WebappInfo> {
-                        installed.onAwait { it }
-                        failed.onAwait { throw IllegalStateException("install failed: $it") }
-                    }
-                } ?: throw IllegalStateException("install timed out")
-                emitWebappsChanged(deviceId)
-                return toRnWebappInfo(info)
-            } finally {
-                installed.cancel()
-                failed.cancel()
+            return when (val result = c.ota.installWebapp(c.gateway, deviceId, archive)) {
+                is WebappInstallResult.Installed -> {
+                    emitWebappsChanged(deviceId)
+                    toRnWebappInfo(result.info)
+                }
+                is WebappInstallResult.Failed -> throw IllegalStateException("install failed: ${result.reason}")
             }
         } finally {
             if (isTemporary) archive.delete()
@@ -584,6 +580,58 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) {
         stateLock.withLock { companion }?.ota?.applyVersion(deviceId, channel, version, otaRootUrl(rootUrl))
+    }
+
+    override suspend fun catalogSources(): Array<String> =
+        stateLock.withLock { companion }?.catalog?.sources()?.toTypedArray() ?: emptyArray()
+
+    override suspend fun addCatalogSource(url: String) {
+        stateLock.withLock { companion }?.catalog?.addSource(url)
+    }
+
+    override suspend fun removeCatalogSource(url: String) {
+        stateLock.withLock { companion }?.catalog?.removeSource(url)
+    }
+
+    override suspend fun refreshCatalog() {
+        stateLock.withLock { companion }?.catalog?.refresh()
+    }
+
+    override suspend fun availableCatalogApps(deviceId: String): String {
+        val catalog = stateLock.withLock { companion }?.catalog ?: return "[]"
+        val listings = catalog.availableApps(deviceId)
+        return catalogJson.encodeToString(ListSerializer(CatalogAppListing.serializer()), listings)
+    }
+
+    override suspend fun checkForCatalogUpdates(deviceId: String): String {
+        val catalog = stateLock.withLock { companion }?.catalog ?: return "[]"
+        val updates = catalog.checkForUpdates(deviceId)
+        return catalogJson.encodeToString(ListSerializer(CatalogAppUpdate.serializer()), updates)
+    }
+
+    override suspend fun installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String): BridgethingWebappInfo {
+        val c = requireCompanion(deviceId)
+        return when (val result = c.catalog.install(deviceId, appId, version, sourceUrl)) {
+            is WebappInstallResult.Installed -> {
+                emitWebappsChanged(deviceId)
+                toRnWebappInfo(result.info)
+            }
+            is WebappInstallResult.Failed -> throw IllegalStateException("install failed: ${result.reason}")
+        }
+    }
+
+    override suspend fun setCatalogPollConfig(config: BridgethingCatalogPollConfig?) {
+        val catalog = stateLock.withLock { companion }?.catalog ?: return
+        if (config == null) {
+            catalog.setPollConfig(null)
+        } else {
+            catalog.setPollConfig(
+                KCatalogPollConfig(
+                    intervalSeconds = config.intervalSeconds.toLong().coerceAtLeast(60L),
+                    autoInstall = config.autoInstall,
+                )
+            )
+        }
     }
 
     override suspend fun reconnectPeer(deviceId: String) {
@@ -726,6 +774,7 @@ public class HybridBridgethingSessionImpl(
         byteSize = r.byteSize?.toDouble(),
         requestId = r.requestId,
         latencyMs = r.latencyMs,
+        payload = r.payload,
         level = r.level,
         target = r.target,
         message = r.message,
@@ -831,11 +880,13 @@ public class HybridBridgethingSessionImpl(
         } else {
             c.setLogObserver(null)
         }
+        scope.launch { c.setDeviceLogStreaming(enabled) }
     }
 
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
+    override fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit) { onCatalogEvent = callback }
     override fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit) { onDiagEntry = callback }
 
     private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
@@ -894,46 +945,6 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    private fun sha256HexOfFile(file: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buf = ByteArray(1024 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n <= 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private suspend fun streamInstallChunks(
-        c: BridgethingCompanion,
-        deviceId: String,
-        installId: String,
-        archive: File,
-        total: Long,
-        startOffset: Long,
-    ) {
-        val device = c.gateway.device(deviceId).webapp
-        val chunkSize = 64 * 1024
-        RandomAccessFile(archive, "r").use { raf ->
-            raf.seek(startOffset)
-            var offset = startOffset
-            val buf = ByteArray(chunkSize)
-            while (offset < total) {
-                val want = minOf(chunkSize.toLong(), total - offset).toInt()
-                val n = raf.read(buf, 0, want)
-                if (n <= 0) throw IllegalStateException("invalid archive")
-                val end = offset + n
-                device.installChunk(
-                    WebappInstallChunk(installId, offset.toUInt(), buf.copyOf(n), end == total),
-                    Priority.Bulk,
-                )
-                offset = end
-            }
-        }
-    }
 
     private fun writeIconToCache(deviceId: String, id: String, mime: String?, bytes: ByteArray): File {
         val dir = File(context.cacheDir, "bridgething-webapp-icons").apply { mkdirs() }
@@ -1137,6 +1148,7 @@ public class HybridBridgethingSessionImpl(
             }
             Pair(rnPhase, snapshot.percent)
         }
+        OtaPhaseSnapshot.Staged -> Pair(BridgethingOtaPhase.WRITING, 100)
         OtaPhaseSnapshot.Completed -> Pair(BridgethingOtaPhase.COMPLETED, null)
         is OtaPhaseSnapshot.Failed -> Pair(BridgethingOtaPhase.FAILED, null)
     }
@@ -1145,6 +1157,8 @@ public class HybridBridgethingSessionImpl(
         OtaKind.Image -> BridgethingOtaKind.IMAGE
         OtaKind.Daemon -> BridgethingOtaKind.DAEMON
         OtaKind.BuiltinWebapp -> BridgethingOtaKind.BUILTINWEBAPP
+        // installed-webapp installs return WebappInfo directly and never emit OTA events.
+        OtaKind.InstalledWebapp -> error("installed-webapp does not flow through OTA events")
     }
 
     private fun makeOtaEvent(
@@ -1171,5 +1185,56 @@ public class HybridBridgethingSessionImpl(
         percent = percent,
         deviceChannel = deviceChannel,
         configuredChannel = configuredChannel,
+    )
+
+    private val catalogJson = Json { ignoreUnknownKeys = true; explicitNulls = false }
+
+    private fun toRnCatalogEvent(ev: CatalogEvent): BridgethingCatalogEvent = when (ev) {
+        is CatalogEvent.Refreshed -> makeCatalogEvent(
+            kind = BridgethingCatalogEventKind.REFRESHED,
+            sourceCount = ev.sourceCount.toDouble(), appCount = ev.appCount.toDouble(),
+        )
+        is CatalogEvent.SourceFailed -> makeCatalogEvent(
+            kind = BridgethingCatalogEventKind.SOURCEFAILED, url = ev.url, reason = ev.reason,
+        )
+        is CatalogEvent.UpdateAvailable -> makeCatalogEvent(
+            kind = BridgethingCatalogEventKind.UPDATEAVAILABLE,
+            deviceId = ev.deviceId, appId = ev.update.appId, name = ev.update.name,
+            url = ev.update.sourceUrl, fromVersion = ev.update.installedVersion, toVersion = ev.update.target.version,
+        )
+        is CatalogEvent.Installed -> makeCatalogEvent(
+            kind = BridgethingCatalogEventKind.INSTALLED,
+            deviceId = ev.deviceId, appId = ev.appId, version = ev.version,
+        )
+        is CatalogEvent.InstallFailed -> makeCatalogEvent(
+            kind = BridgethingCatalogEventKind.INSTALLFAILED,
+            deviceId = ev.deviceId, appId = ev.appId, reason = ev.reason,
+        )
+    }
+
+    private fun makeCatalogEvent(
+        kind: BridgethingCatalogEventKind,
+        sourceCount: Double? = null,
+        appCount: Double? = null,
+        url: String? = null,
+        reason: String? = null,
+        deviceId: String? = null,
+        appId: String? = null,
+        name: String? = null,
+        fromVersion: String? = null,
+        toVersion: String? = null,
+        version: String? = null,
+    ): BridgethingCatalogEvent = BridgethingCatalogEvent(
+        kind = kind,
+        sourceCount = sourceCount,
+        appCount = appCount,
+        url = url,
+        reason = reason,
+        deviceId = deviceId,
+        appId = appId,
+        name = name,
+        fromVersion = fromVersion,
+        toVersion = toVersion,
+        version = version,
     )
 }

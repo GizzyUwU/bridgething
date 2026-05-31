@@ -78,6 +78,27 @@ pub struct OtaAbandon {
   pub update_id: String,
 }
 
+/// Commit every staged bandaid piece (daemon / hub / stock) as one
+/// transaction, then restart bridgething.service once. Bandaid pushes
+/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage on `last:true`
+/// (phase reaches `Writing`/100 but the daemon does NOT restart); the
+/// companion sends `OtaActivate` after the final piece to swap them all
+/// live with a single restart. Image OTAs never use this -- they reboot
+/// at write completion.
+///
+/// `expected` is the set of `update_id`s the companion staged this
+/// batch. The daemon errors the activate if its staged set does not
+/// match exactly, which guards a desync where a daemon crash dropped the
+/// in-memory staged set between staging and activation.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct OtaActivate {
+  pub expected: Vec<String>,
+}
+
 /// Successful response to `OtaAssetRange`. The companion has the asset
 /// (or refetched it from `update_url_base`) and is about to stream the
 /// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
@@ -233,6 +254,8 @@ pub enum GatewayToBridgeSystemMsg {
   OtaChunk(OtaChunk),
   #[bridge_command]
   OtaAbandon(OtaAbandon),
+  #[bridge_command]
+  OtaActivate(OtaActivate),
   #[bridge_command]
   CancelUpdate,
   #[bridge_response]

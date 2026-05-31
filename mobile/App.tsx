@@ -33,6 +33,7 @@ import { LogsScreen } from './screens/Logs';
 import { OtaVersionsScreen } from './screens/OtaVersions';
 import { SettingsScreen } from './screens/Settings';
 import { SetupScreen } from './screens/Setup';
+import { StoreScreen } from './screens/Store';
 import { WebappBrowseScreen } from './screens/WebappBrowse';
 import { WebappDetailScreen } from './screens/WebappDetail';
 
@@ -150,6 +151,11 @@ export default function App() {
             name="WebappBrowse"
             component={WebappBrowseScreen}
             options={{ title: 'apps', headerLargeTitle: false }}
+          />
+          <Stack.Screen
+            name="Store"
+            component={StoreScreen}
+            options={{ title: 'app store', headerLargeTitle: false }}
           />
           <Stack.Screen
             name="WebappDetail"

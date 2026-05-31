@@ -25,6 +25,7 @@ public data class DiagRecord(
   val category: String? = null,
   val detail: String? = null,
   val fields: List<Pair<String, String>>? = null,
+  val payload: String? = null,
 ) {
   public enum class Kind { FRAME, LOG, BREADCRUMB }
   public enum class Direction { OUTBOUND, INBOUND }
@@ -35,7 +36,7 @@ public data class DiagRecord(
       var n = 96
       n += (deviceId?.length ?: 0) + (surface?.length ?: 0) + (requestId?.length ?: 0)
       n += (level?.length ?: 0) + (target?.length ?: 0) + (message?.length ?: 0)
-      n += (category?.length ?: 0) + (detail?.length ?: 0)
+      n += (category?.length ?: 0) + (detail?.length ?: 0) + (payload?.length ?: 0)
       fields?.forEach { n += it.first.length + it.second.length + 16 }
       return n
     }
@@ -78,12 +79,14 @@ public object DiagnosticsBuffer {
     byteSize: Int,
     requestId: String?,
     latencyMs: Double?,
+    payload: String?,
   ) {
     insert { seq, ts ->
       DiagRecord(
         seq = seq, timestampMs = ts, kind = DiagRecord.Kind.FRAME,
         deviceId = deviceId, direction = direction, frameKind = frameKind,
         surface = surface, byteSize = byteSize, requestId = requestId, latencyMs = latencyMs,
+        payload = payload,
       )
     }
   }

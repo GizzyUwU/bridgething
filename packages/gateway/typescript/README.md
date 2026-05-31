@@ -63,8 +63,8 @@ Rust wire types and round-trips back to a typed response. See
 
 ```ts
 const list = await gateway.webapp.list(deviceId);          // TypedRequestResult<WebappList, never>
-const ack  = await gateway.webapp.installBegin(deviceId, { installId, expectedSha256, expectedSize });
-await gateway.webapp.installChunk({ installId, offset, bytes, last }, { priority: 'bulk' });
+const ack  = await gateway.system.otaBegin(deviceId, { kind: 'installedWebapp', updateId, updateUrlBase: null, expectedSha256, expectedSize });
+await gateway.system.otaChunk({ updateId, offset, bytes, last }, { priority: 'bulk' });
 const off = gateway.webapp.onWebappInstalled((id, info) => console.log('done', info));
 ```
 

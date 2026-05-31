@@ -14,9 +14,13 @@ use tokio_util::bytes::Bytes;
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::asset::{
-  CachedAsset,
-  wait::{ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
+use crate::{
+  asset::{
+    CachedAsset,
+    wait::{ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
+  },
+  bluetooth::BluetoothMan,
+  state::State,
 };
 
 const PRELOAD_IDS_MAX: usize = 64;
@@ -155,56 +159,60 @@ impl AssetHandler {
   }
 
   async fn handle_preload(&self, ids: Vec<String>) {
-    if self.handle.state.gateway_info().is_none() {
-      return;
+    preload_assets(self.handle.state.clone(), self.handle.bluetooth.clone(), ids).await;
+  }
+}
+
+pub(crate) async fn preload_assets(state: State, bluetooth: BluetoothMan, ids: Vec<String>) {
+  if state.gateway_info().is_none() {
+    return;
+  }
+  for id in ids.into_iter().take(PRELOAD_IDS_MAX) {
+    if id.starts_with(IAP2_ART_PREFIX) {
+      continue;
     }
-    for id in ids.into_iter().take(PRELOAD_IDS_MAX) {
-      if id.starts_with(IAP2_ART_PREFIX) {
-        continue;
-      }
-      if matches!(self.handle.state.assets.get(&id).await, Ok(Some(_))) {
-        continue;
-      }
-      let state = self.handle.state.clone();
-      let bluetooth = self.handle.bluetooth.clone();
-      tokio::spawn(async move {
-        let cache = state.assets.clone();
-        let id_owned = id.clone();
-        let _ = state
-          .asset_wait
-          .fetch_or_wait(&id, move || async move {
-            let _permit = PRELOAD_GATE.acquire().await;
-            let req = AssetRequest {
-              id: id_owned.clone(),
-              request_id: Uuid::now_v7(),
-            };
-            match bluetooth.gateway_man.request(None, req).await {
-              Ok(got) => {
-                let bytes = Bytes::from(got.bytes);
-                if let Err(err) = cache
-                  .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
-                  .await
-                {
-                  tracing::warn!(?err, %id_owned, "preload: failed to insert into cache");
-                }
-                FetchOutcome::Got(CachedAsset {
-                  bytes,
-                  mime: got.mime,
-                  retention: AssetRetention::Lru,
-                })
+    if matches!(state.assets.get(&id).await, Ok(Some(_))) {
+      continue;
+    }
+    let state = state.clone();
+    let bluetooth = bluetooth.clone();
+    tokio::spawn(async move {
+      let cache = state.assets.clone();
+      let id_owned = id.clone();
+      let _ = state
+        .asset_wait
+        .fetch_or_wait(&id, move || async move {
+          let _permit = PRELOAD_GATE.acquire().await;
+          let req = AssetRequest {
+            id: id_owned.clone(),
+            request_id: Uuid::now_v7(),
+          };
+          match bluetooth.gateway_man.request(None, req).await {
+            Ok(got) => {
+              let bytes = Bytes::from(got.bytes);
+              if let Err(err) = cache
+                .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
+                .await
+              {
+                tracing::warn!(?err, %id_owned, "preload: failed to insert into cache");
               }
-              Err(RequestError::Domain(_)) => {
-                tracing::debug!(%id_owned, "preload: companion reported asset not found");
-                FetchOutcome::NotFound
-              }
-              Err(err) => {
-                tracing::debug!(?err, %id_owned, "preload: companion request failed");
-                FetchOutcome::NotFound
-              }
+              FetchOutcome::Got(CachedAsset {
+                bytes,
+                mime: got.mime,
+                retention: AssetRetention::Lru,
+              })
             }
-          })
-          .await;
-      });
-    }
+            Err(RequestError::Domain(_)) => {
+              tracing::debug!(%id_owned, "preload: companion reported asset not found");
+              FetchOutcome::NotFound
+            }
+            Err(err) => {
+              tracing::debug!(?err, %id_owned, "preload: companion request failed");
+              FetchOutcome::NotFound
+            }
+          }
+        })
+        .await;
+    });
   }
 }

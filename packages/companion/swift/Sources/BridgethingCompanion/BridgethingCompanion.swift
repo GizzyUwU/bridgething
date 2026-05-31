@@ -90,6 +90,7 @@ public actor BridgethingCompanion {
     private let audioDispatcher: AudioDispatcher
     private var timeChangeObservers: [NSObjectProtocol] = []
     public let ota: OtaService
+    public let catalog: CatalogService
     #if canImport(CoreLocation)
         private let geoController: GeoController
     #endif
@@ -119,6 +120,7 @@ public actor BridgethingCompanion {
             audioDispatcher = AudioDispatcher(backend: audioBackend ?? NoOpAudioBackend())
         #endif
         ota = OtaService()
+        catalog = CatalogService(installer: ota)
         #if canImport(CoreLocation)
             geoController = GeoController(provider: geoProvider)
         #endif
@@ -188,6 +190,7 @@ public actor BridgethingCompanion {
         await tunnelDispatcher.stop()
         await audioDispatcher.stop()
         await ota.stop()
+        await catalog.stop()
 
         if let glue = activeGlue {
             await glue.detach()
@@ -294,7 +297,9 @@ public actor BridgethingCompanion {
         case .warn: .warn
         case .error: .error
         }
-        logObserver?(level, "[\(entry.target)] \(entry.message)")
+        let message = "[\(entry.target)] \(entry.message)"
+        DeviceLogRing.shared.push(level: level.rawValue, message: message)
+        logObserver?(level, message)
     }
 
     nonisolated func emitLog(_ level: CompanionLogLevel, _ message: String, observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
@@ -304,6 +309,7 @@ public actor BridgethingCompanion {
         case .warn: osLog.warning("\(message)")
         case .error: osLog.error("\(message)")
         }
+        DeviceLogRing.shared.push(level: level.rawValue, message: message)
         observer?(level, message)
     }
 
@@ -457,6 +463,10 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in
             guard let self else { return }
             await ota.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            await catalog.start(gateway: gateway)
         })
         #if canImport(CoreLocation)
             tasks.append(Task { [weak self] in

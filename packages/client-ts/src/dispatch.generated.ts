@@ -133,7 +133,6 @@ import type {
   WebappCurrentReply,
   WebappIcon,
   WebappIconReply,
-  WebappInstallFailed,
   WebappListReply,
   WebappUninstalled,
 } from '@bridgething/lib/client';
@@ -269,7 +268,6 @@ export type WebappInboundHandlers = {
   webappError: (msg: WebappError) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
   webappInstalled: (msg: WebappInfo) => void;
-  webappInstallFailed: (msg: WebappInstallFailed) => void;
   webappUninstalled: (msg: WebappUninstalled) => void;
 };
 
@@ -2908,18 +2906,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::WebappInstallFailed` from the daemon. */
-  onWebappInstallFailed(handler: (msg: WebappInstallFailed) => void): () => void {
-    return this._client.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'webappInstallFailed') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::WebappUninstalled` from the daemon. */
   onWebappUninstalled(handler: (msg: WebappUninstalled) => void): () => void {
     return this._client.on(event => {
@@ -2975,10 +2961,6 @@ export class WebappSurface {
         }
         case 'webappInstalled': {
           handlers.webappInstalled?.(inner.data);
-          return;
-        }
-        case 'webappInstallFailed': {
-          handlers.webappInstallFailed?.(inner.data);
           return;
         }
         case 'webappUninstalled': {
@@ -4036,10 +4018,6 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           case 'webappInstalled': {
             innerHandlers.webappInstalled?.(inner.data);
-            return;
-          }
-          case 'webappInstallFailed': {
-            innerHandlers.webappInstallFailed?.(inner.data);
             return;
           }
           case 'webappUninstalled': {

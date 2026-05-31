@@ -282,15 +282,13 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'webapps'; data: WebappList }
   | { event: 'active'; data: WebappActive }
   | { event: 'switched'; data: WebappActive }
-  | { event: 'installBeginAck'; data: WebappInstallBeginAck }
   | { event: 'uninstalled'; data: WebappActive }
   | { event: 'webappError'; data: WebappError }
   | { event: 'icon'; data: WebappIconReply }
   | { event: 'configGet'; data: WebappConfigGetReply }
   | { event: 'configList'; data: WebappConfigListReply }
   | { event: 'configAck'; data: WebappConfigAck }
-  | { event: 'webappInstalled'; data: WebappInfo }
-  | { event: 'webappInstallFailed'; data: WebappInstallFailed };
+  | { event: 'webappInstalled'; data: WebappInfo };
 
 export type BrowseReply = { result: BrowseResult };
 
@@ -328,6 +326,13 @@ export type DeviceSetNickname = { nickname: string };
  * surface as `AudioError::EarconNotFound`.
  */
 export type Earcon = { name: string };
+
+/**
+ * Playback context the companion's track plays from (playlist / album /
+ * artist / show). `kind` is opaque to the daemon - it forwards the
+ * string to webapps that render "playing from <name>".
+ */
+export type EnrichmentContext = { uri: string; name: string | null; kind: string | null };
 
 /**
  * Fired when the favorited / liked status of an item changes -
@@ -470,17 +475,20 @@ export type GatewayToBridgePhoneMsg =
  * `Delta` is the ongoing partial-update stream (the only delta-shaped
  * event in the wire protocol - every other surface uses snapshots).
  * `QueueChanged` fires when the queue mutates without a track change
- * (companion-side reorder, prefetch).
+ * (companion-side reorder, prefetch). `EnrichmentOffer` is the iOS
+ * non-authoritative decoration path (see `NowPlayingEnrichment`).
  */
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
   | { event: 'delta'; data: NowPlayingUpdate }
-  | { event: 'queueChanged'; data: QueueSnapshot };
+  | { event: 'queueChanged'; data: QueueSnapshot }
+  | { event: 'enrichmentOffer'; data: NowPlayingEnrichment };
 
 export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
   | { event: 'otaChunk'; data: OtaChunk }
   | { event: 'otaAbandon'; data: OtaAbandon }
+  | { event: 'otaActivate'; data: OtaActivate }
   | { event: 'cancelUpdate' }
   | { event: 'otaAssetRangeReply'; data: OtaAssetRangeReply }
   | { event: 'otaAssetRangeRejected'; data: OtaAssetRangeRejected }
@@ -514,9 +522,6 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'list' }
   | { event: 'getActive' }
   | { event: 'switchTo'; data: WebappSwitchTo }
-  | { event: 'installBegin'; data: WebappInstallBegin }
-  | { event: 'installChunk'; data: WebappInstallChunk }
-  | { event: 'installAbandon'; data: WebappInstallAbandon }
   | { event: 'uninstall'; data: WebappUninstall }
   | { event: 'icon'; data: WebappIcon }
   | { event: 'configGet'; data: WebappConfigGet }
@@ -650,11 +655,43 @@ export type NotificationInvoke = { id: string };
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
 /**
+ * Non-authoritative decoration the iOS companion offers for the track
+ * iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
+ * companion echoes from the last `PlaybackHint`, so the daemon can match
+ * this offer to the live iAP2 identity by exact equality. `head` is the
+ * companion's current Spotify track; `queue` is upcoming. The companion
+ * never claims authority - the daemon overlays art / uri / queue onto the
+ * iAP2 identity only when the offer provably describes the playing track.
+ */
+export type NowPlayingEnrichment = {
+  anchorPid: string | null;
+  head: QueueItem | null;
+  queue: Array<QueueItem>;
+  context: EnrichmentContext | null;
+};
+
+/**
  * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
  * keeps the partial for resume; `OtaAbandon` is the explicit clean-up
  * when the companion no longer wants to retry this artifact.
  */
 export type OtaAbandon = { updateId: string };
+
+/**
+ * Commit every staged bandaid piece (daemon / hub / stock) as one
+ * transaction, then restart bridgething.service once. Bandaid pushes
+ * (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage on `last:true`
+ * (phase reaches `Writing`/100 but the daemon does NOT restart); the
+ * companion sends `OtaActivate` after the final piece to swap them all
+ * live with a single restart. Image OTAs never use this -- they reboot
+ * at write completion.
+ *
+ * `expected` is the set of `update_id`s the companion staged this
+ * batch. The daemon errors the activate if its staged set does not
+ * match exactly, which guards a desync where a daemon crash dropped the
+ * in-memory staged set between staging and activation.
+ */
+export type OtaActivate = { expected: Array<string> };
 
 /**
  * Daemon asks the pinned companion to serve byte ranges from an asset
@@ -989,59 +1026,6 @@ export type WebappConfigSet = { id: string; key: string; value: string };
 export type WebappIcon = { id: string };
 
 export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
-
-/**
- * Drop the daemon-side partial for `install_id`. The chunked-transfer
- * subsystem also runs a 24h stale GC for partials that were never
- * abandoned, so this is an explicit cleanup, not a correctness gate.
- */
-export type WebappInstallAbandon = { installId: string };
-
-/**
- * Companion-initiated chunked webapp install: opens or resumes a
- * streaming push of a zip bundle. Daemon responds with
- * `WebappInstallBeginAck { resume_from_offset }` (the byte offset the
- * next `WebappInstallChunk` should start at, 0 for fresh pushes) or a
- * `WebappError` variant (already-running install, mismatched size/sha
- * on conflicting in-flight install_id, etc).
- *
- * `install_id` is the sha256 of the .zip, hex-encoded. Content-
- * addressed so resume across daemon restarts and retries-after-failure
- * both work without companion-side state to track. The terminal
- * outcome - `WebappInstalled(WebappInfo)` event on success or
- * `WebappInstallFailed { install_id, error }` event on failure -
- * arrives asynchronously after the last chunk lands; between the last
- * `WebappInstallChunk` ack and the terminal event the install is
- * implicitly in "installing" state.
- */
-export type WebappInstallBegin = { installId: string; expectedSha256: string; expectedSize: number };
-
-/**
- * Successful response to `WebappInstallBegin`. The companion's next
- * `WebappInstallChunk` should start at `resume_from_offset`; 0 for a
- * fresh push, or the byte count already on disk when resuming a
- * partial after disconnect.
- */
-export type WebappInstallBeginAck = { resumeFromOffset: number };
-
-/**
- * Streaming chunk of a webapp install upload opened by
- * `WebappInstallBegin`. `offset` must equal the daemon's current
- * `received` for the transfer (chunks are strictly in-order; the
- * companion learns the resume offset from `WebappInstallBeginAck`).
- * `last:true` triggers post-stream verify (size + sha256) followed by
- * extract + validate + install. Terminal outcome arrives as
- * `WebappInstalled` event or `WebappInstallFailed` event.
- */
-export type WebappInstallChunk = { installId: string; offset: number; bytes: Uint8Array; last: boolean };
-
-/**
- * Asynchronous failure of an in-flight install after the upload
- * completed (post-stream verify failed, extract failed, validation
- * failed, etc). Pairs with `WebappInstalled` as the terminal-event
- * duo for an install.
- */
-export type WebappInstallFailed = { installId: string; error: WebappError };
 
 export type WebappList = { webapps: Array<WebappInfo> };
 

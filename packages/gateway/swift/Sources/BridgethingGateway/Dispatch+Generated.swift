@@ -1338,6 +1338,20 @@ public struct PlayerSurface: Sendable {
     }
   }
 
+  /// Send `Player::EnrichmentOffer` to every connected peer (broadcast).
+  public func enrichmentOffer(_ payload: NowPlayingEnrichment, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.enrichmentOffer(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `System` wire surface.
@@ -1570,6 +1584,20 @@ public struct SystemSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaAbandon(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `System::OtaActivate` to every connected peer (broadcast).
+  public func otaActivate(_ payload: OtaActivate, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaActivate(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -1967,23 +1995,6 @@ public struct WebappSurface: Sendable {
     }
   }
 
-  /// Cross-peer stream of `Webapp::InstallBeginAck` messages.
-  public var installBeginAck: AsyncStream<(deviceId: String, msg: WebappInstallBeginAck)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .webapp(let outer) = message.data,
-             case .installBeginAck(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Cross-peer stream of `Webapp::Uninstalled` messages.
   public var uninstalled: AsyncStream<(deviceId: String, msg: WebappActive)> {
     AsyncStream { continuation in
@@ -2103,51 +2114,6 @@ public struct WebappSurface: Sendable {
     }
   }
 
-  /// Cross-peer stream of `Webapp::WebappInstallFailed` messages.
-  public var webappInstallFailed: AsyncStream<(deviceId: String, msg: WebappInstallFailed)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .webapp(let outer) = message.data,
-             case .webappInstallFailed(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send `Webapp::InstallChunk` to every connected peer (broadcast).
-  public func installChunk(_ payload: WebappInstallChunk, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .webapp(.installChunk(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Webapp::InstallAbandon` to every connected peer (broadcast).
-  public func installAbandon(_ payload: WebappInstallAbandon, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .webapp(.installAbandon(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
   /// Typed request to a specific peer: companion sends, daemon responds.
   public func list(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
     let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
@@ -2183,21 +2149,6 @@ public struct WebappSurface: Sendable {
     case .webapp(let inner):
       switch inner {
       case .switched(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func installBegin(deviceId: String, _ req: WebappInstallBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInstallBeginAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.installBegin(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .installBeginAck(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
@@ -3776,6 +3727,12 @@ public struct PlayerSurfaceForDevice: Sendable {
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
+  /// Send `Player::EnrichmentOffer` to this peer.
+  public func enrichmentOffer(_ payload: NowPlayingEnrichment, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.enrichmentOffer(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
 }
 
 /// Per-peer methods for the `System` wire surface (deviceId is baked in).
@@ -4009,6 +3966,12 @@ public struct SystemSurfaceForDevice: Sendable {
   /// Send `System::OtaAbandon` to this peer.
   public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaAbandon(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `System::OtaActivate` to this peer.
+  public func otaActivate(_ payload: OtaActivate, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaActivate(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -4352,24 +4315,6 @@ public struct WebappSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of `Webapp::InstallBeginAck` from this peer.
-  public var installBeginAck: AsyncStream<WebappInstallBeginAck> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .webapp(let outer) = message.data,
-             case .installBeginAck(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Stream of `Webapp::Uninstalled` from this peer.
   public var uninstalled: AsyncStream<WebappActive> {
     AsyncStream { continuation in
@@ -4496,36 +4441,6 @@ public struct WebappSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of `Webapp::WebappInstallFailed` from this peer.
-  public var webappInstallFailed: AsyncStream<WebappInstallFailed> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .webapp(let outer) = message.data,
-             case .webappInstallFailed(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  /// Send `Webapp::InstallChunk` to this peer.
-  public func installChunk(_ payload: WebappInstallChunk, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .webapp(.installChunk(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Webapp::InstallAbandon` to this peer.
-  public func installAbandon(_ payload: WebappInstallAbandon, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .webapp(.installAbandon(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
   /// Typed request to this peer: companion sends, daemon responds.
   public func list(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
     let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
@@ -4561,21 +4476,6 @@ public struct WebappSurfaceForDevice: Sendable {
     case .webapp(let inner):
       switch inner {
       case .switched(let value): return .ok(value)
-      case .webappError(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func installBegin(_ req: WebappInstallBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappInstallBeginAck, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.installBegin(req)), timeout: timeout)
-    switch response.data {
-    case .webapp(let inner):
-      switch inner {
-      case .installBeginAck(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }

@@ -49,13 +49,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private var client: SpotinyClient?
     private var gateway: BridgethingGateway?
-    private var authorityHeld: Bool = false
+    private var heldScopes: Set<CompanionAuthorityScope> = []
     private var nowPlayingObserver: (@Sendable (GlueNowPlaying?) -> Void)?
     private var authObserver: (@Sendable (GlueAuthState) -> Void)?
     private var serviceHealthObserver: (@Sendable (GlueServiceHealth) -> Void)?
     private var hintFetchTask: Task<Void, Never>?
     private var baselinePollTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
+    private var lastHintPid: String?
 
     public init(
         authenticatorFactory: @escaping SpotifyAuthenticatorFactory,
@@ -120,11 +121,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         baselinePollTask?.cancel()
         baselinePollTask = nil
 
-        if let gw = gateway, authorityHeld {
-            try? await gw.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
-            try? await gw.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
-        }
-        authorityHeld = false
+        await releaseAllAuthority()
 
         nowPlayingObserver?(nil)
         nowPlayingObserver = nil
@@ -406,12 +403,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func favoritesContains(_ req: LibraryFavoritesContainsRequest) async throws -> [Bool] {
         guard let client else { throw GlueError.detached }
-        return await client.library.contains(uris: req.uris)
+        // iap2 now-playing uris parse as valid kinds but carry non-base62 ids; the empty
+        // sentinel keeps index alignment while skipping the spotify lookup for them.
+        let uris = req.uris.map { Self.spotifyURI($0) != nil ? $0 : "" }
+        return await client.library.contains(uris: uris)
     }
 
     public func favoritesToggle(_ item: ItemRef) async throws {
         guard let client else { throw GlueError.detached }
-        guard let uri = SpotifyURI(item.uri) else { throw GlueError.notImplemented }
+        guard let uri = Self.spotifyURI(item.uri) else { throw GlueError.notImplemented }
         let saved = (await client.library.contains(uris: [item.uri])).first ?? false
         if saved {
             await client.library.remove(uris: [uri])
@@ -422,7 +422,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func favoritesSet(_ item: ItemRef, liked: Bool) async throws {
         guard let client else { throw GlueError.detached }
-        guard let uri = SpotifyURI(item.uri) else { throw GlueError.notImplemented }
+        guard let uri = Self.spotifyURI(item.uri) else { throw GlueError.notImplemented }
         if liked {
             await client.library.save(uris: [uri])
         } else {
@@ -432,15 +432,23 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func favoritesSetMany(_ entries: [FavoritesSet]) async throws {
         guard let client else { throw GlueError.detached }
-        let toSave = entries.filter { $0.liked }.compactMap { SpotifyURI($0.item.uri) }
-        let toRemove = entries.filter { !$0.liked }.compactMap { SpotifyURI($0.item.uri) }
+        let toSave = entries.filter { $0.liked }.compactMap { Self.spotifyURI($0.item.uri) }
+        let toRemove = entries.filter { !$0.liked }.compactMap { Self.spotifyURI($0.item.uri) }
         if !toSave.isEmpty { await client.library.save(uris: toSave) }
         if !toRemove.isEmpty { await client.library.remove(uris: toRemove) }
+    }
+
+    private static func spotifyURI(_ raw: String) -> SpotifyURI? {
+        guard let uri = SpotifyURI(raw), uri.namespace == "spotify" else { return nil }
+        return uri
     }
 
     public func handlePlaybackHint(_ hint: PlaybackHint) async {
         // Filter to Spotify-app hints only; other-app and unset-bundle hints drop.
         guard hint.appBundle == spotifyAppBundle else { return }
+
+        // echo the iAP2 pid the daemon matches enrichment offers against; always the latest hint.
+        lastHintPid = hint.persistentId
 
         DiagnosticsBuffer.shared.recordBreadcrumb(
             category: "spotify.merge",
@@ -457,8 +465,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func debugState() async -> GlueDebugState {
         GlueDebugState(
-            authorityPlaybackHeld: authorityHeld,
-            authorityMetadataHeld: authorityHeld,
+            authorityPlaybackHeld: heldScopes.contains(.nowPlayingPlayback),
+            authorityMetadataHeld: heldScopes.contains(.nowPlayingMetadata),
             baselinePollActive: baselinePollTask != nil,
             hintFetchActive: hintFetchTask != nil
         )
@@ -500,40 +508,77 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             ]
         )
 
-        #if !os(iOS)
+        #if os(iOS)
+        let anchorPid = lastHintPid
+        startBaselinePollIfNeeded()
+        Task { [weak self] in
+            await self?.sendEnrichment(state: state, anchorPid: anchorPid, reason: reason)
+        }
+        #else
         Task { [weak self] in
             try? await gateway.player.delta(update)
             guard let self else { return }
+            let scopes: Set<CompanionAuthorityScope> = [.nowPlayingPlayback, .nowPlayingMetadata]
             if nowPlaying {
-                try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingPlayback))
-                try? await gateway.authority.claim(AuthorityClaim(scope: .nowPlayingMetadata))
-                authorityHeld = true
-                DiagnosticsBuffer.shared.recordBreadcrumb(
-                    category: "spotify.authority", detail: "claimed playback+metadata"
-                )
+                await claimAuthority(scopes)
                 startBaselinePollIfNeeded()
-            } else if authorityHeld {
-                try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
-                try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
-                authorityHeld = false
-                DiagnosticsBuffer.shared.recordBreadcrumb(
-                    category: "spotify.authority", detail: "released playback+metadata"
-                )
+            } else if !heldScopes.isEmpty {
+                await releaseAllAuthority()
                 stopBaselinePoll()
             }
         }
         #endif
     }
 
+    #if os(iOS)
+    private func sendEnrichment(state: Spotiny.PlayerState, anchorPid: String?, reason: String) async {
+        guard let gateway, let client else { return }
+        let head = state.item.map(Self.queueItem(from:))
+        let queue = (await client.player.getQueue())?.queue.map(Self.queueItem(from:)) ?? []
+        let context = state.context.map { EnrichmentContext(uri: $0.uri, name: nil, kind: $0.type) }
+        let offer = NowPlayingEnrichment(anchorPid: anchorPid, head: head, queue: queue, context: context)
+
+        DiagnosticsBuffer.shared.recordBreadcrumb(
+            category: "spotify.merge",
+            detail: "enrichment offer",
+            fields: [
+                ("reason", reason),
+                ("anchor", anchorPid ?? ""),
+                ("head", state.item?.name ?? ""),
+                ("queue", String(queue.count)),
+            ]
+        )
+        try? await gateway.player.enrichmentOffer(offer)
+    }
+    #endif
+
+    private func claimAuthority(_ scopes: Set<CompanionAuthorityScope>) async {
+        guard let gateway else { return }
+        for scope in scopes where !heldScopes.contains(scope) {
+            try? await gateway.authority.claim(AuthorityClaim(scope: scope))
+            heldScopes.insert(scope)
+            DiagnosticsBuffer.shared.recordBreadcrumb(
+                category: "spotify.authority", detail: "claimed \(scope.rawValue)"
+            )
+        }
+    }
+
+    private func releaseAllAuthority() async {
+        guard let gateway else { return }
+        for scope in heldScopes {
+            try? await gateway.authority.release(AuthorityRelease(scope: scope))
+            DiagnosticsBuffer.shared.recordBreadcrumb(
+                category: "spotify.authority", detail: "released \(scope.rawValue)"
+            )
+        }
+        heldScopes.removeAll()
+    }
+
     fileprivate func handleSocketDown() {
         nowPlayingObserver?(nil)
         stopBaselinePoll()
-        guard let gateway, authorityHeld else { return }
-        authorityHeld = false
-        Task {
-            try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingPlayback))
-            try? await gateway.authority.release(AuthorityRelease(scope: .nowPlayingMetadata))
-        }
+        guard gateway != nil, !heldScopes.isEmpty else { return }
+        Task { await releaseAllAuthority() }
     }
 
     private func startBaselinePollIfNeeded() {
@@ -601,6 +646,20 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private static func artworkId(for item: PlayerItem) -> String? {
         imageAssetId(rawArtworkURL(for: item) ?? "")
+    }
+
+    private static func queueItem(from item: PlayerItem) -> QueueItem {
+        let artist = item.artists.map(\.name).joined(separator: ", ")
+        let album: String? = if case let .track(track) = item { track.album?.name } else { nil }
+        return QueueItem(
+            uri: item.uri,
+            title: item.name.isEmpty ? nil : item.name,
+            artist: artist.isEmpty ? nil : artist,
+            album: album,
+            artworkId: artworkId(for: item),
+            durationMs: UInt32(max(item.duration_ms, 0)),
+            persistentId: nil
+        )
     }
 
     fileprivate static func rawArtworkURL(for item: PlayerItem) -> String? {

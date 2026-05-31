@@ -12,8 +12,25 @@ use bridgething_iap2::{
   csm::now_playing::{MediaItemAttributes, NowPlayingUpdate, PlaybackAttributes, encode_queue_snapshot},
 };
 use bridgething_test_harness::Harness;
+use libbridgething::{GatewayCapabilities, GatewayInfo, QueueItem, gateway::NowPlayingEnrichment};
 
 const CONVERGE: Duration = Duration::from_secs(3);
+
+fn companion_caps() -> GatewayCapabilities {
+  GatewayCapabilities {
+    gateway: GatewayInfo {
+      address: String::new(),
+      name: "harness-companion".into(),
+      os_name: "ios".into(),
+      app_name: "harness-companion".into(),
+      app_version: "0.0.0".into(),
+      adapter_version: "harness".into(),
+      lib_version: "0.0.0".into(),
+      libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
+    },
+    ..Default::default()
+  }
+}
 
 /// Inject a single-source iAP2 now-playing delta with no companion present -
 /// the production cover-art-bug shape. iAP2 is the fallthrough source, so it
@@ -187,4 +204,96 @@ async fn iap2_queue_snapshot_populates_then_clears_on_avail_flip() {
     .wait_for(|state| state.player.queue_reply().items.is_empty(), CONVERGE)
     .await;
   assert!(cleared, "queue did not clear when queue_list_avail flipped to false");
+}
+
+/// End-to-end iOS enrichment: iAP2 establishes the identity, then a non-
+/// authoritative companion (the iOS shape - announces but claims no scope)
+/// sends an `EnrichmentOffer` over the real gateway duplex. The daemon must
+/// keep the iAP2 identity, overlay the spotify uri + art, light the heart
+/// (is_like_supported), and overlay the queue - proving the whole wire path:
+/// gateway dispatch -> apply_enrichment -> merge -> client state reply.
+#[tokio::test]
+async fn iap2_enrichment_overlay_resolves_uri_art_heart_and_queue() {
+  let harness = Harness::start().await.expect("harness start");
+  let phone_addr = harness.iap2_peer();
+  let companion = harness.connect_android().await.expect("connect companion");
+  companion
+    .capabilities()
+    .announce(companion_caps())
+    .await
+    .expect("announce");
+
+  // iAP2 identity for pid 0x1234 renders as "iap2:track:0000000000001234".
+  harness
+    .inject_iap2(
+      phone_addr,
+      SessionEvent::NowPlayingUpdate(NowPlayingUpdate {
+        media_item: Some(MediaItemAttributes {
+          persistent_id: Some(0x1234),
+          title: Some("Enriched Song".into()),
+          artist: Some("Enriched Artist".into()),
+          duration_ms: Some(180_000),
+          ..Default::default()
+        }),
+        playback: None,
+      }),
+    )
+    .await
+    .expect("inject iap2 now-playing");
+
+  companion
+    .player()
+    .enrichment_offer(NowPlayingEnrichment {
+      anchor_pid: Some("iap2:track:0000000000001234".into()),
+      head: Some(QueueItem {
+        uri: "spotify:track:gold".into(),
+        title: Some("Enriched Song".into()),
+        artist: Some("Enriched Artist".into()),
+        album: None,
+        artwork_id: Some("spotify/img/gold".into()),
+        duration_ms: Some(180_000),
+        persistent_id: None,
+      }),
+      queue: vec![QueueItem {
+        uri: "spotify:track:next".into(),
+        title: Some("Up Next".into()),
+        artist: Some("Enriched Artist".into()),
+        album: None,
+        artwork_id: Some("spotify/img/next".into()),
+        duration_ms: Some(200_000),
+        persistent_id: None,
+      }],
+      context: None,
+    })
+    .await
+    .expect("send enrichment offer");
+
+  let converged = harness
+    .wait_for(
+      |state| state.player.state_reply().state.track.and_then(|t| t.uri).as_deref() == Some("spotify:track:gold"),
+      CONVERGE,
+    )
+    .await;
+  assert!(converged, "enrichment uri overlay never reached merged state");
+
+  let reply = harness.state().player.state_reply();
+  let track = reply.state.track.expect("track present");
+  assert_eq!(
+    track.persistent_id.as_deref(),
+    Some("iap2:track:0000000000001234"),
+    "identity stays iAP2"
+  );
+  assert_eq!(track.title.as_deref(), Some("Enriched Song"), "title stays iAP2");
+  assert_eq!(track.uri.as_deref(), Some("spotify:track:gold"), "spotify uri overlaid");
+  assert_eq!(
+    track.artwork_id.as_deref(),
+    Some("spotify/img/gold"),
+    "spotify art overlaid"
+  );
+  assert_eq!(track.is_like_supported, Some(true), "heart lit on exact match");
+  assert_eq!(
+    reply.state.queue.first().map(|q| q.uri.as_str()),
+    Some("spotify:track:next"),
+    "queue overlaid from the offer"
+  );
 }

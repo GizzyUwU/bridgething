@@ -418,12 +418,15 @@ class SpotifyGlue(
 
     override suspend fun favoritesContains(req: LibraryFavoritesContainsRequest): List<Boolean> {
         val client = client ?: throw GlueError.Detached
-        return client.library.contains(req.uris)
+        // iap2 now-playing uris parse as valid kinds but carry non-base62 ids; the empty
+        // sentinel keeps index alignment while skipping the spotify lookup for them.
+        val uris = req.uris.map { if (spotifyUri(it) != null) it else "" }
+        return client.library.contains(uris)
     }
 
     override suspend fun favoritesToggle(item: ItemRef) {
         val client = client ?: throw GlueError.Detached
-        val uri = SpotifyUri.parse(item.uri) ?: throw GlueError.NotImplemented
+        val uri = spotifyUri(item.uri) ?: throw GlueError.NotImplemented
         val saved = client.library.contains(listOf(item.uri)).firstOrNull() ?: false
         if (saved) {
             client.library.remove(listOf(uri))
@@ -434,7 +437,7 @@ class SpotifyGlue(
 
     override suspend fun favoritesSet(item: ItemRef, liked: Boolean) {
         val client = client ?: throw GlueError.Detached
-        val uri = SpotifyUri.parse(item.uri) ?: throw GlueError.NotImplemented
+        val uri = spotifyUri(item.uri) ?: throw GlueError.NotImplemented
         if (liked) {
             client.library.save(listOf(uri))
         } else {
@@ -444,11 +447,14 @@ class SpotifyGlue(
 
     override suspend fun favoritesSetMany(entries: List<FavoritesSet>) {
         val client = client ?: throw GlueError.Detached
-        val toSave = entries.filter { it.liked }.mapNotNull { SpotifyUri.parse(it.item.uri) }
-        val toRemove = entries.filter { !it.liked }.mapNotNull { SpotifyUri.parse(it.item.uri) }
+        val toSave = entries.filter { it.liked }.mapNotNull { spotifyUri(it.item.uri) }
+        val toRemove = entries.filter { !it.liked }.mapNotNull { spotifyUri(it.item.uri) }
         if (toSave.isNotEmpty()) client.library.save(toSave)
         if (toRemove.isNotEmpty()) client.library.remove(toRemove)
     }
+
+    private fun spotifyUri(raw: String): SpotifyUri? =
+        SpotifyUri.parse(raw)?.takeIf { it.namespace == "spotify" }
 
     suspend fun handlePlaybackHint(hint: PlaybackHint) {
         if (hint.appBundle != SPOTIFY_APP_BUNDLE) return

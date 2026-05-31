@@ -262,7 +262,6 @@ export type BridgeToClientWebappMsg =
   | { event: 'webappError'; data: WebappError }
   | { event: 'activeChanged'; data: WebappActiveChanged }
   | { event: 'webappInstalled'; data: WebappInfo }
-  | { event: 'webappInstallFailed'; data: WebappInstallFailed }
   | { event: 'webappUninstalled'; data: WebappUninstalled };
 
 export type CapabilitiesSnapshot = { capabilities: Capabilities };
@@ -709,13 +708,6 @@ export type WebappCurrentReply = { id: string | null; name: string | null };
 export type WebappIcon = { id: string };
 
 export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
-
-/**
- * Asynchronous failure event for an install whose upload completed
- * but failed verify / extract / validation. Pairs with the
- * `WebappInstalled` event as the terminal-outcome duo.
- */
-export type WebappInstallFailed = { installId: string; error: WebappError };
 
 export type WebappListReply = { webapps: Array<WebappInfo> };
 

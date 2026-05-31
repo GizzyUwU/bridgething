@@ -561,20 +561,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/webapp-install-begin-request",
-    "gateway opens a chunked install upload identified by sha256 hex of the zip",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Request,
-      data: GatewayToBridgeMsgData::Webapp(GatewayToBridgeWebappMsg::InstallBegin(WebappInstallBegin {
-        install_id: "fb3fdadc2bbac80ef1a0bbd900c3097d3eebb31a92b4c97c7e96b9c2cf6f2c10".into(),
-        expected_sha256: "fb3fdadc2bbac80ef1a0bbd900c3097d3eebb31a92b4c97c7e96b9c2cf6f2c10".into(),
-        expected_size: fingerprint_bytes().len() as u32,
-      })),
-    },
-  ));
-
-  out.push(gateway_fixture(
     "gateway_to_bridge/webapp-uninstall-command",
     "gateway tells the daemon to remove a previously-installed webapp",
     GatewayToBridgeMsg {

@@ -44,17 +44,6 @@ pub struct WebappActiveReply {
   pub name: Option<String>,
 }
 
-/// Asynchronous failure event for an install whose upload completed
-/// but failed verify / extract / validation. Pairs with the
-/// `WebappInstalled` event as the terminal-outcome duo.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "client.ts")]
-pub struct WebappInstallFailed {
-  pub install_id: String,
-  pub error: WebappError,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
@@ -88,14 +77,9 @@ pub enum BridgeToClientWebappMsg {
   WebappError(WebappError),
   #[bridge_event]
   ActiveChanged(WebappActiveChanged),
-  /// event: a chunked install completed successfully (broadcast to all
-  /// webapp peers, including the one that initiated).
+  /// event: a webapp install completed successfully
   #[bridge_event]
   WebappInstalled(WebappInfo),
-  /// event: a chunked install failed post-upload (broadcast to all
-  /// webapp peers).
-  #[bridge_event]
-  WebappInstallFailed(WebappInstallFailed),
   #[bridge_event]
   WebappUninstalled(WebappUninstalled),
 }

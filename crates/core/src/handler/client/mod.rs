@@ -1,4 +1,5 @@
 mod asset;
+pub(crate) use asset::preload_assets;
 mod audio;
 mod bluetooth;
 mod capabilities;

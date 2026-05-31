@@ -85,7 +85,9 @@ import type {
   NetWsSend,
   NotificationInvoke,
   NotificationRemoved,
+  NowPlayingEnrichment,
   OtaAbandon,
+  OtaActivate,
   OtaAssetRange,
   OtaAssetRangeAbandon,
   OtaAssetRangeChunk,
@@ -142,11 +144,6 @@ import type {
   WebappConfigSet,
   WebappIcon,
   WebappIconReply,
-  WebappInstallAbandon,
-  WebappInstallBegin,
-  WebappInstallBeginAck,
-  WebappInstallChunk,
-  WebappInstallFailed,
   WebappList,
   WebappSwitchTo,
   WebappUninstall,
@@ -385,7 +382,6 @@ export type WebappInboundHandlers = {
   webapps: (deviceId: string, msg: WebappList) => void;
   active: (deviceId: string, msg: WebappActive) => void;
   switched: (deviceId: string, msg: WebappActive) => void;
-  installBeginAck: (deviceId: string, msg: WebappInstallBeginAck) => void;
   uninstalled: (deviceId: string, msg: WebappActive) => void;
   webappError: (deviceId: string, msg: WebappError) => void;
   icon: (deviceId: string, msg: WebappIconReply) => void;
@@ -393,14 +389,12 @@ export type WebappInboundHandlers = {
   configList: (deviceId: string, msg: WebappConfigListReply) => void;
   configAck: (deviceId: string, msg: WebappConfigAck) => void;
   webappInstalled: (deviceId: string, msg: WebappInfo) => void;
-  webappInstallFailed: (deviceId: string, msg: WebappInstallFailed) => void;
 };
 
 export type WebappDeviceInboundHandlers = {
   webapps: (msg: WebappList) => void;
   active: (msg: WebappActive) => void;
   switched: (msg: WebappActive) => void;
-  installBeginAck: (msg: WebappInstallBeginAck) => void;
   uninstalled: (msg: WebappActive) => void;
   webappError: (msg: WebappError) => void;
   icon: (msg: WebappIconReply) => void;
@@ -408,7 +402,6 @@ export type WebappDeviceInboundHandlers = {
   configList: (msg: WebappConfigListReply) => void;
   configAck: (msg: WebappConfigAck) => void;
   webappInstalled: (msg: WebappInfo) => void;
-  webappInstallFailed: (msg: WebappInstallFailed) => void;
 };
 
 export type ForwardInboundHandlers = {
@@ -2038,6 +2031,21 @@ export class PlayerSurface {
       }),
     );
   }
+
+  /** Send `Player::EnrichmentOffer` to every connected peer (broadcast). */
+  async enrichmentOffer(payload: NowPlayingEnrichment, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'player', data: { event: 'enrichmentOffer', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
 }
 
 export class SystemSurface {
@@ -2302,6 +2310,21 @@ export class SystemSurface {
           id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `System::OtaActivate` to every connected peer (broadcast). */
+  async otaActivate(payload: OtaActivate, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'command' },
+          data: { type: 'system', data: { event: 'otaActivate', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2758,18 +2781,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::InstallBeginAck` across all peers. */
-  onInstallBeginAck(handler: (deviceId: string, msg: WebappInstallBeginAck) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'installBeginAck') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::Uninstalled` across all peers. */
   onUninstalled(handler: (deviceId: string, msg: WebappActive) => void): () => void {
     return this._gateway.on(event => {
@@ -2854,18 +2865,6 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::WebappInstallFailed` across all peers. */
-  onWebappInstallFailed(handler: (deviceId: string, msg: WebappInstallFailed) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'webappInstallFailed') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Webapp` variants. */
   subscribe(handlers: WebappInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2893,10 +2892,6 @@ export class WebappSurface {
         }
         case 'switched': {
           handlers.switched?.(event.deviceId, inner.data);
-          return;
-        }
-        case 'installBeginAck': {
-          handlers.installBeginAck?.(event.deviceId, inner.data);
           return;
         }
         case 'uninstalled': {
@@ -2927,46 +2922,12 @@ export class WebappSurface {
           handlers.webappInstalled?.(event.deviceId, inner.data);
           return;
         }
-        case 'webappInstallFailed': {
-          handlers.webappInstallFailed?.(event.deviceId, inner.data);
-          return;
-        }
         default: {
           if (!partial) this._gateway.logger.warn('Webapp: no handler for inner', inner);
           return;
         }
       }
     });
-  }
-
-  /** Send `Webapp::InstallChunk` to every connected peer (broadcast). */
-  async installChunk(payload: WebappInstallChunk, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Webapp::InstallAbandon` to every connected peer (broadcast). */
-  async installAbandon(payload: WebappInstallAbandon, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'command' },
-          data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
   }
 
   /** Typed request to a specific peer: companion sends, daemon responds. */
@@ -3010,24 +2971,6 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'switched') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async installBegin(
-    deviceId: string,
-    req: WebappInstallBegin,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -5024,6 +4967,16 @@ export class PlayerSurfaceForDevice {
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
+
+  /** Send `Player::EnrichmentOffer` to this peer. */
+  async enrichmentOffer(payload: NowPlayingEnrichment, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'player', data: { event: 'enrichmentOffer', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
 }
 
 export class SystemSurfaceForDevice {
@@ -5296,6 +5249,16 @@ export class SystemSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'otaAbandon', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `System::OtaActivate` to this peer. */
+  async otaActivate(payload: OtaActivate, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'system', data: { event: 'otaActivate', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -5722,19 +5685,6 @@ export class WebappSurfaceForDevice {
     });
   }
 
-  /** Subscribe to `Webapp::InstallBeginAck` from this peer. */
-  onInstallBeginAck(handler: (msg: WebappInstallBeginAck) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'installBeginAck') return;
-      handler(inner.data);
-    });
-  }
-
   /** Subscribe to `Webapp::Uninstalled` from this peer. */
   onUninstalled(handler: (msg: WebappActive) => void): () => void {
     return this._gateway.on(event => {
@@ -5826,19 +5776,6 @@ export class WebappSurfaceForDevice {
     });
   }
 
-  /** Subscribe to `Webapp::WebappInstallFailed` from this peer. */
-  onWebappInstallFailed(handler: (msg: WebappInstallFailed) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'webapp') return;
-      const inner = data.data;
-      if (inner.event !== 'webappInstallFailed') return;
-      handler(inner.data);
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Webapp` variants from this peer. */
   subscribe(handlers: WebappDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5869,10 +5806,6 @@ export class WebappSurfaceForDevice {
           handlers.switched?.(inner.data);
           return;
         }
-        case 'installBeginAck': {
-          handlers.installBeginAck?.(inner.data);
-          return;
-        }
         case 'uninstalled': {
           handlers.uninstalled?.(inner.data);
           return;
@@ -5901,36 +5834,12 @@ export class WebappSurfaceForDevice {
           handlers.webappInstalled?.(inner.data);
           return;
         }
-        case 'webappInstallFailed': {
-          handlers.webappInstallFailed?.(inner.data);
-          return;
-        }
         default: {
           if (!partial) this._gateway.logger.warn('Webapp: no handler for inner', inner);
           return;
         }
       }
     });
-  }
-
-  /** Send `Webapp::InstallChunk` to this peer. */
-  async installChunk(payload: WebappInstallChunk, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'webapp', data: { event: 'installChunk', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Webapp::InstallAbandon` to this peer. */
-  async installAbandon(payload: WebappInstallAbandon, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'webapp', data: { event: 'installAbandon', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
   }
 
   /** Typed request to this peer: companion sends, daemon responds. */
@@ -5970,23 +5879,6 @@ export class WebappSurfaceForDevice {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'switched') return { ok: true, response: inner.data };
-      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async installBegin(
-    req: WebappInstallBegin,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappInstallBeginAck, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'installBegin', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'webapp') {
-      const inner = d.data;
-      if (inner.event === 'installBeginAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -7814,10 +7706,6 @@ function outerSubscribeGateway(
             innerHandlers.switched?.(event.deviceId, inner.data);
             return;
           }
-          case 'installBeginAck': {
-            innerHandlers.installBeginAck?.(event.deviceId, inner.data);
-            return;
-          }
           case 'uninstalled': {
             innerHandlers.uninstalled?.(event.deviceId, inner.data);
             return;
@@ -7844,10 +7732,6 @@ function outerSubscribeGateway(
           }
           case 'webappInstalled': {
             innerHandlers.webappInstalled?.(event.deviceId, inner.data);
-            return;
-          }
-          case 'webappInstallFailed': {
-            innerHandlers.webappInstallFailed?.(event.deviceId, inner.data);
             return;
           }
           default: {
@@ -8490,10 +8374,6 @@ function outerSubscribeDevice(
             innerHandlers.switched?.(inner.data);
             return;
           }
-          case 'installBeginAck': {
-            innerHandlers.installBeginAck?.(inner.data);
-            return;
-          }
           case 'uninstalled': {
             innerHandlers.uninstalled?.(inner.data);
             return;
@@ -8520,10 +8400,6 @@ function outerSubscribeDevice(
           }
           case 'webappInstalled': {
             innerHandlers.webappInstalled?.(inner.data);
-            return;
-          }
-          case 'webappInstallFailed': {
-            innerHandlers.webappInstallFailed?.(inner.data);
             return;
           }
           default: {

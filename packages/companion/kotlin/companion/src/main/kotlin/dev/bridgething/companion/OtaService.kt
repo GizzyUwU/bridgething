@@ -6,18 +6,21 @@ import dev.bridgething.gateway.OtaAssetRangeHandle
 import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.device
 import dev.bridgething.gateway.system
+import dev.bridgething.gateway.webapp
 import dev.bridgething.schema.BridgeThingMeta
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.OtaAssetRange
 import dev.bridgething.schema.OtaAssetRangeChunk
 import dev.bridgething.schema.OtaAssetRangeRejected
 import dev.bridgething.schema.OtaAssetRangeReply
+import dev.bridgething.schema.OtaActivate
 import dev.bridgething.schema.OtaBegin
 import dev.bridgething.schema.OtaChunk
 import dev.bridgething.schema.OtaKind
 import dev.bridgething.schema.OtaPhase
 import dev.bridgething.schema.Priority
 import dev.bridgething.schema.RangePart
+import dev.bridgething.schema.WebappInfo
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -50,8 +53,20 @@ public sealed class OtaPhaseSnapshot {
     public object Idle : OtaPhaseSnapshot()
     public data class Streaming(val percent: Int) : OtaPhaseSnapshot()
     public data class Applying(val phase: OtaPhase, val percent: Int) : OtaPhaseSnapshot()
+
+    /**
+     * A bandaid piece (daemon / builtin-webapp) is validated and staged on
+     * the device but not yet live. The batch goes live on `OtaActivate`.
+     */
+    public object Staged : OtaPhaseSnapshot()
     public object Completed : OtaPhaseSnapshot()
     public data class Failed(val reason: String) : OtaPhaseSnapshot()
+}
+
+/** Terminal outcome of a third-party webapp install (`OtaKind.InstalledWebapp`). */
+public sealed class WebappInstallResult {
+    public data class Installed(val info: WebappInfo) : WebappInstallResult()
+    public data class Failed(val reason: String) : WebappInstallResult()
 }
 
 /**
@@ -129,7 +144,7 @@ public sealed class OtaPollEvent {
 public class OtaService(
     private val httpClient: OkHttpClient = OkHttpClient(),
     private val json: Json = defaultJson,
-) {
+) : WebappInstaller {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private val deviceMetaMutex = Mutex()
@@ -209,12 +224,13 @@ public class OtaService(
     ): Flow<OtaPhaseSnapshot> {
         setLocalZck(zckPath)
         return runOtaFlow { collector ->
-            val terminal = driveOta(
+            val (terminal, _) = driveOta(
                 gateway = gateway,
                 deviceId = deviceId,
                 kind = OtaKind.Image,
                 artifactPath = swuPath,
                 updateUrlBase = updateUrlBase,
+                mode = DriveMode.Full,
                 emit = collector,
             )
             collector(terminal)
@@ -222,10 +238,9 @@ public class OtaService(
     }
 
     /**
-     * Drive a daemon-kind OTA from a local aarch64 daemon binary. The
-     * daemon validates and atomically swaps `.current`, then a
-     * `systemctl restart bridgething.service` triggers the new binary
-     * to take over. No range proxy traffic for this kind.
+     * Push a new daemon binary to the bandaid. Stages it then activates the
+     * (single-piece) batch, which atomically swaps `.current` and restarts
+     * bridgething.service once. No range proxy traffic for this kind.
      */
     public suspend fun pushDaemon(
         gateway: BridgethingGateway,
@@ -233,15 +248,131 @@ public class OtaService(
         binaryPath: File,
     ): Flow<OtaPhaseSnapshot> {
         return runOtaFlow { collector ->
-            val terminal = driveOta(
+            val terminal = applyBandaidBatch(gateway, deviceId, listOf(OtaKind.Daemon to binaryPath), collector)
+            collector(terminal)
+        }
+    }
+
+    /**
+     * Push a builtin-webapp bundle (hub or stock) to the bandaid. Same
+     * stage-then-activate path as the daemon; the bundle's manifest id must
+     * be a reserved builtin or the daemon rejects the stage.
+     */
+    public suspend fun pushBuiltinWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: File,
+    ): Flow<OtaPhaseSnapshot> {
+        return runOtaFlow { collector ->
+            val terminal = applyBandaidBatch(gateway, deviceId, listOf(OtaKind.BuiltinWebapp to bundlePath), collector)
+            collector(terminal)
+        }
+    }
+
+    /**
+     * Push a coupled set of bandaid pieces (daemon + hub + stock, in any
+     * combination) as one batch: every piece stages, then a single
+     * `OtaActivate` swaps them all live with one restart.
+     */
+    public suspend fun pushBandaidBatch(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        artifacts: List<Pair<OtaKind, File>>,
+    ): Flow<OtaPhaseSnapshot> {
+        return runOtaFlow { collector ->
+            val terminal = applyBandaidBatch(gateway, deviceId, artifacts, collector)
+            collector(terminal)
+        }
+    }
+
+    /**
+     * Install a third-party webapp bundle into the device's writable registry
+     * via `OtaKind.InstalledWebapp`. Reuses the OTA chunk pump; no staging, no
+     * activate, no restart. The terminal is the daemon's `WebappInstalled`
+     * event (success, carrying the `WebappInfo`) or an `OtaError` (failure).
+     */
+    override suspend fun installWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: File,
+    ): WebappInstallResult {
+        val totalSize = try {
+            bundlePath.length()
+        } catch (e: Throwable) {
+            return WebappInstallResult.Failed("stat bundle failed: ${e.message ?: e.toString()}")
+        }
+        if (totalSize <= 0L) return WebappInstallResult.Failed("could not stat bundle")
+        if (totalSize > UInt.MAX_VALUE.toLong()) return WebappInstallResult.Failed("bundle larger than 4 GiB")
+        val sha = try {
+            hashFile(bundlePath)
+        } catch (e: Throwable) {
+            return WebappInstallResult.Failed("sha256 failed: ${e.message ?: e.toString()}")
+        }
+
+        // subscribe before streaming so the terminal event cannot be missed.
+        val terminal = CompletableDeferred<WebappInstallResult>()
+        val installedJob = scope.launch {
+            gateway.webapp.webappInstalled.collect { (devId, info) ->
+                if (devId == deviceId && terminal.isActive) terminal.complete(WebappInstallResult.Installed(info))
+            }
+        }
+        val errorJob = scope.launch {
+            gateway.device(deviceId).system.otaError.collect { e ->
+                if (terminal.isActive) terminal.complete(WebappInstallResult.Failed("[${e.code}] ${e.msg}"))
+            }
+        }
+        val timeoutJob = scope.launch {
+            delay(60_000)
+            if (terminal.isActive) terminal.complete(WebappInstallResult.Failed("install timed out"))
+        }
+        fun stopJobs() {
+            installedJob.cancel(); errorJob.cancel(); timeoutJob.cancel()
+        }
+
+        val begin = OtaBegin(
+            kind = OtaKind.InstalledWebapp,
+            updateId = sha,
+            updateUrlBase = null,
+            expectedSha256 = sha,
+            expectedSize = totalSize.toUInt(),
+        )
+        val resumeFrom: UInt = try {
+            when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
+                is RequestResult.Ok -> res.response.resumeFromOffset
+                is RequestResult.DomainErr -> {
+                    stopJobs()
+                    return WebappInstallResult.Failed("daemon rejected install: ${res.error.reason}")
+                }
+                is RequestResult.ProtocolErr -> {
+                    stopJobs()
+                    return WebappInstallResult.Failed("OtaBegin protocol error: ${res.error}")
+                }
+            }
+        } catch (e: Throwable) {
+            stopJobs()
+            return WebappInstallResult.Failed("OtaBegin send failed: ${e.message ?: e.toString()}")
+        }
+
+        try {
+            streamArtifact(
                 gateway = gateway,
                 deviceId = deviceId,
-                kind = OtaKind.Daemon,
-                artifactPath = binaryPath,
-                updateUrlBase = null,
-                emit = collector,
+                updateId = sha,
+                artifactPath = bundlePath,
+                startOffset = resumeFrom.toLong(),
+                totalSize = totalSize,
             )
-            collector(terminal)
+        } catch (e: Throwable) {
+            stopJobs()
+            return WebappInstallResult.Failed("chunk stream failed: ${e.message ?: e.toString()}")
+        }
+
+        return try {
+            terminal.await()
+        } finally {
+            installedJob.cancelAndJoin()
+            errorJob.cancelAndJoin()
+            timeoutJob.cancelAndJoin()
         }
     }
 
@@ -438,12 +569,10 @@ public class OtaService(
                 return
             }
             var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
-            val terminal = driveOta(
+            val terminal = applyBandaidBatch(
                 gateway = gateway,
                 deviceId = deviceId,
-                kind = OtaKind.Daemon,
-                artifactPath = cached,
-                updateUrlBase = null,
+                artifacts = listOf(OtaKind.Daemon to cached),
                 emit = { snapshot ->
                     last = snapshot
                     eventsFlow.tryEmit(
@@ -485,12 +614,13 @@ public class OtaService(
             }
             setLocalZck(zckLocal)
             var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
-            val terminal = driveOta(
+            val (terminal, _) = driveOta(
                 gateway = gateway,
                 deviceId = deviceId,
                 kind = OtaKind.Image,
                 artifactPath = swuLocal,
                 updateUrlBase = config.rootUrl,
+                mode = DriveMode.Full,
                 emit = { snapshot ->
                     last = snapshot
                     eventsFlow.tryEmit(
@@ -619,26 +749,44 @@ public class OtaService(
         }
     }
 
+    private enum class DriveMode {
+        /** Image: stream, then await `Reboot` (the device power-cycles). */
+        Full,
+
+        /**
+         * Bandaid (daemon / builtin-webapp): stream, then await `Writing`/100,
+         * which means the piece is staged but not yet live. The batch goes
+         * live on a later `OtaActivate`.
+         */
+        Stage,
+    }
+
+    /**
+     * Stream one artifact and await its terminal. Returns the terminal
+     * snapshot plus the artifact's sha256 (the `update_id`), which the caller
+     * passes to `OtaActivate.expected` for a bandaid batch.
+     */
     private suspend fun driveOta(
         gateway: BridgethingGateway,
         deviceId: String,
         kind: OtaKind,
         artifactPath: File,
         updateUrlBase: String?,
+        mode: DriveMode,
         emit: suspend (OtaPhaseSnapshot) -> Unit,
-    ): OtaPhaseSnapshot {
+    ): Pair<OtaPhaseSnapshot, String> {
         val totalSize = try { artifactPath.length() } catch (e: Throwable) {
-            return OtaPhaseSnapshot.Failed(reason = "stat artifact failed: ${e.message ?: e.toString()}")
+            return OtaPhaseSnapshot.Failed(reason = "stat artifact failed: ${e.message ?: e.toString()}") to ""
         }
         if (totalSize <= 0L) {
-            return OtaPhaseSnapshot.Failed(reason = "could not stat artifact")
+            return OtaPhaseSnapshot.Failed(reason = "could not stat artifact") to ""
         }
         if (totalSize > UInt.MAX_VALUE.toLong()) {
-            return OtaPhaseSnapshot.Failed(reason = "artifact larger than 4 GiB")
+            return OtaPhaseSnapshot.Failed(reason = "artifact larger than 4 GiB") to ""
         }
 
         val sha = try { hashFile(artifactPath) } catch (e: Throwable) {
-            return OtaPhaseSnapshot.Failed(reason = "sha256 failed: ${e.message ?: e.toString()}")
+            return OtaPhaseSnapshot.Failed(reason = "sha256 failed: ${e.message ?: e.toString()}") to ""
         }
 
         val begin = OtaBegin(
@@ -652,25 +800,28 @@ public class OtaService(
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
                 is RequestResult.Ok -> res.response.resumeFromOffset
                 is RequestResult.DomainErr -> {
-                    return OtaPhaseSnapshot.Failed(reason = "daemon rejected OtaBegin: ${res.error.reason}")
+                    return OtaPhaseSnapshot.Failed(reason = "daemon rejected OtaBegin: ${res.error.reason}") to sha
                 }
                 is RequestResult.ProtocolErr -> {
-                    return OtaPhaseSnapshot.Failed(reason = "OtaBegin protocol error: ${res.error}")
+                    return OtaPhaseSnapshot.Failed(reason = "OtaBegin protocol error: ${res.error}") to sha
                 }
             }
         } catch (e: Throwable) {
-            return OtaPhaseSnapshot.Failed(reason = "OtaBegin send failed: ${e.message ?: e.toString()}")
+            return OtaPhaseSnapshot.Failed(reason = "OtaBegin send failed: ${e.message ?: e.toString()}") to sha
         }
 
         emit(OtaPhaseSnapshot.Streaming(percent = percent(resumeFrom.toLong(), totalSize)))
 
+        val success: OtaPhaseSnapshot = if (mode == DriveMode.Full) OtaPhaseSnapshot.Completed else OtaPhaseSnapshot.Staged
         val terminal = CompletableDeferred<OtaPhaseSnapshot>()
         val progressJob = scope.launch {
             gateway.device(deviceId).system.otaProgress.collect { p ->
                 emit(OtaPhaseSnapshot.Applying(phase = p.phase, percent = p.percent.toInt()))
-                if (p.phase == OtaPhase.Reboot) {
-                    if (terminal.isActive) terminal.complete(OtaPhaseSnapshot.Completed)
+                val done = when (mode) {
+                    DriveMode.Full -> p.phase == OtaPhase.Reboot
+                    DriveMode.Stage -> p.phase == OtaPhase.Writing && p.percent.toInt() >= 100
                 }
+                if (done && terminal.isActive) terminal.complete(success)
             }
         }
         val errorJob = scope.launch {
@@ -692,14 +843,73 @@ public class OtaService(
             )
         } catch (e: Throwable) {
             progressJob.cancel(); errorJob.cancel()
-            return OtaPhaseSnapshot.Failed(reason = "chunk stream failed: ${e.message ?: e.toString()}")
+            return OtaPhaseSnapshot.Failed(reason = "chunk stream failed: ${e.message ?: e.toString()}") to sha
         }
 
         val result = try { terminal.await() } finally {
             progressJob.cancelAndJoin()
             errorJob.cancelAndJoin()
         }
-        return result
+        return result to sha
+    }
+
+    /**
+     * Stage each artifact on the bandaid, then activate the whole batch with
+     * a single `OtaActivate` (one service restart). Returns the terminal
+     * snapshot; the first piece that fails short-circuits the batch.
+     */
+    private suspend fun applyBandaidBatch(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        artifacts: List<Pair<OtaKind, File>>,
+        emit: suspend (OtaPhaseSnapshot) -> Unit,
+    ): OtaPhaseSnapshot {
+        val stagedIds = mutableListOf<String>()
+        for ((kind, path) in artifacts) {
+            val (snapshot, updateId) = driveOta(
+                gateway = gateway,
+                deviceId = deviceId,
+                kind = kind,
+                artifactPath = path,
+                updateUrlBase = null,
+                mode = DriveMode.Stage,
+                emit = emit,
+            )
+            if (snapshot !is OtaPhaseSnapshot.Staged) return snapshot
+            stagedIds.add(updateId)
+        }
+        return commitBandaid(gateway, deviceId, stagedIds, emit)
+    }
+
+    /** Send `OtaActivate` and await the single `Reboot`. */
+    private suspend fun commitBandaid(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        expected: List<String>,
+        emit: suspend (OtaPhaseSnapshot) -> Unit,
+    ): OtaPhaseSnapshot {
+        val terminal = CompletableDeferred<OtaPhaseSnapshot>()
+        val progressJob = scope.launch {
+            gateway.device(deviceId).system.otaProgress.collect { p ->
+                emit(OtaPhaseSnapshot.Applying(phase = p.phase, percent = p.percent.toInt()))
+                if (p.phase == OtaPhase.Reboot && terminal.isActive) terminal.complete(OtaPhaseSnapshot.Completed)
+            }
+        }
+        val errorJob = scope.launch {
+            gateway.device(deviceId).system.otaError.collect { e ->
+                if (terminal.isActive) terminal.complete(OtaPhaseSnapshot.Failed(reason = "[${e.code}] ${e.msg}"))
+            }
+        }
+        try {
+            gateway.device(deviceId).system.otaActivate(OtaActivate(expected = expected))
+        } catch (e: Throwable) {
+            progressJob.cancel(); errorJob.cancel()
+            return OtaPhaseSnapshot.Failed(reason = "OtaActivate send failed: ${e.message ?: e.toString()}")
+        }
+        return try { terminal.await() } finally {
+            progressJob.cancelAndJoin()
+            errorJob.cancelAndJoin()
+        }
     }
 
     private suspend fun streamArtifact(

@@ -686,6 +686,31 @@ mod tests {
   }
 
   #[test]
+  fn pid_round_trips_canonically_single_prefix() {
+    let media = MediaItemAttributes {
+      persistent_id: Some(0x3242_5b9c_9dd6_28f8),
+      title: Some("Side of Town".to_string()),
+      ..Default::default()
+    };
+    let key = delta_track_key(Some(&media)).expect("real pid yields a key");
+    assert_eq!(key, "32425b9c9dd628f8", "key is bare hex, no prefix");
+
+    let lib_update = translate_now_playing(
+      Iap2NowPlayingUpdate {
+        media_item: Some(media),
+        playback: None,
+      },
+      Some(&key),
+    );
+    let lib_pid = lib_update.media_item.as_ref().and_then(|m| m.persistent_id.clone());
+    assert_eq!(lib_pid.as_deref(), Some("iap2:track:32425b9c9dd628f8"), "single prefix");
+
+    let mut entry = HintCheckpoint::default();
+    let hint = evaluate_hint_against(&mut entry, &lib_update, Instant::now()).expect("track emits hint");
+    assert_eq!(hint.persistent_id, lib_pid, "hint anchor equals the player-state pid");
+  }
+
+  #[test]
   fn play_state_flip_emits_hint() {
     let mut entry = HintCheckpoint::default();
     let t0 = Instant::now();

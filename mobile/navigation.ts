@@ -9,6 +9,7 @@ export type RootStackParamList = {
   Setup: { startAt?: 'signIn' | 'pair'; step?: number } | undefined;
   Dashboard: undefined;
   WebappBrowse: { deviceId: string };
+  Store: { deviceId: string };
   WebappDetail: { deviceId: string; id: string };
   Settings: undefined;
   OtaVersions: { deviceId: string; channel: string };

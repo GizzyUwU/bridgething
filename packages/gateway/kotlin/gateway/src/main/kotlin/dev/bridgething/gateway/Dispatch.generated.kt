@@ -964,6 +964,23 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Player::EnrichmentOffer` to every connected peer (broadcast). */
+  public suspend fun enrichmentOffer(payload: NowPlayingEnrichment, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.EnrichmentOffer(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
 }
 
 /** Cross-peer methods for the `System` wire surface. */
@@ -1094,6 +1111,23 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `System::OtaActivate` to every connected peer (broadcast). */
+  public suspend fun otaActivate(payload: OtaActivate, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
+            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaActivate(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1433,15 +1467,6 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Cross-peer stream of `Webapp::InstallBeginAck` messages. */
-  public val installBeginAck: Flow<Pair<String, WebappInstallBeginAck>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayWebappMsg.InstallBeginAck ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
   /** Cross-peer stream of `Webapp::Uninstalled` messages. */
   public val uninstalled: Flow<Pair<String, WebappActive>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1505,49 +1530,6 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Cross-peer stream of `Webapp::WebappInstallFailed` messages. */
-  public val webappInstallFailed: Flow<Pair<String, WebappInstallFailed>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayWebappMsg.WebappInstallFailed ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
-  /** Send `Webapp::InstallChunk` to every connected peer (broadcast). */
-  public suspend fun installChunk(payload: WebappInstallChunk, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallChunk(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Webapp::InstallAbandon` to every connected peer (broadcast). */
-  public suspend fun installAbandon(payload: WebappInstallAbandon, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Command,
-            data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallAbandon(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
   /** Typed request to a specific peer: companion sends, daemon responds. */
   public suspend fun list(deviceId: String, timeout: Duration = 30.seconds): RequestResult<WebappList, Nothing> {
     val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List)
@@ -1583,21 +1565,6 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Switched -> RequestResult.Ok(inner.data)
-        is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(WireError.Unsupported)
-      }
-      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(WireError.Unsupported)
-    }
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  public suspend fun installBegin(deviceId: String, req: WebappInstallBegin, timeout: Duration = 30.seconds): RequestResult<WebappInstallBeginAck, WebappError> {
-    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallBegin(req))
-    val response = gateway.request(deviceId, outboundData, timeout)
-    return when (val d = response.data) {
-      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
-        is BridgeToGatewayWebappMsg.InstallBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }
@@ -2804,6 +2771,16 @@ public class PlayerSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
+  /** Send `Player::EnrichmentOffer` to this peer. */
+  public suspend fun enrichmentOffer(payload: NowPlayingEnrichment, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.EnrichmentOffer(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
 }
 
 /** Per-peer methods for the `System` wire surface (deviceId is baked in). */
@@ -2937,6 +2914,16 @@ public class SystemSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAbandon(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `System::OtaActivate` to this peer. */
+  public suspend fun otaActivate(payload: OtaActivate, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaActivate(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -3238,16 +3225,6 @@ public class WebappSurfaceForDevice(
       inner.data
     }
 
-  /** Stream of `Webapp::InstallBeginAck` from this peer. */
-  public val installBeginAck: Flow<WebappInstallBeginAck> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayWebappMsg.InstallBeginAck ?: return@mapNotNull null
-      inner.data
-    }
-
   /** Stream of `Webapp::Uninstalled` from this peer. */
   public val uninstalled: Flow<WebappActive> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -3318,36 +3295,6 @@ public class WebappSurfaceForDevice(
       inner.data
     }
 
-  /** Stream of `Webapp::WebappInstallFailed` from this peer. */
-  public val webappInstallFailed: Flow<WebappInstallFailed> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayWebappMsg.WebappInstallFailed ?: return@mapNotNull null
-      inner.data
-    }
-
-  /** Send `Webapp::InstallChunk` to this peer. */
-  public suspend fun installChunk(payload: WebappInstallChunk, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallChunk(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Webapp::InstallAbandon` to this peer. */
-  public suspend fun installAbandon(payload: WebappInstallAbandon, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Command,
-      data = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallAbandon(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
   /** Typed request to this peer: companion sends, daemon responds. */
   public suspend fun list(timeout: Duration = 30.seconds): RequestResult<WebappList, Nothing> {
     val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List)
@@ -3383,21 +3330,6 @@ public class WebappSurfaceForDevice(
     return when (val d = response.data) {
       is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
         is BridgeToGatewayWebappMsg.Switched -> RequestResult.Ok(inner.data)
-        is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(WireError.Unsupported)
-      }
-      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(WireError.Unsupported)
-    }
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  public suspend fun installBegin(req: WebappInstallBegin, timeout: Duration = 30.seconds): RequestResult<WebappInstallBeginAck, WebappError> {
-    val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.InstallBegin(req))
-    val response = gateway.request(deviceId, outboundData, timeout)
-    return when (val d = response.data) {
-      is BridgeToGatewayMsgData.Webapp -> when (val inner = d.data) {
-        is BridgeToGatewayWebappMsg.InstallBeginAck -> RequestResult.Ok(inner.data)
         is BridgeToGatewayWebappMsg.WebappError -> RequestResult.DomainErr(inner.data)
         else -> RequestResult.ProtocolErr(WireError.Unsupported)
       }

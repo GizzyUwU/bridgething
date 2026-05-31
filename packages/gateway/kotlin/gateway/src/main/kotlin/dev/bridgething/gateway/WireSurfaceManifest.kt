@@ -93,11 +93,9 @@ object WireSurfaceManifest {
     "webapp.configGet",
     "webapp.configList",
     "webapp.icon",
-    "webapp.installBeginAck",
     "webapp.switched",
     "webapp.uninstalled",
     "webapp.webappError",
-    "webapp.webappInstallFailed",
     "webapp.webappInstalled",
     "webapp.webapps",
   )

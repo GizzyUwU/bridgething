@@ -211,6 +211,12 @@ impl<'a> PlayerSurface<'a> {
   pub async fn queue_changed(&self, payload: QueueSnapshot) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePlayerMsgEvent::QueueChanged(payload)).await
   }
+  pub async fn enrichment_offer(&self, payload: NowPlayingEnrichment) -> Result<(), SdkError> {
+    self
+      .0
+      .event(GatewayToBridgePlayerMsgEvent::EnrichmentOffer(payload))
+      .await
+  }
   /// Stream of `Player` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayPlayerMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
@@ -236,6 +242,12 @@ impl<'a> SystemSurface<'a> {
     self
       .0
       .command(GatewayToBridgeSystemMsgCommand::OtaAbandon(payload))
+      .await
+  }
+  pub async fn ota_activate(&self, payload: OtaActivate) -> Result<(), SdkError> {
+    self
+      .0
+      .command(GatewayToBridgeSystemMsgCommand::OtaActivate(payload))
       .await
   }
   pub async fn cancel_update(&self) -> Result<(), SdkError> {
@@ -334,15 +346,6 @@ impl<'a> VoiceSurface<'a> {
 pub struct WebappSurface<'a>(&'a Gateway);
 
 impl<'a> WebappSurface<'a> {
-  pub async fn install_chunk(&self, payload: WebappInstallChunk) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeWebappMsgEvent::InstallChunk(payload)).await
-  }
-  pub async fn install_abandon(&self, payload: WebappInstallAbandon) -> Result<(), SdkError> {
-    self
-      .0
-      .command(GatewayToBridgeWebappMsgCommand::InstallAbandon(payload))
-      .await
-  }
   pub async fn list(&self) -> Result<WebappList, RequestFailure<::core::convert::Infallible>> {
     self.0.request(ListWebapps).await
   }
@@ -350,12 +353,6 @@ impl<'a> WebappSurface<'a> {
     self.0.request(GetActiveWebapp).await
   }
   pub async fn switch_to(&self, request: WebappSwitchTo) -> Result<WebappActive, RequestFailure<WebappError>> {
-    self.0.request(request).await
-  }
-  pub async fn install_begin(
-    &self,
-    request: WebappInstallBegin,
-  ) -> Result<WebappInstallBeginAck, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
   pub async fn uninstall(&self, request: WebappUninstall) -> Result<WebappActive, RequestFailure<WebappError>> {

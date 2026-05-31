@@ -97,11 +97,11 @@ enum Command {
     /// Webapp uuid (from the bundle's `manifest.json`).
     id: Uuid,
   },
-  /// Open `WebappInstallBegin` for a chunked webapp install, stream the
-  /// `.zip` via `WebappInstallChunk` events on the Bulk lane, and watch
-  /// for the terminal `WebappInstalled` / `WebappInstallFailed` event.
-  /// The bundle's manifest.id determines where the daemon installs it;
-  /// reserved-uuid bundles (stock/hub/launcher) are hard-rejected.
+  /// Open `OtaBegin { kind: InstalledWebapp }`, stream the `.zip` via
+  /// `OtaChunk` events on the Bulk lane, and watch for the terminal
+  /// `WebappInstalled` event (or an `OtaError`). The bundle's manifest.id
+  /// determines where the daemon installs it; reserved-uuid bundles
+  /// (stock/hub/launcher) are hard-rejected.
   Install {
     /// Path to the bundle `.zip`. Relative paths resolve against
     /// `--fixture` when set, otherwise CWD.

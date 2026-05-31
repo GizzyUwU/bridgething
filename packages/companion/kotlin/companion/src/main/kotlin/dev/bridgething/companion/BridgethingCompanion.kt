@@ -10,12 +10,14 @@ import dev.bridgething.gateway.BridgethingGateway
 import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.LyricsRequestHandle
+import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.asset
 import dev.bridgething.gateway.audio
 import dev.bridgething.gateway.authority
 import dev.bridgething.gateway.capabilities
 import dev.bridgething.gateway.lyrics
 import dev.bridgething.gateway.notifications
+import dev.bridgething.gateway.system
 import dev.bridgething.gateway.time
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
@@ -35,6 +37,11 @@ import dev.bridgething.schema.BridgeToGatewayPlayerMsg
 import dev.bridgething.schema.CompanionAuthorityScope
 import dev.bridgething.schema.GatewayCapabilities
 import dev.bridgething.schema.GatewayInfo
+import dev.bridgething.schema.LogEntry
+import dev.bridgething.schema.LogLevel
+import dev.bridgething.schema.LogSource
+import dev.bridgething.schema.LogsSubscribe
+import dev.bridgething.schema.LogsUnsubscribe
 import dev.bridgething.schema.LyricLine
 import dev.bridgething.schema.Lyrics as WireLyrics
 import dev.bridgething.schema.LyricsErrorReply
@@ -150,6 +157,13 @@ public class BridgethingCompanion(
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
+    public val catalog: CatalogService = CatalogService(
+        installer = ota,
+        store = FileCatalogStore(
+            java.io.File(context.filesDir?.path ?: (System.getProperty("java.io.tmpdir") ?: "."), "bridgething-catalog"),
+        ),
+        httpClient = httpClient,
+    )
 
     private val netDispatcher = NetDispatcher(client = httpClient)
     private val tunnelDispatcher = TunnelDispatcher()
@@ -170,6 +184,11 @@ public class BridgethingCompanion(
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
     private var ancsAuthStateObserver: ((AncsAuthState) -> Unit)? = null
     private var logObserver: ((CompanionLogLevel, String) -> Unit)? = null
+    private val deviceLogMutex = Mutex()
+    private var deviceLogStreaming: Boolean = false
+    private val connectedDeviceIds: MutableSet<String> = mutableSetOf()
+    private val deviceLogTokens: MutableMap<String, String> = mutableMapOf()
+    private var deviceLogJob: Job? = null
     private var volumeClaimed: Boolean = false
     private var timeChangeReceiver: BroadcastReceiver? = null
 
@@ -216,6 +235,14 @@ public class BridgethingCompanion(
         }
         for (job in toCancel) job.cancel()
 
+        deviceLogMutex.withLock {
+            deviceLogJob?.cancel()
+            deviceLogJob = null
+            deviceLogTokens.clear()
+            connectedDeviceIds.clear()
+            deviceLogStreaming = false
+        }
+
         timeChangeReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         timeChangeReceiver = null
 
@@ -231,6 +258,7 @@ public class BridgethingCompanion(
         runCatching { audioDispatcher.stop() }
         runCatching { phoneDispatcher.stop() }
         runCatching { ota.stop() }
+        runCatching { catalog.stop() }
 
         if (glue != null) runCatching { glue.detach() }
 
@@ -287,6 +315,63 @@ public class BridgethingCompanion(
         logObserver = observer
     }
 
+    // subscribes to the daemon's tracing log over the gateway and forwards entries through logObserver.
+    public suspend fun setDeviceLogStreaming(enabled: Boolean) {
+        val toSubscribe = deviceLogMutex.withLock {
+            if (enabled == deviceLogStreaming) return
+            deviceLogStreaming = enabled
+            if (enabled) {
+                connectedDeviceIds.toList()
+            } else {
+                deviceLogJob?.cancel()
+                deviceLogJob = null
+                emptyList()
+            }
+        }
+        if (enabled) {
+            startDeviceLogConsumer()
+            for (id in toSubscribe) subscribeDeviceLogs(id)
+        } else {
+            val tokens = deviceLogMutex.withLock {
+                val t = deviceLogTokens.values.toList()
+                deviceLogTokens.clear()
+                t
+            }
+            for (token in tokens) runCatching { gateway.system.logsUnsubscribe(LogsUnsubscribe(token = token)) }
+        }
+    }
+
+    private suspend fun startDeviceLogConsumer() {
+        deviceLogMutex.withLock {
+            if (deviceLogJob != null) return
+            deviceLogJob = scope.launch {
+                gateway.system.logEntry.collect { (_, entry) -> forwardDeviceLog(entry) }
+            }
+        }
+    }
+
+    private suspend fun subscribeDeviceLogs(deviceId: String) {
+        val result = runCatching {
+            gateway.system.logsSubscribe(
+                deviceId,
+                LogsSubscribe(source = LogSource.Daemon, levels = emptyList(), filter = null),
+            )
+        }.getOrNull()
+        if (result is RequestResult.Ok) deviceLogMutex.withLock { deviceLogTokens[deviceId] = result.response.token }
+    }
+
+    private fun forwardDeviceLog(entry: LogEntry) {
+        val level = when (entry.level) {
+            LogLevel.Trace, LogLevel.Debug -> CompanionLogLevel.Debug
+            LogLevel.Info -> CompanionLogLevel.Info
+            LogLevel.Warn -> CompanionLogLevel.Warn
+            LogLevel.Error -> CompanionLogLevel.Error
+        }
+        val message = "[${entry.target}] ${entry.message}"
+        DeviceLogRing.push(level.raw, message)
+        logObserver?.invoke(level, message)
+    }
+
     /** Android has no equivalent to the iOS ANCS pair flow; always resolves [AncsSetupKind.Unsupported]. */
     public fun enableAncsNotifications(): AncsSetupResult =
         AncsSetupResult(kind = AncsSetupKind.Unsupported, authState = AncsAuthState.Unknown)
@@ -341,6 +426,7 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { audioDispatcher.start(gateway) })
         dispatchers.add(scope.launch { phoneDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })
+        dispatchers.add(scope.launch { catalog.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
     }
 
@@ -352,8 +438,20 @@ public class BridgethingCompanion(
                     announceCapabilities()
                     emitTimeSnapshot()
                     phoneDispatcher.announce(gateway)
+                    val subscribe = deviceLogMutex.withLock {
+                        connectedDeviceIds.add(event.device.id)
+                        deviceLogStreaming
+                    }
+                    if (subscribe) subscribeDeviceLogs(event.device.id)
                 }
-                is GatewayEvent.Disconnected -> log(CompanionLogLevel.Info, "peer disconnected: ${event.deviceId}")
+                is GatewayEvent.Disconnected -> {
+                    log(CompanionLogLevel.Info, "peer disconnected: ${event.deviceId}")
+                    // the daemon auto-releases the subscription token on peer disconnect.
+                    deviceLogMutex.withLock {
+                        connectedDeviceIds.remove(event.deviceId)
+                        deviceLogTokens.remove(event.deviceId)
+                    }
+                }
                 is GatewayEvent.DecodeError -> log(CompanionLogLevel.Warn, "[${event.deviceId}] decode error: ${event.description}")
                 is GatewayEvent.Message -> Unit
             }
@@ -598,6 +696,7 @@ public class BridgethingCompanion(
             CompanionLogLevel.Error -> android.util.Log.e(TAG, message)
         }
         DiagnosticsBuffer.recordLog(level = level.raw, target = TAG, message = message)
+        DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }
 

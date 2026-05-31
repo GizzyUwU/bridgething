@@ -6,8 +6,11 @@ import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
+import com.margelo.nitro.bridgething.session.BridgethingCatalogEvent
+import com.margelo.nitro.bridgething.session.BridgethingCatalogPollConfig
 import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
+import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
 import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
@@ -37,6 +40,7 @@ public interface BridgethingSessionBackend {
 
     public suspend fun snapshot(): BridgethingSessionSnapshot
     public suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry>
+    public suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine>
     public suspend fun companionDebug(): BridgethingCompanionDebug
 
     public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult
@@ -58,6 +62,15 @@ public interface BridgethingSessionBackend {
     public suspend fun checkForOtaUpdate(channel: String, rootUrl: String?)
     public suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest
     public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?)
+
+    public suspend fun catalogSources(): Array<String>
+    public suspend fun addCatalogSource(url: String)
+    public suspend fun removeCatalogSource(url: String)
+    public suspend fun refreshCatalog()
+    public suspend fun availableCatalogApps(deviceId: String): String
+    public suspend fun checkForCatalogUpdates(deviceId: String): String
+    public suspend fun installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String): BridgethingWebappInfo
+    public suspend fun setCatalogPollConfig(config: BridgethingCatalogPollConfig?)
 
     public suspend fun reconnectPeer(deviceId: String)
 
@@ -85,5 +98,6 @@ public interface BridgethingSessionBackend {
     public fun setOnWebappsChanged(callback: (String) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
+    public fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit)
     public fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit)
 }

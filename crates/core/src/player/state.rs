@@ -1,15 +1,23 @@
-use std::time::{Duration, Instant};
+use std::{
+  num::NonZeroUsize,
+  time::{Duration, Instant},
+};
 
 use libbridgething::{
   CompanionAuthorityScope, MediaItem, MediaItemUpdate, NowPlayingUpdate, Playback, PlaybackOptions, PlaybackState,
   PlaybackUpdate, PlayerOptions, PlayerState as WirePlayerState, QueueItem, RepeatMode, Track,
   client::{PlayerQueueReply, PlayerStateReply},
+  gateway::NowPlayingEnrichment,
 };
+use lru::LruCache;
 
 use crate::authority::AuthorityRegistry;
 
 const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
+
+const ENRICHMENT_CACHE_CAP: usize = 32;
+const DURATION_TOLERANCE_MS: u32 = 3000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NowPlayingSource {
@@ -41,6 +49,9 @@ pub struct PlayerState {
 
   iap2_queue: Vec<QueueItem>,
   companion_queue: Vec<QueueItem>,
+
+  enrichment: Option<NowPlayingEnrichment>,
+  enrichment_by_pid: LruCache<String, EnrichedEntry>,
 
   transport_intent: Option<TransportIntent>,
   seek_intent: Option<SeekIntent>,
@@ -82,6 +93,9 @@ impl PlayerState {
 
       iap2_queue: Vec::new(),
       companion_queue: Vec::new(),
+
+      enrichment: None,
+      enrichment_by_pid: LruCache::new(NonZeroUsize::new(ENRICHMENT_CACHE_CAP).unwrap()),
 
       transport_intent: None,
       seek_intent: None,
@@ -189,15 +203,62 @@ impl PlayerState {
     self.apply_merged(merged_meta, merged_play);
   }
 
-  fn merged_queue(&self) -> Vec<QueueItem> {
+  fn merged_queue(&self, overlay: &Overlay) -> Vec<QueueItem> {
     let companion_authoritative = self
       .authority
       .is_authoritative(CompanionAuthorityScope::NowPlayingMetadata);
     if companion_authoritative {
       self.companion_queue.clone()
+    } else if let Some(queue) = &overlay.queue {
+      queue.clone()
     } else {
       self.iap2_queue.clone()
     }
+  }
+
+  pub(crate) fn apply_enrichment(&mut self, offer: NowPlayingEnrichment) {
+    if let (Some(pid), Some(head)) = (offer.anchor_pid.as_deref(), offer.head.as_ref())
+      && !head.uri.is_empty()
+    {
+      self
+        .enrichment_by_pid
+        .put(pid.to_string(), EnrichedEntry::from_head(head));
+    }
+    self.enrichment = Some(offer);
+  }
+
+  fn resolve_overlay(&self, id: &MediaItemUpdate) -> Overlay {
+    let pid = id.persistent_id.as_deref();
+
+    if let Some(pid) = pid
+      && let Some(entry) = self.enrichment_by_pid.peek(pid)
+      && content_agrees(entry, id)
+    {
+      let anchor_is_current = self.enrichment.as_ref().and_then(|o| o.anchor_pid.as_deref()) == Some(pid);
+      return Overlay {
+        tier: Tier::Exact,
+        art: entry.artwork_id.clone(),
+        uri: Some(entry.uri.clone()),
+        like_supported: true,
+        queue: anchor_is_current.then(|| self.enrichment.as_ref().map(|o| o.queue.clone()).unwrap_or_default()),
+      };
+    }
+
+    let candidates = self
+      .enrichment
+      .iter()
+      .flat_map(|o| o.head.iter().chain(o.queue.iter()))
+      .map(Cand::from_queue)
+      .chain(self.enrichment_by_pid.iter().map(|(_, e)| Cand::from_entry(e)));
+    if let Some(cand) = best_content_match(id, candidates) {
+      return Overlay {
+        tier: Tier::Content,
+        art: cand.artwork_id,
+        ..Overlay::bare()
+      };
+    }
+
+    Overlay::bare()
   }
 
   pub(crate) fn apply_now_playing(&mut self, source: NowPlayingSource, update: NowPlayingUpdate) {
@@ -449,10 +510,11 @@ impl PlayerState {
   pub fn replies(&self) -> (PlayerStateReply, PlayerQueueReply) {
     let merged_meta = self.merged_metadata();
     let merged_play = self.merged_playback();
-    let merged_queue = self.merged_queue();
+    let overlay = self.resolve_overlay(&merged_meta);
+    let merged_queue = self.merged_queue(&overlay);
     let effective = self.effective_track();
 
-    let media_item = effective.map(|t| build_media_item(t, &merged_meta));
+    let media_item = effective.map(|t| build_media_item(t, &merged_meta, &overlay));
     let playback = Playback {
       state: if self.playing {
         PlaybackState::Playing
@@ -474,7 +536,7 @@ impl PlayerState {
       speed: merged_play.playback_speed.unwrap_or(self.playback_speed as f32),
       crossfade_ms: None,
     };
-    let queue_current = effective.map(|t| build_queue_item(t, merged_meta));
+    let queue_current = effective.map(|t| build_queue_item(t, &merged_meta, &overlay));
 
     let state = PlayerStateReply {
       state: WirePlayerState {
@@ -495,7 +557,12 @@ impl PlayerState {
 
   pub fn current_artwork_id(&self) -> Option<String> {
     self.effective_track()?;
-    let id = self.merged_metadata().artwork_id?;
+    let merged = self.merged_metadata();
+    let overlay = self.resolve_overlay(&merged);
+    let id = match overlay.tier {
+      Tier::Bare => merged.artwork_id,
+      _ => overlay.art,
+    }?;
     if id.is_empty() { None } else { Some(id) }
   }
 
@@ -508,35 +575,54 @@ impl PlayerState {
   }
 }
 
-fn build_queue_item(track: &Track, merged: MediaItemUpdate) -> QueueItem {
-  let artwork_id = merged.artwork_id.filter(|s| !s.is_empty());
+fn overlaid_artwork_id(merged: &MediaItemUpdate, overlay: &Overlay) -> Option<String> {
+  let id = match overlay.tier {
+    Tier::Bare => merged.artwork_id.clone(),
+    _ => overlay.art.clone(),
+  };
+  id.filter(|s| !s.is_empty())
+}
+
+fn build_queue_item(track: &Track, merged: &MediaItemUpdate, overlay: &Overlay) -> QueueItem {
+  let uri = match overlay.tier {
+    Tier::Exact => overlay.uri.clone().unwrap_or_else(|| track.id.clone()),
+    _ => track.id.clone(),
+  };
   QueueItem {
-    uri: track.id.clone(),
-    title: merged.title,
-    artist: merged.artist,
-    album: merged.album,
-    artwork_id,
+    uri,
+    title: merged.title.clone(),
+    artist: merged.artist.clone(),
+    album: merged.album.clone(),
+    artwork_id: overlaid_artwork_id(merged, overlay),
     duration_ms: merged.duration_ms,
     persistent_id: Some(track.id.clone()),
   }
 }
 
-fn build_media_item(track: &Track, merged: &MediaItemUpdate) -> MediaItem {
-  let artwork_id = merged.artwork_id.clone().filter(|s| !s.is_empty());
+fn build_media_item(track: &Track, merged: &MediaItemUpdate, overlay: &Overlay) -> MediaItem {
+  let uri = match overlay.tier {
+    Tier::Exact => Some(overlay.uri.clone().unwrap_or_else(|| track.id.clone())),
+    _ => Some(track.id.clone()),
+  };
+  let is_like_supported = if overlay.like_supported {
+    Some(true)
+  } else {
+    merged.is_like_supported
+  };
   MediaItem {
-    uri: Some(track.id.clone()),
+    uri,
     persistent_id: Some(track.id.clone()),
     title: merged.title.clone(),
     album: merged.album.clone(),
     album_artist: merged.album_artist.clone(),
     artist: merged.artist.clone(),
     liked: merged.liked,
-    artwork_id,
+    artwork_id: overlaid_artwork_id(merged, overlay),
     duration_ms: merged.duration_ms,
     media_types: merged.media_types.clone(),
     track_number: merged.track_number,
     track_count: merged.track_count,
-    is_like_supported: merged.is_like_supported,
+    is_like_supported,
     is_ban_supported: merged.is_ban_supported,
     is_banned: merged.is_banned,
     chapter_count: merged.chapter_count,
@@ -640,6 +726,165 @@ fn accumulate_playback(target: &mut PlaybackUpdate, src: PlaybackUpdate) {
   if src.apple_music_radio_station_name.is_some() {
     target.apple_music_radio_station_name = src.apple_music_radio_station_name;
   }
+}
+
+#[derive(Debug, Clone)]
+struct EnrichedEntry {
+  uri: String,
+  artwork_id: Option<String>,
+  norm_title: String,
+  norm_artist: String,
+  duration_ms: Option<u32>,
+}
+
+impl EnrichedEntry {
+  fn from_head(head: &QueueItem) -> Self {
+    EnrichedEntry {
+      uri: head.uri.clone(),
+      artwork_id: head.artwork_id.clone(),
+      norm_title: head.title.as_deref().map(normalize).unwrap_or_default(),
+      norm_artist: head.artist.as_deref().map(artist_primary).unwrap_or_default(),
+      duration_ms: head.duration_ms,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier {
+  Bare,
+  Content,
+  Exact,
+}
+
+struct Overlay {
+  tier: Tier,
+  art: Option<String>,
+  uri: Option<String>,
+  like_supported: bool,
+  queue: Option<Vec<QueueItem>>,
+}
+
+impl Overlay {
+  fn bare() -> Self {
+    Overlay {
+      tier: Tier::Bare,
+      art: None,
+      uri: None,
+      like_supported: false,
+      queue: None,
+    }
+  }
+}
+
+struct Cand {
+  norm_title: String,
+  norm_artist: String,
+  duration_ms: Option<u32>,
+  artwork_id: Option<String>,
+}
+
+impl Cand {
+  fn from_queue(item: &QueueItem) -> Self {
+    Cand {
+      norm_title: item.title.as_deref().map(normalize).unwrap_or_default(),
+      norm_artist: item.artist.as_deref().map(artist_primary).unwrap_or_default(),
+      duration_ms: item.duration_ms,
+      artwork_id: item.artwork_id.clone(),
+    }
+  }
+
+  fn from_entry(entry: &EnrichedEntry) -> Self {
+    Cand {
+      norm_title: entry.norm_title.clone(),
+      norm_artist: entry.norm_artist.clone(),
+      duration_ms: entry.duration_ms,
+      artwork_id: entry.artwork_id.clone(),
+    }
+  }
+}
+
+fn content_agrees(entry: &EnrichedEntry, id: &MediaItemUpdate) -> bool {
+  let Some(title) = id.title.as_deref() else {
+    return false;
+  };
+  if normalize(title) != entry.norm_title || entry.norm_title.is_empty() {
+    return false;
+  }
+  let artist = id.artist.as_deref().map(artist_primary).unwrap_or_default();
+  if !artist_overlap(&artist, &entry.norm_artist) {
+    return false;
+  }
+  duration_ok(entry.duration_ms, id.duration_ms)
+}
+
+fn best_content_match(id: &MediaItemUpdate, cands: impl Iterator<Item = Cand>) -> Option<Cand> {
+  let title = id.title.as_deref().map(normalize)?;
+  if title.is_empty() {
+    return None;
+  }
+  let artist = id.artist.as_deref().map(artist_primary).unwrap_or_default();
+  let mut best: Option<Cand> = None;
+  for cand in cands {
+    if cand.artwork_id.is_none() || cand.norm_title != title {
+      continue;
+    }
+    if !artist_overlap(&artist, &cand.norm_artist) || !duration_ok(cand.duration_ms, id.duration_ms) {
+      continue;
+    }
+    let confirmed = both_present(cand.duration_ms, id.duration_ms);
+    match &best {
+      None => best = Some(cand),
+      Some(b) if confirmed && !both_present(b.duration_ms, id.duration_ms) => best = Some(cand),
+      _ => {}
+    }
+  }
+  best
+}
+
+fn both_present(a: Option<u32>, b: Option<u32>) -> bool {
+  matches!((a, b), (Some(_), Some(_)))
+}
+
+fn duration_ok(a: Option<u32>, b: Option<u32>) -> bool {
+  match (a, b) {
+    (Some(x), Some(y)) => x.abs_diff(y) <= DURATION_TOLERANCE_MS,
+    _ => true,
+  }
+}
+
+fn artist_overlap(a: &str, b: &str) -> bool {
+  !a.is_empty() && !b.is_empty() && (a == b || a.contains(b) || b.contains(a))
+}
+
+fn artist_primary(s: &str) -> String {
+  let lower = s.to_lowercase();
+  let first = lower.split([',', '&']).next().unwrap_or(&lower);
+  let first = first.split(" feat").next().unwrap_or(first);
+  normalize(first)
+}
+
+fn normalize(s: &str) -> String {
+  let lower = s.to_lowercase();
+  let head = lower.split(" - ").next().unwrap_or(&lower);
+  let mut out = String::with_capacity(head.len());
+  let mut depth: i32 = 0;
+  let mut pending_space = false;
+  for ch in head.chars() {
+    match ch {
+      '(' | '[' | '{' => depth += 1,
+      ')' | ']' | '}' => depth = (depth - 1).max(0),
+      _ if depth > 0 => {}
+      c if c.is_alphanumeric() => {
+        if pending_space && !out.is_empty() {
+          out.push(' ');
+        }
+        pending_space = false;
+        out.push(c);
+      }
+      _ => pending_space = true,
+    }
+  }
+  out
 }
 
 #[cfg(test)]
@@ -792,5 +1037,384 @@ mod tests {
     state.apply_now_playing(NowPlayingSource::Iap2, iap2_track("track:a", "A"));
     let track = state.replies().0.state.track.expect("track present");
     assert_eq!(track.artwork_id, None);
+  }
+
+  fn iap2_full(pid: &str, title: &str, artist: &str, duration_ms: Option<u32>) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(pid.to_string()),
+        title: Some(title.to_string()),
+        artist: Some(artist.to_string()),
+        duration_ms,
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    }
+  }
+
+  fn qitem(uri: &str, title: &str, artist: &str, art: Option<&str>, duration_ms: Option<u32>) -> QueueItem {
+    QueueItem {
+      uri: uri.to_string(),
+      title: Some(title.to_string()),
+      artist: Some(artist.to_string()),
+      album: None,
+      artwork_id: art.map(str::to_string),
+      duration_ms,
+      persistent_id: None,
+    }
+  }
+
+  fn offer(anchor: &str, head: Option<QueueItem>, queue: Vec<QueueItem>) -> NowPlayingEnrichment {
+    NowPlayingEnrichment {
+      anchor_pid: Some(anchor.to_string()),
+      head,
+      queue,
+      context: None,
+    }
+  }
+
+  fn media(state: &PlayerState) -> MediaItem {
+    state.replies().0.state.track.expect("track present")
+  }
+
+  #[test]
+  fn no_offer_is_bare() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song", "Artist", Some(180000)),
+    );
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("iap2:track:a"));
+    assert_eq!(m.artwork_id, None);
+    assert_eq!(m.is_like_supported, None);
+  }
+
+  #[test]
+  fn exact_match_overlays_uri_art_heart_and_queue() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song", "Artist", Some(180000)),
+    );
+    let up_next = qitem("spotify:track:2", "Next", "Other", Some("spotify/img/2"), Some(200000));
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:1",
+        "Song",
+        "Artist",
+        Some("spotify/img/1"),
+        Some(180000),
+      )),
+      vec![up_next.clone()],
+    ));
+
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("spotify:track:1"));
+    assert_eq!(m.persistent_id.as_deref(), Some("iap2:track:a"));
+    assert_eq!(m.artwork_id.as_deref(), Some("spotify/img/1"));
+    assert_eq!(m.is_like_supported, Some(true));
+    assert_eq!(state.replies().1.items, vec![up_next]);
+  }
+
+  #[test]
+  fn veto_rejects_mismatched_head() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Real Song", "Artist", Some(180000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:9",
+        "Completely Different",
+        "Nobody",
+        Some("spotify/img/9"),
+        Some(9000),
+      )),
+      vec![],
+    ));
+
+    let m = media(&state);
+    assert_eq!(
+      m.uri.as_deref(),
+      Some("iap2:track:a"),
+      "no spotify uri on a veto-rejected head"
+    );
+    assert_eq!(m.is_like_supported, None, "heart hidden on veto");
+    assert_eq!(m.artwork_id, None);
+  }
+
+  #[test]
+  fn skip_back_restores_from_by_pid_without_fresh_offer() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song A", "Artist", Some(180000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:a",
+        "Song A",
+        "Artist",
+        Some("spotify/img/a"),
+        Some(180000),
+      )),
+      vec![],
+    ));
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:b", "Song B", "Artist", Some(200000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:b",
+      Some(qitem(
+        "spotify:track:b",
+        "Song B",
+        "Artist",
+        Some("spotify/img/b"),
+        Some(200000),
+      )),
+      vec![],
+    ));
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song A", "Artist", Some(180000)),
+    );
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("spotify:track:a"));
+    assert_eq!(m.artwork_id.as_deref(), Some("spotify/img/a"));
+    assert_eq!(m.is_like_supported, Some(true));
+  }
+
+  #[test]
+  fn skip_forward_content_match_supplies_art_only() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song A", "Artist", Some(180000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:a",
+        "Song A",
+        "Artist",
+        Some("spotify/img/a"),
+        Some(180000),
+      )),
+      vec![qitem(
+        "spotify:track:b",
+        "Song B",
+        "Artist",
+        Some("spotify/img/b"),
+        Some(200000),
+      )],
+    ));
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:b", "Song B", "Artist", Some(200000)),
+    );
+    let m = media(&state);
+    assert_eq!(
+      m.artwork_id.as_deref(),
+      Some("spotify/img/b"),
+      "predictive queue art fills instantly"
+    );
+    assert_eq!(m.uri.as_deref(), Some("iap2:track:b"), "no uri on a content match");
+    assert_eq!(m.is_like_supported, None, "heart hidden on a content match");
+  }
+
+  #[test]
+  fn content_match_rejected_on_duration_mismatch() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song A", "Artist", Some(180000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:a",
+        "Song A",
+        "Artist",
+        Some("spotify/img/a"),
+        Some(180000),
+      )),
+      vec![qitem(
+        "spotify:track:b",
+        "Live Take",
+        "Artist",
+        Some("spotify/img/b"),
+        Some(100000),
+      )],
+    ));
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:b", "Live Take", "Artist", Some(400000)),
+    );
+    let m = media(&state);
+    assert_eq!(
+      m.artwork_id, None,
+      "duration delta beyond tolerance rejects the art match"
+    );
+  }
+
+  #[test]
+  fn late_iap2_art_does_not_downgrade_spotify_art() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:a", "Song", "Artist", Some(180000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:a",
+      Some(qitem(
+        "spotify:track:a",
+        "Song",
+        "Artist",
+        Some("spotify/img/a"),
+        Some(180000),
+      )),
+      vec![],
+    ));
+    assert_eq!(media(&state).artwork_id.as_deref(), Some("spotify/img/a"));
+
+    state.apply_artwork_id(NowPlayingSource::Iap2, "iap2/art/a/3".to_string());
+    assert_eq!(
+      media(&state).artwork_id.as_deref(),
+      Some("spotify/img/a"),
+      "a matched spotify art is not replaced by a late iAP2 art"
+    );
+  }
+
+  #[test]
+  fn normalize_folds_remaster_and_feat_suffixes() {
+    assert_eq!(normalize("Song (feat. Someone) - Remastered 2011"), normalize("song"));
+    assert_eq!(normalize("Heart of Glass [Live]"), normalize("heart of glass"));
+  }
+
+  #[test]
+  fn skip_back_with_unstable_pid_recovers_art_then_heart() {
+    // the bug: iAP2 gives a real pid on skip-forward but a pid-less ("nonmusic") identity for the
+    // SAME track on skip-back. the retained forward entry is a content candidate, so the back
+    // track's spotify art loads instantly by title (not the forward track's art, no heart yet), and
+    // the companion's fresh offer (anchored to the nonmusic key) then lights the heart.
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:aaaa", "Song A", "X", Some(180_000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:aaaa",
+      Some(qitem(
+        "spotify:track:a",
+        "Song A",
+        "X",
+        Some("spotify/img/a"),
+        Some(180_000),
+      )),
+      vec![],
+    ));
+    assert_eq!(media(&state).artwork_id.as_deref(), Some("spotify/img/a"));
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:bbbb", "Song B", "X", Some(200_000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:bbbb",
+      Some(qitem(
+        "spotify:track:b",
+        "Song B",
+        "X",
+        Some("spotify/img/b"),
+        Some(200_000),
+      )),
+      vec![],
+    ));
+    assert_eq!(media(&state).artwork_id.as_deref(), Some("spotify/img/b"));
+
+    // skip back to A, but iAP2 reports it pid-less -> a synthesized nonmusic identity key.
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:nonmusic_songa", "Song A", "X", Some(180_000)),
+    );
+    let m = media(&state);
+    assert_eq!(
+      m.artwork_id.as_deref(),
+      Some("spotify/img/a"),
+      "retained forward entry supplies A's art by content match despite the key change"
+    );
+    assert_eq!(
+      m.uri.as_deref(),
+      Some("iap2:track:nonmusic_songa"),
+      "no uri/heart on a content match"
+    );
+    assert_eq!(m.is_like_supported, None);
+
+    state.apply_enrichment(offer(
+      "iap2:track:nonmusic_songa",
+      Some(qitem(
+        "spotify:track:a",
+        "Song A",
+        "X",
+        Some("spotify/img/a"),
+        Some(180_000),
+      )),
+      vec![],
+    ));
+    let m = media(&state);
+    assert_eq!(
+      m.uri.as_deref(),
+      Some("spotify:track:a"),
+      "fresh offer resolves the uri"
+    );
+    assert_eq!(m.is_like_supported, Some(true), "heart lit after the fresh offer");
+    assert_eq!(m.artwork_id.as_deref(), Some("spotify/img/a"));
+  }
+
+  #[test]
+  fn unstable_pid_back_track_never_shows_the_forward_arts() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:bbbb", "Song B", "X", Some(200_000)),
+    );
+    state.apply_enrichment(offer(
+      "iap2:track:bbbb",
+      Some(qitem(
+        "spotify:track:b",
+        "Song B",
+        "X",
+        Some("spotify/img/b"),
+        Some(200_000),
+      )),
+      vec![qitem(
+        "spotify:track:c",
+        "Song C",
+        "X",
+        Some("spotify/img/c"),
+        Some(210_000),
+      )],
+    ));
+    assert_eq!(media(&state).artwork_id.as_deref(), Some("spotify/img/b"));
+
+    state.apply_now_playing(
+      NowPlayingSource::Iap2,
+      iap2_full("iap2:track:nonmusic_unknown", "Some Unseen Track", "Y", Some(123_000)),
+    );
+    assert_eq!(
+      media(&state).artwork_id,
+      None,
+      "no match -> bare, never the forward/queue art"
+    );
   }
 }

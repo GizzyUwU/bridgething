@@ -107,8 +107,8 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "voice.streamOpen", "voice.frame", "voice.streamClose", "voice.dispatched", "voice.dispatchFailed",
         // webapp
         "webapp.webapps", "webapp.active", "webapp.switched", "webapp.uninstalled",
-        "webapp.installBeginAck", "webapp.webappError", "webapp.icon", "webapp.configGet",
-        "webapp.configList", "webapp.configAck", "webapp.webappInstalled", "webapp.webappInstallFailed",
+        "webapp.webappError", "webapp.icon", "webapp.configGet",
+        "webapp.configList", "webapp.configAck", "webapp.webappInstalled",
         // forward
         "forward.text", "forward.binary", "forward.json",
     ]

@@ -40,21 +40,26 @@
 mod daemon_swap;
 mod range_proxy;
 mod slots;
+mod staging;
 mod swupdate;
 mod webapp_swap;
 
 use std::{
+  collections::BTreeSet,
+  future::Future,
   path::PathBuf,
+  pin::Pin,
   sync::Arc,
   time::{Duration, Instant},
 };
 
 use bluer::Address;
 use libbridgething::{
-  OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus,
+  OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
   gateway::{BridgeToGatewaySystemMsgEvent, OtaAssetRangeChunk, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk},
 };
 pub use range_proxy::RangeProxy;
+use staging::StagedPiece;
 use tokio::{
   sync::{mpsc, oneshot, watch},
   task::JoinHandle,
@@ -68,6 +73,9 @@ use crate::{
 
 pub type OtaEventTx = mpsc::Sender<BridgeToGatewaySystemMsgEvent>;
 
+pub type InstalledWebappApply =
+  Arc<dyn Fn(PathBuf) -> Pin<Box<dyn Future<Output = Result<WebappInfo, WebappError>> + Send>> + Send + Sync>;
+
 #[derive(Debug)]
 enum Command {
   Begin {
@@ -80,8 +88,15 @@ enum Command {
   Abandon {
     update_id: String,
   },
+  Activate {
+    expected: Vec<String>,
+  },
   Cancel,
   WriteFinished,
+  StageFinished {
+    result: Result<StagedPiece, WriteError>,
+    peer: Option<Address>,
+  },
 }
 
 pub type TerminatorFn = Arc<dyn Fn() + Send + Sync + 'static>;
@@ -90,15 +105,6 @@ pub type TerminatorFn = Arc<dyn Fn() + Send + Sync + 'static>;
 pub struct OtaTerminators {
   pub reboot: TerminatorFn,
   pub restart_self: TerminatorFn,
-}
-
-impl OtaTerminators {
-  fn for_kind(&self, kind: OtaKind) -> &TerminatorFn {
-    match kind {
-      OtaKind::Image => &self.reboot,
-      OtaKind::Daemon | OtaKind::BuiltinWebapp => &self.restart_self,
-    }
-  }
 }
 
 #[derive(Clone)]
@@ -119,6 +125,7 @@ impl OtaOrchestrator {
     terminators: OtaTerminators,
     range_proxy: RangeProxy,
     peers: PeerTracker,
+    installed_apply: InstalledWebappApply,
   ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let actor = OtaActor {
@@ -127,10 +134,13 @@ impl OtaOrchestrator {
       terminators,
       range_proxy,
       peers,
+      installed_apply,
       self_tx: cmd_tx.clone(),
       cmd_rx,
       state: OtaState::Idle,
       last_streaming_emit_at: None,
+      staged: Vec::new(),
+      staged_peer: None,
     };
     let handle = tokio::spawn(actor.run());
     (Self { cmd_tx }, handle)
@@ -159,6 +169,12 @@ impl OtaOrchestrator {
   pub async fn abandon(&self, update_id: String) {
     if let Err(err) = self.cmd_tx.send(Command::Abandon { update_id }).await {
       tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaAbandon");
+    }
+  }
+
+  pub async fn activate(&self, expected: Vec<String>) {
+    if let Err(err) = self.cmd_tx.send(Command::Activate { expected }).await {
+      tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaActivate");
     }
   }
 
@@ -208,15 +224,19 @@ struct OtaActor {
   terminators: OtaTerminators,
   range_proxy: RangeProxy,
   peers: PeerTracker,
+  installed_apply: InstalledWebappApply,
   self_tx: mpsc::Sender<Command>,
   cmd_rx: mpsc::Receiver<Command>,
   state: OtaState,
   last_streaming_emit_at: Option<Instant>,
+  staged: Vec<StagedPiece>,
+  staged_peer: Option<Address>,
 }
 
 impl OtaActor {
   async fn run(mut self) {
     tracing::info!("ota orchestrator started");
+    staging::sweep_orphans().await;
     while let Some(cmd) = self.cmd_rx.recv().await {
       match cmd {
         Command::Begin { req, peer, ack } => self.handle_begin(req, peer, ack).await,
@@ -225,11 +245,13 @@ impl OtaActor {
           self.range_proxy.route_chunk(chunk).await;
         }
         Command::Abandon { update_id } => self.handle_abandon(update_id).await,
+        Command::Activate { expected } => self.handle_activate(expected).await,
         Command::Cancel => self.handle_cancel().await,
         Command::WriteFinished => {
           self.state = OtaState::Idle;
           self.range_proxy.deactivate().await;
         }
+        Command::StageFinished { result, peer } => self.handle_stage_finished(result, peer).await,
       }
     }
     tracing::info!("ota orchestrator exiting");
@@ -248,11 +270,23 @@ impl OtaActor {
       return;
     }
 
-    if let Some(pinned) = self.state.pinned_peer()
+    let pinned = match self.state.pinned_peer() {
+      Some(p) => Some(p),
+      None if !self.staged.is_empty() => Some(self.staged_peer),
+      None => None,
+    };
+    if let Some(pinned) = pinned
       && pinned != peer
     {
       let _ = ack.send(Err(OtaBeginRejected {
         reason: "ota in progress, pinned to a different companion".into(),
+      }));
+      return;
+    }
+
+    if matches!(req.kind, OtaKind::Image) && !self.staged.is_empty() {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "bandaid updates staged; activate or abandon them before an image OTA".into(),
       }));
       return;
     }
@@ -274,7 +308,7 @@ impl OtaActor {
 
     let kind = req.kind;
     let target_dir = match kind {
-      OtaKind::Image => None,
+      OtaKind::Image | OtaKind::InstalledWebapp => None,
       OtaKind::Daemon | OtaKind::BuiltinWebapp => {
         if crate::paths::is_on_device() {
           Some(crate::paths::bandaid_transfers_dir())
@@ -399,6 +433,13 @@ impl OtaActor {
 
   async fn handle_abandon(&mut self, update_id: String) {
     let _ = self.transfers.abandon(update_id.clone()).await;
+    if let Some(pos) = self.staged.iter().position(|p| p.update_id == update_id) {
+      let piece = self.staged.remove(pos);
+      staging::discard(&piece).await;
+      if self.staged.is_empty() {
+        self.staged_peer = None;
+      }
+    }
     if let OtaState::Streaming {
       update_id: streaming, ..
     } = &self.state
@@ -422,8 +463,8 @@ impl OtaActor {
           tracing::info!("cancel during image write; signalling libswupdate");
           let _ = cancel_tx.send(true);
         }
-        OtaKind::Daemon | OtaKind::BuiltinWebapp => {
-          tracing::info!(?kind, "cancel during swap; rename is atomic, ignoring");
+        OtaKind::Daemon | OtaKind::BuiltinWebapp | OtaKind::InstalledWebapp => {
+          tracing::info!(?kind, "cancel during swap/install; not interruptible, ignoring");
         }
       },
     }
@@ -431,66 +472,177 @@ impl OtaActor {
 
   async fn spawn_write(&mut self, kind: OtaKind, update_id: String, peer: Option<Address>, payload: PathBuf) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    let cancel_tx_for_watcher = cancel_tx.clone();
     self.state = OtaState::Writing {
       kind,
       update_id: update_id.clone(),
-      cancel_tx,
+      cancel_tx: cancel_tx.clone(),
       peer,
     };
 
     let events_tx = self.events_tx.clone();
-    let terminator = self.terminators.for_kind(kind).clone();
     let self_tx = self.self_tx.clone();
 
-    if let Some(addr) = peer {
-      let events_tx = self.events_tx.clone();
-      let mut snapshot_rx = self.peers.watch_snapshot();
-      tokio::spawn(async move {
-        loop {
-          if snapshot_rx.changed().await.is_err() {
-            return;
-          }
-          let connected = snapshot_rx
-            .borrow()
-            .peers
-            .get(&addr)
-            .map(|p| matches!(p.companion, PeerCompanionStatus::Connected(_)))
-            .unwrap_or(false);
-          if !connected {
-            tracing::warn!(%addr, "pinned peer disconnected mid-write; signalling cancel + emitting OtaError");
-            emit_error(
-              &events_tx,
-              OtaErrorCode::Internal,
-              "companion disconnected mid-install".into(),
-            )
-            .await;
-            let _ = cancel_tx_for_watcher.send(true);
-            return;
-          }
+    match kind {
+      OtaKind::Image => {
+        if let Some(addr) = peer {
+          let events_tx = self.events_tx.clone();
+          let cancel_tx_for_watcher = cancel_tx.clone();
+          let mut snapshot_rx = self.peers.watch_snapshot();
+          tokio::spawn(async move {
+            loop {
+              if snapshot_rx.changed().await.is_err() {
+                return;
+              }
+              let connected = snapshot_rx
+                .borrow()
+                .peers
+                .get(&addr)
+                .map(|p| matches!(p.companion, PeerCompanionStatus::Connected(_)))
+                .unwrap_or(false);
+              if !connected {
+                tracing::warn!(%addr, "pinned peer disconnected mid-write; signalling cancel + emitting OtaError");
+                emit_error(
+                  &events_tx,
+                  OtaErrorCode::Internal,
+                  "companion disconnected mid-install".into(),
+                )
+                .await;
+                let _ = cancel_tx_for_watcher.send(true);
+                return;
+              }
+            }
+          });
         }
-      });
+
+        let terminator = self.terminators.reboot.clone();
+        tokio::spawn(async move {
+          let outcome = run_image_write(&events_tx, &payload, cancel_rx).await;
+          let _ = tokio::fs::remove_file(&payload).await;
+          match outcome {
+            Ok(()) => {
+              tracing::info!(%update_id, "image write complete; rebooting");
+              (terminator)();
+            }
+            Err(err) => {
+              tracing::warn!(?err, "image write terminated with error");
+              emit_error(&events_tx, err.code, err.msg).await;
+            }
+          }
+          let _ = self_tx.send(Command::WriteFinished).await;
+        });
+      }
+      OtaKind::Daemon | OtaKind::BuiltinWebapp => {
+        tokio::spawn(async move {
+          let result = run_stage(&events_tx, kind, &payload, update_id, cancel_rx).await;
+          let _ = tokio::fs::remove_file(&payload).await;
+          let _ = self_tx.send(Command::StageFinished { result, peer }).await;
+        });
+      }
+      OtaKind::InstalledWebapp => {
+        let apply = self.installed_apply.clone();
+        let transfers = self.transfers.clone();
+        tokio::spawn(async move {
+          emit_progress(&events_tx, OtaPhase::Writing, 0, None).await;
+          let result = (apply)(payload.clone()).await;
+          let _ = transfers.abandon(update_id.clone()).await;
+          let _ = tokio::fs::remove_file(&payload).await;
+          match result {
+            Ok(info) => tracing::info!(%update_id, id = %info.id, name = %info.name, "installed webapp applied"),
+            Err(err) => {
+              tracing::warn!(%update_id, ?err, "installed webapp apply failed");
+              emit_error(
+                &events_tx,
+                OtaErrorCode::WriteFailed,
+                format!("install failed: {err:?}"),
+              )
+              .await;
+            }
+          }
+          let _ = self_tx.send(Command::WriteFinished).await;
+        });
+      }
+    }
+  }
+
+  async fn handle_stage_finished(&mut self, result: Result<StagedPiece, WriteError>, peer: Option<Address>) {
+    self.state = OtaState::Idle;
+    match result {
+      Ok(piece) => {
+        tracing::info!(update_id = %piece.update_id, kind = ?piece.kind, "ota piece staged; awaiting activate");
+        self.staged.push(piece);
+        self.staged_peer = peer;
+        emit_progress(&self.events_tx, OtaPhase::Writing, 100, None).await;
+      }
+      Err(err) => {
+        tracing::warn!(?err, "ota stage terminated with error");
+        emit_error(&self.events_tx, err.code, err.msg).await;
+      }
+    }
+  }
+
+  async fn handle_activate(&mut self, expected: Vec<String>) {
+    if !matches!(self.state, OtaState::Idle) {
+      emit_error(
+        &self.events_tx,
+        OtaErrorCode::Internal,
+        "cannot activate while an OTA transfer is in flight".into(),
+      )
+      .await;
+      return;
     }
 
-    tokio::spawn(async move {
-      let outcome = match kind {
-        OtaKind::Image => run_image_write(&events_tx, &payload, cancel_rx).await,
-        OtaKind::Daemon => run_daemon_swap(&events_tx, &payload, cancel_rx).await,
-        OtaKind::BuiltinWebapp => run_webapp_swap(&events_tx, &payload, cancel_rx).await,
-      };
-      let _ = tokio::fs::remove_file(&payload).await;
-      match outcome {
-        Ok(()) => {
-          tracing::info!(%update_id, ?kind, "ota write complete; firing terminator");
-          (terminator)();
-        }
+    let have: BTreeSet<&str> = self.staged.iter().map(|p| p.update_id.as_str()).collect();
+    let want: BTreeSet<&str> = expected.iter().map(String::as_str).collect();
+    if self.staged.is_empty() || have != want {
+      emit_error(
+        &self.events_tx,
+        OtaErrorCode::Internal,
+        format!(
+          "no matching staged batch (staged {}, expected {})",
+          self.staged.len(),
+          expected.len()
+        ),
+      )
+      .await;
+      return;
+    }
+
+    let mut batch = std::mem::take(&mut self.staged);
+    self.staged_peer = None;
+    batch.sort_by_key(|p| match p.kind {
+      OtaKind::BuiltinWebapp => 0,
+      OtaKind::Daemon => 1,
+      OtaKind::Image | OtaKind::InstalledWebapp => 2,
+    });
+
+    let mut committed: Vec<&StagedPiece> = Vec::new();
+    for piece in &batch {
+      match staging::commit(piece).await {
+        Ok(()) => committed.push(piece),
         Err(err) => {
-          tracing::warn!(?err, ?kind, "ota write terminated with error");
-          emit_error(&events_tx, err.code, err.msg).await;
+          tracing::error!(?err, kind = ?piece.kind, "commit failed; rolling back batch");
+          for &done in committed.iter().rev() {
+            if let Err(rb) = staging::rollback(done).await {
+              tracing::error!(?rb, "rollback failed during batch unwind");
+            }
+          }
+          for p in &batch {
+            staging::discard(p).await;
+          }
+          emit_error(
+            &self.events_tx,
+            OtaErrorCode::WriteFailed,
+            format!("commit failed: {err}"),
+          )
+          .await;
+          return;
         }
       }
-      let _ = self_tx.send(Command::WriteFinished).await;
-    });
+    }
+
+    tracing::info!(pieces = batch.len(), "bandaid batch committed; restarting service");
+    emit_progress(&self.events_tx, OtaPhase::Reboot, 0, None).await;
+    (self.terminators.restart_self)();
   }
 }
 
@@ -561,50 +713,39 @@ async fn run_image_write(
   Ok(())
 }
 
-async fn run_daemon_swap(
+async fn run_stage(
   events_tx: &OtaEventTx,
-  binary_path: &std::path::Path,
+  kind: OtaKind,
+  payload: &std::path::Path,
+  update_id: String,
   mut cancel_rx: watch::Receiver<bool>,
-) -> Result<(), WriteError> {
+) -> Result<StagedPiece, WriteError> {
   if check_cancel(&mut cancel_rx) {
     return Err(WriteError {
       code: OtaErrorCode::Cancelled,
-      msg: "cancelled before swap".into(),
+      msg: "cancelled before staging".into(),
     });
   }
 
   emit_progress(events_tx, OtaPhase::Writing, 0, None).await;
-  daemon_swap::swap(binary_path).await.map_err(|err| WriteError {
-    code: OtaErrorCode::WriteFailed,
-    msg: format!("daemon swap failed: {err}"),
-  })?;
-  emit_progress(events_tx, OtaPhase::Writing, 100, None).await;
+  let piece = match kind {
+    OtaKind::Daemon => daemon_swap::stage(payload, update_id).await.map_err(|err| WriteError {
+      code: OtaErrorCode::WriteFailed,
+      msg: format!("daemon stage failed: {err}"),
+    })?,
+    OtaKind::BuiltinWebapp => webapp_swap::stage(payload, update_id).await.map_err(|err| WriteError {
+      code: OtaErrorCode::WriteFailed,
+      msg: format!("builtin-webapp stage failed: {err}"),
+    })?,
+    OtaKind::Image | OtaKind::InstalledWebapp => {
+      return Err(WriteError {
+        code: OtaErrorCode::Internal,
+        msg: "run_stage called for a non-bandaid kind".into(),
+      });
+    }
+  };
 
-  emit_progress(events_tx, OtaPhase::Reboot, 0, None).await;
-  Ok(())
-}
-
-async fn run_webapp_swap(
-  events_tx: &OtaEventTx,
-  bundle_path: &std::path::Path,
-  mut cancel_rx: watch::Receiver<bool>,
-) -> Result<(), WriteError> {
-  if check_cancel(&mut cancel_rx) {
-    return Err(WriteError {
-      code: OtaErrorCode::Cancelled,
-      msg: "cancelled before swap".into(),
-    });
-  }
-
-  emit_progress(events_tx, OtaPhase::Writing, 0, None).await;
-  webapp_swap::swap(bundle_path).await.map_err(|err| WriteError {
-    code: OtaErrorCode::WriteFailed,
-    msg: format!("builtin-webapp swap failed: {err}"),
-  })?;
-  emit_progress(events_tx, OtaPhase::Writing, 100, None).await;
-
-  emit_progress(events_tx, OtaPhase::Reboot, 0, None).await;
-  Ok(())
+  Ok(piece)
 }
 
 pub(crate) fn check_cancel(rx: &mut watch::Receiver<bool>) -> bool {
@@ -640,13 +781,32 @@ fn transfer_error_code(err: &TransferError) -> OtaErrorCode {
 
 #[cfg(test)]
 mod tests {
-  use std::sync::atomic::{AtomicUsize, Ordering};
+  use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-  use libbridgething::gateway::{OtaBegin, OtaChunk};
+  use libbridgething::{
+    WebappRole, WebappSource,
+    gateway::{OtaBegin, OtaChunk},
+  };
   use sha2::{Digest, Sha256};
   use tokio::time::{Duration, timeout};
 
   use super::*;
+
+  fn dummy_info() -> WebappInfo {
+    WebappInfo {
+      id: uuid::Uuid::now_v7(),
+      name: "test-app".into(),
+      source: WebappSource::Installed,
+      role: WebappRole::Standard,
+      version: "0.1.0".into(),
+      description: None,
+      icon_available: false,
+      icon_mime: None,
+      config: vec![],
+      permissions: vec![],
+      voice_grammar: None,
+    }
+  }
 
   fn fixture_bytes() -> (Vec<u8>, String, u32) {
     let bytes = b"fake-swu-payload-for-orchestrator-tests".to_vec();
@@ -670,6 +830,8 @@ mod tests {
     events: mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
     reboot_calls: Arc<AtomicUsize>,
     restart_self_calls: Arc<AtomicUsize>,
+    installed_apply_calls: Arc<AtomicUsize>,
+    installed_apply_ok: Arc<AtomicBool>,
     _root: PathBuf,
   }
 
@@ -690,14 +852,40 @@ mod tests {
         restart_counter.fetch_add(1, Ordering::SeqCst);
       }),
     };
+    let installed_apply_calls = Arc::new(AtomicUsize::new(0));
+    let installed_apply_ok = Arc::new(AtomicBool::new(true));
+    let apply_calls = installed_apply_calls.clone();
+    let apply_ok = installed_apply_ok.clone();
+    let installed_apply: InstalledWebappApply = Arc::new(move |_path| {
+      let calls = apply_calls.clone();
+      let ok = apply_ok.clone();
+      Box::pin(async move {
+        calls.fetch_add(1, Ordering::SeqCst);
+        if ok.load(Ordering::SeqCst) {
+          Ok(dummy_info())
+        } else {
+          Err(WebappError::Internal {
+            reason: "test apply failure".into(),
+          })
+        }
+      })
+    });
     let peers = PeerTracker::noop();
-    let (ota, _ota_handle) =
-      OtaOrchestrator::spawn(transfers, events_tx, terminators, range_proxy::noop_proxy(), peers);
+    let (ota, _ota_handle) = OtaOrchestrator::spawn(
+      transfers,
+      events_tx,
+      terminators,
+      range_proxy::noop_proxy(),
+      peers,
+      installed_apply,
+    );
     Harness {
       ota,
       events,
       reboot_calls,
       restart_self_calls,
+      installed_apply_calls,
+      installed_apply_ok,
       _root: root,
     }
   }
@@ -1028,22 +1216,11 @@ mod tests {
     );
   }
 
-  // Daemon-kind. The on-device atomic-rename + systemctl restart path
-  // is gated behind /etc/superbird in `daemon_swap::swap`, so the host
-  // test rig sees the swap thunk no-op cleanly and the orchestrator
-  // proceeds to fire the restart_self terminator. That's the contract
-  // we test here: phase sequence is correct and the right terminator
-  // fires.
-
-  #[tokio::test]
-  async fn daemon_happy_path_emits_subset_phases_and_restarts() {
-    let mut h = boot().await;
-    let (bytes, sha, size) = fixture_bytes();
-
+  async fn stage_and_assert_no_restart(h: &mut Harness, kind: OtaKind, bytes: Vec<u8>, sha: String, size: u32) {
     h.ota
       .begin(
         OtaBegin {
-          kind: OtaKind::Daemon,
+          kind,
           update_id: sha.clone(),
           update_url_base: None,
           expected_sha256: sha.clone(),
@@ -1052,8 +1229,7 @@ mod tests {
         None,
       )
       .await
-      .expect("daemon begin ok");
-
+      .expect("stage begin ok");
     h.ota
       .chunk(OtaChunk {
         update_id: sha,
@@ -1062,38 +1238,42 @@ mod tests {
         last: true,
       })
       .await;
-
-    let mut saw_writing_done = false;
-    let mut saw_reboot = false;
-    let deadline = Duration::from_secs(5);
-    timeout(deadline, async {
-      while !(saw_writing_done && saw_reboot) {
-        let ev = h.events.recv().await.expect("event channel closed");
-        match ev {
-          BridgeToGatewaySystemMsgEvent::OtaProgress(p) => match p.phase {
-            OtaPhase::Confirming => panic!("daemon-kind must not emit Confirming"),
-            OtaPhase::Writing if p.percent == 100 => saw_writing_done = true,
-            OtaPhase::Reboot => saw_reboot = true,
-            _ => {}
-          },
-          BridgeToGatewaySystemMsgEvent::OtaError(e) => panic!("unexpected error during happy path: {e:?}"),
-          other => panic!("unexpected system event during happy path: {other:?}"),
-        }
-      }
+    wait_for(&mut h.events, Duration::from_secs(5), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if p.phase == OtaPhase::Writing && p.percent == 100)
     })
-    .await
-    .expect("daemon happy path timed out");
+    .await;
+  }
 
+  #[tokio::test]
+  async fn daemon_stage_then_activate_restarts_once() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    stage_and_assert_no_restart(&mut h, OtaKind::Daemon, bytes, sha.clone(), size).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      0,
+      "staging must not restart before activate"
+    );
+
+    h.ota.activate(vec![sha]).await;
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)),
+    )
+    .await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
       h.restart_self_calls.load(Ordering::SeqCst),
       1,
-      "restart_self thunk should fire once on daemon-kind success"
+      "activate restarts exactly once"
     );
     assert_eq!(
       h.reboot_calls.load(Ordering::SeqCst),
       0,
-      "reboot thunk must not fire for daemon-kind"
+      "reboot must not fire for bandaid kinds"
     );
   }
 
@@ -1173,66 +1353,85 @@ mod tests {
     assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
   }
 
+  fn fixture_seed(seed: &str) -> (Vec<u8>, String, u32) {
+    let bytes = format!("fake-ota-payload-{seed}").into_bytes();
+    let sha = {
+      let mut hsh = Sha256::new();
+      hsh.update(&bytes);
+      hex::encode(hsh.finalize())
+    };
+    let size = bytes.len() as u32;
+    (bytes, sha, size)
+  }
+
   #[tokio::test]
-  async fn builtin_webapp_happy_path_emits_subset_phases_and_restarts() {
+  async fn coupled_batch_commits_with_single_restart() {
     let mut h = boot().await;
-    let (bytes, sha, size) = fixture_bytes();
+    let (db, dsha, dsz) = fixture_seed("daemon");
+    let (hb, hsha, hsz) = fixture_seed("hub");
+    let (sb, ssha, ssz) = fixture_seed("stock");
 
-    h.ota
-      .begin(
-        OtaBegin {
-          kind: OtaKind::BuiltinWebapp,
-          update_id: sha.clone(),
-          update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
-        },
-        None,
-      )
-      .await
-      .expect("builtin-webapp begin ok");
-
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
-
-    let mut saw_writing_done = false;
-    let mut saw_reboot = false;
-    let deadline = Duration::from_secs(5);
-    timeout(deadline, async {
-      while !(saw_writing_done && saw_reboot) {
-        let ev = h.events.recv().await.expect("event channel closed");
-        match ev {
-          BridgeToGatewaySystemMsgEvent::OtaProgress(p) => match p.phase {
-            OtaPhase::Confirming => panic!("builtin-webapp must not emit Confirming"),
-            OtaPhase::Writing if p.percent == 100 => saw_writing_done = true,
-            OtaPhase::Reboot => saw_reboot = true,
-            _ => {}
-          },
-          BridgeToGatewaySystemMsgEvent::OtaError(e) => panic!("unexpected error during happy path: {e:?}"),
-          other => panic!("unexpected system event during happy path: {other:?}"),
-        }
-      }
-    })
-    .await
-    .expect("builtin-webapp happy path timed out");
+    stage_and_assert_no_restart(&mut h, OtaKind::Daemon, db, dsha.clone(), dsz).await;
+    stage_and_assert_no_restart(&mut h, OtaKind::BuiltinWebapp, hb, hsha.clone(), hsz).await;
+    stage_and_assert_no_restart(&mut h, OtaKind::BuiltinWebapp, sb, ssha.clone(), ssz).await;
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
       h.restart_self_calls.load(Ordering::SeqCst),
-      1,
-      "restart_self thunk should fire once on builtin-webapp success"
-    );
-    assert_eq!(
-      h.reboot_calls.load(Ordering::SeqCst),
       0,
-      "reboot thunk must not fire for builtin-webapp"
+      "three staged pieces must not have restarted yet"
     );
+
+    h.ota.activate(vec![dsha, hsha, ssha]).await;
+    let _ = wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if matches!(p.phase, OtaPhase::Reboot)),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      1,
+      "a three-piece batch activates with exactly one restart"
+    );
+    assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0);
+  }
+
+  #[tokio::test]
+  async fn partial_batch_without_activate_never_restarts() {
+    let mut h = boot().await;
+    let (db, dsha, dsz) = fixture_seed("daemon");
+    let (hb, hsha, hsz) = fixture_seed("hub");
+
+    stage_and_assert_no_restart(&mut h, OtaKind::Daemon, db, dsha, dsz).await;
+    stage_and_assert_no_restart(&mut h, OtaKind::BuiltinWebapp, hb, hsha, hsz).await;
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      0,
+      "staged-but-not-activated batch must never restart"
+    );
+  }
+
+  #[tokio::test]
+  async fn activate_with_mismatched_expected_errors_and_does_not_restart() {
+    let mut h = boot().await;
+    let (db, dsha, dsz) = fixture_seed("daemon");
+    stage_and_assert_no_restart(&mut h, OtaKind::Daemon, db, dsha, dsz).await;
+
+    h.ota.activate(vec!["0".repeat(64)]).await;
+    let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
+    assert_eq!(e.code, OtaErrorCode::Internal);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
   }
 
   #[tokio::test]
@@ -1277,6 +1476,89 @@ mod tests {
       .await
       .expect("resume begin ok");
     assert_eq!(ack.resume_from_offset, 10, "partial should survive cancel");
+    assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
+  }
+
+  #[tokio::test]
+  async fn installed_webapp_applies_without_restart_or_reboot() {
+    let mut h = boot().await;
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::InstalledWebapp,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("installed-webapp begin ok");
+    h.ota
+      .chunk(OtaChunk {
+        update_id: sha,
+        offset: 0,
+        bytes,
+        last: true,
+      })
+      .await;
+
+    wait_for(
+      &mut h.events,
+      Duration::from_secs(5),
+      |ev| matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if p.phase == OtaPhase::Writing),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert_eq!(h.installed_apply_calls.load(Ordering::SeqCst), 1, "apply ran once");
+    assert_eq!(
+      h.restart_self_calls.load(Ordering::SeqCst),
+      0,
+      "install must not restart"
+    );
+    assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 0, "install must not reboot");
+  }
+
+  #[tokio::test]
+  async fn installed_webapp_apply_failure_emits_ota_error() {
+    let mut h = boot().await;
+    h.installed_apply_ok.store(false, Ordering::SeqCst);
+    let (bytes, sha, size) = fixture_bytes();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::InstalledWebapp,
+          update_id: sha.clone(),
+          update_url_base: None,
+          expected_sha256: sha.clone(),
+          expected_size: size,
+        },
+        None,
+      )
+      .await
+      .expect("installed-webapp begin ok");
+    h.ota
+      .chunk(OtaChunk {
+        update_id: sha,
+        offset: 0,
+        bytes,
+        last: true,
+      })
+      .await;
+
+    let err = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
+      matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
+    })
+    .await;
+    let BridgeToGatewaySystemMsgEvent::OtaError(e) = err else {
+      unreachable!()
+    };
+    assert_eq!(e.code, OtaErrorCode::WriteFailed);
     assert_eq!(h.restart_self_calls.load(Ordering::SeqCst), 0);
   }
 }

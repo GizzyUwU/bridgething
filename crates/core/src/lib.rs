@@ -43,7 +43,7 @@ use libbridgething::{BRIDGETHING_NETWORK_GATEWAY_PORT, BRIDGETHING_STOCK_WS_PORT
 use mic::{MicConfig, MicManager};
 #[cfg(feature = "test-tap")]
 pub use net::TappedFrame;
-use ota::{OtaOrchestrator, OtaTerminators, RangeProxy};
+use ota::{InstalledWebappApply, OtaOrchestrator, OtaTerminators, RangeProxy};
 use peer::PeerTracker;
 use player::Player;
 // don't pub anything else from core so that dead code lints still work
@@ -201,6 +201,20 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let range_proxy_handle = RangeProxy::spawn(bluetooth.clone(), libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT).await;
 
+  let installed_apply: InstalledWebappApply = {
+    let webapps = webapps.clone();
+    let kv = kv.clone();
+    let bus = bus.clone();
+    let bluetooth = bluetooth.clone();
+    std::sync::Arc::new(move |path| {
+      let webapps = webapps.clone();
+      let kv = kv.clone();
+      let bus = bus.clone();
+      let bluetooth = bluetooth.clone();
+      Box::pin(async move { install::apply_and_announce(&webapps, &kv, &bus, &bluetooth, path).await })
+    })
+  };
+
   let (ota_events_tx, ota_events_rx) = tokio::sync::mpsc::channel(64);
   let (ota, _ota_handle) = OtaOrchestrator::spawn(
     transfers.clone(),
@@ -211,6 +225,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     },
     range_proxy_handle.proxy.clone(),
     peers.clone(),
+    installed_apply,
   );
 
   let state = AppState::assemble(StateAssembly {

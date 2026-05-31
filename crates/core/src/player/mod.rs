@@ -34,6 +34,7 @@ enum PlayerCommand {
   ApplyIap2Queue(Vec<QueueItem>),
   ApplyCompanionQueue(Vec<QueueItem>),
   ApplyCompanionSnapshot(libbridgething::PlayerState),
+  ApplyEnrichment(libbridgething::gateway::NowPlayingEnrichment),
   ApplyTransportIntent(bool),
   ApplySeekIntent(u32),
 }
@@ -79,6 +80,10 @@ impl Player {
 
   pub async fn apply_companion_snapshot(&self, snapshot: libbridgething::PlayerState) -> PlayerResult<()> {
     self.send(PlayerCommand::ApplyCompanionSnapshot(snapshot)).await
+  }
+
+  pub async fn apply_enrichment(&self, offer: libbridgething::gateway::NowPlayingEnrichment) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyEnrichment(offer)).await
   }
 
   pub async fn apply_transport_intent(&self, playing: bool) -> PlayerResult<()> {
@@ -141,8 +146,10 @@ async fn run_actor(
   snapshot_tx: watch::Sender<PlayerSnapshot>,
   bus: WireEventBus,
 ) {
+  let mut last_sig: Option<BroadcastSig> = None;
   while let Some(cmd) = cmd_rx.recv().await {
     let kind = ProcessedKind::for_command(&cmd);
+    let force = forces_broadcast(&cmd);
     match cmd {
       PlayerCommand::SendState => {}
       PlayerCommand::ApplyNowPlaying(source, update) => state.apply_now_playing(source, update),
@@ -150,6 +157,7 @@ async fn run_actor(
       PlayerCommand::ApplyIap2Queue(items) => state.replace_iap2_queue(items),
       PlayerCommand::ApplyCompanionQueue(items) => state.replace_companion_queue(items),
       PlayerCommand::ApplyCompanionSnapshot(snap) => state.apply_companion_snapshot(snap),
+      PlayerCommand::ApplyEnrichment(offer) => state.apply_enrichment(offer),
       PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
       PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
     }
@@ -157,11 +165,43 @@ async fn run_actor(
     let snapshot = snapshot_of(&state);
     let _ = snapshot_tx.send(snapshot.clone());
 
-    if let Err(err) = broadcast_for(&bus, kind, snapshot).await {
-      tracing::warn!(?err, "player actor: snapshot broadcast failed");
+    let sig = BroadcastSig::of(&snapshot);
+    if force || last_sig.as_ref() != Some(&sig) {
+      last_sig = Some(sig);
+      if let Err(err) = broadcast_for(&bus, kind, snapshot).await {
+        tracing::warn!(?err, "player actor: snapshot broadcast failed");
+      }
     }
   }
   tracing::debug!("player actor: command channel closed; exiting");
+}
+
+#[derive(PartialEq)]
+struct BroadcastSig {
+  state: PlayerStateReply,
+  queue: PlayerQueueReply,
+}
+
+impl BroadcastSig {
+  fn of(snapshot: &PlayerSnapshot) -> Self {
+    let mut state = snapshot.state_reply.clone();
+    state.state.playback.position_ms = 0;
+    BroadcastSig {
+      state,
+      queue: snapshot.queue_reply.clone(),
+    }
+  }
+}
+
+fn forces_broadcast(cmd: &PlayerCommand) -> bool {
+  matches!(
+    cmd,
+    PlayerCommand::SendState
+      | PlayerCommand::ApplyNowPlaying(..)
+      | PlayerCommand::ApplyCompanionSnapshot(..)
+      | PlayerCommand::ApplyTransportIntent(..)
+      | PlayerCommand::ApplySeekIntent(..)
+  )
 }
 
 #[derive(Debug, Clone, Copy)]

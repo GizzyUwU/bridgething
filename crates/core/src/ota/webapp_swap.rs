@@ -1,18 +1,19 @@
-//! Builtin-webapp OTA backend. Extracts the staged zip bundle,
-//! validates the manifest id is hub or stock, atomic-rotates the
-//! existing bundle dir on the bandaid bind-mount path
-//! (`/opt/bridgething/webapps/<name>`) and lets the orchestrator's
-//! restart_self terminator pick up the new content.
+//! Builtin-webapp OTA backend. Extracts the streamed zip bundle and
+//! validates the manifest id is hub or stock, then parks the validated
+//! tree at a stable `.incoming.<name>` path on the bandaid bind-mount
+//! (`/opt/bridgething/webapps`). The live rotate and the single service
+//! restart happen later, on `OtaActivate`, via `staging::commit`.
 
 use std::{
   io,
   path::{Path, PathBuf},
 };
 
-use libbridgething::WebappManifest;
+use libbridgething::{OtaKind, WebappManifest};
 use tokio::fs;
 use uuid::Uuid;
 
+use super::staging::{self, StagePaths, StagedPiece};
 use crate::{
   paths::{ON_DEVICE_SENTINEL, is_on_device},
   state::{HUB_WEBAPP_ID, STOCK_WEBAPP_ID, extract_zip},
@@ -40,12 +41,16 @@ fn io_err(step: &'static str) -> impl Fn(io::Error) -> SwapError {
   move |source| SwapError::Io { step, source }
 }
 
-pub async fn swap(staged_bundle: &Path) -> Result<(), SwapError> {
+pub async fn stage(staged_bundle: &Path, update_id: String) -> Result<StagedPiece, SwapError> {
   if !is_on_device() {
     tracing::warn!(
-      "builtin-webapp swap requested but {ON_DEVICE_SENTINEL} is missing - no-op (off-device safety gate)"
+      "builtin-webapp stage requested but {ON_DEVICE_SENTINEL} is missing - no-op (off-device safety gate)"
     );
-    return Ok(());
+    return Ok(StagedPiece {
+      kind: OtaKind::BuiltinWebapp,
+      update_id,
+      paths: None,
+    });
   }
 
   let webapps_root = PathBuf::from(WEBAPPS_DIR);
@@ -53,62 +58,50 @@ pub async fn swap(staged_bundle: &Path) -> Result<(), SwapError> {
     .await
     .map_err(io_err("mkdir webapps root"))?;
 
-  for name in ["hub", "stock"] {
-    let prev = webapps_root.join(format!("{name}.previous"));
-    if let Err(err) = fs::remove_dir_all(&prev).await
-      && err.kind() != io::ErrorKind::NotFound
-    {
-      return Err(SwapError::Io {
-        step: "clear stale previous",
-        source: err,
-      });
-    }
-  }
+  let tmp = webapps_root.join(format!(".tmp.{}", Uuid::now_v7().simple()));
+  fs::create_dir_all(&tmp).await.map_err(io_err("mkdir tmp"))?;
 
-  let staging = webapps_root.join(format!(".tmp.{}", Uuid::now_v7().simple()));
-  fs::create_dir_all(&staging).await.map_err(io_err("mkdir staging"))?;
-
-  if let Err(err) = run_extract(staged_bundle.to_path_buf(), staging.clone()).await {
-    let _ = fs::remove_dir_all(&staging).await;
+  if let Err(err) = run_extract(staged_bundle.to_path_buf(), tmp.clone()).await {
+    staging::remove_any(&tmp).await;
     return Err(err);
   }
 
-  let manifest = match read_manifest(&staging).await {
+  let manifest = match read_manifest(&tmp).await {
     Ok(m) => m,
     Err(err) => {
-      let _ = fs::remove_dir_all(&staging).await;
+      staging::remove_any(&tmp).await;
       return Err(err);
     }
   };
 
-  let target_name = builtin_dir_name(manifest.id).ok_or_else(|| {
-    let id = manifest.id;
-    tokio::spawn({
-      let staging = staging.clone();
-      async move {
-        let _ = fs::remove_dir_all(&staging).await;
-      }
-    });
-    SwapError::NotBuiltin { id }
-  })?;
+  let target_name = match builtin_dir_name(manifest.id) {
+    Some(name) => name,
+    None => {
+      staging::remove_any(&tmp).await;
+      return Err(SwapError::NotBuiltin { id: manifest.id });
+    }
+  };
 
-  let final_path = webapps_root.join(target_name);
-  let previous_path = webapps_root.join(format!("{target_name}.previous"));
+  let current = webapps_root.join(target_name);
+  let previous = webapps_root.join(format!("{target_name}.previous"));
+  let incoming = webapps_root.join(format!(".incoming.{target_name}"));
 
-  if fs::try_exists(&final_path).await.map_err(io_err("stat current"))? {
-    fs::rename(&final_path, &previous_path)
-      .await
-      .map_err(io_err("rotate current -> previous"))?;
-  }
-  fs::rename(&staging, &final_path)
+  staging::remove_any(&incoming).await;
+  staging::remove_any(&previous).await;
+  fs::rename(&tmp, &incoming)
     .await
-    .map_err(io_err("promote staging -> current"))?;
+    .map_err(io_err("rename tmp -> incoming"))?;
 
-  tracing::info!(
-    "builtin webapp '{target_name}' swapped: {} now serves the new bundle",
-    final_path.display()
-  );
-  Ok(())
+  tracing::info!("builtin webapp '{target_name}' staged at {}", incoming.display());
+  Ok(StagedPiece {
+    kind: OtaKind::BuiltinWebapp,
+    update_id,
+    paths: Some(StagePaths {
+      incoming,
+      current,
+      previous,
+    }),
+  })
 }
 
 async fn run_extract(archive_path: PathBuf, dest: PathBuf) -> Result<(), SwapError> {

@@ -18,12 +18,6 @@ pub enum WebappError {
   /// Install rejected: the manifest's id is in the reserved-uuid set
   /// (stock, hub, launcher, etc).
   IdReserved { id: String },
-  /// Post-stream sha256 of the uploaded archive did not match the
-  /// expected_sha256 declared at Begin.
-  ArchiveSha256Mismatch,
-  /// Chunk would push past expected_size, or last:true arrived with
-  /// fewer bytes than expected_size.
-  ArchiveSizeMismatch,
   /// Extracted bundle exceeds the 1 GiB disk-protection cap.
   ExtractedTooLarge { max_bytes: u32 },
   /// Zip extraction failed: corrupt archive, unsafe entry names, etc.
@@ -32,9 +26,6 @@ pub enum WebappError {
   MissingIndexHtml,
   /// manifest.json missing, unparseable, or failed schema validation.
   InvalidManifest { reason: String },
-  /// WebappInstall referenced an install_id that has no in-flight
-  /// transfer (never opened, or already abandoned / completed).
-  ArchiveTransferNotFound { install_id: String },
   /// The webapp's manifest doesn't declare an icon (or the icon file is missing on disk).
   IconNotAvailable { id: String },
   /// Config key is not declared in the webapp's manifest schema.

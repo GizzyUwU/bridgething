@@ -104,7 +104,8 @@ public actor BridgethingGateway {
       surface: diagSurfaceLabel(message.data),
       byteSize: frame.count,
       requestId: diagRequestId(message.meta, id: message.id),
-      latencyMs: nil
+      latencyMs: nil,
+      payload: diagPayload(message.data, frameBytes: frame.count)
     )
     try await adapter.send(deviceId: deviceId, frame: frame)
   }
@@ -134,7 +135,8 @@ public actor BridgethingGateway {
       surface: diagSurfaceLabel(data),
       byteSize: frame.count,
       requestId: id.uuidString,
-      latencyMs: nil
+      latencyMs: nil,
+      payload: diagPayload(data, frameBytes: frame.count)
     )
 
     return try await withCheckedThrowingContinuation { cont in
@@ -213,7 +215,8 @@ public actor BridgethingGateway {
           surface: diagSurfaceLabel(msg.data),
           byteSize: frame.count,
           requestId: requestId,
-          latencyMs: latencyMs
+          latencyMs: latencyMs,
+          payload: diagPayload(msg.data, frameBytes: frame.count)
         )
         if case let .response(r) = msg.meta, completePendingRequest(id: r.requestId, with: msg) {
           continue
@@ -325,4 +328,23 @@ private func diagSurfaceLabel(_ value: Any) -> String {
     return String(describing: value)
   }
   return String(describing: type(of: value))
+}
+
+private let diagPayloadFrameCap = 16 * 1024
+private let diagPayloadCharCap = 4 * 1024
+private let diagPayloadEncoder: JSONEncoder = {
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = [.sortedKeys]
+  return encoder
+}()
+
+private func diagPayload<T: Encodable>(_ data: T, frameBytes: Int) -> String? {
+  guard frameBytes <= diagPayloadFrameCap else { return nil }
+  guard let encoded = try? diagPayloadEncoder.encode(data),
+        let string = String(data: encoded, encoding: .utf8)
+  else { return nil }
+  if string.count > diagPayloadCharCap {
+    return String(string.prefix(diagPayloadCharCap)) + "…(truncated)"
+  }
+  return string
 }

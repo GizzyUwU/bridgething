@@ -1,4 +1,8 @@
-import type { BridgethingDiagEntry } from '@bridgething/session-react-native';
+import type {
+  BridgethingDeviceLogLine,
+  BridgethingDiagEntry,
+} from '@bridgething/session-react-native';
+import { AppState } from 'react-native';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -8,7 +12,7 @@ const DIAG_LIMIT = 2000;
 const LOG_LIMIT = 1000;
 
 export type DeviceLogLine = {
-  id: number;
+  id: string;
   ts: number;
   level: string;
   message: string;
@@ -22,6 +26,7 @@ type DiagState = {
   ingestEntry(entry: BridgethingDiagEntry): void;
   seedEntries(entries: BridgethingDiagEntry[]): void;
   ingestDeviceLog(level: string, message: string): void;
+  seedDeviceLogs(lines: BridgethingDeviceLogLine[]): void;
   setLogStreaming(on: boolean): void;
   clearDeviceLogs(): void;
 };
@@ -63,16 +68,36 @@ export const useDiagnosticsStore = create<DiagState>((set, get) => ({
     set(s => {
       const next = [
         ...s.deviceLogs,
-        { id: logCounter++, ts: Date.now(), level, message },
+        { id: `l${logCounter++}`, ts: Date.now(), level, message },
       ];
       if (next.length > LOG_LIMIT) next.splice(0, next.length - LOG_LIMIT);
       return { deviceLogs: next };
     });
   },
 
+  // the native ring is the source of truth; the live stream drops while the app is
+  // backgrounded and the js thread is suspended, so a foreground pull replaces the
+  // store wholesale to backfill the gap. seq-prefixed ids stay disjoint from live ids.
+  seedDeviceLogs: lines => {
+    const mapped = lines.map(l => ({
+      id: `s${l.seq}`,
+      ts: l.ts,
+      level: l.level,
+      message: l.message,
+    }));
+    if (mapped.length > LOG_LIMIT) mapped.splice(0, mapped.length - LOG_LIMIT);
+    set({ deviceLogs: mapped });
+  },
+
   setLogStreaming: on => {
     set({ logStreaming: on });
     getSession().setLogStreamingEnabled(on);
+    if (on) {
+      getSession()
+        .deviceLogSnapshot(LOG_LIMIT)
+        .then(lines => get().seedDeviceLogs(lines))
+        .catch(() => {});
+    }
   },
 
   clearDeviceLogs: () => set({ deviceLogs: [] }),
@@ -89,6 +114,15 @@ export async function startDiagnostics(): Promise<void> {
       if (event.type === 'diagEntry') store.ingestEntry(event.entry);
       else if (event.type === 'log')
         store.ingestDeviceLog(event.level, event.message);
+    });
+    AppState.addEventListener('change', next => {
+      if (next !== 'active') return;
+      const s = useDiagnosticsStore.getState();
+      if (!s.logStreaming) return;
+      session
+        .deviceLogSnapshot(LOG_LIMIT)
+        .then(lines => s.seedDeviceLogs(lines))
+        .catch(() => {});
     });
     wired = true;
   }

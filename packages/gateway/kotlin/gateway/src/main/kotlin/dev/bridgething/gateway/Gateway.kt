@@ -1,10 +1,13 @@
 package dev.bridgething.gateway
 
 import dev.bridgething.schema.BridgeToGatewayMsg
+import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.MsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.Priority
+import kotlinx.serialization.SerializationStrategy
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -144,6 +147,7 @@ public class BridgethingGateway(
       byteSize = frame.size,
       requestId = diagRequestId(message.meta, message.id),
       latencyMs = null,
+      payload = diagPayload(GatewayToBridgeMsgData.serializer(), message.data, frame.size),
     )
     adapter.send(deviceId, frame)
   }
@@ -187,6 +191,7 @@ public class BridgethingGateway(
         byteSize = frame.size,
         requestId = id.toString(),
         latencyMs = null,
+        payload = diagPayload(GatewayToBridgeMsgData.serializer(), data, frame.size),
       )
       adapter.send(deviceId, frame)
       withTimeout(timeout) { deferred.await() }
@@ -250,6 +255,7 @@ public class BridgethingGateway(
         byteSize = frame.size,
         requestId = reqId,
         latencyMs = latencyMs,
+        payload = diagPayload(BridgeToGatewayMsgData.serializer(), msg.data, frame.size),
       )
       val resolved = if (resp != null) {
         val deferred = mutex.withLock { pendingRequests.remove(resp.data.requestId) }
@@ -278,3 +284,19 @@ private fun diagRequestId(meta: MsgMeta, id: UUID): String? = when (meta) {
 }
 
 private fun diagSurface(data: Any): String = data::class.simpleName ?: "unknown"
+
+private const val DIAG_PAYLOAD_FRAME_CAP = 16 * 1024
+private const val DIAG_PAYLOAD_CHAR_CAP = 4 * 1024
+private val diagJson = Json { encodeDefaults = true }
+
+// json preview of a decoded message body, skipped for binary-heavy frames so the
+// ring's byte budget isn't blown by asset / ota chunk payloads.
+private fun <T> diagPayload(serializer: SerializationStrategy<T>, data: T, frameBytes: Int): String? {
+  if (frameBytes > DIAG_PAYLOAD_FRAME_CAP) return null
+  return try {
+    val encoded = diagJson.encodeToString(serializer, data)
+    if (encoded.length > DIAG_PAYLOAD_CHAR_CAP) encoded.take(DIAG_PAYLOAD_CHAR_CAP) + "…(truncated)" else encoded
+  } catch (_: Throwable) {
+    null
+  }
+}

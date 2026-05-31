@@ -27,6 +27,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingWebappsChanged: ((String) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
+        private var pendingCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
         private var pendingDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
 
         /** explicit init because bun workspace symlinks trip RN's autolinker. idempotent. */
@@ -53,6 +54,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     webapps = pendingWebappsChanged,
                     deviceMeta = pendingDeviceMetaChanged,
                     ota = pendingOtaEvent,
+                    catalog = pendingCatalogEvent,
                     diag = pendingDiagEntry,
                 )
                 pendingProviderChanged = null
@@ -67,6 +69,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingWebappsChanged = null
                 pendingDeviceMetaChanged = null
                 pendingOtaEvent = null
+                pendingCatalogEvent = null
                 pendingDiagEntry = null
                 snapshot
             }
@@ -82,6 +85,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.webapps?.let(b::setOnWebappsChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.ota?.let(b::setOnOtaEvent)
+            replay.catalog?.let(b::setOnCatalogEvent)
             replay.diag?.let(b::setOnDiagEntry)
         }
 
@@ -105,6 +109,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val webapps: ((String) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val ota: ((BridgethingOtaEvent) -> Unit)?,
+        val catalog: ((BridgethingCatalogEvent) -> Unit)?,
         val diag: ((BridgethingDiagEntry) -> Unit)?,
     )
 
@@ -148,6 +153,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun diagnosticsSnapshot(limit: Double): Promise<Array<BridgethingDiagEntry>> = Promise.async {
         backend?.diagnosticsSnapshot(limit) ?: emptyArray()
+    }
+
+    override fun deviceLogSnapshot(limit: Double): Promise<Array<BridgethingDeviceLogLine>> = Promise.async {
+        backend?.deviceLogSnapshot(limit) ?: emptyArray()
     }
 
     override fun companionDebug(): Promise<BridgethingCompanionDebug> = Promise.async {
@@ -230,6 +239,44 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
         backend?.applyOtaUpdate(deviceId, channel, version, unwrapString(rootUrl))
+    }
+
+    override fun catalogSources(): Promise<Array<String>> = Promise.async {
+        require().catalogSources()
+    }
+
+    override fun addCatalogSource(url: String): Promise<Unit> = Promise.async {
+        backend?.addCatalogSource(url)
+    }
+
+    override fun removeCatalogSource(url: String): Promise<Unit> = Promise.async {
+        backend?.removeCatalogSource(url)
+    }
+
+    override fun refreshCatalog(): Promise<Unit> = Promise.async {
+        backend?.refreshCatalog()
+    }
+
+    override fun availableCatalogApps(deviceId: String): Promise<String> = Promise.async {
+        require().availableCatalogApps(deviceId)
+    }
+
+    override fun checkForCatalogUpdates(deviceId: String): Promise<String> = Promise.async {
+        require().checkForCatalogUpdates(deviceId)
+    }
+
+    override fun installCatalogApp(deviceId: String, appId: String, version: String, sourceUrl: String): Promise<BridgethingWebappInfo> = Promise.async {
+        require().installCatalogApp(deviceId, appId, version, sourceUrl)
+    }
+
+    override fun setCatalogPollConfig(config: Variant_NullType_BridgethingCatalogPollConfig?): Promise<Unit> = Promise.async {
+        val unwrapped: BridgethingCatalogPollConfig? = config?.let { variant ->
+            when (variant) {
+                is Variant_NullType_BridgethingCatalogPollConfig.First -> null
+                is Variant_NullType_BridgethingCatalogPollConfig.Second -> variant.value
+            }
+        }
+        backend?.setCatalogPollConfig(unwrapped)
     }
 
     override fun reconnectPeer(deviceId: String): Promise<Unit> = Promise.async {
@@ -326,6 +373,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnOtaEvent(callback: (event: BridgethingOtaEvent) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnOtaEvent) { pendingOtaEvent = it }
+    }
+
+    override fun setOnCatalogEvent(callback: (event: BridgethingCatalogEvent) -> Unit) {
+        forwardOrBuffer(callback, BridgethingSessionBackend::setOnCatalogEvent) { pendingCatalogEvent = it }
     }
 
     override fun setOnDiagEntry(callback: (entry: BridgethingDiagEntry) -> Unit) {

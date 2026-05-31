@@ -5,6 +5,7 @@ import {
   Download,
   Link as LinkIcon,
   Lock,
+  Store as StoreIcon,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, Text, View } from 'react-native';
@@ -87,6 +88,18 @@ export function WebappBrowseScreen({ navigation, route }: Props) {
           }
         />
 
+        <View className="mb-6">
+          <Button
+            onPress={() => navigation.navigate('Store', { deviceId })}
+            disabled={!peer}
+            icon={StoreIcon}
+            size="lg"
+          >
+            browse the app store
+          </Button>
+        </View>
+
+        <SectionHeader title="or install from a link" />
         <View className="mb-3">
           <Field
             label="webapp url"

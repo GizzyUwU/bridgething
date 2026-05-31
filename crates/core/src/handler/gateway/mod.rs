@@ -195,17 +195,8 @@ impl GatewayHandler {
         }
       }
       GatewayToBridgeMsgData::Webapp(webapp_msg) => {
-        if webapp_msg.is_request_variant() {
-          let req = webapp_msg.into_request().expect("checked above");
+        if let Some(req) = webapp_msg.into_request() {
           tokio::spawn(async move { req.dispatch(&WebappHandler::new(handle)).await });
-        } else if webapp_msg.is_event_variant() {
-          let ev = webapp_msg.into_event().expect("checked above");
-          // await rather than spawn so chunked install events stay in order
-          if let Err(err) = ev.dispatch(&WebappHandler::new(handle)).await {
-            tracing::error!(?err, "webapp event handler failed");
-          }
-        } else if let Some(cmd) = webapp_msg.into_command() {
-          tokio::spawn(async move { cmd.dispatch(&WebappHandler::new(handle)).await });
         }
       }
       GatewayToBridgeMsgData::Error(err) => {

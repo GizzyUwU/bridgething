@@ -1,27 +1,20 @@
-//! Shared chunked-install plumbing for the gateway-side WebappInstall
-//! surface: transfer + verify + extract + install + broadcast. Mirrors
-//! OTA's `Begin/Chunk/Abandon` shape. The chunked-transfer primitive
-//! ([`crate::transfer::ChunkedTransfer`]) handles the on-disk partial +
-//! sha256 + size verify; this module sequences install_from_path and
-//! broadcasts the terminal events.
-//!
-//! Also holds the first-boot example-webapp seeder ([`seed_examples`]),
-//! which reuses `install_from_path` to install bundled samples into the
-//! writable registry once.
+//! Webapp bundle application into the writable registry. The
+//! `OtaKind::InstalledWebapp` backend calls [`apply_and_announce`] on a
+//! fully-streamed bundle to install it and broadcast `WebappInstalled`;
+//! the first-boot example seeder ([`seed_examples`]) reuses
+//! `install_from_path` to install bundled samples once. Bytes arrive via
+//! the OTA orchestrator's `ChunkedTransfer`, not here.
 
 use std::path::{Path, PathBuf};
 
 use libbridgething::{
-  WebappError,
-  client::BridgeToClientWebappMsgEvent,
-  gateway::{BridgeToGatewayWebappMsgEvent, WebappInstallFailed as GatewayInstallFailed},
+  WebappError, WebappInfo, client::BridgeToClientWebappMsgEvent, gateway::BridgeToGatewayWebappMsgEvent,
 };
-use tokio_util::bytes::Bytes;
 
 use crate::{
   bluetooth::BluetoothMan,
-  state::{State, WebappRegistry},
-  transfer::{ChunkOutcome, TransferError},
+  net::WireEventBus,
+  state::{KvStore, WebappRegistry},
 };
 
 pub async fn seed_examples(webapps: &WebappRegistry, examples_dir: &Path, marker: &Path) {
@@ -61,119 +54,30 @@ async fn write_seed_marker(marker: &Path) {
   }
 }
 
-pub async fn install_begin(
-  state: &State,
-  install_id: String,
-  expected_sha256: String,
-  expected_size: u32,
-) -> Result<u32, WebappError> {
-  match state
-    .transfers
-    .begin(install_id, expected_size as u64, Some(expected_sha256), None)
-    .await
-  {
-    Ok(resume_from_offset) => Ok(resume_from_offset.min(u32::MAX as u64) as u32),
-    Err(err) => Err(transfer_err_to_webapp_err(err)),
-  }
-}
-
-pub async fn accept_install_chunk(
-  state: &State,
+pub async fn apply_and_announce(
+  webapps: &WebappRegistry,
+  kv: &KvStore,
+  bus: &WireEventBus,
   bluetooth: &BluetoothMan,
-  install_id: String,
-  offset: u32,
-  bytes: Vec<u8>,
-  last: bool,
-) {
-  let chunk = Bytes::from(bytes);
-  match state
-    .transfers
-    .accept_chunk(install_id.clone(), offset as u64, chunk, last)
-    .await
+  archive_path: PathBuf,
+) -> Result<WebappInfo, WebappError> {
+  let info = webapps.install_from_path(archive_path).await?;
+  if let Some(manifest) = webapps.manifest(info.id).await
+    && let Err(err) = kv.seed_config_defaults(&manifest).await
   {
-    Ok(ChunkOutcome::Continue { .. }) => {}
-    Ok(ChunkOutcome::Completed { path, sha256: _ }) => {
-      let state = state.clone();
-      let bluetooth = bluetooth.clone();
-      tokio::spawn(async move {
-        complete_install(state, bluetooth, install_id, path).await;
-      });
-    }
-    Err(err) => {
-      let webapp_err = transfer_err_to_webapp_err(err);
-      broadcast_install_failed(state, bluetooth, install_id.clone(), webapp_err).await;
-      let _ = state.transfers.abandon(install_id).await;
-    }
+    tracing::warn!(?err, id = %info.id, "config-default seed failed after install");
   }
+  broadcast_installed(bus, bluetooth, info.clone()).await;
+  Ok(info)
 }
 
-pub async fn install_abandon(state: &State, install_id: String) {
-  if let Err(err) = state.transfers.abandon(install_id.clone()).await {
-    tracing::warn!(?err, install_id, "install abandon failed");
-  }
-}
-
-async fn complete_install(state: State, bluetooth: BluetoothMan, install_id: String, archive_path: PathBuf) {
-  let install_result = state.webapps.install_from_path(archive_path.clone()).await;
-
-  let _ = state.transfers.abandon(install_id.clone()).await;
-  let _ = tokio::fs::remove_file(&archive_path).await;
-
-  match install_result {
-    Ok(info) => {
-      if let Some(manifest) = state.webapps.manifest(info.id).await
-        && let Err(err) = state.kv.seed_config_defaults(&manifest).await
-      {
-        tracing::warn!(?err, id = %info.id, "config-default seed failed after install");
-      }
-      tracing::info!(install_id, id = %info.id, name = %info.name, "webapp install completed");
-      broadcast_installed(&state, &bluetooth, info).await;
-    }
-    Err(err) => {
-      tracing::warn!(install_id, ?err, "webapp install failed");
-      broadcast_install_failed(&state, &bluetooth, install_id, err).await;
-    }
-  }
-}
-
-async fn broadcast_installed(state: &State, bluetooth: &BluetoothMan, info: libbridgething::WebappInfo) {
+async fn broadcast_installed(bus: &WireEventBus, bluetooth: &BluetoothMan, info: WebappInfo) {
   let gateway_event = BridgeToGatewayWebappMsgEvent::WebappInstalled(info.clone());
   bluetooth.gateway_man.broadcast(gateway_event).await;
 
   let client_event = BridgeToClientWebappMsgEvent::WebappInstalled(info);
-  if let Err(errs) = state.bus.broadcast_event(client_event).await {
+  if let Err(errs) = bus.broadcast_event(client_event).await {
     tracing::debug!(count = errs.len(), "webapp installed client broadcast non-fatal errors");
-  }
-}
-
-async fn broadcast_install_failed(state: &State, bluetooth: &BluetoothMan, install_id: String, error: WebappError) {
-  let gateway_event = BridgeToGatewayWebappMsgEvent::WebappInstallFailed(GatewayInstallFailed {
-    install_id: install_id.clone(),
-    error: error.clone(),
-  });
-  bluetooth.gateway_man.broadcast(gateway_event).await;
-
-  let client_event = BridgeToClientWebappMsgEvent::WebappInstallFailed(libbridgething::client::WebappInstallFailed {
-    install_id,
-    error,
-  });
-  if let Err(errs) = state.bus.broadcast_event(client_event).await {
-    tracing::debug!(
-      count = errs.len(),
-      "webapp install failed client broadcast non-fatal errors"
-    );
-  }
-}
-
-fn transfer_err_to_webapp_err(err: TransferError) -> WebappError {
-  match err {
-    TransferError::HashMismatch { .. } => WebappError::ArchiveSha256Mismatch,
-    TransferError::SizeMismatch { .. } | TransferError::SizeOverflow { .. } => WebappError::ArchiveSizeMismatch,
-    TransferError::UnknownTransfer { id } => WebappError::ArchiveTransferNotFound { install_id: id },
-    TransferError::ConflictingBegin { id } => WebappError::ArchiveTransferNotFound { install_id: id },
-    other => WebappError::Internal {
-      reason: other.to_string(),
-    },
   }
 }
 

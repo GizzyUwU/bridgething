@@ -17,9 +17,18 @@ public enum OtaPhaseSnapshot: Sendable, Equatable {
     case streaming(percent: Int)
     /// Daemon-side phases (verifying / writing / confirming / reboot).
     case applying(phase: OtaPhase, percent: Int)
+    /// A bandaid piece (daemon / builtin-webapp) is validated and staged on
+    /// the device but not yet live. The batch goes live on `OtaActivate`.
+    case staged
     /// Update finished cleanly. Device has rebooted.
     case completed
     /// Update failed.
+    case failed(reason: String)
+}
+
+/// Terminal outcome of a third-party webapp install (`OtaKind.installedWebapp`).
+public enum WebappInstallResult: Sendable {
+    case installed(WebappInfo)
     case failed(reason: String)
 }
 
@@ -189,38 +198,175 @@ public actor OtaService {
         progress: AsyncStream<OtaPhaseSnapshot>.Continuation
     ) async {
         setLocalZck(zckPath)
-        let result = await driveOta(
+        let (result, _) = await driveOta(
             gateway: gateway,
             deviceId: deviceId,
             kind: .image,
             artifactPath: swuPath,
             updateUrlBase: updateUrlBase,
+            mode: .full,
             progress: progress
         )
         progress.yield(result)
         progress.finish()
     }
 
-    /// Drive a daemon-kind OTA from a local aarch64 daemon binary. The
-    /// daemon validates and atomically swaps `.current`, then
-    /// `systemctl restart bridgething.service` triggers the new binary
-    /// to take over. No range proxy traffic for this kind.
+    /// Push a new daemon binary to the bandaid. Stages it then activates the
+    /// (single-piece) batch, which atomically swaps `.current` and restarts
+    /// bridgething.service once. No range proxy traffic for this kind.
     public func pushDaemon(
         gateway: BridgethingGateway,
         deviceId: String,
         binaryPath: URL,
         progress: AsyncStream<OtaPhaseSnapshot>.Continuation
     ) async {
-        let result = await driveOta(
+        let result = await applyBandaidBatch(
             gateway: gateway,
             deviceId: deviceId,
-            kind: .daemon,
-            artifactPath: binaryPath,
-            updateUrlBase: nil,
+            artifacts: [(kind: .daemon, path: binaryPath)],
             progress: progress
         )
         progress.yield(result)
         progress.finish()
+    }
+
+    /// Push a builtin-webapp bundle (hub or stock) to the bandaid. Same
+    /// stage-then-activate path as the daemon; the bundle's manifest id must
+    /// be a reserved builtin or the daemon rejects the stage.
+    public func pushBuiltinWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: URL,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation
+    ) async {
+        let result = await applyBandaidBatch(
+            gateway: gateway,
+            deviceId: deviceId,
+            artifacts: [(kind: .builtinWebapp, path: bundlePath)],
+            progress: progress
+        )
+        progress.yield(result)
+        progress.finish()
+    }
+
+    /// Push a coupled set of bandaid pieces (daemon + hub + stock, in any
+    /// combination) as one batch: every piece stages, then a single
+    /// `OtaActivate` swaps them all live with one restart.
+    public func pushBandaidBatch(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        artifacts: [(kind: OtaKind, path: URL)],
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation
+    ) async {
+        let result = await applyBandaidBatch(
+            gateway: gateway,
+            deviceId: deviceId,
+            artifacts: artifacts,
+            progress: progress
+        )
+        progress.yield(result)
+        progress.finish()
+    }
+
+    // MARK: - webapp install
+
+    /// Install a third-party webapp bundle into the device's writable
+    /// registry via `OtaKind.installedWebapp`. Reuses the OTA chunk pump;
+    /// no staging, no activate, no restart. The terminal is the daemon's
+    /// `WebappInstalled` event (success, carrying the `WebappInfo`) or an
+    /// `OtaError` (failure).
+    public func installWebapp(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        bundlePath: URL
+    ) async -> WebappInstallResult {
+        let totalSize: UInt64
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: bundlePath.path)
+            guard let n = (attrs[.size] as? NSNumber)?.uint64Value else {
+                return .failed(reason: "could not stat bundle")
+            }
+            totalSize = n
+        } catch {
+            return .failed(reason: "stat bundle failed: \(error.localizedDescription)")
+        }
+        guard totalSize <= UInt64(UInt32.max) else {
+            return .failed(reason: "bundle larger than 4 GiB")
+        }
+
+        let sha256: String
+        do {
+            sha256 = try await hashFile(bundlePath)
+        } catch {
+            return .failed(reason: "sha256 failed: \(error.localizedDescription)")
+        }
+
+        // subscribe before streaming so the terminal event cannot be missed.
+        let terminalTask = Task<WebappInstallResult, Never> {
+            await withTaskGroup(of: WebappInstallResult.self) { group in
+                group.addTask {
+                    for await pair in gateway.webapp.webappInstalled where pair.deviceId == deviceId {
+                        return .installed(pair.msg)
+                    }
+                    return .failed(reason: "installed stream ended")
+                }
+                group.addTask {
+                    for await pair in gateway.system.otaError where pair.deviceId == deviceId {
+                        return .failed(reason: "[\(pair.msg.code)] \(pair.msg.msg)")
+                    }
+                    return .failed(reason: "error stream ended")
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                    return .failed(reason: "install timed out")
+                }
+                let result = await group.next() ?? .failed(reason: "install interrupted")
+                group.cancelAll()
+                return result
+            }
+        }
+
+        let begin = OtaBegin(
+            kind: .installedWebapp,
+            updateId: sha256,
+            updateUrlBase: nil,
+            expectedSha256: sha256,
+            expectedSize: UInt32(totalSize)
+        )
+        let beginResult: RequestResult<OtaBeginAck, OtaBeginRejected>
+        do {
+            beginResult = try await gateway.system.otaBegin(deviceId: deviceId, begin)
+        } catch {
+            terminalTask.cancel()
+            return .failed(reason: "OtaBegin send failed: \(error.localizedDescription)")
+        }
+        let resumeFromOffset: UInt32
+        switch beginResult {
+        case let .ok(ack):
+            resumeFromOffset = ack.resumeFromOffset
+        case let .domain(rej):
+            terminalTask.cancel()
+            return .failed(reason: "daemon rejected install: \(rej.reason)")
+        case let .protocolError(err):
+            terminalTask.cancel()
+            return .failed(reason: "OtaBegin protocol error: \(err)")
+        }
+
+        do {
+            try await streamArtifact(
+                gateway: gateway,
+                deviceId: deviceId,
+                updateId: sha256,
+                artifactPath: bundlePath,
+                startOffset: UInt64(resumeFromOffset),
+                totalSize: totalSize
+            )
+        } catch {
+            terminalTask.cancel()
+            return .failed(reason: "chunk stream failed: \(error.localizedDescription)")
+        }
+
+        return await terminalTask.value
     }
 
     // MARK: - manifest poll loop
@@ -521,9 +667,9 @@ public actor OtaService {
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         case let .failed(reason):
             eventContinuation.yield(.failed(deviceId: deviceId, kind: kind, reason: reason))
-        case .idle, .streaming, .applying:
-            // Stream ended without a terminal snapshot; treat as success since `driveOta` only
-            // completes on the .reboot phase or an explicit failure path.
+        case .idle, .streaming, .applying, .staged:
+            // Stream ended without a terminal snapshot; treat as success since the auto path
+            // only finishes on a committed batch (.completed) or an explicit failure.
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         }
     }
@@ -674,33 +820,46 @@ public actor OtaService {
 
     // MARK: - push-side driver
 
+    private enum DriveMode {
+        /// Image: stream, then await `Reboot` (the device power-cycles).
+        case full
+        /// Bandaid (daemon / builtin-webapp): stream, then await `Writing`/100,
+        /// which means the piece is staged but not yet live. The batch goes
+        /// live on a later `OtaActivate`.
+        case stage
+    }
+
+    /// Stream one artifact and await its terminal. Returns the terminal
+    /// snapshot plus the artifact's sha256 (the `update_id`), which the
+    /// caller passes to `OtaActivate.expected` for a bandaid batch.
     private func driveOta(
         gateway: BridgethingGateway,
         deviceId: String,
         kind: OtaKind,
         artifactPath: URL,
         updateUrlBase: String?,
+        mode: DriveMode,
         progress: AsyncStream<OtaPhaseSnapshot>.Continuation
-    ) async -> OtaPhaseSnapshot {
+    ) async -> (snapshot: OtaPhaseSnapshot, updateId: String) {
         let totalSize: UInt64
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: artifactPath.path)
             guard let n = (attrs[.size] as? NSNumber)?.uint64Value else {
-                return .failed(reason: "could not stat artifact")
+                return (.failed(reason: "could not stat artifact"), "")
             }
             totalSize = n
         } catch {
-            return .failed(reason: "stat artifact failed: \(error.localizedDescription)")
+            return (.failed(reason: "stat artifact failed: \(error.localizedDescription)"), "")
         }
         guard totalSize <= UInt64(UInt32.max) else {
-            return .failed(reason: "artifact larger than 4 GiB")
+            return (.failed(reason: "artifact larger than 4 GiB"), "")
         }
 
         let sha256: String
         do {
             sha256 = try await hashFile(artifactPath)
         } catch {
-            return .failed(reason: "sha256 failed: \(error.localizedDescription)")
+            return (.failed(reason: "sha256 failed: \(error.localizedDescription)"), "")
         }
 
         let begin = OtaBegin(
@@ -714,33 +873,22 @@ public actor OtaService {
         do {
             beginResult = try await gateway.system.otaBegin(deviceId: deviceId, begin)
         } catch {
-            return .failed(reason: "OtaBegin send failed: \(error.localizedDescription)")
+            return (.failed(reason: "OtaBegin send failed: \(error.localizedDescription)"), sha256)
         }
         let resumeFromOffset: UInt32
         switch beginResult {
         case let .ok(ack):
             resumeFromOffset = ack.resumeFromOffset
         case let .domain(rej):
-            return .failed(reason: "daemon rejected OtaBegin: \(rej.reason)")
+            return (.failed(reason: "daemon rejected OtaBegin: \(rej.reason)"), sha256)
         case let .protocolError(err):
-            return .failed(reason: "OtaBegin protocol error: \(err)")
+            return (.failed(reason: "OtaBegin protocol error: \(err)"), sha256)
         }
 
         progress.yield(.streaming(percent: percent(UInt64(resumeFromOffset), totalSize)))
 
-        let progressTask = Task {
-            for await ev in gateway.system.otaProgress {
-                let phase = ev.msg.phase
-                progress.yield(.applying(phase: phase, percent: Int(ev.msg.percent)))
-                if phase == .reboot { break }
-            }
-        }
-        let errorTask = Task {
-            for await ev in gateway.system.otaError {
-                progress.yield(.failed(reason: "[\(ev.msg.code)] \(ev.msg.msg)"))
-                break
-            }
-        }
+        // subscribe before streaming so the terminal event cannot be missed.
+        let terminalTask = awaitTerminal(gateway: gateway, mode: mode, progress: progress)
 
         do {
             try await streamArtifact(
@@ -752,14 +900,99 @@ public actor OtaService {
                 totalSize: totalSize
             )
         } catch {
-            progressTask.cancel()
-            errorTask.cancel()
-            return .failed(reason: "chunk stream failed: \(error.localizedDescription)")
+            terminalTask.cancel()
+            return (.failed(reason: "chunk stream failed: \(error.localizedDescription)"), sha256)
         }
 
-        await progressTask.value
-        errorTask.cancel()
-        return .completed
+        return (await terminalTask.value, sha256)
+    }
+
+    /// Stage each artifact on the bandaid, then activate the whole batch with
+    /// a single `OtaActivate` (one service restart). Returns the terminal
+    /// snapshot; does not finish `progress` (the public wrappers do).
+    private func applyBandaidBatch(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        artifacts: [(kind: OtaKind, path: URL)],
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation
+    ) async -> OtaPhaseSnapshot {
+        var stagedIds: [String] = []
+        for artifact in artifacts {
+            let (snapshot, updateId) = await driveOta(
+                gateway: gateway,
+                deviceId: deviceId,
+                kind: artifact.kind,
+                artifactPath: artifact.path,
+                updateUrlBase: nil,
+                mode: .stage,
+                progress: progress
+            )
+            guard case .staged = snapshot else {
+                return snapshot
+            }
+            stagedIds.append(updateId)
+        }
+        return await commitBandaid(gateway: gateway, deviceId: deviceId, expected: stagedIds, progress: progress)
+    }
+
+    /// Send `OtaActivate` and await the single `Reboot`. Subscribes before
+    /// sending so the terminal cannot be missed.
+    private func commitBandaid(
+        gateway: BridgethingGateway,
+        deviceId: String,
+        expected: [String],
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation
+    ) async -> OtaPhaseSnapshot {
+        let terminalTask = awaitTerminal(gateway: gateway, mode: .full, progress: progress)
+        do {
+            try await gateway.device(deviceId).system.otaActivate(OtaActivate(expected: expected))
+        } catch {
+            terminalTask.cancel()
+            return .failed(reason: "OtaActivate send failed: \(error.localizedDescription)")
+        }
+        return await terminalTask.value
+    }
+
+    /// Watch the progress + error streams and resolve to a terminal: the
+    /// mode's success snapshot when the phase predicate fires, or `.failed`
+    /// on an `OtaError`. The error arm parks (rather than returning) if its
+    /// stream ends without an error, so the progress arm wins the race.
+    private func awaitTerminal(
+        gateway: BridgethingGateway,
+        mode: DriveMode,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation
+    ) -> Task<OtaPhaseSnapshot, Never> {
+        let success: OtaPhaseSnapshot
+        switch mode {
+        case .full: success = .completed
+        case .stage: success = .staged
+        }
+        return Task {
+            await withTaskGroup(of: OtaPhaseSnapshot.self) { group in
+                group.addTask {
+                    for await ev in gateway.system.otaProgress {
+                        progress.yield(.applying(phase: ev.msg.phase, percent: Int(ev.msg.percent)))
+                        let done: Bool
+                        switch mode {
+                        case .full: done = ev.msg.phase == .reboot
+                        case .stage: done = ev.msg.phase == .writing && ev.msg.percent >= 100
+                        }
+                        if done { break }
+                    }
+                    return success
+                }
+                group.addTask {
+                    for await ev in gateway.system.otaError {
+                        return .failed(reason: "[\(ev.msg.code)] \(ev.msg.msg)")
+                    }
+                    try? await Task.sleep(for: .seconds(3600))
+                    return success
+                }
+                let result = await group.next() ?? success
+                group.cancelAll()
+                return result
+            }
+        }
     }
 
     private func streamArtifact(

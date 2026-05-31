@@ -26,13 +26,13 @@ public struct DiagRecord: Sendable {
   public let detail: String?
   public let fields: [(key: String, value: String)]?
 
-  /// rough heap footprint, used to keep the buffer under its byte budget without
-  /// measuring exactly. the fixed term covers the struct itself + bookkeeping.
+  public let payload: String?
+
   var approxBytes: Int {
     var n = 96
     n += (deviceId?.utf8.count ?? 0) + (surface?.utf8.count ?? 0) + (requestId?.utf8.count ?? 0)
     n += (level?.utf8.count ?? 0) + (target?.utf8.count ?? 0) + (message?.utf8.count ?? 0)
-    n += (category?.utf8.count ?? 0) + (detail?.utf8.count ?? 0)
+    n += (category?.utf8.count ?? 0) + (detail?.utf8.count ?? 0) + (payload?.utf8.count ?? 0)
     for f in fields ?? [] { n += f.key.utf8.count + f.value.utf8.count + 16 }
     return n
   }
@@ -94,7 +94,8 @@ public final class DiagnosticsBuffer: @unchecked Sendable {
     surface: String,
     byteSize: Int,
     requestId: String?,
-    latencyMs: Double?
+    latencyMs: Double?,
+    payload: String?
   ) {
     insert { seq, ts in
       DiagRecord(
@@ -102,7 +103,8 @@ public final class DiagnosticsBuffer: @unchecked Sendable {
         deviceId: deviceId, direction: direction, frameKind: frameKind,
         surface: surface, byteSize: byteSize, requestId: requestId, latencyMs: latencyMs,
         level: nil, target: nil, message: nil,
-        category: nil, detail: nil, fields: nil
+        category: nil, detail: nil, fields: nil,
+        payload: payload
       )
     }
   }
@@ -114,7 +116,8 @@ public final class DiagnosticsBuffer: @unchecked Sendable {
         deviceId: nil, direction: nil, frameKind: nil,
         surface: nil, byteSize: nil, requestId: nil, latencyMs: nil,
         level: level, target: target, message: message,
-        category: nil, detail: nil, fields: nil
+        category: nil, detail: nil, fields: nil,
+        payload: nil
       )
     }
   }
@@ -130,7 +133,8 @@ public final class DiagnosticsBuffer: @unchecked Sendable {
         deviceId: nil, direction: nil, frameKind: nil,
         surface: nil, byteSize: nil, requestId: nil, latencyMs: nil,
         level: nil, target: nil, message: nil,
-        category: category, detail: detail, fields: fields
+        category: category, detail: detail, fields: fields,
+        payload: nil
       )
     }
   }

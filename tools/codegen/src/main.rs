@@ -268,9 +268,9 @@ fn emit_kotlin_serializers(enums: &[AdjacentTaggedEnum]) -> Result<()> {
 fn patch_swift(input: &str, uuid_field_names: &BTreeSet<String>) -> Result<String> {
   // typeshare emits one definition per Rust struct, even when two
   // structs in different modules share an identical name and body
-  // (deliberate when a shared payload is wired to two surfaces, e.g.
-  // WebappInstallBegin). Drop duplicates with matching bodies; bail if
-  // bodies diverge (real type mismatch worth surfacing).
+  // (deliberate when a shared payload is wired to two surfaces). Drop
+  // duplicates with matching bodies; bail if bodies diverge (real type
+  // mismatch worth surfacing).
   let deduped = dedup_swift_decls(input)?;
   // typeshare emits `[UInt8]` for `Vec<u8>`. Swift's Codable plus every
   // msgpack lib distinguishes Data (encodes as msgpack bin) from
@@ -324,9 +324,9 @@ fn patch_kotlin(
 ) -> Result<String> {
   // typeshare emits one definition per Rust struct, even when two
   // structs in different modules share an identical name and body
-  // (deliberate when a shared payload is wired to two surfaces, e.g.
-  // WebappInstallBegin). Drop duplicates with matching bodies; bail if
-  // bodies diverge (real type mismatch worth surfacing).
+  // (deliberate when a shared payload is wired to two surfaces). Drop
+  // duplicates with matching bodies; bail if bodies diverge (real type
+  // mismatch worth surfacing).
   let deduped = dedup_kotlin_decls(input)?;
   // typeshare emits `List<UByte>` for `Vec<u8>`. kotlinx-msgpack
   // encodes ByteArray as msgpack bin, but List<UByte> as an array of
