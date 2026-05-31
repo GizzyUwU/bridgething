@@ -211,6 +211,10 @@ impl AssetActor {
     if matches!(retention, AssetRetention::Persistent) {
       return Err(AssetError::PersistentRequiresChunkedPath);
     }
+    if bytes.is_empty() {
+      tracing::debug!(%id, "asset cache: ignoring 0-byte insert");
+      return Ok(());
+    }
     let byte_len = bytes.len();
     let now = unix_now();
 
@@ -249,6 +253,11 @@ impl AssetActor {
     retention: AssetRetention,
   ) -> Result<(), AssetError> {
     let byte_len = tokio::fs::metadata(&source).await?.len() as usize;
+    if byte_len == 0 {
+      tracing::debug!(%id, "asset cache: ignoring 0-byte insert_from_path");
+      tokio::fs::remove_file(&source).await.ok();
+      return Ok(());
+    }
     let now = unix_now();
 
     self.evict_entry(&id).await;
@@ -700,5 +709,105 @@ mod tests {
       .await
       .unwrap_err();
     assert!(matches!(err, AssetError::PersistentRequiresChunkedPath));
+  }
+
+  async fn fresh_with_events() -> (AssetActor, broadcast::Receiver<AssetCacheEvent>) {
+    let db = crate::db::open(None).await.unwrap();
+    let (events_tx, _) = broadcast::channel(16);
+    let (_cmd_tx, cmd_rx) = mpsc::channel(16);
+    let actor = AssetActor::new(db, temp_blobs(), cmd_rx, events_tx.clone())
+      .bootstrap()
+      .await
+      .unwrap();
+    (actor, events_tx.subscribe())
+  }
+
+  #[tokio::test]
+  async fn empty_memory_insert_is_not_stored() {
+    // the observed iAP2 0-byte artwork transfer: serving an empty image makes the
+    // stock webapp refetch in a tight loop, so a 0-byte asset must never land.
+    let mut a = fresh().await;
+    a.handle_insert_memory(
+      "iap2/art/3bb6205e3a0018fe/134".into(),
+      Bytes::new(),
+      Some("image/jpeg".into()),
+      AssetRetention::Lru,
+    )
+    .await
+    .unwrap();
+    assert!(a.handle_get("iap2/art/3bb6205e3a0018fe/134".into()).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn empty_memory_insert_emits_no_ready() {
+    // a Ready event would wake any wait_for_asset waiter and hand it the empty asset.
+    let (mut a, mut events) = fresh_with_events().await;
+    a.handle_insert_memory("e/1".into(), Bytes::new(), None, AssetRetention::Lru)
+      .await
+      .unwrap();
+    assert!(matches!(events.try_recv(), Err(broadcast::error::TryRecvError::Empty)));
+  }
+
+  #[tokio::test]
+  async fn empty_insert_preserves_existing_good_asset() {
+    // a stray 0-byte transfer for an id that already holds good bytes must not clobber it.
+    let mut a = fresh().await;
+    a.handle_insert_memory("k".into(), Bytes::from_static(b"good"), None, AssetRetention::Lru)
+      .await
+      .unwrap();
+    a.handle_insert_memory("k".into(), Bytes::new(), None, AssetRetention::Lru)
+      .await
+      .unwrap();
+    let got = a.handle_get("k".into()).await.expect("existing asset survives an empty insert");
+    assert_eq!(&got.bytes[..], b"good");
+  }
+
+  #[tokio::test]
+  async fn empty_insert_rejected_for_every_memory_retention() {
+    let mut a = fresh().await;
+    for (id, retention) in [
+      ("lru", AssetRetention::Lru),
+      ("pin", AssetRetention::Pinned),
+      ("ttl", AssetRetention::Ttl(TtlRetention { seconds: 60 })),
+    ] {
+      a.handle_insert_memory(id.into(), Bytes::new(), None, retention)
+        .await
+        .unwrap();
+      assert!(a.handle_get(id.into()).await.is_none(), "empty {id} insert must not store");
+    }
+  }
+
+  #[tokio::test]
+  async fn empty_insert_from_path_is_not_stored() {
+    // chunked transfer that completes with a 0-byte file (declared_size=0) must not land.
+    let mut a = fresh().await;
+    let source = std::env::temp_dir().join(format!("empty-src-{}", uuid::Uuid::now_v7()));
+    tokio::fs::write(&source, b"").await.unwrap();
+    a.handle_insert_from_path("c/empty".into(), source, Some("image/jpeg".into()), AssetRetention::Lru)
+      .await
+      .unwrap();
+    assert!(a.handle_get("c/empty".into()).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn empty_persistent_insert_from_path_writes_no_blob() {
+    let blobs = temp_blobs();
+    let db = crate::db::open(None).await.unwrap();
+    let (events_tx, _) = broadcast::channel(16);
+    let (_cmd_tx, cmd_rx) = mpsc::channel(16);
+    let mut a = AssetActor::new(db, blobs.clone(), cmd_rx, events_tx)
+      .bootstrap()
+      .await
+      .unwrap();
+    let source = std::env::temp_dir().join(format!("empty-persist-{}", uuid::Uuid::now_v7()));
+    tokio::fs::write(&source, b"").await.unwrap();
+    a.handle_insert_from_path("p/empty".into(), source, None, AssetRetention::Persistent)
+      .await
+      .unwrap();
+    assert!(a.handle_get("p/empty".into()).await.is_none());
+    assert!(
+      !blobs.join(safe_blob_name("p/empty")).exists(),
+      "no persistent blob should be written for a 0-byte asset"
+    );
   }
 }
