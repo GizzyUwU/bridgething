@@ -147,8 +147,7 @@ function NoDeviceHero() {
         no Car Thing connected
       </Text>
       <Text className="mt-2 text-center text-[14px] leading-[20px] text-muted-foreground">
-        pair it from the status strip above, or plug it in — the bridge
-        auto-connects when it’s within Bluetooth range.
+        the bridge auto-connects when it’s within Bluetooth range
       </Text>
     </View>
   );

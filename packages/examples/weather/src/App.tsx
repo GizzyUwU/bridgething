@@ -37,7 +37,7 @@ export default function App() {
           if (!cancelled)
             setPhase({
               kind: 'error',
-              message: 'no location — set "location" in the companion, or connect a phone with GPS.',
+              message: 'no location - please set in companion app or allow gps',
             });
           return;
         }
@@ -170,7 +170,7 @@ async function fetchForecast(client: BridgethingClient, coords: Coords, units: s
 }
 
 function netErrorMessage(res: { kind: 'domain' | 'protocol'; error: unknown }): string {
-  if (res.kind === 'domain') return 'no network — is a phone connected to the companion app?';
+  if (res.kind === 'domain') return 'no network - please connect your phone';
   return 'network request failed.';
 }
 

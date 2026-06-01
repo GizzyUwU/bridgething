@@ -27,18 +27,22 @@ use uuid::Uuid;
 const RING_CAPACITY: usize = 512;
 const BROADCAST_CAPACITY: usize = 256;
 
-/// Identifies a subscription's owner so its streams drain when that peer goes
-/// away. Client subscribers are keyed by websocket addr, gateway subscribers
-/// by the companion's bt address.
+const TAP_TARGET_DENYLIST: &[&str] = &[
+  "bridgething::state::log_tap",
+  "libbridgething::protocol",
+  "bridgething::rfcomm::frame",
+];
+
+fn tap_denied(target: &str) -> bool {
+  TAP_TARGET_DENYLIST.iter().any(|prefix| target.starts_with(prefix))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogOwner {
   Client(SocketAddr),
   Gateway(Option<Address>),
 }
 
-/// Pushes one entry to a subscriber's transport. Returns false when the send
-/// fails terminally and the subscription should close. Lets one `LogTap` feed
-/// both the client websocket and gateway peers without knowing either transport.
 pub type LogSink = Box<dyn Fn(Arc<LogEntry>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 #[derive(Debug, Clone)]
@@ -178,6 +182,9 @@ where
 {
   fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
     let metadata = event.metadata();
+    if tap_denied(metadata.target()) {
+      return;
+    }
     let level = match *metadata.level() {
       tracing::Level::TRACE => LogLevel::Trace,
       tracing::Level::DEBUG => LogLevel::Debug,
@@ -284,6 +291,48 @@ mod tests {
     assert!(matches(&e, &[], Some("als")));
     assert!(matches(&e, &[], Some("brightness")));
     assert!(!matches(&e, &[], Some("nope")));
+  }
+
+  #[test]
+  fn tap_denied_matches_self_and_gateway_traffic_targets() {
+    assert!(tap_denied("bridgething::state::log_tap"));
+    assert!(tap_denied("libbridgething::protocol::bridge::encode"));
+    assert!(tap_denied("libbridgething::protocol::gateway::decoder"));
+    assert!(tap_denied("bridgething::rfcomm::frame"));
+    assert!(!tap_denied("bridgething::bluetooth::rfcomm"));
+    assert!(!tap_denied("bridgething::rfcomm::decode"));
+    assert!(!tap_denied("bridgething::als"));
+  }
+
+  #[test]
+  fn layer_excludes_denied_targets_from_capture() {
+    use tracing_subscriber::prelude::*;
+    let (tap, layer) = LogTap::new();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    tracing::subscriber::with_default(subscriber, || {
+      tracing::info!(target: "bridgething::als", "kept-normal");
+      tracing::trace!(target: "bridgething::state::log_tap", "self-feedback");
+      tracing::trace!(target: "libbridgething::protocol::bridge::encode", "codec-noise");
+      tracing::trace!(target: "bridgething::rfcomm::frame", "gateway-traffic");
+    });
+    let messages: Vec<String> = tap
+      .inner
+      .ring
+      .lock()
+      .unwrap()
+      .iter()
+      .map(|e| e.message.clone())
+      .collect();
+    assert!(
+      messages.iter().any(|m| m == "kept-normal"),
+      "normal events must still be captured: {messages:?}"
+    );
+    assert!(
+      messages
+        .iter()
+        .all(|m| !["self-feedback", "codec-noise", "gateway-traffic"].contains(&m.as_str())),
+      "denied targets must never enter the tap: {messages:?}"
+    );
   }
 
   #[tokio::test]

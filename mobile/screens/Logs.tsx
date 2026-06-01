@@ -86,7 +86,7 @@ export function LogsScreen({}: Props) {
           <Text className="text-center text-[14px] text-muted-foreground">
             {entries.length === 0
               ? streaming
-                ? 'streaming — no log lines yet'
+                ? 'streaming; no log lines yet'
                 : 'press start to stream device logs'
               : 'no entries match this filter'}
           </Text>

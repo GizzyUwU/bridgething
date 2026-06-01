@@ -36,7 +36,7 @@ export default function App() {
         const res = await client.net.fetch({
           request: { url, method: 'GET', headers: [], body: null, timeoutMs: 15_000, redirect: 'follow' },
         });
-        if (!res.ok) throw new Error(res.kind === 'domain' ? 'no network — is a phone connected?' : 'fetch failed.');
+        if (!res.ok) throw new Error(res.kind === 'domain' ? 'no network - connect your phone' : 'fetch failed.');
         const reply = res.response as NetFetchReply;
         if (reply.response.status >= 400) throw new Error(`calendar feed returned ${reply.response.status}`);
 

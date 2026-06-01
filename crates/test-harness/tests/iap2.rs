@@ -121,6 +121,53 @@ async fn iap2_artwork_resolves_and_appears_in_broadcast() {
   );
 }
 
+#[tokio::test]
+async fn iap2_zero_byte_artwork_does_not_strand_the_retransmit() {
+  let harness = Harness::start().await.expect("harness start");
+  let phone = harness.iap2_peer();
+  let art_id = "iap2/art/0000000000001234/7";
+
+  // now-playing advertises artwork transfer id 7: arms the pending-art mapping.
+  harness
+    .inject_iap2(
+      phone,
+      SessionEvent::NowPlayingUpdate(NowPlayingUpdate {
+        media_item: Some(MediaItemAttributes {
+          persistent_id: Some(0x1234),
+          title: Some("Art Song".into()),
+          artwork_id: Some(7),
+          ..Default::default()
+        }),
+        playback: None,
+      }),
+    )
+    .await
+    .expect("inject now-playing");
+
+  // transient placeholder: a 0-byte transfer for id 7.
+  harness.iap2_artwork(phone, 7, Vec::new()).await.expect("inject 0-byte artwork");
+
+  // iOS re-transmits the real bytes for the SAME id, with no new now-playing delta.
+  harness
+    .iap2_artwork(phone, 7, vec![0xFF; 64])
+    .await
+    .expect("inject real artwork retransmit");
+
+  let deadline = std::time::Instant::now() + CONVERGE;
+  let landed = loop {
+    if let Some(asset) = harness.state().assets.get(art_id).await.expect("asset get") {
+      break Some(asset);
+    }
+    if std::time::Instant::now() >= deadline {
+      break None;
+    }
+    tokio::time::sleep(Duration::from_millis(25)).await;
+  };
+
+  let asset = landed.expect("real artwork retransmit was dropped after a 0-byte placeholder");
+  assert_eq!(&asset.bytes[..], &[0xFF; 64][..], "cached bytes are the real retransmit");
+}
+
 /// The queue snapshot path: a now-playing delta with `queue_list_avail` + a
 /// transfer id arms the daemon, then the FileTransfer blob (a CSM param block of
 /// wrapped media items) decodes into the merged queue. Flipping `queue_list_avail`

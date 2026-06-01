@@ -282,7 +282,7 @@ function breadcrumbText(e: BridgethingDiagEntry): string {
   const fields: Record<string, string> = {};
   for (const f of e.fields ?? []) fields[f.key] = f.value;
   const extras = [fields.reason, fields.track].filter(Boolean).join(' · ');
-  return extras ? `${e.detail ?? ''} — ${extras}` : (e.detail ?? '');
+  return extras ? `${e.detail ?? ''} - ${extras}` : (e.detail ?? '');
 }
 
 function deviceLogToLine(l: DeviceLogLine): FeedLine {

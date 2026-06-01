@@ -439,9 +439,8 @@ function PairPage({
           pair your Car Thing
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-          turn on your Car Thing and tap pair. a system picker opens — it can
-          take a few seconds for your Car Thing to appear, then choose it to
-          finish.
+          turn on your Car Thing and tap pair. it can take a few seconds for
+          your Car Thing to appear.
         </Text>
 
         <View className="my-10 items-center">
@@ -469,7 +468,7 @@ function PairPage({
               pair
             </Button>
             <Button onPress={onContinue} variant="ghost" size="md">
-              skip — i&apos;ll pair later
+              skip
             </Button>
           </>
         )}

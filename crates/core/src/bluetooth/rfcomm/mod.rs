@@ -129,7 +129,7 @@ impl Connection {
   }
 
   async fn send(&self, msg: &BridgeToGatewayMsg, priority: Priority) -> BluetoothResult<()> {
-    tracing::trace!("({}) sending rfcomm message ({:?}): {:?}", self.address, priority, msg);
+    tracing::trace!(target: "bridgething::rfcomm::frame", "({}) sending rfcomm message ({:?}): {:?}", self.address, priority, msg);
     let mut buf = BytesMut::new();
     encode_bridge_frame(priority, msg, &mut buf)?;
     let bytes = buf.freeze();
@@ -269,7 +269,7 @@ impl RfcommGateway {
           }
         },
         Some(data) = self.send_rx.recv() => {
-          tracing::trace!("rfcomm gateway received message: {:?}", data);
+          tracing::trace!(target: "bridgething::rfcomm::frame", "rfcomm gateway received message: {:?}", data);
           let OutboundGatewayMessage { address, priority, msg } = data;
           if let Some(address) = address {
             if let Some(conn) = self.connections.get(&address) {
@@ -288,7 +288,7 @@ impl RfcommGateway {
           }
         },
         Some((address, msg)) = self.conn_rx.recv() => {
-          tracing::trace!("rfcomm message from {}: {:?}", address, msg);
+          tracing::trace!(target: "bridgething::rfcomm::frame", "rfcomm message from {}: {:?}", address, msg);
           match msg {
             ConnectionMessage::Close => {
               tracing::debug!("rfcomm connection closed: {:?}", address);

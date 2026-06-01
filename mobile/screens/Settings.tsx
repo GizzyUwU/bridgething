@@ -489,7 +489,7 @@ export function SettingsScreen({ navigation }: Props) {
               icon={TerminalSquare}
               iconTint="default"
               title="live log stream"
-              subtitle="device logs over Bluetooth — pulls real cost while on"
+              subtitle="device logs over Bluetooth (slows connection while active)"
               chevron
               onPress={() => navigation.navigate('Logs')}
             />
@@ -638,7 +638,7 @@ function OtaDeviceCard({
         </View>
       ) : status?.phase === 'completed' ? (
         <Text className="mt-1 text-[12px] text-muted-foreground">
-          updated — Car Thing is rebooting
+          rebooting to complete installation...
         </Text>
       ) : null}
       {status?.error ? (
@@ -781,7 +781,7 @@ function GeoFlagRow({
   const granted = status === RESULTS.GRANTED || status === RESULTS.LIMITED;
   const blocked = status === RESULTS.BLOCKED;
   const subtitle = blocked
-    ? 'denied at the system level — tap to open Settings'
+    ? 'denied at the system level'
     : 'forward your phone’s location to webapps that ask';
 
   const handleToggle = async (next: boolean) => {
@@ -850,7 +850,7 @@ function BackgroundLocationRow() {
   const subtitle = granted
     ? 'allowed all the time'
     : blocked
-      ? 'denied at the system level — tap to open Settings'
+      ? 'denied at the system level'
       : 'forward fixes even when the app is in the background';
 
   const handleToggle = async (next: boolean) => {

@@ -1,12 +1,12 @@
-//! Model-based property engine (roadmap step 7, phase 2) — Mode 1: deterministic
+//! Model-based property engine - Mode 1: deterministic
 //! differential. A proptest strategy generates random sequences over the atomic
 //! inbound vocabulary; each event is applied to both the real headless daemon
 //! and the reference [`Model`], and after every event the daemon's merged
 //! projection must equal the model's. A divergence is either a daemon bug or a
-//! model bug — both worth knowing.
+//! model bug - both worth knowing.
 //!
 //! The vocabulary spans both sources: iAP2 deltas + artwork (where the cover-art
-//! family lives — the production flicker was a no-companion phone) and companion
+//! family lives - the production flicker was a no-companion phone) and companion
 //! deltas + authority claim/release (the authority-gated merge: fallthrough and
 //! the artwork-no-fallthrough rule). Companion disconnect and the chaos /
 //! invariants mode land next.
@@ -20,7 +20,7 @@
 //!
 //! The barrier is combined: after every event we wait for the daemon's player
 //! projection AND its live authority scopes to match the model. The authority
-//! half is load-bearing — a bare claim has no player-observable effect, and the
+//! half is load-bearing - a bare claim has no player-observable effect, and the
 //! companion handler spawns per message, so without it a claim would race a
 //! following companion delta.
 

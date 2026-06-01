@@ -142,10 +142,10 @@ function StateDump({
     <ScrollView contentContainerClassName="px-5 py-4 pb-12">
       {np ? (
         <Section title="now playing">
-          <Row label="track id" value={np.track?.id ?? '—'} wrap />
-          <Row label="title" value={np.track?.title ?? '—'} />
-          <Row label="artist" value={np.track?.artist ?? '—'} />
-          <Row label="album" value={np.track?.album ?? '—'} />
+          <Row label="track id" value={np.track?.id ?? '-'} wrap />
+          <Row label="title" value={np.track?.title ?? '-'} />
+          <Row label="artist" value={np.track?.artist ?? '-'} />
+          <Row label="album" value={np.track?.album ?? '-'} />
           <Row label="duration" value={ms(np.track?.durationMs)} />
           <Row label="position" value={ms(np.playback.positionMs)} />
           <Row
@@ -154,7 +154,7 @@ function StateDump({
           />
           <Row label="shuffle" value={yesno(np.playback.shuffle)} />
           <Row label="repeat" value={repeat} />
-          <Row label="app" value={np.appName ?? '—'} />
+          <Row label="app" value={np.appName ?? '-'} />
         </Section>
       ) : null}
 
@@ -220,14 +220,14 @@ function StateDump({
 
       {snapshot?.deviceMeta.map(d => (
         <Section key={d.deviceId} title={`device · ${d.deviceId}`}>
-          <Row label="model" value={d.meta.modelName || '—'} />
-          <Row label="serial" value={d.meta.serialNumber || '—'} wrap />
-          <Row label="channel" value={d.meta.channel || '—'} />
-          <Row label="daemon" value={d.meta.daemonVersion || '—'} />
-          <Row label="image" value={d.meta.imageVersion || '—'} />
+          <Row label="model" value={d.meta.modelName || '-'} />
+          <Row label="serial" value={d.meta.serialNumber || '-'} wrap />
+          <Row label="channel" value={d.meta.channel || '-'} />
+          <Row label="daemon" value={d.meta.daemonVersion || '-'} />
+          <Row label="image" value={d.meta.imageVersion || '-'} />
           <Row
             label="os"
-            value={`${d.meta.osName} ${d.meta.osVersion}`.trim() || '—'}
+            value={`${d.meta.osName} ${d.meta.osVersion}`.trim() || '-'}
           />
         </Section>
       ))}
@@ -325,7 +325,7 @@ function Row({
 }
 
 function ms(value: number | undefined): string {
-  if (value == null) return '—';
+  if (value == null) return '-';
   const total = Math.round(value / 1000);
   const m = Math.floor(total / 60);
   const s = total % 60;
@@ -354,7 +354,7 @@ function renderMerge({ item }: ListRenderItemInfo<BridgethingDiagEntry>) {
       </View>
       <Text className="mt-1 font-mono text-[12px] leading-[16px] text-foreground">
         {item.detail}
-        {fields.track ? ` — ${fields.track}` : ''}
+        {fields.track ? ` - ${fields.track}` : ''}
         {fields.playing
           ? ` (${fields.playing === 'true' ? 'playing' : 'paused'})`
           : ''}

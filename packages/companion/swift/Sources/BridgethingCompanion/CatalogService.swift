@@ -36,6 +36,7 @@ public struct CatalogAppListing: Encodable, Sendable, Equatable {
     public let newestCompatible: CatalogAppVersion?
     public let installedVersion: String?
     public let updateAvailable: Bool
+    public let alsoAvailableFrom: [URL]
 
     private enum CodingKeys: String, CodingKey {
         case app

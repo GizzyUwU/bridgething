@@ -160,7 +160,7 @@ function BluetoothPanel({ client }: { client: BridgethingClient }) {
           className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
             discoverable ? 'bg-bt-blue/20 text-bt-blue' : 'bg-white/5 text-bt-off-white'
           }`}>
-          {discoverable ? 'discoverable — tap to stop' : 'make discoverable'}
+          {discoverable ? 'discoverable' : 'make discoverable'}
         </button>
       </Card>
 

@@ -15,10 +15,7 @@ use serde_json::{Value, json};
 
 use super::{HandlerResult, MsgHandle};
 use crate::{
-  asset::{
-    CachedAsset,
-    wait::{ASSET_WAIT_TIMEOUT, wait_for_asset},
-  },
+  asset::{CachedAsset, wait::FetchOutcome},
   stock::{
     GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
     presets,
@@ -105,27 +102,13 @@ impl LegacyStockHandler {
   async fn serve_asset_to_stock(self, id: String) -> HandlerResult {
     tracing::debug!("({}) stock image lookup for id: {}", &self.handle.from, id);
     let stock_msg_id = self.handle.stock_msg_id;
-
-    if let Some(asset) = self.handle.state.assets.get(&id).await? {
-      return self.send_stock_image(stock_msg_id, &asset).await;
+    match super::asset::resolve_asset(&self.handle.state, &self.handle.bluetooth, &id).await {
+      FetchOutcome::Got(asset) => self.send_stock_image(stock_msg_id, &asset).await,
+      FetchOutcome::NotFound => {
+        tracing::trace!("({}) no asset for stock image id: {}", &self.handle.from, id);
+        self.send_empty_stock_image(stock_msg_id).await
+      }
     }
-
-    let is_now_playing = self.handle.state.player.current_artwork_id().as_deref() == Some(id.as_str());
-    if !is_now_playing {
-      tracing::trace!(
-        "({}) asset miss for stock image (not now-playing): {}",
-        &self.handle.from,
-        id
-      );
-      return self.send_empty_stock_image(stock_msg_id).await;
-    }
-
-    if let Some(asset) = wait_for_asset(&self.handle.state.assets, &id, ASSET_WAIT_TIMEOUT).await {
-      tracing::debug!("({}) now-playing art landed during wait: {}", &self.handle.from, id);
-      return self.send_stock_image(stock_msg_id, &asset).await;
-    }
-    tracing::trace!("({}) now-playing art wait timed out for: {}", &self.handle.from, id);
-    self.send_empty_stock_image(stock_msg_id).await
   }
 
   async fn send_stock_image(&self, stock_msg_id: Option<usize>, asset: &CachedAsset) -> HandlerResult {

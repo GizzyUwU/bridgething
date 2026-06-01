@@ -221,6 +221,10 @@ impl Iap2EventRouter {
         }
       }
       SessionEvent::ArtworkBytes { transfer_id, bytes } => {
+        if bytes.is_empty() {
+          tracing::debug!(%address, transfer_id, "iAP2 0-byte artwork; retaining pending entry");
+          return;
+        }
         let Some(asset_id) = self.pending_art.take_if_matches(address, transfer_id).await else {
           tracing::debug!(
             %address,

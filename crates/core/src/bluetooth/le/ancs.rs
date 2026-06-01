@@ -234,9 +234,7 @@ impl Ancs {
     self.ds_buffer.clear();
     if self.consecutive_timeouts == ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
       tracing::warn!(
-        "ANCS notifications arriving but iOS is dropping or rejecting content reads — iPhone has no \
-         LE-bond ANCS authorization for this peer. Run the companion iOS app's \"Enable notifications\" \
-         flow to LE-pair the device and accept the ANCS prompt"
+        "ANCS notifications arriving but iOS is dropping or rejecting content reads"
       );
       true
     } else {
