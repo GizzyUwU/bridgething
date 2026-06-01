@@ -152,7 +152,7 @@ pub struct StreamError {
 
 #[typeshare]
 #[serde_with::serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum WsFrame {
@@ -162,6 +162,20 @@ pub enum WsFrame {
     #[ts(type = "Uint8Array")]
     Vec<u8>,
   ),
+}
+
+impl std::fmt::Debug for WsFrame {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    const HEAD: usize = 4096;
+    match self {
+      Self::Text(s) if s.len() > HEAD => {
+        let head: String = s.chars().take(HEAD).collect();
+        write!(f, "Text({head:?}… <{} bytes total>)", s.len())
+      }
+      Self::Text(s) => write!(f, "Text({s:?})"),
+      Self::Binary(b) => write!(f, "Binary(<{} bytes>)", b.len()),
+    }
+  }
 }
 
 #[typeshare]

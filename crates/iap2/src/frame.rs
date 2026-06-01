@@ -162,20 +162,15 @@ pub struct SessionTriple {
 }
 
 impl Lsp {
-  /// Production accessory defaults; the iPhone replaces these with its
-  /// own proposal during SYN exchange. Session list: control on id 1,
-  /// file-transfer on id 2 (version 2), external-accessory on id 3. The
-  /// full list is required to keep the link open past NEGOTIATE; offering
-  /// only "control" makes the iPhone RST silently.
   pub fn accessory_default() -> Self {
     Self {
       version: 1,
-      max_outgoing: 5,
-      max_len: 2048,
+      max_outgoing: 64,
+      max_len: 16384,
       retransmission_timeout_ms: 6000,
       ack_timeout_ms: 3000,
       max_retransmissions: 30,
-      max_ack: 3,
+      max_ack: 8,
       sessions: vec![
         SessionTriple {
           id: 1,
@@ -292,6 +287,7 @@ impl Decoder for LinkCodec {
         Ok(h) => h,
         Err(FrameError::Incomplete) => return Ok(None),
         Err(FrameError::BadHeaderChecksum) | Err(FrameError::BadMagic) => {
+          tracing::debug!("iap2 decode: magic matched but header checksum failed, resyncing one byte");
           src.advance(1);
           continue;
         }
@@ -299,6 +295,11 @@ impl Decoder for LinkCodec {
       };
       let total_len = header.length as usize;
       if total_len < LINK_HEADER_LEN {
+        tracing::debug!(
+          "iap2 decode: implausible length {} (< header) for seq {}, resyncing one byte",
+          header.length,
+          header.seq
+        );
         src.advance(1);
         continue;
       }
@@ -311,7 +312,12 @@ impl Decoder for LinkCodec {
       } else {
         let payload_with_csum = &src[LINK_HEADER_LEN..total_len];
         if !verify_modular_sum(payload_with_csum) {
-          src.advance(1);
+          tracing::warn!(
+            "iap2 decode: bad payload checksum for seq {} (len {}), skipping packet",
+            header.seq,
+            header.length
+          );
+          src.advance(total_len);
           continue;
         }
         let payload_len = trailer_len - 1;

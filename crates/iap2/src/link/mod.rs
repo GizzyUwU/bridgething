@@ -28,7 +28,7 @@ use crate::{
   frame::{ControlBits, DETECT_MARKER, LINK_MAGIC, LinkCodec, LinkPacket, Lsp},
 };
 
-const READ_CAPACITY: usize = 4096;
+const READ_CAPACITY: usize = 16384;
 
 #[derive(Debug, Clone)]
 pub struct LinkConfig {
