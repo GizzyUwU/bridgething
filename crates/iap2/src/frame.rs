@@ -165,12 +165,12 @@ impl Lsp {
   pub fn accessory_default() -> Self {
     Self {
       version: 1,
-      max_outgoing: 64,
-      max_len: 16384,
-      retransmission_timeout_ms: 15000,
-      ack_timeout_ms: 6000,
+      max_outgoing: 5,
+      max_len: 2048,
+      retransmission_timeout_ms: 6000,
+      ack_timeout_ms: 3000,
       max_retransmissions: 30,
-      max_ack: 8,
+      max_ack: 3,
       sessions: vec![
         SessionTriple {
           id: 1,
