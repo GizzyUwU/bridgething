@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { DebugOverlay } from './components/DebugOverlay';
 import { SpotifyAuthWebView } from './components/SpotifyAuthWebView';
 import { Press } from './components/Press';
 import { Wordmark } from './components/Wordmark';
@@ -197,7 +196,6 @@ export default function App() {
         </Stack.Navigator>
       </NavigationContainer>
       <SpotifyAuthWebView />
-      <DebugOverlay />
     </SafeAreaProvider>
   );
 }

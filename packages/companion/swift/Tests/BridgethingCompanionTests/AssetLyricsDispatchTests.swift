@@ -59,6 +59,35 @@ final class AssetLyricsDispatchTests: XCTestCase {
         await h.companion.stop()
     }
 
+    func testAssetDispatchRunsConcurrently() async throws {
+        var behaviors = FakeGlue.Behaviors()
+        behaviors.asset = { _ in
+            try? await Task.sleep(for: .milliseconds(400))
+            return AssetBytes(bytes: Data([0x1]), mime: "image/jpeg")
+        }
+        let h = try await boot(glue: FakeGlue(behaviors: behaviors))
+
+        let count = 6
+        let start = ContinuousClock.now
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0 ..< count {
+                group.addTask {
+                    _ = try? await h.driver.request(
+                        .asset(.request(AssetRequest(id: "art:\(i)", requestId: UUID()))),
+                        timeout: .seconds(5)
+                    )
+                }
+            }
+        }
+        let elapsed = start.duration(to: .now)
+        // serial dispatch would be ~count * 400ms (2.4s); per-message concurrency is ~400ms.
+        XCTAssertLessThan(
+            elapsed, .milliseconds(1500),
+            "asset dispatch must run per-message-concurrent, not serialize behind each fetch"
+        )
+        await h.companion.stop()
+    }
+
     func testAssetMissReturnsNotFound() async throws {
         // FakeGlue with no asset behavior returns nil -> notFound.
         let h = try await boot()

@@ -27,6 +27,27 @@ pub struct LibraryBrowseRequest {
   pub offset: u32,
 }
 
+/// Resolve a single context uri (playlist / album / show / artist) to its
+/// name + cover art. Used to populate a stock preset slot the device only
+/// knows by `context_uri`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = BridgeToGateway,
+  surface = Library,
+  request_variant = ResolveContext,
+  response = crate::gateway::ContextResolveReply,
+  response_variant = ContextResolveReply,
+  error = crate::gateway::LibraryErrorReply,
+  error_variant = LibraryErrorReply,
+)]
+pub struct LibraryResolveContextRequest {
+  pub uri: String,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
@@ -155,6 +176,8 @@ pub struct FavoritesSetMany {
 pub enum BridgeToGatewayLibraryMsg {
   #[bridge_request]
   Browse(LibraryBrowseRequest),
+  #[bridge_request]
+  ResolveContext(LibraryResolveContextRequest),
   #[bridge_request]
   Search(LibrarySearchRequest),
   #[bridge_request]

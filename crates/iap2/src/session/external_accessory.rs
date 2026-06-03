@@ -83,6 +83,11 @@ impl EaFlow {
       || msg_id == StopExternalAccessoryProtocolSession::CSM_MSG_ID
   }
 
+  /// True while at least one EA stream is open, i.e. a companion app is attached.
+  pub(super) fn has_open_streams(&self) -> bool {
+    !self.streams.is_empty()
+  }
+
   /// Idempotent post-Identified kick: sends `RequestAppLaunch` once per session. iOS silently
   /// ignores it unless the bundle id names an installed app declaring our EA protocol string in
   /// its `UISupportedExternalAccessoryProtocols` Info.plist key.

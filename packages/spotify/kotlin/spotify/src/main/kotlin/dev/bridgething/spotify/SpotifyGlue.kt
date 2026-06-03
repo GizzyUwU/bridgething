@@ -1,7 +1,7 @@
 package dev.bridgething.spotify
 
 import dev.bridgething.gateway.BridgethingGateway
-import dev.bridgething.gateway.DiagnosticsBuffer
+import dev.bridgething.gateway.asset
 import dev.bridgething.gateway.authority
 import dev.bridgething.gateway.player
 import dev.bridgething.glue.AssetBytes
@@ -12,11 +12,14 @@ import dev.bridgething.glue.GlueDebugState
 import dev.bridgething.glue.GlueError
 import dev.bridgething.glue.GlueNowPlaying
 import dev.bridgething.glue.GlueServiceHealth
+import dev.bridgething.schema.AssetPush
+import dev.bridgething.schema.AssetRetention
 import dev.bridgething.schema.AuthorityClaim
 import dev.bridgething.schema.AuthorityRelease
 import dev.bridgething.schema.BrowseEntry
 import dev.bridgething.schema.BrowseFolder
 import dev.bridgething.schema.BrowseResult
+import dev.bridgething.schema.ContextResolveReply
 import dev.bridgething.schema.CompanionAuthorityScope
 import dev.bridgething.schema.FavoritesPage
 import dev.bridgething.schema.FavoritesSet
@@ -32,8 +35,8 @@ import dev.bridgething.schema.MediaItemUpdate
 import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NowPlayingUpdate
 import dev.bridgething.schema.PlayUri
-import dev.bridgething.schema.PlaybackHint
 import dev.bridgething.schema.PlaybackUpdate
+import dev.bridgething.schema.Priority
 import dev.bridgething.schema.QueuePosition
 import dev.bridgething.schema.QueueUri
 import dev.bridgething.schema.RecommendationsResult
@@ -49,7 +52,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsBytes
@@ -65,18 +71,22 @@ import dev.bridgething.schema.Show as WireShow
 import dev.bridgething.schema.Track as WireTrack
 
 private const val ASSET_ID_PREFIX = "spotify/img/"
-private const val HINT_DEBOUNCE_MS = 250L
+private const val DEFAULT_HERO_EDGE = 248
+private const val IMAGE_BROWSE_EDGE = 300
+private const val CONTROL_REFETCH_MS = 700L
 private const val POLL_INTERVAL_MS = 60_000L
 private const val SPOTIFY_APP_BUNDLE = "com.spotify.client"
 
 typealias SpotifyAuthenticatorFactory = () -> SpotifyAuthenticator
 
-/** `BridgethingGlue` impl; no dealer websocket, so now-playing is driven by playback hints plus a baseline poll. */
+/** `BridgethingGlue` impl. */
 class SpotifyGlue(
     private val authenticatorFactory: SpotifyAuthenticatorFactory,
     private val accessToken: String = "",
     private val refreshToken: String = "",
     private val onTokensRefreshed: ((accessToken: String, refreshToken: String) -> Unit)? = null,
+    private val usesDealer: Boolean = false,
+    private val engine: HttpClientEngine? = null,
 ) : BridgethingGlue, SpotinyDelegate {
     override val name: String = "spotify"
     override val displayName: String = "Spotify"
@@ -96,7 +106,16 @@ class SpotifyGlue(
     override val lyricsSupported: Boolean = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val httpClient = HttpClient(CIO)
+    private val httpClient = run {
+        val configure: HttpClientConfig<*>.() -> Unit = {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 6_000
+                connectTimeoutMillis = 4_000
+            }
+        }
+        if (engine != null) HttpClient(engine, configure) else HttpClient(CIO, configure)
+    }
+    private val pushedAssetIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private var client: SpotinyClient? = null
     private var gateway: BridgethingGateway? = null
@@ -107,11 +126,13 @@ class SpotifyGlue(
     private var hintFetchJob: Job? = null
     private var baselinePollJob: Job? = null
     private var connectJob: Job? = null
+    @Volatile private var heroEdge: Int = DEFAULT_HERO_EDGE
 
     override suspend fun attach(gateway: BridgethingGateway) {
         if (this.gateway != null) detach()
 
         this.gateway = gateway
+        pushedAssetIds.clear()
 
         if (accessToken.isEmpty() && refreshToken.isEmpty()) {
             // no tokens yet: RN drives interactive sign-in and re-attaches via completeSpotifySignIn.
@@ -127,10 +148,19 @@ class SpotifyGlue(
             delegate = this,
             accessToken = accessToken,
             refreshToken = refreshToken,
+            engine = engine,
         )
         this.client = client
 
-        connectJob = scope.launch { client.connect() }
+        connectJob = scope.launch {
+            if (usesDealer) {
+                client.connect()
+            } else {
+                client.authenticateOnly()
+                startBaselinePollIfNeeded()
+                fetchAndDispatch()
+            }
+        }
     }
 
     override suspend fun detach() {
@@ -143,6 +173,7 @@ class SpotifyGlue(
         hintFetchJob = null
         baselinePollJob?.cancel()
         baselinePollJob = null
+        runCatching { client?.disconnect() }
 
         val gw = gateway
         if (gw != null && authorityHeld) {
@@ -160,6 +191,10 @@ class SpotifyGlue(
 
     override suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) {
         nowPlayingObserver = observer
+    }
+
+    override suspend fun setArtProfile(heroPx: Int, thumbPx: Int) {
+        heroEdge = heroPx.coerceAtLeast(1)
     }
 
     override suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {
@@ -182,6 +217,7 @@ class SpotifyGlue(
             val parsed = SpotifyUri.parse(uri.uri) ?: throw GlueError.NotImplemented
             client.player.play(uri = parsed)
         }
+        scheduleControlRefetch()
     }
 
     suspend fun queue(req: QueueUri) {
@@ -194,31 +230,37 @@ class SpotifyGlue(
     override suspend fun pause() {
         val client = client ?: throw GlueError.Detached
         client.player.pause()
+        scheduleControlRefetch()
     }
 
     override suspend fun resume() {
         val client = client ?: throw GlueError.Detached
         client.player.resume()
+        scheduleControlRefetch()
     }
 
     override suspend fun skipNext() {
         val client = client ?: throw GlueError.Detached
         client.player.skipNext()
+        scheduleControlRefetch()
     }
 
     override suspend fun skipPrev() {
         val client = client ?: throw GlueError.Detached
         client.player.skipPrevious()
+        scheduleControlRefetch()
     }
 
     override suspend fun seekTo(positionMs: UInt) {
         val client = client ?: throw GlueError.Detached
         client.player.seek(positionMs.toInt())
+        scheduleControlRefetch()
     }
 
     override suspend fun setShuffle(on: Boolean) {
         val client = client ?: throw GlueError.Detached
         client.player.setShuffle(on)
+        scheduleControlRefetch()
     }
 
     override suspend fun setRepeat(mode: WireRepeat) {
@@ -229,6 +271,7 @@ class SpotifyGlue(
             WireRepeat.One -> RepeatMode.TRACK
         }
         client.player.setRepeatMode(mapped)
+        scheduleControlRefetch()
     }
 
     override suspend fun search(req: LibrarySearchRequest): SearchResult {
@@ -268,6 +311,34 @@ class SpotifyGlue(
         }
 
         return SearchResult(items = items, kinds = presentKinds, total = null, hasMore = reachedFullPage)
+    }
+
+    override suspend fun resolveContext(uri: String): ContextResolveReply {
+        val client = client ?: throw GlueError.Detached
+        val parsed = SpotifyUri.parse(uri) ?: throw GlueError.NotImplemented
+        fun reply(name: String?, imageUrl: SpotifyImageURLs?, subtitle: String? = null): ContextResolveReply {
+            val artworkId = imageUrl?.let { imageAssetId(bestImageUrl(it, heroEdge), heroEdge) }
+            return ContextResolveReply(name = name, artworkId = artworkId, subtitle = subtitle)
+        }
+        return when (parsed.kind) {
+            SpotifyUri.Kind.PLAYLIST, SpotifyUri.Kind.PLAYLIST_V2 -> {
+                val p = client.playlists.getPlaylist(parsed)
+                reply(p?.name, p?.imageUrl)
+            }
+            SpotifyUri.Kind.ALBUM -> {
+                val a = client.albums.getAlbum(parsed)
+                reply(a?.name, a?.imageUrl, a?.artists?.firstOrNull()?.name)
+            }
+            SpotifyUri.Kind.SHOW -> {
+                val s = client.shows.getShow(parsed)
+                reply(s?.name, s?.imageUrl)
+            }
+            SpotifyUri.Kind.ARTIST, SpotifyUri.Kind.ARTIST_TOPLIST -> {
+                val ar = client.artists.getArtist(parsed)
+                reply(ar?.name, ar?.imageUrl)
+            }
+            else -> throw GlueError.NotImplemented
+        }
     }
 
     override suspend fun browse(req: LibraryBrowseRequest): BrowseResult {
@@ -323,6 +394,53 @@ class SpotifyGlue(
             ALBUMS_NODE -> {
                 val page = client.albums.getUserSavedAlbums(limit, offset)
                 val entries = page.items.map { BrowseEntry.Item(LibraryItem.Album(mapAlbum(it))) }
+                section(entries, page.items.size, page.total, offset)
+            }
+
+            else -> {
+                val nodeId = req.nodeId ?: return BrowseResult(entries = emptyList(), total = null, hasMore = false)
+                val parsed = SpotifyUri.parse(nodeId)
+                    ?: return BrowseResult(entries = emptyList(), total = null, hasMore = false)
+                browseChildren(client, parsed, limit, offset)
+            }
+        }
+    }
+
+    private suspend fun browseChildren(client: SpotinyClient, uri: SpotifyUri, limit: Int, offset: Int): BrowseResult {
+        return when (uri.kind) {
+            SpotifyUri.Kind.PLAYLIST, SpotifyUri.Kind.PLAYLIST_V2 -> {
+                val page = client.playlists.getPlaylistItems(uri, limit, offset)
+                val entries = page.items.map { mapPlaylistItem(it) }
+                section(entries, page.items.size, page.total, offset)
+            }
+
+            SpotifyUri.Kind.ALBUM -> {
+                val page = client.albums.getAlbumTracks(uri, limit, offset)
+                val entries = page.items.map { BrowseEntry.Item(LibraryItem.Track(mapTrack(it))) }
+                section(entries, page.items.size, page.total, offset)
+            }
+
+            SpotifyUri.Kind.ARTIST, SpotifyUri.Kind.ARTIST_TOPLIST -> {
+                // artist top-tracks is not offset-paged.
+                val entries = client.artists.getArtistTopTracks(uri).map { BrowseEntry.Item(LibraryItem.Track(mapTrack(it))) }
+                BrowseResult(entries = entries, total = entries.size.toUInt(), hasMore = false)
+            }
+
+            SpotifyUri.Kind.SHOW -> {
+                val page = client.shows.getShowEpisodes(uri, limit, offset)
+                val entries = page.items.map { BrowseEntry.Item(LibraryItem.PodcastEpisode(mapEpisode(it))) }
+                section(entries, page.items.size, page.total, offset)
+            }
+
+            SpotifyUri.Kind.COLLECTION -> {
+                val page = client.tracks.getUserSavedTracks(limit, offset)
+                val entries = page.items.map { BrowseEntry.Item(LibraryItem.Track(mapTrack(it, saved = true))) }
+                section(entries, page.items.size, page.total, offset)
+            }
+
+            SpotifyUri.Kind.YOUR_EPISODES -> {
+                val page = client.episodes.getUserSavedEpisodes(limit, offset)
+                val entries = page.items.map { BrowseEntry.Item(LibraryItem.PodcastEpisode(mapEpisode(it))) }
                 section(entries, page.items.size, page.total, offset)
             }
 
@@ -456,19 +574,13 @@ class SpotifyGlue(
     private fun spotifyUri(raw: String): SpotifyUri? =
         SpotifyUri.parse(raw)?.takeIf { it.namespace == "spotify" }
 
-    suspend fun handlePlaybackHint(hint: PlaybackHint) {
-        if (hint.appBundle != SPOTIFY_APP_BUNDLE) return
-
-        DiagnosticsBuffer.recordBreadcrumb(
-            category = "spotify.merge",
-            detail = "iap2 playback hint",
-            fields = listOf("source" to "iap2BackProp"),
-        )
+    private fun scheduleControlRefetch() {
+        if (usesDealer) return
         hintFetchJob?.cancel()
         hintFetchJob = scope.launch {
-            delay(HINT_DEBOUNCE_MS)
+            delay(CONTROL_REFETCH_MS)
             if (!isActive) return@launch
-            fetchAndDispatch("hint")
+            fetchAndDispatch()
         }
     }
 
@@ -480,52 +592,58 @@ class SpotifyGlue(
     )
 
     override suspend fun asset(id: String): AssetBytes? {
-        if (!id.startsWith(ASSET_ID_PREFIX)) return null
-        val encoded = id.substring(ASSET_ID_PREFIX.length)
-        val urlString = runCatching { URLDecoder.decode(encoded, "UTF-8") }.getOrNull() ?: return null
+        val (urlString, maxEdge) = parseImageId(id) ?: return null
         val response: HttpResponse = httpClient.get(urlString)
         if (response.status.value !in 200..299) return null
-        val mime = response.headers[HttpHeaders.ContentType]
-        return AssetBytes(bytes = response.bodyAsBytes(), mime = mime)
+        val data = response.bodyAsBytes()
+        val scaled = downsample(data, maxEdge)
+        return if (scaled != null) {
+            AssetBytes(bytes = scaled, mime = "image/jpeg")
+        } else {
+            AssetBytes(bytes = data, mime = response.headers[HttpHeaders.ContentType])
+        }
     }
 
-    private suspend fun fetchAndDispatch(reason: String) {
+    private suspend fun pushArtwork(item: PlayerItem?, maxEdge: Int) {
+        val gateway = gateway ?: return
+        val raw = item?.let { rawArtworkUrl(it, maxEdge) } ?: return
+        val id = imageAssetId(raw, maxEdge) ?: return
+        if (pushedAssetIds.contains(id)) return
+        val bytes = runCatching { asset(id) }.getOrNull() ?: return
+        runCatching {
+            gateway.asset.push(
+                AssetPush(id = id, bytes = bytes.bytes, mime = bytes.mime ?: "image/jpeg", retention = AssetRetention.Lru),
+                Priority.Bulk,
+            )
+            pushedAssetIds.add(id)
+        }
+    }
+
+    private suspend fun fetchAndDispatch() {
         val client = client ?: return
         val state = client.player.getPlaybackState() ?: return
-        handleStateUpdate(state, reason)
+        handleStateUpdate(state)
     }
 
-    private fun handleStateUpdate(state: PlayerState, reason: String) {
+    private fun handleStateUpdate(state: PlayerState) {
         val gateway = gateway ?: return
-        val update = makeUpdate(state)
-        val artworkUrl = state.item?.let { rawArtworkUrl(it) }
+        val update = makeUpdate(state, heroEdge)
+        val artworkUrl = state.item?.let { rawArtworkUrl(it, heroEdge) }
         nowPlayingObserver?.invoke(GlueNowPlaying(update = update, artworkUrl = artworkUrl))
 
         val nowPlaying = state.isPlaying
-        DiagnosticsBuffer.recordBreadcrumb(
-            category = "spotify.merge",
-            detail = "augmented now-playing",
-            fields = listOf(
-                "source" to "companionAugmented",
-                "reason" to reason,
-                "track" to (state.item?.name ?: ""),
-                "playing" to nowPlaying.toString(),
-            ),
-        )
         scope.launch {
+            pushArtwork(state.item, heroEdge)
             runCatching { gateway.player.delta(update) }
             if (nowPlaying) {
                 runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingPlayback)) }
                 runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingMetadata)) }
                 authorityHeld = true
-                DiagnosticsBuffer.recordBreadcrumb("spotify.authority", "claimed playback+metadata")
-                startBaselinePollIfNeeded()
+                if (!usesDealer) startBaselinePollIfNeeded()
             } else if (authorityHeld) {
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingPlayback)) }
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingMetadata)) }
                 authorityHeld = false
-                DiagnosticsBuffer.recordBreadcrumb("spotify.authority", "released playback+metadata")
-                stopBaselinePoll()
             }
         }
     }
@@ -548,7 +666,7 @@ class SpotifyGlue(
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
                 if (!isActive) return@launch
-                fetchAndDispatch("poll")
+                fetchAndDispatch()
             }
         }
     }
@@ -577,7 +695,7 @@ class SpotifyGlue(
     }
 
     override fun playerStateUpdated(oldState: PlayerState?, newState: PlayerState) {
-        handleStateUpdate(newState, "dealer")
+        handleStateUpdate(newState)
     }
 
     override fun serviceDidRateLimit(retryAfterSeconds: Int) {
@@ -634,7 +752,7 @@ class SpotifyGlue(
                 ),
             )
 
-        fun makeUpdate(state: PlayerState): NowPlayingUpdate {
+        fun makeUpdate(state: PlayerState, heroEdge: Int): NowPlayingUpdate {
             val media: MediaItemUpdate? = state.item?.let { item ->
                 val title = item.name
                 val artist = item.artists.joinToString(", ") { it.name }
@@ -646,7 +764,7 @@ class SpotifyGlue(
                     albumArtist = null,
                     artist = artist.ifEmpty { null },
                     liked = null,
-                    artworkId = artworkId(item),
+                    artworkId = artworkId(item, heroEdge),
                     durationMs = maxOf(item.durationMs, 0).toUInt(),
                     mediaTypes = null,
                     trackNumber = null,
@@ -681,28 +799,72 @@ class SpotifyGlue(
             return NowPlayingUpdate(mediaItem = media, playback = playback)
         }
 
-        fun artworkId(item: PlayerItem): String? = imageAssetId(rawArtworkUrl(item) ?: "")
+        fun artworkId(item: PlayerItem, maxEdge: Int): String? = imageAssetId(rawArtworkUrl(item, maxEdge) ?: "", maxEdge)
 
-        fun rawArtworkUrl(item: PlayerItem): String? {
-            val url = bestImageUrl(item.imageUrl)
+        fun rawArtworkUrl(item: PlayerItem, maxEdge: Int): String? {
+            val url = bestImageUrl(item.imageUrl, maxEdge)
             return url.ifEmpty { null }
         }
 
-        fun bestImageUrl(urls: SpotifyImageURLs): String {
+        fun bestImageUrl(urls: SpotifyImageURLs, maxEdge: Int): String {
+            if (maxEdge <= 64) {
+                if (urls.small.isNotEmpty()) return urls.small
+                if (urls.medium.isNotEmpty()) return urls.medium
+                return urls.large
+            }
+            if (maxEdge <= 300) {
+                if (urls.medium.isNotEmpty()) return urls.medium
+                if (urls.large.isNotEmpty()) return urls.large
+                return urls.small
+            }
             if (urls.large.isNotEmpty()) return urls.large
             if (urls.medium.isNotEmpty()) return urls.medium
-            if (urls.small.isNotEmpty()) return urls.small
-            return ""
+            return urls.small
         }
 
-        fun imageAssetId(rawUrl: String): String? {
+        fun imageAssetId(rawUrl: String, maxEdge: Int): String? {
             if (rawUrl.isEmpty()) return null
             val encoded = URLEncoder.encode(rawUrl, "UTF-8")
                 .replace("+", "%20")
                 .replace("*", "%2A")
                 .replace("%7E", "~")
-            return ASSET_ID_PREFIX + encoded
+            return "$ASSET_ID_PREFIX$maxEdge/$encoded"
         }
+
+        fun parseImageId(id: String): Pair<String, Int>? {
+            if (!id.startsWith(ASSET_ID_PREFIX)) return null
+            val rest = id.substring(ASSET_ID_PREFIX.length)
+            val slash = rest.indexOf('/')
+            if (slash <= 0) return null
+            val maxEdge = rest.substring(0, slash).toIntOrNull() ?: return null
+            val url = runCatching { URLDecoder.decode(rest.substring(slash + 1), "UTF-8") }.getOrNull() ?: return null
+            return url to maxEdge
+        }
+
+        fun downsample(data: ByteArray, maxEdge: Int): ByteArray? = runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            val longest = maxOf(bounds.outWidth, bounds.outHeight)
+            if (longest <= 0) return@runCatching null
+            var sample = 1
+            while (longest / (sample * 2) >= maxEdge) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, opts) ?: return@runCatching null
+            val scale = maxEdge.toFloat() / maxOf(bmp.width, bmp.height).toFloat()
+            val scaled = if (scale < 1f) {
+                android.graphics.Bitmap.createScaledBitmap(
+                    bmp,
+                    (bmp.width * scale).toInt().coerceAtLeast(1),
+                    (bmp.height * scale).toInt().coerceAtLeast(1),
+                    true,
+                )
+            } else {
+                bmp
+            }
+            val out = java.io.ByteArrayOutputStream()
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            out.toByteArray()
+        }.getOrNull()
 
         fun spotifyType(kind: ItemKind): String? = when (kind) {
             ItemKind.Track -> "track"
@@ -723,9 +885,33 @@ class SpotifyGlue(
                 artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
                 artists = t.artists.map { WireArtist(id = it.uri, name = it.name) },
                 duration_ms = maxOf(t.durationMs, 0).toUInt(),
-                image_id = imageAssetId(bestImageUrl(t.imageUrl)) ?: "",
+                image_id = imageAssetId(bestImageUrl(t.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE) ?: "",
                 saved = saved,
             )
+        }
+
+        fun mapPlaylistItem(item: PlaylistItem): BrowseEntry {
+            if (item.type == "episode") {
+                return BrowseEntry.Item(LibraryItem.PodcastEpisode(WirePodcastEpisode(
+                    uri = item.uri,
+                    name = item.name ?: "",
+                    showName = null,
+                    durationMs = maxOf(item.durationMs, 0).toUInt(),
+                    publishedAtUnixS = null,
+                    artworkId = imageAssetId(bestImageUrl(SpotifyImageURLs(item.images), IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
+                )))
+            }
+            val primary = item.artists.firstOrNull()
+            return BrowseEntry.Item(LibraryItem.Track(WireTrack(
+                id = item.uri,
+                name = item.name ?: "",
+                album = WireAlbum(id = item.album?.uri ?: "", name = item.album?.name ?: ""),
+                artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
+                artists = item.artists.map { WireArtist(id = it.uri, name = it.name) },
+                duration_ms = maxOf(item.durationMs, 0).toUInt(),
+                image_id = imageAssetId(bestImageUrl(item.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE) ?: "",
+                saved = false,
+            )))
         }
 
         fun mapAlbum(a: Album): WireAlbum = WireAlbum(id = a.uri, name = a.name)
@@ -737,7 +923,7 @@ class SpotifyGlue(
             name = p.name,
             ownerName = null,
             trackCount = null,
-            artworkId = imageAssetId(bestImageUrl(p.imageUrl)),
+            artworkId = imageAssetId(bestImageUrl(p.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
         )
 
         fun mapShow(s: Show): WireShow = WireShow(
@@ -745,7 +931,7 @@ class SpotifyGlue(
             name = s.name,
             publisher = null,
             episodeCount = null,
-            artworkId = imageAssetId(bestImageUrl(s.imageUrl)),
+            artworkId = imageAssetId(bestImageUrl(s.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
         )
 
         fun mapEpisode(e: Episode): WirePodcastEpisode = WirePodcastEpisode(
@@ -754,7 +940,7 @@ class SpotifyGlue(
             showName = e.show?.name,
             durationMs = maxOf(e.durationMs, 0).toUInt(),
             publishedAtUnixS = null,
-            artworkId = imageAssetId(bestImageUrl(e.imageUrl)),
+            artworkId = imageAssetId(bestImageUrl(e.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
         )
 
         fun mapRepeat(mode: RepeatMode): WireRepeat = when (mode) {

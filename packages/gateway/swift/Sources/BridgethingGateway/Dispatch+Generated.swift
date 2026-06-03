@@ -378,6 +378,24 @@ public struct LibrarySurface: Sendable {
     }
   }
 
+  /// Stream of typed inbound `LibraryResolveContextRequest` requests with handles for typed responses.
+  public var resolveContextRequests: AsyncStream<(handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .resolveContext(let payload) = outer else { continue }
+          let handle = LibraryResolveContextRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Stream of typed inbound `LibrarySearchRequest` requests with handles for typed responses.
   public var searchRequests: AsyncStream<(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest)> {
     AsyncStream { continuation in
@@ -2114,6 +2132,23 @@ public struct WebappSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Webapp::ActiveChanged` messages.
+  public var activeChanged: AsyncStream<(deviceId: String, msg: WebappActiveChanged)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .activeChanged(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Typed request to a specific peer: companion sends, daemon responds.
   public func list(deviceId: String, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
     let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
@@ -2868,6 +2903,25 @@ public struct LibrarySurfaceForDevice: Sendable {
           guard case .library(let outer) = message.data else { continue }
           guard case .browse(let payload) = outer else { continue }
           let handle = LibraryBrowseRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `LibraryResolveContextRequest` requests with handles for typed responses.
+  public var resolveContextRequests: AsyncStream<(handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .library(let outer) = message.data else { continue }
+          guard case .resolveContext(let payload) = outer else { continue }
+          let handle = LibraryResolveContextRequestHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
           continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
@@ -4441,6 +4495,24 @@ public struct WebappSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Webapp::ActiveChanged` from this peer.
+  public var activeChanged: AsyncStream<WebappActiveChanged> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .activeChanged(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Typed request to this peer: companion sends, daemon responds.
   public func list(timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappList, Never> {
     let response = try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: timeout)
@@ -4931,6 +5003,45 @@ public final class LibraryBrowseRequestHandle: @unchecked Sendable {
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.browseReply(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondErr(_ error: LibraryErrorReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID(),
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.libraryErrorReply(error))
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: WireError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID(),
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class LibraryResolveContextRequestHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  public let requestId: UUID
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: ContextResolveReply) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID(),
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .library(.contextResolveReply(response))
     )
     try await gateway.send(deviceId: deviceId, msg)
   }

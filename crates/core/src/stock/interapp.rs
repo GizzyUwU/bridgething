@@ -245,13 +245,15 @@ pub enum StockInterAppSendPayload {
     current: StockQueueTrack,
     previous: Vec<StockQueueTrack>,
   },
-  #[serde(rename = "com.spotify.get_children_of_item")]
+  #[serde(rename = "call_result")]
   ItemChildren {
     limit: usize,
     offset: usize,
     total: usize,
     items: Vec<ChildItem>,
   },
+  #[serde(rename = "call_result")]
+  Home { items: Vec<HomeSection> },
   #[serde(rename = "call_result")]
   Image {
     height: usize,
@@ -327,6 +329,22 @@ pub struct ChildMeta {
   pub duration_ms: usize,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HomeSection {
+  pub title: String,
+  pub uri: String,
+  pub total: usize,
+  pub children: Vec<HomeChild>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct HomeChild {
+  pub image_id: String,
+  pub subtitle: String,
+  pub title: String,
+  pub uri: String,
+}
+
 impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
   fn from(data: BridgeToClientPlayerMsg) -> Self {
     match data {
@@ -389,6 +407,44 @@ pub fn library_browse_to_stock(result: BrowseResult, limit: u32, offset: u32) ->
     offset: offset as usize,
     total,
     items,
+  }
+}
+
+pub fn library_browse_to_home(result: BrowseResult) -> StockInterAppSendPayload {
+  let items = result
+    .entries
+    .into_iter()
+    .filter_map(browse_entry_to_home_section)
+    .collect();
+  StockInterAppSendPayload::Home { items }
+}
+
+fn browse_entry_to_home_section(entry: BrowseEntry) -> Option<HomeSection> {
+  let BrowseEntry::Folder(folder) = entry else {
+    return None;
+  };
+  let total = folder.total.unwrap_or_default() as usize;
+  let children = folder
+    .preview_children
+    .unwrap_or_default()
+    .into_iter()
+    .map(browse_entry_to_home_child)
+    .collect();
+  Some(HomeSection {
+    title: folder.title,
+    uri: folder.node_id,
+    total,
+    children,
+  })
+}
+
+fn browse_entry_to_home_child(entry: BrowseEntry) -> HomeChild {
+  let child = browse_entry_to_child(entry);
+  HomeChild {
+    image_id: child.image_id,
+    subtitle: child.subtitle,
+    title: child.title,
+    uri: child.uri,
   }
 }
 

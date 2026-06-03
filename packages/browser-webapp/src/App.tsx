@@ -29,7 +29,7 @@ export default function App() {
 
   const go = (url: string) => {
     const normalized = normalizeUrl(url);
-    if (normalized) window.location.href = normalized;
+    if (normalized) client.store.put({ key: '@cdp/navigate', value: normalized });
   };
 
   return (

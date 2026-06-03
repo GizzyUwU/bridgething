@@ -2,8 +2,8 @@ use libbridgething::{
   ConfigEntry, ConfigField, WebappError,
   client::{BridgeToClientConfigMsgEvent, ConfigChanged},
   gateway::{
-    GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, WebappActive, WebappConfigAck,
-    WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList, WebappConfigListReply,
+    BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, WebappActive,
+    WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList, WebappConfigListReply,
     WebappConfigSet, WebappIcon, WebappIconReply, WebappList, WebappSwitchTo, WebappUninstall,
   },
 };
@@ -30,7 +30,7 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
   type Output = HandlerResult;
 
   async fn list(&self) -> HandlerResult {
-    let webapps = self.handle.state.webapps.list().await;
+    let webapps = self.handle.state.webapps.list_with_icons().await;
     self.handle.respond_to::<ListWebapps>(WebappList { webapps }).await;
     Ok(())
   }
@@ -63,6 +63,7 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
     self.reload_kiosk().await;
     let active = active_payload(&self.handle).await?;
     self.handle.respond_to::<WebappSwitchTo>(active).await;
+    self.broadcast_active_changed().await;
     Ok(())
   }
 
@@ -93,6 +94,7 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
         tracing::info!("active webapp {id} was uninstalled; falling back to {fallback}");
         self.handle.state.set_active_webapp(fallback).await?;
         self.reload_kiosk().await;
+        self.broadcast_active_changed().await;
       } else {
         tracing::warn!("active webapp {id} was uninstalled and no fallback is available");
       }
@@ -270,6 +272,17 @@ impl WebappHandler {
     if let Err(e) = self.handle.state.chrome.send(ChromeCommand::Navigate(url)).await {
       tracing::warn!("failed to reload kiosk after webapp switch: {:?}", e);
     }
+  }
+
+  async fn broadcast_active_changed(&self) {
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast(BridgeToGatewayWebappMsgEvent::ActiveChanged(
+        self.handle.state.active_webapp_changed_event().await,
+      ))
+      .await;
   }
 }
 

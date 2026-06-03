@@ -802,9 +802,11 @@ mod tests {
       description: None,
       icon_available: false,
       icon_mime: None,
+      icon: None,
       config: vec![],
       permissions: vec![],
       voice_grammar: None,
+      art: None,
     }
   }
 

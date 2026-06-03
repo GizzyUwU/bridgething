@@ -402,9 +402,25 @@ pub type GatewayRecvRx = tokio::sync::mpsc::Receiver<InboundGatewayMessage>;
 pub type GatewaySendTx = tokio::sync::mpsc::Sender<OutboundGatewayMessage>;
 pub type GatewaySendRx = tokio::sync::mpsc::Receiver<OutboundGatewayMessage>;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
-type PendingRequests = Arc<Mutex<HashMap<Uuid, oneshot::Sender<GatewayToBridgeMsgData>>>>;
+#[derive(Debug)]
+struct Pending {
+  target: Option<Address>,
+  tx: oneshot::Sender<GatewayToBridgeMsgData>,
+}
+
+type PendingRequests = Arc<Mutex<HashMap<Uuid, Pending>>>;
+
+fn fail_pending_on_disconnect(pending: &PendingRequests, addr: Address, no_peers_left: bool) {
+  pending.lock().expect("pending-request map poisoned").retain(|_id, p| {
+    let drop_it = match p.target {
+      Some(target) => target == addr,
+      None => no_peers_left,
+    };
+    !drop_it
+  });
+}
 
 #[derive(Debug)]
 pub struct GatewayMan {
@@ -430,10 +446,16 @@ struct GatewayRuntime {
 impl GatewayMan {
   fn allocate() -> (Self, GatewayBootstrap) {
     let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(GATEWAY_OUTBOUND_CAPACITY);
+    let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+    let peer_owners = PeerOwners::new();
+    peer_owners.set_disconnect_hook({
+      let pending = pending.clone();
+      Arc::new(move |addr, no_peers_left| fail_pending_on_disconnect(&pending, addr, no_peers_left))
+    });
     let me = Self {
       outbound_tx,
-      peer_owners: PeerOwners::new(),
-      pending: Arc::new(Mutex::new(HashMap::new())),
+      peer_owners,
+      pending,
     };
     (me, GatewayBootstrap { outbound_rx })
   }
@@ -502,6 +524,7 @@ impl GatewayMan {
   }
 
   pub async fn send_all(&self, data: OutboundGatewayMessage) {
+    tracing::trace!("queueing outbound gateway message: {:?}", &data);
     if let Err(err) = self.outbound_tx.send(data).await {
       tracing::error!(?err, "gateway outbound queue closed; drop");
     }
@@ -627,7 +650,7 @@ impl GatewayMan {
       .pending
       .lock()
       .expect("pending-request map poisoned")
-      .insert(id, tx);
+      .insert(id, Pending { target: address, tx });
 
     let msg = BridgeToGatewayMsg {
       id,
@@ -656,13 +679,13 @@ impl GatewayMan {
   }
 
   pub fn complete_pending(&self, request_id: &Uuid, data: GatewayToBridgeMsgData) -> bool {
-    let tx = self
+    let pending = self
       .pending
       .lock()
       .expect("pending-request map poisoned")
       .remove(request_id);
-    if let Some(tx) = tx {
-      let _ = tx.send(data);
+    if let Some(pending) = pending {
+      let _ = pending.tx.send(data);
       true
     } else {
       false

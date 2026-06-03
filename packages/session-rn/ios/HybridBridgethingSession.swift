@@ -15,7 +15,6 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) async throws
 
     func snapshot() async -> BridgethingSessionSnapshot
-    func diagnosticsSnapshot(limit: Double) async -> [BridgethingDiagEntry]
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
     func companionDebug() async -> BridgethingCompanionDebug
 
@@ -76,7 +75,6 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
     func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void)
-    func setOnDiagEntry(_ callback: @escaping @Sendable (BridgethingDiagEntry) -> Void)
 }
 
 /// thin Nitro proxy; buffers callback setters until a backend is installed via `installBackend(_:)`.
@@ -97,7 +95,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
     private static var pendingCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
-    private static var pendingDiagEntry: (@Sendable (BridgethingDiagEntry) -> Void)?
 
     /// install the backend; must be called before RN starts. replays any already-registered callback setters.
     public static func installBackend(_ backend: any BridgethingSessionBackend) {
@@ -116,7 +113,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
         let catalogCb = pendingCatalogEvent
-        let diagCb = pendingDiagEntry
         pendingProviderChanged = nil
         pendingAuthStateChanged = nil
         pendingServiceHealthChanged = nil
@@ -130,7 +126,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
         pendingCatalogEvent = nil
-        pendingDiagEntry = nil
         stateLock.unlock()
 
         if let providerCb { backend.setOnProviderChanged(providerCb) }
@@ -146,7 +141,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
         if let catalogCb { backend.setOnCatalogEvent(catalogCb) }
-        if let diagCb { backend.setOnDiagEntry(diagCb) }
     }
 
     private static func backend() throws -> any BridgethingSessionBackend {
@@ -234,12 +228,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func snapshot() throws -> Promise<BridgethingSessionSnapshot> {
         Promise.async {
             await (try Self.backend()).snapshot()
-        }
-    }
-
-    public func diagnosticsSnapshot(limit: Double) throws -> Promise<[BridgethingDiagEntry]> {
-        Promise.async {
-            await (try Self.backend()).diagnosticsSnapshot(limit: limit)
         }
     }
 
@@ -588,14 +576,5 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingCatalogEvent = wrapped }
         Self.stateLock.unlock()
         backend?.setOnCatalogEvent(wrapped)
-    }
-
-    public func setOnDiagEntry(callback: @escaping (BridgethingDiagEntry) -> Void) throws {
-        let wrapped: @Sendable (BridgethingDiagEntry) -> Void = { entry in callback(entry) }
-        Self.stateLock.lock()
-        let backend = Self._backend
-        if backend == nil { Self.pendingDiagEntry = wrapped }
-        Self.stateLock.unlock()
-        backend?.setOnDiagEntry(wrapped)
     }
 }

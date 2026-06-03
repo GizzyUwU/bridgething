@@ -6,16 +6,21 @@ use typeshare::typeshare;
 
 use crate::{NowPlayingUpdate, PlayerState, QueueItem};
 
-/// Snapshot of the player queue as the companion sees it. Sent on
-/// queue mutations the gateway can detect (user reorder, queue clear,
-/// gapless prefetch landing). The daemon overwrites its cached queue
-/// from this and re-broadcasts to webapps.
+/// Queue update from the companion. `order` is the complete queue as a
+/// list of item uris, every message - so it is a full ordering, not an
+/// op-delta with a baseline to track. `items` carries full metadata only
+/// for uris the daemon does not already hold from the previous message on
+/// this connection; the daemon rebuilds the queue from `order` against its
+/// last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
+/// is a link reset and the companion re-sends a full ordering on reconnect;
+/// no revision numbers or resync are needed.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct QueueSnapshot {
+  pub order: Vec<String>,
   pub items: Vec<QueueItem>,
 }
 
@@ -37,9 +42,10 @@ pub struct EnrichmentContext {
 /// iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
 /// companion echoes from the last `PlaybackHint`, so the daemon can match
 /// this offer to the live iAP2 identity by exact equality. `head` is the
-/// companion's current Spotify track; `queue` is upcoming. The companion
-/// never claims authority - the daemon overlays art / uri / queue onto the
-/// iAP2 identity only when the offer provably describes the playing track.
+/// companion's current Spotify track. The companion never claims authority
+/// - the daemon overlays art / uri onto the iAP2 identity only when the
+/// offer provably describes the playing track. The queue rides its own
+/// `QueueChanged` surface (on-change), not this frequent per-hint offer.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -48,7 +54,6 @@ pub struct EnrichmentContext {
 pub struct NowPlayingEnrichment {
   pub anchor_pid: Option<String>,
   pub head: Option<QueueItem>,
-  pub queue: Vec<QueueItem>,
   pub context: Option<EnrichmentContext>,
 }
 

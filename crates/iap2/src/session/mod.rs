@@ -156,6 +156,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     Self::with_app_launch(
       identification,
       None,
+      Vec::new(),
       mfi,
       link_command_tx,
       link_events_rx,
@@ -170,6 +171,7 @@ impl<M: MfiAccess> Iap2Session<M> {
   pub fn with_app_launch(
     identification: IdentificationConfig,
     app_launch_bundle_id: Option<String>,
+    artwork_suppress_bundles: Vec<String>,
     mfi: M,
     link_command_tx: mpsc::Sender<Iap2Command>,
     link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -181,7 +183,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     Self {
       auth: AuthFlow::new(),
       ident: IdentificationFlow::new(),
-      now_playing: NowPlayingFlow::new(now_playing_command_rx),
+      now_playing: NowPlayingFlow::new(now_playing_command_rx, artwork_suppress_bundles),
       ea: None,
       file_transfer: FileTransferFlow::new(link_command_tx.clone()),
       hid: HidFlow::new(hid_command_rx),
@@ -320,7 +322,11 @@ impl<M: MfiAccess> Iap2Session<M> {
         .await;
     }
     if NowPlayingFlow::handles(msg_id) {
-      return self.now_playing.handle(frame, &self.session_events_tx).await;
+      let companion_connected = self.ea.as_ref().is_some_and(EaFlow::has_open_streams);
+      return self
+        .now_playing
+        .handle(frame, companion_connected, &self.link_command_tx, &self.session_events_tx)
+        .await;
     }
     if EaFlow::handles(msg_id) {
       if let Some(ea) = self.ea.as_mut() {

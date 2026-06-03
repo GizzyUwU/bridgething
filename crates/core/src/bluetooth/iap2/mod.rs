@@ -52,6 +52,7 @@ const IAP2_EVENTS_CAPACITY: usize = 64;
 #[cfg(feature = "test-tap")]
 const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
+const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
 
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
@@ -408,6 +409,7 @@ impl Iap2Manager {
     let session = Iap2Session::with_app_launch(
       self.identification.clone(),
       Some(COMPANION_BUNDLE_ID.to_string()),
+      vec![SPOTIFY_BUNDLE_ID.to_string()],
       mfi,
       link_command_tx,
       link_events_rx,

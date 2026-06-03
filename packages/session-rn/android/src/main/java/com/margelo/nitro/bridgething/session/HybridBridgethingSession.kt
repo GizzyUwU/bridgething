@@ -28,7 +28,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
         private var pendingCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
-        private var pendingDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
 
         /** explicit init because bun workspace symlinks trip RN's autolinker. idempotent. */
         @JvmStatic
@@ -55,7 +54,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     deviceMeta = pendingDeviceMetaChanged,
                     ota = pendingOtaEvent,
                     catalog = pendingCatalogEvent,
-                    diag = pendingDiagEntry,
                 )
                 pendingProviderChanged = null
                 pendingAuthStateChanged = null
@@ -70,7 +68,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingDeviceMetaChanged = null
                 pendingOtaEvent = null
                 pendingCatalogEvent = null
-                pendingDiagEntry = null
                 snapshot
             }
             replay.provider?.let(b::setOnProviderChanged)
@@ -86,7 +83,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.ota?.let(b::setOnOtaEvent)
             replay.catalog?.let(b::setOnCatalogEvent)
-            replay.diag?.let(b::setOnDiagEntry)
         }
 
         private fun require(): BridgethingSessionBackend = backend
@@ -110,7 +106,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val ota: ((BridgethingOtaEvent) -> Unit)?,
         val catalog: ((BridgethingCatalogEvent) -> Unit)?,
-        val diag: ((BridgethingDiagEntry) -> Unit)?,
     )
 
     override fun start(): Promise<Unit> = Promise.async { require().start() }
@@ -149,10 +144,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun snapshot(): Promise<BridgethingSessionSnapshot> = Promise.async {
         require().snapshot()
-    }
-
-    override fun diagnosticsSnapshot(limit: Double): Promise<Array<BridgethingDiagEntry>> = Promise.async {
-        backend?.diagnosticsSnapshot(limit) ?: emptyArray()
     }
 
     override fun deviceLogSnapshot(limit: Double): Promise<Array<BridgethingDeviceLogLine>> = Promise.async {
@@ -377,10 +368,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnCatalogEvent(callback: (event: BridgethingCatalogEvent) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnCatalogEvent) { pendingCatalogEvent = it }
-    }
-
-    override fun setOnDiagEntry(callback: (entry: BridgethingDiagEntry) -> Unit) {
-        forwardOrBuffer(callback, BridgethingSessionBackend::setOnDiagEntry) { pendingDiagEntry = it }
     }
 
     private fun unwrapString(variant: Variant_NullType_String?): String? = variant?.let {

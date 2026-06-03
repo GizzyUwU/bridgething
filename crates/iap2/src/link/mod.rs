@@ -344,14 +344,12 @@ impl Link {
         }
       }
 
-      if state.should_send_ack_now() {
+      state.drain_pending_send(writer, codec).await?;
+      if state.needs_ack() {
         state.send_standalone_ack(writer, codec).await?;
       }
 
-      state.drain_pending_send(writer, codec).await?;
-
       let retransmit_deadline = state.next_retransmit_deadline();
-      let ack_delay_deadline = state.ack_delay_deadline();
 
       tokio::select! {
         read = reader.read_buf(buf) => {
@@ -381,9 +379,6 @@ impl Link {
             let _ = events_tx.send(Iap2Event::LinkDown("retransmit limit".into())).await;
             return Err(Error::RetransmitLimit);
           }
-        }
-        _ = sleep_until_or_pending(ack_delay_deadline) => {
-          state.send_standalone_ack(writer, codec).await?;
         }
       }
     }

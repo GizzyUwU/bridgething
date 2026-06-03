@@ -162,7 +162,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   let authority = AuthorityRegistry::new();
   let capabilities = CapabilitiesRegistry::new(bus.clone(), authority.clone());
-  let player = Player::new(bus.clone(), authority.clone());
+  let player = Player::new(bus.clone(), authority.clone(), assets.clone());
   let audio = AudioManager::new(authority.clone(), bus.clone());
   let asset_wait = asset::wait::AssetWaitTracker::new();
   let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());

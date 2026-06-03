@@ -48,7 +48,7 @@ export async function effectiveAuthMethod(): Promise<SpotifyAuthMethod | null> {
   if (avail.length === 0) return null;
   const stored = getPreferredAuthMethod();
   if (stored && avail.includes(stored)) return stored;
-  return avail.includes('deviceCode') ? 'deviceCode' : avail[0];
+  return avail.includes('pkce') ? 'pkce' : avail[0];
 }
 
 type Flow = { cancelled: boolean };

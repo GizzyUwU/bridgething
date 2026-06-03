@@ -1,3 +1,4 @@
+use derive_more::derive::Debug;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use typeshare::typeshare;
@@ -60,7 +61,27 @@ pub enum WebappRole {
   Launcher,
 }
 
+/// Art render sizes a webapp declares so the companion warms exactly the
+/// pixels it renders: hero (now-playing / detail views) and thumb (queue /
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
+/// which is also the stock webapp's profile.
 #[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct ArtProfile {
+  pub hero_px: u32,
+  pub thumb_px: u32,
+}
+
+impl Default for ArtProfile {
+  fn default() -> Self {
+    Self { hero_px: 248, thumb_px: 96 }
+  }
+}
+
+#[typeshare]
+#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +97,13 @@ pub struct WebappInfo {
   pub description: Option<String>,
   pub icon_available: bool,
   pub icon_mime: Option<String>,
+  /// icon bytes, inlined on the gateway list so the companion never round-trips
+  /// a separate fetch per app. omitted on the on-device client list.
+  #[debug(skip)]
+  #[serde_as(as = "Option<serde_with::Bytes>")]
+  #[ts(type = "Uint8Array | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub icon: Option<Vec<u8>>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
   /// Plain-English description of the voice intents the webapp wants
@@ -84,6 +112,9 @@ pub struct WebappInfo {
   /// inference, which is what makes WEBAPP_INTENT emission context-aware.
   /// `None` opts the webapp out of voice integration.
   pub voice_grammar: Option<String>,
+  /// Declared art render sizes; the companion warms exactly these. `None`
+  /// means the canonical `{248, 96}` default applies.
+  pub art: Option<ArtProfile>,
 }
 
 /// On-disk `manifest.json` shape. Read from the bundle at install time
@@ -114,6 +145,9 @@ pub struct WebappManifest {
   /// prompt at inference. Webapps that don't declare a grammar opt out
   /// of voice integration.
   pub voice_grammar: Option<String>,
+  /// Declared art render sizes. Omitted falls back to `{248, 96}`.
+  #[serde(default)]
+  pub art: Option<ArtProfile>,
 }
 
 /// One declared user-tunable setting. Adjacent-tagged on the wire to

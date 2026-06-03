@@ -2,7 +2,9 @@ use libbridgething::client::{ClientToBridgeStoreMsgRequestDispatch, KVDelete, KV
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::stock::StockSetupSend;
+use crate::{chrome::ChromeCommand, state::BROWSER_WEBAPP_ID, stock::StockSetupSend};
+
+const BROWSER_NAVIGATE_KEY: &str = "@cdp/navigate";
 
 #[derive(Debug)]
 pub struct StorageHandler {
@@ -52,6 +54,15 @@ impl ClientToBridgeStoreMsgRequestDispatch for StorageHandler {
   async fn put(&self, params: KVPut) -> HandlerResult {
     let app_id = self.active_app_id().await?;
     let KVPut { key, value } = params;
+
+    if app_id == BROWSER_WEBAPP_ID && key == BROWSER_NAVIGATE_KEY {
+      tracing::info!("({}) browser webapp cdp-navigate to {}", &self.handle.from, &value);
+      if let Err(e) = self.handle.state.chrome.send(ChromeCommand::NavigateExternal(value.clone())).await {
+        tracing::warn!("({}) browser navigate dispatch failed: {:?}", &self.handle.from, e);
+      }
+      return Ok(self.handle.respond_to::<KVPut>(StorageResponse { key, value: Some(value) }).await?);
+    }
+
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);
     self.handle.state.kv.data_set(app_id, &key, value.clone()).await?;
 

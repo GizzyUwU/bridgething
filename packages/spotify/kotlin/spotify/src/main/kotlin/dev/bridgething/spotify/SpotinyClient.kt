@@ -18,7 +18,6 @@ interface SpotinyDelegate {
 
 /**
  * spotify web api client. authenticates via the injected authenticator and exposes typed resources.
- * token persistence is caller-owned through delegate.authDidRefresh. the dealer websocket is not started; connect() authenticates only.
  */
 class SpotinyClient(
     private val authenticator: SpotifyAuthenticator,
@@ -26,7 +25,9 @@ class SpotinyClient(
     accessToken: String = "",
     refreshToken: String = "",
     engine: HttpClientEngine? = null,
+    private val dealerProvider: DealerSocketProvider? = null,
 ) {
+    private val socketEngine = engine
     val maxRetries = 3
 
     var accessToken: String = accessToken
@@ -42,6 +43,10 @@ class SpotinyClient(
         private set
     var lastAuthError: String? = null
         private set
+    var lastPlayerState: PlayerState? = null
+        private set
+
+    private var dealer: DealerSocket? = null
 
     val hasAuthTokens: Boolean
         get() = accessToken.isNotEmpty() && refreshToken.isNotEmpty()
@@ -64,9 +69,28 @@ class SpotinyClient(
     private val authMutex = Mutex()
 
     suspend fun connect() {
-        if (isConnected) return
-        isConnected = false
         authenticate()
+        if (accessToken.isEmpty()) return
+        val d = dealer ?: DealerSocket(this, dealerProvider ?: KtorDealerSocketProvider(socketEngine)).also { dealer = it }
+        d.start()
+    }
+
+    suspend fun authenticateOnly() {
+        authenticate()
+    }
+
+    suspend fun disconnect() {
+        dealer?.stop()
+        dealer = null
+        isConnected = false
+    }
+
+    fun setConnected(value: Boolean) {
+        isConnected = value
+    }
+
+    fun setLastPlayerState(state: PlayerState?) {
+        lastPlayerState = state
     }
 
     suspend fun reauthenticate() {

@@ -35,27 +35,12 @@ impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
   }
 
   async fn queue_changed(&self, params: QueueSnapshot) -> HandlerResult {
-    self.handle.state.player.apply_companion_queue(params.items).await?;
+    self.handle.state.player.apply_companion_queue(params).await?;
     Ok(())
   }
 
   async fn enrichment_offer(&self, params: NowPlayingEnrichment) -> HandlerResult {
-    let prefetch = enrichment_prefetch_ids(&params);
     self.handle.state.player.apply_enrichment(params).await?;
-    if !prefetch.is_empty() {
-      crate::handler::client::preload_assets(self.handle.state.clone(), self.handle.bluetooth.clone(), prefetch).await;
-    }
     Ok(())
   }
-}
-
-const ENRICHMENT_PREFETCH_QUEUE_DEPTH: usize = 3;
-
-fn enrichment_prefetch_ids(offer: &NowPlayingEnrichment) -> Vec<String> {
-  offer
-    .head
-    .iter()
-    .chain(offer.queue.iter().take(ENRICHMENT_PREFETCH_QUEUE_DEPTH))
-    .filter_map(|item| item.artwork_id.clone())
-    .collect()
 }

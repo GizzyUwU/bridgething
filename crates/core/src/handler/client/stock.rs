@@ -5,17 +5,21 @@ use libbridgething::{
   BrowseEntry, ItemKind, ItemRef, LibraryItem, QueuePosition,
   client::ClientLegacyStockCommand,
   gateway::{
-    self, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
-    LibraryFavoritesContainsRequest,
+    self, AssetRequest, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
+    LibraryFavoritesContainsRequest, LibraryResolveContextRequest,
   },
   stock::{StockPreset, StockSetPreset},
   wire::RequestError,
 };
 use serde_json::{Value, json};
+use tokio_util::bytes::Bytes;
+use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
 use crate::{
-  asset::{CachedAsset, wait::FetchOutcome},
+  asset::{CachedAsset, Retention, wait::FetchOutcome},
+  bluetooth::BluetoothMan,
+  state::State,
   stock::{
     GraphqlError, StockConnectionType, StockInterAppSend, StockInterAppSendPayload, StockPermissionsSend, StockTip,
     presets,
@@ -159,7 +163,28 @@ impl LegacyStockHandler {
   }
 
   async fn spotify_get_home(&self, limit: usize, _limit_overrides: HashMap<String, usize>) -> HandlerResult {
-    self.browse_through_modern(None, limit_to_u32(limit), 0).await
+    let limit = limit_to_u32(limit);
+    let payload = if self.has_gateway() {
+      let req = LibraryBrowseRequest {
+        node_id: None,
+        limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
+        offset: 0,
+      };
+      match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+        Ok(reply) => crate::stock::interapp::library_browse_to_home(reply.result),
+        Err(err) => {
+          log_request_failure("library.browse (home)", &err);
+          StockInterAppSendPayload::Home { items: Vec::new() }
+        }
+      }
+    } else {
+      StockInterAppSendPayload::Home { items: Vec::new() }
+    };
+    self
+      .handle
+      .send_stock(StockInterAppSend::new(self.handle.stock_msg_id, payload))
+      .await?;
+    Ok(())
   }
 
   async fn spotify_get_podcast(&self, uri: String, limit: Option<usize>, offset: Option<usize>) -> HandlerResult {
@@ -273,6 +298,18 @@ impl LegacyStockHandler {
         Vec::new()
       }
     };
+    if self.has_gateway() {
+      let missing: Vec<StockPreset> = result
+        .iter()
+        .filter(|p| p.image_url.is_none() || p.name.is_none())
+        .cloned()
+        .collect();
+      if !missing.is_empty() {
+        let state = self.handle.state.clone();
+        let bluetooth = self.handle.bluetooth.clone();
+        tokio::spawn(async move { backfill_preset_art(state, bluetooth, missing).await });
+      }
+    }
     self
       .handle
       .send_stock(StockInterAppSend::new(
@@ -359,16 +396,34 @@ impl LegacyStockHandler {
   }
 
   async fn spotify_set_preset(&self, requests: Vec<StockSetPreset>) -> HandlerResult {
-    let to_write: Vec<StockPreset> = requests
-      .into_iter()
-      .map(|req| StockPreset {
+    let old = presets::list(&self.handle.state.kv).await.unwrap_or_default();
+    let has_gateway = self.has_gateway();
+    let mut to_write: Vec<StockPreset> = Vec::with_capacity(requests.len());
+    for req in requests {
+      let resolved = if has_gateway {
+        resolve_preset_context(&self.handle.bluetooth, &req.context_uri).await
+      } else {
+        None
+      };
+      let image_url = resolved.as_ref().and_then(|r| r.artwork_id.clone());
+      let name = resolved.and_then(|r| r.name);
+      if let Some(prev) = old.iter().find(|p| p.slot_index == req.slot_index)
+        && let Some(prev_art) = &prev.image_url
+        && Some(prev_art) != image_url.as_ref()
+      {
+        let _ = self.handle.state.assets.clear(prev_art).await;
+      }
+      if let Some(art) = &image_url {
+        warm_preset_art(&self.handle.state, &self.handle.bluetooth, art).await;
+      }
+      to_write.push(StockPreset {
         context_uri: req.context_uri,
-        image_url: None,
+        image_url,
         slot_index: req.slot_index,
-        name: None,
+        name,
         description: None,
-      })
-      .collect();
+      });
+    }
     if let Err(err) = presets::upsert_many(&self.handle.state.kv, &to_write).await {
       tracing::warn!(?err, "stock set_preset write failed");
     }
@@ -737,6 +792,68 @@ fn graphql_tips_data() -> Value {
     })
     .collect::<Vec<_>>();
   json!({ "tipsOnDemand": { "tips": tips } })
+}
+
+async fn resolve_preset_context(bluetooth: &BluetoothMan, uri: &str) -> Option<gateway::ContextResolveReply> {
+  match bluetooth
+    .gateway_man
+    .request(None, LibraryResolveContextRequest { uri: uri.to_string() })
+    .await
+  {
+    Ok(reply) => Some(reply),
+    Err(err) => {
+      tracing::debug!(?err, %uri, "preset context resolve failed");
+      None
+    }
+  }
+}
+
+async fn warm_preset_art(state: &State, bluetooth: &BluetoothMan, id: &str) {
+  if matches!(state.assets.contains(id).await, Ok(true)) {
+    return;
+  }
+  let req = AssetRequest {
+    id: id.to_string(),
+    request_id: Uuid::now_v7(),
+  };
+  match bluetooth.gateway_man.request(None, req).await {
+    Ok(got) => {
+      let bytes = Bytes::from(got.bytes);
+      if !bytes.is_empty()
+        && let Err(err) = state
+          .assets
+          .insert_internal(id.to_string(), bytes, got.mime, Retention::DISK_PINNED)
+          .await
+      {
+        tracing::warn!(?err, %id, "failed to warm preset art into cache");
+      }
+    }
+    Err(err) => tracing::debug!(?err, %id, "preset art pull failed"),
+  }
+}
+
+async fn backfill_preset_art(state: State, bluetooth: BluetoothMan, missing: Vec<StockPreset>) {
+  let mut updated: Vec<StockPreset> = Vec::new();
+  for mut preset in missing {
+    let Some(resolved) = resolve_preset_context(&bluetooth, &preset.context_uri).await else {
+      continue;
+    };
+    if preset.name.is_none() {
+      preset.name = resolved.name;
+    }
+    if preset.image_url.is_none() {
+      preset.image_url = resolved.artwork_id;
+    }
+    if let Some(art) = &preset.image_url {
+      warm_preset_art(&state, &bluetooth, art).await;
+    }
+    updated.push(preset);
+  }
+  if !updated.is_empty()
+    && let Err(err) = presets::upsert_many(&state.kv, &updated).await
+  {
+    tracing::warn!(?err, "preset backfill write failed");
+  }
 }
 
 fn canned_tips() -> Vec<StockTip> {

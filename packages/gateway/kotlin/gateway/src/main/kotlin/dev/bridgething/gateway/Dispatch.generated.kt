@@ -277,6 +277,17 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
       handle to inner.data
     }
 
+  /** Stream of typed inbound `LibraryResolveContextRequest` requests. */
+  public val resolveContextRequests: Flow<Pair<LibraryResolveContextRequestHandle, LibraryResolveContextRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.ResolveContext ?: return@mapNotNull null
+      val handle = LibraryResolveContextRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
   /** Stream of typed inbound `LibrarySearchRequest` requests. */
   public val searchRequests: Flow<Pair<LibrarySearchRequestHandle, LibrarySearchRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1530,6 +1541,15 @@ public class WebappSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
+  /** Cross-peer stream of `Webapp::ActiveChanged` messages. */
+  public val activeChanged: Flow<Pair<String, WebappActiveChanged>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayWebappMsg.ActiveChanged ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
   /** Typed request to a specific peer: companion sends, daemon responds. */
   public suspend fun list(deviceId: String, timeout: Duration = 30.seconds): RequestResult<WebappList, Nothing> {
     val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List)
@@ -2156,6 +2176,18 @@ public class LibrarySurfaceForDevice(
       val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
       val inner = outer.data as? BridgeToGatewayLibraryMsg.Browse ?: return@mapNotNull null
       val handle = LibraryBrowseRequestHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
+  /** Stream of typed inbound `LibraryResolveContextRequest` requests. */
+  public val resolveContextRequests: Flow<Pair<LibraryResolveContextRequestHandle, LibraryResolveContextRequest>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Library ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayLibraryMsg.ResolveContext ?: return@mapNotNull null
+      val handle = LibraryResolveContextRequestHandle(gateway, it.deviceId, it.message.id)
       handle to inner.data
     }
 
@@ -3295,6 +3327,16 @@ public class WebappSurfaceForDevice(
       inner.data
     }
 
+  /** Stream of `Webapp::ActiveChanged` from this peer. */
+  public val activeChanged: Flow<WebappActiveChanged> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Webapp ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayWebappMsg.ActiveChanged ?: return@mapNotNull null
+      inner.data
+    }
+
   /** Typed request to this peer: companion sends, daemon responds. */
   public suspend fun list(timeout: Duration = 30.seconds): RequestResult<WebappList, Nothing> {
     val outboundData = GatewayToBridgeMsgData.Webapp(GatewayToBridgeWebappMsg.List)
@@ -3805,6 +3847,39 @@ public class LibraryBrowseRequestHandle internal constructor(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.BrowseReply(response)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondErr(error: LibraryErrorReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryErrorReply(error)),
+    )
+    gateway.send(deviceId, msg)
+  }
+
+  public suspend fun respondProtocolErr(error: WireError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
+public class LibraryResolveContextRequestHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  public val requestId: UUID,
+) {
+  public suspend fun respond(response: ContextResolveReply) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ContextResolveReply(response)),
     )
     gateway.send(deviceId, msg)
   }

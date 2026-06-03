@@ -1,7 +1,5 @@
 package dev.bridgething.companion
 
-import dev.bridgething.gateway.DiagRecord
-import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.schema.BridgeToGatewayLibraryMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.BridgeToGatewayPlayerMsg
@@ -46,13 +44,9 @@ class CompanionDispatchTest {
     )
 
     @Test
-    fun `companion logs tee into the diagnostics buffer`() = runBlocking {
+    fun `companion logs land in the device log ring`() = runBlocking {
         val (companion, _) = boot(this, null)
-        val logged = DiagnosticsBuffer.tail(512).any {
-            it.kind == DiagRecord.Kind.LOG &&
-                it.target == "bridgething.companion" &&
-                it.message == "companion started"
-        }
+        val logged = DeviceLogRing.tail(512).any { it.message == "companion started" }
         assertTrue(logged)
         companion.stop()
     }

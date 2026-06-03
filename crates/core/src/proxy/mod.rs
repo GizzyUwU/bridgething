@@ -276,19 +276,16 @@ async fn bridge(
 
   let mut inbound_handle = inbound_task;
   let mut outbound_handle = outbound_task;
-  let gateway_initiated;
-  tokio::select! {
+  let gateway_initiated = tokio::select! {
     res = &mut inbound_handle => {
-      gateway_initiated = res.unwrap_or(false);
+      outbound_handle.abort();
+      res.unwrap_or(false)
     }
     _ = &mut outbound_handle => {
-      gateway_initiated = false;
+      inbound_handle.abort();
+      false
     }
-  }
-  inbound_handle.abort();
-  outbound_handle.abort();
-  let _ = inbound_handle.await;
-  let _ = outbound_handle.await;
+  };
 
   state.tunnel_routes.drop_id(tunnel_id);
   if !gateway_initiated {

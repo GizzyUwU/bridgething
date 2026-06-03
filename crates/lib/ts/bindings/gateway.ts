@@ -2,6 +2,7 @@
 import type {
   AcceptCallAction,
   AncsAuthState,
+  ArtProfile,
   AssetRetention,
   BridgeThingMeta,
   BrowseResult,
@@ -164,6 +165,7 @@ export type BridgeToGatewayGeoMsg =
 
 export type BridgeToGatewayLibraryMsg =
   | { event: 'browse'; data: LibraryBrowseRequest }
+  | { event: 'resolveContext'; data: LibraryResolveContextRequest }
   | { event: 'search'; data: LibrarySearchRequest }
   | { event: 'recommendations'; data: LibraryRecommendationsRequest }
   | { event: 'favoritesList'; data: LibraryFavoritesListRequest }
@@ -288,7 +290,8 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'configGet'; data: WebappConfigGetReply }
   | { event: 'configList'; data: WebappConfigListReply }
   | { event: 'configAck'; data: WebappConfigAck }
-  | { event: 'webappInstalled'; data: WebappInfo };
+  | { event: 'webappInstalled'; data: WebappInfo }
+  | { event: 'activeChanged'; data: WebappActiveChanged };
 
 export type BrowseReply = { result: BrowseResult };
 
@@ -300,6 +303,12 @@ export type ChromeNavigate = { url: string };
  * announce, then re-sends on any field change.
  */
 export type CommunicationsSnapshot = { state: CommunicationsState };
+
+/**
+ * Resolved metadata for a single context uri (playlist / album / show /
+ * artist), used to populate a stock preset's name + cover art.
+ */
+export type ContextResolveReply = { name: string | null; artworkId: string | null; subtitle: string | null };
 
 /**
  * Domain-error response to `DeviceSetNickname`: nickname rejected at
@@ -404,6 +413,7 @@ export type GatewayToBridgeGeoMsg =
 
 export type GatewayToBridgeLibraryMsg =
   | { event: 'browseReply'; data: BrowseReply }
+  | { event: 'contextResolveReply'; data: ContextResolveReply }
   | { event: 'searchReply'; data: SearchReply }
   | { event: 'recommendationsReply'; data: RecommendationsReply }
   | { event: 'favoritesListReply'; data: FavoritesListReply }
@@ -575,6 +585,13 @@ export type LibraryRecommendationsRequest = {
   offset: number;
 };
 
+/**
+ * Resolve a single context uri (playlist / album / show / artist) to its
+ * name + cover art. Used to populate a stock preset slot the device only
+ * knows by `context_uri`.
+ */
+export type LibraryResolveContextRequest = { uri: string };
+
 export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
 
 /**
@@ -659,14 +676,14 @@ export type NotificationRemoved = { id: string; reason: DismissReason };
  * iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
  * companion echoes from the last `PlaybackHint`, so the daemon can match
  * this offer to the live iAP2 identity by exact equality. `head` is the
- * companion's current Spotify track; `queue` is upcoming. The companion
- * never claims authority - the daemon overlays art / uri / queue onto the
- * iAP2 identity only when the offer provably describes the playing track.
+ * companion's current Spotify track. The companion never claims authority
+ * - the daemon overlays art / uri onto the iAP2 identity only when the
+ * offer provably describes the playing track. The queue rides its own
+ * `QueueChanged` surface (on-change), not this frequent per-hint offer.
  */
 export type NowPlayingEnrichment = {
   anchorPid: string | null;
   head: QueueItem | null;
-  queue: Array<QueueItem>;
   context: EnrichmentContext | null;
 };
 
@@ -846,12 +863,16 @@ export type PlaybackHint = {
 };
 
 /**
- * Snapshot of the player queue as the companion sees it. Sent on
- * queue mutations the gateway can detect (user reorder, queue clear,
- * gapless prefetch landing). The daemon overwrites its cached queue
- * from this and re-broadcasts to webapps.
+ * Queue update from the companion. `order` is the complete queue as a
+ * list of item uris, every message - so it is a full ordering, not an
+ * op-delta with a baseline to track. `items` carries full metadata only
+ * for uris the daemon does not already hold from the previous message on
+ * this connection; the daemon rebuilds the queue from `order` against its
+ * last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
+ * is a link reset and the companion re-sends a full ordering on reconnect;
+ * no revision numbers or resync are needed.
  */
-export type QueueSnapshot = { items: Array<QueueItem> };
+export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 
 export type QueueUri = { uri: string; position: QueuePosition };
 
@@ -1000,6 +1021,13 @@ export type VoiceStreamOpen = { streamId: string; format: VoiceFormat };
 export type VolumeChanged = { level: number; muted: boolean };
 
 export type WebappActive = { id: string | null; name: string | null };
+
+/**
+ * Event payload for an active-webapp change (any initiator). Distinct from
+ * `WebappActive` (a request response) so it carries the new app's declared
+ * art profile; the companion reads `art` directly to size its pushes.
+ */
+export type WebappActiveChanged = { id: string | null; name: string | null; art: ArtProfile | null };
 
 /**
  * Ack for WebappConfigSet / WebappConfigDelete. The `value` field

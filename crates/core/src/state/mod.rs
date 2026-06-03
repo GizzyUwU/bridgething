@@ -40,7 +40,7 @@ pub use telephony::TelephonyManager;
 pub use time::TimeManager;
 pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
 pub(crate) use webapps::extract_zip;
-pub use webapps::{HUB_WEBAPP_ID, STOCK_WEBAPP_ID, WebappRegistry};
+pub use webapps::{BROWSER_WEBAPP_ID, HUB_WEBAPP_ID, STOCK_WEBAPP_ID, WebappRegistry};
 
 pub type State = Arc<AppState>;
 
@@ -158,6 +158,18 @@ impl AppState {
 
   pub async fn active_webapp(&self) -> StateResult<Option<Uuid>> {
     self.meta_store.active_webapp(&self.webapps).await
+  }
+
+  pub async fn active_webapp_changed_event(&self) -> libbridgething::gateway::WebappActiveChanged {
+    let id = self.active_webapp().await.ok().flatten();
+    let (name, art) = match id {
+      Some(id) => match self.webapps.bundle(id).await {
+        Some(b) => (Some(b.manifest.name.clone()), b.manifest.art),
+        None => (None, None),
+      },
+      None => (None, None),
+    };
+    libbridgething::gateway::WebappActiveChanged { id, name, art }
   }
 
   pub async fn set_active_webapp(&self, id: Uuid) -> StateResult<()> {

@@ -1,13 +1,10 @@
 package dev.bridgething.gateway
 
 import dev.bridgething.schema.BridgeToGatewayMsg
-import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.MsgMeta
 import dev.bridgething.schema.GatewayToBridgeMsg
 import dev.bridgething.schema.GatewayToBridgeMsgData
 import dev.bridgething.schema.Priority
-import kotlinx.serialization.SerializationStrategy
-import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -70,7 +67,6 @@ public class BridgethingGateway(
 
   private val buffers = mutableMapOf<String, FrameAccumulator>()
   private val pendingRequests = mutableMapOf<UUID, CompletableDeferred<BridgeToGatewayMsg>>()
-  private val requestSentAt = mutableMapOf<UUID, Double>()
   private var consumerJob: Job? = null
 
   // Broadcast, not fan-out: every dispatcher collector must see every event. A
@@ -139,16 +135,6 @@ public class BridgethingGateway(
     priority: Priority = Priority.Normal,
   ) {
     val frame = codec.encode(GatewayToBridgeMsg.serializer(), message, priority = priority)
-    DiagnosticsBuffer.recordFrame(
-      deviceId = deviceId,
-      direction = DiagRecord.Direction.OUTBOUND,
-      frameKind = diagFrameKind(message.meta),
-      surface = diagSurface(message.data),
-      byteSize = frame.size,
-      requestId = diagRequestId(message.meta, message.id),
-      latencyMs = null,
-      payload = diagPayload(GatewayToBridgeMsgData.serializer(), message.data, frame.size),
-    )
     adapter.send(deviceId, frame)
   }
 
@@ -178,28 +164,17 @@ public class BridgethingGateway(
     val deferred = CompletableDeferred<BridgeToGatewayMsg>()
     mutex.withLock {
       pendingRequests[id] = deferred
-      requestSentAt[id] = System.currentTimeMillis().toDouble()
     }
 
     return try {
       val frame = codec.encode(GatewayToBridgeMsg.serializer(), msg)
-      DiagnosticsBuffer.recordFrame(
-        deviceId = deviceId,
-        direction = DiagRecord.Direction.OUTBOUND,
-        frameKind = DiagRecord.FrameKind.REQUEST,
-        surface = diagSurface(data),
-        byteSize = frame.size,
-        requestId = id.toString(),
-        latencyMs = null,
-        payload = diagPayload(GatewayToBridgeMsgData.serializer(), data, frame.size),
-      )
       adapter.send(deviceId, frame)
       withTimeout(timeout) { deferred.await() }
     } catch (_: TimeoutCancellationException) {
-      mutex.withLock { pendingRequests.remove(id); requestSentAt.remove(id) }
+      mutex.withLock { pendingRequests.remove(id) }
       throw GatewayException.RequestTimedOut()
     } catch (e: Throwable) {
-      mutex.withLock { pendingRequests.remove(id); requestSentAt.remove(id) }
+      mutex.withLock { pendingRequests.remove(id) }
       throw e
     }
   }
@@ -237,26 +212,6 @@ public class BridgethingGateway(
         continue
       }
       val resp = msg.meta as? MsgMeta.Response
-      var latencyMs: Double? = null
-      val reqId: String? = when {
-        resp != null -> resp.data.requestId.toString()
-        msg.meta is MsgMeta.Request -> msg.id.toString()
-        else -> null
-      }
-      if (resp != null) {
-        val sentAt = mutex.withLock { requestSentAt.remove(resp.data.requestId) }
-        if (sentAt != null) latencyMs = System.currentTimeMillis().toDouble() - sentAt
-      }
-      DiagnosticsBuffer.recordFrame(
-        deviceId = deviceId,
-        direction = DiagRecord.Direction.INBOUND,
-        frameKind = diagFrameKind(msg.meta),
-        surface = diagSurface(msg.data),
-        byteSize = frame.size,
-        requestId = reqId,
-        latencyMs = latencyMs,
-        payload = diagPayload(BridgeToGatewayMsgData.serializer(), msg.data, frame.size),
-      )
       val resolved = if (resp != null) {
         val deferred = mutex.withLock { pendingRequests.remove(resp.data.requestId) }
         deferred?.complete(msg) ?: false
@@ -267,36 +222,5 @@ public class BridgethingGateway(
         outboundEvents.emit(GatewayEvent.Message(deviceId, msg))
       }
     }
-  }
-}
-
-private fun diagFrameKind(meta: MsgMeta): DiagRecord.FrameKind = when (meta) {
-  is MsgMeta.Command -> DiagRecord.FrameKind.COMMAND
-  is MsgMeta.Event -> DiagRecord.FrameKind.EVENT
-  is MsgMeta.Request -> DiagRecord.FrameKind.REQUEST
-  is MsgMeta.Response -> DiagRecord.FrameKind.RESPONSE
-}
-
-private fun diagRequestId(meta: MsgMeta, id: UUID): String? = when (meta) {
-  is MsgMeta.Request -> id.toString()
-  is MsgMeta.Response -> meta.data.requestId.toString()
-  else -> null
-}
-
-private fun diagSurface(data: Any): String = data::class.simpleName ?: "unknown"
-
-private const val DIAG_PAYLOAD_FRAME_CAP = 16 * 1024
-private const val DIAG_PAYLOAD_CHAR_CAP = 4 * 1024
-private val diagJson = Json { encodeDefaults = true }
-
-// json preview of a decoded message body, skipped for binary-heavy frames so the
-// ring's byte budget isn't blown by asset / ota chunk payloads.
-private fun <T> diagPayload(serializer: SerializationStrategy<T>, data: T, frameBytes: Int): String? {
-  if (frameBytes > DIAG_PAYLOAD_FRAME_CAP) return null
-  return try {
-    val encoded = diagJson.encodeToString(serializer, data)
-    if (encoded.length > DIAG_PAYLOAD_CHAR_CAP) encoded.take(DIAG_PAYLOAD_CHAR_CAP) + "…(truncated)" else encoded
-  } catch (_: Throwable) {
-    null
   }
 }

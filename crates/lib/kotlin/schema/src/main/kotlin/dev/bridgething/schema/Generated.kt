@@ -14,6 +14,16 @@ data class Album (
 	val name: String
 )
 
+/// Art render sizes a webapp declares so the companion warms exactly the
+/// pixels it renders: hero (now-playing / detail views) and thumb (queue /
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
+/// which is also the stock webapp's profile.
+@Serializable
+data class ArtProfile (
+	val heroPx: UInt,
+	val thumbPx: UInt
+)
+
 @Serializable
 data class Artist (
 	val id: String,
@@ -539,6 +549,15 @@ data class ConfigEntry (
 	val value: String
 )
 
+/// Resolved metadata for a single context uri (playlist / album / show /
+/// artist), used to populate a stock preset's name + cover art.
+@Serializable
+data class ContextResolveReply (
+	val name: String? = null,
+	val artworkId: String? = null,
+	val subtitle: String? = null
+)
+
 @Serializable
 enum class DeviceType(val string: String) {
 	@SerialName("android")
@@ -986,6 +1005,14 @@ data class LibraryRecommendationsRequest (
 	val kind: ItemKind? = null,
 	val limit: UInt,
 	val offset: UInt
+)
+
+/// Resolve a single context uri (playlist / album / show / artist) to its
+/// name + cover art. Used to populate a stock preset slot the device only
+/// knows by `context_uri`.
+@Serializable
+data class LibraryResolveContextRequest (
+	val uri: String
 )
 
 @Serializable
@@ -1565,14 +1592,14 @@ data class QueueItem (
 /// iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
 /// companion echoes from the last `PlaybackHint`, so the daemon can match
 /// this offer to the live iAP2 identity by exact equality. `head` is the
-/// companion's current Spotify track; `queue` is upcoming. The companion
-/// never claims authority - the daemon overlays art / uri / queue onto the
-/// iAP2 identity only when the offer provably describes the playing track.
+/// companion's current Spotify track. The companion never claims authority
+/// - the daemon overlays art / uri onto the iAP2 identity only when the
+/// offer provably describes the playing track. The queue rides its own
+/// `QueueChanged` surface (on-change), not this frequent per-hint offer.
 @Serializable
 data class NowPlayingEnrichment (
 	val anchorPid: String? = null,
 	val head: QueueItem? = null,
-	val queue: List<QueueItem>,
 	val context: EnrichmentContext? = null
 )
 
@@ -2287,12 +2314,17 @@ data class PodcastEpisode (
 	val artworkId: String? = null
 )
 
-/// Snapshot of the player queue as the companion sees it. Sent on
-/// queue mutations the gateway can detect (user reorder, queue clear,
-/// gapless prefetch landing). The daemon overwrites its cached queue
-/// from this and re-broadcasts to webapps.
+/// Queue update from the companion. `order` is the complete queue as a
+/// list of item uris, every message - so it is a full ordering, not an
+/// op-delta with a baseline to track. `items` carries full metadata only
+/// for uris the daemon does not already hold from the previous message on
+/// this connection; the daemon rebuilds the queue from `order` against its
+/// last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
+/// is a link reset and the companion re-sends a full ordering on reconnect;
+/// no revision numbers or resync are needed.
 @Serializable
 data class QueueSnapshot (
+	val order: List<String>,
 	val items: List<QueueItem>
 )
 
@@ -2743,6 +2775,16 @@ data class WebappActive (
 	val name: String? = null
 )
 
+/// Event payload for an active-webapp change (any initiator). Distinct from
+/// `WebappActive` (a request response) so it carries the new app's declared
+/// art profile; the companion reads `art` directly to size its pushes.
+@Serializable
+data class WebappActiveChanged (
+	val id: ByteArray? = null,
+	val name: String? = null,
+	val art: ArtProfile? = null
+)
+
 /// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
 /// echoes what's now stored after the write (None for delete).
 @Serializable
@@ -2851,6 +2893,9 @@ data class WebappInfo (
 	val description: String? = null,
 	val iconAvailable: Boolean,
 	val iconMime: String? = null,
+	/// icon bytes, inlined on the gateway list so the companion never round-trips
+	/// a separate fetch per app. omitted on the on-device client list.
+	val icon: ByteArray? = null,
 	val config: List<ConfigField>,
 	val permissions: List<String>,
 	/// Plain-English description of the voice intents the webapp wants
@@ -2858,7 +2903,10 @@ data class WebappInfo (
 	/// "currently active extensions" section of the system prompt at
 	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
 	/// `None` opts the webapp out of voice integration.
-	val voiceGrammar: String? = null
+	val voiceGrammar: String? = null,
+	/// Declared art render sizes; the companion warms exactly these. `None`
+	/// means the canonical `{248, 96}` default applies.
+	val art: ArtProfile? = null
 )
 
 @Serializable
@@ -2884,7 +2932,9 @@ data class WebappManifest (
 	/// the grammars of all installed-and-active webapps into the system
 	/// prompt at inference. Webapps that don't declare a grammar opt out
 	/// of voice integration.
-	val voiceGrammar: String? = null
+	val voiceGrammar: String? = null,
+	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
+	val art: ArtProfile? = null
 )
 
 @Serializable
@@ -2981,6 +3031,9 @@ sealed class BridgeToGatewayLibraryMsg {
 	@Serializable
 	@SerialName("browse")
 	data class Browse(val data: LibraryBrowseRequest): BridgeToGatewayLibraryMsg()
+	@Serializable
+	@SerialName("resolveContext")
+	data class ResolveContext(val data: LibraryResolveContextRequest): BridgeToGatewayLibraryMsg()
 	@Serializable
 	@SerialName("search")
 	data class Search(val data: LibrarySearchRequest): BridgeToGatewayLibraryMsg()
@@ -3252,6 +3305,12 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("webappInstalled")
 	data class WebappInstalled(val data: WebappInfo): BridgeToGatewayWebappMsg()
+	/// event: the active webapp changed (any initiator - hub tap, gateway
+	/// switchTo, uninstall fallback). carries the new app's id/name + declared
+	/// art profile so the companion sizes art pushes to what it renders.
+	@Serializable
+	@SerialName("activeChanged")
+	data class ActiveChanged(val data: WebappActiveChanged): BridgeToGatewayWebappMsg()
 }
 
 @Serializable(with = ForwardMessageSerializer::class)
@@ -3356,6 +3415,9 @@ sealed class GatewayToBridgeLibraryMsg {
 	@Serializable
 	@SerialName("browseReply")
 	data class BrowseReply(val data: dev.bridgething.schema.BrowseReply): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("contextResolveReply")
+	data class ContextResolveReply(val data: dev.bridgething.schema.ContextResolveReply): GatewayToBridgeLibraryMsg()
 	@Serializable
 	@SerialName("searchReply")
 	data class SearchReply(val data: dev.bridgething.schema.SearchReply): GatewayToBridgeLibraryMsg()

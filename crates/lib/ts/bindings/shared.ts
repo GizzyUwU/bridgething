@@ -22,6 +22,14 @@ export type Album = { id: string; name: string };
  */
 export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized';
 
+/**
+ * Art render sizes a webapp declares so the companion warms exactly the
+ * pixels it renders: hero (now-playing / detail views) and thumb (queue /
+ * grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
+ * which is also the stock webapp's profile.
+ */
+export type ArtProfile = { heroPx: number; thumbPx: number };
+
 export type Artist = { id: string; name: string };
 
 export type AssetRetention =
@@ -1188,6 +1196,11 @@ export type WebappInfo = {
   description: string | null;
   iconAvailable: boolean;
   iconMime: string | null;
+  /**
+   * icon bytes, inlined on the gateway list so the companion never round-trips
+   * a separate fetch per app. omitted on the on-device client list.
+   */
+  icon?: Uint8Array | null;
   config: Array<ConfigField>;
   permissions: Array<string>;
   /**
@@ -1198,6 +1211,11 @@ export type WebappInfo = {
    * `None` opts the webapp out of voice integration.
    */
   voiceGrammar: string | null;
+  /**
+   * Declared art render sizes; the companion warms exactly these. `None`
+   * means the canonical `{248, 96}` default applies.
+   */
+  art: ArtProfile | null;
 };
 
 /**
@@ -1222,6 +1240,10 @@ export type WebappManifest = {
    * of voice integration.
    */
   voiceGrammar: string | null;
+  /**
+   * Declared art render sizes. Omitted falls back to `{248, 96}`.
+   */
+  art?: ArtProfile | null;
 };
 
 /**

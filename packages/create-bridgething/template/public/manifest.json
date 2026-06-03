@@ -4,5 +4,6 @@
   "version": "0.1.0",
   "description": "",
   "config": [],
-  "permissions": []
+  "permissions": [],
+  "art": { "heroPx": 248, "thumbPx": 96 }
 }

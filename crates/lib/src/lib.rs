@@ -10,7 +10,8 @@ pub mod wire;
 pub mod protocol;
 
 pub use shared::{
-  AcceptCallAction, Album, AncsAuthState, Artist, AssetRetention, AudioCapabilities, BoolField, BridgeThingMeta,
+  AcceptCallAction, Album, AncsAuthState, ArtProfile, Artist, AssetRetention, AudioCapabilities, BoolField,
+  BridgeThingMeta,
   BrightnessMode, BrightnessState, BrowseEntry, BrowseFolder, BrowseResult, CARTHING_HACKS_LOGO, CallEndReason,
   Capabilities, CommunicationsState, CompanionAuthorityScope, ConfigEntry, ConfigField, CurrentlyActiveApplication,
   Device, DeviceType, Diagnostics, DismissReason, DtmfTone, EndCallAction, EnumField, FavoritesPage, ForwardMessage,

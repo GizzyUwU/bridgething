@@ -14,6 +14,20 @@ public struct Album: Codable, Sendable {
 	}
 }
 
+/// Art render sizes a webapp declares so the companion warms exactly the
+/// pixels it renders: hero (now-playing / detail views) and thumb (queue /
+/// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
+/// which is also the stock webapp's profile.
+public struct ArtProfile: Codable, Sendable {
+	public let heroPx: UInt32
+	public let thumbPx: UInt32
+
+	public init(heroPx: UInt32, thumbPx: UInt32) {
+		self.heroPx = heroPx
+		self.thumbPx = thumbPx
+	}
+}
+
 public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
@@ -947,6 +961,20 @@ public struct ConfigEntry: Codable, Sendable {
 	}
 }
 
+/// Resolved metadata for a single context uri (playlist / album / show /
+/// artist), used to populate a stock preset's name + cover art.
+public struct ContextResolveReply: Codable, Sendable {
+	public let name: String?
+	public let artworkId: String?
+	public let subtitle: String?
+
+	public init(name: String?, artworkId: String?, subtitle: String?) {
+		self.name = name
+		self.artworkId = artworkId
+		self.subtitle = subtitle
+	}
+}
+
 public enum DeviceType: String, Codable, Sendable {
 	case android
 	case ios = "iOS"
@@ -1773,6 +1801,17 @@ public struct LibraryRecommendationsRequest: Codable, Sendable {
 		self.kind = kind
 		self.limit = limit
 		self.offset = offset
+	}
+}
+
+/// Resolve a single context uri (playlist / album / show / artist) to its
+/// name + cover art. Used to populate a stock preset slot the device only
+/// knows by `context_uri`.
+public struct LibraryResolveContextRequest: Codable, Sendable {
+	public let uri: String
+
+	public init(uri: String) {
+		self.uri = uri
 	}
 }
 
@@ -2670,19 +2709,18 @@ public struct QueueItem: Codable, Sendable {
 /// iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
 /// companion echoes from the last `PlaybackHint`, so the daemon can match
 /// this offer to the live iAP2 identity by exact equality. `head` is the
-/// companion's current Spotify track; `queue` is upcoming. The companion
-/// never claims authority - the daemon overlays art / uri / queue onto the
-/// iAP2 identity only when the offer provably describes the playing track.
+/// companion's current Spotify track. The companion never claims authority
+/// - the daemon overlays art / uri onto the iAP2 identity only when the
+/// offer provably describes the playing track. The queue rides its own
+/// `QueueChanged` surface (on-change), not this frequent per-hint offer.
 public struct NowPlayingEnrichment: Codable, Sendable {
 	public let anchorPid: String?
 	public let head: QueueItem?
-	public let queue: [QueueItem]
 	public let context: EnrichmentContext?
 
-	public init(anchorPid: String?, head: QueueItem?, queue: [QueueItem], context: EnrichmentContext?) {
+	public init(anchorPid: String?, head: QueueItem?, context: EnrichmentContext?) {
 		self.anchorPid = anchorPid
 		self.head = head
-		self.queue = queue
 		self.context = context
 	}
 }
@@ -3610,14 +3648,20 @@ public struct PodcastEpisode: Codable, Sendable {
 	}
 }
 
-/// Snapshot of the player queue as the companion sees it. Sent on
-/// queue mutations the gateway can detect (user reorder, queue clear,
-/// gapless prefetch landing). The daemon overwrites its cached queue
-/// from this and re-broadcasts to webapps.
+/// Queue update from the companion. `order` is the complete queue as a
+/// list of item uris, every message - so it is a full ordering, not an
+/// op-delta with a baseline to track. `items` carries full metadata only
+/// for uris the daemon does not already hold from the previous message on
+/// this connection; the daemon rebuilds the queue from `order` against its
+/// last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
+/// is a link reset and the companion re-sends a full ordering on reconnect;
+/// no revision numbers or resync are needed.
 public struct QueueSnapshot: Codable, Sendable {
+	public let order: [String]
 	public let items: [QueueItem]
 
-	public init(items: [QueueItem]) {
+	public init(order: [String], items: [QueueItem]) {
+		self.order = order
 		self.items = items
 	}
 }
@@ -4306,6 +4350,21 @@ public struct WebappActive: Codable, Sendable {
 	}
 }
 
+/// Event payload for an active-webapp change (any initiator). Distinct from
+/// `WebappActive` (a request response) so it carries the new app's declared
+/// art profile; the companion reads `art` directly to size its pushes.
+public struct WebappActiveChanged: Codable, Sendable {
+	@OptionalMsgpackUuid public var id: UUID?
+	public let name: String?
+	public let art: ArtProfile?
+
+	public init(id: UUID?, name: String?, art: ArtProfile?) {
+		self.id = id
+		self.name = name
+		self.art = art
+	}
+}
+
 /// Ack for WebappConfigSet / WebappConfigDelete. The `value` field
 /// echoes what's now stored after the write (None for delete).
 public struct WebappConfigAck: Codable, Sendable {
@@ -4497,6 +4556,9 @@ public struct WebappInfo: Codable, Sendable {
 	public let description: String?
 	public let iconAvailable: Bool
 	public let iconMime: String?
+	/// icon bytes, inlined on the gateway list so the companion never round-trips
+	/// a separate fetch per app. omitted on the on-device client list.
+	public let icon: Data?
 	public let config: [ConfigField]
 	public let permissions: [String]
 	/// Plain-English description of the voice intents the webapp wants
@@ -4505,8 +4567,11 @@ public struct WebappInfo: Codable, Sendable {
 	/// inference, which is what makes WEBAPP_INTENT emission context-aware.
 	/// `None` opts the webapp out of voice integration.
 	public let voiceGrammar: String?
+	/// Declared art render sizes; the companion warms exactly these. `None`
+	/// means the canonical `{248, 96}` default applies.
+	public let art: ArtProfile?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, icon: Data?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?) {
 		self.id = id
 		self.name = name
 		self.source = source
@@ -4515,9 +4580,11 @@ public struct WebappInfo: Codable, Sendable {
 		self.description = description
 		self.iconAvailable = iconAvailable
 		self.iconMime = iconMime
+		self.icon = icon
 		self.config = config
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
+		self.art = art
 	}
 }
 
@@ -4547,8 +4614,10 @@ public struct WebappManifest: Codable, Sendable {
 	/// prompt at inference. Webapps that don't declare a grammar opt out
 	/// of voice integration.
 	public let voiceGrammar: String?
+	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
+	public let art: ArtProfile?
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -4558,6 +4627,7 @@ public struct WebappManifest: Codable, Sendable {
 		self.config = config
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
+		self.art = art
 	}
 }
 
@@ -4806,6 +4876,7 @@ public enum BridgeToGatewayGeoMsg: Codable, Sendable {
 
 public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 	case browse(LibraryBrowseRequest)
+	case resolveContext(LibraryResolveContextRequest)
 	case search(LibrarySearchRequest)
 	case recommendations(LibraryRecommendationsRequest)
 	case favoritesList(LibraryFavoritesListRequest)
@@ -4816,6 +4887,7 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browse,
+			resolveContext,
 			search,
 			recommendations,
 			favoritesList,
@@ -4836,6 +4908,11 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 			case .browse:
 				if let content = try? container.decode(LibraryBrowseRequest.self, forKey: .data) {
 					self = .browse(content)
+					return
+				}
+			case .resolveContext:
+				if let content = try? container.decode(LibraryResolveContextRequest.self, forKey: .data) {
+					self = .resolveContext(content)
 					return
 				}
 			case .search:
@@ -4883,6 +4960,9 @@ public enum BridgeToGatewayLibraryMsg: Codable, Sendable {
 		switch self {
 		case .browse(let content):
 			try container.encode(CodingKeys.browse, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .resolveContext(let content):
+			try container.encode(CodingKeys.resolveContext, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .search(let content):
 			try container.encode(CodingKeys.search, forKey: .event)
@@ -5675,6 +5755,10 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	/// signal for an install; failures surface as `OtaError` on the system
 	/// surface.
 	case webappInstalled(WebappInfo)
+	/// event: the active webapp changed (any initiator - hub tap, gateway
+	/// switchTo, uninstall fallback). carries the new app's id/name + declared
+	/// art profile so the companion sizes art pushes to what it renders.
+	case activeChanged(WebappActiveChanged)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case webapps,
@@ -5686,7 +5770,8 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			configGet,
 			configList,
 			configAck,
-			webappInstalled
+			webappInstalled,
+			activeChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5747,6 +5832,11 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 					self = .webappInstalled(content)
 					return
 				}
+			case .activeChanged:
+				if let content = try? container.decode(WebappActiveChanged.self, forKey: .data) {
+					self = .activeChanged(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayWebappMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayWebappMsg"))
@@ -5784,6 +5874,9 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .webappInstalled(let content):
 			try container.encode(CodingKeys.webappInstalled, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .activeChanged(let content):
+			try container.encode(CodingKeys.activeChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6175,6 +6268,7 @@ public enum GatewayToBridgeGeoMsg: Codable, Sendable {
 
 public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 	case browseReply(BrowseReply)
+	case contextResolveReply(ContextResolveReply)
 	case searchReply(SearchReply)
 	case recommendationsReply(RecommendationsReply)
 	case favoritesListReply(FavoritesListReply)
@@ -6184,6 +6278,7 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browseReply,
+			contextResolveReply,
 			searchReply,
 			recommendationsReply,
 			favoritesListReply,
@@ -6203,6 +6298,11 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			case .browseReply:
 				if let content = try? container.decode(BrowseReply.self, forKey: .data) {
 					self = .browseReply(content)
+					return
+				}
+			case .contextResolveReply:
+				if let content = try? container.decode(ContextResolveReply.self, forKey: .data) {
+					self = .contextResolveReply(content)
 					return
 				}
 			case .searchReply:
@@ -6245,6 +6345,9 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 		switch self {
 		case .browseReply(let content):
 			try container.encode(CodingKeys.browseReply, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .contextResolveReply(let content):
+			try container.encode(CodingKeys.contextResolveReply, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .searchReply(let content):
 			try container.encode(CodingKeys.searchReply, forKey: .event)

@@ -68,8 +68,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
     private var onCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
-    private var onDiagEntry: (@Sendable (BridgethingDiagEntry) -> Void)?
-    private var diagTask: Task<Void, Never>?
     private var logStreamingDesired: Bool = false
     private var lastAuthState: BridgethingAuthState = .idleState()
     private var lastServiceHealth: BridgethingServiceHealth = toRNServiceHealth(.ok)
@@ -124,19 +122,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 self?.emitCatalogEvent(toRNCatalogEvent(event))
             }
         }
-        let diagStream = DiagnosticsBuffer.shared.stream
-        let diagTask = Task { [weak self] in
-            for await record in diagStream {
-                guard let self else { return }
-                let cb = stateLock.withLock { onDiagEntry }
-                cb?(Self.toRNDiagEntry(record))
-            }
-        }
         stateLock.lock()
         eventsTask = task
         otaEventsTask = otaTask
         catalogEventsTask = catalogTask
-        self.diagTask = diagTask
         stateLock.unlock()
 
         await applyOtaPollConfig(Self.loadOtaPollConfig())
@@ -152,21 +141,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let events = eventsTask
         let ota = otaEventsTask
         let catalog = catalogEventsTask
-        let diag = diagTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
         otaEventsTask = nil
         catalogEventsTask = nil
         authTask = nil
-        diagTask = nil
         stateLock.unlock()
 
         auth?.cancel()
         events?.cancel()
         ota?.cancel()
         catalog?.cancel()
-        diag?.cancel()
 
         await companion?.stop()
 
@@ -289,10 +275,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             capabilityFlags: Self.loadCapabilityFlags(),
             otaPollConfig: Self.loadOtaPollConfig()
         )
-    }
-
-    public func diagnosticsSnapshot(limit: Double) async -> [BridgethingDiagEntry] {
-        DiagnosticsBuffer.shared.tail(limit: Int(limit)).map(Self.toRNDiagEntry)
     }
 
     public func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine] {
@@ -682,54 +664,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         defaults.set(config.rootUrl, forKey: PrefKey.otaRootUrl)
     }
 
-    // MARK: - Diagnostics record conversion
-
-    private static func toRNDiagEntry(_ r: DiagRecord) -> BridgethingDiagEntry {
-        BridgethingDiagEntry(
-            seq: Double(r.seq),
-            ts: r.timestampMs,
-            kind: rnDiagKind(r.kind),
-            deviceId: r.deviceId,
-            direction: r.direction.map(rnDiagDirection),
-            frameKind: r.frameKind.map(rnDiagFrameKind),
-            surface: r.surface,
-            byteSize: r.byteSize.map(Double.init),
-            requestId: r.requestId,
-            latencyMs: r.latencyMs,
-            payload: r.payload,
-            level: r.level,
-            target: r.target,
-            message: r.message,
-            category: r.category,
-            detail: r.detail,
-            fields: r.fields.map { $0.map { BridgethingConfigEntry(key: $0.key, value: $0.value) } }
-        )
-    }
-
-    private static func rnDiagKind(_ k: DiagRecord.Kind) -> BridgethingDiagKind {
-        switch k {
-        case .frame: .frame
-        case .log: .log
-        case .breadcrumb: .breadcrumb
-        }
-    }
-
-    private static func rnDiagDirection(_ d: DiagRecord.Direction) -> BridgethingDiagDirection {
-        switch d {
-        case .outbound: .outbound
-        case .inbound: .inbound
-        }
-    }
-
-    private static func rnDiagFrameKind(_ f: DiagRecord.FrameKind) -> BridgethingDiagFrameKind {
-        switch f {
-        case .request: .request
-        case .response: .response
-        case .event: .event
-        case .command: .command
-        }
-    }
-
     // MARK: - Callback setters
 
     public func setOnProviderChanged(_ callback: @escaping @Sendable (BridgethingProviderInfo?) -> Void) {
@@ -803,10 +737,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void) {
         stateLock.withLock { onOtaEvent = callback }
-    }
-
-    public func setOnDiagEntry(_ callback: @escaping @Sendable (BridgethingDiagEntry) -> Void) {
-        stateLock.withLock { onDiagEntry = callback }
     }
 
     // MARK: - Cross-platform AccessorySetupKit picker

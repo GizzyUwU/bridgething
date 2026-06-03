@@ -97,6 +97,34 @@ async fn stock_get_image_serves_a_companion_cached_asset() {
   assert!(!image_data.is_empty(), "stock get_image must serve the cached asset bytes");
 }
 
+/// A companion-fetched asset request that is in flight when the companion drops
+/// must fail fast, not hang on the request leak-guard. The daemon fails pending
+/// gateway requests when their peer disconnects, so the stock reply comes back
+/// empty within the disconnect latency rather than after the 60s leak-guard.
+#[tokio::test]
+async fn companion_disconnect_fails_inflight_asset_request_fast() {
+  let harness = Harness::start().await.expect("harness start");
+  let companion = harness.connect_android().await.expect("connect companion");
+  let mut stock = harness.connect_stock_client().await.expect("stock client");
+
+  // a normal companion-fetched id: cache miss, not an iap2 art id, gateway present
+  // -> daemon issues an AssetRequest the companion never answers.
+  let id = "spotify/img/480/https%3A%2F%2Fexample.test%2Fart.jpg";
+
+  let drop_companion = async {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(companion);
+  };
+  let fetch = stock_get_image(&mut stock, id, Duration::from_secs(8));
+  let (image, ()) = tokio::join!(fetch, drop_companion);
+
+  assert_eq!(
+    image,
+    Some(String::new()),
+    "a disconnect must fail the in-flight fetch promptly and serve an empty image, not hang"
+  );
+}
+
 #[tokio::test]
 async fn chunked_asset_push_resumes_across_daemon_restart() {
   let harness = Harness::start().await.expect("harness start");

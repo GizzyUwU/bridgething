@@ -10,6 +10,7 @@ import dev.bridgething.schema.BridgeToGatewayPhoneMsg
 import dev.bridgething.schema.BridgeToGatewayTunnelMsg
 import dev.bridgething.schema.TunnelOpen
 import dev.bridgething.schema.LibraryBrowseRequest
+import dev.bridgething.schema.LibraryResolveContextRequest
 import dev.bridgething.schema.LibraryFavoritesContainsRequest
 import dev.bridgething.schema.LibraryFavoritesListRequest
 import dev.bridgething.schema.LibraryRecommendationsRequest
@@ -51,6 +52,7 @@ class WireSurfaceCoverageTest {
     private val probes: Map<String, BridgeToGatewayMsgData> = mapOf(
         "asset.request" to BridgeToGatewayMsgData.Asset(BridgeToGatewayAssetMsg.Request(AssetRequest(id = "probe", requestId = UUID.randomUUID()))),
         "library.browse" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.Browse(LibraryBrowseRequest(nodeId = null, limit = 1u, offset = 0u))),
+        "library.resolveContext" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.ResolveContext(LibraryResolveContextRequest(uri = "x"))),
         "library.search" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.Search(LibrarySearchRequest(query = "x", kinds = null, limit = 1u, offset = 0u))),
         "library.recommendations" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.Recommendations(LibraryRecommendationsRequest(seeds = emptyList(), kind = null, limit = 1u, offset = 0u))),
         "library.favoritesList" to BridgeToGatewayMsgData.Library(BridgeToGatewayLibraryMsg.FavoritesList(LibraryFavoritesListRequest(limit = 1u, offset = 0u))),
@@ -128,7 +130,7 @@ class WireSurfaceCoverageTest {
         // webapp
         "webapp.webapps", "webapp.active", "webapp.switched", "webapp.uninstalled",
         "webapp.webappError", "webapp.icon", "webapp.configGet",
-        "webapp.configList", "webapp.configAck", "webapp.webappInstalled",
+        "webapp.configList", "webapp.configAck", "webapp.webappInstalled", "webapp.activeChanged",
         // forward
         "forward.text", "forward.binary", "forward.json",
     )

@@ -68,7 +68,7 @@ public final class GeoController {
         }
         getOnceTask = Task { [weak self] in
             for await (handle, req) in gateway.geo.getOnceRequests {
-                await self?.handleGetOnce(handle: handle, req: req)
+                Task { [weak self] in await self?.handleGetOnce(handle: handle, req: req) }
             }
         }
     }

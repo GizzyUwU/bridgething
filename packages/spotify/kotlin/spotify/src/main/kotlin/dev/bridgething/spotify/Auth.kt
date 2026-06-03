@@ -105,7 +105,7 @@ class DeviceCodeAuthenticator(
             throw OAuthError.TokenRequestFailed(status, text)
         }
 
-        val body = runCatching { json.decodeFromString(DeviceCodeResponse.serializer(), text) }
+        val body = runCatching { oauthJson.decodeFromString(DeviceCodeResponse.serializer(), text) }
             .getOrElse { throw OAuthError.MalformedDeviceCodeResponse }
 
         val userCode = body.userCode
@@ -169,7 +169,7 @@ class DeviceCodeAuthenticator(
         if (status !in 200..299) {
             throw OAuthError.TokenRequestFailed(status, text)
         }
-        val token = json.decodeFromString(OAuthTokenResponse.serializer(), text)
+        val token = oauthJson.decodeFromString(OAuthTokenResponse.serializer(), text)
         return TokenBundle(
             accessToken = token.accessToken,
             refreshToken = token.refreshToken,
@@ -180,14 +180,14 @@ class DeviceCodeAuthenticator(
     }
 
     private suspend fun postForm(endpoint: String, params: Map<String, String>): HttpResponse =
-        client.post(endpoint) {
+        oauthHttpClient.post(endpoint) {
             header("Authorization", authHeader)
             contentType(ContentType.Application.FormUrlEncoded)
             setBody(formUrlEncodedBody(params))
         }
 
     private fun errorString(body: String): String? =
-        runCatching { json.decodeFromString(OAuthErrorBody.serializer(), body).error }.getOrNull()
+        runCatching { oauthJson.decodeFromString(OAuthErrorBody.serializer(), body).error }.getOrNull()
 
     private data class DeviceCodeFlow(
         val userCode: String,
@@ -197,22 +197,52 @@ class DeviceCodeAuthenticator(
         val expiresIn: Int,
         val interval: Int,
     )
+}
 
-    private companion object {
-        val client = HttpClient(CIO)
+data class PkceRefreshConfig(
+    val clientId: String,
+    val tokenUrl: String,
+)
 
-        val json = Json { ignoreUnknownKeys = true }
+class PkceRefreshAuthenticator(private val config: PkceRefreshConfig) : SpotifyAuthenticator {
+    override suspend fun authorize(): TokenBundle = throw OAuthError.UnsupportedPlatform
 
-        fun formUrlEncodedBody(params: Map<String, String>): String =
-            params.entries.joinToString("&") { (k, v) -> "${formEncode(k)}=${formEncode(v)}" }
-
-        fun formEncode(value: String): String =
-            URLEncoder.encode(value, "UTF-8")
-                .replace("+", "%20")
-                .replace("*", "%2A")
-                .replace("%7E", "~")
+    override suspend fun refreshAccessToken(refreshToken: String): TokenBundle {
+        val params = mapOf(
+            "grant_type" to "refresh_token",
+            "refresh_token" to refreshToken,
+            "client_id" to config.clientId,
+        )
+        val response = oauthHttpClient.post(config.tokenUrl) {
+            contentType(ContentType.Application.FormUrlEncoded)
+            setBody(formUrlEncodedBody(params))
+        }
+        val status = response.status.value
+        val text = response.bodyAsText()
+        if (status !in 200..299) throw OAuthError.TokenRequestFailed(status, text)
+        val token = oauthJson.decodeFromString(OAuthTokenResponse.serializer(), text)
+        return TokenBundle(
+            accessToken = token.accessToken,
+            refreshToken = token.refreshToken,
+            tokenType = token.tokenType,
+            expiresIn = token.expiresIn,
+            scope = token.scope,
+        )
     }
 }
+
+private val oauthHttpClient = HttpClient(CIO)
+
+private val oauthJson = Json { ignoreUnknownKeys = true }
+
+private fun formUrlEncodedBody(params: Map<String, String>): String =
+    params.entries.joinToString("&") { (k, v) -> "${formEncode(k)}=${formEncode(v)}" }
+
+private fun formEncode(value: String): String =
+    URLEncoder.encode(value, "UTF-8")
+        .replace("+", "%20")
+        .replace("*", "%2A")
+        .replace("%7E", "~")
 
 @Serializable
 private data class OAuthTokenResponse(

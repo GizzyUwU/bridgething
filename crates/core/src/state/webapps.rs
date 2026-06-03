@@ -130,6 +130,18 @@ impl WebappRegistry {
     infos.into_values().collect()
   }
 
+  pub async fn list_with_icons(&self) -> Vec<WebappInfo> {
+    let mut infos = self.list().await;
+    for info in &mut infos {
+      if info.icon_available {
+        if let Some((bytes, _)) = self.read_icon(info.id).await {
+          info.icon = Some(bytes);
+        }
+      }
+    }
+    infos
+  }
+
   pub async fn list_for_clients(&self) -> Vec<WebappInfo> {
     self
       .list()
@@ -505,9 +517,11 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     description: b.manifest.description.clone(),
     icon_available: b.icon_size.is_some(),
     icon_mime: b.icon_mime.clone(),
+    icon: None,
     config: b.manifest.config.clone(),
     permissions: b.manifest.permissions.clone(),
     voice_grammar: b.manifest.voice_grammar.clone(),
+    art: b.manifest.art,
   }
 }
 

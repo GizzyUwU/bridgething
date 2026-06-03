@@ -17,7 +17,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RNAppAuthAuthorizationFlo
     _: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    bootstrapDiagnosticsLogging()
+    bootstrapLogging()
     BridgethingApp.installBridgething()
 
     let delegate = ReactNativeDelegate()

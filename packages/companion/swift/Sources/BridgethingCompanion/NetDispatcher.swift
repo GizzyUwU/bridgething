@@ -36,7 +36,7 @@ public actor NetDispatcher {
     public func start(gateway: BridgethingGateway) async {
         fetchTask = Task { [weak self] in
             for await (handle, req) in gateway.net.fetchRequests {
-                await self?.handleFetch(handle: handle, req: req.request)
+                Task { [weak self] in await self?.handleFetch(handle: handle, req: req.request) }
             }
         }
         wsOpenTask = Task { [weak self] in

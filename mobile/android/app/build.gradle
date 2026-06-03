@@ -94,6 +94,8 @@ android {
         if (localPropsFile.exists()) localPropsFile.withInputStream { localProps.load(it) }
         buildConfigField "String", "BRIDGETHING_AUTH_PSK",
             "\"${System.getenv("BRIDGETHING_AUTH_PSK") ?: project.findProperty("BRIDGETHING_AUTH_PSK") ?: localProps.getProperty("BRIDGETHING_AUTH_PSK") ?: ""}\""
+        buildConfigField "String", "BRIDGETHING_PKCE_CLIENT_ID",
+            "\"${System.getenv("BRIDGETHING_PKCE_CLIENT_ID") ?: project.findProperty("BRIDGETHING_PKCE_CLIENT_ID") ?: localProps.getProperty("BRIDGETHING_PKCE_CLIENT_ID") ?: ""}\""
     }
     buildFeatures {
         buildConfig true

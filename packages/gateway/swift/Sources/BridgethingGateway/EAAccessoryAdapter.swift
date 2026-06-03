@@ -2,6 +2,9 @@
 
   import ExternalAccessory
   import Foundation
+  import Logging
+
+  private let eaLog = Logger(label: "ea")
 
   /// `Adapter` implementation that talks to the bridgething daemon over an
   /// MFi-paired iAP2 session, exposed to apps as an `EAAccessory`. Filters the
@@ -147,9 +150,6 @@
       let id = state.deviceId
       guard sessions[id] === state else { return }
       retryTasks.removeValue(forKey: id)?.cancel()
-      DiagnosticsBuffer.shared.recordBreadcrumb(
-        category: "ea.link", detail: "link up", fields: [("device", id)]
-      )
       eventContinuation.yield(.connected(Device(id: id, name: state.accessory.name)))
     }
 
@@ -194,16 +194,8 @@
 
     private func scheduleRetryOrFail(accessory: EAAccessory, attempt: Int, reason: String) {
       let id = Self.deviceId(for: accessory)
-      DiagnosticsBuffer.shared.recordBreadcrumb(
-        category: "ea.link",
-        detail: "open attempt \(attempt + 1) failed: \(reason)",
-        fields: [("device", id)]
-      )
       guard attempt + 1 < maxOpenAttempts else {
-        DiagnosticsBuffer.shared.recordLog(
-          level: "error", target: "ea",
-          message: "link failed for \(id) after \(attempt + 1) attempts: \(reason)"
-        )
+        eaLog.error("link failed for \(id) after \(attempt + 1) attempts: \(reason)")
         eventContinuation.yield(.linkFailed(deviceId: id, name: accessory.name, reason: reason))
         return
       }

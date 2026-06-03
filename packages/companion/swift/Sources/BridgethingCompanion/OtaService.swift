@@ -149,8 +149,7 @@ public actor OtaService {
         rangeServerTask?.cancel()
         rangeServerTask = Task { [weak self] in
             for await (handle, req) in gateway.system.otaAssetRangeRequests {
-                guard let self else { return }
-                await handleRangeRequest(gateway: gateway, handle: handle, req: req)
+                Task { [weak self] in await self?.handleRangeRequest(gateway: gateway, handle: handle, req: req) }
             }
         }
         metaTask?.cancel()

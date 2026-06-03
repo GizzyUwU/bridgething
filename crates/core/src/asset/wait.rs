@@ -24,7 +24,7 @@ use tokio::{
 use super::{AssetCache, AssetCacheEvent, CachedAsset};
 
 pub const ASSET_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-const NEGATIVE_CACHE_TTL: Duration = Duration::from_millis(500);
+const NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(5);
 const INFLIGHT_BROADCAST_CAPACITY: usize = 8;
 
 #[derive(Debug, Clone)]

@@ -279,33 +279,6 @@ export type BridgethingSessionSnapshot = {
   otaPollConfig?: BridgethingOtaPollConfig;
 };
 
-export type BridgethingDiagKind = 'frame' | 'log' | 'breadcrumb';
-export type BridgethingDiagDirection = 'outbound' | 'inbound';
-export type BridgethingDiagFrameKind = 'request' | 'response' | 'event' | 'command';
-
-export type BridgethingDiagEntry = {
-  seq: number;
-  ts: number;
-  kind: BridgethingDiagKind;
-
-  deviceId?: string;
-  direction?: BridgethingDiagDirection;
-  frameKind?: BridgethingDiagFrameKind;
-  surface?: string;
-  byteSize?: number;
-  requestId?: string;
-  latencyMs?: number;
-  payload?: string;
-
-  level?: string;
-  target?: string;
-  message?: string;
-
-  category?: string;
-  detail?: string;
-  fields?: BridgethingConfigEntry[];
-};
-
 export type BridgethingDeviceLogLine = {
   seq: number;
   ts: number;
@@ -336,7 +309,6 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   snapshot(): Promise<BridgethingSessionSnapshot>;
 
-  diagnosticsSnapshot(limit: number): Promise<BridgethingDiagEntry[]>;
   deviceLogSnapshot(limit: number): Promise<BridgethingDeviceLogLine[]>;
   companionDebug(): Promise<BridgethingCompanionDebug>;
 
@@ -397,7 +369,6 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
-  setOnDiagEntry(callback: (entry: BridgethingDiagEntry) => void): void;
 
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;

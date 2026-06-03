@@ -28,7 +28,7 @@ public actor TunnelDispatcher {
     public func start(gateway: BridgethingGateway) async {
         openTask = Task { [weak self] in
             for await (handle, req) in gateway.tunnel.openRequests {
-                await self?.handleOpen(handle: handle, req: req, gateway: gateway)
+                Task { [weak self] in await self?.handleOpen(handle: handle, req: req, gateway: gateway) }
             }
         }
         dataTask = Task { [weak self] in

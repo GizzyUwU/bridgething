@@ -109,6 +109,7 @@ public struct FrameHeader: Sendable, Equatable {
 public struct Codec: Sendable {
   public let defaultCompression: Compression
   public let defaultEncoding: Encoding
+  static let autoGzipPayloadThreshold = 16 * 1024 - 128
 
   public init(compression: Compression = .none, encoding: Encoding = .msgpack) {
     defaultCompression = compression
@@ -121,7 +122,6 @@ public struct Codec: Sendable {
     compression: Compression? = nil,
     encoding: Encoding? = nil
   ) throws -> Data {
-    let comp = compression ?? defaultCompression
     let enc = encoding ?? defaultEncoding
 
     let payload: Data = switch enc {
@@ -129,9 +129,18 @@ public struct Codec: Sendable {
     case .json: try JSONEncoder().encode(message)
     }
 
-    let body: Data = switch comp {
+    var comp = compression ?? defaultCompression
+    var body: Data = switch comp {
     case .none: payload
     case .gzip: try payload.gzipped()
+    }
+
+    if compression == nil, comp == .none, priority != .bulk, payload.count > Self.autoGzipPayloadThreshold {
+      let gzipped = try payload.gzipped()
+      if gzipped.count < payload.count {
+        comp = .gzip
+        body = gzipped
+      }
     }
 
     let header = FrameHeader(

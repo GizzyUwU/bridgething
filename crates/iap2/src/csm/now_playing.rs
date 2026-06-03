@@ -45,7 +45,10 @@ pub const SENT_BY_ACCESSORY: &[u16] = &[
 pub const RECEIVED_BY_ACCESSORY: &[u16] = &[NowPlayingUpdate::CSM_MSG_ID];
 
 /// MediaItem attribute sub-ids the accessory subscribes to; the iPhone
-/// only pushes these back.
+/// only pushes these back. Artwork (`MEDIA_ITEM_ARTWORK_ID`) is NOT here:
+/// it is appended only when art is wanted, because subscribing to it makes
+/// iOS push full-size cover art over FileTransfer per track change, which
+/// is redundant when a companion already supplies sized art.
 pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_PERSISTENT_ID,
   MEDIA_ITEM_TITLE,
@@ -56,7 +59,6 @@ pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_ARTIST,
   MEDIA_ITEM_ALBUM_ARTIST,
   MEDIA_ITEM_LIKED,
-  MEDIA_ITEM_ARTWORK_ID,
 ];
 
 /// Playback attribute sub-ids the accessory subscribes to. The
@@ -126,9 +128,13 @@ pub struct StartNowPlayingUpdates {
 impl StartNowPlayingUpdates {
   pub const CSM_MSG_ID: u16 = 0x5000;
 
-  pub fn standard() -> Self {
+  pub fn subscription(include_artwork: bool) -> Self {
+    let mut media_item = MEDIA_ITEM_SUBSCRIBE.to_vec();
+    if include_artwork {
+      media_item.push(MEDIA_ITEM_ARTWORK_ID);
+    }
     Self {
-      media_item: MEDIA_ITEM_SUBSCRIBE.to_vec(),
+      media_item,
       playback: PLAYBACK_SUBSCRIBE.to_vec(),
     }
   }
@@ -824,8 +830,7 @@ mod tests {
 
   #[test]
   fn start_now_playing_emits_subscribe_list_per_param() {
-    let csm = StartNowPlayingUpdates::standard();
-    let frame: CsmFrame = csm.into();
+    let frame: CsmFrame = StartNowPlayingUpdates::subscription(false).into();
     assert_eq!(frame.msg_id, 0x5000);
     let media = frame.find(NOW_PLAYING_PARAM_MEDIA_ITEM).unwrap();
     let media_subs = decode_param_block(media.payload.clone()).unwrap();
@@ -837,6 +842,15 @@ mod tests {
     let play = frame.find(NOW_PLAYING_PARAM_PLAYBACK).unwrap();
     let play_subs = decode_param_block(play.payload.clone()).unwrap();
     assert_eq!(play_subs.len(), PLAYBACK_SUBSCRIBE.len());
+  }
+
+  #[test]
+  fn start_now_playing_with_artwork_appends_artwork_id() {
+    let frame: CsmFrame = StartNowPlayingUpdates::subscription(true).into();
+    let media = frame.find(NOW_PLAYING_PARAM_MEDIA_ITEM).unwrap();
+    let media_subs = decode_param_block(media.payload.clone()).unwrap();
+    assert_eq!(media_subs.len(), MEDIA_ITEM_SUBSCRIBE.len() + 1);
+    assert_eq!(media_subs.last().unwrap().id, MEDIA_ITEM_ARTWORK_ID);
   }
 
   #[test]

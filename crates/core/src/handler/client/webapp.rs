@@ -4,6 +4,7 @@ use libbridgething::{
     ClientToBridgeWebappMsgDispatch, WebappActivate, WebappActiveReply, WebappCurrent, WebappCurrentReply, WebappIcon,
     WebappIconReply, WebappList, WebappListReply,
   },
+  gateway::BridgeToGatewayWebappMsgEvent,
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -79,6 +80,14 @@ impl ClientToBridgeWebappMsgDispatch for WebappHandler {
       .handle
       .respond_to::<WebappActivate>(WebappActiveReply { id: Some(id), name })
       .await?;
+    self
+      .handle
+      .bluetooth
+      .gateway_man
+      .broadcast(BridgeToGatewayWebappMsgEvent::ActiveChanged(
+        self.handle.state.active_webapp_changed_event().await,
+      ))
+      .await;
     Ok(())
   }
 

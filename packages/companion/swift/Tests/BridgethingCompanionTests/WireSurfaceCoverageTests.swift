@@ -26,6 +26,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
     private static let probes: [String: BridgeToGatewayMsgData] = [
         "asset.request": .asset(.request(AssetRequest(id: "probe", requestId: UUID()))),
         "library.browse": .library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 1, offset: 0))),
+        "library.resolveContext": .library(.resolveContext(LibraryResolveContextRequest(uri: "x"))),
         "library.search": .library(.search(LibrarySearchRequest(query: "x", kinds: nil, limit: 1, offset: 0))),
         "library.recommendations": .library(.recommendations(
             LibraryRecommendationsRequest(seeds: [], kind: nil, limit: 1, offset: 0)
@@ -108,7 +109,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
         // webapp
         "webapp.webapps", "webapp.active", "webapp.switched", "webapp.uninstalled",
         "webapp.webappError", "webapp.icon", "webapp.configGet",
-        "webapp.configList", "webapp.configAck", "webapp.webappInstalled",
+        "webapp.configList", "webapp.configAck", "webapp.webappInstalled", "webapp.activeChanged",
         // forward
         "forward.text", "forward.binary", "forward.json",
     ]

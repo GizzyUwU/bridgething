@@ -11,8 +11,7 @@ public data class DeviceLogRecord(
  * Process-wide ring of device-log lines (daemon tracing forwarded over the gateway,
  * plus companion-origin lines). The live `logObserver` path carries entries in
  * real-time while foregrounded; this durable tail lets the RN side backfill the gap
- * opened while the app is backgrounded and the JS thread is suspended. Mirrors
- * [dev.bridgething.gateway.DiagnosticsBuffer].
+ * opened while the app is backgrounded and the JS thread is suspended.
  */
 public object DeviceLogRing {
     private const val LIMIT = 2000

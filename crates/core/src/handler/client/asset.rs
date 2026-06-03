@@ -143,11 +143,7 @@ async fn fetch_via_companion(state: &State, bluetooth: &BluetoothMan, id: &str) 
           {
             tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
           }
-          FetchOutcome::Got(CachedAsset {
-            bytes,
-            mime: got.mime,
-            retention: AssetRetention::Lru,
-          })
+          FetchOutcome::Got(CachedAsset { bytes, mime: got.mime })
         }
         Err(RequestError::Domain(nf)) => {
           tracing::debug!(id = %nf.id, "companion reported asset not found");
@@ -199,11 +195,7 @@ pub(crate) async fn preload_assets(state: State, bluetooth: BluetoothMan, ids: V
               {
                 tracing::warn!(?err, %id_owned, "preload: failed to insert into cache");
               }
-              FetchOutcome::Got(CachedAsset {
-                bytes,
-                mime: got.mime,
-                retention: AssetRetention::Lru,
-              })
+              FetchOutcome::Got(CachedAsset { bytes, mime: got.mime })
             }
             Err(RequestError::Domain(_)) => {
               tracing::debug!(%id_owned, "preload: companion reported asset not found");

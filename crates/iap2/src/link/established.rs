@@ -31,9 +31,7 @@ struct LinkParams {
   max_outgoing: u8,
   max_payload_len: u16,
   retransmission_timeout: Duration,
-  ack_timeout: Duration,
   max_retransmissions: u8,
-  max_ack: u8,
 }
 
 impl LinkParams {
@@ -42,9 +40,7 @@ impl LinkParams {
       max_outgoing: lsp.max_outgoing.max(1),
       max_payload_len: lsp.max_len.saturating_sub(FRAME_OVERHEAD as u16).max(1),
       retransmission_timeout: Duration::from_millis(lsp.retransmission_timeout_ms as u64),
-      ack_timeout: Duration::from_millis(lsp.ack_timeout_ms as u64),
       max_retransmissions: lsp.max_retransmissions.max(1),
-      max_ack: lsp.max_ack.max(1),
     }
   }
 }
@@ -74,9 +70,8 @@ pub(super) struct EstablishedState {
 
   last_received_in_sequence_psn: u8,
   out_of_order: BTreeMap<u8, LinkPacket>,
-  cumulative_received: u8,
+  unacked_delivery: bool,
   must_send_ack: bool,
-  ack_delay_deadline: Option<Instant>,
 }
 
 impl EstablishedState {
@@ -89,9 +84,8 @@ impl EstablishedState {
       pending_send: VecDeque::new(),
       last_received_in_sequence_psn: peer_initial_psn,
       out_of_order: BTreeMap::new(),
-      cumulative_received: 0,
+      unacked_delivery: false,
       must_send_ack: false,
-      ack_delay_deadline: None,
     }
   }
 
@@ -103,16 +97,12 @@ impl EstablishedState {
     self.unacked.front().map(|p| p.deadline)
   }
 
-  pub(super) fn ack_delay_deadline(&self) -> Option<Instant> {
-    self.ack_delay_deadline
-  }
-
   pub(super) fn has_buffered_out_of_order(&self) -> bool {
     !self.out_of_order.is_empty()
   }
 
-  pub(super) fn should_send_ack_now(&self) -> bool {
-    self.must_send_ack || self.cumulative_received >= self.params.max_ack
+  pub(super) fn needs_ack(&self) -> bool {
+    self.must_send_ack || self.unacked_delivery
   }
 
   pub(super) fn enqueue_send(&mut self, session_id: u8, payload: Bytes) {
@@ -153,9 +143,8 @@ impl EstablishedState {
   {
     let packet = LinkPacket::header_only(ControlBits::ACK, self.last_sent_psn, self.last_received_in_sequence_psn);
     write_packet(writer, codec, packet).await?;
-    self.cumulative_received = 0;
+    self.unacked_delivery = false;
     self.must_send_ack = false;
-    self.ack_delay_deadline = None;
     Ok(())
   }
 
@@ -186,9 +175,8 @@ impl EstablishedState {
       payload.freeze(),
     );
     write_packet(writer, codec, packet).await?;
-    self.cumulative_received = 0;
+    self.unacked_delivery = false;
     self.must_send_ack = false;
-    self.ack_delay_deadline = None;
     Ok(())
   }
 
@@ -241,7 +229,7 @@ impl EstablishedState {
         payload: packet.payload,
       });
       self.last_received_in_sequence_psn = recv_seq;
-      self.bump_cumulative();
+      self.mark_delivered();
 
       loop {
         let next = self.last_received_in_sequence_psn.wrapping_add(1);
@@ -253,7 +241,7 @@ impl EstablishedState {
           payload: buffered.payload,
         });
         self.last_received_in_sequence_psn = next;
-        self.bump_cumulative();
+        self.mark_delivered();
       }
       return out;
     }
@@ -298,11 +286,8 @@ impl EstablishedState {
     self.unacked.len() < self.params.max_outgoing as usize
   }
 
-  fn bump_cumulative(&mut self) {
-    self.cumulative_received = self.cumulative_received.saturating_add(1);
-    if self.ack_delay_deadline.is_none() {
-      self.ack_delay_deadline = Some(Instant::now() + self.params.ack_timeout);
-    }
+  fn mark_delivered(&mut self) {
+    self.unacked_delivery = true;
   }
 
   async fn send_data_packet<W>(
@@ -328,9 +313,8 @@ impl EstablishedState {
     writer.flush().await?;
 
     self.last_sent_psn = seq;
-    self.cumulative_received = 0;
+    self.unacked_delivery = false;
     self.must_send_ack = false;
-    self.ack_delay_deadline = None;
     self.unacked.push_back(UnackedPacket {
       seq,
       wire,
@@ -402,6 +386,22 @@ mod tests {
     assert!(delivered.is_empty());
     assert!(state.out_of_order.contains_key(&52));
     assert_eq!(state.last_received_in_sequence_psn, 50);
+  }
+
+  #[tokio::test]
+  async fn single_in_sequence_delivery_owes_ack_immediately() {
+    let mut state = EstablishedState::new(99, 50, &test_lsp(127, 65535, 8));
+    assert!(!state.needs_ack(), "fresh state owes no ack");
+    let delivered = state.handle_inbound_data(data_packet(51, 100, 1, b"art-chunk"));
+    assert_eq!(delivered.len(), 1);
+    assert!(
+      state.needs_ack(),
+      "one in-sequence packet must owe an ack without waiting for max_ack or a timer"
+    );
+    let mut sink = Vec::new();
+    let mut codec = LinkCodec;
+    state.send_standalone_ack(&mut sink, &mut codec).await.unwrap();
+    assert!(!state.needs_ack(), "sending the ack clears the debt");
   }
 
   #[test]

@@ -170,4 +170,8 @@ impl PossibleSendMsg {
       ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id)),
     }
   }
+
+  pub fn is_noop(&self) -> bool {
+    matches!(self, Self::Stock(StockSendMsg::Unsupported))
+  }
 }

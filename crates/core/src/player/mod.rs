@@ -7,9 +7,10 @@ use libbridgething::{
 };
 pub use state::NowPlayingSource;
 use state::*;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::{
+  asset::{AssetCache, AssetCacheEvent, Retention},
   authority::AuthorityRegistry,
   net::{WSError, WireEventBus},
 };
@@ -32,7 +33,7 @@ enum PlayerCommand {
   ApplyNowPlaying(NowPlayingSource, libbridgething::NowPlayingUpdate),
   ApplyArtworkId(NowPlayingSource, String),
   ApplyIap2Queue(Vec<QueueItem>),
-  ApplyCompanionQueue(Vec<QueueItem>),
+  ApplyCompanionQueue(libbridgething::gateway::QueueSnapshot),
   ApplyCompanionSnapshot(libbridgething::PlayerState),
   ApplyEnrichment(libbridgething::gateway::NowPlayingEnrichment),
   ApplyTransportIntent(bool),
@@ -46,11 +47,11 @@ pub struct Player {
 }
 
 impl Player {
-  pub fn new(bus: WireEventBus, authority: AuthorityRegistry) -> Self {
+  pub fn new(bus: WireEventBus, authority: AuthorityRegistry, assets: AssetCache) -> Self {
     let (cmd_tx, cmd_rx) = mpsc::channel(PLAYER_CMD_CAPACITY);
     let initial = PlayerState::new(authority);
     let (snapshot_tx, snapshot_rx) = watch::channel(snapshot_of(&initial));
-    tokio::spawn(run_actor(initial, cmd_rx, snapshot_tx, bus));
+    tokio::spawn(run_actor(initial, cmd_rx, snapshot_tx, bus, assets));
     Self { cmd_tx, snapshot_rx }
   }
 
@@ -74,8 +75,8 @@ impl Player {
     self.send(PlayerCommand::ApplyIap2Queue(items)).await
   }
 
-  pub async fn apply_companion_queue(&self, items: Vec<QueueItem>) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyCompanionQueue(items)).await
+  pub async fn apply_companion_queue(&self, snapshot: libbridgething::gateway::QueueSnapshot) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyCompanionQueue(snapshot)).await
   }
 
   pub async fn apply_companion_snapshot(&self, snapshot: libbridgething::PlayerState) -> PlayerResult<()> {
@@ -145,21 +146,55 @@ async fn run_actor(
   mut cmd_rx: mpsc::Receiver<PlayerCommand>,
   snapshot_tx: watch::Sender<PlayerSnapshot>,
   bus: WireEventBus,
+  assets: AssetCache,
 ) {
   let mut last_sig: Option<BroadcastSig> = None;
-  while let Some(cmd) = cmd_rx.recv().await {
-    let kind = ProcessedKind::for_command(&cmd);
-    let force = forces_broadcast(&cmd);
-    match cmd {
-      PlayerCommand::SendState => {}
-      PlayerCommand::ApplyNowPlaying(source, update) => state.apply_now_playing(source, update),
-      PlayerCommand::ApplyArtworkId(source, id) => state.apply_artwork_id(source, id),
-      PlayerCommand::ApplyIap2Queue(items) => state.replace_iap2_queue(items),
-      PlayerCommand::ApplyCompanionQueue(items) => state.replace_companion_queue(items),
-      PlayerCommand::ApplyCompanionSnapshot(snap) => state.apply_companion_snapshot(snap),
-      PlayerCommand::ApplyEnrichment(offer) => state.apply_enrichment(offer),
-      PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
-      PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
+  let mut pinned_head: Option<String> = None;
+  let mut asset_events = Some(assets.subscribe());
+
+  loop {
+    let force;
+    let kind;
+    tokio::select! {
+      cmd = cmd_rx.recv() => {
+        let Some(cmd) = cmd else {
+          tracing::debug!("player actor: command channel closed; exiting");
+          return;
+        };
+        kind = ProcessedKind::for_command(&cmd);
+        force = forces_broadcast(&cmd);
+        match cmd {
+          PlayerCommand::SendState => {}
+          PlayerCommand::ApplyNowPlaying(source, update) => state.apply_now_playing(source, update),
+          PlayerCommand::ApplyArtworkId(source, id) => state.apply_artwork_id(source, id),
+          PlayerCommand::ApplyIap2Queue(items) => state.replace_iap2_queue(items),
+          PlayerCommand::ApplyCompanionQueue(snapshot) => state.apply_companion_queue(snapshot),
+          PlayerCommand::ApplyCompanionSnapshot(snap) => state.apply_companion_snapshot(snap),
+          PlayerCommand::ApplyEnrichment(offer) => state.apply_enrichment(offer),
+          PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
+          PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
+        }
+      }
+      ev = async {
+        match &mut asset_events {
+          Some(rx) => rx.recv().await,
+          None => std::future::pending().await,
+        }
+      } => {
+        kind = ProcessedKind::Full;
+        force = false;
+        match ev {
+          Ok(AssetCacheEvent::Ready { id }) => state.note_asset_ready(id),
+          Ok(AssetCacheEvent::Cleared { id }) => state.note_asset_cleared(&id),
+          Err(broadcast::error::RecvError::Lagged(n)) => {
+            tracing::warn!(skipped = n, "player actor: asset event channel lagged; presence mirror may drift until next event");
+          }
+          Err(broadcast::error::RecvError::Closed) => {
+            asset_events = None;
+            continue;
+          }
+        }
+      }
     }
 
     let snapshot = snapshot_of(&state);
@@ -172,8 +207,23 @@ async fn run_actor(
         tracing::warn!(?err, "player actor: snapshot broadcast failed");
       }
     }
+
+    reconcile_head_pin(&assets, &state, &mut pinned_head).await;
   }
-  tracing::debug!("player actor: command channel closed; exiting");
+}
+
+async fn reconcile_head_pin(assets: &AssetCache, state: &PlayerState, pinned_head: &mut Option<String>) {
+  let desired = state.current_artwork_id().filter(|id| state.is_present(id));
+  if desired.as_deref() == pinned_head.as_deref() {
+    return;
+  }
+  if let Some(old) = pinned_head.take() {
+    let _ = assets.set_retention(&old, Retention::MEM_LRU).await;
+  }
+  if let Some(new) = desired {
+    let _ = assets.set_retention(&new, Retention::MEM_PINNED).await;
+    *pinned_head = Some(new);
+  }
 }
 
 #[derive(PartialEq)]

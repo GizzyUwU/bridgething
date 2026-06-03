@@ -1,9 +1,10 @@
 import Logging
 import os
 
-/// swift-log handler that tees every record into the diagnostics ring buffer and
-/// the OS unified log
-public struct DiagnosticsLogHandler: LogHandler {
+/// swift-log handler that routes every record into the OS unified log (viewable
+/// live in Console.app and Xcode). Bridges transitive swift-log producers
+/// (nio / async-http-client in spotiny) onto os_log for free.
+public struct OSLogHandler: LogHandler {
   public var logLevel: Logging.Logger.Level = .debug
   public var metadata: Logging.Logger.Metadata = [:]
 
@@ -30,11 +31,7 @@ public struct DiagnosticsLogHandler: LogHandler {
     line _: UInt
   ) {
     let merged = explicit.map { metadata.merging($0) { _, new in new } } ?? metadata
-    let text = merged.isEmpty
-      ? message.description
-      : "\(message.description) \(merged.map { "\($0)=\($1)" }.sorted().joined(separator: " "))"
-
-    DiagnosticsBuffer.shared.recordLog(level: level.rawValue, target: label, message: text)
+    let text = Self.render(message, merged: merged)
 
     switch level {
     case .trace, .debug: osLog.debug("\(text, privacy: .public)")
@@ -43,10 +40,18 @@ public struct DiagnosticsLogHandler: LogHandler {
     case .error, .critical: osLog.error("\(text, privacy: .public)")
     }
   }
+
+  /// Composes the line: bare message, or message followed by metadata as
+  /// sorted `key=value` pairs for stable output.
+  static func render(_ message: Logging.Logger.Message, merged: Logging.Logger.Metadata) -> String {
+    merged.isEmpty
+      ? message.description
+      : "\(message.description) \(merged.map { "\($0)=\($1)" }.sorted().joined(separator: " "))"
+  }
 }
 
-/// Installs `DiagnosticsLogHandler` as the process logging backend. Call once at
-/// app launch before anything logs; swift-log traps on a second bootstrap.
-public func bootstrapDiagnosticsLogging() {
-  LoggingSystem.bootstrap { DiagnosticsLogHandler(label: $0) }
+/// Installs `OSLogHandler` as the process logging backend. Call once at app
+/// launch before anything logs; swift-log traps on a second bootstrap.
+public func bootstrapLogging() {
+  LoggingSystem.bootstrap { OSLogHandler(label: $0) }
 }

@@ -24,9 +24,8 @@ public protocol BridgethingGlue: Sendable {
     func attach(gateway: BridgethingGateway) async throws
     func detach() async
 
-    /// Subscribe to NowPlaying updates. `nil` means nothing is playing or the source went away.
-    /// Default impl is a no-op.
     func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
+    func setArtProfile(heroPx: Int, thumbPx: Int) async
 
     /// Inbound transport-control verbs. Default impls throw `GlueError.notImplemented`;
     func play(_ uri: PlayUri) async throws
@@ -44,6 +43,7 @@ public protocol BridgethingGlue: Sendable {
 
     /// Library verbs; default impls throw `GlueError.notImplemented`.
     func browse(_ req: LibraryBrowseRequest) async throws -> BrowseResult
+    func resolveContext(_ uri: String) async throws -> ContextResolveReply
     func search(_ req: LibrarySearchRequest) async throws -> SearchResult
     func recommendations(_ req: LibraryRecommendationsRequest) async throws -> RecommendationsResult
     func favoritesList(_ req: LibraryFavoritesListRequest) async throws -> FavoritesPage
@@ -113,6 +113,7 @@ public extension BridgethingGlue {
     func setCrossfade(_: UInt32?) async throws { throw GlueError.notImplemented }
     func browse(_: LibraryBrowseRequest) async throws -> BrowseResult { throw GlueError.notImplemented }
     func search(_: LibrarySearchRequest) async throws -> SearchResult { throw GlueError.notImplemented }
+    func resolveContext(_: String) async throws -> ContextResolveReply { throw GlueError.notImplemented }
     func recommendations(_: LibraryRecommendationsRequest) async throws -> RecommendationsResult { throw GlueError.notImplemented }
     func favoritesList(_: LibraryFavoritesListRequest) async throws -> FavoritesPage { throw GlueError.notImplemented }
     func favoritesContains(_: LibraryFavoritesContainsRequest) async throws -> [Bool] { throw GlueError.notImplemented }
@@ -123,6 +124,7 @@ public extension BridgethingGlue {
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
     func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
+    func setArtProfile(heroPx _: Int, thumbPx _: Int) async {}
 
     /// Default for glues without an auth surface: report ready immediately.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {

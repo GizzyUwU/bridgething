@@ -12,7 +12,10 @@ use bridgething_iap2::{
   csm::now_playing::{MediaItemAttributes, NowPlayingUpdate, PlaybackAttributes, encode_queue_snapshot},
 };
 use bridgething_test_harness::Harness;
-use libbridgething::{GatewayCapabilities, GatewayInfo, QueueItem, gateway::NowPlayingEnrichment};
+use libbridgething::{
+  GatewayCapabilities, GatewayInfo, QueueItem,
+  gateway::{NowPlayingEnrichment, QueueSnapshot},
+};
 
 const CONVERGE: Duration = Duration::from_secs(3);
 
@@ -301,7 +304,16 @@ async fn iap2_enrichment_overlay_resolves_uri_art_heart_and_queue() {
         duration_ms: Some(180_000),
         persistent_id: None,
       }),
-      queue: vec![QueueItem {
+      context: None,
+    })
+    .await
+    .expect("send enrichment offer");
+
+  companion
+    .player()
+    .queue_changed(QueueSnapshot {
+      order: vec!["spotify:track:next".into()],
+      items: vec![QueueItem {
         uri: "spotify:track:next".into(),
         title: Some("Up Next".into()),
         artist: Some("Enriched Artist".into()),
@@ -310,10 +322,9 @@ async fn iap2_enrichment_overlay_resolves_uri_art_heart_and_queue() {
         duration_ms: Some(200_000),
         persistent_id: None,
       }],
-      context: None,
     })
     .await
-    .expect("send enrichment offer");
+    .expect("send queue changed");
 
   let converged = harness
     .wait_for(

@@ -3,7 +3,13 @@ use std::{
   time::Duration,
 };
 
-use headless_chrome::{Browser, Tab, protocol::cdp::Network};
+use headless_chrome::{
+  Browser, Tab,
+  protocol::cdp::{
+    Network,
+    Page::{GetNavigationHistory, NavigateToHistoryEntry},
+  },
+};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +46,9 @@ type ChromeRx = tokio::sync::mpsc::Receiver<ChromeCommand>;
 #[derive(Debug, Clone)]
 pub enum ChromeCommand {
   Navigate(String),
+  NavigateExternal(String),
+  HistoryBack,
+  HistoryForward,
   Reload,
   ClearHttpCache,
 }
@@ -47,6 +56,7 @@ pub enum ChromeCommand {
 #[derive(Debug)]
 pub struct Chrome {
   connected: Arc<AtomicBool>,
+  external: Arc<AtomicBool>,
   tx: ChromeTx,
 
   cancel_token: tokio_util::sync::CancellationToken,
@@ -58,12 +68,14 @@ impl Chrome {
     tracing::debug!("initializing chrome worker (port {})", chrome_port());
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let connected = Arc::new(AtomicBool::new(false));
+    let external = Arc::new(AtomicBool::new(false));
 
     let cancel_token = tokio_util::sync::CancellationToken::new();
-    let mut worker = ChromeWorker::new(connected.clone(), rx, cancel_token.clone())?;
+    let mut worker = ChromeWorker::new(connected.clone(), external.clone(), rx, cancel_token.clone())?;
 
     Ok(Self {
       connected: connected.clone(),
+      external,
       tx,
 
       cancel_token: cancel_token.clone(),
@@ -73,6 +85,10 @@ impl Chrome {
 
   pub fn connected(&self) -> bool {
     self.connected.load(std::sync::atomic::Ordering::SeqCst)
+  }
+
+  pub fn is_external(&self) -> bool {
+    self.external.load(std::sync::atomic::Ordering::SeqCst)
   }
 
   pub async fn send(&self, command: ChromeCommand) -> Result<()> {
@@ -87,6 +103,7 @@ impl Chrome {
 
 struct ChromeWorker {
   connected: Arc<AtomicBool>,
+  external: Arc<AtomicBool>,
   browser: Option<Browser>,
   http: reqwest::Client,
 
@@ -95,7 +112,12 @@ struct ChromeWorker {
 }
 
 impl ChromeWorker {
-  fn new(connected: Arc<AtomicBool>, rx: ChromeRx, cancel_token: CancellationToken) -> Result<Self> {
+  fn new(
+    connected: Arc<AtomicBool>,
+    external: Arc<AtomicBool>,
+    rx: ChromeRx,
+    cancel_token: CancellationToken,
+  ) -> Result<Self> {
     let http = reqwest::Client::builder()
       .connect_timeout(CHROME_PROBE_TIMEOUT)
       .timeout(CHROME_PROBE_TIMEOUT)
@@ -104,6 +126,7 @@ impl ChromeWorker {
 
     Ok(Self {
       connected,
+      external,
       browser: None,
       http,
 
@@ -117,8 +140,20 @@ impl ChromeWorker {
       tokio::select! {
         Some(message) = self.rx.recv() => {
           match message {
-            ChromeCommand::Navigate(url) => self.handle_navigate(url).await,
-            ChromeCommand::Reload => self.handle_reload().await,
+            ChromeCommand::Navigate(url) => {
+              self.external.store(false, std::sync::atomic::Ordering::SeqCst);
+              self.handle_navigate(url).await
+            }
+            ChromeCommand::NavigateExternal(url) => {
+              self.external.store(true, std::sync::atomic::Ordering::SeqCst);
+              self.handle_navigate(url).await
+            }
+            ChromeCommand::HistoryBack => self.handle_history(false).await,
+            ChromeCommand::HistoryForward => self.handle_history(true).await,
+            ChromeCommand::Reload => {
+              self.external.store(false, std::sync::atomic::Ordering::SeqCst);
+              self.handle_reload().await
+            }
             ChromeCommand::ClearHttpCache => self.handle_clear_http_cache().await,
           }
         }
@@ -141,15 +176,33 @@ impl ChromeWorker {
     tracing::debug!("navigating to {}", url);
     self
       .with_first_tab("navigate", |tab| {
-        // Page.navigate to the URL chrome is already on is a silent
-        // no-op; it does not refetch. Active-webapp switches between
-        // two webapps that both serve at `/` hit this path. Use
-        // Page.reload(ignoreCache) to force a real fetch in that case.
         if url_matches_current(&tab.get_url(), &url) {
           tab.reload(true, None).map(|_| ())
         } else {
           tab.navigate_to(&url).map(|_| ())
         }
+      })
+      .await;
+  }
+
+  async fn handle_history(&mut self, forward: bool) {
+    tracing::debug!("history navigate (forward={})", forward);
+    self
+      .with_first_tab("history", move |tab| {
+        let history = tab.call_method(GetNavigationHistory(None))?;
+        let current = history.current_index as usize;
+        let target = if forward {
+          current + 1
+        } else if current == 0 {
+          return Ok(());
+        } else {
+          current - 1
+        };
+        let Some(entry) = history.entries.get(target) else {
+          return Ok(());
+        };
+        let entry_id = entry.id;
+        tab.call_method(NavigateToHistoryEntry { entry_id }).map(|_| ())
       })
       .await;
   }
@@ -163,14 +216,6 @@ impl ChromeWorker {
       .await;
   }
 
-  // Apply `op` to the kiosk's first tab, retrying once if the cached
-  // browser handle's transport has gone dead since the last call.
-  // Any Err return OR panic from headless_chrome marks the connection
-  // as dead, drops the cached handle, and reconnects on the second
-  // attempt. Without this, headless_chrome's silent Err returns
-  // (e.g. when chromium has crashed and respawned) are dropped on
-  // the floor and the daemon believes navigations succeeded when they
-  // were actually no-ops.
   async fn with_first_tab<F>(&mut self, label: &'static str, op: F)
   where
     F: Fn(&Arc<Tab>) -> anyhow::Result<()>,

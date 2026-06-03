@@ -11,7 +11,6 @@ import type {
   BridgethingConfigEntry,
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
-  BridgethingDiagEntry,
   BridgethingNowPlaying,
   BridgethingOtaEvent,
   BridgethingOtaManifest,
@@ -45,10 +44,6 @@ export type {
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
   BridgethingDeviceMetaEntry,
-  BridgethingDiagDirection,
-  BridgethingDiagEntry,
-  BridgethingDiagFrameKind,
-  BridgethingDiagKind,
   BridgethingHostInfo,
   BridgethingNowPlaying,
   BridgethingNowPlayingPlayback,
@@ -125,8 +120,7 @@ export type SessionEvent =
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
   | { type: 'catalogEvent'; event: BridgethingCatalogEvent }
-  | { type: 'log'; level: string; message: string }
-  | { type: 'diagEntry'; entry: BridgethingDiagEntry };
+  | { type: 'log'; level: string; message: string };
 
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
@@ -197,10 +191,6 @@ export class BridgethingSession {
 
   async snapshot(): Promise<BridgethingSessionSnapshot> {
     return this.native.snapshot();
-  }
-
-  async diagnosticsSnapshot(limit: number): Promise<BridgethingDiagEntry[]> {
-    return this.native.diagnosticsSnapshot(limit);
   }
 
   async deviceLogSnapshot(limit: number): Promise<BridgethingDeviceLogLine[]> {
@@ -402,9 +392,6 @@ export class BridgethingSession {
     });
     this.native.setOnLog((level, message) => {
       this.dispatch({ type: 'log', level, message });
-    });
-    this.native.setOnDiagEntry(entry => {
-      this.dispatch({ type: 'diagEntry', entry });
     });
   }
 }

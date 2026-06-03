@@ -30,7 +30,7 @@ pub mod wait;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-pub use actor::AssetCacheEvent;
+pub use actor::{AssetCacheEvent, Retention};
 pub use ingest::AssetIngest;
 use libbridgething::AssetRetention;
 use sea_orm::{DatabaseConnection, DbErr};
@@ -50,7 +50,6 @@ const COMMAND_MAILBOX_CAPACITY: usize = 16;
 pub struct CachedAsset {
   pub bytes: Bytes,
   pub mime: Option<String>,
-  pub retention: AssetRetention,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +86,16 @@ impl AssetCache {
     mime: Option<String>,
     retention: AssetRetention,
   ) -> Result<(), AssetError> {
+    self.insert_internal(id, bytes, mime, Retention::from_wire(retention)).await
+  }
+
+  pub async fn insert_internal(
+    &self,
+    id: String,
+    bytes: Bytes,
+    mime: Option<String>,
+    retention: Retention,
+  ) -> Result<(), AssetError> {
     let (ack, rx) = oneshot::channel();
     self
       .inner
@@ -118,12 +127,41 @@ impl AssetCache {
         id,
         source,
         mime,
+        retention: Retention::from_wire(retention),
+        ack,
+      })
+      .await
+      .map_err(|_| AssetError::CacheClosed)?;
+    rx.await.map_err(|_| AssetError::CacheClosed)?
+  }
+
+  pub async fn set_retention(&self, id: &str, retention: Retention) -> Result<(), AssetError> {
+    let (ack, rx) = oneshot::channel();
+    self
+      .inner
+      .cmd_tx
+      .send(actor::Command::SetRetention {
+        id: id.to_string(),
         retention,
         ack,
       })
       .await
       .map_err(|_| AssetError::CacheClosed)?;
     rx.await.map_err(|_| AssetError::CacheClosed)?
+  }
+
+  pub async fn contains(&self, id: &str) -> Result<bool, AssetError> {
+    let (reply, rx) = oneshot::channel();
+    self
+      .inner
+      .cmd_tx
+      .send(actor::Command::Contains {
+        id: id.to_string(),
+        reply,
+      })
+      .await
+      .map_err(|_| AssetError::CacheClosed)?;
+    rx.await.map_err(|_| AssetError::CacheClosed)
   }
 
   pub async fn get(&self, id: &str) -> Result<Option<CachedAsset>, AssetError> {
@@ -192,6 +230,6 @@ pub enum AssetError {
   CacheClosed,
   #[error("asset cache io error: {0}")]
   Io(#[from] std::io::Error),
-  #[error("Persistent retention requires the chunked PushBegin/PushChunk path; single-frame Push is memory-only")]
-  PersistentRequiresChunkedPath,
+  #[error("disk pin rejected: would exceed the disk budget after evicting all Ttl entries")]
+  DiskBudgetExceeded,
 }

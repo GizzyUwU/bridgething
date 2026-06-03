@@ -194,6 +194,10 @@ impl Connection {
   }
 
   async fn send(&mut self, msg: PossibleSendMsg) {
+    if msg.is_noop() {
+      return;
+    }
+
     let json = match serde_json::to_string(&msg) {
       Ok(json) => json,
       Err(err) => {

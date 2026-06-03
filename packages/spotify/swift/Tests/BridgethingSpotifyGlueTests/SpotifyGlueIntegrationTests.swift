@@ -101,6 +101,69 @@ final class SpotifyGlueIntegrationTests: XCTestCase {
         XCTAssertTrue(titles.contains("Home"), "expected the Made-For-You Home section, got \(titles)")
     }
 
+    /// pull a node id out of root's section preview children, matched by a predicate on the contained item.
+    private func nodeFromRoot(_ h: Harness, where match: (BridgethingSchema.LibraryItem) -> String?) async throws -> String? {
+        let rootResp = try await request(h, .library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0))))
+        guard case let .library(.browseReply(root)) = rootResp.data else {
+            XCTFail("expected browseReply, got \(rootResp.data)")
+            return nil
+        }
+        for entry in root.result.entries {
+            guard case let .folder(folder) = entry else { continue }
+            for child in folder.previewChildren ?? [] {
+                guard case let .item(item) = child, let id = match(item) else { continue }
+                return id
+            }
+        }
+        return nil
+    }
+
+    func testDrillIntoPlaylistReturnsTracks() async throws {
+        let h = try await boot()
+        defer { Task { await h.companion.stop() } }
+
+        let node = try await nodeFromRoot(h) { item in
+            if case let .playlist(p) = item, p.uri.hasPrefix("spotify:playlist:") { return p.uri }
+            return nil
+        }
+        guard let node else { throw XCTSkip("no playlist on this account to drill into") }
+
+        let resp = try await request(h, .library(.browse(LibraryBrowseRequest(nodeId: node, limit: 20, offset: 0))))
+        guard case let .library(.browseReply(reply)) = resp.data else {
+            return XCTFail("expected browseReply, got \(resp.data)")
+        }
+        XCTAssertFalse(reply.result.entries.isEmpty, "drilling into a playlist should return its tracks, got empty")
+        guard case let .item(first)? = reply.result.entries.first else {
+            return XCTFail("expected an item entry, got \(String(describing: reply.result.entries.first))")
+        }
+        switch first {
+        case let .track(t): XCTAssertFalse(t.id.isEmpty)
+        case let .podcastEpisode(e): XCTAssertFalse(e.uri.isEmpty)
+        default: XCTFail("playlist children should be tracks/episodes, got \(first)")
+        }
+    }
+
+    func testDrillIntoLikedSongsReturnsTracks() async throws {
+        let h = try await boot()
+        defer { Task { await h.companion.stop() } }
+
+        let node = try await nodeFromRoot(h) { item in
+            if case let .playlist(p) = item, p.name == "Liked Songs" { return p.uri }
+            return nil
+        }
+        guard let node else { throw XCTSkip("no Liked Songs node on this account") }
+
+        let resp = try await request(h, .library(.browse(LibraryBrowseRequest(nodeId: node, limit: 20, offset: 0))))
+        guard case let .library(.browseReply(reply)) = resp.data else {
+            return XCTFail("expected browseReply, got \(resp.data)")
+        }
+        guard case let .item(.track(track))? = reply.result.entries.first else {
+            throw XCTSkip("no liked songs on this account; nothing to assert")
+        }
+        XCTAssertTrue(track.id.hasPrefix("spotify:track:"), "liked song id should be a track uri, got \(track.id)")
+        XCTAssertTrue(track.saved, "liked songs should report saved=true")
+    }
+
     func testSearchTracksReturnsRealTracks() async throws {
         let h = try await boot()
         let resp = try await request(

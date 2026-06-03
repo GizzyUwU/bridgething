@@ -187,7 +187,7 @@ impl Model {
   // --- router half (handler/iap2.rs) ---
 
   fn apply_iap2_now_playing(&mut self, update: &Iap2NowPlaying) {
-    let pid_hex = match delta_track_key(update.media_item.as_ref()) {
+    let pid_hex = match delta_track_key(update.media_item.as_ref(), self.last_pid_hex.as_deref()) {
       Some(key) => {
         if self.last_pid_hex.as_deref() != Some(&key) {
           self.pending_art = None;
@@ -479,15 +479,20 @@ fn translate_now_playing(
 }
 
 // mirror of the daemon's `handler/iap2.rs::delta_track_key` - the spec written twice.
-fn delta_track_key(media: Option<&MediaItemAttributes>) -> Option<String> {
+fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
   let media = media?;
   let title = media.title.as_deref().filter(|t| !t.is_empty());
   match media.persistent_id {
     Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
+    _ if title.is_some() && current.is_some_and(is_real_pid_key) => current.map(str::to_string),
     _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
     Some(0) => Some(IDLE_PID_HEX.to_string()),
     _ => None,
   }
+}
+
+fn is_real_pid_key(key: &str) -> bool {
+  key.len() == 16 && key != IDLE_PID_HEX && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn nonmusic_key(title: &str, artist: Option<&str>) -> String {

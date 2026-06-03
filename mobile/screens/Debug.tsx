@@ -1,40 +1,20 @@
 import type {
   BridgethingCompanionDebug,
-  BridgethingDiagEntry,
   BridgethingSessionSnapshot,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react-native';
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-import {
-  FlatList,
-  type ListRenderItemInfo,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { RefreshCw } from 'lucide-react-native';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Press } from '../components/Press';
-import { Segmented } from '../components/Segmented';
-import { useDiagnostics } from '../lib/diagnostics';
 import { getSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Debug'>;
 
-const TABS = ['timeline', 'frames', 'state'] as const;
-type Tab = (typeof TABS)[number];
-
 export function DebugScreen({}: Props) {
-  const entries = useDiagnostics(s => s.entries);
-  const [tab, setTab] = useState<Tab>('timeline');
   const [companion, setCompanion] = useState<BridgethingCompanionDebug | null>(
     null,
   );
@@ -54,40 +34,17 @@ export function DebugScreen({}: Props) {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
-
-  // while the state tab is open, re-pull on a cadence so position / authority /
-  // service-health read live instead of frozen at mount.
-  useEffect(() => {
-    if (tab !== 'state') return;
     const id = setInterval(refresh, 1500);
     return () => clearInterval(id);
-  }, [tab, refresh]);
-
-  const merges = useMemo(
-    () =>
-      entries
-        .filter(
-          e => e.kind === 'breadcrumb' && e.category?.startsWith('spotify'),
-        )
-        .slice()
-        .reverse(),
-    [entries],
-  );
-  const frames = useMemo(
-    () =>
-      entries
-        .filter(e => e.kind === 'frame')
-        .slice()
-        .reverse(),
-    [entries],
-  );
+  }, [refresh]);
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <View className="border-b border-border bg-surface px-5 py-3">
         <View className="flex-row items-center justify-between">
-          <Segmented options={TABS} value={tab} onChange={setTab} size="sm" />
+          <Text className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            session state
+          </Text>
           <Press
             onPress={refresh}
             scaleTo={0.92}
@@ -101,25 +58,7 @@ export function DebugScreen({}: Props) {
         </View>
       </View>
 
-      {tab === 'timeline' ? (
-        <FlatList
-          data={merges}
-          keyExtractor={e => String(e.seq)}
-          renderItem={renderMerge}
-          ListEmptyComponent={<Empty label="no augmentation activity yet" />}
-          contentContainerClassName="px-3 py-2"
-        />
-      ) : tab === 'frames' ? (
-        <FlatList
-          data={frames}
-          keyExtractor={e => String(e.seq)}
-          renderItem={renderFrameRow}
-          ListEmptyComponent={<Empty label="no wire frames yet" />}
-          contentContainerClassName="px-3 py-2"
-        />
-      ) : (
-        <StateDump companion={companion} snapshot={snapshot} />
-      )}
+      <StateDump companion={companion} snapshot={snapshot} />
     </SafeAreaView>
   );
 }
@@ -324,98 +263,6 @@ function Row({
   );
 }
 
-function ms(value: number | undefined): string {
-  if (value == null) return '-';
-  const total = Math.round(value / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function renderMerge({ item }: ListRenderItemInfo<BridgethingDiagEntry>) {
-  const fields = fieldMap(item);
-  const source = fields.source ?? item.category ?? '';
-  return (
-    <View className="border-b border-border/50 py-1.5">
-      <View className="flex-row items-center gap-2">
-        <View className="rounded-md bg-primary-soft px-1.5 py-0.5">
-          <Text className="font-mono text-[10px] font-bold uppercase text-primary">
-            {source}
-          </Text>
-        </View>
-        <Text className="font-mono text-[10px] text-muted-foreground">
-          {formatTime(item.ts)}
-        </Text>
-        {fields.reason ? (
-          <Text className="font-mono text-[10px] text-muted-foreground">
-            · {fields.reason}
-          </Text>
-        ) : null}
-      </View>
-      <Text className="mt-1 font-mono text-[12px] leading-[16px] text-foreground">
-        {item.detail}
-        {fields.track ? ` - ${fields.track}` : ''}
-        {fields.playing
-          ? ` (${fields.playing === 'true' ? 'playing' : 'paused'})`
-          : ''}
-      </Text>
-    </View>
-  );
-}
-
-function renderFrameRow({ item }: ListRenderItemInfo<BridgethingDiagEntry>) {
-  return <FrameRow item={item} />;
-}
-
-function FrameRow({ item }: { item: BridgethingDiagEntry }) {
-  const [expanded, setExpanded] = useState(false);
-  const outbound = item.direction === 'outbound';
-  const Icon = outbound ? ArrowUpRight : ArrowDownLeft;
-  const tint = outbound ? 'hsl(199 100% 44%)' : 'hsl(150 50% 42%)';
-  const hasPayload = !!item.payload;
-
-  return (
-    <View className="border-b border-border/50 py-1.5">
-      <Press
-        onPress={() => hasPayload && setExpanded(e => !e)}
-        scaleTo={hasPayload ? 0.99 : 1}
-        className="flex-row items-center gap-2"
-      >
-        <Icon size={13} color={tint} strokeWidth={2.6} />
-        <Text className="font-mono text-[10px] text-muted-foreground">
-          {formatTime(item.ts)}
-        </Text>
-        <Text
-          className="flex-1 font-mono text-[12px] font-semibold text-foreground"
-          numberOfLines={1}
-        >
-          {item.surface}
-        </Text>
-        <Text className="font-mono text-[10px] text-muted-foreground">
-          {item.frameKind}
-        </Text>
-        {item.latencyMs != null ? (
-          <Text className="font-mono text-[10px] text-primary">
-            {Math.round(item.latencyMs)}ms
-          </Text>
-        ) : null}
-        {item.byteSize != null ? (
-          <Text className="font-mono text-[10px] text-muted-foreground">
-            {item.byteSize}b
-          </Text>
-        ) : null}
-      </Press>
-      {expanded && item.payload ? (
-        <View className="mt-1.5 rounded-md bg-surface px-2.5 py-2">
-          <Text className="font-mono text-[11px] leading-[15px] text-foreground">
-            {item.payload}
-          </Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 function Empty({ label }: { label: string }) {
   return (
     <View className="flex-1 items-center justify-center p-6">
@@ -426,25 +273,14 @@ function Empty({ label }: { label: string }) {
   );
 }
 
-function fieldMap(entry: BridgethingDiagEntry): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const f of entry.fields ?? []) out[f.key] = f.value;
-  return out;
+function ms(value: number | undefined): string {
+  if (value == null) return '-';
+  const total = Math.round(value / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function yesno(value: boolean): string {
   return value ? 'held' : 'no';
-}
-
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return (
-    String(d.getHours()).padStart(2, '0') +
-    ':' +
-    String(d.getMinutes()).padStart(2, '0') +
-    ':' +
-    String(d.getSeconds()).padStart(2, '0') +
-    '.' +
-    String(d.getMilliseconds()).padStart(3, '0')
-  );
 }

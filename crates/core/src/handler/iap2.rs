@@ -162,7 +162,8 @@ impl Iap2EventRouter {
         let pid_hex = {
           let mut guard = self.hint_state.lock().await;
           let entry = guard.entry(address).or_default();
-          if let Some(key) = delta_track_key(update.media_item.as_ref()) {
+          let current = entry.track_pid_hex.clone();
+          if let Some(key) = delta_track_key(update.media_item.as_ref(), current.as_deref()) {
             let track_changed = entry.track_pid_hex.as_deref() != Some(&key);
             entry.track_pid_hex = Some(key.clone());
             drop(guard);
@@ -424,15 +425,20 @@ fn pid_is_idle(pid: &str) -> bool {
   pid == IDLE_PID_HEX || pid.ends_with(&format!(":{IDLE_PID_HEX}"))
 }
 
-fn delta_track_key(media: Option<&MediaItemAttributes>) -> Option<String> {
+fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
   let media = media?;
   let title = media.title.as_deref().filter(|t| !t.is_empty());
   match media.persistent_id {
     Some(pid) if pid != 0 => Some(format!("{pid:016x}")),
+    _ if title.is_some() && current.is_some_and(is_real_pid_key) => current.map(str::to_string),
     _ if title.is_some() => Some(nonmusic_key(title.unwrap(), media.artist.as_deref())),
     Some(0) => Some(IDLE_PID_HEX.to_string()),
     _ => None,
   }
+}
+
+fn is_real_pid_key(key: &str) -> bool {
+  key.len() == 16 && key != IDLE_PID_HEX && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 // pid-less tracks (Spotify-on-iOS, non-music apps) collide on the literal "nonmusic" slot
@@ -696,7 +702,7 @@ mod tests {
       title: Some("Side of Town".to_string()),
       ..Default::default()
     };
-    let key = delta_track_key(Some(&media)).expect("real pid yields a key");
+    let key = delta_track_key(Some(&media), None).expect("real pid yields a key");
     assert_eq!(key, "32425b9c9dd628f8", "key is bare hex, no prefix");
 
     let lib_update = translate_now_playing(
@@ -712,6 +718,96 @@ mod tests {
     let mut entry = HintCheckpoint::default();
     let hint = evaluate_hint_against(&mut entry, &lib_update, Instant::now()).expect("track emits hint");
     assert_eq!(hint.persistent_id, lib_pid, "hint anchor equals the player-state pid");
+  }
+
+  #[test]
+  fn pidless_title_fragment_inherits_active_real_pid() {
+    let pid_frag = MediaItemAttributes {
+      persistent_id: Some(13687273467863668569),
+      duration_ms: Some(183127),
+      album: Some("Feel".to_string()),
+      track_number: Some(1),
+      ..Default::default()
+    };
+    let key1 = delta_track_key(Some(&pid_frag), None).expect("real pid yields a key");
+    assert_eq!(key1, "bdf2f6b363a49759");
+
+    let title_frag = MediaItemAttributes {
+      persistent_id: None,
+      title: Some("Feel Real Pretty".to_string()),
+      artist: Some("Pretty".to_string()),
+      ..Default::default()
+    };
+    let key2 = delta_track_key(Some(&title_frag), Some(&key1)).expect("title fragment yields a key");
+    assert_eq!(key2, key1, "pid-less title fragment sticks to the active real pid");
+  }
+
+  #[test]
+  fn pidless_title_with_no_active_pid_is_nonmusic() {
+    let title_frag = MediaItemAttributes {
+      persistent_id: None,
+      title: Some("Some Episode".to_string()),
+      artist: Some("Host".to_string()),
+      ..Default::default()
+    };
+    let key = delta_track_key(Some(&title_frag), None).expect("title yields a key");
+    assert!(key.starts_with(NONMUSIC_PREFIX), "no active pid -> nonmusic identity");
+  }
+
+  #[test]
+  fn pidless_source_distinguishes_tracks_by_title() {
+    // a genuinely pid-less source (every track lacks a pid) must still see a title change as a
+    // new track, so stickiness only applies when the current key is a real pid.
+    let first = delta_track_key(
+      Some(&MediaItemAttributes {
+        title: Some("Ep 1".to_string()),
+        ..Default::default()
+      }),
+      None,
+    )
+    .unwrap();
+    let second = delta_track_key(
+      Some(&MediaItemAttributes {
+        title: Some("Ep 2".to_string()),
+        ..Default::default()
+      }),
+      Some(&first),
+    )
+    .unwrap();
+    assert_ne!(first, second, "pid-less title change is a new track, not sticky");
+  }
+
+  #[test]
+  fn real_pid_change_overrides_active_pid() {
+    let a = delta_track_key(
+      Some(&MediaItemAttributes {
+        persistent_id: Some(0xaaaa),
+        ..Default::default()
+      }),
+      None,
+    )
+    .unwrap();
+    let b = delta_track_key(
+      Some(&MediaItemAttributes {
+        persistent_id: Some(0xbbbb),
+        title: Some("New".to_string()),
+        ..Default::default()
+      }),
+      Some(&a),
+    )
+    .unwrap();
+    assert_ne!(a, b, "a genuine new pid is always a track change");
+  }
+
+  #[test]
+  fn idle_pid_is_not_treated_as_a_real_pid_anchor() {
+    assert!(!is_real_pid_key(IDLE_PID_HEX));
+    let title_frag = MediaItemAttributes {
+      title: Some("After Idle".to_string()),
+      ..Default::default()
+    };
+    let key = delta_track_key(Some(&title_frag), Some(IDLE_PID_HEX)).unwrap();
+    assert!(key.starts_with(NONMUSIC_PREFIX), "idle is not a real-pid anchor to stick to");
   }
 
   #[test]

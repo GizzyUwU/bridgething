@@ -5,7 +5,7 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-use crate::{ConfigEntry, WebappError, WebappInfo};
+use crate::{ArtProfile, ConfigEntry, WebappError, WebappInfo};
 
 #[typeshare]
 #[serde_with::serde_as]
@@ -73,6 +73,22 @@ pub struct WebappActive {
   pub name: Option<String>,
 }
 
+/// Event payload for an active-webapp change (any initiator). Distinct from
+/// `WebappActive` (a request response) so it carries the new app's declared
+/// art profile; the companion reads `art` directly to size its pushes.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct WebappActiveChanged {
+  #[ts(type = "string | null")]
+  #[typeshare(serialized_as = "Option<Vec<u8>>")]
+  pub id: Option<Uuid>,
+  pub name: Option<String>,
+  pub art: Option<ArtProfile>,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
@@ -110,4 +126,9 @@ pub enum BridgeToGatewayWebappMsg {
   /// surface.
   #[bridge_event]
   WebappInstalled(WebappInfo),
+  /// event: the active webapp changed (any initiator - hub tap, gateway
+  /// switchTo, uninstall fallback). carries the new app's id/name + declared
+  /// art profile so the companion sizes art pushes to what it renders.
+  #[bridge_event]
+  ActiveChanged(WebappActiveChanged),
 }

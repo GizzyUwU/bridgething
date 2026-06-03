@@ -123,7 +123,6 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       case 'webappsChanged':
       case 'otaEvent':
       case 'log':
-      case 'diagEntry':
         return;
     }
   },

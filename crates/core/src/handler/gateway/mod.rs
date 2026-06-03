@@ -25,9 +25,11 @@ use capabilities::*;
 use chrome::*;
 use geo::*;
 use libbridgething::{
-  gateway::{GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  AssetRetention,
+  gateway::{GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData},
   wire::MsgMeta,
 };
+use tokio_util::bytes::Bytes;
 use library::*;
 use net::*;
 use notifications::*;
@@ -84,25 +86,37 @@ impl GatewayHandler {
     let handle = MsgHandle::new(self, id, meta, address, protocol);
 
     match data {
-      GatewayToBridgeMsgData::Asset(asset_msg) => {
-        if asset_msg.is_request_variant() {
-          let req = asset_msg.into_request().expect("checked above");
-          tokio::spawn(async move { req.dispatch(&AssetHandler::new(handle)).await });
-        } else if asset_msg.is_event_variant() {
-          let ev = asset_msg.into_event().expect("checked above");
-          // fine to await here - asset events need to arrive in order, and handle_event just forwards
-          if let Err(err) = ev.dispatch(&AssetHandler::new(handle)).await {
-            tracing::error!(?err, "asset event handler failed");
-          }
-        } else if let Some(cmd) = asset_msg.into_command() {
-          tokio::spawn(async move { cmd.dispatch(&AssetHandler::new(handle)).await });
-        } else {
-          tracing::warn!(
-            "({:?}) stray response-shape arrival on Asset surface with no matching pending request; dropping",
-            handle.address,
-          );
+      GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg {
+        GatewayToBridgeAssetMsg::Got(reply) => {
+          tracing::debug!(id = %reply.id, "caching late asset reply past its request timeout");
+          handle
+            .state
+            .ingest
+            .push(reply.id, Bytes::from(reply.bytes), reply.mime, AssetRetention::Lru)
+            .await;
         }
-      }
+        GatewayToBridgeAssetMsg::NotFound(reply) => {
+          tracing::debug!(id = %reply.id, "late asset not-found past its request timeout; ignoring");
+        }
+        other => {
+          if other.is_request_variant() {
+            let req = other.into_request().expect("checked above");
+            tokio::spawn(async move { req.dispatch(&AssetHandler::new(handle)).await });
+          } else if other.is_event_variant() {
+            let ev = other.into_event().expect("checked above");
+            if let Err(err) = ev.dispatch(&AssetHandler::new(handle)).await {
+              tracing::error!(?err, "asset event handler failed");
+            }
+          } else if let Some(cmd) = other.into_command() {
+            tokio::spawn(async move { cmd.dispatch(&AssetHandler::new(handle)).await });
+          } else {
+            tracing::warn!(
+              "({:?}) stray response-shape arrival on Asset surface with no matching pending request; dropping",
+              handle.address,
+            );
+          }
+        }
+      },
       GatewayToBridgeMsgData::Audio(audio_msg) => {
         if let Some(event) = audio_msg.into_event() {
           tokio::spawn(async move { event.dispatch(&AudioHandler::new(handle)).await });

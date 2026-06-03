@@ -7,7 +7,6 @@ import android.telecom.DisconnectCause
 import android.telecom.InCallService
 import android.telecom.VideoProfile
 import android.util.Log
-import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.schema.AcceptCallAction
 import dev.bridgething.schema.CallEndReason
 import dev.bridgething.schema.CallEndReasonFailedInner
@@ -51,7 +50,6 @@ public class BridgethingInCallService : InCallService() {
         PhoneBridgeRegistry.service = this
         val addedMsg = "call added $id state=${stateOf(call)}"
         Log.i(TAG, addedMsg)
-        DiagnosticsBuffer.recordLog(level = "info", target = TAG, message = addedMsg)
         emit(PhoneOutEvent.CallStarted(toWire(call, id)))
         emitSnapshots()
     }

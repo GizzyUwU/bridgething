@@ -12,7 +12,6 @@ import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
-import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
@@ -39,7 +38,6 @@ public interface BridgethingSessionBackend {
     public suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean)
 
     public suspend fun snapshot(): BridgethingSessionSnapshot
-    public suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry>
     public suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine>
     public suspend fun companionDebug(): BridgethingCompanionDebug
 
@@ -99,5 +97,4 @@ public interface BridgethingSessionBackend {
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
     public fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit)
-    public fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit)
 }

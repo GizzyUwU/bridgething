@@ -1,6 +1,6 @@
 /target
-/target-cross
-/target-test
+/target
+/target*/
 adapters/node/native
 
 # swift

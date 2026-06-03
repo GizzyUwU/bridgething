@@ -15,6 +15,19 @@ pub struct BrowseReply {
   pub result: BrowseResult,
 }
 
+/// Resolved metadata for a single context uri (playlist / album / show /
+/// artist), used to populate a stock preset's name + cover art.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct ContextResolveReply {
+  pub name: Option<String>,
+  pub artwork_id: Option<String>,
+  pub subtitle: Option<String>,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -84,6 +97,8 @@ pub struct FavoriteChanged {
 pub enum GatewayToBridgeLibraryMsg {
   #[bridge_response]
   BrowseReply(BrowseReply),
+  #[bridge_response]
+  ContextResolveReply(ContextResolveReply),
   #[bridge_response]
   SearchReply(SearchReply),
   #[bridge_response]

@@ -7,7 +7,6 @@ import android.content.IntentFilter
 import dev.bridgething.gateway.Adapter
 import dev.bridgething.gateway.AssetRequestHandle
 import dev.bridgething.gateway.BridgethingGateway
-import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.LyricsRequestHandle
 import dev.bridgething.gateway.RequestResult
@@ -19,6 +18,7 @@ import dev.bridgething.gateway.lyrics
 import dev.bridgething.gateway.notifications
 import dev.bridgething.gateway.system
 import dev.bridgething.gateway.time
+import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueNowPlaying
@@ -65,6 +65,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.coroutineScope
 import dev.bridgething.gateway.library
 import dev.bridgething.gateway.LibraryBrowseRequestHandle
+import dev.bridgething.gateway.LibraryResolveContextRequestHandle
 import dev.bridgething.gateway.LibrarySearchRequestHandle
 import dev.bridgething.gateway.LibraryRecommendationsRequestHandle
 import dev.bridgething.gateway.LibraryFavoritesListRequestHandle
@@ -80,6 +81,7 @@ import dev.bridgething.schema.LibraryError
 import dev.bridgething.schema.LibraryErrorNotSupportedInner
 import dev.bridgething.schema.WireError
 import dev.bridgething.schema.LibraryBrowseRequest
+import dev.bridgething.schema.LibraryResolveContextRequest
 import dev.bridgething.schema.LibrarySearchRequest
 import dev.bridgething.schema.LibraryRecommendationsRequest
 import dev.bridgething.schema.LibraryFavoritesListRequest
@@ -419,6 +421,7 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })
         dispatchers.add(scope.launch { runAncsAuthDispatch() })
+        dispatchers.add(scope.launch { runWebappProfileDispatch() })
         dispatchers.add(scope.launch { runNotificationInvokeDispatch() })
         dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
@@ -428,6 +431,14 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { ota.start(gateway) })
         dispatchers.add(scope.launch { catalog.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
+    }
+
+    private suspend fun runWebappProfileDispatch() {
+        gateway.webapp.activeChanged.collect { (_, changed) ->
+            val hero = changed.art?.heroPx?.toInt() ?: 248
+            val thumb = changed.art?.thumbPx?.toInt() ?: 96
+            activeGlue?.setArtProfile(hero, thumb)
+        }
     }
 
     private suspend fun runConnectAnnouncer() {
@@ -570,6 +581,7 @@ public class BridgethingCompanion(
 
     private suspend fun runLibraryDispatch(): Unit = coroutineScope {
         launch { gateway.library.browseRequests.collect { (handle, req) -> launch { handleBrowse(handle, req) } } }
+        launch { gateway.library.resolveContextRequests.collect { (handle, req) -> launch { handleResolveContext(handle, req) } } }
         launch { gateway.library.searchRequests.collect { (handle, req) -> launch { handleSearch(handle, req) } } }
         launch { gateway.library.recommendationsRequests.collect { (handle, req) -> launch { handleRecommendations(handle, req) } } }
         launch { gateway.library.favoritesListRequests.collect { (handle, req) -> launch { handleFavoritesList(handle, req) } } }
@@ -588,6 +600,17 @@ public class BridgethingCompanion(
             return
         }
         runCatching { handle.respond(BrowseReply(result)) }
+    }
+
+    private suspend fun handleResolveContext(handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest) {
+        val glue = activeGlue ?: run { runCatching { handle.respondErr(noProviderReply()) }; return }
+        val result = try {
+            glue.resolveContext(req.uri)
+        } catch (e: Throwable) {
+            respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
+            return
+        }
+        runCatching { handle.respond(result) }
     }
 
     private suspend fun handleSearch(handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) {
@@ -695,7 +718,6 @@ public class BridgethingCompanion(
             CompanionLogLevel.Warn -> android.util.Log.w(TAG, message)
             CompanionLogLevel.Error -> android.util.Log.e(TAG, message)
         }
-        DiagnosticsBuffer.recordLog(level = level.raw, target = TAG, message = message)
         DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }

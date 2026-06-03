@@ -41,6 +41,7 @@ import type {
   BrowseReply,
   ChromeNavigate,
   CommunicationsSnapshot,
+  ContextResolveReply,
   DeviceNicknameRejected,
   DeviceNicknameReply,
   DeviceSetNickname,
@@ -61,6 +62,7 @@ import type {
   LibraryFavoritesContainsRequest,
   LibraryFavoritesListRequest,
   LibraryRecommendationsRequest,
+  LibraryResolveContextRequest,
   LibrarySearchRequest,
   LogsSubscribe,
   LogsSubscribeReply,
@@ -135,6 +137,7 @@ import type {
   VoiceStreamOpen,
   VolumeChanged,
   WebappActive,
+  WebappActiveChanged,
   WebappConfigAck,
   WebappConfigDelete,
   WebappConfigGet,
@@ -197,6 +200,10 @@ export type LibraryInboundHandlers = {
   favoritesSet: (deviceId: string, msg: FavoritesSet) => void;
   favoritesSetMany: (deviceId: string, msg: FavoritesSetMany) => void;
   browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
+  resolveContext: (
+    handle: LibraryResolveContextRequestHandle,
+    req: LibraryResolveContextRequest,
+  ) => Promise<void> | void;
   search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
   recommendations: (
     handle: LibraryRecommendationsRequestHandle,
@@ -214,6 +221,10 @@ export type LibraryDeviceInboundHandlers = {
   favoritesSet: (msg: FavoritesSet) => void;
   favoritesSetMany: (msg: FavoritesSetMany) => void;
   browse: (handle: LibraryBrowseRequestHandle, req: LibraryBrowseRequest) => Promise<void> | void;
+  resolveContext: (
+    handle: LibraryResolveContextRequestHandle,
+    req: LibraryResolveContextRequest,
+  ) => Promise<void> | void;
   search: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void;
   recommendations: (
     handle: LibraryRecommendationsRequestHandle,
@@ -389,6 +400,7 @@ export type WebappInboundHandlers = {
   configList: (deviceId: string, msg: WebappConfigListReply) => void;
   configAck: (deviceId: string, msg: WebappConfigAck) => void;
   webappInstalled: (deviceId: string, msg: WebappInfo) => void;
+  activeChanged: (deviceId: string, msg: WebappActiveChanged) => void;
 };
 
 export type WebappDeviceInboundHandlers = {
@@ -402,6 +414,7 @@ export type WebappDeviceInboundHandlers = {
   configList: (msg: WebappConfigListReply) => void;
   configAck: (msg: WebappConfigAck) => void;
   webappInstalled: (msg: WebappInfo) => void;
+  activeChanged: (msg: WebappActiveChanged) => void;
 };
 
 export type ForwardInboundHandlers = {
@@ -819,6 +832,28 @@ export class LibrarySurface {
     });
   }
 
+  /** Typed inbound `LibraryResolveContextRequest` request: handler is given a typed handle for the response. */
+  onResolveContext(
+    handler: (handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'resolveContext') return;
+      const handle = new LibraryResolveContextRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onResolveContext handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Typed inbound `LibrarySearchRequest` request: handler is given a typed handle for the response. */
   onSearch(
     handler: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void,
@@ -947,6 +982,20 @@ export class LibrarySurface {
             return;
           }
           const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'resolveContext': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.resolveContext;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'resolveContext');
+            return;
+          }
+          const handle = new LibraryResolveContextRequestHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -2865,6 +2914,18 @@ export class WebappSurface {
     });
   }
 
+  /** Subscribe to `Webapp::ActiveChanged` across all peers. */
+  onActiveChanged(handler: (deviceId: string, msg: WebappActiveChanged) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'activeChanged') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Webapp` variants. */
   subscribe(handlers: WebappInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2920,6 +2981,10 @@ export class WebappSurface {
         }
         case 'webappInstalled': {
           handlers.webappInstalled?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'activeChanged': {
+          handlers.activeChanged?.(event.deviceId, inner.data);
           return;
         }
         default: {
@@ -3794,6 +3859,29 @@ export class LibrarySurfaceForDevice {
     });
   }
 
+  /** Typed inbound `LibraryResolveContextRequest` request from this peer: handler is given a typed handle for the response. */
+  onResolveContext(
+    handler: (handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest) => Promise<void> | void,
+  ): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'library') return;
+      const inner = data.data;
+      if (inner.event !== 'resolveContext') return;
+      const handle = new LibraryResolveContextRequestHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onResolveContext handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Typed inbound `LibrarySearchRequest` request from this peer: handler is given a typed handle for the response. */
   onSearch(
     handler: (handle: LibrarySearchRequestHandle, req: LibrarySearchRequest) => Promise<void> | void,
@@ -3927,6 +4015,20 @@ export class LibrarySurfaceForDevice {
             return;
           }
           const handle = new LibraryBrowseRequestHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'resolveContext': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.resolveContext;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('Library: no handler for inner', 'resolveContext');
+            return;
+          }
+          const handle = new LibraryResolveContextRequestHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -5776,6 +5878,19 @@ export class WebappSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Webapp::ActiveChanged` from this peer. */
+  onActiveChanged(handler: (msg: WebappActiveChanged) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'activeChanged') return;
+      handler(inner.data);
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `Webapp` variants from this peer. */
   subscribe(handlers: WebappDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5832,6 +5947,10 @@ export class WebappSurfaceForDevice {
         }
         case 'webappInstalled': {
           handlers.webappInstalled?.(inner.data);
+          return;
+        }
+        case 'activeChanged': {
+          handlers.activeChanged?.(inner.data);
           return;
         }
         default: {
@@ -6430,6 +6549,41 @@ export class LibraryBrowseRequestHandle {
       id: newUuid(),
       meta: { kind: 'response', data: { requestId: this.requestId } },
       data: { type: 'library', data: { event: 'browseReply', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondErr(error: LibraryErrorReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this.requestId } },
+      data: { type: 'library', data: { event: 'libraryErrorReply', data: error } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: WireError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this.requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
+export class LibraryResolveContextRequestHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    public readonly requestId: string,
+  ) {}
+
+  async respond(response: ContextResolveReply): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this.requestId } },
+      data: { type: 'library', data: { event: 'contextResolveReply', data: response } },
     };
     await this._gateway.send(this.deviceId, msg);
   }
@@ -7265,6 +7419,19 @@ function outerSubscribeGateway(
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
             return;
           }
+          case 'resolveContext': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.resolveContext;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'resolveContext');
+              return;
+            }
+            const handle = new LibraryResolveContextRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
           case 'search': {
             if (event.message.meta.kind !== 'request') return;
             const handler = innerHandlers.search;
@@ -7734,6 +7901,10 @@ function outerSubscribeGateway(
             innerHandlers.webappInstalled?.(event.deviceId, inner.data);
             return;
           }
+          case 'activeChanged': {
+            innerHandlers.activeChanged?.(event.deviceId, inner.data);
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('Webapp: no handler for inner', inner);
             return;
@@ -7928,6 +8099,19 @@ function outerSubscribeDevice(
               return;
             }
             const handle = new LibraryBrowseRequestHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'resolveContext': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.resolveContext;
+            if (!handler) {
+              if (!partial) g.logger.warn('Library: no handler for inner', 'resolveContext');
+              return;
+            }
+            const handle = new LibraryResolveContextRequestHandle(g, event.deviceId, event.message.id);
             const result = handler(handle, inner.data);
             if (result && typeof result.then === 'function')
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
@@ -8400,6 +8584,10 @@ function outerSubscribeDevice(
           }
           case 'webappInstalled': {
             innerHandlers.webappInstalled?.(inner.data);
+            return;
+          }
+          case 'activeChanged': {
+            innerHandlers.activeChanged?.(inner.data);
             return;
           }
           default: {

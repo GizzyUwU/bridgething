@@ -9,7 +9,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use super::{gesture_threshold, gesture_window, trigger_hub_switch};
-use crate::state::State;
+use crate::{chrome::ChromeCommand, handler::gateway::webapp::navigate_url_for_active, state::State};
 
 const RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
@@ -63,6 +63,28 @@ fn open_name(path: &Path) -> Option<String> {
   Some(dev.name().unwrap_or("").to_string())
 }
 
+async fn handle_browser_nav(state: &State, key: KeyCode) {
+  if !state.chrome.is_external() {
+    return;
+  }
+  match state.active_webapp().await {
+    Ok(Some(active)) if active == crate::state::BROWSER_WEBAPP_ID => {}
+    _ => return,
+  }
+  let cmd = if key == KeyCode::KEY_ESC {
+    ChromeCommand::Navigate(navigate_url_for_active(state).await)
+  } else if key == KeyCode::KEY_1 {
+    ChromeCommand::HistoryBack
+  } else if key == KeyCode::KEY_4 {
+    ChromeCommand::HistoryForward
+  } else {
+    return;
+  };
+  if let Err(e) = state.chrome.send(cmd).await {
+    tracing::warn!("browser nav key: dispatch failed: {:?}", e);
+  }
+}
+
 async fn run_loop(path: &Path, state: &State, cancel: &CancellationToken) -> Result<(), String> {
   let device = Device::open(path).map_err(|e| format!("open: {e}"))?;
   let mut events = device.into_event_stream().map_err(|e| format!("stream: {e}"))?;
@@ -81,26 +103,28 @@ async fn run_loop(path: &Path, state: &State, cancel: &CancellationToken) -> Res
         if ev.event_type() != EventType::KEY {
           continue;
         }
-        if KeyCode::new(ev.code()) != KeyCode::KEY_M {
-          continue;
-        }
         if ev.value() != 1 {
           continue;
         }
 
-        let now = Instant::now();
-        while let Some(front) = window.front() {
-          if now.duration_since(*front) > span {
-            window.pop_front();
-          } else {
-            break;
+        let key = KeyCode::new(ev.code());
+        if key == KeyCode::KEY_M {
+          let now = Instant::now();
+          while let Some(front) = window.front() {
+            if now.duration_since(*front) > span {
+              window.pop_front();
+            } else {
+              break;
+            }
           }
-        }
-        window.push_back(now);
-        tracing::trace!(count = window.len(), "hub gesture: KEY_M press");
-        if window.len() >= threshold {
-          window.clear();
-          trigger_hub_switch(state).await;
+          window.push_back(now);
+          tracing::trace!(count = window.len(), "hub gesture: KEY_M press");
+          if window.len() >= threshold {
+            window.clear();
+            trigger_hub_switch(state).await;
+          }
+        } else if key == KeyCode::KEY_ESC || key == KeyCode::KEY_1 || key == KeyCode::KEY_4 {
+          handle_browser_nav(state, key).await;
         }
       }
     }

@@ -448,6 +448,7 @@ public actor BridgethingCompanion {
         tasks.append(Task { [weak self] in await self?.runLibraryDispatch() })
         tasks.append(Task { [weak self] in await self?.runLyricsDispatch() })
         tasks.append(Task { [weak self] in await self?.runAncsAuthDispatch() })
+        tasks.append(Task { [weak self] in await self?.runWebappProfileDispatch() })
         tasks.append(Task { [weak self] in
             guard let self else { return }
             await netDispatcher.start(gateway: gateway)
@@ -508,6 +509,14 @@ public actor BridgethingCompanion {
         }
     }
 
+    private func runWebappProfileDispatch() async {
+        for await (_, changed) in gateway.webapp.activeChanged {
+            let hero = changed.art.map { Int($0.heroPx) } ?? 248
+            let thumb = changed.art.map { Int($0.thumbPx) } ?? 96
+            await activeGlue?.setArtProfile(heroPx: hero, thumbPx: thumb)
+        }
+    }
+
     private func runPlayerDispatch() async {
         for await event in gateway.events {
             guard case let .message(_, msg) = event,
@@ -552,7 +561,7 @@ public actor BridgethingCompanion {
 
     private func runAssetDispatch() async {
         for await (handle, req) in gateway.asset.requestRequests {
-            await handleAsset(handle: handle, id: req.id)
+            Task { [weak self] in await self?.handleAsset(handle: handle, id: req.id) }
         }
     }
 
@@ -569,7 +578,11 @@ public actor BridgethingCompanion {
             try? await handle.respondErr(AssetNotFoundReply(id: id))
             return
         }
-        try? await handle.respond(AssetGotReply(id: id, bytes: bytes.bytes, mime: bytes.mime))
+        do {
+            try await handle.respond(AssetGotReply(id: id, bytes: bytes.bytes, mime: bytes.mime))
+        } catch {
+            log(.warn, "asset \(id) respond failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - library dispatch
@@ -577,6 +590,7 @@ public actor BridgethingCompanion {
     private func runLibraryDispatch() async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in await self?.runLibraryBrowse() }
+            group.addTask { [weak self] in await self?.runLibraryResolveContext() }
             group.addTask { [weak self] in await self?.runLibrarySearch() }
             group.addTask { [weak self] in await self?.runLibraryRecommendations() }
             group.addTask { [weak self] in await self?.runLibraryFavoritesList() }
@@ -589,66 +603,91 @@ public actor BridgethingCompanion {
 
     private func runLibraryBrowse() async {
         for await (handle, req) in gateway.library.browseRequests {
-            guard let glue = activeGlue else {
-                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(BrowseReply(result: glue.browse(req)))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            let result: BrowseResult
-            do { result = try await glue.browse(req) } catch {
-                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
+        }
+    }
+
+    private func runLibraryResolveContext() async {
+        for await (handle, req) in gateway.library.resolveContextRequests {
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(glue.resolveContext(req.uri))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            try? await handle.respond(BrowseReply(result: result))
         }
     }
 
     private func runLibrarySearch() async {
         for await (handle, req) in gateway.library.searchRequests {
-            guard let glue = activeGlue else {
-                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(SearchReply(result: glue.search(req)))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            let result: SearchResult
-            do { result = try await glue.search(req) } catch {
-                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
-            }
-            try? await handle.respond(SearchReply(result: result))
         }
     }
 
     private func runLibraryRecommendations() async {
         for await (handle, req) in gateway.library.recommendationsRequests {
-            guard let glue = activeGlue else {
-                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(RecommendationsReply(result: glue.recommendations(req)))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            let result: RecommendationsResult
-            do { result = try await glue.recommendations(req) } catch {
-                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
-            }
-            try? await handle.respond(RecommendationsReply(result: result))
         }
     }
 
     private func runLibraryFavoritesList() async {
         for await (handle, req) in gateway.library.favoritesListRequests {
-            guard let glue = activeGlue else {
-                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(FavoritesListReply(page: glue.favoritesList(req)))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            let page: FavoritesPage
-            do { page = try await glue.favoritesList(req) } catch {
-                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
-            }
-            try? await handle.respond(FavoritesListReply(page: page))
         }
     }
 
     private func runLibraryFavoritesContains() async {
         for await (handle, req) in gateway.library.favoritesContainsRequests {
-            guard let glue = activeGlue else {
-                try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); continue
+            Task { [weak self] in
+                guard let glue = await self?.activeGlue else {
+                    try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
+                }
+                do {
+                    try await handle.respond(FavoritesContainsReply(liked: glue.favoritesContains(req)))
+                } catch {
+                    await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
+                }
             }
-            let liked: [Bool]
-            do { liked = try await glue.favoritesContains(req) } catch {
-                await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) }); continue
-            }
-            try? await handle.respond(FavoritesContainsReply(liked: liked))
         }
     }
 
@@ -706,7 +745,7 @@ public actor BridgethingCompanion {
 
     private func runLyricsDispatch() async {
         for await (handle, req) in gateway.lyrics.getRequests {
-            await handleLyrics(handle: handle, req: req)
+            Task { [weak self] in await self?.handleLyrics(handle: handle, req: req) }
         }
     }
 

@@ -7,16 +7,23 @@ import Spotiny
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
+#if canImport(ImageIO)
+    import CoreGraphics
+    import ImageIO
+#endif
 
 public typealias WireRepeat = BridgethingSchema.RepeatMode
 private typealias SpotinyRepeat = Spotiny.RepeatMode
 
 private let assetIdPrefix = "spotify/img/"
+private let defaultHeroEdge = 248
+private let defaultThumbEdge = 96
+private let queueMax = 50
+private let enrichmentWarmConcurrency = 4
 private let hintDebounceNanos: UInt64 = 250_000_000
 private let pollIntervalNanos: UInt64 = 60_000_000_000
 private let spotifyAppBundle = "com.spotify.client"
 
-/// Builds the refresh-only `OAuthAuthenticator` the host configured.
 public typealias SpotifyAuthenticatorFactory = @Sendable () -> any OAuthAuthenticator
 
 public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
@@ -57,13 +64,32 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var baselinePollTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
     private var lastHintPid: String?
+    private var pushedAssetIds: Set<String> = []
+    private let pushedLock = NSLock()
+
+    private var lastSentQueueOrder: [String] = []
+    private var lastSentQueueUris: Set<String> = []
+    private var lastSentThumbEdge = defaultThumbEdge
+
+    private var lastHomePrefetchAt: Date?
+
+    private var artHeroEdge = defaultHeroEdge
+    private var artThumbEdge = defaultThumbEdge
+    private let artProfileLock = NSLock()
+
+    public static let defaultImageSession: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 6
+        cfg.timeoutIntervalForResource = 15
+        return URLSession(configuration: cfg)
+    }()
 
     public init(
         authenticatorFactory: @escaping SpotifyAuthenticatorFactory,
         accessToken: String = "",
         refreshToken: String = "",
         onTokensRefreshed: TokenCallback? = nil,
-        urlSession: URLSession = .shared,
+        urlSession: URLSession = SpotifyGlue.defaultImageSession,
         httpExecutor: (any SpotinyHTTPExecutor)? = nil,
         usesDealer: Bool = false
     ) {
@@ -80,6 +106,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         if self.gateway != nil { await detach() }
 
         self.gateway = gateway
+        clearPushedArtwork()
+        resetQueueDedup()
+        lastHomePrefetchAt = nil
 
         guard !initialAccessToken.isEmpty || !initialRefreshToken.isEmpty else {
             // no tokens yet
@@ -126,8 +155,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         nowPlayingObserver?(nil)
         nowPlayingObserver = nil
 
+        resetQueueDedup()
         client = nil
         gateway = nil
+    }
+
+    private func resetQueueDedup() {
+        lastSentQueueOrder = []
+        lastSentQueueUris = []
     }
 
     public func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async {
@@ -219,6 +254,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             query: req.query, types: types, limit: Int(req.limit), offset: Int(req.offset)
         )
 
+        let edge = artEdges().hero
         let limit = Int(req.limit)
         var items: [LibraryItem] = []
         var presentKinds: [ItemKind] = []
@@ -227,12 +263,12 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         for kind in kinds {
             let kindItems: [LibraryItem]
             switch kind {
-            case .track: kindItems = results.tracks.map { .track(Self.mapTrack($0)) }
+            case .track: kindItems = results.tracks.map { .track(Self.mapTrack($0, edge: edge)) }
             case .album: kindItems = results.albums.map { .album(Self.mapAlbum($0)) }
             case .artist: kindItems = results.artists.map { .artist(Self.mapArtist($0)) }
-            case .playlist: kindItems = results.playlists.map { .playlist(Self.mapPlaylist($0)) }
-            case .show: kindItems = results.shows.map { .show(Self.mapShow($0)) }
-            case .podcastEpisode: kindItems = results.episodes.map { .podcastEpisode(Self.mapEpisode($0)) }
+            case .playlist: kindItems = results.playlists.map { .playlist(Self.mapPlaylist($0, edge: edge)) }
+            case .show: kindItems = results.shows.map { .show(Self.mapShow($0, edge: edge)) }
+            case .podcastEpisode: kindItems = results.episodes.map { .podcastEpisode(Self.mapEpisode($0, edge: edge)) }
             case .station: kindItems = []
             }
             if !kindItems.isEmpty {
@@ -242,6 +278,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             items.append(contentsOf: kindItems)
         }
 
+        #if os(iOS)
+        prefetchVisible(items)
+        #endif
         return SearchResult(items: items, kinds: presentKinds, total: nil, hasMore: reachedFullPage)
     }
 
@@ -249,25 +288,27 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         guard let client else { throw GlueError.detached }
         let limit = Int(req.limit)
         let offset = Int(req.offset)
+        let edge = artEdges().hero
 
+        let result: BrowseResult
         switch req.nodeId {
         case nil, "", "root":
             return await browseRoot(client)
 
         case Self.recentlyPlayedNode:
             // recently-played is cursor-based, not offset-paged.
-            let entries = Self.dedupedTrackEntries(await client.player.getRecentlyPlayed(limit: 50))
-            return BrowseResult(entries: entries, total: UInt32(entries.count), hasMore: false)
+            let entries = Self.dedupedTrackEntries(await client.player.getRecentlyPlayed(limit: 50), edge: edge)
+            result = BrowseResult(entries: entries, total: UInt32(entries.count), hasMore: false)
 
         case Self.topTracksNode:
             let page = await client.tracks.getUserTopTracks(limit: limit, offset: offset)
-            let entries = page.items.map { BrowseEntry.item(.track(Self.mapTrack($0))) }
-            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.track(Self.mapTrack($0, edge: edge))) }
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         case Self.homeNode:
             let page = await client.categories.getMadeForYou(limit: limit, offset: offset)
-            let entries = page.items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0))) }
-            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0, edge: edge))) }
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         case Self.playlistsNode:
             let page = await client.playlists.getUserPlaylists(limit: limit, offset: offset)
@@ -276,24 +317,71 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 let userId = await client.users.getCurrentUser()?.id
                 if let liked = Self.likedSongsEntry(userId: userId) { entries.append(liked) }
             }
-            entries += page.items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0))) }
-            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+            entries += page.items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0, edge: edge))) }
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         case Self.podcastsNode:
             let page = await client.shows.getUserSavedShows(limit: limit, offset: offset)
             var entries: [BrowseEntry] = []
             if offset == 0 { entries.append(Self.yourEpisodesEntry()) }
-            entries += page.items.map { BrowseEntry.item(.show(Self.mapShow($0))) }
-            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+            entries += page.items.map { BrowseEntry.item(.show(Self.mapShow($0, edge: edge))) }
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         case Self.artistsNode:
             let page = await client.artists.getUserFollowedArtists(limit: limit, offset: offset)
             let entries = page.items.map { BrowseEntry.item(.artist(Self.mapArtist($0))) }
-            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         case Self.albumsNode:
             let page = await client.albums.getUserSavedAlbums(limit: limit, offset: offset)
             let entries = page.items.map { BrowseEntry.item(.album(Self.mapAlbum($0))) }
+            result = Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+
+        default:
+            guard let uri = SpotifyURI(req.nodeId ?? "") else {
+                return BrowseResult(entries: [], total: nil, hasMore: false)
+            }
+            result = await browseChildren(client, uri, limit: limit, offset: offset)
+        }
+
+        #if os(iOS)
+        prefetchVisible(result.entries)
+        #endif
+        return result
+    }
+
+    /// Drill-in: children of an individual library item (playlist/album/artist/show + the liked/your-episodes pseudo nodes).
+    private func browseChildren(_ client: SpotinyClient, _ uri: SpotifyURI, limit: Int, offset: Int) async -> BrowseResult {
+        let edge = artEdges().hero
+        switch uri.kind {
+        case .playlist, .playlistV2:
+            let page = await client.playlists.getPlaylistItems(uri: uri, limit: limit, offset: offset)
+            let entries = page.items.map { Self.mapPlaylistItem($0, edge: edge) }
+            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+
+        case .album:
+            let page = await client.albums.getAlbumTracks(uri: uri, limit: limit, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.track(Self.mapTrack($0, edge: edge))) }
+            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+
+        case .artist, .artistToplist:
+            // artist top-tracks is not offset-paged.
+            let entries = (await client.artists.getArtistTopTracks(uri: uri)).map { BrowseEntry.item(.track(Self.mapTrack($0, edge: edge))) }
+            return BrowseResult(entries: entries, total: UInt32(entries.count), hasMore: false)
+
+        case .show:
+            let page = await client.shows.getShowEpisodes(uri: uri, limit: limit, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.podcastEpisode(Self.mapEpisode($0, edge: edge))) }
+            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+
+        case .collection:
+            let page = await client.tracks.getUserSavedTracks(limit: limit, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.track(Self.mapTrack($0, edge: edge, saved: true))) }
+            return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
+
+        case ._yourEpisodes:
+            let page = await client.episodes.getUserSavedEpisodes(limit: limit, offset: offset)
+            let entries = page.items.map { BrowseEntry.item(.podcastEpisode(Self.mapEpisode($0, edge: edge))) }
             return Self.section(entries, pageCount: page.items.count, total: page.total, offset: offset)
 
         default:
@@ -304,6 +392,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     /// Each section folder inlines a preview slice of its children.
     private func browseRoot(_ client: SpotinyClient) async -> BrowseResult {
         let previewLimit = 14
+        let edge = artEdges().hero
 
         async let recentP = client.player.getRecentlyPlayed(limit: previewLimit)
         async let topP = client.tracks.getUserTopTracks(limit: previewLimit)
@@ -314,16 +403,16 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         async let albumsP = client.albums.getUserSavedAlbums(limit: previewLimit)
         async let userP = client.users.getCurrentUser()
 
-        let recentChildren = Self.dedupedTrackEntries(await recentP)
-        let topChildren = (await topP).items.map { BrowseEntry.item(.track(Self.mapTrack($0))) }
-        let homeChildren = (await homeP).items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0))) }
+        let recentChildren = Self.dedupedTrackEntries(await recentP, edge: edge)
+        let topChildren = (await topP).items.map { BrowseEntry.item(.track(Self.mapTrack($0, edge: edge))) }
+        let homeChildren = (await homeP).items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0, edge: edge))) }
 
         var playlistChildren: [BrowseEntry] = []
         if let liked = Self.likedSongsEntry(userId: (await userP)?.id) { playlistChildren.append(liked) }
-        playlistChildren += (await playlistsP).items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0))) }
+        playlistChildren += (await playlistsP).items.map { BrowseEntry.item(.playlist(Self.mapPlaylist($0, edge: edge))) }
 
         var podcastChildren: [BrowseEntry] = [Self.yourEpisodesEntry()]
-        podcastChildren += (await showsP).items.map { BrowseEntry.item(.show(Self.mapShow($0))) }
+        podcastChildren += (await showsP).items.map { BrowseEntry.item(.show(Self.mapShow($0, edge: edge))) }
 
         let artistChildren = (await artistsP).items.map { BrowseEntry.item(.artist(Self.mapArtist($0))) }
         let albumChildren = (await albumsP).items.map { BrowseEntry.item(.album(Self.mapAlbum($0))) }
@@ -343,7 +432,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         addSection(Self.podcastsNode, "Podcasts", podcastChildren, total: nil)
         addSection(Self.artistsNode, "Artists", artistChildren, total: nil)
         addSection(Self.albumsNode, "Albums", albumChildren, total: nil)
-        return BrowseResult(entries: folders, total: UInt32(folders.count), hasMore: false)
+        let result = BrowseResult(entries: folders, total: UInt32(folders.count), hasMore: false)
+        #if os(iOS)
+        prefetchHome(result.entries)
+        #endif
+        return result
     }
 
     private static func section(_ entries: [BrowseEntry], pageCount: Int, total: Int, offset: Int) -> BrowseResult {
@@ -351,11 +444,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     // recently-played repeats tracks; dedupe by uri.
-    private static func dedupedTrackEntries(_ tracks: [Spotiny.Track]) -> [BrowseEntry] {
+    private static func dedupedTrackEntries(_ tracks: [Spotiny.Track], edge: Int) -> [BrowseEntry] {
         var seen = Set<String>()
         return tracks.compactMap { track in
             guard seen.insert(track.uri).inserted else { return nil }
-            return .item(.track(Self.mapTrack(track)))
+            return .item(.track(Self.mapTrack(track, edge: edge)))
         }
     }
 
@@ -373,21 +466,48 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         )))
     }
 
+    public func resolveContext(_ uri: String) async throws -> ContextResolveReply {
+        guard let client else { throw GlueError.detached }
+        guard let parsed = SpotifyURI(uri) else { throw GlueError.notImplemented }
+        let heroEdge = artEdges().hero
+        func reply(_ name: String?, _ imageUrl: Spotiny.SpotifyImageURLs?, subtitle: String? = nil) -> ContextResolveReply {
+            let artworkId = imageUrl.flatMap { Self.imageAssetId(Self.bestImageURL($0, maxEdge: heroEdge), maxEdge: heroEdge) }
+            return ContextResolveReply(name: name, artworkId: artworkId, subtitle: subtitle)
+        }
+        switch parsed.kind {
+        case .playlist, .playlistV2:
+            let p = await client.playlists.getPlaylist(uri: parsed)
+            return reply(p?.name, p?.imageUrl)
+        case .album:
+            let a = await client.albums.getAlbum(uri: parsed)
+            return reply(a?.name, a?.imageUrl, subtitle: a?.artists.first?.name)
+        case .show:
+            let s = await client.shows.getShow(uri: parsed)
+            return reply(s?.name, s?.imageUrl)
+        case .artist, .artistToplist:
+            let ar = await client.artists.getArtist(uri: parsed)
+            return reply(ar?.name, ar?.imageUrl)
+        default:
+            throw GlueError.notImplemented
+        }
+    }
+
     public func recommendations(_ req: LibraryRecommendationsRequest) async throws -> RecommendationsResult {
         guard let client else { throw GlueError.detached }
         let limit = Int(req.limit)
 
+        let edge = artEdges().hero
         let seedTracks = req.seeds.filter { $0.kind == .track }.compactMap { SpotifyURI($0.uri)?.id }
         let seedArtists = req.seeds.filter { $0.kind == .artist }.compactMap { SpotifyURI($0.uri)?.id }
 
         let tracks = await client.recommendations.get(seedTracks: seedTracks, seedArtists: seedArtists, limit: limit)
         if !tracks.isEmpty {
-            return RecommendationsResult(items: tracks.map { .track(Self.mapTrack($0)) }, total: nil, hasMore: false)
+            return RecommendationsResult(items: tracks.map { .track(Self.mapTrack($0, edge: edge)) }, total: nil, hasMore: false)
         }
 
         if let artistSeed = req.seeds.first(where: { $0.kind == .artist }), let uri = SpotifyURI(artistSeed.uri) {
             let top = Array((await client.artists.getArtistTopTracks(uri: uri)).prefix(limit))
-            return RecommendationsResult(items: top.map { .track(Self.mapTrack($0)) }, total: nil, hasMore: false)
+            return RecommendationsResult(items: top.map { .track(Self.mapTrack($0, edge: edge)) }, total: nil, hasMore: false)
         }
 
         return RecommendationsResult(items: [], total: nil, hasMore: false)
@@ -396,8 +516,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public func favoritesList(_ req: LibraryFavoritesListRequest) async throws -> FavoritesPage {
         guard let client else { throw GlueError.detached }
         let offset = Int(req.offset)
+        let edge = artEdges().hero
         let page = await client.tracks.getUserSavedTracks(limit: Int(req.limit), offset: offset)
-        let items = page.items.map { LibraryItem.track(Self.mapTrack($0, saved: true)) }
+        let items = page.items.map { LibraryItem.track(Self.mapTrack($0, edge: edge, saved: true)) }
         return FavoritesPage(items: items, total: UInt32(max(page.total, 0)), hasMore: offset + page.items.count < page.total)
     }
 
@@ -450,11 +571,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         // echo the iAP2 pid the daemon matches enrichment offers against; always the latest hint.
         lastHintPid = hint.persistentId
 
-        DiagnosticsBuffer.shared.recordBreadcrumb(
-            category: "spotify.merge",
-            detail: "iap2 playback hint",
-            fields: [("source", "iap2BackProp")]
-        )
         hintFetchTask?.cancel()
         hintFetchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: hintDebounceNanos)
@@ -473,13 +589,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     }
 
     public func asset(id: String) async throws -> AssetBytes? {
-        guard id.hasPrefix(assetIdPrefix) else { return nil }
-        let encoded = String(id.dropFirst(assetIdPrefix.count))
-        guard let urlString = encoded.removingPercentEncoding,
-              let url = URL(string: urlString) else { return nil }
-        let (data, response) = try await urlSession.data(from: url)
-        let mime = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
-        return AssetBytes(bytes: data, mime: mime)
+        guard let parsed = Self.parseImageId(id) else { return nil }
+        let (data, response) = try await urlSession.data(from: parsed.url)
+        // ImageIO leaves the decoded bitmap + source autoreleased; drain it per image so
+        // concurrent warms don't stack full-res bitmaps until the next actor hop.
+        return autoreleasepool {
+            if let scaled = Self.downsample(data, maxEdge: parsed.maxEdge) {
+                return AssetBytes(bytes: scaled, mime: "image/jpeg")
+            }
+            let mime = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
+            return AssetBytes(bytes: data, mime: mime)
+        }
     }
 
     fileprivate func fetchAndDispatch(reason: String) async {
@@ -492,21 +612,12 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     fileprivate func handleStateUpdate(_ state: Spotiny.PlayerState, reason: String) {
         guard let gateway else { return }
-        let update = Self.makeUpdate(from: state)
-        let artworkUrl = state.item.flatMap(Self.rawArtworkURL(for:))
+        let heroEdge = artEdges().hero
+        let update = Self.makeUpdate(from: state, heroEdge: heroEdge)
+        let artworkUrl = state.item.flatMap { Self.rawArtworkURL(for: $0, maxEdge: heroEdge) }
         nowPlayingObserver?(GlueNowPlaying(update: update, artworkUrl: artworkUrl))
 
         let nowPlaying = state.is_playing
-        DiagnosticsBuffer.shared.recordBreadcrumb(
-            category: "spotify.merge",
-            detail: "augmented now-playing",
-            fields: [
-                ("source", "companionAugmented"),
-                ("reason", reason),
-                ("track", state.item?.name ?? ""),
-                ("playing", String(nowPlaying)),
-            ]
-        )
 
         #if os(iOS)
         let anchorPid = lastHintPid
@@ -533,33 +644,153 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     #if os(iOS)
     private func sendEnrichment(state: Spotiny.PlayerState, anchorPid: String?, reason: String) async {
         guard let gateway, let client else { return }
-        let head = state.item.map(Self.queueItem(from:))
-        let queue = (await client.player.getQueue())?.queue.map(Self.queueItem(from:)) ?? []
-        let context = state.context.map { EnrichmentContext(uri: $0.uri, name: nil, kind: $0.type) }
-        let offer = NowPlayingEnrichment(anchorPid: anchorPid, head: head, queue: queue, context: context)
+        let (heroEdge, thumbEdge) = artEdges()
+        let head = state.item.map { Self.queueItem(from: $0, maxEdge: heroEdge) }
 
-        DiagnosticsBuffer.shared.recordBreadcrumb(
-            category: "spotify.merge",
-            detail: "enrichment offer",
-            fields: [
-                ("reason", reason),
-                ("anchor", anchorPid ?? ""),
-                ("head", state.item?.name ?? ""),
-                ("queue", String(queue.count)),
-            ]
-        )
-        try? await gateway.player.enrichmentOffer(offer)
+        let context = state.context.map { EnrichmentContext(uri: $0.uri, name: nil, kind: $0.type) }
+        try? await gateway.player.enrichmentOffer(NowPlayingEnrichment(anchorPid: anchorPid, head: head, context: context))
+
+        let queueItems = Array((await client.player.getQueue())?.queue.prefix(queueMax) ?? [])
+        let entries = queueItems.map { Self.queueItem(from: $0, maxEdge: thumbEdge) }
+        await sendQueueChangedIfNeeded(entries, thumbEdge: thumbEdge)
+
+        if let headId = head?.artworkId {
+            await warmArtwork(headId)
+        }
+        await warmArtworkBounded(entries.compactMap(\.artworkId), maxConcurrent: enrichmentWarmConcurrency)
+    }
+
+    private func sendQueueChangedIfNeeded(_ entries: [QueueItem], thumbEdge: Int) async {
+        guard let gateway else { return }
+        let order = entries.map(\.uri)
+
+        if thumbEdge != lastSentThumbEdge {
+            lastSentThumbEdge = thumbEdge
+            resetQueueDedup()
+        }
+        guard order != lastSentQueueOrder else { return }
+
+        let fresh = entries.filter { !lastSentQueueUris.contains($0.uri) }
+        do {
+            try await gateway.player.queueChanged(QueueSnapshot(order: order, items: fresh))
+            lastSentQueueOrder = order
+            lastSentQueueUris = Set(order)
+        } catch {
+            // leave last-sent state unchanged so the next change re-sends.
+        }
+    }
+
+    private static let browsePrefetchCount = 5
+    private static let homePrefetchInterval: TimeInterval = 3600
+
+    private func prefetchArtIds(_ ids: [String]) {
+        guard !ids.isEmpty, gateway != nil else { return }
+        Task { [weak self] in await self?.warmArtworkBounded(ids, maxConcurrent: enrichmentWarmConcurrency) }
+    }
+
+    private func prefetchVisible(_ entries: [BrowseEntry]) {
+        prefetchArtIds(entries.prefix(Self.browsePrefetchCount).compactMap(Self.entryArtId))
+    }
+
+    private func prefetchVisible(_ items: [LibraryItem]) {
+        prefetchArtIds(items.prefix(Self.browsePrefetchCount).compactMap(Self.itemArtId))
+    }
+
+    // home changes rarely; push its visible art once, then leave the link alone for an hour.
+    private func prefetchHome(_ entries: [BrowseEntry]) {
+        let now = Date()
+        if let last = lastHomePrefetchAt, now.timeIntervalSince(last) < Self.homePrefetchInterval { return }
+        lastHomePrefetchAt = now
+        prefetchVisible(entries)
+    }
+
+    private static func entryArtId(_ entry: BrowseEntry) -> String? {
+        switch entry {
+        case .item(let item): return itemArtId(item)
+        case .folder(let folder): return folder.previewChildren?.first.flatMap(Self.entryArtId)
+        }
+    }
+
+    private static func itemArtId(_ item: LibraryItem) -> String? {
+        switch item {
+        case .track(let t): return t.image_id.isEmpty ? nil : t.image_id
+        case .playlist(let p): return p.artworkId
+        case .show(let s): return s.artworkId
+        case .podcastEpisode(let e): return e.artworkId
+        case .album, .artist, .station: return nil
+        }
+    }
+
+    private func warmArtworkBounded(_ ids: [String], maxConcurrent: Int) async {
+        await withTaskGroup(of: Void.self) { group in
+            var iter = ids.makeIterator()
+            var inFlight = 0
+            while inFlight < maxConcurrent, let id = iter.next() {
+                group.addTask { await self.warmArtwork(id) }
+                inFlight += 1
+            }
+            while await group.next() != nil {
+                if let id = iter.next() {
+                    group.addTask { await self.warmArtwork(id) }
+                }
+            }
+        }
+    }
+
+    private func warmArtwork(_ id: String) async {
+        guard let gateway else { return }
+        guard claimArtworkPush(id) else { return }
+        guard let bytes = try? await asset(id: id) else {
+            unclaimArtworkPush(id)
+            return
+        }
+        do {
+            try await gateway.asset.push(
+                AssetPush(id: id, bytes: bytes.bytes, mime: bytes.mime ?? "image/jpeg", retention: .lru),
+                priority: .bulk
+            )
+        } catch {
+            unclaimArtworkPush(id)
+        }
     }
     #endif
+
+    public func setArtProfile(heroPx: Int, thumbPx: Int) {
+        artProfileLock.lock()
+        defer { artProfileLock.unlock() }
+        artHeroEdge = max(1, heroPx)
+        artThumbEdge = max(1, thumbPx)
+    }
+
+    private func artEdges() -> (hero: Int, thumb: Int) {
+        artProfileLock.lock()
+        defer { artProfileLock.unlock() }
+        return (artHeroEdge, artThumbEdge)
+    }
+
+    private func claimArtworkPush(_ id: String) -> Bool {
+        pushedLock.lock()
+        defer { pushedLock.unlock() }
+        return pushedAssetIds.insert(id).inserted
+    }
+
+    private func unclaimArtworkPush(_ id: String) {
+        pushedLock.lock()
+        defer { pushedLock.unlock() }
+        pushedAssetIds.remove(id)
+    }
+
+    private func clearPushedArtwork() {
+        pushedLock.lock()
+        defer { pushedLock.unlock() }
+        pushedAssetIds.removeAll()
+    }
 
     private func claimAuthority(_ scopes: Set<CompanionAuthorityScope>) async {
         guard let gateway else { return }
         for scope in scopes where !heldScopes.contains(scope) {
             try? await gateway.authority.claim(AuthorityClaim(scope: scope))
             heldScopes.insert(scope)
-            DiagnosticsBuffer.shared.recordBreadcrumb(
-                category: "spotify.authority", detail: "claimed \(scope.rawValue)"
-            )
         }
     }
 
@@ -567,9 +798,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         guard let gateway else { return }
         for scope in heldScopes {
             try? await gateway.authority.release(AuthorityRelease(scope: scope))
-            DiagnosticsBuffer.shared.recordBreadcrumb(
-                category: "spotify.authority", detail: "released \(scope.rawValue)"
-            )
         }
         heldScopes.removeAll()
     }
@@ -597,7 +825,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         baselinePollTask = nil
     }
 
-    private static func makeUpdate(from state: Spotiny.PlayerState) -> NowPlayingUpdate {
+    private static func makeUpdate(from state: Spotiny.PlayerState, heroEdge: Int) -> NowPlayingUpdate {
         let media: MediaItemUpdate? = state.item.map { item in
             let title = item.name
             let artist = item.artists.map(\.name).joined(separator: ", ")
@@ -609,7 +837,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 albumArtist: nil,
                 artist: artist.isEmpty ? nil : artist,
                 liked: nil,
-                artworkId: artworkId(for: item),
+                artworkId: artworkId(for: item, maxEdge: heroEdge),
                 durationMs: UInt32(max(item.duration_ms, 0)),
                 mediaTypes: nil,
                 trackNumber: nil,
@@ -644,11 +872,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         return NowPlayingUpdate(mediaItem: media, playback: playback)
     }
 
-    private static func artworkId(for item: PlayerItem) -> String? {
-        imageAssetId(rawArtworkURL(for: item) ?? "")
+    private static func artworkId(for item: PlayerItem, maxEdge: Int) -> String? {
+        imageAssetId(rawArtworkURL(for: item, maxEdge: maxEdge) ?? "", maxEdge: maxEdge)
     }
 
-    private static func queueItem(from item: PlayerItem) -> QueueItem {
+    private static func queueItem(from item: PlayerItem, maxEdge: Int) -> QueueItem {
         let artist = item.artists.map(\.name).joined(separator: ", ")
         let album: String? = if case let .track(track) = item { track.album?.name } else { nil }
         return QueueItem(
@@ -656,14 +884,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             title: item.name.isEmpty ? nil : item.name,
             artist: artist.isEmpty ? nil : artist,
             album: album,
-            artworkId: artworkId(for: item),
+            artworkId: artworkId(for: item, maxEdge: maxEdge),
             durationMs: UInt32(max(item.duration_ms, 0)),
             persistentId: nil
         )
     }
 
-    fileprivate static func rawArtworkURL(for item: PlayerItem) -> String? {
-        let url = bestImageURL(item.imageUrl)
+    fileprivate static func rawArtworkURL(for item: PlayerItem, maxEdge: Int) -> String? {
+        let url = bestImageURL(item.imageUrl, maxEdge: maxEdge)
         return url.isEmpty ? nil : url
     }
 
@@ -677,18 +905,58 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private static let artistsNode = "artists"
     private static let albumsNode = "albums"
 
-    private static func bestImageURL(_ urls: SpotifyImageURLs) -> String {
+    private static func bestImageURL(_ urls: SpotifyImageURLs, maxEdge: Int) -> String {
+        if maxEdge <= 64 {
+            if !urls.small.isEmpty { return urls.small }
+            if !urls.medium.isEmpty { return urls.medium }
+            return urls.large
+        }
+        if maxEdge <= 300 {
+            if !urls.medium.isEmpty { return urls.medium }
+            if !urls.large.isEmpty { return urls.large }
+            return urls.small
+        }
         if !urls.large.isEmpty { return urls.large }
         if !urls.medium.isEmpty { return urls.medium }
-        if !urls.small.isEmpty { return urls.small }
-        return ""
+        return urls.small
     }
 
-    private static func imageAssetId(_ rawURL: String) -> String? {
+    private static func imageAssetId(_ rawURL: String, maxEdge: Int) -> String? {
         guard !rawURL.isEmpty,
               let encoded = rawURL.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
         else { return nil }
-        return assetIdPrefix + encoded
+        return "\(assetIdPrefix)\(maxEdge)/\(encoded)"
+    }
+
+    private static func parseImageId(_ id: String) -> (url: URL, maxEdge: Int)? {
+        guard id.hasPrefix(assetIdPrefix) else { return nil }
+        let rest = id.dropFirst(assetIdPrefix.count)
+        guard let slash = rest.firstIndex(of: "/"),
+              let maxEdge = Int(rest[..<slash])
+        else { return nil }
+        let encoded = String(rest[rest.index(after: slash)...])
+        guard let urlString = encoded.removingPercentEncoding, let url = URL(string: urlString) else { return nil }
+        return (url, maxEdge)
+    }
+
+    private static func downsample(_ data: Data, maxEdge: Int) -> Data? {
+        #if canImport(ImageIO)
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxEdge,
+            ]
+            guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+            let out = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, "public.jpeg" as CFString, 1, nil)
+            else { return nil }
+            CGImageDestinationAddImage(dest, thumb, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)
+            guard CGImageDestinationFinalize(dest) else { return nil }
+            return out as Data
+        #else
+            return nil
+        #endif
     }
 
     private static func spotifyType(for kind: ItemKind) -> String? {
@@ -703,7 +971,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
     }
 
-    private static func mapTrack(_ t: Spotiny.Track, saved: Bool = false) -> BridgethingSchema.Track {
+    private static func mapTrack(_ t: Spotiny.Track, edge: Int, saved: Bool = false) -> BridgethingSchema.Track {
         let primary = t.artists.first
         return BridgethingSchema.Track(
             id: t.uri,
@@ -712,9 +980,33 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             artist: BridgethingSchema.Artist(id: primary?.uri ?? "", name: primary?.name ?? ""),
             artists: t.artists.map { BridgethingSchema.Artist(id: $0.uri, name: $0.name) },
             duration_ms: UInt32(max(t.duration_ms, 0)),
-            image_id: imageAssetId(bestImageURL(t.imageUrl)) ?? "",
+            image_id: imageAssetId(bestImageURL(t.imageUrl, maxEdge: edge), maxEdge: edge) ?? "",
             saved: saved
         )
+    }
+
+    private static func mapPlaylistItem(_ item: Spotiny.PlaylistItem, edge: Int) -> BrowseEntry {
+        if item.type == "episode" {
+            return .item(.podcastEpisode(BridgethingSchema.PodcastEpisode(
+                uri: item.uri,
+                name: item.name ?? "",
+                showName: nil,
+                durationMs: UInt32(max(item.duration_ms, 0)),
+                publishedAtUnixS: nil,
+                artworkId: imageAssetId(bestImageURL(Spotiny.SpotifyImageURLs(item.images), maxEdge: edge), maxEdge: edge)
+            )))
+        }
+        let primary = item.artists.first
+        return .item(.track(BridgethingSchema.Track(
+            id: item.uri,
+            name: item.name ?? "",
+            album: BridgethingSchema.Album(id: item.album?.uri ?? "", name: item.album?.name ?? ""),
+            artist: BridgethingSchema.Artist(id: primary?.uri ?? "", name: primary?.name ?? ""),
+            artists: item.artists.map { BridgethingSchema.Artist(id: $0.uri, name: $0.name) },
+            duration_ms: UInt32(max(item.duration_ms, 0)),
+            image_id: imageAssetId(bestImageURL(item.imageUrl, maxEdge: edge), maxEdge: edge) ?? "",
+            saved: false
+        )))
     }
 
     private static func mapAlbum(_ a: Spotiny.Album) -> BridgethingSchema.Album {
@@ -725,34 +1017,34 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         BridgethingSchema.Artist(id: a.uri, name: a.name)
     }
 
-    private static func mapPlaylist(_ p: Spotiny.Playlist) -> BridgethingSchema.Playlist {
+    private static func mapPlaylist(_ p: Spotiny.Playlist, edge: Int) -> BridgethingSchema.Playlist {
         BridgethingSchema.Playlist(
             uri: p.uri,
             name: p.name,
             ownerName: nil,
             trackCount: nil,
-            artworkId: imageAssetId(bestImageURL(p.imageUrl))
+            artworkId: imageAssetId(bestImageURL(p.imageUrl, maxEdge: edge), maxEdge: edge)
         )
     }
 
-    private static func mapShow(_ s: Spotiny.Show) -> BridgethingSchema.Show {
+    private static func mapShow(_ s: Spotiny.Show, edge: Int) -> BridgethingSchema.Show {
         BridgethingSchema.Show(
             uri: s.uri,
             name: s.name,
             publisher: nil,
             episodeCount: nil,
-            artworkId: imageAssetId(bestImageURL(s.imageUrl))
+            artworkId: imageAssetId(bestImageURL(s.imageUrl, maxEdge: edge), maxEdge: edge)
         )
     }
 
-    private static func mapEpisode(_ e: Spotiny.Episode) -> BridgethingSchema.PodcastEpisode {
+    private static func mapEpisode(_ e: Spotiny.Episode, edge: Int) -> BridgethingSchema.PodcastEpisode {
         BridgethingSchema.PodcastEpisode(
             uri: e.uri,
             name: e.name,
             showName: e.show?.name,
             durationMs: UInt32(max(e.duration_ms, 0)),
             publishedAtUnixS: nil,
-            artworkId: imageAssetId(bestImageURL(e.imageUrl))
+            artworkId: imageAssetId(bestImageURL(e.imageUrl, maxEdge: edge), maxEdge: edge)
         )
     }
 

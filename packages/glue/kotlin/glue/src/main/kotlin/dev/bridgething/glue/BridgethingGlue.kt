@@ -4,6 +4,7 @@ import dev.bridgething.gateway.BridgethingGateway
 import dev.bridgething.lyrics.Lyrics
 import dev.bridgething.lyrics.TrackIdentity
 import dev.bridgething.schema.BrowseResult
+import dev.bridgething.schema.ContextResolveReply
 import dev.bridgething.schema.FavoritesPage
 import dev.bridgething.schema.FavoritesSet
 import dev.bridgething.schema.ItemRef
@@ -58,6 +59,7 @@ interface BridgethingGlue {
     // Library surface. Default impls throw NotImplemented; the companion maps that to a
     // protocol `Unimplemented` reply (recognized verb, no backend) vs a domain LibraryError.
     suspend fun browse(req: LibraryBrowseRequest): BrowseResult = throw GlueError.NotImplemented
+    suspend fun resolveContext(uri: String): ContextResolveReply = throw GlueError.NotImplemented
     suspend fun search(req: LibrarySearchRequest): SearchResult = throw GlueError.NotImplemented
     suspend fun recommendations(req: LibraryRecommendationsRequest): RecommendationsResult = throw GlueError.NotImplemented
     suspend fun favoritesList(req: LibraryFavoritesListRequest): FavoritesPage = throw GlueError.NotImplemented
@@ -87,6 +89,12 @@ interface BridgethingGlue {
      * no-op for stub glues.
      */
     suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) {}
+
+    /**
+     * Set the art render sizes (hero / thumb px) the active webapp declares, so the
+     * glue warms art pushes at exactly what gets rendered. Default impl is no-op.
+     */
+    suspend fun setArtProfile(heroPx: Int, thumbPx: Int) {}
 
     /** default no-op; glues with interactive sign-in drive this to surface auth transitions. */
     suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {}

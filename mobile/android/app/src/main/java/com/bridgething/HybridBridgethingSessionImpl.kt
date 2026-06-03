@@ -19,11 +19,7 @@ import com.margelo.nitro.bridgething.session.BridgethingConfigField
 import com.margelo.nitro.bridgething.session.BridgethingConfigKind
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMetaEntry
-import com.margelo.nitro.bridgething.session.BridgethingDiagDirection
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
-import com.margelo.nitro.bridgething.session.BridgethingDiagEntry
-import com.margelo.nitro.bridgething.session.BridgethingDiagFrameKind
-import com.margelo.nitro.bridgething.session.BridgethingDiagKind
 import com.margelo.nitro.bridgething.session.BridgethingHostInfo
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
@@ -68,8 +64,6 @@ import dev.bridgething.companion.OtaPhaseSnapshot
 import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
 import dev.bridgething.companion.OtaPollEvent
 import dev.bridgething.companion.WebappInstallResult
-import dev.bridgething.gateway.DiagRecord
-import dev.bridgething.gateway.DiagnosticsBuffer
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.device
@@ -197,10 +191,6 @@ public class HybridBridgethingSessionImpl(
     private var onCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
 
     @Volatile
-    private var onDiagEntry: ((BridgethingDiagEntry) -> Unit)? = null
-    private var diagJob: Job? = null
-
-    @Volatile
     private var lastAuthState: BridgethingAuthState = idleState()
 
     @Volatile
@@ -232,7 +222,6 @@ public class HybridBridgethingSessionImpl(
         eventsJob = scope.launch { c.gateway.events.collect { event -> handleGatewayEvent(event) } }
         otaJob = scope.launch { c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) } }
         catalogJob = scope.launch { c.catalog.events.collect { ev -> onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } }
-        diagJob = scope.launch { DiagnosticsBuffer.stream.collect { rec -> onDiagEntry?.invoke(toRnDiagEntry(rec)) } }
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
         runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
@@ -254,27 +243,23 @@ public class HybridBridgethingSessionImpl(
         var priorOta: Job? = null
         var priorCatalog: Job? = null
         var priorAuth: Job? = null
-        var priorDiag: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
             priorEvents = eventsJob
             priorOta = otaJob
             priorCatalog = catalogJob
             priorAuth = authJob
-            priorDiag = diagJob
             priorCompanion = companion
             companion = null
             eventsJob = null
             otaJob = null
             catalogJob = null
             authJob = null
-            diagJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
         priorCatalog?.cancel()
         priorAuth?.cancel()
-        priorDiag?.cancel()
         // detach UI observers but leave the companion running in the foreground service.
         priorCompanion?.setNowPlayingObserver(null)
         priorCompanion?.setAncsAuthStateObserver(null)
@@ -291,7 +276,7 @@ public class HybridBridgethingSessionImpl(
     override suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingApp.spotifyAuthConfig()
 
     override suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean) {
-        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken)
+        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken, usesDealer)
         setActiveProvider(BridgethingApp.SPOTIFY_PROVIDER_ID)
     }
 
@@ -395,9 +380,6 @@ public class HybridBridgethingSessionImpl(
             otaPollConfig = loadOtaPollConfig(),
         )
     }
-
-    override suspend fun diagnosticsSnapshot(limit: Double): Array<BridgethingDiagEntry> =
-        DiagnosticsBuffer.tail(limit.toInt()).map(::toRnDiagEntry).toTypedArray()
 
     override suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine> =
         DeviceLogRing.tail(limit.toInt())
@@ -745,44 +727,6 @@ public class HybridBridgethingSessionImpl(
             .apply()
     }
 
-    // --- diagnostics record conversion ---
-
-    private fun toRnDiagEntry(r: DiagRecord): BridgethingDiagEntry = BridgethingDiagEntry(
-        seq = r.seq.toDouble(),
-        ts = r.timestampMs,
-        kind = when (r.kind) {
-            DiagRecord.Kind.FRAME -> BridgethingDiagKind.FRAME
-            DiagRecord.Kind.LOG -> BridgethingDiagKind.LOG
-            DiagRecord.Kind.BREADCRUMB -> BridgethingDiagKind.BREADCRUMB
-        },
-        deviceId = r.deviceId,
-        direction = r.direction?.let {
-            when (it) {
-                DiagRecord.Direction.OUTBOUND -> BridgethingDiagDirection.OUTBOUND
-                DiagRecord.Direction.INBOUND -> BridgethingDiagDirection.INBOUND
-            }
-        },
-        frameKind = r.frameKind?.let {
-            when (it) {
-                DiagRecord.FrameKind.REQUEST -> BridgethingDiagFrameKind.REQUEST
-                DiagRecord.FrameKind.RESPONSE -> BridgethingDiagFrameKind.RESPONSE
-                DiagRecord.FrameKind.EVENT -> BridgethingDiagFrameKind.EVENT
-                DiagRecord.FrameKind.COMMAND -> BridgethingDiagFrameKind.COMMAND
-            }
-        },
-        surface = r.surface,
-        byteSize = r.byteSize?.toDouble(),
-        requestId = r.requestId,
-        latencyMs = r.latencyMs,
-        payload = r.payload,
-        level = r.level,
-        target = r.target,
-        message = r.message,
-        category = r.category,
-        detail = r.detail,
-        fields = r.fields?.map { BridgethingConfigEntry(it.first, it.second) }?.toTypedArray(),
-    )
-
     override suspend fun isNotificationAccessGranted(): Boolean {
         val ctx = context.applicationContext
         val packages = androidx.core.app.NotificationManagerCompat
@@ -887,7 +831,6 @@ public class HybridBridgethingSessionImpl(
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
     override fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit) { onCatalogEvent = callback }
-    override fun setOnDiagEntry(callback: (BridgethingDiagEntry) -> Unit) { onDiagEntry = callback }
 
     private suspend fun requireCompanion(deviceId: String): BridgethingCompanion {
         val c = stateLock.withLock { companion } ?: throw IllegalStateException("session not started")

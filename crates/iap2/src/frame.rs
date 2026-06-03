@@ -167,8 +167,8 @@ impl Lsp {
       version: 1,
       max_outgoing: 64,
       max_len: 16384,
-      retransmission_timeout_ms: 6000,
-      ack_timeout_ms: 3000,
+      retransmission_timeout_ms: 15000,
+      ack_timeout_ms: 6000,
       max_retransmissions: 30,
       max_ack: 8,
       sessions: vec![
