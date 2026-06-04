@@ -280,6 +280,133 @@ async fn slow_art_under_baseline() {
   }
 }
 
+/// T3 link-integrity probe: push a large sustained artwork volume over the real
+/// radio and rely on the DEVICE-side iAP2 decoder reject count (journald "bad
+/// payload checksum") plus hci RX-byte growth to expose UART corruption. The
+/// frame-tap arrival oracle is deliberately not used; corruption manifests as
+/// decoder rejects and link retransmits, not as non-arrival, so an arrival
+/// assertion is blind to it (which is why slow_art passed at 4M). Snapshot the
+/// device reject count before and after; clean link -> zero rejects.
+#[tokio::test]
+#[ignore = "requires a booted Car Thing + host BT radio; measure device journald rejects around it"]
+async fn link_integrity_volume() {
+  init_test_tracing();
+  let device = DeviceHarness::from_env().expect("device env (SUPERBIRD_BT_MAC)");
+  // a modern-mode subscriber drives the art PULL: artwork is fetched on demand,
+  // so without an active subscriber the daemon never requests the blob.
+  let _client = device.connect_modern_client().await.expect("modern client");
+  let source = device.iap2_source().await.expect("iap2 emulator source");
+
+  // device-side integrity baseline: the daemon's iap2 decoder rejects a corrupt
+  // inbound frame with a `bad payload checksum` warn (frame.rs). The host-side
+  // frame-tap only sees DECODED frames, so corruption is invisible there - which
+  // is why an arrival-only assertion stayed green on the corrupting 4M link. We
+  // read the device's reject count directly instead.
+  let rejects_before = device_checksum_rejects();
+  let rx_before = device_hci_rx_bytes();
+
+  let blob = vec![0xC3u8; 512 * 1024];
+  let run_start = tokio::time::Instant::now();
+  let mut total = 0usize;
+  for i in 0..16u8 {
+    let pid = 0xD00D_0000u64 + u64::from(i);
+    source
+      .push_now_playing(Iap2NowPlaying {
+        media_item: Some(Iap2MediaItem {
+          persistent_id: Some(pid),
+          title: Some(format!("Integrity {i}")),
+          artwork_id: Some(i),
+          ..Default::default()
+        }),
+        playback: None,
+      })
+      .await
+      .expect("push now-playing");
+    source.push_artwork(i, blob.clone()).await.expect("push artwork");
+    total += blob.len();
+    // dwell so the device pulls THIS art (512 KB ~ 1.7 s at 3M) before the next
+    // now-playing supersedes it.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    eprintln!("[integrity] blob {i}: 512 KB ({} KB cumulative)", total / 1024);
+  }
+  // final drain so the last pull completes before we tear down the link.
+  tokio::time::sleep(Duration::from_secs(8)).await;
+
+  let rejects_after = device_checksum_rejects();
+  let rx_after = device_hci_rx_bytes();
+  let rejects = rejects_after.saturating_sub(rejects_before);
+  let rx_grew = rx_after.saturating_sub(rx_before);
+  eprintln!(
+    "[integrity] pushed {} KB over {:?}; device RX +{} KB, checksum rejects +{}",
+    total / 1024,
+    run_start.elapsed(),
+    rx_grew / 1024,
+    rejects
+  );
+
+  // guard: a clean reject count is only meaningful if real volume crossed the
+  // link. At the 4M corruption rate (~1 bad byte / 38 KB) 2 MB would shed ~55
+  // frames, so 2 MB with zero rejects is already a decisive clean verdict.
+  assert!(
+    rx_grew >= 2 * 1024 * 1024,
+    "only {} KB reached the device - too little to test link integrity (art pulls did not run?)",
+    rx_grew / 1024
+  );
+  // the actual integrity assertion: a clean UART link rejects nothing. This is
+  // RED on the 4M link and GREEN on a clean 3M (xtal/2, 12M/4) link.
+  assert_eq!(
+    rejects, 0,
+    "iap2 decoder rejected {rejects} inbound frames on bad payload checksum over {} KB - UART link is corrupting",
+    rx_grew / 1024
+  );
+}
+
+/// Run a command on the booted device over the USB-gadget ssh, mirroring
+/// scripts/superbird-ssh. `SUPERBIRD_HOST` overrides the mDNS default.
+fn device_ssh(cmd: &str) -> String {
+  let host = std::env::var("SUPERBIRD_HOST").unwrap_or_else(|_| "bridgething.local".into());
+  let out = std::process::Command::new("ssh")
+    .args([
+      "-o",
+      "AddressFamily=inet",
+      "-o",
+      "UserKnownHostsFile=/dev/null",
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "ConnectTimeout=5",
+      "-o",
+      "LogLevel=ERROR",
+      &format!("root@{host}"),
+      cmd,
+    ])
+    .output()
+    .expect("ssh to device");
+  assert!(
+    out.status.success(),
+    "device ssh `{cmd}` failed: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Count of iap2 `bad payload checksum` decoder rejects in the daemon journal
+/// this boot (the device-side corruption signal).
+fn device_checksum_rejects() -> u64 {
+  device_ssh("journalctl -u bridgething -b --no-pager | grep -c 'bad payload checksum' || true")
+    .parse()
+    .unwrap_or(0)
+}
+
+/// hci0 RX byte counter, used to confirm real inbound volume actually crossed.
+fn device_hci_rx_bytes() -> u64 {
+  device_ssh("hciconfig hci0 | grep -oE 'RX bytes:[0-9]+' | head -1")
+    .trim_start_matches("RX bytes:")
+    .trim()
+    .parse()
+    .unwrap_or(0)
+}
+
 fn init_test_tracing() {
   use tracing_subscriber::EnvFilter;
   // RUST_LOG overrides; default lets the iap2 link/file-transfer trace lines through.
