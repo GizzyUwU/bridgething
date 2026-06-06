@@ -26,11 +26,6 @@
   /// Opens therefore retry with backoff, and the peer is reported connected only
   /// once both streams reach `.openCompleted` (not when the session object is
   /// created). Exhausting the retries yields `.linkFailed`.
-  ///
-  /// Threading: streams are scheduled on the main RunLoop, so all stream
-  /// delegate callbacks run on the main thread. Public Adapter methods marshal
-  /// onto the main thread via `MainActor.run`. RFCOMM bandwidth (~700 kbps peak)
-  /// is comfortably below what the main RunLoop can sustain without UI hitches.
   public final class EAAccessoryAdapter: NSObject, Adapter, @unchecked Sendable {
     public nonisolated let events: AsyncStream<AdapterEvent>
     private let eventContinuation: AsyncStream<AdapterEvent>.Continuation
@@ -151,22 +146,32 @@
       let id = state.deviceId
       guard sessions[id] === state else { return }
       retryTasks.removeValue(forKey: id)?.cancel()
+      eaLog.info("ea link up for \(id)")
       eventContinuation.yield(.connected(Device(id: id, name: state.accessory.name)))
     }
 
     /// A stream errored or closed before the link came up; tear down and retry.
     fileprivate func linkOpenFailed(_ state: SessionState, reason: String) {
       let id = state.deviceId
+      eaLog.warning("ea open failed for \(id) (attempt \(state.attempt + 1)): \(reason)")
       if sessions[id] === state { sessions.removeValue(forKey: id) }
       state.tearDown()
       scheduleRetryOrFail(accessory: state.accessory, attempt: state.attempt, reason: reason)
     }
 
-    /// Stream end after the link was up: a normal disconnect.
-    fileprivate func handleStreamEnd(deviceId: String) {
-      if let session = sessions.removeValue(forKey: deviceId) {
-        session.tearDown()
-        eventContinuation.yield(.disconnected(deviceId: deviceId))
+    fileprivate func linkDropped(_ state: SessionState, reason: String) {
+      let id = state.deviceId
+      guard sessions[id] === state else { return }
+      sessions.removeValue(forKey: id)
+      state.tearDown()
+      let stillAttached = EAAccessoryManager.shared().connectedAccessories
+        .contains { Self.deviceId(for: $0) == id }
+      if stillAttached {
+        eaLog.warning("ea link dropped for \(id) after link-up (\(reason)); re-opening")
+        scheduleRetryOrFail(accessory: state.accessory, attempt: 0, reason: reason)
+      } else {
+        eaLog.info("ea link ended for \(id) (\(reason)); accessory gone")
+        eventContinuation.yield(.disconnected(deviceId: id))
       }
     }
 
@@ -249,12 +254,12 @@
       super.init()
       if let input = session.inputStream {
         input.delegate = self
-        input.schedule(in: .main, forMode: .default)
+        input.schedule(in: .main, forMode: .common)
         input.open()
       }
       if let output = session.outputStream {
         output.delegate = self
-        output.schedule(in: .main, forMode: .default)
+        output.schedule(in: .main, forMode: .common)
         output.open()
       }
     }
@@ -262,12 +267,12 @@
     func tearDown() {
       if let input = session.inputStream {
         input.close()
-        input.remove(from: .main, forMode: .default)
+        input.remove(from: .main, forMode: .common)
         input.delegate = nil
       }
       if let output = session.outputStream {
         output.close()
-        output.remove(from: .main, forMode: .default)
+        output.remove(from: .main, forMode: .common)
         output.delegate = nil
       }
     }
@@ -299,6 +304,9 @@
           guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return 0 }
           return out.write(base, maxLength: currentWrite.count)
         }
+        if written < 0 {
+          eaLog.warning("ea write error for \(deviceId): \(String(describing: out.streamError))")
+        }
         if written <= 0 { break }
         currentWrite.removeSubrange(0 ..< written)
       }
@@ -321,6 +329,9 @@
             guard let base = ptr.baseAddress else { return 0 }
             return input.read(base, maxLength: ptr.count)
           }
+          if n < 0 {
+            eaLog.warning("ea read error for \(deviceId): \(String(describing: input.streamError))")
+          }
           if n <= 0 { break }
           owner?.handleInbound(deviceId: deviceId, bytes: Data(buffer.prefix(n)))
         }
@@ -328,7 +339,8 @@
         drainOutput()
       case .endEncountered, .errorOccurred:
         if isLinkedUp {
-          owner?.handleStreamEnd(deviceId: deviceId)
+          let reason = eventCode == .errorOccurred ? "stream error after link-up" : "stream closed after link-up"
+          owner?.linkDropped(self, reason: reason)
         } else if !openFailed {
           openFailed = true
           let reason = eventCode == .errorOccurred ? "stream error during open" : "stream closed during open"

@@ -336,7 +336,7 @@ impl LegacyStockHandler {
   }
 
   async fn spotify_get_saved(&self, id: String) -> HandlerResult {
-    if !self.has_gateway() {
+    if crate::player::is_synthetic_uri(&id) || !self.has_gateway() {
       return self.send_saved_result(false).await;
     }
     let req = LibraryFavoritesContainsRequest { uris: vec![id] };
@@ -456,6 +456,7 @@ impl LegacyStockHandler {
   async fn spotify_set_saved(&self, id: Option<String>, uri: Option<String>, saved: bool) -> HandlerResult {
     if let Some(item_uri) = uri.or(id)
       && self.has_gateway()
+      && !crate::player::is_synthetic_uri(&item_uri)
     {
       self
         .handle

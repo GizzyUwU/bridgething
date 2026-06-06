@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  Album, Artist, BrowseEntry, BrowseResult, CurrentlyActiveApplication, ItemKind, ItemRef, LibraryItem, MediaItem,
-  PlaybackOptions, PlaybackRestrictions, PlaybackState, PlayerOptions as WirePlayerOptions,
-  PlayerState as WirePlayerState, QueueItem, QueuePosition, RepeatMode, Track,
+  Album, Artist, BrowseEntry, BrowseResult, ItemKind, ItemRef, LibraryItem, MediaItem, Playback, PlaybackOptions,
+  PlaybackRestrictions, PlaybackState, PlayerOptions as WirePlayerOptions, PlayerState as WirePlayerState, QueueItem,
+  QueuePosition, RepeatMode, Track,
   client::{
     BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg,
     ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, Earcon as ClientEarcon, FavoritesSet as ClientFavoritesSet,
@@ -215,19 +215,6 @@ pub enum StockInterAppSendPayload {
     playback_speed: f64,
   },
   #[serde(rename = "com.spotify.superbird.player_state")]
-  SimplePlayerState {
-    currently_active_application: CurrentlyActiveApplication,
-    context_uri: String,
-    context_title: String,
-    is_paused: bool,
-    is_paused_bool: bool,
-    playback_options: StockPlaybackOptions,
-    playback_position: usize,
-    playback_restrictions: PlaybackRestrictions,
-    playback_speed: f64,
-    track: StockTrack,
-  },
-  #[serde(rename = "com.spotify.superbird.player_state")]
   SpotifyPlayerState {
     context_uri: String,
     context_title: String,
@@ -360,7 +347,7 @@ impl From<BridgeToClientPlayerMsg> for StockInterAppSendPayload {
 }
 
 pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayload {
-  let active_app = reply.active_app;
+  let other_media = reply.active_app.is_some();
   let WirePlayerState {
     track,
     playback,
@@ -380,37 +367,49 @@ pub fn player_state_to_stock(reply: PlayerStateReply) -> StockInterAppSendPayloa
   let playback_position = playback.position_ms as usize;
   let playback_speed = f64::from(player_speed_or_default(&options));
 
-  if let Some(app) = active_app {
-    let context_uri = track.as_ref().and_then(|t| t.persistent_id.clone()).unwrap_or_default();
-    return StockInterAppSendPayload::SimplePlayerState {
-      currently_active_application: app,
-      context_uri,
-      context_title: String::new(),
-      is_paused,
-      is_paused_bool: is_paused,
-      playback_options,
-      playback_position,
-      playback_restrictions: PlaybackRestrictions::default(),
-      playback_speed,
-      track: media_item_to_stock_track(track.unwrap_or_default()),
-    };
-  }
+  let (context_uri, context_title, playback_restrictions) = if other_media {
+    (
+      track.as_ref().and_then(|t| t.persistent_id.clone()).unwrap_or_default(),
+      String::new(),
+      other_media_restrictions(&playback),
+    )
+  } else {
+    (
+      context
+        .as_ref()
+        .map(|c| c.uri.clone())
+        .filter(|u| !u.is_empty())
+        .or_else(|| track.as_ref().and_then(|t| t.uri.clone()))
+        .unwrap_or_default(),
+      context.and_then(|c| c.name).unwrap_or_default(),
+      PlaybackRestrictions::all_true(),
+    )
+  };
 
   StockInterAppSendPayload::SpotifyPlayerState {
-    context_uri: context
-      .as_ref()
-      .map(|c| c.uri.clone())
-      .filter(|u| !u.is_empty())
-      .or_else(|| track.as_ref().and_then(|t| t.uri.clone()))
-      .unwrap_or_default(),
-    context_title: context.and_then(|c| c.name).unwrap_or_default(),
+    context_uri,
+    context_title,
     is_paused,
     is_paused_bool: is_paused,
     playback_options,
     playback_position,
-    playback_restrictions: PlaybackRestrictions::default(),
+    playback_restrictions,
     playback_speed,
     track: media_item_to_stock_track(track.unwrap_or_default()),
+  }
+}
+
+fn other_media_restrictions(playback: &Playback) -> PlaybackRestrictions {
+  PlaybackRestrictions {
+    can_repeat_context: false,
+    can_repeat_track: false,
+    can_seek: playback.set_elapsed_time_available.unwrap_or(false),
+    can_skip_next: true,
+    can_skip_prev: true,
+    can_toggle_shuffle: playback.shuffle_mode.is_some(),
+    can_like: false,
+    can_change_volume: true,
+    can_set_output: false,
   }
 }
 
@@ -613,8 +612,12 @@ fn stock_album(name: Option<String>, uri: Option<String>) -> StockAlbum {
 }
 
 fn media_item_to_stock_track(item: MediaItem) -> StockTrack {
-  let uid = item.persistent_id.unwrap_or_default();
-  let uri = item.uri.filter(|u| !u.is_empty()).unwrap_or_default();
+  let uid = item.persistent_id.clone().unwrap_or_default();
+  let uri = item
+    .uri
+    .filter(|u| !u.is_empty())
+    .or(item.persistent_id)
+    .unwrap_or_default();
   let artist = stock_artist(item.artist, item.artist_uri);
   StockTrack {
     name: item.title.unwrap_or_default(),
@@ -1358,14 +1361,15 @@ mod test {
   }
 
   #[test]
-  fn now_playing_track_uri_empty_until_resolved() {
+  fn now_playing_track_uri_falls_back_to_synthetic_id() {
     let item = libbridgething::MediaItem {
       uri: None,
       persistent_id: Some("iap2:track:a".to_string()),
       ..Default::default()
     };
     let track = super::media_item_to_stock_track(item);
-    assert_eq!(track.uri, "");
+    // a non-empty uri is what makes the stock npv transport controls live.
+    assert_eq!(track.uri, "iap2:track:a");
     assert_eq!(track.uid, "iap2:track:a");
   }
 
@@ -1387,8 +1391,8 @@ mod test {
   }
 
   #[test]
-  fn other_media_emits_simple_player_state_with_a_non_empty_context() {
-    let reply = reply_with(
+  fn other_media_emits_full_player_state_with_other_media_restrictions() {
+    let mut reply = reply_with(
       Some(libbridgething::CurrentlyActiveApplication {
         id: "com.google.ios.youtube".to_string(),
         name: "YouTube".to_string(),
@@ -1399,17 +1403,29 @@ mod test {
         ..Default::default()
       },
     );
+    reply.state.playback.set_elapsed_time_available = Some(true);
+    reply.state.playback.shuffle_mode = None;
     match super::player_state_to_stock(reply) {
-      super::StockInterAppSendPayload::SimplePlayerState {
-        currently_active_application,
+      super::StockInterAppSendPayload::SpotifyPlayerState {
         context_uri,
+        context_title,
+        playback_restrictions,
+        track,
         ..
       } => {
-        assert_eq!(currently_active_application.name, "YouTube");
         // a non-empty context keeps the stock "let's drive" empty-context modal away.
         assert_eq!(context_uri, "iap2:track:y");
+        assert_eq!(context_title, "");
+        // skip rides hid; seek follows the elapsed-time gate; like has no target;
+        // shuffle is off because its state is unknown.
+        assert!(playback_restrictions.can_skip_next);
+        assert!(playback_restrictions.can_seek);
+        assert!(!playback_restrictions.can_like);
+        assert!(!playback_restrictions.can_toggle_shuffle);
+        // a non-empty track uri is what enables the transport controls.
+        assert_eq!(track.uri, "iap2:track:y");
       }
-      other => panic!("expected SimplePlayerState, got {other:?}"),
+      other => panic!("expected SpotifyPlayerState, got {other:?}"),
     }
   }
 
