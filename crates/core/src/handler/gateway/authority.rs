@@ -17,8 +17,14 @@ impl GatewayToBridgeAuthorityMsgEventDispatch for AuthorityHandler {
   type Output = HandlerResult;
 
   async fn claim(&self, params: AuthorityClaim) -> HandlerResult {
-    tracing::debug!(scope = ?params.scope, "({:?}) companion claims authority", &self.handle.address);
-    if let Err(err) = self.handle.state.capabilities.claim_authority(params.scope).await {
+    tracing::debug!(scope = ?params.scope, app_bundle = ?params.app_bundle, "({:?}) companion claims authority", &self.handle.address);
+    if let Err(err) = self
+      .handle
+      .state
+      .capabilities
+      .claim_authority(params.scope, params.app_bundle)
+      .await
+    {
       tracing::warn!(?err, "failed to publish authority claim");
     }
     Ok(())

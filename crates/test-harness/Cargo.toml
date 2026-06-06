@@ -29,5 +29,6 @@ async-trait.workspace = true
 bridgething-client = { version = "0.1.0", path = "../client-rs" }
 
 [dev-dependencies]
+base64 = "0.22.1"
 proptest = "1.11.0"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

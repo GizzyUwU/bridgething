@@ -39,13 +39,6 @@ impl OutboundFrame {
       priority: Priority::Normal,
     }
   }
-
-  pub fn bulk(msg: GatewayToBridgeMsg) -> Self {
-    Self {
-      msg,
-      priority: Priority::Bulk,
-    }
-  }
 }
 
 pub struct Connection {

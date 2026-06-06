@@ -1,12 +1,10 @@
 //! Generic asset cache. Single source of truth for binary blobs
 //! addressable by opaque string id, regardless of who produced them.
 //!
-//! Producers: companion-pushed (single-frame `GatewayToBridgeAssetMsg::
-//! Push` for memory-resident small blobs, or chunked `PushBegin`/
-//! `PushChunk` via `ChunkedTransfer` for anything Persistent or larger
-//! than 256 KB), iAP2 FileTransfer (`iap2/art/...` ids), or any future
-//! daemon-internal source that wants a place to put bytes a webapp
-//! will fetch later.
+//! Producers: on-demand pull (the daemon requests an asset over the
+//! gateway and caches the reply), iAP2 FileTransfer (`iap2/art/...` ids),
+//! or any daemon-internal source that wants a place to put bytes a
+//! webapp will fetch later.
 //!
 //! Consumers: webapps via `ClientToBridgeAssetMsg::Get`, stock GetImage
 //! via the legacy player-image WS event, and direct in-process callers.
@@ -18,20 +16,24 @@
 //! survives daemon restart. Persistent entries are read from disk on
 //! every `Get`; their bytes never sit in the daemon's memory budget.
 //!
+//! Daemon-pulled album art uses an internal disk-LRU retention
+//! ([`Retention::DISK_LRU`], not a wire variant): disk-backed so it
+//! survives restart like `Persistent`, but evicted oldest-accessed-first
+//! under [`DISK_BUDGET_BYTES`] rather than pinned, mirroring the stock
+//! app's on-disk timestamp art cache.
+//!
 //! The cache is single-task-owned (actor pattern); the public
 //! [`AssetCache`] handle is `Clone` and posts commands across an mpsc
 //! to the owning task. Subscribe to [`AssetCacheEvent`]s with
 //! `subscribe()` for `Ready` / `Cleared` notifications.
 
 mod actor;
-pub mod ingest;
 pub mod storage;
 pub mod wait;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub use actor::{AssetCacheEvent, Retention};
-pub use ingest::AssetIngest;
 use libbridgething::AssetRetention;
 use sea_orm::{DatabaseConnection, DbErr};
 use tokio::{
@@ -86,7 +88,9 @@ impl AssetCache {
     mime: Option<String>,
     retention: AssetRetention,
   ) -> Result<(), AssetError> {
-    self.insert_internal(id, bytes, mime, Retention::from_wire(retention)).await
+    self
+      .insert_internal(id, bytes, mime, Retention::from_wire(retention))
+      .await
   }
 
   pub async fn insert_internal(
@@ -219,8 +223,6 @@ impl AssetCachePending {
     (self.handle, join)
   }
 }
-
-pub type AssetResult<T> = Result<T, AssetError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AssetError {

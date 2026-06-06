@@ -325,12 +325,12 @@ public actor OtaService {
             }
         }
 
+        let transferId = UUID()
         let begin = OtaBegin(
             kind: .installedWebapp,
             updateId: sha256,
             updateUrlBase: nil,
-            expectedSha256: sha256,
-            expectedSize: UInt32(totalSize)
+            transfer: TransferRef(id: transferId, totalSize: UInt32(totalSize), sha256: sha256)
         )
         let beginResult: RequestResult<OtaBeginAck, OtaBeginRejected>
         do {
@@ -355,7 +355,7 @@ public actor OtaService {
             try await streamArtifact(
                 gateway: gateway,
                 deviceId: deviceId,
-                updateId: sha256,
+                transferId: transferId,
                 artifactPath: bundlePath,
                 startOffset: UInt64(resumeFromOffset),
                 totalSize: totalSize
@@ -766,22 +766,50 @@ public actor OtaService {
             }
         }
         let parts = req.ranges.map { RangePart(start: $0.start, length: $0.length) }
-        do {
-            try await handle.respond(OtaAssetRangeReply(totalSize: totalSize, parts: parts))
-        } catch {
-            return
-        }
+        let streamLen = parts.reduce(UInt32(0)) { $0 + $1.length }
 
         let fileHandle: FileHandle
         do {
             fileHandle = try FileHandle(forReadingFrom: zck)
         } catch {
+            try? await handle.respondErr(OtaAssetRangeRejected(reason: "open zck failed"))
             return
         }
         defer { try? fileHandle.close() }
 
+        let inlineMax: UInt32 = 16 * 1024
+        if streamLen <= inlineMax {
+            var body = Data(capacity: Int(streamLen))
+            for part in parts {
+                do {
+                    try fileHandle.seek(toOffset: UInt64(part.start))
+                    guard let piece = try fileHandle.read(upToCount: Int(part.length)), piece.count == Int(part.length) else {
+                        try? await handle.respondErr(OtaAssetRangeRejected(reason: "short read from zck"))
+                        return
+                    }
+                    body.append(piece)
+                } catch {
+                    try? await handle.respondErr(OtaAssetRangeRejected(reason: "read zck failed"))
+                    return
+                }
+            }
+            try? await handle.respond(OtaAssetRangeReply(totalSize: totalSize, parts: parts, body: .inline(body)))
+            return
+        }
+
+        do {
+            try await handle.respond(OtaAssetRangeReply(
+                totalSize: totalSize,
+                parts: parts,
+                body: .stream(TransferRef(id: handle.requestId, totalSize: streamLen, sha256: nil))
+            ))
+        } catch {
+            return
+        }
+
         let chunkBytes: UInt32 = 64 * 1024
-        for (idx, part) in parts.enumerated() {
+        var streamOffset: UInt32 = 0
+        for part in parts {
             do {
                 try fileHandle.seek(toOffset: UInt64(part.start))
             } catch {
@@ -797,22 +825,16 @@ public actor OtaService {
                     return
                 }
                 if data.isEmpty { return }
-                let absoluteOffset = part.start + produced
                 produced += UInt32(data.count)
-                let last = idx + 1 == parts.count && produced == part.length
-                let chunk = OtaAssetRangeChunk(
-                    requestId: handle.requestId,
-                    partIndex: UInt32(idx),
-                    offset: absoluteOffset,
-                    bytes: data,
-                    last: last
-                )
                 do {
-                    try await gateway.device(handle.deviceId).system
-                        .otaAssetRangeChunk(chunk, priority: .bulk)
+                    try await gateway.device(handle.deviceId).transfer.fragment(
+                        TransferFragment(transferId: handle.requestId, offset: streamOffset, bytes: data),
+                        priority: .background
+                    )
                 } catch {
                     return
                 }
+                streamOffset += UInt32(data.count)
             }
         }
     }
@@ -861,12 +883,12 @@ public actor OtaService {
             return (.failed(reason: "sha256 failed: \(error.localizedDescription)"), "")
         }
 
+        let transferId = UUID()
         let begin = OtaBegin(
             kind: kind,
             updateId: sha256,
             updateUrlBase: updateUrlBase,
-            expectedSha256: sha256,
-            expectedSize: UInt32(totalSize)
+            transfer: TransferRef(id: transferId, totalSize: UInt32(totalSize), sha256: sha256)
         )
         let beginResult: RequestResult<OtaBeginAck, OtaBeginRejected>
         do {
@@ -893,7 +915,7 @@ public actor OtaService {
             try await streamArtifact(
                 gateway: gateway,
                 deviceId: deviceId,
-                updateId: sha256,
+                transferId: transferId,
                 artifactPath: artifactPath,
                 startOffset: UInt64(resumeFromOffset),
                 totalSize: totalSize
@@ -994,10 +1016,12 @@ public actor OtaService {
         }
     }
 
+    // background lane: an in-flight art pull or now-playing delta preempts the
+    // artifact stream between fragments.
     private func streamArtifact(
         gateway: BridgethingGateway,
         deviceId: String,
-        updateId: String,
+        transferId: UUID,
         artifactPath: URL,
         startOffset: UInt64,
         totalSize: UInt64
@@ -1015,14 +1039,10 @@ public actor OtaService {
             if data.isEmpty {
                 throw OtaServiceError.unexpectedEof(at: offset, total: totalSize)
             }
-            let last = offset + UInt64(data.count) == totalSize
-            let chunk = OtaChunk(
-                updateId: updateId,
-                offset: UInt32(offset),
-                bytes: data,
-                last: last
+            try await gateway.device(deviceId).transfer.fragment(
+                TransferFragment(transferId: transferId, offset: UInt32(offset), bytes: data),
+                priority: .background
             )
-            try await gateway.device(deviceId).system.otaChunk(chunk, priority: .bulk)
             offset += UInt64(data.count)
         }
     }

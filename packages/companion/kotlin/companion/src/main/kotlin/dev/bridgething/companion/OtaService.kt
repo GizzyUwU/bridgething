@@ -6,22 +6,25 @@ import dev.bridgething.gateway.OtaAssetRangeHandle
 import dev.bridgething.gateway.RequestResult
 import dev.bridgething.gateway.device
 import dev.bridgething.gateway.system
+import dev.bridgething.gateway.transfer
 import dev.bridgething.gateway.webapp
 import dev.bridgething.schema.BridgeThingMeta
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.OtaAssetRange
-import dev.bridgething.schema.OtaAssetRangeChunk
 import dev.bridgething.schema.OtaAssetRangeRejected
 import dev.bridgething.schema.OtaAssetRangeReply
 import dev.bridgething.schema.OtaActivate
 import dev.bridgething.schema.OtaBegin
-import dev.bridgething.schema.OtaChunk
 import dev.bridgething.schema.OtaKind
 import dev.bridgething.schema.OtaPhase
 import dev.bridgething.schema.Priority
 import dev.bridgething.schema.RangePart
+import dev.bridgething.schema.TransferBody
+import dev.bridgething.schema.TransferFragment
+import dev.bridgething.schema.TransferRef
 import dev.bridgething.schema.WebappInfo
 import java.io.File
+import java.util.UUID
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -329,12 +332,12 @@ public class OtaService(
             installedJob.cancel(); errorJob.cancel(); timeoutJob.cancel()
         }
 
+        val transferId = UUID.randomUUID()
         val begin = OtaBegin(
             kind = OtaKind.InstalledWebapp,
             updateId = sha,
             updateUrlBase = null,
-            expectedSha256 = sha,
-            expectedSize = totalSize.toUInt(),
+            transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
@@ -357,7 +360,7 @@ public class OtaService(
             streamArtifact(
                 gateway = gateway,
                 deviceId = deviceId,
-                updateId = sha,
+                transferId = transferId,
                 artifactPath = bundlePath,
                 startOffset = resumeFrom.toLong(),
                 totalSize = totalSize,
@@ -708,16 +711,49 @@ public class OtaService(
             }
         }
         val parts = req.ranges.map { RangePart(start = it.start, length = it.length) }
-        try {
-            handle.respond(OtaAssetRangeReply(totalSize = totalSize, parts = parts))
-        } catch (_: Throwable) {
+        val streamLen = parts.fold(0u) { acc, p -> acc + p.length }
+
+        val raf = try { RandomAccessFile(zck, "r") } catch (_: Throwable) {
+            runCatching { handle.respondErr(OtaAssetRangeRejected(reason = "open zck failed")) }
             return
         }
-
-        val raf = try { RandomAccessFile(zck, "r") } catch (_: Throwable) { return }
         try {
+            if (streamLen <= INLINE_RANGE_MAX_BYTES) {
+                val body = ByteArray(streamLen.toInt())
+                var at = 0
+                for (part in parts) {
+                    try {
+                        raf.seek(part.start.toLong())
+                        raf.readFully(body, at, part.length.toInt())
+                    } catch (_: Throwable) {
+                        runCatching { handle.respondErr(OtaAssetRangeRejected(reason = "read zck failed")) }
+                        return
+                    }
+                    at += part.length.toInt()
+                }
+                runCatching {
+                    handle.respond(OtaAssetRangeReply(totalSize = totalSize, parts = parts, body = TransferBody.Inline(body)))
+                }
+                return
+            }
+
+            try {
+                handle.respond(
+                    OtaAssetRangeReply(
+                        totalSize = totalSize,
+                        parts = parts,
+                        body = TransferBody.Stream(
+                            TransferRef(id = handle.requestId, totalSize = streamLen, sha256 = null),
+                        ),
+                    ),
+                )
+            } catch (_: Throwable) {
+                return
+            }
+
             val chunkBytes = 64 * 1024
-            for ((idx, part) in parts.withIndex()) {
+            var streamOffset: UInt = 0u
+            for (part in parts) {
                 try { raf.seek(part.start.toLong()) } catch (_: Throwable) { return }
                 var produced: UInt = 0u
                 while (produced < part.length) {
@@ -726,22 +762,17 @@ public class OtaService(
                     val read = try { raf.read(buf) } catch (_: Throwable) { return }
                     if (read <= 0) return
                     val data = if (read == buf.size) buf else buf.copyOf(read)
-                    val absOffset = part.start + produced
                     produced = (produced.toLong() + read.toLong())
                         .coerceAtMost(UInt.MAX_VALUE.toLong()).toUInt()
-                    val last = (idx + 1 == parts.size) && produced == part.length
-                    val chunk = OtaAssetRangeChunk(
-                        requestId = handle.requestId,
-                        partIndex = idx.toUInt(),
-                        offset = absOffset,
-                        bytes = data,
-                        last = last,
-                    )
                     try {
-                        gateway.device(handle.deviceId).system.otaAssetRangeChunk(chunk, priority = Priority.Bulk)
+                        gateway.device(handle.deviceId).transfer.fragment(
+                            TransferFragment(transferId = handle.requestId, offset = streamOffset, bytes = data),
+                            priority = Priority.Background,
+                        )
                     } catch (_: Throwable) {
                         return
                     }
+                    streamOffset += read.toUInt()
                 }
             }
         } finally {
@@ -789,12 +820,12 @@ public class OtaService(
             return OtaPhaseSnapshot.Failed(reason = "sha256 failed: ${e.message ?: e.toString()}") to ""
         }
 
+        val transferId = UUID.randomUUID()
         val begin = OtaBegin(
             kind = kind,
             updateId = sha,
             updateUrlBase = updateUrlBase,
-            expectedSha256 = sha,
-            expectedSize = totalSize.toUInt(),
+            transfer = TransferRef(id = transferId, totalSize = totalSize.toUInt(), sha256 = sha),
         )
         val resumeFrom: UInt = try {
             when (val res = gateway.device(deviceId).system.otaBegin(begin)) {
@@ -836,7 +867,7 @@ public class OtaService(
             streamArtifact(
                 gateway = gateway,
                 deviceId = deviceId,
-                updateId = sha,
+                transferId = transferId,
                 artifactPath = artifactPath,
                 startOffset = resumeFrom.toLong(),
                 totalSize = totalSize,
@@ -915,7 +946,7 @@ public class OtaService(
     private suspend fun streamArtifact(
         gateway: BridgethingGateway,
         deviceId: String,
-        updateId: String,
+        transferId: UUID,
         artifactPath: File,
         startOffset: Long,
         totalSize: Long,
@@ -928,16 +959,12 @@ public class OtaService(
                 val want = minOf(chunkSize.toLong(), totalSize - offset).toInt()
                 val buf = ByteArray(want)
                 val read = raf.read(buf)
-                if (read <= 0) throw IOException("EOF at $offset/$totalSize before last chunk")
+                if (read <= 0) throw IOException("EOF at $offset/$totalSize before last fragment")
                 val data = if (read == buf.size) buf else buf.copyOf(read)
-                val last = offset + read == totalSize
-                val chunk = OtaChunk(
-                    updateId = updateId,
-                    offset = offset.toUInt(),
-                    bytes = data,
-                    last = last,
+                gateway.device(deviceId).transfer.fragment(
+                    TransferFragment(transferId = transferId, offset = offset.toUInt(), bytes = data),
+                    priority = Priority.Background,
                 )
-                gateway.device(deviceId).system.otaChunk(chunk, priority = Priority.Bulk)
                 offset += read
             }
         }
@@ -973,6 +1000,8 @@ public class OtaService(
     }
 
     private companion object {
+        val INLINE_RANGE_MAX_BYTES: UInt = 16u * 1024u
+
         val defaultJson: Json = Json {
             ignoreUnknownKeys = true
             isLenient = true

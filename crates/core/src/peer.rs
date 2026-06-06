@@ -507,8 +507,10 @@ impl PeerActor {
       if let Err(err) = self.capabilities.clear_companion(addr).await {
         tracing::warn!(?err, "failed to clear companion capabilities on disconnect");
       }
-      // drop any log-tap streams the companion opened so the broadcast receiver +
-      // pump task don't leak across reconnects (memory is shared with chromium).
+      if let Err(err) = self.player.reset_companion().await {
+        tracing::warn!(?err, "failed to reset player queue state on companion disconnect");
+      }
+      // drop any log-tap streams the companion opened so the broadcast receiver + pump task don't leak across reconnects
       let drained = self.log_tap.drain_for_owner(LogOwner::Gateway(Some(addr)));
       if !drained.is_empty() {
         tracing::debug!(count = drained.len(), %addr, "drained gateway log subscriptions on companion disconnect");

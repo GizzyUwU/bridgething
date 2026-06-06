@@ -355,7 +355,8 @@ async fn link_integrity_volume() {
   // the actual integrity assertion: a clean UART link rejects nothing. This is
   // RED on the 4M link and GREEN on a clean 3M (xtal/2, 12M/4) link.
   assert_eq!(
-    rejects, 0,
+    rejects,
+    0,
     "iap2 decoder rejected {rejects} inbound frames on bad payload checksum over {} KB - UART link is corrupting",
     rx_grew / 1024
   );
@@ -435,7 +436,7 @@ fn init_test_tracing() {
 async fn flood_iap2_and_companion_concurrent() {
   use bridgething_gateway::Gateway;
   use libbridgething::{
-    CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate, PlaybackUpdate,
+    CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlayerState,
     gateway::AuthorityClaim,
   };
 
@@ -473,6 +474,7 @@ async fn flood_iap2_and_companion_concurrent() {
     .authority()
     .claim(AuthorityClaim {
       scope: CompanionAuthorityScope::NowPlayingMetadata,
+      app_bundle: Some("com.spotify.client".to_string()),
     })
     .await
     .expect("claim metadata authority");
@@ -530,18 +532,23 @@ async fn flood_iap2_and_companion_concurrent() {
     loop {
       let res = gateway
         .player()
-        .delta(NowPlayingUpdate {
-          media_item: Some(MediaItemUpdate {
+        .snapshot(PlayerState {
+          track: Some(MediaItem {
             persistent_id: Some(format!("companion:track:{m:05}")),
             title: Some(format!("Flood Companion {m:05}")),
             artist: Some("Companion Artist".into()),
             ..Default::default()
           }),
-          playback: Some(PlaybackUpdate {
-            playing: Some(m % 2 == 0),
-            position_ms: Some(((m * 137) % 240_000) as u32),
+          playback: Playback {
+            state: if m % 2 == 0 {
+              libbridgething::PlaybackState::Playing
+            } else {
+              libbridgething::PlaybackState::Paused
+            },
+            position_ms: ((m * 137) % 240_000) as u32,
             ..Default::default()
-          }),
+          },
+          ..Default::default()
         })
         .await;
       if res.is_err() {
@@ -553,6 +560,7 @@ async fn flood_iap2_and_companion_concurrent() {
           .authority()
           .claim(AuthorityClaim {
             scope: CompanionAuthorityScope::NowPlayingMetadata,
+            app_bundle: Some("com.spotify.client".to_string()),
           })
           .await;
       }

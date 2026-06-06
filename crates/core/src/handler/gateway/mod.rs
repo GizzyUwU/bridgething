@@ -25,11 +25,9 @@ use capabilities::*;
 use chrome::*;
 use geo::*;
 use libbridgething::{
-  AssetRetention,
-  gateway::{GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData},
+  gateway::{GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeTransferMsg},
   wire::MsgMeta,
 };
-use tokio_util::bytes::Bytes;
 use library::*;
 use net::*;
 use notifications::*;
@@ -88,27 +86,17 @@ impl GatewayHandler {
     match data {
       GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg {
         GatewayToBridgeAssetMsg::Got(reply) => {
-          tracing::debug!(id = %reply.id, "caching late asset reply past its request timeout");
-          handle
-            .state
-            .ingest
-            .push(reply.id, Bytes::from(reply.bytes), reply.mime, AssetRetention::Lru)
-            .await;
+          tracing::debug!(id = %reply.id, "late asset reply past its request timeout; dropping");
         }
         GatewayToBridgeAssetMsg::NotFound(reply) => {
           tracing::debug!(id = %reply.id, "late asset not-found past its request timeout; ignoring");
         }
         other => {
-          if other.is_request_variant() {
-            let req = other.into_request().expect("checked above");
-            tokio::spawn(async move { req.dispatch(&AssetHandler::new(handle)).await });
-          } else if other.is_event_variant() {
+          if other.is_event_variant() {
             let ev = other.into_event().expect("checked above");
             if let Err(err) = ev.dispatch(&AssetHandler::new(handle)).await {
               tracing::error!(?err, "asset event handler failed");
             }
-          } else if let Some(cmd) = other.into_command() {
-            tokio::spawn(async move { cmd.dispatch(&AssetHandler::new(handle)).await });
           } else {
             tracing::warn!(
               "({:?}) stray response-shape arrival on Asset surface with no matching pending request; dropping",
@@ -183,12 +171,6 @@ impl GatewayHandler {
         if system_msg.is_request_variant() {
           let req = system_msg.into_request().expect("checked above");
           tokio::spawn(async move { req.dispatch(&SystemHandler::new(handle, ota)).await });
-        } else if system_msg.is_event_variant() {
-          let ev = system_msg.into_event().expect("checked above");
-          // fine to await here - asset events need to arrive in order, and handle_event just forwards
-          if let Err(err) = ev.dispatch(&SystemHandler::new(handle, ota)).await {
-            tracing::error!(?err, "system event handler failed");
-          }
         } else if let Some(cmd) = system_msg.into_command() {
           tokio::spawn(async move { cmd.dispatch(&SystemHandler::new(handle, ota)).await });
         }
@@ -198,6 +180,18 @@ impl GatewayHandler {
           tokio::spawn(async move { event.dispatch(&TimeHandler::new(handle)).await });
         }
       }
+      GatewayToBridgeMsgData::Transfer(transfer_msg) => match transfer_msg {
+        GatewayToBridgeTransferMsg::Fragment(f) => {
+          self
+            .state
+            .transfer_sinks
+            .fragment(f.transfer_id, f.offset, f.bytes.into())
+            .await;
+        }
+        GatewayToBridgeTransferMsg::Abandon(a) => {
+          self.state.transfer_sinks.abandon(a.transfer_id, a.reason).await;
+        }
+      },
       GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {
         if let Some(event) = tunnel_msg.into_event() {
           tokio::spawn(async move { event.dispatch(&TunnelHandler::new(handle)).await });

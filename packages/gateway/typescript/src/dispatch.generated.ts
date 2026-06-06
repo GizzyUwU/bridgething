@@ -7,7 +7,6 @@ import type {
   GatewayCapabilities,
   LogEntry,
   Notification,
-  NowPlayingUpdate,
   OtaError,
   OtaProgress,
   PhoneCall,
@@ -29,12 +28,6 @@ import type {
   AssetClear,
   AssetGotReply,
   AssetNotFoundReply,
-  AssetPush,
-  AssetPushAbandon,
-  AssetPushBegin,
-  AssetPushBeginAck,
-  AssetPushBeginRejected,
-  AssetPushChunk,
   AssetRequest,
   AuthorityClaim,
   AuthorityRelease,
@@ -87,18 +80,15 @@ import type {
   NetWsSend,
   NotificationInvoke,
   NotificationRemoved,
-  NowPlayingEnrichment,
   OtaAbandon,
   OtaActivate,
   OtaAssetRange,
   OtaAssetRangeAbandon,
-  OtaAssetRangeChunk,
   OtaAssetRangeRejected,
   OtaAssetRangeReply,
   OtaBegin,
   OtaBeginAck,
   OtaBeginRejected,
-  OtaChunk,
   PhoneAcceptAction,
   PhoneCallAction,
   PhoneCallEnded,
@@ -108,7 +98,6 @@ import type {
   PhoneMuteAction,
   PhoneStateReply,
   PlayUri,
-  PlaybackHint,
   QueueSnapshot,
   QueueUri,
   RecommendationsReply,
@@ -121,6 +110,8 @@ import type {
   SetSpeed,
   SetVolume,
   SkipToIndex,
+  TransferAbandon,
+  TransferFragment,
   Tts,
   TtsCancel,
   TtsEnded,
@@ -312,7 +303,6 @@ export type PlayerInboundHandlers = {
   setRepeat: (deviceId: string, msg: SetRepeat) => void;
   setSpeed: (deviceId: string, msg: SetSpeed) => void;
   setCrossfade: (deviceId: string, msg: SetCrossfade) => void;
-  hint: (deviceId: string, msg: PlaybackHint) => void;
 };
 
 export type PlayerDeviceInboundHandlers = {
@@ -328,7 +318,6 @@ export type PlayerDeviceInboundHandlers = {
   setRepeat: (msg: SetRepeat) => void;
   setSpeed: (msg: SetSpeed) => void;
   setCrossfade: (msg: SetCrossfade) => void;
-  hint: (msg: PlaybackHint) => void;
 };
 
 export type SystemInboundHandlers = {
@@ -1947,18 +1936,6 @@ export class PlayerSurface {
     });
   }
 
-  /** Subscribe to `Player::Hint` across all peers. */
-  onHint(handler: (deviceId: string, msg: PlaybackHint) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      const data = event.message.data;
-      if (data.type !== 'player') return;
-      const inner = data.data;
-      if (inner.event !== 'hint') return;
-      handler(event.deviceId, inner.data);
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Player` variants. */
   subscribe(handlers: PlayerInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2024,10 +2001,6 @@ export class PlayerSurface {
           handlers.setCrossfade?.(event.deviceId, inner.data);
           return;
         }
-        case 'hint': {
-          handlers.hint?.(event.deviceId, inner.data);
-          return;
-        }
         default: {
           if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
           return;
@@ -2051,21 +2024,6 @@ export class PlayerSurface {
     );
   }
 
-  /** Send `Player::Delta` to every connected peer (broadcast). */
-  async delta(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'player', data: { event: 'delta', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
   /** Send `Player::QueueChanged` to every connected peer (broadcast). */
   async queueChanged(payload: QueueSnapshot, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
@@ -2075,21 +2033,6 @@ export class PlayerSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'player', data: { event: 'queueChanged', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Player::EnrichmentOffer` to every connected peer (broadcast). */
-  async enrichmentOffer(payload: NowPlayingEnrichment, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'player', data: { event: 'enrichmentOffer', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2335,21 +2278,6 @@ export class SystemSurface {
     });
   }
 
-  /** Send `System::OtaChunk` to every connected peer (broadcast). */
-  async otaChunk(payload: OtaChunk, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'system', data: { event: 'otaChunk', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
   /** Send `System::OtaAbandon` to every connected peer (broadcast). */
   async otaAbandon(payload: OtaAbandon, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
@@ -2389,21 +2317,6 @@ export class SystemSurface {
           id: newUuid(),
           meta: { kind: 'command' },
           data: { type: 'system', data: { event: 'cancelUpdate' } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `System::OtaAssetRangeChunk` to every connected peer (broadcast). */
-  async otaAssetRangeChunk(payload: OtaAssetRangeChunk, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'system', data: { event: 'otaAssetRangeChunk', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -3251,21 +3164,6 @@ export class AssetSurface {
     });
   }
 
-  /** Send `Asset::Push` to every connected peer (broadcast). */
-  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'asset', data: { event: 'push', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
   /** Send `Asset::Clear` to every connected peer (broadcast). */
   async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
@@ -3279,54 +3177,6 @@ export class AssetSurface {
         return this._gateway.send(deviceId, msg, options);
       }),
     );
-  }
-
-  /** Send `Asset::PushChunk` to every connected peer (broadcast). */
-  async pushChunk(payload: AssetPushChunk, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Asset::PushAbandon` to every connected peer (broadcast). */
-  async pushAbandon(payload: AssetPushAbandon, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'command' },
-          data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  async pushBegin(
-    deviceId: string,
-    req: AssetPushBegin,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<AssetPushBeginAck, AssetPushBeginRejected>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'asset', data: { event: 'pushBegin', data: req } };
-    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'asset') {
-      const inner = d.data;
-      if (inner.event === 'pushBeginAck') return { ok: true, response: inner.data };
-      if (inner.event === 'pushBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -3414,6 +3264,40 @@ export class TimeSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'time', data: { event: 'snapshot', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
+export class TransferSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
+  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'transfer', data: { event: 'fragment', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
+  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'transfer', data: { event: 'abandon', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -4949,19 +4833,6 @@ export class PlayerSurfaceForDevice {
     });
   }
 
-  /** Subscribe to `Player::Hint` from this peer. */
-  onHint(handler: (msg: PlaybackHint) => void): () => void {
-    return this._gateway.on(event => {
-      if (event.type !== 'message') return;
-      if (event.deviceId !== this.deviceId) return;
-      const data = event.message.data;
-      if (data.type !== 'player') return;
-      const inner = data.data;
-      if (inner.event !== 'hint') return;
-      handler(inner.data);
-    });
-  }
-
   /** Exhaustive subscribe over all inbound `Player` variants from this peer. */
   subscribe(handlers: PlayerDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5028,10 +4899,6 @@ export class PlayerSurfaceForDevice {
           handlers.setCrossfade?.(inner.data);
           return;
         }
-        case 'hint': {
-          handlers.hint?.(inner.data);
-          return;
-        }
         default: {
           if (!partial) this._gateway.logger.warn('Player: no handler for inner', inner);
           return;
@@ -5050,32 +4917,12 @@ export class PlayerSurfaceForDevice {
     await this._gateway.send(this.deviceId, msg, options);
   }
 
-  /** Send `Player::Delta` to this peer. */
-  async delta(payload: NowPlayingUpdate, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'player', data: { event: 'delta', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
   /** Send `Player::QueueChanged` to this peer. */
   async queueChanged(payload: QueueSnapshot, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'queueChanged', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Player::EnrichmentOffer` to this peer. */
-  async enrichmentOffer(payload: NowPlayingEnrichment, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'player', data: { event: 'enrichmentOffer', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -5335,16 +5182,6 @@ export class SystemSurfaceForDevice {
     });
   }
 
-  /** Send `System::OtaChunk` to this peer. */
-  async otaChunk(payload: OtaChunk, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'system', data: { event: 'otaChunk', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
   /** Send `System::OtaAbandon` to this peer. */
   async otaAbandon(payload: OtaAbandon, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
@@ -5371,16 +5208,6 @@ export class SystemSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'command' },
       data: { type: 'system', data: { event: 'cancelUpdate' } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `System::OtaAssetRangeChunk` to this peer. */
-  async otaAssetRangeChunk(payload: OtaAssetRangeChunk, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'system', data: { event: 'otaAssetRangeChunk', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -6218,16 +6045,6 @@ export class AssetSurfaceForDevice {
     });
   }
 
-  /** Send `Asset::Push` to this peer. */
-  async push(payload: AssetPush, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'asset', data: { event: 'push', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
   /** Send `Asset::Clear` to this peer. */
   async clear(payload: AssetClear, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
@@ -6236,43 +6053,6 @@ export class AssetSurfaceForDevice {
       data: { type: 'asset', data: { event: 'clear', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Asset::PushChunk` to this peer. */
-  async pushChunk(payload: AssetPushChunk, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'asset', data: { event: 'pushChunk', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Asset::PushAbandon` to this peer. */
-  async pushAbandon(payload: AssetPushAbandon, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'command' },
-      data: { type: 'asset', data: { event: 'pushAbandon', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  async pushBegin(
-    req: AssetPushBegin,
-    options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<AssetPushBeginAck, AssetPushBeginRejected>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'asset', data: { event: 'pushBegin', data: req } };
-    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
-    const d = response.data;
-    if (d.type === 'asset') {
-      const inner = d.data;
-      if (inner.event === 'pushBeginAck') return { ok: true, response: inner.data };
-      if (inner.event === 'pushBeginRejected') return { ok: false, kind: 'domain', error: inner.data };
-    }
-    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
-    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
   }
 }
 
@@ -6349,6 +6129,33 @@ export class TimeSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'time', data: { event: 'snapshot', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
+export class TransferSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Send `Transfer::Fragment` to this peer. */
+  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'transfer', data: { event: 'fragment', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Transfer::Abandon` to this peer. */
+  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'transfer', data: { event: 'abandon', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -6493,6 +6300,8 @@ export interface GatewaySurfaces {
   readonly chrome: ChromeSurface;
   /** Methods scoped to the `Time` wire surface. */
   readonly time: TimeSurface;
+  /** Methods scoped to the `Transfer` wire surface. */
+  readonly transfer: TransferSurface;
   /** Methods scoped to the `Lyrics` wire surface. */
   readonly lyrics: LyricsSurface;
   /** Returns a per-device proxy with `deviceId` baked into every method and listener. */
@@ -7002,6 +6811,7 @@ type DeviceSurfaceCache = {
   capabilities?: CapabilitiesSurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
   time?: TimeSurfaceForDevice;
+  transfer?: TransferSurfaceForDevice;
   lyrics?: LyricsSurfaceForDevice;
 };
 
@@ -7066,6 +6876,9 @@ export class BridgethingGatewayDevice {
   get time(): TimeSurfaceForDevice {
     return (this._surfaces.time ??= new TimeSurfaceForDevice(this._gateway, this.deviceId));
   }
+  get transfer(): TransferSurfaceForDevice {
+    return (this._surfaces.transfer ??= new TransferSurfaceForDevice(this._gateway, this.deviceId));
+  }
   get lyrics(): LyricsSurfaceForDevice {
     return (this._surfaces.lyrics ??= new LyricsSurfaceForDevice(this._gateway, this.deviceId));
   }
@@ -7098,6 +6911,7 @@ type GatewaySurfaceCache = {
   capabilities?: CapabilitiesSurface;
   chrome?: ChromeSurface;
   time?: TimeSurface;
+  transfer?: TransferSurface;
   lyrics?: LyricsSurface;
 };
 
@@ -7258,6 +7072,14 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): TimeSurface {
       const bucket = bucketFor(this);
       return (bucket.time ??= new TimeSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingGateway.prototype, 'transfer', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): TransferSurface {
+      const bucket = bucketFor(this);
+      return (bucket.transfer ??= new TransferSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'lyrics', {
@@ -7701,10 +7523,6 @@ function outerSubscribeGateway(
           }
           case 'setCrossfade': {
             innerHandlers.setCrossfade?.(event.deviceId, inner.data);
-            return;
-          }
-          case 'hint': {
-            innerHandlers.hint?.(event.deviceId, inner.data);
             return;
           }
           default: {
@@ -8386,10 +8204,6 @@ function outerSubscribeDevice(
           }
           case 'setCrossfade': {
             innerHandlers.setCrossfade?.(inner.data);
-            return;
-          }
-          case 'hint': {
-            innerHandlers.hint?.(inner.data);
             return;
           }
           default: {

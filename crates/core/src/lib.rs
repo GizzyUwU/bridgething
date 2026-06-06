@@ -30,7 +30,7 @@ mod monitoring;
 use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin};
 
 use als::{AlsConfig, AlsManager};
-use asset::{AssetCache, AssetIngest};
+use asset::AssetCache;
 use authority::AuthorityRegistry;
 use bluetooth::{BluetoothBringup, BluetoothDeps, BluetoothManager};
 #[cfg(feature = "test-tap")]
@@ -153,8 +153,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     .expect("failed to initialize chunked transfer manager");
   let (transfers, transfer_handle) = transfer_pending.spawn();
 
-  let (ingest, ingest_handle) = AssetIngest::spawn(transfers.clone(), assets.clone());
-
   let ws_routes = RouteTable::new();
   let stream_routes = RouteTable::new();
   let geo_watchers = state::GeoWatchers::new();
@@ -199,7 +197,14 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     .await
     .spawn();
 
-  let range_proxy_handle = RangeProxy::spawn(bluetooth.clone(), libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT).await;
+  let transfer_sinks = transfer::sinks::TransferSinks::default();
+
+  let range_proxy_handle = RangeProxy::spawn(
+    bluetooth.clone(),
+    transfer_sinks.clone(),
+    libbridgething::BRIDGETHING_OTA_RANGE_PROXY_PORT,
+  )
+  .await;
 
   let installed_apply: InstalledWebappApply = {
     let webapps = webapps.clone();
@@ -226,6 +231,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     range_proxy_handle.proxy.clone(),
     peers.clone(),
     installed_apply,
+    transfer_sinks.clone(),
   );
 
   let state = AppState::assemble(StateAssembly {
@@ -236,8 +242,6 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     chrome,
     webapps,
     assets,
-    transfers: transfers.clone(),
-    ingest,
     asset_wait,
     iap2_pending_art,
     authority,
@@ -255,11 +259,11 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     geo_watchers,
     log_tap,
     tunnel_routes,
+    transfer_sinks,
     db,
     meta_store,
     asset_cache_handle,
     transfer_handle,
-    ingest_handle,
     als_handle,
     mic_handle,
   });

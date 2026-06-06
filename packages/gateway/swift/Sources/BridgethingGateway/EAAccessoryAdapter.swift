@@ -1,5 +1,6 @@
 #if canImport(ExternalAccessory)
 
+  import BridgethingSchema
   import ExternalAccessory
   import Foundation
   import Logging
@@ -225,7 +226,10 @@
     let session: EASession
     let attempt: Int
     weak var owner: EAAccessoryAdapter?
-    var pendingWrites = Data()
+    private var normalQueue: [Data] = []
+    private var bulkQueue: [Data] = []
+    private var backgroundQueue: [Data] = []
+    private var currentWrite = Data()
 
     private var inputOpen = false
     private var outputOpen = false
@@ -268,20 +272,35 @@
       }
     }
 
-    func enqueueWrite(_ data: Data) {
-      pendingWrites.append(data)
+    func enqueueWrite(_ frame: Data) {
+      switch frame.count >= 16 ? Priority.fromByte(frame[frame.startIndex + 5]) : .normal {
+      case .normal: normalQueue.append(frame)
+      case .bulk: bulkQueue.append(frame)
+      case .background: backgroundQueue.append(frame)
+      }
       drainOutput()
     }
 
     private func drainOutput() {
       guard let out = session.outputStream else { return }
-      while !pendingWrites.isEmpty, out.hasSpaceAvailable {
-        let written = pendingWrites.withUnsafeBytes { raw -> Int in
+      while out.hasSpaceAvailable {
+        if currentWrite.isEmpty {
+          if !normalQueue.isEmpty {
+            currentWrite = normalQueue.removeFirst()
+          } else if !bulkQueue.isEmpty {
+            currentWrite = bulkQueue.removeFirst()
+          } else if !backgroundQueue.isEmpty {
+            currentWrite = backgroundQueue.removeFirst()
+          } else {
+            break
+          }
+        }
+        let written = currentWrite.withUnsafeBytes { raw -> Int in
           guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-          return out.write(base, maxLength: pendingWrites.count)
+          return out.write(base, maxLength: currentWrite.count)
         }
         if written <= 0 { break }
-        pendingWrites.removeSubrange(0 ..< written)
+        currentWrite.removeSubrange(0 ..< written)
       }
     }
 

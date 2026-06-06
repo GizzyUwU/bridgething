@@ -181,8 +181,8 @@ export class BridgethingSession {
     return this.native.spotifyAuthConfig();
   }
 
-  async completeSpotifySignIn(accessToken: string, refreshToken: string, usesDealer: boolean): Promise<void> {
-    await this.native.completeSpotifySignIn(accessToken, refreshToken, usesDealer);
+  async completeSpotifySignIn(accessToken: string, refreshToken: string): Promise<void> {
+    await this.native.completeSpotifySignIn(accessToken, refreshToken);
   }
 
   async currentProvider(): Promise<BridgethingProviderInfo | null> {

@@ -1,17 +1,21 @@
-//! Asset family (T1-only): the chunked-transfer disk tier surviving a daemon
-//! restart. Headless uses an in-memory db but on-disk blob + transfer dirs, so
-//! sqlite metadata does not survive a restart but a chunked push's `.partial` +
-//! `.meta` sidecar do - which is exactly the resume path worth exercising. This
-//! takes ownership of the harness (restart consumes it), so it is a direct T1
-//! test rather than a lifted seam body; daemon restart is a T1 concept anyway.
+//! Asset family (T1-only): stock `get_image` and modern `asset.get` share one
+//! id-keyed resolution path. Covers cache-hit serve, the `iap2/art/...` lane that
+//! must never be fetched from the companion, fail-fast when a companion drops an
+//! in-flight pull-on-miss request, and the companion-served pull bodies: inline,
+//! fragment-streamed, and fragment-streamed under concurrent background traffic.
 
 use std::time::Duration;
 
+use base64::Engine;
+use bridgething_gateway::Gateway;
 use bridgething_test_harness::{Harness, MockWsClient};
 use libbridgething::{
-  AssetRetention,
-  client::AssetGet,
-  gateway::{AssetPush, AssetPushBegin, AssetPushChunk},
+  AssetRetention, GatewayCapabilities, GatewayInfo, Priority,
+  gateway::{
+    AssetGotReply, BridgeToGatewayAssetMsg, BridgeToGatewayMsgData, GatewayToBridgeAssetMsg, GatewayToBridgeMsgData,
+    GatewayToBridgeTransferMsg, TransferBody, TransferFragment, TransferRef,
+  },
+  wire::MsgMeta,
 };
 
 const ASSET_RESOLVE: Duration = Duration::from_secs(5);
@@ -66,35 +70,32 @@ async fn stock_get_image_never_routes_iap2_art_to_the_companion() {
   );
 }
 
-/// Stock `get_image` resolves through the same path as the modern `asset.get`,
-/// so a cached asset (here companion-pushed) is served as image bytes.
+/// Stock `get_image` resolves through the same id-keyed path as the modern
+/// `asset.get`, so any cached asset is served as image bytes.
 #[tokio::test]
-async fn stock_get_image_serves_a_companion_cached_asset() {
+async fn stock_get_image_serves_a_cached_asset() {
   let harness = Harness::start().await.expect("harness start");
-  let gateway = harness.connect_android().await.expect("connect companion");
   let id = "spotify/track/stockserve/image";
-  gateway
-    .asset()
-    .push(AssetPush {
-      id: id.into(),
-      bytes: vec![0x42u8; 128],
-      mime: Some("image/jpeg".into()),
-      retention: AssetRetention::Lru,
-    })
+  harness
+    .state()
+    .assets
+    .insert(
+      id.into(),
+      vec![0x42u8; 128].into(),
+      Some("image/jpeg".into()),
+      AssetRetention::Lru,
+    )
     .await
-    .expect("companion push");
-
-  let deadline = tokio::time::Instant::now() + ASSET_RESOLVE;
-  while harness.state().assets.get(id).await.ok().flatten().is_none() {
-    assert!(tokio::time::Instant::now() < deadline, "pushed asset never cached");
-    tokio::time::sleep(Duration::from_millis(25)).await;
-  }
+    .expect("seed cache");
 
   let mut stock = harness.connect_stock_client().await.expect("stock client");
   let image_data = stock_get_image(&mut stock, id, Duration::from_secs(3))
     .await
     .expect("stock get_image must respond");
-  assert!(!image_data.is_empty(), "stock get_image must serve the cached asset bytes");
+  assert!(
+    !image_data.is_empty(),
+    "stock get_image must serve the cached asset bytes"
+  );
 }
 
 /// A companion-fetched asset request that is in flight when the companion drops
@@ -125,81 +126,164 @@ async fn companion_disconnect_fails_inflight_asset_request_fast() {
   );
 }
 
-#[tokio::test]
-async fn chunked_asset_push_resumes_across_daemon_restart() {
-  let harness = Harness::start().await.expect("harness start");
-  let gateway = harness.connect_android().await.expect("connect companion");
-
-  let id = "spotify/track/resume-across-restart/image".to_string();
-  let payload: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
-  let half = payload.len() / 2;
-  let begin = || AssetPushBegin {
-    id: id.clone(),
-    expected_size: payload.len() as u32,
-    expected_sha256: None,
-    mime: Some("image/jpeg".into()),
-    retention: AssetRetention::Persistent,
+/// Announce companion capabilities so the daemon opens the companion-fetch
+/// lane for cache misses.
+async fn announce(gateway: &Gateway) {
+  let caps = GatewayCapabilities {
+    gateway: GatewayInfo {
+      address: String::new(),
+      name: "asset-server".into(),
+      os_name: "android".into(),
+      app_name: "asset-server".into(),
+      app_version: "0.0.0".into(),
+      adapter_version: "harness".into(),
+      lib_version: "0.0.0".into(),
+      libbridgething_version: format!("v{}", libbridgething::LIBBRIDGETHING_VERSION),
+    },
+    ..Default::default()
   };
+  gateway.capabilities().announce(caps).await.expect("announce");
+}
 
-  let ack = gateway.asset().push_begin(begin()).await.expect("push_begin");
-  assert_eq!(ack.resume_from_offset, 0, "a fresh push must start at offset 0");
-
-  gateway
-    .asset()
-    .push_chunk(AssetPushChunk {
-      id: id.clone(),
-      offset: 0,
-      bytes: payload[..half].to_vec(),
-      last: false,
-    })
-    .await
-    .expect("push first half");
-
-  // restart: in-memory db resets, on-disk transfers/ persists.
-  let harness = harness.restart().await.expect("restart");
-  let gateway = harness.connect_android().await.expect("reconnect companion");
-
-  let ack = gateway
-    .asset()
-    .push_begin(begin())
-    .await
-    .expect("push_begin after restart");
-  assert!(
-    ack.resume_from_offset > 0,
-    "the persisted partial must survive restart, but push_begin reported resume_from_offset=0"
-  );
-  let resume = ack.resume_from_offset as usize;
-
-  gateway
-    .asset()
-    .push_chunk(AssetPushChunk {
-      id: id.clone(),
-      offset: ack.resume_from_offset,
-      bytes: payload[resume..].to_vec(),
-      last: true,
-    })
-    .await
-    .expect("push remaining after resume");
-
-  // the reassembled asset must resolve with the exact original bytes.
-  let client = harness.connect_command_client().await.expect("command client");
-  let deadline = tokio::time::Instant::now() + ASSET_RESOLVE;
-  let got = loop {
-    if let Ok(got) = client
-      .asset()
-      .get(AssetGet {
-        id: id.clone(),
-        request_id: uuid::Uuid::now_v7(),
-      })
-      .await
-    {
-      break got;
+/// Answer every daemon `AssetRequest` with `body`: inline bytes, or a
+/// fragment stream on the Bulk lane keyed by the request id.
+fn serve_assets(gateway: Gateway, bytes: Vec<u8>, inline: bool, fragment_size: usize) -> tokio::task::JoinHandle<()> {
+  let mut events = gateway.events();
+  tokio::spawn(async move {
+    while let Ok(msg) = events.recv().await {
+      let BridgeToGatewayMsgData::Asset(BridgeToGatewayAssetMsg::Request(req)) = &msg.data else {
+        continue;
+      };
+      let req = req.clone();
+      let body = if inline {
+        TransferBody::Inline(bytes.clone())
+      } else {
+        TransferBody::Stream(TransferRef {
+          id: req.request_id,
+          total_size: bytes.len() as u32,
+          sha256: None,
+        })
+      };
+      let reply = GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Got(AssetGotReply {
+        id: req.id.clone(),
+        mime: Some("image/jpeg".into()),
+        body,
+      }));
+      gateway.connection().respond(msg.id, reply).await.expect("respond");
+      if !inline {
+        let mut offset = 0usize;
+        while offset < bytes.len() {
+          let end = (offset + fragment_size).min(bytes.len());
+          gateway
+            .connection()
+            .send_data(
+              MsgMeta::Event,
+              GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
+                transfer_id: req.request_id,
+                offset: offset as u32,
+                bytes: bytes[offset..end].to_vec(),
+              })),
+              Priority::Bulk,
+            )
+            .await
+            .expect("fragment send");
+          offset = end;
+        }
+      }
     }
-    assert!(
-      tokio::time::Instant::now() < deadline,
-      "asset never resolved after the resumed push completed"
-    );
-    tokio::time::sleep(Duration::from_millis(25)).await;
+  })
+}
+
+fn art_bytes(len: usize) -> Vec<u8> {
+  (0u8..=255).cycle().take(len).collect()
+}
+
+/// Companion serves an asset as a Bulk-lane fragment stream; the daemon
+/// reassembles it through the memory sink and serves the exact bytes.
+#[tokio::test]
+async fn asset_pull_stream_body_serves_exact_bytes() {
+  let harness = Harness::start().await.expect("harness start");
+  let companion = harness.connect_android().await.expect("connect companion");
+  announce(&companion).await;
+  let bytes = art_bytes(100 * 1024);
+  let _responder = serve_assets(companion.clone(), bytes.clone(), false, 8 * 1024);
+
+  let mut stock = harness.connect_stock_client().await.expect("stock client");
+  let image_data = stock_get_image(&mut stock, "spotify/img/248/streamed", ASSET_RESOLVE)
+    .await
+    .expect("stock get_image must respond");
+  assert_eq!(
+    image_data,
+    base64::engine::general_purpose::STANDARD.encode(&bytes),
+    "served bytes must match the fragment-streamed source"
+  );
+}
+
+/// Companion serves a small asset inline in the reply; no fragments flow.
+#[tokio::test]
+async fn asset_pull_inline_body_serves_exact_bytes() {
+  let harness = Harness::start().await.expect("harness start");
+  let companion = harness.connect_android().await.expect("connect companion");
+  announce(&companion).await;
+  let bytes = art_bytes(4 * 1024);
+  let _responder = serve_assets(companion.clone(), bytes.clone(), true, 0);
+
+  let mut stock = harness.connect_stock_client().await.expect("stock client");
+  let image_data = stock_get_image(&mut stock, "spotify/img/96/inline", ASSET_RESOLVE)
+    .await
+    .expect("stock get_image must respond");
+  assert_eq!(image_data, base64::engine::general_purpose::STANDARD.encode(&bytes));
+}
+
+/// A sustained Background-lane fragment flood (a stand-in for an OTA push)
+/// must not stall a foreground asset pull: the companion's lane scheduler
+/// drains the Bulk-lane art fragments ahead of the queued Background
+/// backlog, and the daemon drops the unknown-id flood without harm.
+#[tokio::test]
+async fn asset_pull_resolves_under_background_flood() {
+  let harness = Harness::start().await.expect("harness start");
+  let companion = harness.connect_android().await.expect("connect companion");
+  announce(&companion).await;
+  let bytes = art_bytes(64 * 1024);
+  let _responder = serve_assets(companion.clone(), bytes.clone(), false, 8 * 1024);
+
+  let flood_id = uuid::Uuid::now_v7();
+  let flooder = {
+    let companion = companion.clone();
+    tokio::spawn(async move {
+      let chunk = vec![0xAAu8; 8 * 1024];
+      for i in 0u32..512 {
+        if companion
+          .connection()
+          .send_data(
+            MsgMeta::Event,
+            GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
+              transfer_id: flood_id,
+              offset: i * 8 * 1024,
+              bytes: chunk.clone(),
+            })),
+            Priority::Background,
+          )
+          .await
+          .is_err()
+        {
+          break;
+        }
+      }
+    })
   };
-  assert_eq!(got.bytes, payload, "resumed asset bytes must match the original");
+
+  // let the flood get ahead before asking for art.
+  tokio::time::sleep(Duration::from_millis(50)).await;
+
+  let mut stock = harness.connect_stock_client().await.expect("stock client");
+  let image_data = stock_get_image(&mut stock, "spotify/img/248/contended", ASSET_RESOLVE)
+    .await
+    .expect("asset pull must resolve while a background flood is in flight");
+  assert_eq!(
+    image_data,
+    base64::engine::general_purpose::STANDARD.encode(&bytes),
+    "served bytes must be intact under background contention"
+  );
+  flooder.abort();
 }

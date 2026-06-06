@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use bridgething_test_harness::Harness;
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate, gateway::AuthorityClaim,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, PlayerState, gateway::AuthorityClaim,
 };
 
 const CONVERGE: Duration = Duration::from_secs(3);
@@ -42,20 +42,21 @@ async fn gateway_only_now_playing() {
     .authority()
     .claim(AuthorityClaim {
       scope: CompanionAuthorityScope::NowPlayingMetadata,
+      app_bundle: None,
     })
     .await
     .expect("claim metadata");
   phone
     .player()
-    .delta(NowPlayingUpdate {
-      media_item: Some(MediaItemUpdate {
+    .snapshot(PlayerState {
+      track: Some(MediaItem {
         persistent_id: Some("track-1".into()),
         title: Some("Test Song".into()),
         artist: Some("Test Artist".into()),
         album: Some("Test Album".into()),
         ..Default::default()
       }),
-      playback: None,
+      ..Default::default()
     })
     .await
     .expect("now playing");
@@ -86,13 +87,13 @@ async fn no_authority_no_merge() {
   // deliberately NO claim_authority
   phone
     .player()
-    .delta(NowPlayingUpdate {
-      media_item: Some(MediaItemUpdate {
+    .snapshot(PlayerState {
+      track: Some(MediaItem {
         persistent_id: Some("track-2".into()),
         title: Some("Should Not Appear".into()),
         ..Default::default()
       }),
-      playback: None,
+      ..Default::default()
     })
     .await
     .expect("now playing");
@@ -130,6 +131,7 @@ async fn companion_disconnect_clears_authority() {
     .authority()
     .claim(AuthorityClaim {
       scope: CompanionAuthorityScope::NowPlayingMetadata,
+      app_bundle: None,
     })
     .await
     .expect("claim metadata");
@@ -137,6 +139,7 @@ async fn companion_disconnect_clears_authority() {
     .authority()
     .claim(AuthorityClaim {
       scope: CompanionAuthorityScope::NowPlayingPlayback,
+      app_bundle: None,
     })
     .await
     .expect("claim playback");

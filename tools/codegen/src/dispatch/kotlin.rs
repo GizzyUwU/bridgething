@@ -483,12 +483,13 @@ fn push_device_proxy_class(out: &mut String, surfaces: &[Surface]) {
 fn kotlin_request_handle_class(r: &TypedRequestEntry) -> String {
   let mut out = String::new();
   let response_pascal = r.response_variant_pascal();
+  let send_suffix = if r.is_bulk_byte_stream() { ", Priority.Bulk" } else { "" };
   out.push_str(&format!(
     "public class {}Handle internal constructor(\n  private val gateway: BridgethingGateway,\n  public val deviceId: String,\n  public val requestId: UUID,\n) {{\n",
     r.request
   ));
   out.push_str(&format!(
-    "  public suspend fun respond(response: {}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{response_pascal}(response)),\n    )\n    gateway.send(deviceId, msg)\n  }}\n\n",
+    "  public suspend fun respond(response: {}) {{\n    val msg = GatewayToBridgeMsg(\n      id = UUID.randomUUID(),\n      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),\n      data = GatewayToBridgeMsgData.{}(GatewayToBridge{}Msg.{response_pascal}(response)),\n    )\n    gateway.send(deviceId, msg{send_suffix})\n  }}\n\n",
     r.response, r.surface, r.surface
   ));
   if let Some(err_type) = &r.error {

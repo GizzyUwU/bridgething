@@ -11,6 +11,15 @@
 //! refreshed within `STALE_TIMEOUT` is treated as released on the next
 //! `is_authoritative` query - covers companion crashes, BT blips that
 //! drop a Release in flight, and OS-suspended companions.
+//!
+//! The now-playing scopes are the exception: they hold indefinitely once
+//! claimed. The companion claims them once when its app becomes the
+//! current player, and the dealer pushes only on change, so there is no
+//! periodic refresh to ride a staleness clock. They drop on explicit
+//! release (sign-out), on the companion-disconnect hook (`drop_all`), or
+//! get arbitrated away by the player's iAP2 app-bundle gate when another
+//! app takes the foreground. The companion declares its app bundle on the
+//! claim so that gate can compare it against iAP2's foreground signal.
 
 use std::{
   collections::HashMap,
@@ -30,6 +39,14 @@ pub struct AuthorityRegistry {
 #[derive(Debug, Default)]
 struct Inner {
   scopes: RwLock<HashMap<CompanionAuthorityScope, Instant>>,
+  companion_app_bundle: RwLock<Option<String>>,
+}
+
+fn scope_holds_indefinitely(scope: CompanionAuthorityScope) -> bool {
+  matches!(
+    scope,
+    CompanionAuthorityScope::NowPlayingMetadata | CompanionAuthorityScope::NowPlayingPlayback
+  )
 }
 
 impl AuthorityRegistry {
@@ -48,15 +65,38 @@ impl AuthorityRegistry {
   }
 
   pub fn drop_all(&self) {
-    let mut guard = self.inner.scopes.write().expect("authority lock poisoned");
-    guard.clear();
+    self.inner.scopes.write().expect("authority lock poisoned").clear();
+    *self
+      .inner
+      .companion_app_bundle
+      .write()
+      .expect("authority lock poisoned") = None;
+  }
+
+  pub fn set_companion_app_bundle(&self, bundle: Option<String>) {
+    if let Some(bundle) = bundle {
+      *self
+        .inner
+        .companion_app_bundle
+        .write()
+        .expect("authority lock poisoned") = Some(bundle);
+    }
+  }
+
+  pub fn companion_app_bundle(&self) -> Option<String> {
+    self
+      .inner
+      .companion_app_bundle
+      .read()
+      .expect("authority lock poisoned")
+      .clone()
   }
 
   pub fn is_authoritative(&self, scope: CompanionAuthorityScope) -> bool {
     let guard = self.inner.scopes.read().expect("authority lock poisoned");
     guard
       .get(&scope)
-      .map(|claimed_at| claimed_at.elapsed() < STALE_TIMEOUT)
+      .map(|claimed_at| scope_holds_indefinitely(scope) || claimed_at.elapsed() < STALE_TIMEOUT)
       .unwrap_or(false)
   }
 
@@ -64,7 +104,7 @@ impl AuthorityRegistry {
     let guard = self.inner.scopes.read().expect("authority lock poisoned");
     guard
       .iter()
-      .filter(|(_, claimed_at)| claimed_at.elapsed() < STALE_TIMEOUT)
+      .filter(|(scope, claimed_at)| scope_holds_indefinitely(**scope) || claimed_at.elapsed() < STALE_TIMEOUT)
       .map(|(scope, _)| *scope)
       .collect()
   }

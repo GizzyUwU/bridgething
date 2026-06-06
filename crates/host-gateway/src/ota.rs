@@ -1,17 +1,17 @@
 //! OTA push driver. Reads a `.swu` from disk, hashes it, opens an
-//! `OtaBegin` request to the daemon, then streams the bytes via
-//! `OtaChunk` events on the Bulk lane until the daemon emits a
-//! `Reboot` phase progress event (or fails). Bytes never accumulate
-//! in memory companion-side either: the file is read in `chunk_size`
-//! buffers and each is shipped immediately.
+//! `OtaBegin` request to the daemon, then streams the bytes as
+//! `TransferFragment` events on the Background lane until the daemon
+//! emits a `Reboot` phase progress event (or fails). Bytes never
+//! accumulate in memory companion-side either: the file is read in
+//! `chunk_size` buffers and each is shipped immediately.
 //!
 //! When `--zck <path>` is supplied, the same loop also services
 //! inbound `OtaAssetRange` requests from the daemon's range proxy.
-//! The host reads the requested byte ranges from the local .zck file
-//! and streams them back as `OtaAssetRangeChunk` events on the Bulk
-//! lane. This is the test rig for the wireless-OTA path: every wire
-//! type the mobile companion will eventually serve, the host serves
-//! first.
+//! The host serves the requested byte ranges from the local .zck file
+//! through the reply's `TransferBody`: small results inline, larger
+//! ones as a stream-relative fragment stream on the Background lane.
+//! This is the test rig for the wireless-OTA path: every wire type the
+//! mobile companion will eventually serve, the host serves first.
 
 use std::{
   path::{Path, PathBuf},
@@ -21,24 +21,27 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use libbridgething::{
-  OtaKind, OtaPhase,
+  OtaKind, OtaPhase, Priority,
   gateway::{
     BridgeToGatewayMsg, BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData,
-    GatewayToBridgeSystemMsg, OtaAssetRange, OtaAssetRangeChunk, OtaAssetRangeRejected, OtaAssetRangeReply, OtaBegin,
-    OtaChunk,
+    GatewayToBridgeSystemMsg, OtaAssetRange, OtaAssetRangeRejected, OtaAssetRangeReply, OtaBegin, TransferBody,
+    TransferRef,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncReadExt;
 
 use crate::{
   chaos::ChaosConfig,
   conn::{Connection, OutboundFrame},
+  transfer::{stream_file_fragments, stream_range_fragments},
 };
 
 /// 64 KiB matches the daemon's ChunkedTransfer write granularity.
 const RANGE_CHUNK_BYTES: usize = 64 * 1024;
+/// Range results at or under this ride inline in the reply.
+const RANGE_INLINE_MAX_BYTES: u32 = 16 * 1024;
 
 pub async fn run_push_update(
   url: &str,
@@ -69,12 +72,16 @@ pub async fn run_push_update(
   let _ = await_version(&mut conn).await;
 
   tracing::info!(?kind, "opening OtaBegin");
+  let transfer_id = uuid::Uuid::now_v7();
   let begin = OtaBegin {
     kind,
     update_id: sha256.clone(),
     update_url_base,
-    expected_sha256: sha256.clone(),
-    expected_size: size,
+    transfer: TransferRef {
+      id: transfer_id,
+      total_size: size,
+      sha256: Some(sha256.clone()),
+    },
   };
   let resume_from_offset = match send_begin(&mut conn, begin).await? {
     Ok(ack) => ack.resume_from_offset,
@@ -89,7 +96,16 @@ pub async fn run_push_update(
     );
   }
 
-  stream_chunks(&mut conn, &sha256, &artifact, resume_from_offset, total_len, chunk_size).await?;
+  stream_file_fragments(
+    &conn.outbound_tx,
+    transfer_id,
+    &artifact,
+    resume_from_offset as u64,
+    total_len,
+    chunk_size,
+    Priority::Background,
+  )
+  .await?;
   watch_progress(&mut conn, zck.map(Arc::new)).await
 }
 
@@ -140,53 +156,6 @@ async fn send_begin(
       return Ok(OtaBegin::extract(msg.data));
     }
     tracing::trace!(?msg, "non-response inbound during OtaBegin wait");
-  }
-}
-
-async fn stream_chunks(
-  conn: &mut Connection,
-  update_id: &str,
-  artifact: &Path,
-  start_offset: u32,
-  total_size: u64,
-  chunk_size: usize,
-) -> Result<()> {
-  let mut file = tokio::fs::File::open(artifact).await?;
-  if start_offset > 0 {
-    file.seek(std::io::SeekFrom::Start(start_offset as u64)).await?;
-  }
-
-  let mut buf = vec![0u8; chunk_size];
-  let mut offset: u64 = start_offset as u64;
-  loop {
-    let n = file.read(&mut buf).await?;
-    if n == 0 {
-      return Err(anyhow!(
-        "unexpected EOF at offset {offset}/{total_size} before last:true",
-      ));
-    }
-    let last = offset + n as u64 == total_size;
-    let chunk = OtaChunk {
-      update_id: update_id.to_string(),
-      offset: u32::try_from(offset).map_err(|_| anyhow!("chunk offset overflow"))?,
-      bytes: buf[..n].to_vec(),
-      last,
-    };
-    let msg = GatewayToBridgeMsg {
-      id: uuid::Uuid::now_v7(),
-      meta: MsgMeta::Event,
-      data: GatewayToBridgeMsgData::System(GatewayToBridgeSystemMsg::OtaChunk(chunk)),
-    };
-    conn
-      .outbound_tx
-      .send(OutboundFrame::bulk(msg))
-      .await
-      .map_err(|_| anyhow!("connection writer closed mid-stream at offset {offset}"))?;
-    offset += n as u64;
-    if last {
-      tracing::info!(offset, "sent last chunk; awaiting completion");
-      return Ok(());
-    }
   }
 }
 
@@ -287,52 +256,56 @@ async fn serve_range_request(
       length: r.length,
     })
     .collect();
+  let stream_len: u32 = parts.iter().map(|p| p.length).sum();
+  let ranges: Vec<(u32, u32)> = parts.iter().map(|p| (p.start, p.length)).collect();
+
+  if stream_len <= RANGE_INLINE_MAX_BYTES {
+    let mut body = Vec::with_capacity(stream_len as usize);
+    let mut file = tokio::fs::File::open(&zck_path).await?;
+    for (start, length) in &ranges {
+      use tokio::io::AsyncSeekExt;
+      file.seek(std::io::SeekFrom::Start(*start as u64)).await?;
+      let mut piece = vec![0u8; *length as usize];
+      file.read_exact(&mut piece).await?;
+      body.extend_from_slice(&piece);
+    }
+    respond_reply(
+      &out,
+      request_id,
+      OtaAssetRangeReply {
+        total_size,
+        parts,
+        body: TransferBody::Inline(body),
+      },
+    )
+    .await?;
+    return Ok(());
+  }
+
   respond_reply(
     &out,
     request_id,
     OtaAssetRangeReply {
       total_size,
-      parts: parts.clone(),
+      parts,
+      body: TransferBody::Stream(TransferRef {
+        id: request_id,
+        total_size: stream_len,
+        sha256: None,
+      }),
     },
   )
   .await?;
 
-  let mut file = tokio::fs::File::open(&zck_path).await?;
-  let mut buf = vec![0u8; RANGE_CHUNK_BYTES];
-  for (idx, part) in parts.iter().enumerate() {
-    file.seek(std::io::SeekFrom::Start(part.start as u64)).await?;
-    let mut produced: u32 = 0;
-    while produced < part.length {
-      let want = (part.length - produced) as usize;
-      let to_read = want.min(buf.len());
-      let n = file.read(&mut buf[..to_read]).await?;
-      if n == 0 {
-        return Err(anyhow!(
-          "unexpected EOF reading zck part {idx} at offset {}",
-          part.start as u64 + produced as u64,
-        ));
-      }
-      let absolute_offset = part.start + produced;
-      produced += n as u32;
-      let last = idx + 1 == parts.len() && produced == part.length;
-      let chunk = OtaAssetRangeChunk {
-        request_id,
-        part_index: idx as u32,
-        offset: absolute_offset,
-        bytes: buf[..n].to_vec(),
-        last,
-      };
-      let msg = GatewayToBridgeMsg {
-        id: uuid::Uuid::now_v7(),
-        meta: MsgMeta::Event,
-        data: GatewayToBridgeMsgData::System(GatewayToBridgeSystemMsg::OtaAssetRangeChunk(chunk)),
-      };
-      out
-        .send(OutboundFrame::bulk(msg))
-        .await
-        .map_err(|_| anyhow!("connection writer closed while serving range part {idx}"))?;
-    }
-  }
+  stream_range_fragments(
+    &out,
+    request_id,
+    &zck_path,
+    &ranges,
+    RANGE_CHUNK_BYTES,
+    Priority::Background,
+  )
+  .await?;
   Ok(())
 }
 

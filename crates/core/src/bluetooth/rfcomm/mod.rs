@@ -101,6 +101,7 @@ struct Connection {
   address: Address,
   normal_tx: mpsc::Sender<Bytes>,
   bulk_tx: mpsc::Sender<Bytes>,
+  background_tx: mpsc::Sender<Bytes>,
   _writer_handle: JoinHandle<()>,
   _reader_handle: JoinHandle<()>,
 }
@@ -116,13 +117,15 @@ impl Connection {
 
     let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
     let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
-    let packer = OutboundPacker::new(normal_rx, bulk_rx, RFCOMM_BATCH_BYTES);
+    let (background_tx, background_rx) = mpsc::channel(LANE_CAPACITY);
+    let packer = OutboundPacker::new(normal_rx, bulk_rx, background_rx, RFCOMM_BATCH_BYTES);
     let _writer_handle = tokio::spawn(writer_task(address, write_half, packer));
 
     Self {
       address,
       normal_tx,
       bulk_tx,
+      background_tx,
       _writer_handle,
       _reader_handle,
     }
@@ -136,6 +139,7 @@ impl Connection {
     let lane = match priority {
       Priority::Normal => &self.normal_tx,
       Priority::Bulk => &self.bulk_tx,
+      Priority::Background => &self.background_tx,
     };
     if lane.send(bytes).await.is_err() {
       tracing::debug!("({}) rfcomm writer lane closed; dropping frame", self.address);

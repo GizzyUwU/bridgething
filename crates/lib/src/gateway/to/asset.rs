@@ -27,30 +27,6 @@ pub struct AssetRequest {
   pub request_id: Uuid,
 }
 
-/// Successful response to `AssetPushBegin`. `resume_from_offset` is the
-/// byte offset the next `AssetPushChunk` should start at: 0 for fresh
-/// pushes, or the daemon's recovered partial length for a resume.
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct AssetPushBeginAck {
-  pub resume_from_offset: u32,
-}
-
-/// Domain-error response to `AssetPushBegin`: the daemon refuses to
-/// start or resume this push (conflicting in-flight id, budget
-/// exhausted, oversized, etc.).
-#[typeshare]
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "gateway.ts")]
-pub struct AssetPushBeginRejected {
-  pub reason: String,
-}
-
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -60,8 +36,4 @@ pub struct AssetPushBeginRejected {
 pub enum BridgeToGatewayAssetMsg {
   #[bridge_request]
   Request(AssetRequest),
-  #[bridge_response]
-  PushBeginAck(AssetPushBeginAck),
-  #[bridge_response]
-  PushBeginRejected(AssetPushBeginRejected),
 }

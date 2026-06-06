@@ -275,8 +275,8 @@ public class HybridBridgethingSessionImpl(
 
     override suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingApp.spotifyAuthConfig()
 
-    override suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean) {
-        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken, usesDealer)
+    override suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String) {
+        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken)
         setActiveProvider(BridgethingApp.SPOTIFY_PROVIDER_ID)
     }
 
@@ -393,8 +393,6 @@ public class HybridBridgethingSessionImpl(
         return BridgethingCompanionDebug(
             authorityPlaybackHeld = debug.authorityPlaybackHeld,
             authorityMetadataHeld = debug.authorityMetadataHeld,
-            baselinePollActive = debug.baselinePollActive,
-            hintFetchActive = debug.hintFetchActive,
             ancsAuthStatus = ancs,
         )
     }

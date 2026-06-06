@@ -47,6 +47,10 @@ impl Retention {
     tier: Tier::Disk,
     lifetime: Lifetime::Pinned,
   };
+  pub const DISK_LRU: Retention = Retention {
+    tier: Tier::Disk,
+    lifetime: Lifetime::Lru,
+  };
 
   pub fn disk_ttl(seconds: u32) -> Retention {
     Retention {
@@ -76,6 +80,10 @@ impl Retention {
 
   fn is_pinned(&self) -> bool {
     matches!(self.lifetime, Lifetime::Pinned)
+  }
+
+  fn is_disk_persisted(&self) -> bool {
+    self.tier == Tier::Disk && !matches!(self.lifetime, Lifetime::Ttl(_))
   }
 }
 
@@ -210,7 +218,11 @@ impl AssetActor {
       self.entries.insert(
         row.id,
         Entry {
-          retention: Retention::DISK_PINNED,
+          retention: if row.pinned {
+            Retention::DISK_PINNED
+          } else {
+            Retention::DISK_LRU
+          },
           mime: row.mime,
           byte_len,
           accessed_at: row.accessed_at,
@@ -230,9 +242,6 @@ impl AssetActor {
     Ok(self)
   }
 
-  /// Disk+Ttl blobs carry no DB row (restart-ephemeral), so a crash can
-  /// leave a blob with no backing row. Delete any blob file not referenced
-  /// by a loaded Disk+Pinned row.
   async fn sweep_orphan_blobs(&self, live_blob_names: &HashSet<String>) {
     let Ok(mut dir) = tokio::fs::read_dir(&self.blobs_dir).await else {
       return;
@@ -360,8 +369,10 @@ impl AssetActor {
         }
         tokio::fs::write(&dest, &bytes).await?;
         self.disk_byte_total = self.disk_byte_total.saturating_add(byte_len);
-        if retention.is_pinned() {
-          self.persist_write(&id, &dest, mime.as_deref(), byte_len, now).await?;
+        if retention.is_disk_persisted() {
+          self
+            .persist_write(&id, &dest, mime.as_deref(), byte_len, now, retention.is_pinned())
+            .await?;
         }
         let lru_seq = self.next_lru_seq();
         self.entries.insert(
@@ -414,8 +425,10 @@ impl AssetActor {
         }
         rename_or_copy(&source, &dest).await?;
         self.disk_byte_total = self.disk_byte_total.saturating_add(byte_len);
-        if retention.is_pinned() {
-          self.persist_write(&id, &dest, mime.as_deref(), byte_len, now).await?;
+        if retention.is_disk_persisted() {
+          self
+            .persist_write(&id, &dest, mime.as_deref(), byte_len, now, retention.is_pinned())
+            .await?;
         }
         let lru_seq = self.next_lru_seq();
         self.entries.insert(
@@ -460,13 +473,7 @@ impl AssetActor {
     Ok(())
   }
 
-  /// Lifetime-only, same-tier. The head pin/demote is a metadata flip on an
-  /// existing Memory entry; a request that would change tier is refused
-  /// (we never move bytes between tiers here).
   async fn handle_set_retention(&mut self, id: String, retention: Retention) -> Result<(), AssetError> {
-    // a pinned disk entry needs its row to survive restart; a demote to Ttl
-    // drops the row so it becomes restart-ephemeral. resolved while the entry
-    // borrow is scoped so the db call below doesn't alias it.
     let disk_action = {
       let Some(entry) = self.entries.get_mut(&id) else {
         return Ok(());
@@ -487,8 +494,10 @@ impl AssetActor {
     };
 
     if let Some((dest, mime, byte_len, now)) = disk_action {
-      if retention.is_pinned() {
-        self.persist_write(&id, &dest, mime.as_deref(), byte_len, now).await?;
+      if retention.is_disk_persisted() {
+        self
+          .persist_write(&id, &dest, mime.as_deref(), byte_len, now, retention.is_pinned())
+          .await?;
       } else if let Err(err) = AssetEntity::delete_by_id(id.clone()).exec(&self.db).await {
         tracing::warn!(?err, id = %id, "asset cache: failed to drop row on disk demote");
       }
@@ -561,7 +570,7 @@ impl AssetActor {
         self.disk_byte_total = self.disk_byte_total.saturating_sub(entry.byte_len);
         self.dirty_persist.remove(id);
         let _ = tokio::fs::remove_file(path).await;
-        if entry.retention.is_pinned()
+        if entry.retention.is_disk_persisted()
           && let Err(err) = AssetEntity::delete_by_id(id.to_string()).exec(&self.db).await
         {
           tracing::warn!(?err, id = %id, "asset cache: failed to delete persistent row");
@@ -615,14 +624,14 @@ impl AssetActor {
 
   async fn evict_until_under_disk_budget(&mut self) {
     while self.disk_byte_total > DISK_BUDGET_BYTES {
-      let Some(victim) = self.pick_disk_ttl_victim() else {
+      let Some(victim) = self.pick_disk_evictable_victim() else {
         break;
       };
       tracing::warn!(
         id = %victim,
         total = self.disk_byte_total,
         budget = DISK_BUDGET_BYTES,
-        "asset cache: evicting Ttl disk asset under disk pressure"
+        "asset cache: evicting disk asset under disk pressure"
       );
       self.evict_entry(&victim).await;
       let _ = self.events_tx.send(AssetCacheEvent::Cleared { id: victim });
@@ -664,12 +673,13 @@ impl AssetActor {
       .or_else(|| best_pinned.map(|(id, _)| id.to_string()))
   }
 
-  fn pick_disk_ttl_victim(&self) -> Option<String> {
+  // oldest-accessed non-pinned disk entry; pinned presets survive budget pressure here.
+  fn pick_disk_evictable_victim(&self) -> Option<String> {
     self
       .entries
       .iter()
-      .filter(|(_, e)| matches!(e.storage, EntryStorage::Disk(_)) && matches!(e.retention.lifetime, Lifetime::Ttl(_)))
-      .min_by_key(|(_, e)| e.lru_seq)
+      .filter(|(_, e)| matches!(e.storage, EntryStorage::Disk(_)) && !matches!(e.retention.lifetime, Lifetime::Pinned))
+      .min_by_key(|(_, e)| (e.accessed_at, e.lru_seq))
       .map(|(id, _)| id.clone())
   }
 
@@ -696,6 +706,7 @@ impl AssetActor {
     mime: Option<&str>,
     byte_len: usize,
     now: i64,
+    pinned: bool,
   ) -> Result<(), AssetError> {
     let model = AssetActiveModel {
       id: Set(id.to_string()),
@@ -704,6 +715,7 @@ impl AssetActor {
       byte_len: Set(byte_len as i64),
       inserted_at: Set(now),
       accessed_at: Set(now),
+      pinned: Set(pinned),
     };
     AssetEntity::insert(model)
       .on_conflict(
@@ -714,6 +726,7 @@ impl AssetActor {
             AssetColumn::ByteLen,
             AssetColumn::InsertedAt,
             AssetColumn::AccessedAt,
+            AssetColumn::Pinned,
           ])
           .to_owned(),
       )
@@ -959,13 +972,18 @@ mod tests {
     a.handle_insert("head".into(), Bytes::from_static(b"art"), None, Retention::MEM_LRU)
       .await
       .unwrap();
-    a.handle_set_retention("head".into(), Retention::MEM_PINNED).await.unwrap();
+    a.handle_set_retention("head".into(), Retention::MEM_PINNED)
+      .await
+      .unwrap();
     assert!(matches!(
       a.entries.get("head").unwrap().retention.lifetime,
       Lifetime::Pinned
     ));
     a.handle_set_retention("head".into(), Retention::MEM_LRU).await.unwrap();
-    assert!(matches!(a.entries.get("head").unwrap().retention.lifetime, Lifetime::Lru));
+    assert!(matches!(
+      a.entries.get("head").unwrap().retention.lifetime,
+      Lifetime::Lru
+    ));
   }
 
   #[tokio::test]
@@ -974,7 +992,9 @@ mod tests {
     a.handle_insert("m".into(), Bytes::from_static(b"x"), None, Retention::MEM_LRU)
       .await
       .unwrap();
-    a.handle_set_retention("m".into(), Retention::DISK_PINNED).await.unwrap();
+    a.handle_set_retention("m".into(), Retention::DISK_PINNED)
+      .await
+      .unwrap();
     // unchanged: still a memory entry
     assert_eq!(a.entries.get("m").unwrap().tier(), Tier::Memory);
   }
@@ -1022,7 +1042,10 @@ mod tests {
     a.handle_insert("k".into(), Bytes::new(), None, Retention::MEM_LRU)
       .await
       .unwrap();
-    let got = a.handle_get("k".into()).await.expect("existing asset survives an empty insert");
+    let got = a
+      .handle_get("k".into())
+      .await
+      .expect("existing asset survives an empty insert");
     assert_eq!(&got.bytes[..], b"good");
   }
 
@@ -1057,5 +1080,71 @@ mod tests {
       !blobs.join(safe_blob_name("p/empty")).exists(),
       "no persistent blob should be written for a 0-byte asset"
     );
+  }
+
+  #[tokio::test]
+  async fn disk_lru_survives_restart_as_lru() {
+    let blobs = temp_blobs();
+    let db = crate::db::open(None).await.unwrap();
+    let (events_tx, _) = broadcast::channel(16);
+    let (_cmd_tx, cmd_rx) = mpsc::channel(16);
+    let mut a = AssetActor::new(db.clone(), blobs.clone(), cmd_rx, events_tx)
+      .bootstrap()
+      .await
+      .unwrap();
+    a.handle_insert(
+      "spotify/img/248/abc".into(),
+      Bytes::from_static(b"pulled-art"),
+      Some("image/jpeg".into()),
+      Retention::DISK_LRU,
+    )
+    .await
+    .unwrap();
+    assert_eq!(a.memory_byte_total, 0, "disk-lru art holds no resident memory");
+    drop(a);
+
+    let (events_tx2, _) = broadcast::channel(16);
+    let (_cmd_tx2, cmd_rx2) = mpsc::channel(16);
+    let mut a2 = AssetActor::new(db, blobs, cmd_rx2, events_tx2)
+      .bootstrap()
+      .await
+      .unwrap();
+    let got = a2.handle_get("spotify/img/248/abc".into()).await.unwrap();
+    assert_eq!(&got.bytes[..], b"pulled-art");
+    assert!(
+      matches!(
+        a2.entries.get("spotify/img/248/abc").unwrap().retention.lifetime,
+        Lifetime::Lru
+      ),
+      "reconstructed as lru, not pinned"
+    );
+  }
+
+  #[tokio::test]
+  async fn disk_lru_evicts_oldest_and_never_pinned() {
+    let mut a = fresh().await;
+    a.handle_insert(
+      "preset/0".into(),
+      Bytes::from_static(b"keep"),
+      None,
+      Retention::DISK_PINNED,
+    )
+    .await
+    .unwrap();
+    a.handle_insert("art/old".into(), Bytes::from_static(b"old"), None, Retention::DISK_LRU)
+      .await
+      .unwrap();
+    a.handle_insert("art/new".into(), Bytes::from_static(b"new"), None, Retention::DISK_LRU)
+      .await
+      .unwrap();
+    // inserts within one second tie on accessed_at, so set it explicitly to assert ordering.
+    a.entries.get_mut("preset/0").unwrap().accessed_at = 100;
+    a.entries.get_mut("art/old").unwrap().accessed_at = 10;
+    a.entries.get_mut("art/new").unwrap().accessed_at = 50;
+    assert_eq!(a.pick_disk_evictable_victim().as_deref(), Some("art/old"));
+    a.evict_entry("art/old").await;
+    // pinned presets are filtered out even when oldest, so the next victim is the remaining art.
+    a.entries.get_mut("preset/0").unwrap().accessed_at = 1;
+    assert_eq!(a.pick_disk_evictable_victim().as_deref(), Some("art/new"));
   }
 }

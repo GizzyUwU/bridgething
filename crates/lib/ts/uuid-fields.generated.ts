@@ -10,5 +10,6 @@ export const UUID_FIELD_NAMES: ReadonlySet<string> = new Set([
   'id',
   'requestId',
   'streamId',
+  'transferId',
   'tunnelId',
 ]);

@@ -61,13 +61,15 @@ pub const MEDIA_ITEM_SUBSCRIBE: &[u16] = &[
   MEDIA_ITEM_LIKED,
 ];
 
-/// Playback attribute sub-ids the accessory subscribes to. The
-/// `PlaybackQueueList*` trio (`0x0E`/`0x0F`/`0x11`) is omitted: those
+/// Playback attribute sub-ids the accessory subscribes to. `PLAYBACK_POSITION_MS`
+/// (`0x01`) is NOT here: it is appended only when iAP2 owns the playback bar,
+/// because subscribing to it makes iOS push a ~1Hz position delta on the shared
+/// ACL, which is pure waste while a companion's dealer already drives the bar.
+/// The `PlaybackQueueList*` trio (`0x0E`/`0x0F`/`0x11`) is omitted: those
 /// require companion subscribe-side fields this CSM does not carry, and
 /// iOS silently rejects the entire subscribe when they are listed alone.
 pub const PLAYBACK_SUBSCRIBE: &[u16] = &[
   PLAYBACK_STATE,
-  PLAYBACK_POSITION_MS,
   PLAYBACK_QUEUE_INDEX,
   PLAYBACK_QUEUE_COUNT,
   PLAYBACK_SHUFFLE_MODE,
@@ -128,15 +130,16 @@ pub struct StartNowPlayingUpdates {
 impl StartNowPlayingUpdates {
   pub const CSM_MSG_ID: u16 = 0x5000;
 
-  pub fn subscription(include_artwork: bool) -> Self {
+  pub fn subscription(include_artwork: bool, include_position: bool) -> Self {
     let mut media_item = MEDIA_ITEM_SUBSCRIBE.to_vec();
     if include_artwork {
       media_item.push(MEDIA_ITEM_ARTWORK_ID);
     }
-    Self {
-      media_item,
-      playback: PLAYBACK_SUBSCRIBE.to_vec(),
+    let mut playback = PLAYBACK_SUBSCRIBE.to_vec();
+    if include_position {
+      playback.push(PLAYBACK_POSITION_MS);
     }
+    Self { media_item, playback }
   }
 }
 
@@ -830,7 +833,7 @@ mod tests {
 
   #[test]
   fn start_now_playing_emits_subscribe_list_per_param() {
-    let frame: CsmFrame = StartNowPlayingUpdates::subscription(false).into();
+    let frame: CsmFrame = StartNowPlayingUpdates::subscription(false, false).into();
     assert_eq!(frame.msg_id, 0x5000);
     let media = frame.find(NOW_PLAYING_PARAM_MEDIA_ITEM).unwrap();
     let media_subs = decode_param_block(media.payload.clone()).unwrap();
@@ -842,15 +845,28 @@ mod tests {
     let play = frame.find(NOW_PLAYING_PARAM_PLAYBACK).unwrap();
     let play_subs = decode_param_block(play.payload.clone()).unwrap();
     assert_eq!(play_subs.len(), PLAYBACK_SUBSCRIBE.len());
+    assert!(
+      play_subs.iter().all(|p| p.id != PLAYBACK_POSITION_MS),
+      "position is omitted unless requested"
+    );
   }
 
   #[test]
   fn start_now_playing_with_artwork_appends_artwork_id() {
-    let frame: CsmFrame = StartNowPlayingUpdates::subscription(true).into();
+    let frame: CsmFrame = StartNowPlayingUpdates::subscription(true, false).into();
     let media = frame.find(NOW_PLAYING_PARAM_MEDIA_ITEM).unwrap();
     let media_subs = decode_param_block(media.payload.clone()).unwrap();
     assert_eq!(media_subs.len(), MEDIA_ITEM_SUBSCRIBE.len() + 1);
     assert_eq!(media_subs.last().unwrap().id, MEDIA_ITEM_ARTWORK_ID);
+  }
+
+  #[test]
+  fn start_now_playing_with_position_appends_position_id() {
+    let frame: CsmFrame = StartNowPlayingUpdates::subscription(false, true).into();
+    let play = frame.find(NOW_PLAYING_PARAM_PLAYBACK).unwrap();
+    let play_subs = decode_param_block(play.payload.clone()).unwrap();
+    assert_eq!(play_subs.len(), PLAYBACK_SUBSCRIBE.len() + 1);
+    assert_eq!(play_subs.last().unwrap().id, PLAYBACK_POSITION_MS);
   }
 
   #[test]

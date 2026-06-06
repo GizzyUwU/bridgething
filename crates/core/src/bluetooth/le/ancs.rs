@@ -233,9 +233,7 @@ impl Ancs {
     self.consecutive_timeouts = self.consecutive_timeouts.saturating_add(1);
     self.ds_buffer.clear();
     if self.consecutive_timeouts == ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
-      tracing::warn!(
-        "ANCS notifications arriving but iOS is dropping or rejecting content reads"
-      );
+      tracing::warn!("ANCS notifications arriving but iOS is dropping or rejecting content reads");
       true
     } else {
       tracing::debug!(

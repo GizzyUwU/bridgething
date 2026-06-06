@@ -1,12 +1,11 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Duration};
 
 use libbridgething::{
-  AssetRetention,
   client::{
     AssetGet, AssetGot as WireAssetGot, AssetNotFound as WireAssetNotFound, AssetPreload, BridgeToClientAssetMsg,
     ClientToBridgeAssetMsgDispatch,
   },
-  gateway::AssetRequest,
+  gateway::{AssetRequest, TransferBody},
   wire::RequestError,
 };
 use tokio::sync::Semaphore;
@@ -16,16 +15,18 @@ use uuid::Uuid;
 use super::{HandlerResult, MsgHandle};
 use crate::{
   asset::{
-    CachedAsset,
+    CachedAsset, Retention,
     wait::{ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
   },
   bluetooth::BluetoothMan,
   state::State,
+  transfer::sinks::TransferSinks,
 };
 
 const PRELOAD_IDS_MAX: usize = 64;
 const PRELOAD_PARALLELISM: usize = 16;
 const IAP2_ART_PREFIX: &str = "iap2/art/";
+const ASSET_STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 static PRELOAD_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(PRELOAD_PARALLELISM));
 
 #[derive(Debug)]
@@ -123,40 +124,74 @@ async fn fetch_iap2_art(state: &State, id: &str) -> FetchOutcome {
     .await
 }
 
+pub(crate) async fn request_asset_body(
+  sinks: &TransferSinks,
+  bluetooth: &BluetoothMan,
+  id: &str,
+) -> Option<(Bytes, Option<String>)> {
+  let request_id = Uuid::now_v7();
+  // bind before sending so fragments racing ahead of the terminal reply are not dropped
+  sinks.bind_memory(request_id);
+  let req = AssetRequest {
+    id: id.to_string(),
+    request_id,
+  };
+  match bluetooth.gateway_man.request(None, req).await {
+    Ok(got) => match got.body {
+      TransferBody::Inline(bytes) => {
+        sinks.unbind(request_id);
+        Some((Bytes::from(bytes), got.mime))
+      }
+      TransferBody::Stream(transfer) => {
+        if transfer.id != request_id {
+          tracing::warn!(%id, %request_id, ref_id = %transfer.id, "asset reply ref id does not match request id");
+          sinks.unbind(request_id);
+          return None;
+        }
+        match sinks
+          .collect_memory(request_id, transfer.total_size, ASSET_STREAM_TIMEOUT)
+          .await
+        {
+          Some(bytes) => Some((bytes, got.mime)),
+          None => {
+            tracing::warn!(%id, "asset fragment reassembly failed or timed out");
+            None
+          }
+        }
+      }
+    },
+    Err(RequestError::Domain(_)) => {
+      sinks.unbind(request_id);
+      tracing::debug!(%id, "companion reported asset not found");
+      None
+    }
+    Err(err) => {
+      sinks.unbind(request_id);
+      tracing::warn!(?err, %id, "asset request failed");
+      None
+    }
+  }
+}
+
 async fn fetch_via_companion(state: &State, bluetooth: &BluetoothMan, id: &str) -> FetchOutcome {
   let cache = state.assets.clone();
+  let sinks = state.transfer_sinks.clone();
   let bluetooth = bluetooth.clone();
   let id_owned = id.to_string();
   state
     .asset_wait
     .fetch_or_wait(id, move || async move {
-      let req = AssetRequest {
-        id: id_owned.clone(),
-        request_id: Uuid::now_v7(),
-      };
-      match bluetooth.gateway_man.request(None, req).await {
-        Ok(got) => {
-          let bytes = Bytes::from(got.bytes);
+      match request_asset_body(&sinks, &bluetooth, &id_owned).await {
+        Some((bytes, mime)) => {
           if let Err(err) = cache
-            .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
+            .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), Retention::DISK_LRU)
             .await
           {
             tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");
           }
-          FetchOutcome::Got(CachedAsset { bytes, mime: got.mime })
+          FetchOutcome::Got(CachedAsset { bytes, mime })
         }
-        Err(RequestError::Domain(nf)) => {
-          tracing::debug!(id = %nf.id, "companion reported asset not found");
-          FetchOutcome::NotFound
-        }
-        Err(RequestError::Protocol(err)) => {
-          tracing::warn!(?err, %id_owned, "asset request failed at protocol level");
-          FetchOutcome::NotFound
-        }
-        Err(RequestError::ResponseMismatch) => {
-          tracing::error!(%id_owned, "asset response did not match expected shape");
-          FetchOutcome::NotFound
-        }
+        None => FetchOutcome::NotFound,
       }
     })
     .await
@@ -177,34 +212,23 @@ pub(crate) async fn preload_assets(state: State, bluetooth: BluetoothMan, ids: V
     let bluetooth = bluetooth.clone();
     tokio::spawn(async move {
       let cache = state.assets.clone();
+      let sinks = state.transfer_sinks.clone();
       let id_owned = id.clone();
       let _ = state
         .asset_wait
         .fetch_or_wait(&id, move || async move {
           let _permit = PRELOAD_GATE.acquire().await;
-          let req = AssetRequest {
-            id: id_owned.clone(),
-            request_id: Uuid::now_v7(),
-          };
-          match bluetooth.gateway_man.request(None, req).await {
-            Ok(got) => {
-              let bytes = Bytes::from(got.bytes);
+          match request_asset_body(&sinks, &bluetooth, &id_owned).await {
+            Some((bytes, mime)) => {
               if let Err(err) = cache
-                .insert(id_owned.clone(), bytes.clone(), got.mime.clone(), AssetRetention::Lru)
+                .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), Retention::DISK_LRU)
                 .await
               {
                 tracing::warn!(?err, %id_owned, "preload: failed to insert into cache");
               }
-              FetchOutcome::Got(CachedAsset { bytes, mime: got.mime })
+              FetchOutcome::Got(CachedAsset { bytes, mime })
             }
-            Err(RequestError::Domain(_)) => {
-              tracing::debug!(%id_owned, "preload: companion reported asset not found");
-              FetchOutcome::NotFound
-            }
-            Err(err) => {
-              tracing::debug!(?err, %id_owned, "preload: companion request failed");
-              FetchOutcome::NotFound
-            }
+            None => FetchOutcome::NotFound,
           }
         })
         .await;

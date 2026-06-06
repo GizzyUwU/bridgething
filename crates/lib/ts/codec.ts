@@ -20,8 +20,26 @@ export const FRAME_HEADER_LENGTH = 16;
 export const FRAME_MAGIC = 0xdead;
 export const FRAME_VERSION = 2;
 
-export const priorityToByte = (p: Priority): number => (p === 'bulk' ? 0x01 : 0x00);
-export const priorityFromByte = (b: number): Priority => (b === 0x01 ? 'bulk' : 'normal');
+export const priorityToByte = (p: Priority): number => {
+  switch (p) {
+    case 'bulk':
+      return 0x01;
+    case 'background':
+      return 0x02;
+    default:
+      return 0x00;
+  }
+};
+export const priorityFromByte = (b: number): Priority => {
+  switch (b) {
+    case 0x01:
+      return 'bulk';
+    case 0x02:
+      return 'background';
+    default:
+      return 'normal';
+  }
+};
 
 export class CodecError extends Error {
   constructor(

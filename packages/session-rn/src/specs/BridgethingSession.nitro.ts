@@ -33,10 +33,6 @@ export type BridgethingSpotifyAuthConfig = {
   pkceRedirectUri: string;
   pkceAuthorizeUrl: string;
   pkceTokenUrl: string;
-  deviceCodePsk: string;
-  deviceCodeUrl: string;
-  deviceCodeTokenUrl: string;
-  deviceCodeDescription: string;
 };
 
 // signed-in but degraded: the provider's API is throttling or unreachable.
@@ -289,8 +285,6 @@ export type BridgethingDeviceLogLine = {
 export type BridgethingCompanionDebug = {
   authorityPlaybackHeld: boolean;
   authorityMetadataHeld: boolean;
-  baselinePollActive: boolean;
-  hintFetchActive: boolean;
   ancsAuthStatus: BridgethingAncsAuthStatus;
 };
 
@@ -305,7 +299,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   signOut(): Promise<void>;
 
   spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig>;
-  completeSpotifySignIn(accessToken: string, refreshToken: string, usesDealer: boolean): Promise<void>;
+  completeSpotifySignIn(accessToken: string, refreshToken: string): Promise<void>;
 
   snapshot(): Promise<BridgethingSessionSnapshot>;
 

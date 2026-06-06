@@ -11,10 +11,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -144,8 +146,11 @@ private class Session(
     val device: Device,
     val socket: BluetoothSocket,
 ) {
-    private val writeMutex = Mutex()
     private var readJob: Job? = null
+    private var writerJob: Job? = null
+    private val normalLane = Channel<ByteArray>(Channel.UNLIMITED)
+    private val bulkLane = Channel<ByteArray>(BULK_LANE_DEPTH)
+    private val backgroundLane = Channel<ByteArray>(BULK_LANE_DEPTH)
 
     fun start() {
         readJob = owner.ioScope.launch {
@@ -165,21 +170,52 @@ private class Session(
                 runCatching { socket.close() }
             }
         }
+        writerJob = owner.ioScope.launch { writerLoop() }
     }
 
-    suspend fun write(frame: ByteArray): Unit = writeMutex.withLock {
-        withContext(Dispatchers.IO) {
-            try {
-                socket.outputStream.write(frame)
-                socket.outputStream.flush()
-            } catch (e: IOException) {
-                throw AdapterException.SendFailed(e.message ?: e.toString())
+    suspend fun write(frame: ByteArray) {
+        when (if (frame.size >= 16) frame[5] else 0x00.toByte()) {
+            BULK_BYTE -> bulkLane.send(frame)
+            BACKGROUND_BYTE -> backgroundLane.send(frame)
+            else -> normalLane.send(frame)
+        }
+    }
+
+    private suspend fun writerLoop() {
+        val out = socket.outputStream
+        try {
+            while (true) {
+                val frame = normalLane.tryReceive().getOrNull()
+                    ?: bulkLane.tryReceive().getOrNull()
+                    ?: select {
+                        normalLane.onReceive { it }
+                        bulkLane.onReceive { it }
+                        backgroundLane.onReceive { it }
+                    }
+                withContext(Dispatchers.IO) {
+                    out.write(frame)
+                    out.flush()
+                }
             }
+        } catch (_: IOException) {
+            // socket is dead; the read loop routes the disconnect.
+        } catch (_: ClosedReceiveChannelException) {
+            // lanes closed on teardown.
         }
     }
 
     suspend fun close() {
         readJob?.cancel()
+        writerJob?.cancel()
+        normalLane.close()
+        bulkLane.close()
+        backgroundLane.close()
         runCatching { socket.close() }
+    }
+
+    private companion object {
+        const val BULK_LANE_DEPTH = 4
+        const val BULK_BYTE: Byte = 0x01
+        const val BACKGROUND_BYTE: Byte = 0x02
     }
 }

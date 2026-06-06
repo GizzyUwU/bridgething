@@ -8,6 +8,7 @@ import dev.bridgething.schema.BridgeToGatewayAssetMsg
 import dev.bridgething.schema.BridgeToGatewayLibraryMsg
 import dev.bridgething.schema.BridgeToGatewayLyricsMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
+import dev.bridgething.schema.TransferBody
 import dev.bridgething.schema.FavoritesPage
 import dev.bridgething.schema.GatewayToBridgeAssetMsg
 import dev.bridgething.schema.GatewayToBridgeCapabilitiesMsg
@@ -69,7 +70,8 @@ class LibraryAssetDispatchTest {
         val asset = resp.data as GatewayToBridgeMsgData.Asset
         val got = asset.data as GatewayToBridgeAssetMsg.Got
         assertEquals("art:track:1", got.data.id)
-        assertTrue(payload.contentEquals(got.data.bytes))
+        val inline = got.data.body as TransferBody.Inline
+        assertTrue(payload.contentEquals(inline.data))
         assertEquals("image/png", got.data.mime)
         assertTrue(glue.calls.contains("asset:art:track:1"))
 

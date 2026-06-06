@@ -325,7 +325,12 @@ impl<M: MfiAccess> Iap2Session<M> {
       let companion_connected = self.ea.as_ref().is_some_and(EaFlow::has_open_streams);
       return self
         .now_playing
-        .handle(frame, companion_connected, &self.link_command_tx, &self.session_events_tx)
+        .handle(
+          frame,
+          companion_connected,
+          &self.link_command_tx,
+          &self.session_events_tx,
+        )
         .await;
     }
     if EaFlow::handles(msg_id) {

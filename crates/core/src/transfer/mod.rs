@@ -1,6 +1,6 @@
 //! Disk-backed chunked transfer primitive. The single intermediate
 //! buffer for any wire surface that uses a `Begin` + `Chunk` shape -
-//! today that's chunked AssetPush and OTA streaming.
+//! today that's OTA artifact streaming.
 //!
 //! Each transfer lives as two files under `transfers_dir`: a `.partial`
 //! holding the bytes received so far and a `.meta` json sidecar
@@ -21,6 +21,7 @@
 //! recovered offset and continues.
 
 mod actor;
+pub mod sinks;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 

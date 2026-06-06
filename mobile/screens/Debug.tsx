@@ -145,14 +145,6 @@ function StateDump({
             label="authority · metadata"
             value={yesno(companion.authorityMetadataHeld)}
           />
-          <Row
-            label="baseline poll"
-            value={companion.baselinePollActive ? 'running' : 'idle'}
-          />
-          <Row
-            label="hint fetch"
-            value={companion.hintFetchActive ? 'in flight' : 'idle'}
-          />
           <Row label="ANCS auth" value={companion.ancsAuthStatus} />
         </Section>
       ) : null}

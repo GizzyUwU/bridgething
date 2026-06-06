@@ -8,18 +8,21 @@
 //! `Inactive` (or for the wrong `update_id`) get `409 Conflict`, which
 //! libswupdate surfaces as a clean install failure.
 //!
-//! Wire bytes per chunk land on the Bulk lane and stream straight back
+//! Range bytes arrive either inline in the reply or as a fragment stream
+//! routed through the transfer sink registry, and stream straight back
 //! out the HTTP response body - never accumulated in a `Vec<u8>` on the
 //! daemon side. The 426 MB usable RAM on Superbird is shared with
 //! chromium; range responses can be hundreds of MB if libcurl asks for
 //! a large coalesced range.
 //!
 //! Actor-with-mpsc concurrency: a single broker task owns `active` and
-//! `inflight`, and HTTP handlers and chunk-routing both reach it through
-//! a cloneable `RangeProxy` handle.
+//! the in-flight id set, and HTTP handlers reach it through a cloneable
+//! `RangeProxy` handle. Deactivation unbinds every in-flight sink, which
+//! closes each HTTP body stream with an error.
+
+use std::collections::HashSet;
 
 use bluer::Address;
-use libbridgething::gateway::OtaAssetRangeChunk;
 use tokio::{
   sync::{mpsc, oneshot},
   task::JoinHandle,
@@ -27,12 +30,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::bluetooth::BluetoothMan;
+use crate::{bluetooth::BluetoothMan, transfer::sinks::TransferSinks};
 
 mod server;
 
 const BROKER_MAILBOX: usize = 64;
-const CHUNK_QUEUE: usize = 16;
 
 #[derive(Clone)]
 pub struct RangeProxy {
@@ -53,19 +55,20 @@ pub struct RangeProxyHandle {
 }
 
 impl RangeProxy {
-  pub async fn spawn(bluetooth: BluetoothMan, port: u16) -> RangeProxyHandle {
+  pub async fn spawn(bluetooth: BluetoothMan, sinks: TransferSinks, port: u16) -> RangeProxyHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel(BROKER_MAILBOX);
     let cancel = CancellationToken::new();
 
     let broker = BrokerActor {
       cmd_rx,
+      sinks: sinks.clone(),
       active: None,
       inflight: Default::default(),
     };
     let _broker = tokio::spawn(broker.run());
 
     let proxy = RangeProxy { cmd_tx };
-    let _server = match server::spawn(proxy.clone(), bluetooth, port, cancel.clone()).await {
+    let _server = match server::spawn(proxy.clone(), bluetooth, sinks, port, cancel.clone()).await {
       Ok(handle) => Some(handle),
       Err(err) => {
         tracing::error!(
@@ -96,23 +99,12 @@ impl RangeProxy {
     }
   }
 
-  pub async fn route_chunk(&self, chunk: OtaAssetRangeChunk) {
-    if let Err(err) = self.cmd_tx.send(BrokerCmd::RouteChunk(chunk)).await {
-      tracing::error!(?err, "range proxy mailbox closed; chunk dropped");
-    }
-  }
-
-  pub(crate) async fn begin_range_active(
-    &self,
-    request_id: Uuid,
-    chunk_tx: mpsc::Sender<OtaAssetRangeChunk>,
-  ) -> Result<RangeBegin, BeginRangeError> {
+  pub(crate) async fn begin_range_active(&self, request_id: Uuid) -> Result<RangeBegin, BeginRangeError> {
     let (reply_tx, reply_rx) = oneshot::channel();
     self
       .cmd_tx
       .send(BrokerCmd::BeginRange {
         request_id,
-        chunk_tx,
         reply: reply_tx,
       })
       .await
@@ -146,10 +138,8 @@ enum BrokerCmd {
   Deactivate,
   BeginRange {
     request_id: Uuid,
-    chunk_tx: mpsc::Sender<OtaAssetRangeChunk>,
     reply: oneshot::Sender<Result<RangeBegin, BeginRangeError>>,
   },
-  RouteChunk(OtaAssetRangeChunk),
   EndRange {
     request_id: Uuid,
   },
@@ -163,8 +153,9 @@ struct ActiveOta {
 
 struct BrokerActor {
   cmd_rx: mpsc::Receiver<BrokerCmd>,
+  sinks: TransferSinks,
   active: Option<ActiveOta>,
-  inflight: std::collections::HashMap<Uuid, mpsc::Sender<OtaAssetRangeChunk>>,
+  inflight: HashSet<Uuid>,
 }
 
 impl BrokerActor {
@@ -180,17 +171,15 @@ impl BrokerActor {
           if let Some(active) = self.active.take() {
             tracing::info!(update_id = %active.update_id, "range proxy deactivated");
           }
-          self.inflight.clear();
+          for request_id in self.inflight.drain() {
+            self.sinks.unbind(request_id);
+          }
         }
-        BrokerCmd::BeginRange {
-          request_id,
-          chunk_tx,
-          reply,
-        } => {
+        BrokerCmd::BeginRange { request_id, reply } => {
           let result = match &self.active {
             None => Err(BeginRangeError::NoActiveOta),
             Some(active) => {
-              self.inflight.insert(request_id, chunk_tx);
+              self.inflight.insert(request_id);
               Ok(RangeBegin {
                 update_id: active.update_id.clone(),
                 peer: active.peer,
@@ -199,22 +188,9 @@ impl BrokerActor {
           };
           let _ = reply.send(result);
         }
-        BrokerCmd::RouteChunk(chunk) => {
-          let request_id = chunk.request_id;
-          if let Some(tx) = self.inflight.get(&request_id) {
-            if tx.send(chunk).await.is_err() {
-              tracing::debug!(%request_id, "inflight chunk channel closed; evicting");
-              self.inflight.remove(&request_id);
-            }
-          } else {
-            tracing::debug!(
-              %request_id,
-              "OtaAssetRangeChunk for unknown request_id; libcurl probably timed out",
-            );
-          }
-        }
         BrokerCmd::EndRange { request_id } => {
           self.inflight.remove(&request_id);
+          self.sinks.unbind(request_id);
         }
       }
     }
@@ -233,12 +209,16 @@ pub fn noop_proxy() -> RangeProxy {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use tokio_util::bytes::Bytes;
 
-  fn spawn_broker_only() -> RangeProxy {
+  use super::*;
+  use crate::transfer::sinks::TransferEvent;
+
+  fn spawn_broker_only(sinks: TransferSinks) -> RangeProxy {
     let (cmd_tx, cmd_rx) = mpsc::channel(16);
     let broker = BrokerActor {
       cmd_rx,
+      sinks,
       active: None,
       inflight: Default::default(),
     };
@@ -248,19 +228,17 @@ mod tests {
 
   #[tokio::test]
   async fn begin_range_with_no_active_returns_no_active_ota() {
-    let proxy = spawn_broker_only();
-    let (chunk_tx, _chunk_rx) = mpsc::channel(4);
-    let result = proxy.begin_range_active(Uuid::now_v7(), chunk_tx).await;
+    let proxy = spawn_broker_only(TransferSinks::default());
+    let result = proxy.begin_range_active(Uuid::now_v7()).await;
     assert!(matches!(result, Err(BeginRangeError::NoActiveOta)));
   }
 
   #[tokio::test]
   async fn begin_range_returns_active_update_id_and_peer() {
-    let proxy = spawn_broker_only();
+    let proxy = spawn_broker_only(TransferSinks::default());
     proxy.activate("expected-id".into(), None).await;
-    let (chunk_tx, _chunk_rx) = mpsc::channel(4);
     let begin = proxy
-      .begin_range_active(Uuid::now_v7(), chunk_tx)
+      .begin_range_active(Uuid::now_v7())
       .await
       .expect("begin should succeed");
     assert_eq!(begin.update_id, "expected-id");
@@ -268,48 +246,21 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn route_chunk_delivers_to_inflight_request() {
-    let proxy = spawn_broker_only();
-    proxy.activate("active".into(), None).await;
-    let req_id = Uuid::now_v7();
-    let (chunk_tx, mut chunk_rx) = mpsc::channel(4);
-    proxy.begin_range_active(req_id, chunk_tx).await.unwrap();
-
-    let chunk = OtaAssetRangeChunk {
-      request_id: req_id,
-      part_index: 0,
-      offset: 0,
-      bytes: vec![1, 2, 3],
-      last: true,
-    };
-    proxy.route_chunk(chunk).await;
-    let received = tokio::time::timeout(std::time::Duration::from_secs(1), chunk_rx.recv())
-      .await
-      .expect("timed out")
-      .expect("channel closed");
-    assert_eq!(received.bytes, vec![1, 2, 3]);
-  }
-
-  #[tokio::test]
-  async fn deactivate_clears_inflight_so_route_chunk_drops() {
-    let proxy = spawn_broker_only();
+  async fn deactivate_unbinds_inflight_sinks() {
+    let sinks = TransferSinks::default();
+    let proxy = spawn_broker_only(sinks.clone());
     proxy.activate("a".into(), None).await;
     let req_id = Uuid::now_v7();
-    let (chunk_tx, mut chunk_rx) = mpsc::channel(4);
-    proxy.begin_range_active(req_id, chunk_tx).await.unwrap();
+    let mut rx = sinks.bind_forward(req_id);
+    proxy.begin_range_active(req_id).await.unwrap();
+
+    sinks.fragment(req_id, 0, Bytes::from_static(b"x")).await;
+    assert!(matches!(rx.recv().await, Some(TransferEvent::Fragment { .. })));
+
     proxy.deactivate().await;
-    proxy
-      .route_chunk(OtaAssetRangeChunk {
-        request_id: req_id,
-        part_index: 0,
-        offset: 0,
-        bytes: vec![9],
-        last: true,
-      })
-      .await;
-    let res = tokio::time::timeout(std::time::Duration::from_secs(1), chunk_rx.recv())
+    let res = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
       .await
-      .expect("recv should resolve once broker drops senders");
-    assert!(res.is_none(), "expected channel closed, got chunk: {res:?}");
+      .expect("recv should resolve once broker unbinds");
+    assert!(res.is_none(), "expected channel closed, got event: {res:?}");
   }
 }

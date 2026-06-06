@@ -137,14 +137,14 @@ pub struct OtaProgress {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub enum OtaErrorCode {
-  /// Companion sent chunks for an `update_id` that was never begun
+  /// Companion sent fragments for an `update_id` that was never begun
   /// (or was abandoned mid-stream).
   UnknownUpdate,
-  /// `OtaChunk.offset` did not match the daemon's `received`.
+  /// A fragment's offset did not match the daemon's `received`.
   OffsetMismatch,
-  /// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
+  /// Streamed total's sha256 did not match `OtaBegin.transfer.sha256`.
   HashMismatch,
-  /// Streamed total's byte length did not match `OtaBegin.expected_size`.
+  /// Streamed total's byte length did not match `OtaBegin.transfer.total_size`.
   SizeMismatch,
   /// `CancelUpdate` arrived during a cancelable phase.
   Cancelled,
@@ -181,9 +181,9 @@ pub struct RangeSpec {
   pub length: u32,
 }
 
-/// Resolved range the companion is about to stream. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow as
-/// `OtaAssetRangeChunk` events on the Bulk lane.
+/// Resolved range the companion is about to serve. `start` and `length`
+/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
+/// `TransferBody`.
 #[typeshare]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

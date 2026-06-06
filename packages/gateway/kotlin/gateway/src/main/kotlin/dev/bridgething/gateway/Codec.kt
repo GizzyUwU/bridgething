@@ -11,10 +11,19 @@ import java.nio.ByteBuffer
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-public fun Priority.toWireByte(): Byte = if (this == Priority.Bulk) 0x01 else 0x00
+public fun Priority.toWireByte(): Byte =
+  when (this) {
+    Priority.Normal -> 0x00
+    Priority.Bulk -> 0x01
+    Priority.Background -> 0x02
+  }
 
 public fun priorityFromWireByte(b: Byte): Priority =
-  if (b == 0x01.toByte()) Priority.Bulk else Priority.Normal
+  when (b) {
+    0x01.toByte() -> Priority.Bulk
+    0x02.toByte() -> Priority.Background
+    else -> Priority.Normal
+  }
 
 public enum class Compression(public val byte: Byte) {
   NONE(0x00),

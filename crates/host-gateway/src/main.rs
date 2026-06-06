@@ -8,6 +8,7 @@ mod chaos;
 mod conn;
 mod install;
 mod ota;
+mod transfer;
 mod webapp;
 
 use std::path::PathBuf;
@@ -25,9 +26,9 @@ struct Cli {
   #[arg(long, default_value = "ws://127.0.0.1:8892/")]
   url: String,
 
-  /// Bytes per outbound `OtaChunk`. Each chunk becomes one wire
-  /// message on the Bulk lane. 64 KiB matches libswupdate's IPC chunk
-  /// size and the daemon's ChunkedTransfer write granularity.
+  /// Bytes per outbound `TransferFragment`. Each fragment becomes one
+  /// wire message on the Background lane. 64 KiB matches libswupdate's
+  /// IPC chunk size and the daemon's ChunkedTransfer write granularity.
   #[arg(long, default_value_t = 64 * 1024)]
   chunk_size: usize,
 
@@ -56,9 +57,10 @@ enum Command {
   /// Connect, exchange Version, then print every inbound frame until
   /// killed. Outbound traffic is just the initial Version reply.
   Connect,
-  /// Open `OtaBegin` for an image-kind update, stream the `.swu` via
-  /// `OtaChunk` events on the Bulk lane, then watch progress until the
-  /// daemon hits `Reboot` (or fails). The canonical OTA test rig.
+  /// Open `OtaBegin` for an image-kind update, stream the `.swu` as
+  /// `TransferFragment` events on the Background lane, then watch
+  /// progress until the daemon hits `Reboot` (or fails). The canonical
+  /// OTA test rig.
   PushUpdate {
     /// Path to the `.swu`. Relative paths resolve against `--fixture`
     /// when set, otherwise CWD.
@@ -97,8 +99,8 @@ enum Command {
     /// Webapp uuid (from the bundle's `manifest.json`).
     id: Uuid,
   },
-  /// Open `OtaBegin { kind: InstalledWebapp }`, stream the `.zip` via
-  /// `OtaChunk` events on the Bulk lane, and watch for the terminal
+  /// Open `OtaBegin { kind: InstalledWebapp }`, stream the `.zip` as
+  /// `TransferFragment` events on the Background lane, and watch for the terminal
   /// `WebappInstalled` event (or an `OtaError`). The bundle's manifest.id
   /// determines where the daemon installs it; reserved-uuid bundles
   /// (stock/hub/launcher) are hard-rejected.

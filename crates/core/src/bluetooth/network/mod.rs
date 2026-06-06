@@ -1,7 +1,7 @@
 //! WebSocket-based gateway transport. Accepts WS connections on a
 //! caller-supplied bind address and carries the bridgething gateway
 //! protocol over `BridgeEndec`-framed binary messages. Per-connection
-//! reader/writer pair, a shared `OutboundPacker` for normal+bulk lanes,
+//! reader/writer pair, a shared `OutboundPacker` for the priority lanes,
 //! and a single `recv()` loop owning the connection map and driving both
 //! inbound dispatch and outbound fan-out.
 //!
@@ -95,6 +95,7 @@ struct Connection {
   remote: SocketAddr,
   normal_tx: mpsc::Sender<Bytes>,
   bulk_tx: mpsc::Sender<Bytes>,
+  background_tx: mpsc::Sender<Bytes>,
   _writer_handle: JoinHandle<()>,
   _reader_handle: JoinHandle<()>,
 }
@@ -107,7 +108,8 @@ impl Connection {
 
     let (normal_tx, normal_rx) = mpsc::channel(LANE_CAPACITY);
     let (bulk_tx, bulk_rx) = mpsc::channel(LANE_CAPACITY);
-    let packer = OutboundPacker::new(normal_rx, bulk_rx, NETWORK_BATCH_BYTES);
+    let (background_tx, background_rx) = mpsc::channel(LANE_CAPACITY);
+    let packer = OutboundPacker::new(normal_rx, bulk_rx, background_rx, NETWORK_BATCH_BYTES);
     let _writer_handle = tokio::spawn(writer_task(address, writer, packer));
 
     Self {
@@ -115,6 +117,7 @@ impl Connection {
       remote,
       normal_tx,
       bulk_tx,
+      background_tx,
       _writer_handle,
       _reader_handle,
     }
@@ -128,6 +131,7 @@ impl Connection {
     let lane = match priority {
       Priority::Normal => &self.normal_tx,
       Priority::Bulk => &self.bulk_tx,
+      Priority::Background => &self.background_tx,
     };
     if lane.send(bytes).await.is_err() {
       tracing::debug!("({}) network writer lane closed; dropping frame", self.address);

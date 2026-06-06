@@ -53,9 +53,47 @@ final class AssetLyricsDispatchTests: XCTestCase {
             return XCTFail("expected asset got, got \(resp.data)")
         }
         XCTAssertEqual(reply.id, "art:track:1")
-        XCTAssertEqual(reply.bytes, payload)
+        guard case let .inline(bytes) = reply.body else {
+            return XCTFail("small asset must ride inline, got \(reply.body)")
+        }
+        XCTAssertEqual(bytes, payload)
         XCTAssertEqual(reply.mime, "image/png")
         XCTAssertTrue(h.glue.calls.contains(.asset("art:track:1")))
+        await h.companion.stop()
+    }
+
+    func testAssetAboveInlineCapStreamsFragments() async throws {
+        var behaviors = FakeGlue.Behaviors()
+        let payload = Data((0 ..< 40 * 1024).map { UInt8($0 % 251) })
+        behaviors.asset = { _ in AssetBytes(bytes: payload, mime: "image/jpeg") }
+        let h = try await boot(glue: FakeGlue(behaviors: behaviors))
+
+        let requestId = UUID()
+        let resp = try await h.driver.request(
+            .asset(.request(AssetRequest(id: "art:big", requestId: requestId))),
+            timeout: .seconds(3)
+        )
+        guard case let .asset(.got(reply)) = resp.data else {
+            return XCTFail("expected asset got, got \(resp.data)")
+        }
+        guard case let .stream(ref) = reply.body else {
+            return XCTFail("large asset must declare a stream, got \(reply.body)")
+        }
+        XCTAssertEqual(ref.id, requestId, "stream ref id must be the request id")
+        XCTAssertEqual(ref.totalSize, UInt32(payload.count))
+
+        // fragments follow on the bulk lane, offset-ordered and complete.
+        var assembled = Data()
+        while assembled.count < payload.count {
+            let frame = try await h.driver.waitOutbound(timeout: .seconds(3)) { msg in
+                if case let .transfer(.fragment(f)) = msg.data, f.transferId == requestId { return true }
+                return false
+            }
+            guard case let .transfer(.fragment(f)) = frame.data else { continue }
+            XCTAssertEqual(Int(f.offset), assembled.count, "fragments must arrive in offset order")
+            assembled.append(f.bytes)
+        }
+        XCTAssertEqual(assembled, payload)
         await h.companion.stop()
     }
 

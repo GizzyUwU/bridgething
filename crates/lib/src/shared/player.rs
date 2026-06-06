@@ -47,6 +47,7 @@ pub enum Image {
 pub struct Album {
   pub id: String,
   pub name: String,
+  pub artwork_id: Option<String>,
 }
 
 impl From<String> for Album {
@@ -54,6 +55,7 @@ impl From<String> for Album {
     Self {
       id: format!("bridgething:album:{}", to_slug(&name)),
       name,
+      artwork_id: None,
     }
   }
 }
@@ -65,6 +67,7 @@ impl From<String> for Album {
 pub struct Artist {
   pub id: String,
   pub name: String,
+  pub artwork_id: Option<String>,
 }
 
 impl From<String> for Artist {
@@ -72,6 +75,7 @@ impl From<String> for Artist {
     Self {
       id: format!("bridgething:artist:{}", to_slug(&name)),
       name,
+      artwork_id: None,
     }
   }
 }
@@ -257,10 +261,25 @@ pub struct QueueItem {
   pub uri: String,
   pub title: Option<String>,
   pub artist: Option<String>,
+  pub artist_uri: Option<String>,
   pub album: Option<String>,
+  pub album_uri: Option<String>,
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,
   pub persistent_id: Option<String>,
+}
+
+/// What the current track is playing from: the playlist / album / show /
+/// artist context. Webapps render "playing from <name>"; `uri` lets them
+/// drill into it. `name` is `None` until the companion resolves it.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct PlaybackContext {
+  pub uri: String,
+  pub name: Option<String>,
 }
 
 /// Full player snapshot the daemon broadcasts to webapps. Initial value
@@ -277,6 +296,7 @@ pub struct PlayerState {
   pub playback: Playback,
   pub queue: Vec<QueueItem>,
   pub options: PlayerOptions,
+  pub context: Option<PlaybackContext>,
 }
 
 /// Currently-playing track, populated to the extent the gateway/iAP2
@@ -293,8 +313,10 @@ pub struct MediaItem {
   pub persistent_id: Option<String>,
   pub title: Option<String>,
   pub album: Option<String>,
+  pub album_uri: Option<String>,
   pub album_artist: Option<String>,
   pub artist: Option<String>,
+  pub artist_uri: Option<String>,
   pub liked: Option<bool>,
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,

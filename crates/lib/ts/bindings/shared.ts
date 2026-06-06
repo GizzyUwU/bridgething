@@ -6,7 +6,7 @@
  */
 export type AcceptCallAction = 'accept' | 'endAndAccept';
 
-export type Album = { id: string; name: string };
+export type Album = { id: string; name: string; artwork_id: string | null };
 
 /**
  * Daemon-observed state of the ANCS GATT-client session against the
@@ -30,7 +30,7 @@ export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized
  */
 export type ArtProfile = { heroPx: number; thumbPx: number };
 
-export type Artist = { id: string; name: string };
+export type Artist = { id: string; name: string; artwork_id: string | null };
 
 export type AssetRetention =
   | { type: 'lru' }
@@ -409,8 +409,10 @@ export type MediaItem = {
   persistentId: string | null;
   title: string | null;
   album: string | null;
+  albumUri: string | null;
   albumArtist: string | null;
   artist: string | null;
+  artistUri: string | null;
   liked: boolean | null;
   artworkId: string | null;
   durationMs: number | null;
@@ -436,8 +438,10 @@ export type MediaItemUpdate = {
   persistentId: string | null;
   title: string | null;
   album: string | null;
+  albumUri: string | null;
   albumArtist: string | null;
   artist: string | null;
+  artistUri: string | null;
   liked: boolean | null;
   artworkId: string | null;
   durationMs: number | null;
@@ -818,6 +822,13 @@ export type Playback = {
   appleMusicRadioAd: boolean | null;
 };
 
+/**
+ * What the current track is playing from: the playlist / album / show /
+ * artist context. Webapps render "playing from <name>"; `uri` lets them
+ * drill into it. `name` is `None` until the companion resolves it.
+ */
+export type PlaybackContext = { uri: string; name: string | null };
+
 export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
 
 export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
@@ -895,6 +906,7 @@ export type PlayerState = {
   playback: Playback;
   queue: Array<QueueItem>;
   options: PlayerOptions;
+  context: PlaybackContext | null;
 };
 
 /**
@@ -943,7 +955,7 @@ export type Position = {
   tsUnixS: number;
 };
 
-export type Priority = 'normal' | 'bulk';
+export type Priority = 'normal' | 'bulk' | 'background';
 
 /**
  * One row in the player queue. Lean cross-platform shape - gateways
@@ -956,7 +968,9 @@ export type QueueItem = {
   uri: string;
   title: string | null;
   artist: string | null;
+  artistUri: string | null;
   album: string | null;
+  albumUri: string | null;
   artworkId: string | null;
   durationMs: number | null;
   persistentId: string | null;
@@ -969,9 +983,9 @@ export type QueueItem = {
 export type QueuePosition = { type: 'append' } | { type: 'next' } | { type: 'index'; data: number };
 
 /**
- * Resolved range the companion is about to stream. `start` and `length`
- * echo the corresponding `RangeSpec`; the bytes follow as
- * `OtaAssetRangeChunk` events on the Bulk lane.
+ * Resolved range the companion is about to serve. `start` and `length`
+ * echo the corresponding `RangeSpec`; the bytes follow in the reply's
+ * `TransferBody`.
  */
 export type RangePart = { start: number; length: number };
 

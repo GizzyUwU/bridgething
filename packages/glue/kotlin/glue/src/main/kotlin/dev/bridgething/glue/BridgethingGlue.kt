@@ -16,6 +16,7 @@ import dev.bridgething.schema.LibrarySearchRequest
 import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NowPlayingUpdate
 import dev.bridgething.schema.PlayUri
+import dev.bridgething.schema.QueueUri
 import dev.bridgething.schema.RecommendationsResult
 import dev.bridgething.schema.RepeatMode
 import dev.bridgething.schema.SearchResult
@@ -51,6 +52,7 @@ interface BridgethingGlue {
     suspend fun skipPrev(): Unit = throw GlueError.NotImplemented
     suspend fun skipToIndex(index: UInt): Unit = throw GlueError.NotImplemented
     suspend fun seekTo(positionMs: UInt): Unit = throw GlueError.NotImplemented
+    suspend fun queue(req: QueueUri): Unit = throw GlueError.NotImplemented
     suspend fun setShuffle(on: Boolean): Unit = throw GlueError.NotImplemented
     suspend fun setRepeat(mode: RepeatMode): Unit = throw GlueError.NotImplemented
     suspend fun setSpeed(speed: Float): Unit = throw GlueError.NotImplemented
@@ -96,6 +98,12 @@ interface BridgethingGlue {
      */
     suspend fun setArtProfile(heroPx: Int, thumbPx: Int) {}
 
+    /**
+     * A device peer (re)connected. The daemon drops companion authority on disconnect, so the glue
+     * resets its authority cache and re-emits current now-playing to re-establish it. Default no-op.
+     */
+    suspend fun handlePeerConnected() {}
+
     /** default no-op; glues with interactive sign-in drive this to surface auth transitions. */
     suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {}
 
@@ -112,8 +120,6 @@ interface BridgethingGlue {
 data class GlueDebugState(
     val authorityPlaybackHeld: Boolean = false,
     val authorityMetadataHeld: Boolean = false,
-    val baselinePollActive: Boolean = false,
-    val hintFetchActive: Boolean = false,
 )
 
 /** Auth-lifecycle state an interactive glue reports to the companion. */

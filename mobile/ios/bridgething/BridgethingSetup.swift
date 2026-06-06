@@ -60,8 +60,6 @@ enum BridgethingApp {
 
     static let spotifyProviderId = SpotifyGlue.name
 
-    private static let spotifyWorker = "https://thinglabs.sh/auth"
-
     private static let spotifyScopes: [String] = [
         "user-read-playback-state",
         "user-modify-playback-state",
@@ -80,10 +78,6 @@ enum BridgethingApp {
         "user-read-private",
     ]
 
-    private static var authPsk: String {
-        (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String) ?? ""
-    }
-
     private static var pkceClientID: String {
         (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String) ?? ""
     }
@@ -94,43 +88,27 @@ enum BridgethingApp {
             pkceClientId: pkceClientID,
             pkceRedirectUri: "https://discord.com/api/connections/spotify/callback",
             pkceAuthorizeUrl: "https://accounts.spotify.com/authorize",
-            pkceTokenUrl: "https://accounts.spotify.com/api/token",
-            deviceCodePsk: authPsk,
-            deviceCodeUrl: "\(spotifyWorker)/api/device/code",
-            deviceCodeTokenUrl: "\(spotifyWorker)/api/token",
-            deviceCodeDescription: "car-thing-device"
+            pkceTokenUrl: "https://accounts.spotify.com/api/token"
         )
     }
 
-    static func persistSpotifyTokens(access: String, refresh: String, usesDealer: Bool) {
+    static func persistSpotifyTokens(access: String, refresh: String) {
         spotifyTokenStore.save(access: access, refresh: refresh)
-        spotifyTokenStore.setUsesDealer(usesDealer)
     }
 
     private static func makeSpotifyGlue() -> SpotifyGlue {
         let initial = spotifyTokenStore.load()
         return SpotifyGlue(
-            authenticatorFactory: spotifyAuthenticatorFactory(usesDealer: initial.usesDealer),
+            authenticatorFactory: spotifyAuthenticatorFactory(),
             accessToken: initial.access ?? "",
             refreshToken: initial.refresh ?? "",
             onTokensRefreshed: { access, refresh in
                 spotifyTokenStore.save(access: access, refresh: refresh)
-            },
-            usesDealer: initial.usesDealer
+            }
         )
     }
 
-    private static func spotifyAuthenticatorFactory(usesDealer: Bool) -> SpotifyAuthenticatorFactory {
-        if !usesDealer {
-            let configuration = DeviceCodeConfiguration(
-                deviceCodeEndpoint: URL(string: "\(spotifyWorker)/api/device/code")!,
-                tokenEndpoint: URL(string: "\(spotifyWorker)/api/token")!,
-                description: "car-thing-device",
-                scopes: spotifyScopes,
-                authorizationBearer: authPsk
-            )
-            return { DeviceCodeAuthenticator(configuration: configuration) }
-        }
+    private static func spotifyAuthenticatorFactory() -> SpotifyAuthenticatorFactory {
         let configuration = OAuthConfiguration(
             authorizationEndpoint: URL(string: "https://accounts.spotify.com/authorize")!,
             tokenEndpoint: URL(string: "https://accounts.spotify.com/api/token")!,
@@ -153,14 +131,12 @@ private final class TokenStore: @unchecked Sendable {
     struct Tokens {
         let access: String?
         let refresh: String?
-        let usesDealer: Bool
     }
 
     func load() -> Tokens {
         Tokens(
             access: read(account: "access"),
-            refresh: read(account: "refresh"),
-            usesDealer: read(account: "dealer") == "1"
+            refresh: read(account: "refresh")
         )
     }
 
@@ -169,14 +145,9 @@ private final class TokenStore: @unchecked Sendable {
         write(account: "refresh", value: refresh)
     }
 
-    func setUsesDealer(_ value: Bool) {
-        write(account: "dealer", value: value ? "1" : "0")
-    }
-
     func clear() {
         delete(account: "access")
         delete(account: "refresh")
-        delete(account: "dealer")
     }
 
     private func read(account: String) -> String? {

@@ -915,15 +915,6 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Cross-peer stream of `Player::Hint` messages. */
-  public val hint: Flow<Pair<String, PlaybackHint>> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayPlayerMsg.Hint ?: return@mapNotNull null
-      it.deviceId to inner.data
-    }
-
   /** Send `Player::Snapshot` to every connected peer (broadcast). */
   public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -941,23 +932,6 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
     }
   }
 
-  /** Send `Player::Delta` to every connected peer (broadcast). */
-  public suspend fun delta(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
   /** Send `Player::QueueChanged` to every connected peer (broadcast). */
   public suspend fun queueChanged(payload: QueueSnapshot, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -968,23 +942,6 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Player::EnrichmentOffer` to every connected peer (broadcast). */
-  public suspend fun enrichmentOffer(payload: NowPlayingEnrichment, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.EnrichmentOffer(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1095,23 +1052,6 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       it.deviceId to inner.data
     }
 
-  /** Send `System::OtaChunk` to every connected peer (broadcast). */
-  public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
   /** Send `System::OtaAbandon` to every connected peer (broadcast). */
   public suspend fun otaAbandon(payload: OtaAbandon, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -1156,23 +1096,6 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Command,
             data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `System::OtaAssetRangeChunk` to every connected peer (broadcast). */
-  public suspend fun otaAssetRangeChunk(payload: OtaAssetRangeChunk, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeChunk(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -1718,23 +1641,6 @@ public class ForwardSurface(private val gateway: BridgethingGateway) {
 
 /** Cross-peer methods for the `Asset` wire surface. */
 public class AssetSurface(private val gateway: BridgethingGateway) {
-  /** Send `Asset::Push` to every connected peer (broadcast). */
-  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
   /** Send `Asset::Clear` to every connected peer (broadcast). */
   public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
     val ids = gateway.connectedDeviceIds()
@@ -1749,55 +1655,6 @@ public class AssetSurface(private val gateway: BridgethingGateway) {
           gateway.send(deviceId, msg, priority)
         }
       }.awaitAll()
-    }
-  }
-
-  /** Send `Asset::PushChunk` to every connected peer (broadcast). */
-  public suspend fun pushChunk(payload: AssetPushChunk, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Asset::PushAbandon` to every connected peer (broadcast). */
-  public suspend fun pushAbandon(payload: AssetPushAbandon, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Command,
-            data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Typed request to a specific peer: companion sends, daemon responds. */
-  public suspend fun pushBegin(deviceId: String, req: AssetPushBegin, timeout: Duration = 30.seconds): RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
-    val outboundData = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushBegin(req))
-    val response = gateway.request(deviceId, outboundData, timeout)
-    return when (val d = response.data) {
-      is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
-        is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
-        is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(WireError.Unsupported)
-      }
-      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(WireError.Unsupported)
     }
   }
 
@@ -1906,6 +1763,44 @@ public class TimeSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+}
+
+/** Cross-peer methods for the `Transfer` wire surface. */
+public class TransferSurface(private val gateway: BridgethingGateway) {
+  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
+  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
+  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -2763,16 +2658,6 @@ public class PlayerSurfaceForDevice(
       inner.data
     }
 
-  /** Stream of `Player::Hint` from this peer. */
-  public val hint: Flow<PlaybackHint> = gateway.events
-    .filterIsInstance<GatewayEvent.Message>()
-    .filter { it.deviceId == deviceId }
-    .mapNotNull {
-      val outer = it.message.data as? BridgeToGatewayMsgData.Player ?: return@mapNotNull null
-      val inner = outer.data as? BridgeToGatewayPlayerMsg.Hint ?: return@mapNotNull null
-      inner.data
-    }
-
   /** Send `Player::Snapshot` to this peer. */
   public suspend fun snapshot(payload: PlayerState, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2783,32 +2668,12 @@ public class PlayerSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
-  /** Send `Player::Delta` to this peer. */
-  public suspend fun delta(payload: NowPlayingUpdate, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.Delta(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
   /** Send `Player::QueueChanged` to this peer. */
   public suspend fun queueChanged(payload: QueueSnapshot, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.QueueChanged(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Player::EnrichmentOffer` to this peer. */
-  public suspend fun enrichmentOffer(payload: NowPlayingEnrichment, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.EnrichmentOffer(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2930,16 +2795,6 @@ public class SystemSurfaceForDevice(
       inner.data
     }
 
-  /** Send `System::OtaChunk` to this peer. */
-  public suspend fun otaChunk(payload: OtaChunk, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaChunk(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
   /** Send `System::OtaAbandon` to this peer. */
   public suspend fun otaAbandon(payload: OtaAbandon, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -2966,16 +2821,6 @@ public class SystemSurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Command,
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.CancelUpdate),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `System::OtaAssetRangeChunk` to this peer. */
-  public suspend fun otaAssetRangeChunk(payload: OtaAssetRangeChunk, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeChunk(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -3514,16 +3359,6 @@ public class AssetSurfaceForDevice(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
 ) {
-  /** Send `Asset::Push` to this peer. */
-  public suspend fun push(payload: AssetPush, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Push(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
   /** Send `Asset::Clear` to this peer. */
   public suspend fun clear(payload: AssetClear, priority: Priority = Priority.Normal) {
     val msg = GatewayToBridgeMsg(
@@ -3532,41 +3367,6 @@ public class AssetSurfaceForDevice(
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Clear(payload)),
     )
     gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Asset::PushChunk` to this peer. */
-  public suspend fun pushChunk(payload: AssetPushChunk, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushChunk(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Asset::PushAbandon` to this peer. */
-  public suspend fun pushAbandon(payload: AssetPushAbandon, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Command,
-      data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushAbandon(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Typed request to this peer: companion sends, daemon responds. */
-  public suspend fun pushBegin(req: AssetPushBegin, timeout: Duration = 30.seconds): RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
-    val outboundData = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.PushBegin(req))
-    val response = gateway.request(deviceId, outboundData, timeout)
-    return when (val d = response.data) {
-      is BridgeToGatewayMsgData.Asset -> when (val inner = d.data) {
-        is BridgeToGatewayAssetMsg.PushBeginAck -> RequestResult.Ok(inner.data)
-        is BridgeToGatewayAssetMsg.PushBeginRejected -> RequestResult.DomainErr(inner.data)
-        else -> RequestResult.ProtocolErr(WireError.Unsupported)
-      }
-      is BridgeToGatewayMsgData.Error -> RequestResult.ProtocolErr(d.data)
-      else -> RequestResult.ProtocolErr(WireError.Unsupported)
-    }
   }
 
   /** Stream of typed inbound `AssetRequest` requests. */
@@ -3661,6 +3461,33 @@ public class TimeSurfaceForDevice(
 
 }
 
+/** Per-peer methods for the `Transfer` wire surface (deviceId is baked in). */
+public class TransferSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Send `Transfer::Fragment` to this peer. */
+  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Transfer::Abandon` to this peer. */
+  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+}
+
 /** Per-peer methods for the `Lyrics` wire surface (deviceId is baked in). */
 public class LyricsSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -3721,6 +3548,8 @@ public class BridgethingGatewayDevice(
   public val chrome: ChromeSurfaceForDevice get() = ChromeSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Time` wire surface. */
   public val time: TimeSurfaceForDevice get() = TimeSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Transfer` wire surface. */
+  public val transfer: TransferSurfaceForDevice get() = TransferSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Lyrics` wire surface. */
   public val lyrics: LyricsSurfaceForDevice get() = LyricsSurfaceForDevice(gateway, deviceId)
 }
@@ -3796,6 +3625,10 @@ public val BridgethingGateway.chrome: ChromeSurface
 /** Methods scoped to the `Time` wire surface. */
 public val BridgethingGateway.time: TimeSurface
   get() = TimeSurface(this)
+
+/** Methods scoped to the `Transfer` wire surface. */
+public val BridgethingGateway.transfer: TransferSurface
+  get() = TransferSurface(this)
 
 /** Methods scoped to the `Lyrics` wire surface. */
 public val BridgethingGateway.lyrics: LyricsSurface
@@ -4202,7 +4035,7 @@ public class AssetRequestHandle internal constructor(
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Got(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, Priority.Bulk)
   }
 
   public suspend fun respondErr(error: AssetNotFoundReply) {

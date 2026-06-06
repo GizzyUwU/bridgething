@@ -73,6 +73,10 @@ impl Gateway {
   pub fn time(&self) -> TimeSurface<'_> {
     TimeSurface(self)
   }
+  /// The `Transfer` surface.
+  pub fn transfer(&self) -> TransferSurface<'_> {
+    TransferSurface(self)
+  }
 }
 
 /// Methods scoped to the `Audio` wire surface.
@@ -205,29 +209,8 @@ impl<'a> PlayerSurface<'a> {
   pub async fn snapshot(&self, payload: PlayerState) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePlayerMsgEvent::Snapshot(payload)).await
   }
-  pub async fn delta(&self, payload: NowPlayingUpdate) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgePlayerMsgEvent::Delta(payload)).await
-  }
   pub async fn queue_changed(&self, payload: QueueSnapshot) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgePlayerMsgEvent::QueueChanged(payload)).await
-  }
-  pub async fn enrichment_offer(&self, payload: NowPlayingEnrichment) -> Result<(), SdkError> {
-    self
-      .0
-      .event(GatewayToBridgePlayerMsgEvent::EnrichmentOffer(payload))
-      .await
-  }
-  /// Stream of `Player` events.
-  pub fn events(&self) -> impl Stream<Item = BridgeToGatewayPlayerMsgEvent> + 'static {
-    BroadcastStream::new(self.0.events()).filter_map(|msg| {
-      ready(match msg {
-        Ok(msg) => match msg.data {
-          BridgeToGatewayMsgData::Player(inner) => inner.into_event(),
-          _ => None,
-        },
-        Err(_) => None,
-      })
-    })
   }
 }
 
@@ -235,9 +218,6 @@ impl<'a> PlayerSurface<'a> {
 pub struct SystemSurface<'a>(&'a Gateway);
 
 impl<'a> SystemSurface<'a> {
-  pub async fn ota_chunk(&self, payload: OtaChunk) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeSystemMsgEvent::OtaChunk(payload)).await
-  }
   pub async fn ota_abandon(&self, payload: OtaAbandon) -> Result<(), SdkError> {
     self
       .0
@@ -252,12 +232,6 @@ impl<'a> SystemSurface<'a> {
   }
   pub async fn cancel_update(&self) -> Result<(), SdkError> {
     self.0.command(GatewayToBridgeSystemMsgCommand::CancelUpdate).await
-  }
-  pub async fn ota_asset_range_chunk(&self, payload: OtaAssetRangeChunk) -> Result<(), SdkError> {
-    self
-      .0
-      .event(GatewayToBridgeSystemMsgEvent::OtaAssetRangeChunk(payload))
-      .await
   }
   pub async fn logs_unsubscribe(&self, payload: LogsUnsubscribe) -> Result<(), SdkError> {
     self
@@ -400,26 +374,8 @@ impl<'a> WebappSurface<'a> {
 pub struct AssetSurface<'a>(&'a Gateway);
 
 impl<'a> AssetSurface<'a> {
-  pub async fn push(&self, payload: AssetPush) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeAssetMsgEvent::Push(payload)).await
-  }
   pub async fn clear(&self, payload: AssetClear) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeAssetMsgEvent::Clear(payload)).await
-  }
-  pub async fn push_chunk(&self, payload: AssetPushChunk) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeAssetMsgEvent::PushChunk(payload)).await
-  }
-  pub async fn push_abandon(&self, payload: AssetPushAbandon) -> Result<(), SdkError> {
-    self
-      .0
-      .command(GatewayToBridgeAssetMsgCommand::PushAbandon(payload))
-      .await
-  }
-  pub async fn push_begin(
-    &self,
-    request: AssetPushBegin,
-  ) -> Result<AssetPushBeginAck, RequestFailure<AssetPushBeginRejected>> {
-    self.0.request(request).await
   }
 }
 
@@ -462,5 +418,17 @@ pub struct TimeSurface<'a>(&'a Gateway);
 impl<'a> TimeSurface<'a> {
   pub async fn snapshot(&self, payload: TimeInfo) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeTimeMsgEvent::Snapshot(payload)).await
+  }
+}
+
+/// Methods scoped to the `Transfer` wire surface.
+pub struct TransferSurface<'a>(&'a Gateway);
+
+impl<'a> TransferSurface<'a> {
+  pub async fn fragment(&self, payload: TransferFragment) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTransferMsgEvent::Fragment(payload)).await
+  }
+  pub async fn abandon(&self, payload: TransferAbandon) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTransferMsgEvent::Abandon(payload)).await
   }
 }

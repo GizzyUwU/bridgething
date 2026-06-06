@@ -76,7 +76,10 @@ pub struct ArtProfile {
 
 impl Default for ArtProfile {
   fn default() -> Self {
-    Self { hero_px: 248, thumb_px: 96 }
+    Self {
+      hero_px: 248,
+      thumb_px: 96,
+    }
   }
 }
 

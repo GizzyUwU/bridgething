@@ -156,7 +156,7 @@ public actor BridgethingCompanion {
             }
             if let snapshot = await volumeMonitor.snapshot() {
                 await broadcastVolume(level: snapshot.level, muted: snapshot.muted)
-                try? await gateway.authority.claim(AuthorityClaim(scope: .volume))
+                try? await gateway.authority.claim(AuthorityClaim(scope: .volume, appBundle: nil))
             }
         #endif
     }
@@ -486,6 +486,7 @@ public actor BridgethingCompanion {
                 if deviceLogStreaming { await subscribeDeviceLogs(device.id) }
                 await announceCapabilities()
                 await emitTimeSnapshot()
+                await activeGlue?.handlePeerConnected()
                 #if os(iOS)
                     await reestablishAncsLink()
                     connectedPeerCount += 1
@@ -548,7 +549,6 @@ public actor BridgethingCompanion {
             case let .setRepeat(r): try await glue.setRepeat(r.mode)
             case let .setSpeed(s): try await glue.setSpeed(s.speed)
             case let .setCrossfade(s): try await glue.setCrossfade(s.durationMs)
-            case let .hint(h): await glue.handlePlaybackHint(h)
             }
         } catch {
             emitLog(
@@ -561,11 +561,14 @@ public actor BridgethingCompanion {
 
     private func runAssetDispatch() async {
         for await (handle, req) in gateway.asset.requestRequests {
-            Task { [weak self] in await self?.handleAsset(handle: handle, id: req.id) }
+            Task { [weak self] in await self?.handleAsset(handle: handle, id: req.id, requestId: req.requestId) }
         }
     }
 
-    private func handleAsset(handle: AssetRequestHandle, id: String) async {
+    private static let assetFragmentBytes = 8 * 1024
+    private static let inlineBodyMaxBytes = 8 * 1024
+
+    private func handleAsset(handle: AssetRequestHandle, id: String, requestId: UUID) async {
         let bytes: AssetBytes?
         do {
             bytes = try await activeGlue?.asset(id: id)
@@ -579,9 +582,47 @@ public actor BridgethingCompanion {
             return
         }
         do {
-            try await handle.respond(AssetGotReply(id: id, bytes: bytes.bytes, mime: bytes.mime))
+            try await streamAsset(handle: handle, id: id, requestId: requestId, payload: bytes)
         } catch {
             log(.warn, "asset \(id) respond failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func streamAsset(handle: AssetRequestHandle, id: String, requestId: UUID, payload: AssetBytes) async throws {
+        let data = payload.bytes
+        if data.count <= Self.inlineBodyMaxBytes {
+            try await handle.respond(AssetGotReply(id: id, mime: payload.mime, body: .inline(data)))
+            return
+        }
+        try await handle.respond(AssetGotReply(
+            id: id,
+            mime: payload.mime,
+            body: .stream(TransferRef(id: requestId, totalSize: UInt32(data.count), sha256: nil))
+        ))
+        try await Self.sendFragments(
+            surface: gateway.device(handle.deviceId).transfer,
+            transferId: requestId,
+            data: data,
+            fragmentBytes: Self.assetFragmentBytes,
+            priority: .bulk
+        )
+    }
+
+    static func sendFragments(
+        surface: TransferSurfaceForDevice,
+        transferId: UUID,
+        data: Data,
+        fragmentBytes: Int,
+        priority: Priority
+    ) async throws {
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + fragmentBytes, data.count)
+            try await surface.fragment(
+                TransferFragment(transferId: transferId, offset: UInt32(offset), bytes: data.subdata(in: offset ..< end)),
+                priority: priority
+            )
+            offset = end
         }
     }
 

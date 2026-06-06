@@ -173,8 +173,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     public func spotifyAuthConfig() async -> BridgethingSpotifyAuthConfig { BridgethingApp.spotifyAuthConfig() }
 
-    public func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) async throws {
-        BridgethingApp.persistSpotifyTokens(access: accessToken, refresh: refreshToken, usesDealer: usesDealer)
+    public func completeSpotifySignIn(accessToken: String, refreshToken: String) async throws {
+        BridgethingApp.persistSpotifyTokens(access: accessToken, refresh: refreshToken)
         try await setActiveProvider(id: BridgethingApp.spotifyProviderId)
     }
 
@@ -292,8 +292,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         return BridgethingCompanionDebug(
             authorityPlaybackHeld: debug.authorityPlaybackHeld,
             authorityMetadataHeld: debug.authorityMetadataHeld,
-            baselinePollActive: debug.baselinePollActive,
-            hintFetchActive: debug.hintFetchActive,
             ancsAuthStatus: ancs
         )
     }

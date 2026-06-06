@@ -24,8 +24,8 @@ use bridgething_test_harness::{
   Iap2Source, Iap2SourceDriver, ModernClientDriver, OverAirTransport,
 };
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, MediaItemUpdate, NowPlayingUpdate, PhoneCall,
-  PhoneCallDirection, PhoneCallStatus, Position,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, GeoAccuracy, MediaItem, PhoneCall, PhoneCallDirection,
+  PhoneCallStatus, PlayerState, Position,
   client::{GeoWatch, SetShuffle},
   gateway::AuthorityClaim,
 };
@@ -141,19 +141,20 @@ where
     .authority()
     .claim(AuthorityClaim {
       scope: CompanionAuthorityScope::NowPlayingMetadata,
+      app_bundle: None,
     })
     .await
     .expect("claim metadata authority");
   gateway
     .player()
-    .delta(NowPlayingUpdate {
-      media_item: Some(MediaItemUpdate {
+    .snapshot(PlayerState {
+      track: Some(MediaItem {
         persistent_id: Some("seam-gateway".into()),
         title: Some("Seam Gateway Track".into()),
         artist: Some("Seam".into()),
         ..Default::default()
       }),
-      playback: None,
+      ..Default::default()
     })
     .await
     .expect("push now-playing");

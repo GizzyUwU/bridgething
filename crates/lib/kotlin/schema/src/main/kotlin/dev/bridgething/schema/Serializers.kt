@@ -112,6 +112,9 @@ public object GatewayToBridgeSystemMsgSerializer :
 public object GatewayToBridgeTimeMsgSerializer :
   KSerializer<GatewayToBridgeTimeMsg> by AdjacentTaggedSerializer(GatewayToBridgeTimeMsg::class, discriminator = "event")
 
+public object GatewayToBridgeTransferMsgSerializer :
+  KSerializer<GatewayToBridgeTransferMsg> by AdjacentTaggedSerializer(GatewayToBridgeTransferMsg::class, discriminator = "event")
+
 public object GatewayToBridgeTunnelMsgSerializer :
   KSerializer<GatewayToBridgeTunnelMsg> by AdjacentTaggedSerializer(GatewayToBridgeTunnelMsg::class, discriminator = "event")
 
@@ -147,6 +150,9 @@ public object PlayerErrorSerializer :
 
 public object QueuePositionSerializer :
   KSerializer<QueuePosition> by AdjacentTaggedSerializer(QueuePosition::class, discriminator = "type")
+
+public object TransferBodySerializer :
+  KSerializer<TransferBody> by AdjacentTaggedSerializer(TransferBody::class, discriminator = "type")
 
 public object TunnelErrorSerializer :
   KSerializer<TunnelError> by AdjacentTaggedSerializer(TunnelError::class, discriminator = "type")

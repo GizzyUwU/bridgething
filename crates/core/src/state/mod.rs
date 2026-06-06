@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
   als::AlsManager,
-  asset::{AssetCache, AssetError, AssetIngest, wait::AssetWaitTracker},
+  asset::{AssetCache, AssetError, wait::AssetWaitTracker},
   authority::AuthorityRegistry,
   capabilities::CapabilitiesRegistry,
   chrome,
@@ -16,13 +16,14 @@ use crate::{
   net::{ClientMan, WireEventBus},
   paths,
   peer::PeerTracker,
-  transfer::{ChunkedTransfer, TransferError},
+  transfer::{TransferError, sinks::TransferSinks},
 };
 
 mod audio;
 mod geo_watchers;
 pub mod log_tap;
 pub mod meta;
+mod root_browse;
 pub mod routes;
 pub mod storage;
 mod telephony;
@@ -33,6 +34,7 @@ mod webapps;
 pub use audio::{AudioError, AudioManager};
 pub use geo_watchers::{GeoWatchers, WatchAggregate, WatchChange};
 pub use log_tap::{LogTap, LogTapLayer};
+pub use root_browse::RootBrowseCache;
 pub use routes::RouteTable;
 pub use storage::{DeviceStore, KvStore, MetaStore};
 use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, meta::Entity as MetaEntity};
@@ -53,8 +55,6 @@ pub struct AppState {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
-  pub transfers: ChunkedTransfer,
-  pub ingest: AssetIngest,
   pub asset_wait: AssetWaitTracker,
   pub iap2_pending_art: Iap2PendingArt,
   pub authority: AuthorityRegistry,
@@ -72,12 +72,13 @@ pub struct AppState {
   pub geo_watchers: GeoWatchers,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
+  pub root_browse: RootBrowseCache,
+  pub transfer_sinks: TransferSinks,
 
   db: DatabaseConnection,
   meta_store: MetaStore,
   _asset_cache_handle: JoinHandle<()>,
   _transfer_handle: JoinHandle<()>,
-  _ingest_handle: JoinHandle<()>,
   _als_handle: JoinHandle<()>,
   _mic_handle: JoinHandle<()>,
 }
@@ -92,8 +93,6 @@ impl AppState {
       chrome,
       webapps,
       assets,
-      transfers,
-      ingest,
       asset_wait,
       iap2_pending_art,
       authority,
@@ -111,11 +110,11 @@ impl AppState {
       geo_watchers,
       log_tap,
       tunnel_routes,
+      transfer_sinks,
       db,
       meta_store,
       asset_cache_handle,
       transfer_handle,
-      ingest_handle,
       als_handle,
       mic_handle,
     } = parts;
@@ -127,8 +126,6 @@ impl AppState {
       chrome,
       webapps,
       assets,
-      transfers,
-      ingest,
       asset_wait,
       iap2_pending_art,
       authority,
@@ -146,11 +143,12 @@ impl AppState {
       geo_watchers,
       log_tap,
       tunnel_routes,
+      root_browse: RootBrowseCache::default(),
+      transfer_sinks,
       db,
       meta_store,
       _asset_cache_handle: asset_cache_handle,
       _transfer_handle: transfer_handle,
-      _ingest_handle: ingest_handle,
       _als_handle: als_handle,
       _mic_handle: mic_handle,
     })
@@ -206,8 +204,6 @@ pub struct StateAssembly {
   pub chrome: chrome::Chrome,
   pub webapps: WebappRegistry,
   pub assets: AssetCache,
-  pub transfers: ChunkedTransfer,
-  pub ingest: AssetIngest,
   pub asset_wait: AssetWaitTracker,
   pub iap2_pending_art: Iap2PendingArt,
   pub authority: AuthorityRegistry,
@@ -225,11 +221,11 @@ pub struct StateAssembly {
   pub geo_watchers: GeoWatchers,
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
+  pub transfer_sinks: TransferSinks,
   pub db: DatabaseConnection,
   pub meta_store: MetaStore,
   pub asset_cache_handle: JoinHandle<()>,
   pub transfer_handle: JoinHandle<()>,
-  pub ingest_handle: JoinHandle<()>,
   pub als_handle: JoinHandle<()>,
   pub mic_handle: JoinHandle<()>,
 }

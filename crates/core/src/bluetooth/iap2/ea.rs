@@ -244,6 +244,7 @@ impl Iap2EaGateway {
     let ea_priority = match priority {
       Priority::Normal => EaPriority::Normal,
       Priority::Bulk => EaPriority::Bulk,
+      Priority::Background => EaPriority::Background,
     };
     if let Err(err) = conn.outbound.send(ea_priority, buf.freeze()).await {
       tracing::warn!(stream_id = key.1, ?err, "iap2 ea gateway: chunker channel closed");

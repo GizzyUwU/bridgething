@@ -12,8 +12,6 @@ import dev.bridgething.glue.GlueDebugState
 import dev.bridgething.glue.GlueError
 import dev.bridgething.glue.GlueNowPlaying
 import dev.bridgething.glue.GlueServiceHealth
-import dev.bridgething.schema.AssetPush
-import dev.bridgething.schema.AssetRetention
 import dev.bridgething.schema.AuthorityClaim
 import dev.bridgething.schema.AuthorityRelease
 import dev.bridgething.schema.BrowseEntry
@@ -31,12 +29,16 @@ import dev.bridgething.schema.LibraryFavoritesListRequest
 import dev.bridgething.schema.LibraryItem
 import dev.bridgething.schema.LibraryRecommendationsRequest
 import dev.bridgething.schema.LibrarySearchRequest
+import dev.bridgething.schema.MediaItem
 import dev.bridgething.schema.MediaItemUpdate
 import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NowPlayingUpdate
+import dev.bridgething.schema.Playback
+import dev.bridgething.schema.PlaybackContext
+import dev.bridgething.schema.PlaybackState
+import dev.bridgething.schema.PlayerOptions
 import dev.bridgething.schema.PlayUri
 import dev.bridgething.schema.PlaybackUpdate
-import dev.bridgething.schema.Priority
 import dev.bridgething.schema.QueuePosition
 import dev.bridgething.schema.QueueUri
 import dev.bridgething.schema.RecommendationsResult
@@ -59,22 +61,21 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsBytes
-import io.ktor.http.HttpHeaders
 import java.net.URLDecoder
 import java.net.URLEncoder
 import dev.bridgething.schema.Album as WireAlbum
 import dev.bridgething.schema.Artist as WireArtist
 import dev.bridgething.schema.Playlist as WirePlaylist
+import dev.bridgething.schema.PlayerState as WirePlayerState
 import dev.bridgething.schema.PodcastEpisode as WirePodcastEpisode
 import dev.bridgething.schema.RepeatMode as WireRepeat
 import dev.bridgething.schema.Show as WireShow
 import dev.bridgething.schema.Track as WireTrack
 
 private const val ASSET_ID_PREFIX = "spotify/img/"
+private const val SCDN_IMAGE_PREFIX = "https://i.scdn.co/image/"
 private const val DEFAULT_HERO_EDGE = 248
-private const val IMAGE_BROWSE_EDGE = 300
-private const val CONTROL_REFETCH_MS = 700L
-private const val POLL_INTERVAL_MS = 60_000L
+private const val DEFAULT_THUMB_EDGE = 96
 private const val SPOTIFY_APP_BUNDLE = "com.spotify.client"
 
 typealias SpotifyAuthenticatorFactory = () -> SpotifyAuthenticator
@@ -85,8 +86,8 @@ class SpotifyGlue(
     private val accessToken: String = "",
     private val refreshToken: String = "",
     private val onTokensRefreshed: ((accessToken: String, refreshToken: String) -> Unit)? = null,
-    private val usesDealer: Boolean = false,
     private val engine: HttpClientEngine? = null,
+    cacheDir: java.io.File? = null,
 ) : BridgethingGlue, SpotinyDelegate {
     override val name: String = "spotify"
     override val displayName: String = "Spotify"
@@ -115,7 +116,9 @@ class SpotifyGlue(
         }
         if (engine != null) HttpClient(engine, configure) else HttpClient(CIO, configure)
     }
-    private val pushedAssetIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    private val imageCache: ImageDiskCache? =
+        cacheDir?.let { ImageDiskCache(java.io.File(it, "spotify-art"), 200L shl 20) }
 
     private var client: SpotinyClient? = null
     private var gateway: BridgethingGateway? = null
@@ -123,16 +126,16 @@ class SpotifyGlue(
     private var nowPlayingObserver: ((GlueNowPlaying?) -> Unit)? = null
     private var authObserver: ((GlueAuthState) -> Unit)? = null
     private var serviceHealthObserver: ((GlueServiceHealth) -> Unit)? = null
-    private var hintFetchJob: Job? = null
-    private var baselinePollJob: Job? = null
     private var connectJob: Job? = null
     @Volatile private var heroEdge: Int = DEFAULT_HERO_EDGE
+    @Volatile private var thumbEdge: Int = DEFAULT_THUMB_EDGE
+    private val likedByUri = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    @Volatile private var lastSnapshotState: PlayerState? = null
 
     override suspend fun attach(gateway: BridgethingGateway) {
         if (this.gateway != null) detach()
 
         this.gateway = gateway
-        pushedAssetIds.clear()
 
         if (accessToken.isEmpty() && refreshToken.isEmpty()) {
             // no tokens yet: RN drives interactive sign-in and re-attaches via completeSpotifySignIn.
@@ -153,13 +156,7 @@ class SpotifyGlue(
         this.client = client
 
         connectJob = scope.launch {
-            if (usesDealer) {
-                client.connect()
-            } else {
-                client.authenticateOnly()
-                startBaselinePollIfNeeded()
-                fetchAndDispatch()
-            }
+            client.connect()
         }
     }
 
@@ -169,10 +166,6 @@ class SpotifyGlue(
 
         connectJob?.cancel()
         connectJob = null
-        hintFetchJob?.cancel()
-        hintFetchJob = null
-        baselinePollJob?.cancel()
-        baselinePollJob = null
         runCatching { client?.disconnect() }
 
         val gw = gateway
@@ -185,6 +178,8 @@ class SpotifyGlue(
         nowPlayingObserver?.invoke(null)
         nowPlayingObserver = null
 
+        likedByUri.clear()
+        lastSnapshotState = null
         client = null
         gateway = null
     }
@@ -195,6 +190,7 @@ class SpotifyGlue(
 
     override suspend fun setArtProfile(heroPx: Int, thumbPx: Int) {
         heroEdge = heroPx.coerceAtLeast(1)
+        thumbEdge = thumbPx.coerceAtLeast(1)
     }
 
     override suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {
@@ -216,11 +212,9 @@ class SpotifyGlue(
         } else {
             val parsed = SpotifyUri.parse(uri.uri) ?: throw GlueError.NotImplemented
             client.player.play(uri = parsed)
-        }
-        scheduleControlRefetch()
-    }
+        }    }
 
-    suspend fun queue(req: QueueUri) {
+    override suspend fun queue(req: QueueUri) {
         val client = client ?: throw GlueError.Detached
         if (req.position is QueuePosition.Index) throw GlueError.NotImplemented
         val parsed = SpotifyUri.parse(req.uri) ?: throw GlueError.NotImplemented
@@ -229,39 +223,27 @@ class SpotifyGlue(
 
     override suspend fun pause() {
         val client = client ?: throw GlueError.Detached
-        client.player.pause()
-        scheduleControlRefetch()
-    }
+        client.player.pause()    }
 
     override suspend fun resume() {
         val client = client ?: throw GlueError.Detached
-        client.player.resume()
-        scheduleControlRefetch()
-    }
+        client.player.resume()    }
 
     override suspend fun skipNext() {
         val client = client ?: throw GlueError.Detached
-        client.player.skipNext()
-        scheduleControlRefetch()
-    }
+        client.player.skipNext()    }
 
     override suspend fun skipPrev() {
         val client = client ?: throw GlueError.Detached
-        client.player.skipPrevious()
-        scheduleControlRefetch()
-    }
+        client.player.skipPrevious()    }
 
     override suspend fun seekTo(positionMs: UInt) {
         val client = client ?: throw GlueError.Detached
-        client.player.seek(positionMs.toInt())
-        scheduleControlRefetch()
-    }
+        client.player.seek(positionMs.toInt())    }
 
     override suspend fun setShuffle(on: Boolean) {
         val client = client ?: throw GlueError.Detached
-        client.player.setShuffle(on)
-        scheduleControlRefetch()
-    }
+        client.player.setShuffle(on)    }
 
     override suspend fun setRepeat(mode: WireRepeat) {
         val client = client ?: throw GlueError.Detached
@@ -270,9 +252,7 @@ class SpotifyGlue(
             WireRepeat.All -> RepeatMode.CONTEXT
             WireRepeat.One -> RepeatMode.TRACK
         }
-        client.player.setRepeatMode(mapped)
-        scheduleControlRefetch()
-    }
+        client.player.setRepeatMode(mapped)    }
 
     override suspend fun search(req: LibrarySearchRequest): SearchResult {
         val client = client ?: throw GlueError.Detached
@@ -346,7 +326,7 @@ class SpotifyGlue(
         val limit = req.limit.toInt()
         val offset = req.offset.toInt()
 
-        return when (req.nodeId) {
+        val result = when (req.nodeId) {
             null, "", "root" -> browseRoot(client)
 
             RECENTLY_PLAYED_NODE -> {
@@ -404,6 +384,8 @@ class SpotifyGlue(
                 browseChildren(client, parsed, limit, offset)
             }
         }
+        warmArt(result)
+        return result
     }
 
     private suspend fun browseChildren(client: SpotinyClient, uri: SpotifyUri, limit: Int, offset: Int): BrowseResult {
@@ -551,6 +533,7 @@ class SpotifyGlue(
         } else {
             client.library.save(listOf(uri))
         }
+        applyLikedChange(item.uri, !saved)
     }
 
     override suspend fun favoritesSet(item: ItemRef, liked: Boolean) {
@@ -561,6 +544,7 @@ class SpotifyGlue(
         } else {
             client.library.remove(listOf(uri))
         }
+        applyLikedChange(item.uri, liked)
     }
 
     override suspend fun favoritesSetMany(entries: List<FavoritesSet>) {
@@ -569,77 +553,190 @@ class SpotifyGlue(
         val toRemove = entries.filter { !it.liked }.mapNotNull { spotifyUri(it.item.uri) }
         if (toSave.isNotEmpty()) client.library.save(toSave)
         if (toRemove.isNotEmpty()) client.library.remove(toRemove)
+        for (entry in entries) applyLikedChange(entry.item.uri, entry.liked)
     }
 
     private fun spotifyUri(raw: String): SpotifyUri? =
         SpotifyUri.parse(raw)?.takeIf { it.namespace == "spotify" }
 
-    private fun scheduleControlRefetch() {
-        if (usesDealer) return
-        hintFetchJob?.cancel()
-        hintFetchJob = scope.launch {
-            delay(CONTROL_REFETCH_MS)
-            if (!isActive) return@launch
-            fetchAndDispatch()
+    // browse tiles render small: use the device-advertised thumb edge, never the now-playing hero.
+    private fun dedupedTrackEntries(tracks: List<Track>): List<BrowseEntry> {
+        val seen = mutableSetOf<String>()
+        return tracks.mapNotNull { track ->
+            if (!seen.add(track.uri)) return@mapNotNull null
+            BrowseEntry.Item(LibraryItem.Track(mapTrack(track)))
         }
+    }
+
+    private fun mapTrack(t: Track, saved: Boolean = false): WireTrack {
+        val primary = t.artists.firstOrNull()
+        return WireTrack(
+            id = t.uri,
+            name = t.name,
+            album = WireAlbum(id = t.album?.uri ?: "", name = t.album?.name ?: ""),
+            artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
+            artists = t.artists.map { WireArtist(id = it.uri, name = it.name) },
+            duration_ms = maxOf(t.durationMs, 0).toUInt(),
+            image_id = imageAssetId(bestImageUrl(t.imageUrl, thumbEdge), thumbEdge) ?: "",
+            saved = saved,
+        )
+    }
+
+    private fun mapPlaylistItem(item: PlaylistItem): BrowseEntry {
+        if (item.type == "episode") {
+            return BrowseEntry.Item(LibraryItem.PodcastEpisode(WirePodcastEpisode(
+                uri = item.uri,
+                name = item.name ?: "",
+                showName = null,
+                durationMs = maxOf(item.durationMs, 0).toUInt(),
+                publishedAtUnixS = null,
+                artworkId = imageAssetId(bestImageUrl(SpotifyImageURLs(item.images), thumbEdge), thumbEdge),
+            )))
+        }
+        val primary = item.artists.firstOrNull()
+        return BrowseEntry.Item(LibraryItem.Track(WireTrack(
+            id = item.uri,
+            name = item.name ?: "",
+            album = WireAlbum(id = item.album?.uri ?: "", name = item.album?.name ?: ""),
+            artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
+            artists = item.artists.map { WireArtist(id = it.uri, name = it.name) },
+            duration_ms = maxOf(item.durationMs, 0).toUInt(),
+            image_id = imageAssetId(bestImageUrl(item.imageUrl, thumbEdge), thumbEdge) ?: "",
+            saved = false,
+        )))
+    }
+
+    private fun mapAlbum(a: Album): WireAlbum = WireAlbum(
+        id = a.uri,
+        name = a.name,
+        artwork_id = imageAssetId(bestImageUrl(a.imageUrl, thumbEdge), thumbEdge),
+    )
+
+    private fun mapArtist(a: Artist): WireArtist = WireArtist(
+        id = a.uri,
+        name = a.name,
+        artwork_id = imageAssetId(bestImageUrl(a.imageUrl, thumbEdge), thumbEdge),
+    )
+
+    private fun mapPlaylist(p: Playlist): WirePlaylist = WirePlaylist(
+        uri = p.uri,
+        name = p.name,
+        ownerName = null,
+        trackCount = null,
+        artworkId = imageAssetId(bestImageUrl(p.imageUrl, thumbEdge), thumbEdge),
+    )
+
+    private fun mapShow(s: Show): WireShow = WireShow(
+        uri = s.uri,
+        name = s.name,
+        publisher = null,
+        episodeCount = null,
+        artworkId = imageAssetId(bestImageUrl(s.imageUrl, thumbEdge), thumbEdge),
+    )
+
+    private fun mapEpisode(e: Episode): WirePodcastEpisode = WirePodcastEpisode(
+        uri = e.uri,
+        name = e.name,
+        showName = e.show?.name,
+        durationMs = maxOf(e.durationMs, 0).toUInt(),
+        publishedAtUnixS = null,
+        artworkId = imageAssetId(bestImageUrl(e.imageUrl, thumbEdge), thumbEdge),
+    )
+
+    private fun likeFields(uri: String?): Pair<Boolean?, Boolean?> {
+        if (uri == null || spotifyUri(uri) == null) return null to null
+        return likedByUri[uri] to true
+    }
+
+    private fun buildSnapshot(state: PlayerState): WirePlayerState {
+        val (liked, supported) = likeFields(state.item?.uri)
+        return makeSnapshot(state, heroEdge, liked, supported)
+    }
+
+    private suspend fun resolveLiked(uri: String) {
+        val liked = client?.library?.contains(listOf(uri))?.firstOrNull() ?: return
+        likedByUri[uri] = liked
+        reemitSnapshotIfCurrent(uri)
+    }
+
+    private suspend fun reemitSnapshotIfCurrent(uri: String) {
+        val pending = lastSnapshotState ?: return
+        val gw = gateway ?: return
+        if (pending.item?.uri != uri) return
+        runCatching { gw.player.snapshot(buildSnapshot(pending)) }
+    }
+
+    private suspend fun applyLikedChange(uri: String, liked: Boolean) {
+        likedByUri[uri] = liked
+        reemitSnapshotIfCurrent(uri)
     }
 
     override suspend fun debugState(): GlueDebugState = GlueDebugState(
         authorityPlaybackHeld = authorityHeld,
         authorityMetadataHeld = authorityHeld,
-        baselinePollActive = baselinePollJob != null,
-        hintFetchActive = hintFetchJob != null,
     )
 
     override suspend fun asset(id: String): AssetBytes? {
         val (urlString, maxEdge) = parseImageId(id) ?: return null
-        val response: HttpResponse = httpClient.get(urlString)
+        val master = fetchMaster(urlString) ?: return null
+        val scaled = downsample(master, maxEdge)
+        return AssetBytes(bytes = scaled ?: master, mime = "image/jpeg")
+    }
+
+    private suspend fun fetchMaster(url: String): ByteArray? {
+        imageCache?.get(url)?.let { return it }
+        val response: HttpResponse = httpClient.get(url)
         if (response.status.value !in 200..299) return null
         val data = response.bodyAsBytes()
-        val scaled = downsample(data, maxEdge)
-        return if (scaled != null) {
-            AssetBytes(bytes = scaled, mime = "image/jpeg")
-        } else {
-            AssetBytes(bytes = data, mime = response.headers[HttpHeaders.ContentType])
+        imageCache?.put(url, data)
+        return data
+    }
+
+    private fun warmArt(result: BrowseResult) {
+        for (id in collectArtIds(result.entries).toSet()) {
+            val url = parseImageId(id)?.first ?: continue
+            scope.launch { fetchMaster(url) }
         }
     }
 
-    private suspend fun pushArtwork(item: PlayerItem?, maxEdge: Int) {
-        val gateway = gateway ?: return
-        val raw = item?.let { rawArtworkUrl(it, maxEdge) } ?: return
-        val id = imageAssetId(raw, maxEdge) ?: return
-        if (pushedAssetIds.contains(id)) return
-        val bytes = runCatching { asset(id) }.getOrNull() ?: return
-        runCatching {
-            gateway.asset.push(
-                AssetPush(id = id, bytes = bytes.bytes, mime = bytes.mime ?: "image/jpeg", retention = AssetRetention.Lru),
-                Priority.Bulk,
-            )
-            pushedAssetIds.add(id)
+    private fun collectArtIds(entries: List<BrowseEntry>): List<String> =
+        entries.flatMap { entry ->
+            when (entry) {
+                is BrowseEntry.Folder ->
+                    listOfNotNull(entry.data.artworkId) + collectArtIds(entry.data.previewChildren ?: emptyList())
+                is BrowseEntry.Item -> listOfNotNull(libraryItemArtworkId(entry.data))
+            }
         }
-    }
 
-    private suspend fun fetchAndDispatch() {
-        val client = client ?: return
-        val state = client.player.getPlaybackState() ?: return
-        handleStateUpdate(state)
+    private fun libraryItemArtworkId(item: LibraryItem): String? = when (item) {
+        is LibraryItem.Track -> item.data.image_id.ifEmpty { null }
+        is LibraryItem.Playlist -> item.data.artworkId
+        is LibraryItem.PodcastEpisode -> item.data.artworkId
+        is LibraryItem.Show -> item.data.artworkId
+        is LibraryItem.Station -> item.data.artworkId
+        is LibraryItem.Album, is LibraryItem.Artist -> null
     }
 
     private fun handleStateUpdate(state: PlayerState) {
         val gateway = gateway ?: return
-        val update = makeUpdate(state, heroEdge)
+        val currentUri = state.item?.uri
+        val (liked, likeSupported) = likeFields(currentUri)
+        val update = makeUpdate(state, heroEdge, liked, likeSupported)
         val artworkUrl = state.item?.let { rawArtworkUrl(it, heroEdge) }
         nowPlayingObserver?.invoke(GlueNowPlaying(update = update, artworkUrl = artworkUrl))
 
-        val nowPlaying = state.isPlaying
+        lastSnapshotState = state
+        if (currentUri != null && spotifyUri(currentUri) != null && likedByUri[currentUri] == null) {
+            scope.launch { resolveLiked(currentUri) }
+        }
+
+        val hasItem = state.item != null
         scope.launch {
-            pushArtwork(state.item, heroEdge)
-            runCatching { gateway.player.delta(update) }
-            if (nowPlaying) {
-                runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingPlayback)) }
-                runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingMetadata)) }
+            runCatching { gateway.player.snapshot(makeSnapshot(state, heroEdge, liked, likeSupported)) }
+            if (hasItem) {
+                runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingPlayback, SPOTIFY_APP_BUNDLE)) }
+                runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingMetadata, SPOTIFY_APP_BUNDLE)) }
                 authorityHeld = true
-                if (!usesDealer) startBaselinePollIfNeeded()
             } else if (authorityHeld) {
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingPlayback)) }
                 runCatching { gateway.authority.release(AuthorityRelease(CompanionAuthorityScope.NowPlayingMetadata)) }
@@ -650,7 +747,6 @@ class SpotifyGlue(
 
     private fun handleSocketDown() {
         nowPlayingObserver?.invoke(null)
-        stopBaselinePoll()
         val gateway = gateway ?: return
         if (!authorityHeld) return
         authorityHeld = false
@@ -660,20 +756,15 @@ class SpotifyGlue(
         }
     }
 
-    private fun startBaselinePollIfNeeded() {
-        if (baselinePollJob != null) return
-        baselinePollJob = scope.launch {
-            while (isActive) {
-                delay(POLL_INTERVAL_MS)
-                if (!isActive) return@launch
-                fetchAndDispatch()
-            }
-        }
-    }
-
-    private fun stopBaselinePoll() {
-        baselinePollJob?.cancel()
-        baselinePollJob = null
+    override suspend fun handlePeerConnected() {
+        val gateway = gateway ?: return
+        authorityHeld = false
+        val pending = lastSnapshotState ?: return
+        if (pending.item == null) return
+        runCatching { gateway.player.snapshot(buildSnapshot(pending)) }
+        runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingPlayback, SPOTIFY_APP_BUNDLE)) }
+        runCatching { gateway.authority.claim(AuthorityClaim(CompanionAuthorityScope.NowPlayingMetadata, SPOTIFY_APP_BUNDLE)) }
+        authorityHeld = true
     }
 
     override fun authDidRefresh(accessToken: String, refreshToken: String) {
@@ -722,14 +813,6 @@ class SpotifyGlue(
                 hasMore = offset + pageCount < total,
             )
 
-        fun dedupedTrackEntries(tracks: List<Track>): List<BrowseEntry> {
-            val seen = mutableSetOf<String>()
-            return tracks.mapNotNull { track ->
-                if (!seen.add(track.uri)) return@mapNotNull null
-                BrowseEntry.Item(LibraryItem.Track(mapTrack(track)))
-            }
-        }
-
         fun likedSongsEntry(userId: String?): BrowseEntry? {
             if (userId == null) return null
             val uri = SpotifyUri.build(SpotifyUri.Kind.COLLECTION, userId)
@@ -752,24 +835,27 @@ class SpotifyGlue(
                 ),
             )
 
-        fun makeUpdate(state: PlayerState, heroEdge: Int): NowPlayingUpdate {
+        fun makeUpdate(state: PlayerState, heroEdge: Int, liked: Boolean?, likeSupported: Boolean?): NowPlayingUpdate {
             val media: MediaItemUpdate? = state.item?.let { item ->
                 val title = item.name
                 val artist = item.artists.joinToString(", ") { it.name }
                 val album = (item as? PlayerItem.TrackItem)?.track?.album?.name
+                val albumUri = (item as? PlayerItem.TrackItem)?.track?.album?.uri
                 MediaItemUpdate(
                     persistentId = item.uri,
                     title = title.ifEmpty { null },
                     album = album,
+                    albumUri = albumUri,
                     albumArtist = null,
                     artist = artist.ifEmpty { null },
-                    liked = null,
+                    artistUri = item.artists.firstOrNull()?.uri,
+                    liked = liked,
                     artworkId = artworkId(item, heroEdge),
                     durationMs = maxOf(item.durationMs, 0).toUInt(),
                     mediaTypes = null,
                     trackNumber = null,
                     trackCount = null,
-                    isLikeSupported = null,
+                    isLikeSupported = likeSupported,
                     isBanSupported = null,
                     isBanned = null,
                     isResidentOnDevice = null,
@@ -799,6 +885,60 @@ class SpotifyGlue(
             return NowPlayingUpdate(mediaItem = media, playback = playback)
         }
 
+        fun makeSnapshot(state: PlayerState, heroEdge: Int, liked: Boolean?, likeSupported: Boolean?): WirePlayerState {
+            val track: MediaItem? = state.item?.let { item ->
+                val title = item.name
+                val artist = item.artists.joinToString(", ") { it.name }
+                val album = (item as? PlayerItem.TrackItem)?.track?.album?.name
+                val albumUri = (item as? PlayerItem.TrackItem)?.track?.album?.uri
+                MediaItem(
+                    uri = item.uri,
+                    persistentId = item.uri,
+                    title = title.ifEmpty { null },
+                    album = album,
+                    albumUri = albumUri,
+                    albumArtist = null,
+                    artist = artist.ifEmpty { null },
+                    artistUri = item.artists.firstOrNull()?.uri,
+                    liked = liked,
+                    artworkId = artworkId(item, heroEdge),
+                    durationMs = maxOf(item.durationMs, 0).toUInt(),
+                    mediaTypes = null,
+                    trackNumber = null,
+                    trackCount = null,
+                    isLikeSupported = likeSupported,
+                    isBanSupported = null,
+                    isBanned = null,
+                    chapterCount = null,
+                )
+            }
+
+            val allowSeek = state.actions?.disallows?.seeking?.let { !it } ?: true
+            val playback = Playback(
+                state = if (state.isPlaying) PlaybackState.Playing else PlaybackState.Paused,
+                positionMs = maxOf(state.progressMs, 0).toUInt(),
+                shuffle = state.shuffleState,
+                shuffleMode = if (state.shuffleState) ShuffleMode.Songs else ShuffleMode.Off,
+                repeat = mapRepeat(state.repeatState),
+                queueIndex = null,
+                queueCount = null,
+                queueChapterIndex = null,
+                setElapsedTimeAvailable = allowSeek,
+                queueListAvail = null,
+                appleMusicRadioAd = null,
+            )
+
+            val context = state.context?.let { PlaybackContext(uri = it.uri, name = null) }
+
+            return WirePlayerState(
+                track = track,
+                playback = playback,
+                queue = emptyList(),
+                options = PlayerOptions(speed = 1.0f, crossfade_ms = null),
+                context = context,
+            )
+        }
+
         fun artworkId(item: PlayerItem, maxEdge: Int): String? = imageAssetId(rawArtworkUrl(item, maxEdge) ?: "", maxEdge)
 
         fun rawArtworkUrl(item: PlayerItem, maxEdge: Int): String? {
@@ -824,11 +964,14 @@ class SpotifyGlue(
 
         fun imageAssetId(rawUrl: String, maxEdge: Int): String? {
             if (rawUrl.isEmpty()) return null
+            if (rawUrl.startsWith(SCDN_IMAGE_PREFIX)) {
+                return "$ASSET_ID_PREFIX$maxEdge/i${rawUrl.substring(SCDN_IMAGE_PREFIX.length)}"
+            }
             val encoded = URLEncoder.encode(rawUrl, "UTF-8")
                 .replace("+", "%20")
                 .replace("*", "%2A")
                 .replace("%7E", "~")
-            return "$ASSET_ID_PREFIX$maxEdge/$encoded"
+            return "$ASSET_ID_PREFIX$maxEdge/u$encoded"
         }
 
         fun parseImageId(id: String): Pair<String, Int>? {
@@ -837,7 +980,14 @@ class SpotifyGlue(
             val slash = rest.indexOf('/')
             if (slash <= 0) return null
             val maxEdge = rest.substring(0, slash).toIntOrNull() ?: return null
-            val url = runCatching { URLDecoder.decode(rest.substring(slash + 1), "UTF-8") }.getOrNull() ?: return null
+            val tagged = rest.substring(slash + 1)
+            if (tagged.isEmpty()) return null
+            val body = tagged.substring(1)
+            val url = when (tagged[0]) {
+                'i' -> SCDN_IMAGE_PREFIX + body
+                'u' -> runCatching { URLDecoder.decode(body, "UTF-8") }.getOrNull() ?: return null
+                else -> return null
+            }
             return url to maxEdge
         }
 
@@ -875,73 +1025,6 @@ class SpotifyGlue(
             ItemKind.PodcastEpisode -> "episode"
             ItemKind.Station -> null
         }
-
-        fun mapTrack(t: Track, saved: Boolean = false): WireTrack {
-            val primary = t.artists.firstOrNull()
-            return WireTrack(
-                id = t.uri,
-                name = t.name,
-                album = WireAlbum(id = t.album?.uri ?: "", name = t.album?.name ?: ""),
-                artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
-                artists = t.artists.map { WireArtist(id = it.uri, name = it.name) },
-                duration_ms = maxOf(t.durationMs, 0).toUInt(),
-                image_id = imageAssetId(bestImageUrl(t.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE) ?: "",
-                saved = saved,
-            )
-        }
-
-        fun mapPlaylistItem(item: PlaylistItem): BrowseEntry {
-            if (item.type == "episode") {
-                return BrowseEntry.Item(LibraryItem.PodcastEpisode(WirePodcastEpisode(
-                    uri = item.uri,
-                    name = item.name ?: "",
-                    showName = null,
-                    durationMs = maxOf(item.durationMs, 0).toUInt(),
-                    publishedAtUnixS = null,
-                    artworkId = imageAssetId(bestImageUrl(SpotifyImageURLs(item.images), IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
-                )))
-            }
-            val primary = item.artists.firstOrNull()
-            return BrowseEntry.Item(LibraryItem.Track(WireTrack(
-                id = item.uri,
-                name = item.name ?: "",
-                album = WireAlbum(id = item.album?.uri ?: "", name = item.album?.name ?: ""),
-                artist = WireArtist(id = primary?.uri ?: "", name = primary?.name ?: ""),
-                artists = item.artists.map { WireArtist(id = it.uri, name = it.name) },
-                duration_ms = maxOf(item.durationMs, 0).toUInt(),
-                image_id = imageAssetId(bestImageUrl(item.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE) ?: "",
-                saved = false,
-            )))
-        }
-
-        fun mapAlbum(a: Album): WireAlbum = WireAlbum(id = a.uri, name = a.name)
-
-        fun mapArtist(a: Artist): WireArtist = WireArtist(id = a.uri, name = a.name)
-
-        fun mapPlaylist(p: Playlist): WirePlaylist = WirePlaylist(
-            uri = p.uri,
-            name = p.name,
-            ownerName = null,
-            trackCount = null,
-            artworkId = imageAssetId(bestImageUrl(p.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
-        )
-
-        fun mapShow(s: Show): WireShow = WireShow(
-            uri = s.uri,
-            name = s.name,
-            publisher = null,
-            episodeCount = null,
-            artworkId = imageAssetId(bestImageUrl(s.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
-        )
-
-        fun mapEpisode(e: Episode): WirePodcastEpisode = WirePodcastEpisode(
-            uri = e.uri,
-            name = e.name,
-            showName = e.show?.name,
-            durationMs = maxOf(e.durationMs, 0).toUInt(),
-            publishedAtUnixS = null,
-            artworkId = imageAssetId(bestImageUrl(e.imageUrl, IMAGE_BROWSE_EDGE), IMAGE_BROWSE_EDGE),
-        )
 
         fun mapRepeat(mode: RepeatMode): WireRepeat = when (mode) {
             RepeatMode.OFF -> WireRepeat.Off

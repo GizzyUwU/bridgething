@@ -73,7 +73,6 @@ object WireSurfaceManifest {
     "forward.json",
     "forward.text",
     "notifications.ancsAuthStateChanged",
-    "player.hint",
     "system.deviceNickname",
     "system.deviceNicknameChanged",
     "system.deviceNicknameRejected",

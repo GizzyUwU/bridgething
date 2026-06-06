@@ -2,7 +2,7 @@ use bridgething_macros::BridgeEnum;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{NowPlayingUpdate, PlayerError, PlayerState, QueueItem};
+use crate::{CurrentlyActiveApplication, NowPlayingUpdate, PlayerError, PlayerState, QueueItem};
 
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -10,6 +10,7 @@ use crate::{NowPlayingUpdate, PlayerError, PlayerState, QueueItem};
 #[ts(export, export_to = "client.ts")]
 pub struct PlayerStateReply {
   pub state: PlayerState,
+  pub active_app: Option<CurrentlyActiveApplication>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -19,6 +20,7 @@ pub struct PlayerStateReply {
 pub struct PlayerQueueReply {
   pub current: Option<QueueItem>,
   pub items: Vec<QueueItem>,
+  pub previous: Vec<QueueItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

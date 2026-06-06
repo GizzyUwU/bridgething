@@ -9,8 +9,6 @@ import com.margelo.nitro.bridgething.session.HybridBridgethingSession
 import dev.bridgething.applemusic.AppleMusicGlue
 import dev.bridgething.companion.HostInfo
 import dev.bridgething.lyrics.LrclibResolver
-import dev.bridgething.spotify.DeviceCodeAuthenticator
-import dev.bridgething.spotify.DeviceCodeConfig
 import dev.bridgething.spotify.PkceRefreshAuthenticator
 import dev.bridgething.spotify.PkceRefreshConfig
 import dev.bridgething.spotify.SpotifyAuthenticatorFactory
@@ -25,8 +23,6 @@ import dev.bridgething.tidal.TidalGlue
  */
 public object BridgethingApp {
     public const val APP_NAME: String = "bridgething"
-
-    private const val AUTH_WORKER_BASE_URL: String = "https://thinglabs.sh/auth"
 
     public const val SPOTIFY_PROVIDER_ID: String = "spotify"
 
@@ -54,15 +50,11 @@ public object BridgethingApp {
         pkceRedirectUri = "https://discord.com/api/connections/spotify/callback",
         pkceAuthorizeUrl = "https://accounts.spotify.com/authorize",
         pkceTokenUrl = "https://accounts.spotify.com/api/token",
-        deviceCodePsk = BuildConfig.BRIDGETHING_AUTH_PSK,
-        deviceCodeUrl = "$AUTH_WORKER_BASE_URL/api/device/code",
-        deviceCodeTokenUrl = "$AUTH_WORKER_BASE_URL/api/token",
-        deviceCodeDescription = "car-thing-device",
     )
 
-    public fun persistSpotifyTokens(context: Context, access: String, refresh: String, usesDealer: Boolean) {
+    public fun persistSpotifyTokens(context: Context, access: String, refresh: String) {
         SpotifyTokenStore(context.applicationContext)
-            .save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }, usesDealer))
+            .save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
     }
 
     public fun installBridgething(context: Context) {
@@ -85,7 +77,7 @@ public object BridgethingApp {
                 id = "spotify",
                 displayName = "Spotify",
                 available = true,
-                factory = { makeSpotifyGlue(spotifyTokenStore) },
+                factory = { makeSpotifyGlue(spotifyTokenStore, app.cacheDir) },
                 signOut = { spotifyTokenStore.clear() },
                 hasCredentials = { !spotifyTokenStore.load().refresh.isNullOrEmpty() },
             ),
@@ -108,39 +100,27 @@ public object BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(app))
     }
 
-    private fun makeSpotifyGlue(store: SpotifyTokenStore): SpotifyGlue {
+    private fun makeSpotifyGlue(store: SpotifyTokenStore, cacheDir: java.io.File): SpotifyGlue {
         val seed = store.load()
-        val usesDealer = seed.usesDealer
-        val authenticatorFactory: SpotifyAuthenticatorFactory
-        if (usesDealer) {
-            val pkceConfig = PkceRefreshConfig(
-                clientId = BuildConfig.BRIDGETHING_PKCE_CLIENT_ID,
-                tokenUrl = "https://accounts.spotify.com/api/token",
-            )
-            authenticatorFactory = { PkceRefreshAuthenticator(pkceConfig) }
-        } else {
-            val deviceConfig = DeviceCodeConfig(
-                workerBaseUrl = AUTH_WORKER_BASE_URL,
-                authorizationBearer = BuildConfig.BRIDGETHING_AUTH_PSK,
-                scopes = SPOTIFY_SCOPES,
-                description = "car-thing-device",
-            )
-            authenticatorFactory = { DeviceCodeAuthenticator(deviceConfig) }
-        }
+        val pkceConfig = PkceRefreshConfig(
+            clientId = BuildConfig.BRIDGETHING_PKCE_CLIENT_ID,
+            tokenUrl = "https://accounts.spotify.com/api/token",
+        )
+        val authenticatorFactory: SpotifyAuthenticatorFactory = { PkceRefreshAuthenticator(pkceConfig) }
         return SpotifyGlue(
             authenticatorFactory = authenticatorFactory,
             accessToken = seed.access ?: "",
             refreshToken = seed.refresh ?: "",
             onTokensRefreshed = { access, refresh ->
-                store.save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }, usesDealer))
+                store.save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
             },
-            usesDealer = usesDealer,
+            cacheDir = cacheDir,
         )
     }
 }
 
 private class SpotifyTokenStore(private val context: Context) {
-    data class Tokens(val access: String?, val refresh: String?, val usesDealer: Boolean = false)
+    data class Tokens(val access: String?, val refresh: String?)
 
     private val prefs: SharedPreferences by lazy {
         val masterKey = MasterKey.Builder(context)
@@ -159,7 +139,6 @@ private class SpotifyTokenStore(private val context: Context) {
     fun load(): Tokens = Tokens(
         prefs.getString("access", null),
         prefs.getString("refresh", null),
-        prefs.getBoolean("usesDealer", false),
     )
 
     fun save(tokens: Tokens) {
@@ -167,12 +146,11 @@ private class SpotifyTokenStore(private val context: Context) {
             .apply {
                 if (tokens.access != null) putString("access", tokens.access) else remove("access")
                 if (tokens.refresh != null) putString("refresh", tokens.refresh) else remove("refresh")
-                putBoolean("usesDealer", tokens.usesDealer)
             }
             .apply()
     }
 
     fun clear() {
-        prefs.edit().remove("access").remove("refresh").remove("usesDealer").apply()
+        prefs.edit().remove("access").remove("refresh").apply()
     }
 }

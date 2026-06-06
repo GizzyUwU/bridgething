@@ -12,10 +12,10 @@ import Foundation
 /// place; pure NLU intents (CLARIFY, WEBAPP_INTENT, fast-path-only)
 /// pass through unchanged.
 ///
-/// Auth: the host supplies an `accessTokenProvider` closure (typically
-/// pointing at the daytona DeviceCodeAuthenticator's cached token). The
-/// resolver doesn't refresh on its own; a 401 surfaces as ResolveError
-/// and the host's auth layer catches it and rotates.
+/// Auth: the host supplies an `accessTokenProvider` closure pointing at
+/// the active Spotify authenticator's cached token. The resolver doesn't
+/// refresh on its own; a 401 surfaces as ResolveError and the host's auth
+/// layer catches it and rotates.
 ///
 /// Cache: in-process LRU of size `cacheCapacity` (default 100) keyed by
 /// (entityType, normalizedQuery). Hits the same Spotify endpoint that

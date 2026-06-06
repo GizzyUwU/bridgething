@@ -57,10 +57,24 @@ impl ClientToBridgeStoreMsgRequestDispatch for StorageHandler {
 
     if app_id == BROWSER_WEBAPP_ID && key == BROWSER_NAVIGATE_KEY {
       tracing::info!("({}) browser webapp cdp-navigate to {}", &self.handle.from, &value);
-      if let Err(e) = self.handle.state.chrome.send(ChromeCommand::NavigateExternal(value.clone())).await {
+      if let Err(e) = self
+        .handle
+        .state
+        .chrome
+        .send(ChromeCommand::NavigateExternal(value.clone()))
+        .await
+      {
         tracing::warn!("({}) browser navigate dispatch failed: {:?}", &self.handle.from, e);
       }
-      return Ok(self.handle.respond_to::<KVPut>(StorageResponse { key, value: Some(value) }).await?);
+      return Ok(
+        self
+          .handle
+          .respond_to::<KVPut>(StorageResponse {
+            key,
+            value: Some(value),
+          })
+          .await?,
+      );
     }
 
     tracing::debug!("({}) putting key: {}, value: {}", &self.handle.from, &key, &value);

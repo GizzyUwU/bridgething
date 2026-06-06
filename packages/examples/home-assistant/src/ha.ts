@@ -166,7 +166,10 @@ export class HaConnection {
         if (this.subscribedIds.length) void this.startSubscription();
         return;
       case 'auth_invalid':
-        this.onStatus({ kind: 'error', message: 'home assistant rejected the token; re-check it in the companion app.' });
+        this.onStatus({
+          kind: 'error',
+          message: 'home assistant rejected the token; re-check it in the companion app.',
+        });
         this.rejectReady?.(new Error('auth_invalid'));
         this.closed = true;
         this.teardownSocket();
@@ -227,7 +230,10 @@ export class HaConnection {
   }
 
   private async send(payload: Record<string, unknown>): Promise<void> {
-    await this.client.net.wsSend({ connectionId: this.connectionId, frame: { type: 'text', data: JSON.stringify(payload) } });
+    await this.client.net.wsSend({
+      connectionId: this.connectionId,
+      frame: { type: 'text', data: JSON.stringify(payload) },
+    });
   }
 
   private onLost(message: string): void {
@@ -278,7 +284,8 @@ function toWsUrl(baseUrl: string): string {
 function openErrorMessage(res: { kind: 'domain' | 'protocol'; error: unknown }): string {
   if (res.kind === 'domain') {
     const err = res.error as { type?: string };
-    if (err.type === 'connectFailed') return 'could not reach home assistant; check the URL and that the phone has network.';
+    if (err.type === 'connectFailed')
+      return 'could not reach home assistant; check the URL and that the phone has network.';
     if (err.type === 'gatewayDisconnected') return 'no network - is a phone connected to the companion app?';
   }
   return 'could not open the home assistant connection.';

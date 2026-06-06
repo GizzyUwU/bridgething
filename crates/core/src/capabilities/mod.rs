@@ -79,8 +79,9 @@ impl CapabilitiesRegistry {
     self.rebuild_and_broadcast().await
   }
 
-  pub async fn claim_authority(&self, scope: CompanionAuthorityScope) -> WSResult<()> {
+  pub async fn claim_authority(&self, scope: CompanionAuthorityScope, app_bundle: Option<String>) -> WSResult<()> {
     self.inner.authority.claim(scope);
+    self.inner.authority.set_companion_app_bundle(app_bundle);
     self.rebuild_and_broadcast().await
   }
 
@@ -251,7 +252,9 @@ mod tests {
     let auth = AuthorityRegistry::new();
     let reg = CapabilitiesRegistry::new(bus, auth.clone());
 
-    let _ = reg.claim_authority(CompanionAuthorityScope::NowPlayingMetadata).await;
+    let _ = reg
+      .claim_authority(CompanionAuthorityScope::NowPlayingMetadata, None)
+      .await;
     let snap = reg.snapshot();
     assert_eq!(snap.authority, vec![CompanionAuthorityScope::NowPlayingMetadata]);
     assert!(auth.is_authoritative(CompanionAuthorityScope::NowPlayingMetadata));
@@ -271,7 +274,9 @@ mod tests {
     let _ = reg
       .set_announce(addr, caps_with(vec!["spotify"], SurfaceAvailability::default()))
       .await;
-    let _ = reg.claim_authority(CompanionAuthorityScope::NowPlayingPlayback).await;
+    let _ = reg
+      .claim_authority(CompanionAuthorityScope::NowPlayingPlayback, None)
+      .await;
     assert!(reg.snapshot().gateway.is_some());
     assert!(!reg.snapshot().authority.is_empty());
 

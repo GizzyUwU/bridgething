@@ -7,11 +7,13 @@ use typeshare::typeshare;
 use crate::CompanionAuthorityScope;
 
 #[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 pub struct AuthorityClaim {
   pub scope: CompanionAuthorityScope,
+  pub app_bundle: Option<String>,
 }
 
 #[typeshare]
@@ -22,12 +24,12 @@ pub struct AuthorityRelease {
   pub scope: CompanionAuthorityScope,
 }
 
-/// Companion declares per-scope authority. `Claim` is idempotent and may
-/// be re-issued to refresh the freshness timestamp. `Release` is the
-/// "stop preferring my data for this scope" signal. Stale claims fall
-/// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+/// Companion declares per-scope authority. `Release` is the "stop
+/// preferring my data for this scope" signal. Non-now-playing claims
+/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
+/// hold until release / disconnect / app-change arbitration.
 #[typeshare]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "gateway.ts")]
 #[bridge_enum(into = crate::gateway::GatewayToBridgeMsgData)]

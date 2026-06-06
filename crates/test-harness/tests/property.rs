@@ -40,7 +40,7 @@ use bridgething_test_harness::{
   model::{Model, ModelEvent, Projection},
 };
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItemUpdate, NowPlayingUpdate, PlaybackUpdate,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlayerOptions, PlayerState,
   gateway::{AuthorityClaim, AuthorityRelease},
 };
 use proptest::prelude::*;
@@ -135,14 +135,17 @@ async fn apply_to_daemon(harness: &Harness, addr: Address, phone: &Gateway, even
     ModelEvent::Iap2Artwork { transfer_id, bytes_len } => {
       harness.iap2_artwork(addr, *transfer_id, vec![0u8; *bytes_len]).await
     }
-    ModelEvent::CompanionDelta(update) => phone
+    ModelEvent::CompanionSnapshot(snap) => phone
       .player()
-      .delta(update.clone())
+      .snapshot(snap.clone())
       .await
-      .map_err(|e| anyhow::anyhow!("companion delta: {e}")),
+      .map_err(|e| anyhow::anyhow!("companion snapshot: {e}")),
     ModelEvent::AuthorityClaim(scope) => phone
       .authority()
-      .claim(AuthorityClaim { scope: *scope })
+      .claim(AuthorityClaim {
+        scope: *scope,
+        app_bundle: None,
+      })
       .await
       .map_err(|e| anyhow::anyhow!("authority claim: {e}")),
     ModelEvent::AuthorityRelease(scope) => phone
@@ -267,16 +270,16 @@ fn companion_pid() -> impl Strategy<Value = Option<String>> {
   ]
 }
 
-// Companion deltas carry no artwork_id in this cut: companion-pushed assets ride
-// a separate AssetPush the model does not track, so a companion art id would
-// trip the dangling-art invariant. Omitting it still exercises the key rule -
-// companion-authoritative-with-no-art must NOT fall through to iAP2 art.
-fn companion_delta_strategy() -> impl Strategy<Value = NowPlayingUpdate> {
-  let media = prop_oneof![
+// Companion snapshots carry no artwork_id in this cut: companion-pushed assets
+// ride a separate AssetPush the model does not track, so a companion art id
+// would trip the dangling-art invariant. Omitting it still exercises the key
+// rule - companion-authoritative-with-no-art must NOT fall through to iAP2 art.
+fn companion_snapshot_strategy() -> impl Strategy<Value = PlayerState> {
+  let track = prop_oneof![
     1 => Just(None),
     5 => (companion_pid(), title_strategy(), opt_duration(), opt_bool(), name_strategy()).prop_map(
       |(persistent_id, title, duration_ms, liked, album)| {
-        Some(MediaItemUpdate {
+        Some(MediaItem {
           persistent_id,
           title,
           duration_ms,
@@ -287,20 +290,28 @@ fn companion_delta_strategy() -> impl Strategy<Value = NowPlayingUpdate> {
       }
     ),
   ];
-  let playback = prop_oneof![
-    1 => Just(None),
-    3 => (opt_state(), opt_shuffle(), opt_repeat(), opt_bool()).prop_map(|(state, shuffle_mode, repeat, set_elapsed)| {
-      Some(PlaybackUpdate {
-        playing: state.map(|s| matches!(s, PlaybackState::Playing)),
-        shuffle: shuffle_mode.map(|m| m.is_on()),
-        shuffle_mode: shuffle_mode.map(translate_shuffle),
-        repeat: repeat.map(translate_repeat),
-        set_elapsed_time_available: set_elapsed,
-        ..Default::default()
-      })
-    }),
-  ];
-  (media, playback).prop_map(|(media_item, playback)| NowPlayingUpdate { media_item, playback })
+  let playback = (opt_state(), opt_shuffle(), opt_repeat(), opt_bool()).prop_map(
+    |(state, shuffle_mode, repeat, set_elapsed_time_available)| Playback {
+      state: match state {
+        Some(PlaybackState::Playing) => libbridgething::PlaybackState::Playing,
+        _ => libbridgething::PlaybackState::Paused,
+      },
+      shuffle: shuffle_mode.is_some_and(|m| m.is_on()),
+      shuffle_mode: shuffle_mode.map(translate_shuffle),
+      repeat: repeat.map(translate_repeat).unwrap_or(libbridgething::RepeatMode::Off),
+      set_elapsed_time_available,
+      ..Default::default()
+    },
+  );
+  (track, playback).prop_map(|(track, playback)| PlayerState {
+    track,
+    playback,
+    options: PlayerOptions {
+      speed: 1.0,
+      crossfade_ms: None,
+    },
+    ..Default::default()
+  })
 }
 
 fn scope_strategy() -> impl Strategy<Value = CompanionAuthorityScope> {
@@ -333,7 +344,7 @@ fn event_strategy() -> impl Strategy<Value = ModelEvent> {
     4 => (media_strategy(), playback_strategy())
       .prop_map(|(media_item, playback)| ModelEvent::Iap2NowPlaying(Iap2NowPlaying { media_item, playback })),
     2 => (1u8..=3).prop_map(|transfer_id| ModelEvent::Iap2Artwork { transfer_id, bytes_len: 64 }),
-    3 => companion_delta_strategy().prop_map(ModelEvent::CompanionDelta),
+    3 => companion_snapshot_strategy().prop_map(ModelEvent::CompanionSnapshot),
     2 => scope_strategy().prop_map(ModelEvent::AuthorityClaim),
     1 => scope_strategy().prop_map(ModelEvent::AuthorityRelease),
   ]
@@ -378,7 +389,7 @@ fn chaos_event_strategy() -> impl Strategy<Value = ModelEvent> {
     4 => (iap2_media, playback_strategy())
       .prop_map(|(media_item, playback)| ModelEvent::Iap2NowPlaying(Iap2NowPlaying { media_item, playback })),
     2 => (0u8..=3).prop_map(|transfer_id| ModelEvent::Iap2Artwork { transfer_id, bytes_len: 64 }),
-    3 => companion_delta_strategy().prop_map(ModelEvent::CompanionDelta),
+    3 => companion_snapshot_strategy().prop_map(ModelEvent::CompanionSnapshot),
     2 => scope_strategy().prop_map(ModelEvent::AuthorityClaim),
     1 => scope_strategy().prop_map(ModelEvent::AuthorityRelease),
   ]

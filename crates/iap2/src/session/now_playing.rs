@@ -50,6 +50,7 @@ pub(super) struct NowPlayingFlow {
   rx: mpsc::Receiver<NowPlayingCommand>,
   artwork_suppress_bundles: Vec<String>,
   art_subscribed: bool,
+  position_subscribed: bool,
   subscribed_at: Option<Instant>,
 }
 
@@ -60,6 +61,7 @@ impl NowPlayingFlow {
       rx,
       artwork_suppress_bundles,
       art_subscribed: false,
+      position_subscribed: true,
       subscribed_at: None,
     }
   }
@@ -72,16 +74,24 @@ impl NowPlayingFlow {
   pub(super) async fn ensure_subscribed(&mut self, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
     if matches!(self.state, NowPlayingState::Idle) {
       tracing::debug!("iap2 now-playing: sending StartNowPlayingUpdates");
-      send_csm(StartNowPlayingUpdates::subscription(self.art_subscribed), link_command_tx).await?;
+      send_csm(
+        StartNowPlayingUpdates::subscription(self.art_subscribed, self.position_subscribed),
+        link_command_tx,
+      )
+      .await?;
       self.state = NowPlayingState::Subscribed;
       self.subscribed_at = Some(Instant::now());
     }
     Ok(())
   }
 
-  /// Opt in/out of iOS FileTransfer cover art based on the active app. When a
-  /// companion-served app (e.g. Spotify) is playing we skip iOS art entirely;
-  async fn reconcile_artwork(
+  /// Opt in/out of iOS FileTransfer cover art and the ~1Hz position delta based on the active
+  /// app. When a companion-served app (e.g. Spotify) is playing we skip both iOS art and the
+  /// position flood: the companion's dealer already supplies sized art and a live bar position.
+  /// Art is held off through a settle window when no companion has attached yet (avoids a one-shot
+  /// flood); position has no settle gate (it is tiny and iAP2 is its only source until a companion
+  /// is actually serving).
+  async fn reconcile_subscription(
     &mut self,
     app_bundle: Option<&str>,
     companion_connected: bool,
@@ -91,19 +101,31 @@ impl NowPlayingFlow {
       return Ok(());
     };
     let is_suppress = self.artwork_suppress_bundles.iter().any(|b| b == bundle);
-    let desired = if !is_suppress {
+    let companion_serving = is_suppress && companion_connected;
+    let desired_art = if !is_suppress {
       true
     } else if companion_connected {
       false
     } else {
       self.subscribed_at.is_some_and(|t| t.elapsed() >= ART_SETTLE)
     };
-    if desired == self.art_subscribed {
+    let desired_position = !companion_serving;
+    if desired_art == self.art_subscribed && desired_position == self.position_subscribed {
       return Ok(());
     }
-    self.art_subscribed = desired;
-    tracing::debug!(bundle, artwork = desired, "iap2 now-playing: changing artwork subscription");
-    send_csm(StartNowPlayingUpdates::subscription(desired), link_command_tx).await?;
+    self.art_subscribed = desired_art;
+    self.position_subscribed = desired_position;
+    tracing::debug!(
+      bundle,
+      artwork = desired_art,
+      position = desired_position,
+      "iap2 now-playing: changing subscription"
+    );
+    send_csm(
+      StartNowPlayingUpdates::subscription(desired_art, desired_position),
+      link_command_tx,
+    )
+    .await?;
     Ok(())
   }
 
@@ -127,7 +149,7 @@ impl NowPlayingFlow {
     let app_bundle = update.playback.as_ref().and_then(|p| p.app_bundle.clone());
     emit(session_events_tx, SessionEvent::NowPlayingUpdate(update)).await;
     self
-      .reconcile_artwork(app_bundle.as_deref(), companion_connected, link_command_tx)
+      .reconcile_subscription(app_bundle.as_deref(), companion_connected, link_command_tx)
       .await?;
     Ok(None)
   }
@@ -177,36 +199,50 @@ mod tests {
     let mut f = NowPlayingFlow::new(np_rx, vec!["com.spotify.client".to_string()]);
     f.state = NowPlayingState::Subscribed;
     assert!(!f.art_subscribed, "default subscription carries no artwork");
+    assert!(f.position_subscribed, "default subscription carries position");
 
     // companion attached for the rest of this block
     let conn = true;
 
     // a non-companion app starts playing -> opt into iAP2 art (one re-subscribe)
-    f.reconcile_artwork(Some("com.google.ios.youtube"), conn, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some("com.google.ios.youtube"), conn, &link_tx)
+      .await
+      .unwrap();
     assert!(f.art_subscribed);
+    assert!(f.position_subscribed, "non-companion app keeps iAP2 position");
     assert!(link_rx.try_recv().is_ok(), "re-subscribed when artwork turned on");
 
     // same app again -> no redundant re-subscribe
-    f.reconcile_artwork(Some("com.google.ios.youtube"), conn, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some("com.google.ios.youtube"), conn, &link_tx)
+      .await
+      .unwrap();
     assert!(link_rx.try_recv().is_err());
 
     // a position-only delta carries no bundle -> leave state untouched
-    f.reconcile_artwork(None, conn, &link_tx).await.unwrap();
+    f.reconcile_subscription(None, conn, &link_tx).await.unwrap();
     assert!(f.art_subscribed);
     assert!(link_rx.try_recv().is_err());
 
     // iOS idle/transition sentinel (empty bundle) must not flap the subscription
-    f.reconcile_artwork(Some(""), conn, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some(""), conn, &link_tx).await.unwrap();
     assert!(f.art_subscribed, "empty bundle leaves artwork state untouched");
     assert!(link_rx.try_recv().is_err(), "empty bundle triggers no re-subscribe");
 
-    // Spotify active WITH companion -> drop iAP2 art (one re-subscribe)
-    f.reconcile_artwork(Some("com.spotify.client"), conn, &link_tx).await.unwrap();
+    // Spotify active WITH companion -> drop both iAP2 art and position (one re-subscribe)
+    f.reconcile_subscription(Some("com.spotify.client"), conn, &link_tx)
+      .await
+      .unwrap();
     assert!(!f.art_subscribed);
+    assert!(
+      !f.position_subscribed,
+      "companion serving Spotify drops the iAP2 position flood"
+    );
     assert!(link_rx.try_recv().is_ok(), "re-subscribed when artwork turned off");
 
     // Spotify still active -> no redundant re-subscribe
-    f.reconcile_artwork(Some("com.spotify.client"), conn, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some("com.spotify.client"), conn, &link_tx)
+      .await
+      .unwrap();
     assert!(link_rx.try_recv().is_err());
   }
 
@@ -220,19 +256,64 @@ mod tests {
     // within the settle window a companion may still be attaching: hold art off so a
     // late-attaching companion does not eat a one-shot art flood.
     f.subscribed_at = Some(Instant::now());
-    f.reconcile_artwork(Some("com.spotify.client"), false, &link_tx).await.unwrap();
-    assert!(!f.art_subscribed, "suppress-bundle holds art off during the settle window");
+    f.reconcile_subscription(Some("com.spotify.client"), false, &link_tx)
+      .await
+      .unwrap();
+    assert!(
+      !f.art_subscribed,
+      "suppress-bundle holds art off during the settle window"
+    );
     assert!(link_rx.try_recv().is_err(), "no re-subscribe inside the settle window");
 
     // settle window elapsed with still no companion -> iAP2 art is the only source.
     f.subscribed_at = Some(Instant::now() - ART_SETTLE - Duration::from_millis(1));
-    f.reconcile_artwork(Some("com.spotify.client"), false, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some("com.spotify.client"), false, &link_tx)
+      .await
+      .unwrap();
     assert!(f.art_subscribed, "after settle, no-companion Spotify gets iAP2 art");
     assert!(link_rx.try_recv().is_ok());
 
     // companion attaches -> drop the now-redundant iAP2 art
-    f.reconcile_artwork(Some("com.spotify.client"), true, &link_tx).await.unwrap();
+    f.reconcile_subscription(Some("com.spotify.client"), true, &link_tx)
+      .await
+      .unwrap();
     assert!(!f.art_subscribed);
+    assert!(link_rx.try_recv().is_ok());
+  }
+
+  #[tokio::test]
+  async fn position_drops_only_when_a_companion_serves_the_suppress_bundle() {
+    let (_np_tx, np_rx) = mpsc::channel(4);
+    let (link_tx, mut link_rx) = mpsc::channel(8);
+    let mut f = NowPlayingFlow::new(np_rx, vec!["com.spotify.client".to_string()]);
+    f.state = NowPlayingState::Subscribed;
+
+    // Spotify foreground but no companion attached yet -> iAP2 still owns the bar, keep position.
+    f.subscribed_at = Some(Instant::now() - ART_SETTLE - Duration::from_millis(1));
+    f.reconcile_subscription(Some("com.spotify.client"), false, &link_tx)
+      .await
+      .unwrap();
+    assert!(
+      f.position_subscribed,
+      "no companion -> iAP2 position stays the bar source"
+    );
+    let _ = link_rx.try_recv(); // drain the art-on re-subscribe from the settle elapse
+
+    // companion attaches while Spotify is foreground -> companion drives the bar, drop position.
+    f.reconcile_subscription(Some("com.spotify.client"), true, &link_tx)
+      .await
+      .unwrap();
+    assert!(!f.position_subscribed);
+    assert!(link_rx.try_recv().is_ok(), "re-subscribed when position turned off");
+
+    // companion still present but a non-suppress app comes foreground -> iAP2 owns it again.
+    f.reconcile_subscription(Some("com.google.ios.youtube"), true, &link_tx)
+      .await
+      .unwrap();
+    assert!(
+      f.position_subscribed,
+      "non-suppress foreground app re-enables iAP2 position"
+    );
     assert!(link_rx.try_recv().is_ok());
   }
 }

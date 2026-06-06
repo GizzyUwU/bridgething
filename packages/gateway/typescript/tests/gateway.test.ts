@@ -168,31 +168,6 @@ describe('BridgethingGateway', () => {
     await expect(promise).rejects.toThrow(/shutting down/);
   });
 
-  test('asset.sendPush encodes the right wire shape', async () => {
-    const adapter = new MockAdapter();
-    const gateway = new BridgethingGateway(adapter);
-    await gateway.start();
-    adapter.emit({ type: 'connected', device: DEVICE });
-
-    await gateway.device(DEVICE.id).asset.push({
-      id: 'spotify/track/abc/image',
-      bytes: new Uint8Array([1, 2, 3]),
-      mime: 'image/jpeg',
-      retention: { type: 'lru' },
-    });
-
-    expect(adapter.sentFrames).toHaveLength(1);
-    const decoded = new Codec().decode<GatewayToBridgeMsg>(adapter.sentFrames[0].frame);
-    expect(decoded.meta.kind).toBe('event');
-    expect(decoded.data.type).toBe('asset');
-    if (decoded.data.type !== 'asset') throw new Error();
-    expect(decoded.data.data.event).toBe('push');
-    if (decoded.data.data.event !== 'push') throw new Error();
-    expect(decoded.data.data.data.id).toBe('spotify/track/abc/image');
-    expect(decoded.data.data.data.bytes).toEqual(new Uint8Array([1, 2, 3]));
-    await gateway.stop();
-  });
-
   test('player.onPause fires only for matching variant', async () => {
     const adapter = new MockAdapter();
     const gateway = new BridgethingGateway(adapter);

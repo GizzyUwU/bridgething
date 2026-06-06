@@ -37,7 +37,9 @@ export default function Picker({ all, initial, onDone, onCancel }: Props) {
         </div>
         <div className="flex gap-2">
           {onCancel && (
-            <button onClick={onCancel} className="rounded-full bg-black/30 px-4 py-1.5 text-xs text-bt-soft-gray active:bg-black/50">
+            <button
+              onClick={onCancel}
+              className="rounded-full bg-black/30 px-4 py-1.5 text-xs text-bt-soft-gray active:bg-black/50">
               cancel
             </button>
           )}

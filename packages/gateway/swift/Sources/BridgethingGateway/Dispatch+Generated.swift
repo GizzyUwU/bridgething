@@ -1297,23 +1297,6 @@ public struct PlayerSurface: Sendable {
     }
   }
 
-  /// Cross-peer stream of `Player::Hint` messages.
-  public var hint: AsyncStream<(deviceId: String, msg: PlaybackHint)> {
-    AsyncStream { continuation in
-      let task = Task { [gateway] in
-        for await event in gateway.events {
-          if case .message(let deviceId, let message) = event,
-             case .player(let outer) = message.data,
-             case .hint(let inner) = outer {
-            continuation.yield((deviceId: deviceId, msg: inner))
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Send `Player::Snapshot` to every connected peer (broadcast).
   public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1328,20 +1311,6 @@ public struct PlayerSurface: Sendable {
     }
   }
 
-  /// Send `Player::Delta` to every connected peer (broadcast).
-  public func delta(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.delta(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
   /// Send `Player::QueueChanged` to every connected peer (broadcast).
   public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1349,20 +1318,6 @@ public struct PlayerSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.queueChanged(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Player::EnrichmentOffer` to every connected peer (broadcast).
-  public func enrichmentOffer(_ payload: NowPlayingEnrichment, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.enrichmentOffer(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -1581,20 +1536,6 @@ public struct SystemSurface: Sendable {
     }
   }
 
-  /// Send `System::OtaChunk` to every connected peer (broadcast).
-  public func otaChunk(_ payload: OtaChunk, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .system(.otaChunk(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
   /// Send `System::OtaAbandon` to every connected peer (broadcast).
   public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1630,20 +1571,6 @@ public struct SystemSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.cancelUpdate))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `System::OtaAssetRangeChunk` to every connected peer (broadcast).
-  public func otaAssetRangeChunk(_ payload: OtaAssetRangeChunk, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .system(.otaAssetRangeChunk(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -2363,20 +2290,6 @@ public struct AssetSurface: Sendable {
     }
   }
 
-  /// Send `Asset::Push` to every connected peer (broadcast).
-  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .asset(.push(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
   /// Send `Asset::Clear` to every connected peer (broadcast).
   public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -2388,49 +2301,6 @@ public struct AssetSurface: Sendable {
         }
       }
       try await group.waitForAll()
-    }
-  }
-
-  /// Send `Asset::PushChunk` to every connected peer (broadcast).
-  public func pushChunk(_ payload: AssetPushChunk, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .asset(.pushChunk(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Asset::PushAbandon` to every connected peer (broadcast).
-  public func pushAbandon(_ payload: AssetPushAbandon, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .asset(.pushAbandon(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Typed request to a specific peer: companion sends, daemon responds.
-  public func pushBegin(deviceId: String, _ req: AssetPushBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
-    let response = try await gateway.request(deviceId: deviceId, .asset(.pushBegin(req)), timeout: timeout)
-    switch response.data {
-    case .asset(let inner):
-      switch inner {
-      case .pushBeginAck(let value): return .ok(value)
-      case .pushBeginRejected(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
     }
   }
 
@@ -2521,6 +2391,40 @@ public struct TimeSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .time(.snapshot(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
+/// Cross-peer methods for the `Transfer` wire surface.
+public struct TransferSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Send `Transfer::Fragment` to every connected peer (broadcast).
+  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Transfer::Abandon` to every connected peer (broadcast).
+  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -3745,45 +3649,15 @@ public struct PlayerSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of `Player::Hint` from this peer.
-  public var hint: AsyncStream<PlaybackHint> {
-    AsyncStream { continuation in
-      let task = Task { [gateway, deviceId = self.deviceId] in
-        for await event in gateway.events {
-          if case .message(let evDeviceId, let message) = event,
-             evDeviceId == deviceId,
-             case .player(let outer) = message.data,
-             case .hint(let inner) = outer {
-            continuation.yield(inner)
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
   /// Send `Player::Snapshot` to this peer.
   public func snapshot(_ payload: PlayerState, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.snapshot(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
-  /// Send `Player::Delta` to this peer.
-  public func delta(_ payload: NowPlayingUpdate, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.delta(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
   /// Send `Player::QueueChanged` to this peer.
   public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.queueChanged(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Player::EnrichmentOffer` to this peer.
-  public func enrichmentOffer(_ payload: NowPlayingEnrichment, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.enrichmentOffer(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -4011,12 +3885,6 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
-  /// Send `System::OtaChunk` to this peer.
-  public func otaChunk(_ payload: OtaChunk, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .system(.otaChunk(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
   /// Send `System::OtaAbandon` to this peer.
   public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaAbandon(payload)))
@@ -4032,12 +3900,6 @@ public struct SystemSurfaceForDevice: Sendable {
   /// Send `System::CancelUpdate` to this peer.
   public func cancelUpdate(priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.cancelUpdate))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `System::OtaAssetRangeChunk` to this peer.
-  public func otaAssetRangeChunk(_ payload: OtaAssetRangeChunk, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .system(.otaAssetRangeChunk(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -4733,43 +4595,10 @@ public struct AssetSurfaceForDevice: Sendable {
     }
   }
 
-  /// Send `Asset::Push` to this peer.
-  public func push(_ payload: AssetPush, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .asset(.push(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
   /// Send `Asset::Clear` to this peer.
   public func clear(_ payload: AssetClear, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .asset(.clear(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Asset::PushChunk` to this peer.
-  public func pushChunk(_ payload: AssetPushChunk, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .asset(.pushChunk(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Asset::PushAbandon` to this peer.
-  public func pushAbandon(_ payload: AssetPushAbandon, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .asset(.pushAbandon(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Typed request to this peer: companion sends, daemon responds.
-  public func pushBegin(_ req: AssetPushBegin, timeout: Duration = .seconds(30)) async throws -> RequestResult<AssetPushBeginAck, AssetPushBeginRejected> {
-    let response = try await gateway.request(deviceId: deviceId, .asset(.pushBegin(req)), timeout: timeout)
-    switch response.data {
-    case .asset(let inner):
-      switch inner {
-      case .pushBeginAck(let value): return .ok(value)
-      case .pushBeginRejected(let err): return .domain(err)
-      default: return .protocolError(.unsupported)
-      }
-    case .error(let err): return .protocolError(err)
-    default: return .protocolError(.unsupported)
-    }
   }
 
 }
@@ -4827,6 +4656,25 @@ public struct TimeSurfaceForDevice: Sendable {
   /// Send `Time::Snapshot` to this peer.
   public func snapshot(_ payload: TimeInfo, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .time(.snapshot(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
+/// Per-peer methods for the `Transfer` wire surface (deviceId is baked in).
+public struct TransferSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Send `Transfer::Fragment` to this peer.
+  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Transfer::Abandon` to this peer.
+  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -4899,6 +4747,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var chrome: ChromeSurfaceForDevice { ChromeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Time` wire surface.
   public var time: TimeSurfaceForDevice { TimeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Transfer` wire surface.
+  public var transfer: TransferSurfaceForDevice { TransferSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Lyrics` wire surface.
   public var lyrics: LyricsSurfaceForDevice { LyricsSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
 }
@@ -4940,6 +4790,8 @@ extension BridgethingGateway {
   public nonisolated var chrome: ChromeSurface { ChromeSurface(gateway: self) }
   /// Methods scoped to the `Time` wire surface.
   public nonisolated var time: TimeSurface { TimeSurface(gateway: self) }
+  /// Methods scoped to the `Transfer` wire surface.
+  public nonisolated var transfer: TransferSurface { TransferSurface(gateway: self) }
   /// Methods scoped to the `Lyrics` wire surface.
   public nonisolated var lyrics: LyricsSurface { LyricsSurface(gateway: self) }
   /// Returns a per-device proxy with `deviceId` baked into every method and stream.
@@ -5424,7 +5276,7 @@ public final class AssetRequestHandle: @unchecked Sendable {
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .asset(.got(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: .bulk)
   }
 
   public func respondErr(_ error: AssetNotFoundReply) async throws {

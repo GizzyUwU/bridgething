@@ -56,7 +56,7 @@ use std::{
 use bluer::Address;
 use libbridgething::{
   OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
-  gateway::{BridgeToGatewaySystemMsgEvent, OtaAssetRangeChunk, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk},
+  gateway::{BridgeToGatewaySystemMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected},
 };
 pub use range_proxy::RangeProxy;
 use staging::StagedPiece;
@@ -64,11 +64,13 @@ use tokio::{
   sync::{mpsc, oneshot, watch},
   task::JoinHandle,
 };
-use tokio_util::bytes::Bytes;
 
 use crate::{
   peer::PeerTracker,
-  transfer::{ChunkOutcome, ChunkedTransfer, TransferError},
+  transfer::{
+    ChunkOutcome, ChunkedTransfer, TransferError,
+    sinks::{TransferEvent, TransferSinks},
+  },
 };
 
 pub type OtaEventTx = mpsc::Sender<BridgeToGatewaySystemMsgEvent>;
@@ -83,8 +85,6 @@ enum Command {
     peer: Option<Address>,
     ack: oneshot::Sender<Result<OtaBeginAck, OtaBeginRejected>>,
   },
-  Chunk(OtaChunk),
-  AssetRangeChunk(OtaAssetRangeChunk),
   Abandon {
     update_id: String,
   },
@@ -126,6 +126,7 @@ impl OtaOrchestrator {
     range_proxy: RangeProxy,
     peers: PeerTracker,
     installed_apply: InstalledWebappApply,
+    sinks: TransferSinks,
   ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let actor = OtaActor {
@@ -135,6 +136,7 @@ impl OtaOrchestrator {
       range_proxy,
       peers,
       installed_apply,
+      sinks,
       self_tx: cmd_tx.clone(),
       cmd_rx,
       state: OtaState::Idle,
@@ -160,12 +162,6 @@ impl OtaOrchestrator {
     })
   }
 
-  pub async fn chunk(&self, chunk: OtaChunk) {
-    if let Err(err) = self.cmd_tx.send(Command::Chunk(chunk)).await {
-      tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaChunk");
-    }
-  }
-
   pub async fn abandon(&self, update_id: String) {
     if let Err(err) = self.cmd_tx.send(Command::Abandon { update_id }).await {
       tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaAbandon");
@@ -183,12 +179,6 @@ impl OtaOrchestrator {
       tracing::error!(?err, "ota orchestrator mailbox closed; dropping CancelUpdate");
     }
   }
-
-  pub async fn asset_range_chunk(&self, chunk: OtaAssetRangeChunk) {
-    if let Err(err) = self.cmd_tx.send(Command::AssetRangeChunk(chunk)).await {
-      tracing::error!(?err, "ota orchestrator mailbox closed; dropping OtaAssetRangeChunk");
-    }
-  }
 }
 
 enum OtaState {
@@ -198,6 +188,8 @@ enum OtaState {
     update_id: String,
     expected_size: u64,
     peer: Option<Address>,
+    transfer_id: uuid::Uuid,
+    stream_rx: mpsc::Receiver<TransferEvent>,
   },
   Writing {
     kind: OtaKind,
@@ -225,6 +217,7 @@ struct OtaActor {
   range_proxy: RangeProxy,
   peers: PeerTracker,
   installed_apply: InstalledWebappApply,
+  sinks: TransferSinks,
   self_tx: mpsc::Sender<Command>,
   cmd_rx: mpsc::Receiver<Command>,
   state: OtaState,
@@ -237,21 +230,43 @@ impl OtaActor {
   async fn run(mut self) {
     tracing::info!("ota orchestrator started");
     staging::sweep_orphans().await;
-    while let Some(cmd) = self.cmd_rx.recv().await {
-      match cmd {
-        Command::Begin { req, peer, ack } => self.handle_begin(req, peer, ack).await,
-        Command::Chunk(chunk) => self.handle_chunk(chunk).await,
-        Command::AssetRangeChunk(chunk) => {
-          self.range_proxy.route_chunk(chunk).await;
+    loop {
+      enum Step {
+        Cmd(Option<Command>),
+        Stream(Option<TransferEvent>),
+      }
+      let step = {
+        let cmd_rx = &mut self.cmd_rx;
+        let state = &mut self.state;
+        tokio::select! {
+          cmd = cmd_rx.recv() => Step::Cmd(cmd),
+          ev = async {
+            match state {
+              OtaState::Streaming { stream_rx, .. } => stream_rx.recv().await,
+              _ => std::future::pending().await,
+            }
+          } => Step::Stream(ev),
         }
-        Command::Abandon { update_id } => self.handle_abandon(update_id).await,
-        Command::Activate { expected } => self.handle_activate(expected).await,
-        Command::Cancel => self.handle_cancel().await,
-        Command::WriteFinished => {
+      };
+      match step {
+        Step::Cmd(None) => break,
+        Step::Cmd(Some(cmd)) => match cmd {
+          Command::Begin { req, peer, ack } => self.handle_begin(req, peer, ack).await,
+          Command::Abandon { update_id } => self.handle_abandon(update_id).await,
+          Command::Activate { expected } => self.handle_activate(expected).await,
+          Command::Cancel => self.handle_cancel().await,
+          Command::WriteFinished => {
+            self.state = OtaState::Idle;
+            self.range_proxy.deactivate().await;
+          }
+          Command::StageFinished { result, peer } => self.handle_stage_finished(result, peer).await,
+        },
+        Step::Stream(None) => {
+          tracing::warn!("ota fragment sink unbound mid-stream; returning to idle");
           self.state = OtaState::Idle;
           self.range_proxy.deactivate().await;
         }
-        Command::StageFinished { result, peer } => self.handle_stage_finished(result, peer).await,
+        Step::Stream(Some(ev)) => self.handle_stream_event(ev).await,
       }
     }
     tracing::info!("ota orchestrator exiting");
@@ -292,19 +307,30 @@ impl OtaActor {
     }
 
     if let OtaState::Streaming {
-      update_id: existing, ..
+      update_id: existing,
+      transfer_id: prior_transfer,
+      ..
     } = &self.state
-      && existing != &req.update_id
     {
-      tracing::info!(
-        prior = %existing,
-        new = %req.update_id,
-        "OtaBegin for new update_id during streaming; abandoning prior partial",
-      );
-      let _ = self.transfers.abandon(existing.clone()).await;
+      if existing != &req.update_id {
+        tracing::info!(
+          prior = %existing,
+          new = %req.update_id,
+          "OtaBegin for new update_id during streaming; abandoning prior partial",
+        );
+        let _ = self.transfers.abandon(existing.clone()).await;
+        self.range_proxy.deactivate().await;
+      }
+      self.sinks.unbind(*prior_transfer);
       self.state = OtaState::Idle;
-      self.range_proxy.deactivate().await;
     }
+
+    let Some(expected_sha256) = req.transfer.sha256.clone() else {
+      let _ = ack.send(Err(OtaBeginRejected {
+        reason: "ota transfer ref must carry sha256".into(),
+      }));
+      return;
+    };
 
     let kind = req.kind;
     let target_dir = match kind {
@@ -317,21 +343,17 @@ impl OtaActor {
         }
       }
     };
+    let expected_size = req.transfer.total_size as u64;
     let result = self
       .transfers
-      .begin(
-        req.update_id.clone(),
-        req.expected_size as u64,
-        Some(req.expected_sha256.clone()),
-        target_dir,
-      )
+      .begin(req.update_id.clone(), expected_size, Some(expected_sha256), target_dir)
       .await;
     match result {
       Ok(resume_from_offset) => {
         emit_progress(
           &self.events_tx,
           OtaPhase::Streaming,
-          phase_percent(resume_from_offset, req.expected_size as u64),
+          phase_percent(resume_from_offset, expected_size),
           None,
         )
         .await;
@@ -340,11 +362,15 @@ impl OtaActor {
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
         }
+        // bind after transfers.begin succeeds; the companion only streams once it has the ack.
+        let stream_rx = self.sinks.bind_forward(req.transfer.id);
         self.state = OtaState::Streaming {
           kind,
           update_id,
-          expected_size: req.expected_size as u64,
+          expected_size,
           peer,
+          transfer_id: req.transfer.id,
+          stream_rx,
         };
         let _ = ack.send(Ok(OtaBeginAck {
           resume_from_offset: resume_from_offset as u32,
@@ -358,46 +384,35 @@ impl OtaActor {
     }
   }
 
-  async fn handle_chunk(&mut self, chunk: OtaChunk) {
-    let (kind, current_id, expected_size, peer) = match &self.state {
+  async fn handle_stream_event(&mut self, event: TransferEvent) {
+    let (kind, current_id, expected_size, peer, transfer_id) = match &self.state {
       OtaState::Streaming {
         kind,
         update_id,
         expected_size,
         peer,
-      } => (*kind, update_id.clone(), *expected_size, *peer),
-      _ => {
-        tracing::warn!(
-          update_id = %chunk.update_id,
-          "OtaChunk arrived outside Streaming state; emitting UnknownUpdate",
-        );
-        emit_error(
-          &self.events_tx,
-          OtaErrorCode::UnknownUpdate,
-          format!("no active OTA for {}", chunk.update_id),
-        )
-        .await;
+        transfer_id,
+        ..
+      } => (*kind, update_id.clone(), *expected_size, *peer, *transfer_id),
+      // unreachable: the stream rx only exists inside Streaming
+      _ => return,
+    };
+
+    let (offset, bytes) = match event {
+      TransferEvent::Fragment { offset, bytes } => (offset, bytes),
+      TransferEvent::Abandon { reason } => {
+        tracing::info!(%current_id, %reason, "companion abandoned ota stream; partial retained for resume");
+        self.sinks.unbind(transfer_id);
+        self.state = OtaState::Idle;
+        self.range_proxy.deactivate().await;
         return;
       }
     };
-    if current_id != chunk.update_id {
-      emit_error(
-        &self.events_tx,
-        OtaErrorCode::UnknownUpdate,
-        format!("expected chunks for {current_id}, got {}", chunk.update_id),
-      )
-      .await;
-      return;
-    }
 
+    let last = offset as u64 + bytes.len() as u64 >= expected_size;
     let outcome = self
       .transfers
-      .accept_chunk(
-        chunk.update_id.clone(),
-        chunk.offset as u64,
-        Bytes::from(chunk.bytes),
-        chunk.last,
-      )
+      .accept_chunk(current_id.clone(), offset as u64, bytes, last)
       .await;
     match outcome {
       Ok(ChunkOutcome::Continue { received }) => {
@@ -419,12 +434,14 @@ impl OtaActor {
         emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
         emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
         self.last_streaming_emit_at = None;
+        self.sinks.unbind(transfer_id);
         self.spawn_write(kind, current_id, peer, path).await;
       }
       Err(err) => {
         let code = transfer_error_code(&err);
-        emit_error(&self.events_tx, code, format!("ota chunk: {err}")).await;
+        emit_error(&self.events_tx, code, format!("ota fragment: {err}")).await;
         let _ = self.transfers.abandon(current_id).await;
+        self.sinks.unbind(transfer_id);
         self.state = OtaState::Idle;
         self.range_proxy.deactivate().await;
       }
@@ -441,10 +458,13 @@ impl OtaActor {
       }
     }
     if let OtaState::Streaming {
-      update_id: streaming, ..
+      update_id: streaming,
+      transfer_id,
+      ..
     } = &self.state
       && streaming == &update_id
     {
+      self.sinks.unbind(*transfer_id);
       self.state = OtaState::Idle;
       self.range_proxy.deactivate().await;
     }
@@ -453,8 +473,11 @@ impl OtaActor {
   async fn handle_cancel(&mut self) {
     match &self.state {
       OtaState::Idle => tracing::debug!("cancel requested with no run in flight; ignoring"),
-      OtaState::Streaming { update_id, .. } => {
+      OtaState::Streaming {
+        update_id, transfer_id, ..
+      } => {
         tracing::info!(%update_id, "cancel during streaming; partial retained for resume");
+        self.sinks.unbind(*transfer_id);
         self.state = OtaState::Idle;
         self.range_proxy.deactivate().await;
       }
@@ -785,10 +808,11 @@ mod tests {
 
   use libbridgething::{
     WebappRole, WebappSource,
-    gateway::{OtaBegin, OtaChunk},
+    gateway::{OtaBegin, TransferRef},
   };
   use sha2::{Digest, Sha256};
   use tokio::time::{Duration, timeout};
+  use tokio_util::bytes::Bytes;
 
   use super::*;
 
@@ -827,8 +851,13 @@ mod tests {
     p
   }
 
+  fn tid_for(update_id: impl AsRef<str>) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, update_id.as_ref().as_bytes())
+  }
+
   struct Harness {
     ota: OtaOrchestrator,
+    sinks: TransferSinks,
     events: mpsc::Receiver<BridgeToGatewaySystemMsgEvent>,
     reboot_calls: Arc<AtomicUsize>,
     restart_self_calls: Arc<AtomicUsize>,
@@ -873,6 +902,7 @@ mod tests {
       })
     });
     let peers = PeerTracker::noop();
+    let sinks = TransferSinks::default();
     let (ota, _ota_handle) = OtaOrchestrator::spawn(
       transfers,
       events_tx,
@@ -880,9 +910,11 @@ mod tests {
       range_proxy::noop_proxy(),
       peers,
       installed_apply,
+      sinks.clone(),
     );
     Harness {
       ota,
+      sinks,
       events,
       reboot_calls,
       restart_self_calls,
@@ -921,8 +953,11 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
@@ -930,14 +965,7 @@ mod tests {
       .expect("begin ok");
     assert_eq!(ack.resume_from_offset, 0);
 
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
 
     let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
       matches!(
@@ -960,22 +988,18 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size + 1,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size - 1,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("begin ok");
 
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -998,21 +1022,17 @@ mod tests {
           kind: OtaKind::Image,
           update_id: bogus_sha.clone(),
           update_url_base: None,
-          expected_sha256: bogus_sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&bogus_sha),
+            total_size: size,
+            sha256: Some(bogus_sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: bogus_sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes)).await;
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1025,6 +1045,30 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn begin_without_sha_is_rejected() {
+    let h = boot().await;
+    let (_bytes, sha, size) = fixture_bytes();
+    let err = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: None,
+          },
+        },
+        None,
+      )
+      .await
+      .unwrap_err();
+    assert!(err.reason.contains("sha256"), "got reason: {}", err.reason);
+  }
+
+  #[tokio::test]
   async fn resume_returns_received_offset() {
     let mut h = boot().await;
     let (bytes, sha, size) = fixture_bytes();
@@ -1034,21 +1078,22 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("first begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 0,
-        bytes: bytes[..10].to_vec(),
-        last: false,
-      })
+    h.sinks
+      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
       .await;
+    // fragments ride the sink channel, cancel rides the command mailbox; let
+    // the actor land the fragment before cancelling.
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     h.ota.cancel().await;
     let ack = h
@@ -1058,8 +1103,11 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
@@ -1067,13 +1115,8 @@ mod tests {
       .expect("resume begin ok");
     assert_eq!(ack.resume_from_offset, 10);
 
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 10,
-        bytes: bytes[10..].to_vec(),
-        last: true,
-      })
+    h.sinks
+      .fragment(tid_for(&sha), 10, Bytes::from(bytes[10..].to_vec()))
       .await;
     let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
       matches!(
@@ -1094,21 +1137,17 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .unwrap();
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
     let _ = wait_for(
       &mut h.events,
       Duration::from_secs(5),
@@ -1123,8 +1162,11 @@ mod tests {
           kind: OtaKind::Image,
           update_id: "deadbeef".repeat(8),
           update_url_base: None,
-          expected_sha256: "deadbeef".repeat(8),
-          expected_size: 32,
+          transfer: TransferRef {
+            id: tid_for(&"deadbeef".repeat(8)),
+            total_size: 32,
+            sha256: Some("deadbeef".repeat(8)),
+          },
         },
         None,
       )
@@ -1143,21 +1185,20 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .unwrap();
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 0,
-        bytes: bytes[..10].to_vec(),
-        last: false,
-      })
+    h.sinks
+      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
       .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     h.ota.abandon(sha.clone()).await;
     let ack = h
       .ota
@@ -1166,8 +1207,11 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha,
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha),
+          },
         },
         None,
       )
@@ -1189,8 +1233,11 @@ mod tests {
           kind: OtaKind::Image,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         Some(peer_a),
       )
@@ -1202,10 +1249,13 @@ mod tests {
       .begin(
         OtaBegin {
           kind: OtaKind::Image,
-          update_id: sha,
+          update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: "deadbeef".repeat(8),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some("deadbeef".repeat(8)),
+          },
         },
         Some(peer_b),
       )
@@ -1225,21 +1275,17 @@ mod tests {
           kind,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("stage begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
     wait_for(&mut h.events, Duration::from_secs(5), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if p.phase == OtaPhase::Writing && p.percent == 100)
     })
@@ -1289,22 +1335,18 @@ mod tests {
           kind: OtaKind::Daemon,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size + 1,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size - 1,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("daemon begin ok");
 
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1328,21 +1370,17 @@ mod tests {
           kind: OtaKind::Daemon,
           update_id: bogus_sha.clone(),
           update_url_base: None,
-          expected_sha256: bogus_sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&bogus_sha),
+            total_size: size,
+            sha256: Some(bogus_sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("daemon begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: bogus_sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes)).await;
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1446,21 +1484,20 @@ mod tests {
           kind: OtaKind::Daemon,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("daemon begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha.clone(),
-        offset: 0,
-        bytes: bytes[..10].to_vec(),
-        last: false,
-      })
+    h.sinks
+      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
       .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
     h.ota.cancel().await;
 
     let ack = h
@@ -1470,8 +1507,11 @@ mod tests {
           kind: OtaKind::Daemon,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha,
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha),
+          },
         },
         None,
       )
@@ -1492,21 +1532,17 @@ mod tests {
           kind: OtaKind::InstalledWebapp,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("installed-webapp begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
 
     wait_for(
       &mut h.events,
@@ -1537,21 +1573,17 @@ mod tests {
           kind: OtaKind::InstalledWebapp,
           update_id: sha.clone(),
           update_url_base: None,
-          expected_sha256: sha.clone(),
-          expected_size: size,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
         },
         None,
       )
       .await
       .expect("installed-webapp begin ok");
-    h.ota
-      .chunk(OtaChunk {
-        update_id: sha,
-        offset: 0,
-        bytes,
-        last: true,
-      })
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
 
     let err = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))

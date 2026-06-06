@@ -1,9 +1,9 @@
 //! Webapp-install driver over the unified OTA surface. Reads a `.zip`
 //! from disk, hashes it, opens an `OtaBegin { kind: InstalledWebapp }`
-//! request, then streams the bytes via `OtaChunk` events on the Bulk
-//! lane until the daemon emits a `WebappInstalled` event (success) or an
-//! `OtaError` (failure). Third-party installs share the OTA orchestrator
-//! with image / daemon / builtin-webapp updates.
+//! request, then streams the bytes as `TransferFragment` events on the
+//! Background lane until the daemon emits a `WebappInstalled` event
+//! (success) or an `OtaError` (failure). Third-party installs share the
+//! OTA orchestrator with image / daemon / builtin-webapp updates.
 
 use std::{
   path::{Path, PathBuf},
@@ -12,10 +12,10 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use libbridgething::{
-  OtaKind, WebappInfo,
+  OtaKind, Priority, WebappInfo,
   gateway::{
-    BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayWebappMsg, GatewayToBridgeMsg,
-    GatewayToBridgeMsgData, GatewayToBridgeSystemMsg, OtaBegin, OtaBeginAck, OtaBeginRejected, OtaChunk,
+    BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayWebappMsg, GatewayToBridgeMsg, OtaBegin,
+    OtaBeginAck, OtaBeginRejected, TransferRef,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
@@ -25,6 +25,7 @@ use tokio::io::AsyncReadExt;
 use crate::{
   chaos::ChaosConfig,
   conn::{Connection, OutboundFrame},
+  transfer::stream_file_fragments,
 };
 
 pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundle: PathBuf) -> Result<()> {
@@ -41,12 +42,16 @@ pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundl
   let _ = await_version(&mut conn).await;
 
   tracing::info!("opening OtaBegin (InstalledWebapp)");
+  let transfer_id = uuid::Uuid::now_v7();
   let begin = OtaBegin {
     kind: OtaKind::InstalledWebapp,
     update_id: sha256.clone(),
     update_url_base: None,
-    expected_sha256: sha256.clone(),
-    expected_size: size,
+    transfer: TransferRef {
+      id: transfer_id,
+      total_size: size,
+      sha256: Some(sha256.clone()),
+    },
   };
   let resume_from_offset = match send_begin(&mut conn, begin).await? {
     Ok(ack) => ack.resume_from_offset,
@@ -61,7 +66,16 @@ pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundl
     );
   }
 
-  stream_chunks(&mut conn, &sha256, &bundle, resume_from_offset, total_len, chunk_size).await?;
+  stream_file_fragments(
+    &conn.outbound_tx,
+    transfer_id,
+    &bundle,
+    resume_from_offset as u64,
+    total_len,
+    chunk_size,
+    Priority::Background,
+  )
+  .await?;
   watch_for_outcome(&mut conn).await
 }
 
@@ -131,54 +145,6 @@ async fn send_begin(
       return Ok(OtaBegin::extract(msg.data));
     }
     tracing::trace!(?msg, "non-response inbound during OtaBegin wait");
-  }
-}
-
-async fn stream_chunks(
-  conn: &mut Connection,
-  update_id: &str,
-  bundle: &Path,
-  start_offset: u32,
-  total_size: u64,
-  chunk_size: usize,
-) -> Result<()> {
-  use tokio::io::AsyncSeekExt;
-  let mut file = tokio::fs::File::open(bundle).await?;
-  if start_offset > 0 {
-    file.seek(std::io::SeekFrom::Start(start_offset as u64)).await?;
-  }
-
-  let mut buf = vec![0u8; chunk_size];
-  let mut offset: u64 = start_offset as u64;
-  loop {
-    let n = file.read(&mut buf).await?;
-    if n == 0 {
-      return Err(anyhow!(
-        "unexpected EOF at offset {offset}/{total_size} before last:true",
-      ));
-    }
-    let last = offset + n as u64 == total_size;
-    let chunk = OtaChunk {
-      update_id: update_id.to_string(),
-      offset: u32::try_from(offset).map_err(|_| anyhow!("chunk offset overflow"))?,
-      bytes: buf[..n].to_vec(),
-      last,
-    };
-    let msg = GatewayToBridgeMsg {
-      id: uuid::Uuid::now_v7(),
-      meta: MsgMeta::Event,
-      data: GatewayToBridgeMsgData::System(GatewayToBridgeSystemMsg::OtaChunk(chunk)),
-    };
-    conn
-      .outbound_tx
-      .send(OutboundFrame::bulk(msg))
-      .await
-      .map_err(|_| anyhow!("connection writer closed mid-stream at offset {offset}"))?;
-    offset += n as u64;
-    if last {
-      tracing::info!(offset, "sent last chunk; awaiting WebappInstalled");
-      return Ok(());
-    }
   }
 }
 

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+  collections::{HashMap, VecDeque},
+  time::Duration,
+};
 
 use libbridgething::{
   Priority,
@@ -18,6 +21,7 @@ use crate::{
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const EVENTS_CAP: usize = 256;
 const CMD_CAP: usize = 64;
+const QUEUED_SENDS_CAP: usize = 16;
 
 enum Command<P: Protocol> {
   Send {
@@ -182,7 +186,31 @@ struct Driver<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> {
   pending: HashMap<Uuid, oneshot::Sender<P::InMsg>>,
 }
 
+/// What to do once a queued frame's send completes: ack the producer, or
+/// (for requests) drop the pending entry on failure so the awaiter
+/// resolves to Disconnected.
+enum Completion {
+  Ack(oneshot::Sender<Result<(), TransportError>>),
+  Request(Uuid),
+}
+
+struct Outgoing<P: Protocol> {
+  frame: PrioritizedFrame<P::OutMsg>,
+  completion: Completion,
+}
+
+const fn lane_index(priority: Priority) -> usize {
+  match priority {
+    Priority::Normal => 0,
+    Priority::Bulk => 1,
+    Priority::Background => 2,
+  }
+}
+
 impl<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> Driver<P, O, I> {
+  // outbound frames queue per priority lane and drain strictly in lane
+  // order, one frame per turn, so a normal frame enqueued mid-transfer
+  // goes out ahead of every queued bulk/background fragment.
   async fn run(self) {
     let Driver {
       mut out,
@@ -192,19 +220,25 @@ impl<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> Driver<P, O, I> {
       mut pending,
     } = self;
 
+    let mut lanes: [VecDeque<Outgoing<P>>; 3] = [VecDeque::new(), VecDeque::new(), VecDeque::new()];
+
     loop {
+      let queued: usize = lanes.iter().map(|q| q.len()).sum();
       tokio::select! {
-        cmd = cmd_rx.recv() => match cmd {
+        biased;
+        cmd = cmd_rx.recv(), if queued < QUEUED_SENDS_CAP => match cmd {
           Some(Command::Send { frame, ack }) => {
-            let _ = ack.send(out.send(frame).await);
+            lanes[lane_index(frame.priority)].push_back(Outgoing {
+              frame,
+              completion: Completion::Ack(ack),
+            });
           }
           Some(Command::Request { id, frame, reply }) => {
             pending.insert(id, reply);
-            if let Err(err) = out.send(frame).await {
-              // drop the pending sender so the awaiter resolves to Disconnected.
-              pending.remove(&id);
-              tracing::warn!(%id, error = %err, "request send failed");
-            }
+            lanes[lane_index(frame.priority)].push_back(Outgoing {
+              frame,
+              completion: Completion::Request(id),
+            });
           }
           Some(Command::Cancel(id)) => {
             pending.remove(&id);
@@ -216,6 +250,21 @@ impl<P: Protocol, O: OutboundHalf<P>, I: InboundHalf<P>> Driver<P, O, I> {
           Some(Err(err)) => tracing::warn!(error = %err, "inbound message error"),
           None => break,
         },
+        _ = std::future::ready(()), if queued > 0 => {
+          let next = lanes.iter_mut().find_map(VecDeque::pop_front).expect("queued > 0");
+          let result = out.send(next.frame).await;
+          match next.completion {
+            Completion::Ack(ack) => {
+              let _ = ack.send(result);
+            }
+            Completion::Request(id) => {
+              if let Err(err) = result {
+                pending.remove(&id);
+                tracing::warn!(%id, error = %err, "request send failed");
+              }
+            }
+          }
+        }
       }
     }
 

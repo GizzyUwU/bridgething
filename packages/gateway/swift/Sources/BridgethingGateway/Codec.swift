@@ -23,8 +23,21 @@ public enum CodecError: Error, Equatable {
 }
 
 public extension Priority {
-  static func fromByte(_ byte: UInt8) -> Priority { byte == 0x01 ? .bulk : .normal }
-  var asByte: UInt8 { self == .bulk ? 0x01 : 0x00 }
+  static func fromByte(_ byte: UInt8) -> Priority {
+    switch byte {
+    case 0x01: .bulk
+    case 0x02: .background
+    default: .normal
+    }
+  }
+
+  var asByte: UInt8 {
+    switch self {
+    case .normal: 0x00
+    case .bulk: 0x01
+    case .background: 0x02
+    }
+  }
 }
 
 /// 16-byte wire header.
@@ -135,7 +148,7 @@ public struct Codec: Sendable {
     case .gzip: try payload.gzipped()
     }
 
-    if compression == nil, comp == .none, priority != .bulk, payload.count > Self.autoGzipPayloadThreshold {
+    if compression == nil, comp == .none, priority == .normal, payload.count > Self.autoGzipPayloadThreshold {
       let gzipped = try payload.gzipped()
       if gzipped.count < payload.count {
         comp = .gzip

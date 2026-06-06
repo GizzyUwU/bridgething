@@ -12,7 +12,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func signOut() async
     func currentProvider() async -> BridgethingProviderInfo?
     func spotifyAuthConfig() async -> BridgethingSpotifyAuthConfig
-    func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) async throws
+    func completeSpotifySignIn(accessToken: String, refreshToken: String) async throws
 
     func snapshot() async -> BridgethingSessionSnapshot
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
@@ -212,9 +212,9 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         Promise.async { await (try Self.backend()).spotifyAuthConfig() }
     }
 
-    public func completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Bool) throws -> Promise<Void> {
+    public func completeSpotifySignIn(accessToken: String, refreshToken: String) throws -> Promise<Void> {
         Promise.async {
-            try await Self.backend().completeSpotifySignIn(accessToken: accessToken, refreshToken: refreshToken, usesDealer: usesDealer)
+            try await Self.backend().completeSpotifySignIn(accessToken: accessToken, refreshToken: refreshToken)
         }
     }
 

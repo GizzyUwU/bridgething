@@ -180,6 +180,13 @@ pub struct TypedRequestEntry {
 }
 
 impl TypedRequestEntry {
+  /// Byte-stream surfaces carry large, already-compressed binary (asset images). Their responses
+  /// go on the bulk lane so they yield to latency-sensitive traffic and skip the codecs' size-based
+  /// auto-gzip (gzipping a JPEG just burns the phone's CPU for no size win).
+  pub fn is_bulk_byte_stream(&self) -> bool {
+    self.surface_disc == "asset"
+  }
+
   pub fn response_variant_pascal(&self) -> String {
     upper_first(&self.response_disc)
   }

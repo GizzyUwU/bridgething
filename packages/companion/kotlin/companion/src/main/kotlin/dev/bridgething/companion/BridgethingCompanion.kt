@@ -14,10 +14,12 @@ import dev.bridgething.gateway.asset
 import dev.bridgething.gateway.audio
 import dev.bridgething.gateway.authority
 import dev.bridgething.gateway.capabilities
+import dev.bridgething.gateway.device
 import dev.bridgething.gateway.lyrics
 import dev.bridgething.gateway.notifications
 import dev.bridgething.gateway.system
 import dev.bridgething.gateway.time
+import dev.bridgething.gateway.transfer
 import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
@@ -27,6 +29,8 @@ import dev.bridgething.lyrics.LyricsResolver
 import dev.bridgething.lyrics.TrackIdentity
 import dev.bridgething.schema.AncsAuthState
 import dev.bridgething.schema.AssetGotReply
+import dev.bridgething.schema.Priority
+import java.util.UUID
 import dev.bridgething.schema.AssetNotFoundReply
 import dev.bridgething.schema.AssetRequest
 import dev.bridgething.schema.AudioCapabilities
@@ -52,6 +56,9 @@ import dev.bridgething.schema.NetworkInfo
 import dev.bridgething.schema.NetworkKind
 import dev.bridgething.schema.SurfaceAvailability
 import dev.bridgething.schema.TimeInfo
+import dev.bridgething.schema.TransferBody
+import dev.bridgething.schema.TransferFragment
+import dev.bridgething.schema.TransferRef
 import dev.bridgething.schema.VolumeChanged
 import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineName
@@ -218,7 +225,7 @@ public class BridgethingCompanion(
             scope.launch {
                 broadcastVolume(level, muted)
                 if (!volumeClaimed) {
-                    runCatching { gateway.authority.claim(AuthorityClaim(scope = CompanionAuthorityScope.Volume)) }
+                    runCatching { gateway.authority.claim(AuthorityClaim(scope = CompanionAuthorityScope.Volume, appBundle = null)) }
                     volumeClaimed = true
                 }
             }
@@ -448,6 +455,7 @@ public class BridgethingCompanion(
                     log(CompanionLogLevel.Info, "peer connected: ${event.device.name} [${event.device.id}]")
                     announceCapabilities()
                     emitTimeSnapshot()
+                    activeGlue?.handlePeerConnected()
                     phoneDispatcher.announce(gateway)
                     val subscribe = deviceLogMutex.withLock {
                         connectedDeviceIds.add(event.device.id)
@@ -500,8 +508,7 @@ public class BridgethingCompanion(
         try {
             when (player) {
                 is BridgeToGatewayPlayerMsg.Play -> glue.play(player.data)
-                // glue has no queue verb; the daemon tolerates a missing reply on commands.
-                is BridgeToGatewayPlayerMsg.Queue -> Unit
+                is BridgeToGatewayPlayerMsg.Queue -> glue.queue(player.data)
                 BridgeToGatewayPlayerMsg.Pause -> glue.pause()
                 BridgeToGatewayPlayerMsg.Resume -> glue.resume()
                 BridgeToGatewayPlayerMsg.SkipNext -> glue.skipNext()
@@ -512,7 +519,6 @@ public class BridgethingCompanion(
                 is BridgeToGatewayPlayerMsg.SetRepeat -> glue.setRepeat(player.data.mode)
                 is BridgeToGatewayPlayerMsg.SetSpeed -> glue.setSpeed(player.data.speed)
                 is BridgeToGatewayPlayerMsg.SetCrossfade -> glue.setCrossfade(player.data.durationMs)
-                is BridgeToGatewayPlayerMsg.Hint -> Unit // glue has no playback-hint verb
             }
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "player verb $player failed: ${e.message ?: e.toString()}")
@@ -537,7 +543,42 @@ public class BridgethingCompanion(
             runCatching { handle.respondErr(AssetNotFoundReply(id = req.id)) }
             return
         }
-        runCatching { handle.respond(AssetGotReply(id = req.id, bytes = bytes.bytes, mime = bytes.mime)) }
+        runCatching { streamAsset(handle, req.id, req.requestId, bytes) }
+            .onFailure { log(CompanionLogLevel.Warn, "asset ${req.id} respond failed: ${it.message ?: it.toString()}") }
+    }
+
+    private suspend fun streamAsset(handle: AssetRequestHandle, id: String, requestId: UUID, payload: AssetBytes) {
+        val data = payload.bytes
+        if (data.size <= INLINE_BODY_MAX_BYTES) {
+            handle.respond(AssetGotReply(id = id, mime = payload.mime, body = TransferBody.Inline(data)))
+            return
+        }
+        handle.respond(
+            AssetGotReply(
+                id = id,
+                mime = payload.mime,
+                body = TransferBody.Stream(TransferRef(id = requestId, totalSize = data.size.toUInt(), sha256 = null)),
+            ),
+        )
+        sendFragments(handle.deviceId, requestId, data, ASSET_FRAGMENT_BYTES, Priority.Bulk)
+    }
+
+    internal suspend fun sendFragments(
+        deviceId: String,
+        transferId: UUID,
+        data: ByteArray,
+        fragmentBytes: Int,
+        priority: Priority,
+    ) {
+        var offset = 0
+        while (offset < data.size) {
+            val end = minOf(offset + fragmentBytes, data.size)
+            gateway.device(deviceId).transfer.fragment(
+                TransferFragment(transferId = transferId, offset = offset.toUInt(), bytes = data.copyOfRange(offset, end)),
+                priority = priority,
+            )
+            offset = end
+        }
     }
 
     private suspend fun runLyricsDispatch() {
@@ -735,5 +776,7 @@ public class BridgethingCompanion(
 
     private companion object {
         const val TAG = "bridgething.companion"
+        const val ASSET_FRAGMENT_BYTES = 8 * 1024
+        const val INLINE_BODY_MAX_BYTES = 8 * 1024
     }
 }

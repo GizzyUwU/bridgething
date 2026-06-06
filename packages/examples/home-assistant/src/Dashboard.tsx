@@ -44,7 +44,15 @@ export default function Dashboard({ tiles, status, toast, onActivate, onSetTemp,
   );
 }
 
-function TileView({ tile, onActivate, onSetTemp }: { tile: Tile; onActivate: Props['onActivate']; onSetTemp: Props['onSetTemp'] }) {
+function TileView({
+  tile,
+  onActivate,
+  onSetTemp,
+}: {
+  tile: Tile;
+  onActivate: Props['onActivate'];
+  onSetTemp: Props['onSetTemp'];
+}) {
   const { entityId, state } = tile;
   if (!state || state.state === 'unavailable') {
     return (
@@ -62,7 +70,15 @@ function TileView({ tile, onActivate, onSetTemp }: { tile: Tile; onActivate: Pro
   return <ActionTile state={state} kind={kind} onActivate={onActivate} />;
 }
 
-function ActionTile({ state, kind, onActivate }: { state: HaState; kind: 'toggle' | 'lock' | 'momentary'; onActivate: Props['onActivate'] }) {
+function ActionTile({
+  state,
+  kind,
+  onActivate,
+}: {
+  state: HaState;
+  kind: 'toggle' | 'lock' | 'momentary';
+  onActivate: Props['onActivate'];
+}) {
   const active = isActive(state);
   const accent = kind !== 'momentary' && active;
   return (
@@ -73,7 +89,9 @@ function ActionTile({ state, kind, onActivate }: { state: HaState; kind: 'toggle
       }`}>
       <div className="text-2xl">{domainIcon(state.entityId)}</div>
       <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
-      <div className={`text-xs ${accent ? 'text-bt-charcoal/70' : 'text-bt-soft-gray'}`}>{actionLabel(state, kind)}</div>
+      <div className={`text-xs ${accent ? 'text-bt-charcoal/70' : 'text-bt-soft-gray'}`}>
+        {actionLabel(state, kind)}
+      </div>
     </button>
   );
 }
@@ -96,14 +114,22 @@ function ClimateTile({ tile, state, onSetTemp }: { tile: Tile; state: HaState; o
       </div>
       <div className="truncate text-sm font-medium">{friendlyName(state)}</div>
       <div className="flex items-center justify-between">
-        <button onClick={() => adjust(-step)} className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60" disabled={target == null}>
+        <button
+          onClick={() => adjust(-step)}
+          className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60"
+          disabled={target == null}>
           -
         </button>
         <div className="text-center">
-          <div className="bt-wordmark text-2xl font-semibold leading-none">{target != null ? `${fmt(target)}°` : '--'}</div>
+          <div className="bt-wordmark text-2xl font-semibold leading-none">
+            {target != null ? `${fmt(target)}°` : '--'}
+          </div>
           {current != null && <div className="text-[0.65rem] text-bt-soft-gray">now {fmt(current)}°</div>}
         </div>
-        <button onClick={() => adjust(step)} className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60" disabled={target == null}>
+        <button
+          onClick={() => adjust(step)}
+          className="h-9 w-9 rounded-full bg-black/40 text-lg active:bg-black/60"
+          disabled={target == null}>
           +
         </button>
       </div>
@@ -112,7 +138,10 @@ function ClimateTile({ tile, state, onSetTemp }: { tile: Tile; state: HaState; o
 }
 
 function ReadonlyTile({ state }: { state: HaState }) {
-  const unit = typeof state.attributes['unit_of_measurement'] === 'string' ? (state.attributes['unit_of_measurement'] as string) : '';
+  const unit =
+    typeof state.attributes['unit_of_measurement'] === 'string'
+      ? (state.attributes['unit_of_measurement'] as string)
+      : '';
   return (
     <div className="flex flex-col justify-between rounded-2xl bg-black/20 p-4">
       <div className="text-2xl">{domainIcon(state.entityId)}</div>

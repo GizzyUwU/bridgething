@@ -10,7 +10,6 @@ export const storage = createMMKV({ id: 'bridgething' });
 const KEY = {
   setupCompleted: 'setup.completed',
   ledger: 'device.ledger', // JSON { [deviceId]: DeviceLedgerEntry }
-  spotifyAuthMethod: 'spotify.authMethod', // 'deviceCode' | 'pkce'
 } as const;
 
 export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
@@ -26,15 +25,6 @@ export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
   intervalSeconds: 21600,
   autoPush: false,
 };
-
-export function getPreferredAuthMethod(): 'deviceCode' | 'pkce' | null {
-  const v = storage.getString(KEY.spotifyAuthMethod);
-  return v === 'deviceCode' || v === 'pkce' ? v : null;
-}
-
-export function setPreferredAuthMethod(method: 'deviceCode' | 'pkce'): void {
-  storage.set(KEY.spotifyAuthMethod, method);
-}
 
 export function getSetupCompleted(): boolean {
   return storage.getBoolean(KEY.setupCompleted) ?? false;

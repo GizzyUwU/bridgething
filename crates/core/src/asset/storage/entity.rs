@@ -10,6 +10,7 @@ pub struct Model {
   pub byte_len: i64,
   pub inserted_at: i64,
   pub accessed_at: i64,
+  pub pinned: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

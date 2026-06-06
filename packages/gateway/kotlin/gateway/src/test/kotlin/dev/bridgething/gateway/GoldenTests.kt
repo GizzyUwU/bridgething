@@ -174,7 +174,11 @@ private data class GoldenFixture(
   val decodedJson: JsonElement get() = decoded_json
   val msgpackHex: String get() = msgpack_hex
   val framedHex: String get() = framed_hex
-  val expectedPriority: Priority get() = if (priority == "bulk") Priority.Bulk else Priority.Normal
+  val expectedPriority: Priority get() = when (priority) {
+    "bulk" -> Priority.Bulk
+    "background" -> Priority.Background
+    else -> Priority.Normal
+  }
 }
 
 @Serializable

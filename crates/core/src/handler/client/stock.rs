@@ -5,15 +5,13 @@ use libbridgething::{
   BrowseEntry, ItemKind, ItemRef, LibraryItem, QueuePosition,
   client::ClientLegacyStockCommand,
   gateway::{
-    self, AssetRequest, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
+    self, BridgeToGatewayLibraryMsgCommand, BridgeToGatewayPlayerMsgCommand, LibraryBrowseRequest,
     LibraryFavoritesContainsRequest, LibraryResolveContextRequest,
   },
   stock::{StockPreset, StockSetPreset},
   wire::RequestError,
 };
 use serde_json::{Value, json};
-use tokio_util::bytes::Bytes;
-use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
 use crate::{
@@ -28,6 +26,7 @@ use crate::{
 
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
+const STOCK_THUMBNAIL_EDGE: u32 = 96;
 
 #[derive(Debug)]
 pub struct LegacyStockHandler {
@@ -100,7 +99,9 @@ impl LegacyStockHandler {
   }
 
   async fn get_thumbnail_image(self, id: String) -> HandlerResult {
-    self.serve_asset_to_stock(id).await
+    self
+      .serve_asset_to_stock(art_id_with_edge(&id, STOCK_THUMBNAIL_EDGE))
+      .await
   }
 
   async fn serve_asset_to_stock(self, id: String) -> HandlerResult {
@@ -170,7 +171,14 @@ impl LegacyStockHandler {
         limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
         offset: 0,
       };
-      match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+      match super::library::browse_request(
+        &self.handle.bluetooth.gateway_man,
+        &self.handle.state.root_browse,
+        self.handle.state.player.recently_played_gen(),
+        req,
+      )
+      .await
+      {
         Ok(reply) => crate::stock::interapp::library_browse_to_home(reply.result),
         Err(err) => {
           log_request_failure("library.browse (home)", &err);
@@ -203,7 +211,14 @@ impl LegacyStockHandler {
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+    match super::library::browse_request(
+      &self.handle.bluetooth.gateway_man,
+      &self.handle.state.root_browse,
+      self.handle.state.player.recently_played_gen(),
+      req,
+    )
+    .await
+    {
       Ok(reply) => {
         let payload = crate::stock::interapp::library_browse_to_stock(reply.result, limit, offset);
         self
@@ -325,7 +340,7 @@ impl LegacyStockHandler {
       return self.send_saved_result(false).await;
     }
     let req = LibraryFavoritesContainsRequest { uris: vec![id] };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+    match super::library::favorites_contains_request(&self.handle.bluetooth.gateway_man, req).await {
       Ok(reply) => {
         let liked = reply.liked.first().copied().unwrap_or(false);
         self.send_saved_result(liked).await?;
@@ -511,7 +526,14 @@ impl LegacyStockHandler {
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset: 0,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+    match super::library::browse_request(
+      &self.handle.bluetooth.gateway_man,
+      &self.handle.state.root_browse,
+      self.handle.state.player.recently_played_gen(),
+      req,
+    )
+    .await
+    {
       Ok(reply) => Ok(json!({
         "shelf": {
           "items": reply
@@ -540,7 +562,14 @@ impl LegacyStockHandler {
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, req).await {
+    match super::library::browse_request(
+      &self.handle.bluetooth.gateway_man,
+      &self.handle.state.root_browse,
+      self.handle.state.player.recently_played_gen(),
+      req,
+    )
+    .await
+    {
       Ok(reply) => {
         let entries_len = reply.result.entries.len() as u32;
         let total = reply.result.total.unwrap_or_else(|| {
@@ -638,6 +667,19 @@ impl LegacyStockHandler {
 
 fn limit_to_u32(limit: usize) -> u32 {
   u32::try_from(limit).unwrap_or(STOCK_BROWSE_LIMIT_MAX)
+}
+
+fn art_id_with_edge(id: &str, edge: u32) -> String {
+  let Some(rest) = id.strip_prefix("spotify/img/") else {
+    return id.to_string();
+  };
+  let Some(slash) = rest.find('/') else {
+    return id.to_string();
+  };
+  if rest[..slash].parse::<u32>().is_err() {
+    return id.to_string();
+  }
+  format!("spotify/img/{edge}/{}", &rest[slash + 1..])
 }
 
 fn offset_to_u32(offset: Option<usize>) -> u32 {
@@ -745,7 +787,7 @@ fn library_item_to_graphql_child(item: LibraryItem) -> Value {
       "uri": a.id,
       "title": a.name,
       "subtitle": "",
-      "image_id": "",
+      "image_id": a.artwork_id.unwrap_or_default(),
     }),
     LibraryItem::Playlist(p) => json!({
       "uri": p.uri,
@@ -769,7 +811,7 @@ fn library_item_to_graphql_child(item: LibraryItem) -> Value {
       "uri": a.id,
       "title": a.name,
       "subtitle": "",
-      "image_id": "",
+      "image_id": a.artwork_id.unwrap_or_default(),
     }),
     LibraryItem::Station(s) => json!({
       "uri": s.uri,
@@ -812,23 +854,16 @@ async fn warm_preset_art(state: &State, bluetooth: &BluetoothMan, id: &str) {
   if matches!(state.assets.contains(id).await, Ok(true)) {
     return;
   }
-  let req = AssetRequest {
-    id: id.to_string(),
-    request_id: Uuid::now_v7(),
+  let Some((bytes, mime)) = super::asset::request_asset_body(&state.transfer_sinks, bluetooth, id).await else {
+    return;
   };
-  match bluetooth.gateway_man.request(None, req).await {
-    Ok(got) => {
-      let bytes = Bytes::from(got.bytes);
-      if !bytes.is_empty()
-        && let Err(err) = state
-          .assets
-          .insert_internal(id.to_string(), bytes, got.mime, Retention::DISK_PINNED)
-          .await
-      {
-        tracing::warn!(?err, %id, "failed to warm preset art into cache");
-      }
-    }
-    Err(err) => tracing::debug!(?err, %id, "preset art pull failed"),
+  if !bytes.is_empty()
+    && let Err(err) = state
+      .assets
+      .insert_internal(id.to_string(), bytes, mime, Retention::DISK_PINNED)
+      .await
+  {
+    tracing::warn!(?err, %id, "failed to warm preset art into cache");
   }
 }
 
@@ -882,6 +917,27 @@ fn canned_tips() -> Vec<StockTip> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn thumbnail_rewrites_spotify_art_edge() {
+    assert_eq!(
+      art_id_with_edge("spotify/img/248/iabc123", 96),
+      "spotify/img/96/iabc123"
+    );
+    assert_eq!(
+      art_id_with_edge("spotify/img/248/uhttps%3A%2F%2Fx", 96),
+      "spotify/img/96/uhttps%3A%2F%2Fx"
+    );
+  }
+
+  #[test]
+  fn thumbnail_passes_through_non_spotify_ids() {
+    assert_eq!(art_id_with_edge("iap2/art/deadbeef/3", 96), "iap2/art/deadbeef/3");
+    assert_eq!(
+      art_id_with_edge("spotify/img/notanumber/x", 96),
+      "spotify/img/notanumber/x"
+    );
+  }
 
   #[test]
   fn classify_shelf() {
@@ -984,6 +1040,7 @@ mod tests {
       artist: libbridgething::Artist {
         id: "spotify:artist:x".into(),
         name: "Artist".into(),
+        artwork_id: None,
       },
       ..Track::default()
     }));

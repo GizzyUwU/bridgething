@@ -3,9 +3,8 @@ use std::{future::Future, pin::Pin};
 use libbridgething::{
   gateway::{
     BridgeToGatewayMsg, BridgeToGatewaySystemMsg, DeviceGetNickname, DeviceNicknameRejected, DeviceNicknameReply,
-    DeviceSetNickname, GatewayToBridgeSystemMsgCommandDispatch, GatewayToBridgeSystemMsgEventDispatch,
-    GatewayToBridgeSystemMsgRequestDispatch, LogsSubscribe, LogsSubscribeReply, LogsTail, LogsTailReply,
-    LogsUnsubscribe, OtaAbandon, OtaActivate, OtaAssetRangeChunk, OtaBegin, OtaChunk,
+    DeviceSetNickname, GatewayToBridgeSystemMsgCommandDispatch, GatewayToBridgeSystemMsgRequestDispatch, LogsSubscribe,
+    LogsSubscribeReply, LogsTail, LogsTailReply, LogsUnsubscribe, OtaAbandon, OtaActivate, OtaBegin,
   },
   wire::MsgMeta,
 };
@@ -71,47 +70,16 @@ impl GatewayToBridgeSystemMsgCommandDispatch for SystemHandler {
   }
 }
 
-impl GatewayToBridgeSystemMsgEventDispatch for SystemHandler {
-  type Output = HandlerResult;
-
-  async fn ota_chunk(&self, params: OtaChunk) -> HandlerResult {
-    tracing::trace!(
-      "({:?}) OtaChunk update_id={} offset={} len={} last={}",
-      &self.handle.address,
-      params.update_id,
-      params.offset,
-      params.bytes.len(),
-      params.last,
-    );
-    self.ota.chunk(params).await;
-    Ok(())
-  }
-
-  async fn ota_asset_range_chunk(&self, params: OtaAssetRangeChunk) -> HandlerResult {
-    tracing::trace!(
-      "({:?}) OtaAssetRangeChunk request_id={} part={} offset={} len={} last={}",
-      &self.handle.address,
-      params.request_id,
-      params.part_index,
-      params.offset,
-      params.bytes.len(),
-      params.last,
-    );
-    self.ota.asset_range_chunk(params).await;
-    Ok(())
-  }
-}
-
 impl GatewayToBridgeSystemMsgRequestDispatch for SystemHandler {
   type Output = HandlerResult;
 
   async fn ota_begin(&self, params: OtaBegin) -> HandlerResult {
     tracing::info!(
-      "({:?}) OtaBegin received: update_id={} sha256={} size={}",
+      "({:?}) OtaBegin received: update_id={} transfer_id={} size={}",
       &self.handle.address,
       params.update_id,
-      params.expected_sha256,
-      params.expected_size,
+      params.transfer.id,
+      params.transfer.total_size,
     );
     let peer = self.handle.address;
     match self.ota.begin(params, peer).await {

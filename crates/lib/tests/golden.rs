@@ -25,6 +25,7 @@ const COMPRESSION_NONE: u8 = 0x00;
 const ENCODING_MSGPACK: u8 = 0x00;
 const PRIORITY_NORMAL: u8 = 0x00;
 const PRIORITY_BULK: u8 = 0x01;
+const PRIORITY_BACKGROUND: u8 = 0x02;
 
 const FIXED_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000001";
 const FIXED_REQUEST_ID: &str = "0192f2a0-bbb0-7c00-a000-000000000099";
@@ -123,7 +124,7 @@ fn header_spec() -> HeaderSpec {
         name: "priority".into(),
         offset: 5,
         size: 1,
-        description: "u8: 0x00 normal, 0x01 bulk - sender hint for transport-level scheduling. Default zero on legacy senders is interpreted as normal.".into(),
+        description: "u8: 0x00 normal, 0x01 bulk, 0x02 background - sender hint for transport-level scheduling. Unknown bytes decode as normal.".into(),
       },
       HeaderField {
         name: "reserved".into(),
@@ -157,6 +158,7 @@ fn frame(payload: &[u8], priority: u8) -> Vec<u8> {
 fn priority_label(byte: u8) -> &'static str {
   match byte {
     PRIORITY_BULK => "bulk",
+    PRIORITY_BACKGROUND => "background",
     _ => "normal",
   }
 }
@@ -484,21 +486,6 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
-    "gateway_to_bridge/asset-push-event",
-    "companion proactively pushes an asset blob into the daemon cache",
-    GatewayToBridgeMsg {
-      id: id(),
-      meta: GatewayMsgMeta::Event,
-      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Push(AssetPush {
-        id: "spotify/track/abc/image".into(),
-        bytes: fingerprint_bytes(),
-        mime: Some("image/jpeg".into()),
-        retention: AssetRetention::Pinned,
-      })),
-    },
-  ));
-
-  out.push(gateway_fixture(
     "gateway_to_bridge/asset-clear-event",
     "companion drops a previously pushed asset",
     GatewayToBridgeMsg {
@@ -511,6 +498,81 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
   ));
 
   out.push(gateway_fixture(
+    "gateway_to_bridge/asset-got-inline-response",
+    "asset reply small enough to ride inline - TransferBody.inline arm",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Got(AssetGotReply {
+        id: "spotify/img/248/cover".into(),
+        mime: Some("image/jpeg".into()),
+        body: TransferBody::Inline(fingerprint_bytes()),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/asset-got-stream-response",
+    "asset reply declaring a fragment stream - TransferBody.stream arm, ref id = request id",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Response(ResponseMeta { request_id: req_id() }),
+      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::Got(AssetGotReply {
+        id: "spotify/img/248/cover".into(),
+        mime: Some("image/jpeg".into()),
+        body: TransferBody::Stream(TransferRef {
+          id: req_id(),
+          total_size: 81920,
+          sha256: None,
+        }),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture_with(
+    "gateway_to_bridge/transfer-fragment-event",
+    "one offset-addressed slice of a fragment stream, framed on the Bulk lane",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
+        transfer_id: req_id(),
+        offset: 4096,
+        bytes: fingerprint_bytes(),
+      })),
+    },
+    PRIORITY_BULK,
+  ));
+
+  out.push(gateway_fixture_with(
+    "gateway_to_bridge/transfer-fragment-background-event",
+    "same fragment shape framed on the Background lane - exercises priority byte 0x02",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Fragment(TransferFragment {
+        transfer_id: req_id(),
+        offset: 0,
+        bytes: fingerprint_bytes(),
+      })),
+    },
+    PRIORITY_BACKGROUND,
+  ));
+
+  out.push(gateway_fixture(
+    "gateway_to_bridge/transfer-abandon-event",
+    "sender aborts an in-flight fragment stream",
+    GatewayToBridgeMsg {
+      id: id(),
+      meta: GatewayMsgMeta::Event,
+      data: GatewayToBridgeMsgData::Transfer(GatewayToBridgeTransferMsg::Abandon(TransferAbandon {
+        transfer_id: req_id(),
+        reason: "source asset evicted mid-stream".into(),
+      })),
+    },
+  ));
+
+  out.push(gateway_fixture(
     "gateway_to_bridge/authority-claim-now-playing-metadata",
     "companion claims authority over the now-playing metadata scope",
     GatewayToBridgeMsg {
@@ -518,6 +580,7 @@ fn build_fixtures() -> Vec<(GoldenFixture, Vec<u8>)> {
       meta: GatewayMsgMeta::Event,
       data: GatewayToBridgeMsgData::Authority(GatewayToBridgeAuthorityMsg::Claim(AuthorityClaim {
         scope: CompanionAuthorityScope::NowPlayingMetadata,
+        app_bundle: Some("com.spotify.client".to_string()),
       })),
     },
   ));
@@ -716,7 +779,7 @@ fn golden_fixtures_round_trip_through_rust_codec() {
 }
 
 #[test]
-fn priority_round_trips_through_codec_on_both_lanes() {
+fn priority_round_trips_through_codec_on_all_lanes() {
   use libbridgething::{
     Priority,
     protocol::{BridgeEndec, GatewayEndec, PrioritizedFrame},
@@ -737,7 +800,7 @@ fn priority_round_trips_through_codec_on_both_lanes() {
     data: GatewayToBridgeMsgData::Capabilities(GatewayToBridgeCapabilitiesMsg::Announce(gateway_capabilities())),
   };
 
-  for priority in [Priority::Normal, Priority::Bulk] {
+  for priority in [Priority::Normal, Priority::Bulk, Priority::Background] {
     // Daemon -> phone: encode with BridgeEndec, decode with GatewayEndec.
     let mut wire = BytesMut::new();
     BridgeEndec::default()

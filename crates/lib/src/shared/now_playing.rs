@@ -107,8 +107,10 @@ pub struct MediaItemUpdate {
   pub persistent_id: Option<String>,
   pub title: Option<String>,
   pub album: Option<String>,
+  pub album_uri: Option<String>,
   pub album_artist: Option<String>,
   pub artist: Option<String>,
+  pub artist_uri: Option<String>,
   pub liked: Option<bool>,
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,
@@ -127,8 +129,10 @@ impl MediaItemUpdate {
     self.persistent_id.is_none()
       && self.title.is_none()
       && self.album.is_none()
+      && self.album_uri.is_none()
       && self.album_artist.is_none()
       && self.artist.is_none()
+      && self.artist_uri.is_none()
       && self.liked.is_none()
       && self.artwork_id.is_none()
       && self.duration_ms.is_none()

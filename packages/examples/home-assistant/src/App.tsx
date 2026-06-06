@@ -78,7 +78,10 @@ export default function App() {
       const token = tokenCfg.ok ? tokenCfg.response.value : null;
       if (!baseUrl || !token) {
         if (!cancelled)
-          setMode({ kind: 'needs-config', message: 'set the Home Assistant URL and access token in the companion app.' });
+          setMode({
+            kind: 'needs-config',
+            message: 'set the Home Assistant URL and access token in the companion app.',
+          });
         return;
       }
 
@@ -188,10 +191,21 @@ export default function App() {
   );
 
   if (mode.kind === 'loading')
-    return <Center muted={status.kind === 'error'}>{status.kind === 'error' ? status.message : 'connecting to home assistant...'}</Center>;
+    return (
+      <Center muted={status.kind === 'error'}>
+        {status.kind === 'error' ? status.message : 'connecting to home assistant...'}
+      </Center>
+    );
   if (mode.kind === 'needs-config') return <Center muted>{mode.message}</Center>;
   if (mode.kind === 'picker')
-    return <Picker all={mode.all} initial={selection} onDone={savePicker} onCancel={selection.length ? () => setMode({ kind: 'dashboard' }) : undefined} />;
+    return (
+      <Picker
+        all={mode.all}
+        initial={selection}
+        onDone={savePicker}
+        onCancel={selection.length ? () => setMode({ kind: 'dashboard' }) : undefined}
+      />
+    );
 
   const tiles = selection.map(id => mergeState(id, entities[id], overlay[id], pendingTemp[id]));
   return (
@@ -208,7 +222,12 @@ export default function App() {
 
 export type Tile = { entityId: string; state: HaState | null; pendingTemp: number | null };
 
-function mergeState(id: string, live: HaState | undefined, overlayState: string | undefined, pending: number | undefined): Tile {
+function mergeState(
+  id: string,
+  live: HaState | undefined,
+  overlayState: string | undefined,
+  pending: number | undefined,
+): Tile {
   if (!live) return { entityId: id, state: null, pendingTemp: pending ?? null };
   const state = overlayState ? { ...live, state: overlayState } : live;
   return { entityId: id, state, pendingTemp: pending ?? null };
@@ -217,7 +236,9 @@ function mergeState(id: string, live: HaState | undefined, overlayState: string 
 function Center({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-bt-charcoal px-10">
-      <div className={`max-w-[34rem] text-center text-sm ${muted ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>{children}</div>
+      <div className={`max-w-[34rem] text-center text-sm ${muted ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>
+        {children}
+      </div>
     </div>
   );
 }

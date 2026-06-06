@@ -1,5 +1,5 @@
 use libbridgething::{
-  LibraryError,
+  BrowseResult, LibraryError,
   client::{
     BridgeToClientMsgData, ClientToBridgeLibraryMsgDispatch, FavoritesSet as ClientFavoritesSet,
     FavoritesSetMany as ClientFavoritesSetMany, FavoritesToggle as ClientFavoritesToggle, LibraryBrowse,
@@ -8,13 +8,14 @@ use libbridgething::{
     LibrarySearch, LibrarySearchReply,
   },
   gateway::{
-    self, BridgeToGatewayLibraryMsgCommand, LibraryBrowseRequest, LibraryFavoritesContainsRequest,
-    LibraryFavoritesListRequest, LibraryRecommendationsRequest, LibrarySearchRequest,
+    self, BridgeToGatewayLibraryMsgCommand, BrowseReply, FavoritesContainsReply, LibraryBrowseRequest,
+    LibraryFavoritesContainsRequest, LibraryFavoritesListRequest, LibraryRecommendationsRequest, LibrarySearchRequest,
   },
   wire::{RequestError, WireRequest},
 };
 
 use super::{HandlerResult, MsgHandle};
+use crate::{bluetooth::GatewayMan, player::is_synthetic_uri, state::RootBrowseCache};
 
 const RECOMMENDATIONS_SEEDS_MAX: usize = 5;
 const FAVORITES_CONTAINS_MAX: usize = 50;
@@ -85,7 +86,14 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match browse_request(
+      &self.handle.bluetooth.gateway_man,
+      &self.handle.state.root_browse,
+      self.handle.state.player.recently_played_gen(),
+      outbound,
+    )
+    .await
+    {
       Ok(reply) => {
         self
           .handle
@@ -208,7 +216,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
     let mut uris = uris;
     uris.truncate(FAVORITES_CONTAINS_MAX);
     let outbound = LibraryFavoritesContainsRequest { uris };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match favorites_contains_request(&self.handle.bluetooth.gateway_man, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -256,4 +264,42 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       ))
       .await
   }
+}
+
+pub(super) async fn browse_request(
+  gateway_man: &GatewayMan,
+  root_cache: &RootBrowseCache,
+  root_gen: u64,
+  req: LibraryBrowseRequest,
+) -> Result<BrowseReply, RequestError<gateway::LibraryErrorReply>> {
+  if req.node_id.as_deref().is_some_and(is_synthetic_uri) {
+    return Ok(BrowseReply {
+      result: BrowseResult {
+        entries: Vec::new(),
+        total: None,
+        has_more: false,
+      },
+    });
+  }
+  if req.node_id.is_none() {
+    let result = root_cache
+      .get_or_fetch(root_gen, || async {
+        gateway_man.request_bulk(None, req).await.map(|reply| reply.result)
+      })
+      .await?;
+    return Ok(BrowseReply { result });
+  }
+  gateway_man.request_bulk(None, req).await
+}
+
+pub(super) async fn favorites_contains_request(
+  gateway_man: &GatewayMan,
+  req: LibraryFavoritesContainsRequest,
+) -> Result<FavoritesContainsReply, RequestError<gateway::LibraryErrorReply>> {
+  if !req.uris.is_empty() && req.uris.iter().all(|uri| is_synthetic_uri(uri)) {
+    return Ok(FavoritesContainsReply {
+      liked: vec![false; req.uris.len()],
+    });
+  }
+  gateway_man.request_bulk(None, req).await
 }

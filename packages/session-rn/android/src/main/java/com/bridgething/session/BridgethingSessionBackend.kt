@@ -35,7 +35,7 @@ public interface BridgethingSessionBackend {
     public suspend fun signOut()
     public suspend fun currentProvider(): BridgethingProviderInfo?
     public suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig
-    public suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean)
+    public suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String)
 
     public suspend fun snapshot(): BridgethingSessionSnapshot
     public suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine>

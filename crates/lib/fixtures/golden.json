@@ -32,7 +32,7 @@
         "name": "priority",
         "offset": 5,
         "size": 1,
-        "description": "u8: 0x00 normal, 0x01 bulk - sender hint for transport-level scheduling. Default zero on legacy senders is interpreted as normal."
+        "description": "u8: 0x00 normal, 0x01 bulk, 0x02 background - sender hint for transport-level scheduling. Unknown bytes decode as normal."
       },
       {
         "name": "reserved",
@@ -556,43 +556,6 @@
       "framed_hex": "dead02000000000000000000000001aa83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065ac6361706162696c6974696573a46461746182a56576656e74a8616e6e6f756e6365a46461746186a76761746577617988a761646472657373b130303a31313a32323a33333a34343a3535a46e616d65ad4a6f65792773206950686f6e65a66f734e616d65a3694f53a76170704e616d65b26272696467657468696e672d6d6f62696c65aa61707056657273696f6ea5312e302e30ae6164617074657256657273696f6ea5312e302e30aa6c696256657273696f6ea5312e302e30b56c69626272696467657468696e6756657273696f6ea676302e312e30aa757269536368656d657391a773706f74696679a76e6574776f726b82a46b696e64a477696669a76d657465726564c2a9617661696c61626c6586a367656fc2ad6e6f74696669636174696f6e73c2a86e65744665746368c3a56e65745773c3a8617564696f547473c2a66c7972696373c3a5617564696f82a7656172636f6e7390a6766f6963657390ad6d7573696350726f7669646572a773706f74696679"
     },
     {
-      "name": "gateway_to_bridge/asset-push-event",
-      "description": "companion proactively pushes an asset blob into the daemon cache",
-      "direction": "gateway_to_bridge",
-      "priority": "normal",
-      "decoded_json": {
-        "data": {
-          "data": {
-            "data": {
-              "bytes": [
-                137,
-                80,
-                78,
-                71,
-                13,
-                10,
-                26,
-                10
-              ],
-              "id": "spotify/track/abc/image",
-              "mime": "image/jpeg",
-              "retention": {
-                "type": "pinned"
-              }
-            },
-            "event": "push"
-          },
-          "type": "asset"
-        },
-        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
-        "meta": {
-          "kind": "event"
-        }
-      },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a470757368a46461746184a26964b773706f746966792f747261636b2f6162632f696d616765a56279746573c40889504e470d0a1a0aa46d696d65aa696d6167652f6a706567a9726574656e74696f6e81a474797065a670696e6e6564",
-      "framed_hex": "dead02000000000000000000000000a183a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a470757368a46461746184a26964b773706f746966792f747261636b2f6162632f696d616765a56279746573c40889504e470d0a1a0aa46d696d65aa696d6167652f6a706567a9726574656e74696f6e81a474797065a670696e6e6564"
-    },
-    {
       "name": "gateway_to_bridge/asset-clear-event",
       "description": "companion drops a previously pushed asset",
       "direction": "gateway_to_bridge",
@@ -616,6 +579,172 @@
       "framed_hex": "dead020000000000000000000000006b83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a56173736574a46461746182a56576656e74a5636c656172a46461746181a26964b773706f746966792f747261636b2f6162632f696d616765"
     },
     {
+      "name": "gateway_to_bridge/asset-got-inline-response",
+      "description": "asset reply small enough to ride inline - TransferBody.inline arm",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "body": {
+                "data": [
+                  137,
+                  80,
+                  78,
+                  71,
+                  13,
+                  10,
+                  26,
+                  10
+                ],
+                "type": "inline"
+              },
+              "id": "spotify/img/248/cover",
+              "mime": "image/jpeg"
+            },
+            "event": "got"
+          },
+          "type": "asset"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56173736574a46461746182a56576656e74a3676f74a46461746183a26964b573706f746966792f696d672f3234382f636f766572a46d696d65aa696d6167652f6a706567a4626f647982a474797065a6696e6c696e65a464617461c40889504e470d0a1a0a",
+      "framed_hex": "dead02000000000000000000000000bd83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56173736574a46461746182a56576656e74a3676f74a46461746183a26964b573706f746966792f696d672f3234382f636f766572a46d696d65aa696d6167652f6a706567a4626f647982a474797065a6696e6c696e65a464617461c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/asset-got-stream-response",
+      "description": "asset reply declaring a fragment stream - TransferBody.stream arm, ref id = request id",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "body": {
+                "data": {
+                  "id": "0192f2a0-bbb0-7c00-a000-000000000099",
+                  "totalSize": 81920
+                },
+                "type": "stream"
+              },
+              "id": "spotify/img/248/cover",
+              "mime": "image/jpeg"
+            },
+            "event": "got"
+          },
+          "type": "asset"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "data": {
+            "requestId": "0192f2a0-bbb0-7c00-a000-000000000099"
+          },
+          "kind": "response"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56173736574a46461746182a56576656e74a3676f74a46461746183a26964b573706f746966792f696d672f3234382f636f766572a46d696d65aa696d6167652f6a706567a4626f647982a474797065a673747265616da46461746182a26964c4100192f2a0bbb07c00a000000000000099a9746f74616c53697a65ce00014000",
+      "framed_hex": "dead02000000000000000000000000d883a26964c4100192f2a0bbb07c00a000000000000001a46d65746182a46b696e64a8726573706f6e7365a46461746181a9726571756573744964c4100192f2a0bbb07c00a000000000000099a46461746182a474797065a56173736574a46461746182a56576656e74a3676f74a46461746183a26964b573706f746966792f696d672f3234382f636f766572a46d696d65aa696d6167652f6a706567a4626f647982a474797065a673747265616da46461746182a26964c4100192f2a0bbb07c00a000000000000099a9746f74616c53697a65ce00014000"
+    },
+    {
+      "name": "gateway_to_bridge/transfer-fragment-event",
+      "description": "one offset-addressed slice of a fragment stream, framed on the Bulk lane",
+      "direction": "gateway_to_bridge",
+      "priority": "bulk",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "bytes": [
+                137,
+                80,
+                78,
+                71,
+                13,
+                10,
+                26,
+                10
+              ],
+              "offset": 4096,
+              "transferId": "0192f2a0-bbb0-7c00-a000-000000000099"
+            },
+            "event": "fragment"
+          },
+          "type": "transfer"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a8667261676d656e74a46461746183aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a66f6666736574cd1000a56279746573c40889504e470d0a1a0a",
+      "framed_hex": "dead020000010000000000000000008d83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a8667261676d656e74a46461746183aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a66f6666736574cd1000a56279746573c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/transfer-fragment-background-event",
+      "description": "same fragment shape framed on the Background lane - exercises priority byte 0x02",
+      "direction": "gateway_to_bridge",
+      "priority": "background",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "bytes": [
+                137,
+                80,
+                78,
+                71,
+                13,
+                10,
+                26,
+                10
+              ],
+              "offset": 0,
+              "transferId": "0192f2a0-bbb0-7c00-a000-000000000099"
+            },
+            "event": "fragment"
+          },
+          "type": "transfer"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a8667261676d656e74a46461746183aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a66f666673657400a56279746573c40889504e470d0a1a0a",
+      "framed_hex": "dead020000020000000000000000008b83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a8667261676d656e74a46461746183aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a66f666673657400a56279746573c40889504e470d0a1a0a"
+    },
+    {
+      "name": "gateway_to_bridge/transfer-abandon-event",
+      "description": "sender aborts an in-flight fragment stream",
+      "direction": "gateway_to_bridge",
+      "priority": "normal",
+      "decoded_json": {
+        "data": {
+          "data": {
+            "data": {
+              "reason": "source asset evicted mid-stream",
+              "transferId": "0192f2a0-bbb0-7c00-a000-000000000099"
+            },
+            "event": "abandon"
+          },
+          "type": "transfer"
+        },
+        "id": "0192f2a0-bbb0-7c00-a000-000000000001",
+        "meta": {
+          "kind": "event"
+        }
+      },
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a76162616e646f6ea46461746182aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a6726561736f6ebf736f757263652061737365742065766963746564206d69642d73747265616d",
+      "framed_hex": "dead020000000000000000000000009983a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a87472616e73666572a46461746182a56576656e74a76162616e646f6ea46461746182aa7472616e736665724964c4100192f2a0bbb07c00a000000000000099a6726561736f6ebf736f757263652061737365742065766963746564206d69642d73747265616d"
+    },
+    {
       "name": "gateway_to_bridge/authority-claim-now-playing-metadata",
       "description": "companion claims authority over the now-playing metadata scope",
       "direction": "gateway_to_bridge",
@@ -624,6 +753,7 @@
         "data": {
           "data": {
             "data": {
+              "appBundle": "com.spotify.client",
               "scope": "nowPlayingMetadata"
             },
             "event": "claim"
@@ -635,8 +765,8 @@
           "kind": "event"
         }
       },
-      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746181a573636f7065b26e6f77506c6179696e674d65746164617461",
-      "framed_hex": "dead020000000000000000000000006d83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746181a573636f7065b26e6f77506c6179696e674d65746164617461"
+      "msgpack_hex": "83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746182a573636f7065b26e6f77506c6179696e674d65746164617461a961707042756e646c65b2636f6d2e73706f746966792e636c69656e74",
+      "framed_hex": "dead020000000000000000000000008a83a26964c4100192f2a0bbb07c00a000000000000001a46d65746181a46b696e64a56576656e74a46461746182a474797065a9617574686f72697479a46461746182a56576656e74a5636c61696da46461746182a573636f7065b26e6f77506c6179696e674d65746164617461a961707042756e646c65b2636f6d2e73706f746966792e636c69656e74"
     },
     {
       "name": "gateway_to_bridge/authority-release-now-playing-playback",

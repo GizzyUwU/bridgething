@@ -3,7 +3,6 @@ import type {
   AcceptCallAction,
   AncsAuthState,
   ArtProfile,
-  AssetRetention,
   BridgeThingMeta,
   BrowseResult,
   CallEndReason,
@@ -31,7 +30,6 @@ import type {
   NetFetchResponse,
   NluResolvedIntent,
   Notification,
-  NowPlayingUpdate,
   OtaError,
   OtaKind,
   OtaProgress,
@@ -65,15 +63,20 @@ import type {
 } from './shared';
 import type { MsgMeta, WireError } from './wire';
 
+/**
+ * Invalidate the daemon-side cached asset for `id`. The companion's
+ * escape hatch when it knows an asset it previously served is stale.
+ */
 export type AssetClear = { id: string };
 
 /**
- * Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
- * without the retention hint - the daemon picks retention for assets
- * it asked for, since the lifecycle is request-scoped rather than
- * companion-managed.
+ * Typed terminal response for an `AssetRequest`. Small assets arrive
+ * inline; larger ones declare a stream whose ref id is the originating
+ * request id, with the bytes following as `TransferFragment` events on
+ * the bulk lane (so now-playing traffic preempts them between
+ * fragments).
  */
-export type AssetGotReply = { id: string; bytes: Uint8Array; mime: string | null };
+export type AssetGotReply = { id: string; mime: string | null; body: TransferBody };
 
 /**
  * Domain error response for an `AssetRequest`: the companion does not
@@ -81,71 +84,21 @@ export type AssetGotReply = { id: string; bytes: Uint8Array; mime: string | null
  */
 export type AssetNotFoundReply = { id: string };
 
-/**
- * Single-frame asset push for small, latency-critical, memory-resident
- * assets (album art). The payload size must be at most
- * `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
- * `Persistent`. Larger payloads or persistent retention require the
- * chunked `PushBegin`/`PushChunk` flow.
- */
-export type AssetPush = { id: string; bytes: Uint8Array; mime: string | null; retention: AssetRetention };
-
-/**
- * Drop the daemon-side partial for `id`. The companion's escape hatch
- * when it wants to clean up a push it can no longer complete.
- */
-export type AssetPushAbandon = { id: string };
-
-/**
- * Open or resume a chunked asset push. Daemon responds with
- * `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
- * `AssetPushChunk` should start at, 0 for fresh pushes) or
- * `AssetPushBeginRejected { reason }` (conflicting in-flight id with
- * mismatched size/sha, budget exhausted, etc.).
- *
- * Required for any push with `retention = Persistent` and for any push
- * larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
- */
-export type AssetPushBegin = {
-  id: string;
-  expectedSize: number;
-  expectedSha256: string | null;
-  mime: string | null;
-  retention: AssetRetention;
-};
-
-/**
- * Successful response to `AssetPushBegin`. `resume_from_offset` is the
- * byte offset the next `AssetPushChunk` should start at: 0 for fresh
- * pushes, or the daemon's recovered partial length for a resume.
- */
-export type AssetPushBeginAck = { resumeFromOffset: number };
-
-/**
- * Domain-error response to `AssetPushBegin`: the daemon refuses to
- * start or resume this push (conflicting in-flight id, budget
- * exhausted, oversized, etc.).
- */
-export type AssetPushBeginRejected = { reason: string };
-
-/**
- * Streaming chunk of an asset push opened by `AssetPushBegin`.
- * `offset` must equal the daemon's current `received` for this id.
- * `last:true` triggers post-stream verify (size + optional sha256)
- * and commit to the asset cache.
- */
-export type AssetPushChunk = { id: string; offset: number; bytes: Uint8Array; last: boolean };
-
 export type AssetRequest = { id: string; requestId: string };
 
-export type AuthorityClaim = { scope: CompanionAuthorityScope };
+export type AuthorityClaim = {
+  scope: CompanionAuthorityScope;
+  /**
+   * App bundle the companion represents (e.g. `com.spotify.client`).
+   * The daemon's now-playing gate compares it against iAP2's foreground
+   * app to override a still-claimed companion when another app takes over.
+   */
+  appBundle: string | null;
+};
 
 export type AuthorityRelease = { scope: CompanionAuthorityScope };
 
-export type BridgeToGatewayAssetMsg =
-  | { event: 'request'; data: AssetRequest }
-  | { event: 'pushBeginAck'; data: AssetPushBeginAck }
-  | { event: 'pushBeginRejected'; data: AssetPushBeginRejected };
+export type BridgeToGatewayAssetMsg = { event: 'request'; data: AssetRequest };
 
 export type BridgeToGatewayAudioMsg =
   | { event: 'volumeUp' }
@@ -251,8 +204,7 @@ export type BridgeToGatewayPlayerMsg =
   | { event: 'setShuffle'; data: SetShuffle }
   | { event: 'setRepeat'; data: SetRepeat }
   | { event: 'setSpeed'; data: SetSpeed }
-  | { event: 'setCrossfade'; data: SetCrossfade }
-  | { event: 'hint'; data: PlaybackHint };
+  | { event: 'setCrossfade'; data: SetCrossfade };
 
 export type BridgeToGatewaySystemMsg =
   | { event: 'otaProgress'; data: OtaProgress }
@@ -337,13 +289,6 @@ export type DeviceSetNickname = { nickname: string };
 export type Earcon = { name: string };
 
 /**
- * Playback context the companion's track plays from (playlist / album /
- * artist / show). `kind` is opaque to the daemon - it forwards the
- * string to webapps that render "playing from <name>".
- */
-export type EnrichmentContext = { uri: string; name: string | null; kind: string | null };
-
-/**
  * Fired when the favorited / liked status of an item changes -
  * regardless of whether it was driven by the daemon (FavoritesToggle/Set
  * command) or by the user mutating it on the gateway-side app directly.
@@ -372,11 +317,7 @@ export type FavoritesSetMany = { entries: Array<FavoritesSet> };
 export type FavoritesToggle = { item: ItemRef };
 
 export type GatewayToBridgeAssetMsg =
-  | { event: 'push'; data: AssetPush }
   | { event: 'clear'; data: AssetClear }
-  | { event: 'pushBegin'; data: AssetPushBegin }
-  | { event: 'pushChunk'; data: AssetPushChunk }
-  | { event: 'pushAbandon'; data: AssetPushAbandon }
   | { event: 'got'; data: AssetGotReply }
   | { event: 'notFound'; data: AssetNotFoundReply };
 
@@ -386,10 +327,11 @@ export type GatewayToBridgeAudioMsg =
   | { event: 'volumeChanged'; data: VolumeChanged };
 
 /**
- * Companion declares per-scope authority. `Claim` is idempotent and may
- * be re-issued to refresh the freshness timestamp. `Release` is the
- * "stop preferring my data for this scope" signal. Stale claims fall
- * back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+ * Companion declares per-scope authority. `Release` is the "stop
+ * preferring my data for this scope" signal. Non-now-playing claims
+ * fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
+ * hold until release / disconnect / app-change arbitration (the
+ * companion declares its `app_bundle` so the daemon can arbitrate).
  */
 export type GatewayToBridgeAuthorityMsg =
   | { event: 'claim'; data: AuthorityClaim }
@@ -448,6 +390,7 @@ export type GatewayToBridgeMsgData =
   | { type: 'player'; data: GatewayToBridgePlayerMsg }
   | { type: 'system'; data: GatewayToBridgeSystemMsg }
   | { type: 'time'; data: GatewayToBridgeTimeMsg }
+  | { type: 'transfer'; data: GatewayToBridgeTransferMsg }
   | { type: 'tunnel'; data: GatewayToBridgeTunnelMsg }
   | { type: 'voice'; data: GatewayToBridgeVoiceMsg }
   | { type: 'webapp'; data: GatewayToBridgeWebappMsg }
@@ -480,29 +423,24 @@ export type GatewayToBridgePhoneMsg =
   | { event: 'stateReply'; data: PhoneStateReply };
 
 /**
- * Gateway -> bridge player events. `Snapshot` is the initial-state event
- * fired at announce when the companion claims player authority;
- * `Delta` is the ongoing partial-update stream (the only delta-shaped
- * event in the wire protocol - every other surface uses snapshots).
- * `QueueChanged` fires when the queue mutates without a track change
- * (companion-side reorder, prefetch). `EnrichmentOffer` is the iOS
- * non-authoritative decoration path (see `NowPlayingEnrichment`).
+ * Gateway -> bridge player events. The companion is authoritative for
+ * now-playing: `Snapshot` carries the full player state and is the sole
+ * metadata/playback source (driven by the dealer push). `QueueChanged`
+ * carries a full queue replacement when the upcoming list materially
+ * changes; the daemon derives the post-advance next from the held
+ * snapshot, so a plain advance costs no queue traffic.
  */
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
-  | { event: 'delta'; data: NowPlayingUpdate }
-  | { event: 'queueChanged'; data: QueueSnapshot }
-  | { event: 'enrichmentOffer'; data: NowPlayingEnrichment };
+  | { event: 'queueChanged'; data: QueueSnapshot };
 
 export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
-  | { event: 'otaChunk'; data: OtaChunk }
   | { event: 'otaAbandon'; data: OtaAbandon }
   | { event: 'otaActivate'; data: OtaActivate }
   | { event: 'cancelUpdate' }
   | { event: 'otaAssetRangeReply'; data: OtaAssetRangeReply }
   | { event: 'otaAssetRangeRejected'; data: OtaAssetRangeRejected }
-  | { event: 'otaAssetRangeChunk'; data: OtaAssetRangeChunk }
   | { event: 'deviceGetNickname' }
   | { event: 'deviceSetNickname'; data: DeviceSetNickname }
   | { event: 'logsTail'; data: LogsTail }
@@ -516,6 +454,10 @@ export type GatewayToBridgeSystemMsg =
  * changes.
  */
 export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
+
+export type GatewayToBridgeTransferMsg =
+  | { event: 'fragment'; data: TransferFragment }
+  | { event: 'abandon'; data: TransferAbandon };
 
 export type GatewayToBridgeTunnelMsg =
   | { event: 'openReply'; data: TunnelOpenReply }
@@ -672,22 +614,6 @@ export type NotificationInvoke = { id: string };
 export type NotificationRemoved = { id: string; reason: DismissReason };
 
 /**
- * Non-authoritative decoration the iOS companion offers for the track
- * iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
- * companion echoes from the last `PlaybackHint`, so the daemon can match
- * this offer to the live iAP2 identity by exact equality. `head` is the
- * companion's current Spotify track. The companion never claims authority
- * - the daemon overlays art / uri onto the iAP2 identity only when the
- * offer provably describes the playing track. The queue rides its own
- * `QueueChanged` surface (on-change), not this frequent per-hint offer.
- */
-export type NowPlayingEnrichment = {
-  anchorPid: string | null;
-  head: QueueItem | null;
-  context: EnrichmentContext | null;
-};
-
-/**
  * Drop the daemon-side partial for `update_id`. After `CancelUpdate`
  * keeps the partial for resume; `OtaAbandon` is the explicit clean-up
  * when the companion no longer wants to retry this artifact.
@@ -697,8 +623,8 @@ export type OtaAbandon = { updateId: string };
 /**
  * Commit every staged bandaid piece (daemon / hub / stock) as one
  * transaction, then restart bridgething.service once. Bandaid pushes
- * (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage on `last:true`
- * (phase reaches `Writing`/100 but the daemon does NOT restart); the
+ * (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
+ * completion (phase reaches `Writing`/100, the daemon does NOT restart); the
  * companion sends `OtaActivate` after the final piece to swap them all
  * live with a single restart. Image OTAs never use this -- they reboot
  * at write completion.
@@ -722,27 +648,11 @@ export type OtaAssetRange = { updateId: string; asset: string; ranges: Array<Ran
 
 /**
  * Daemon-side cancel for an in-flight range request: libcurl gave up
- * (timeout, OTA failed, daemon is shutting down). Companion stops
- * sending `OtaAssetRangeChunk` events for `request_id` and frees any
- * resources it held open.
+ * (timeout, OTA failed, daemon is shutting down). Companion stops the
+ * fragment stream for `request_id` and frees any resources it held
+ * open.
  */
 export type OtaAssetRangeAbandon = { requestId: string };
-
-/**
- * Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
- * the Bulk lane in order: parts in declaration order, chunks in
- * ascending `offset`. `offset` is absolute within the asset, not
- * within the part - matches what the daemon's HTTP-Range writer needs
- * to feed libcurl. `last:true` only on the final chunk of the final
- * part for this `request_id`.
- */
-export type OtaAssetRangeChunk = {
-  requestId: string;
-  partIndex: number;
-  offset: number;
-  bytes: Uint8Array;
-  last: boolean;
-};
 
 /**
  * Domain-error response to `OtaAssetRange`: the companion can't serve
@@ -755,42 +665,40 @@ export type OtaAssetRangeRejected = { reason: string };
 
 /**
  * Successful response to `OtaAssetRange`. The companion has the asset
- * (or refetched it from `update_url_base`) and is about to stream the
- * requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
- * `parts` echoes the resolved ranges in the order they will be sent;
- * `total_size` is the asset's full byte length (for `Content-Range`
- * totals).
+ * (or refetched it from `update_url_base`) and serves the resolved
+ * ranges in `body`: small results inline, larger ones as a fragment
+ * stream whose offsets are stream-relative (0..sum of part lengths,
+ * parts concatenated in declaration order - the daemon's HTTP-Range
+ * writer maps them to absolute positions via `parts`). `total_size` is
+ * the asset's full byte length (for `Content-Range` totals).
  */
-export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart> };
+export type OtaAssetRangeReply = { totalSize: number; parts: Array<RangePart>; body: TransferBody };
 
 /**
  * Companion-initiated OTA: opens or resumes a streaming push of an
  * update artifact identified by its sha256. The daemon responds with
- * `OtaBeginAck { resume_from_offset }` (the byte offset the next
- * `OtaChunk` should start at, 0 for fresh pushes) or
+ * `OtaBeginAck { resume_from_offset }` (the byte offset the first
+ * `TransferFragment` should start at, 0 for fresh pushes) or
  * `OtaBeginRejected { reason }`.
  *
  * `kind` selects the backend. See `OtaKind`.
  *
  * `update_id` is the sha256 of the artifact, hex-encoded. Content-
  * addressed so resume across daemon restarts and retries-after-failure
- * both work without companion-side state to track.
+ * both work without companion-side state to track. `transfer.id` is
+ * minted per attempt and only correlates the fragment stream; the
+ * daemon binds it to the `update_id`-keyed partial, so a reconnect
+ * with a fresh transfer id still resumes the same bytes.
  *
  * `update_url_base` is image-kind only: the server prefix the companion
  * may refetch the .zck delta from on cache miss while serving range
  * requests during the Writing phase. Ignored for non-image kinds.
  */
-export type OtaBegin = {
-  kind: OtaKind;
-  updateId: string;
-  updateUrlBase: string | null;
-  expectedSha256: string;
-  expectedSize: number;
-};
+export type OtaBegin = { kind: OtaKind; updateId: string; updateUrlBase: string | null; transfer: TransferRef };
 
 /**
  * Successful response to `OtaBegin`. `resume_from_offset` is the byte
- * offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+ * offset the first `TransferFragment` should start at: 0 for fresh pushes, or
  * the daemon's recovered partial length for a resume.
  */
 export type OtaBeginAck = { resumeFromOffset: number };
@@ -801,16 +709,6 @@ export type OtaBeginAck = { resumeFromOffset: number };
  * update_id with mismatched size/sha, budget exhausted).
  */
 export type OtaBeginRejected = { reason: string };
-
-/**
- * Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
- * equal the daemon's current `received` for the transfer (chunks are
- * strictly in-order; the companion learns the resume offset from
- * `OtaBeginAck`). `last:true` triggers post-stream verify (size +
- * sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
- * phase progress events.
- */
-export type OtaChunk = { updateId: string; offset: number; bytes: Uint8Array; last: boolean };
 
 export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
 
@@ -847,30 +745,14 @@ export type PhoneStateReply = { state: PhoneState };
 export type PlayUri = { uri: string; context: PlayContext | null };
 
 /**
- * Invalidation signal fired when the daemon observes an iAP2 NowPlaying
- * state change the companion can't see directly. Carries enough context
- * for the companion to filter ("is this for the app I care about?") and
- * dedupe ("did the track actually change?"). The companion is expected
- * to react with its own data fetch (e.g. Spotify Web API) - the hint
- * itself is not a state source. `persistent_id` is iAP2's opaque hex
- * identifier; do not treat it as a service URI.
- */
-export type PlaybackHint = {
-  appBundle: string | null;
-  persistentId: string | null;
-  playing: boolean | null;
-  durationMs: number | null;
-};
-
-/**
- * Queue update from the companion. `order` is the complete queue as a
- * list of item uris, every message - so it is a full ordering, not an
- * op-delta with a baseline to track. `items` carries full metadata only
- * for uris the daemon does not already hold from the previous message on
- * this connection; the daemon rebuilds the queue from `order` against its
- * last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
- * is a link reset and the companion re-sends a full ordering on reconnect;
- * no revision numbers or resync are needed.
+ * Full queue replacement from the companion. `order` is the upcoming
+ * queue as a list of item uris, current excluded; `items` carries full
+ * metadata for every uri in `order`, so the daemon rebuilds the queue
+ * from the snapshot alone. The companion sends one only when the upcoming
+ * list materially changes (context switch, reorder, add-to-queue), never
+ * on a plain advance - the daemon derives the post-advance next by
+ * locating the now-playing track in the held queue. Both sides drop this
+ * state on disconnect; no deltas, revisions, or resync to track.
  */
 export type QueueSnapshot = { order: Array<string>; items: Array<QueueItem> };
 
@@ -917,6 +799,39 @@ export type TrackIdentity = {
   durationMs: number | null;
   isrc: string | null;
 };
+
+/**
+ * Sender-side abort of an in-flight transfer (source lost the bytes,
+ * upstream fetch failed). The receiver drops the bound sink; partial
+ * disk state is kept for resumable transfers and discarded otherwise.
+ */
+export type TransferAbandon = { transferId: string; reason: string };
+
+/**
+ * Standard embedding for a byte payload that may or may not warrant a
+ * fragment stream. Senders pick by size: a small payload rides inline
+ * in the carrying message (one frame, no machinery); a large one
+ * declares a stream and fragments follow. Receivers resolve both arms
+ * through one path.
+ */
+export type TransferBody = { type: 'inline'; data: Uint8Array } | { type: 'stream'; data: TransferRef };
+
+/**
+ * One slice of a transfer's bytes. Variable-size and offset-addressed:
+ * fragments are sent in offset order on the transfer's priority lane,
+ * sized by the sender to its preemption budget. Receivers route by
+ * `transfer_id` to the sink bound when the transfer opened.
+ */
+export type TransferFragment = { transferId: string; offset: number; bytes: Uint8Array };
+
+/**
+ * Handle to a fragment stream, embedded in the typed message that
+ * opens a transfer (a pull reply or a push begin). The bytes travel
+ * out-of-band as `TransferFragment` events keyed by `id`; the
+ * transfer completes when `total_size` bytes have arrived. For pull
+ * replies `id` is the originating request id.
+ */
+export type TransferRef = { id: string; totalSize: number; sha256: string | null };
 
 /**
  * Fire-and-forget TTS request. `id` is webapp-assigned (no request

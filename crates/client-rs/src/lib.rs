@@ -162,6 +162,7 @@ mod tests {
             }),
             data: BridgeToClientMsgData::Player(BridgeToClientPlayerMsg::StateReply(PlayerStateReply {
               state: PlayerState::default(),
+              active_app: None,
             })),
           };
           ws.send(Message::Text(serde_json::to_string(&reply).unwrap().into()))
@@ -206,6 +207,7 @@ mod tests {
         meta: MsgMeta::Event,
         data: BridgeToClientMsgData::Player(BridgeToClientPlayerMsg::Snapshot(PlayerStateReply {
           state: PlayerState::default(),
+          active_app: None,
         })),
       };
       ws.send(Message::Text(serde_json::to_string(&event).unwrap().into()))
@@ -235,7 +237,8 @@ mod tests {
     assert_eq!(
       reply,
       PlayerStateReply {
-        state: PlayerState::default()
+        state: PlayerState::default(),
+        active_app: None,
       }
     );
   }

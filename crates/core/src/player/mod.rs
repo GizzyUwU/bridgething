@@ -5,7 +5,6 @@ use libbridgething::{
   client::{BridgeToClientPlayerMsg, PlayerQueueReply, PlayerStateReply},
   wire::MsgMeta,
 };
-pub use state::NowPlayingSource;
 use state::*;
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -17,6 +16,10 @@ use crate::{
 
 const PLAYER_CMD_CAPACITY: usize = 64;
 
+pub(crate) fn is_synthetic_uri(uri: &str) -> bool {
+  uri.starts_with("iap2:")
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayerSnapshot {
   pub state_reply: PlayerStateReply,
@@ -25,19 +28,19 @@ pub struct PlayerSnapshot {
   pub iap2_repeat_mode: Option<RepeatMode>,
   pub iap2_set_elapsed_time_available: Option<bool>,
   pub current_artwork_id: Option<String>,
+  pub recently_played_gen: u64,
 }
 
 #[derive(Debug)]
 enum PlayerCommand {
   SendState,
-  ApplyNowPlaying(NowPlayingSource, libbridgething::NowPlayingUpdate),
-  ApplyArtworkId(NowPlayingSource, String),
-  ApplyIap2Queue(Vec<QueueItem>),
+  ApplyNowPlaying(libbridgething::NowPlayingUpdate),
+  ApplyArtworkId(String),
   ApplyCompanionQueue(libbridgething::gateway::QueueSnapshot),
   ApplyCompanionSnapshot(libbridgething::PlayerState),
-  ApplyEnrichment(libbridgething::gateway::NowPlayingEnrichment),
   ApplyTransportIntent(bool),
   ApplySeekIntent(u32),
+  ResetCompanion,
 }
 
 #[derive(Debug, Clone)]
@@ -59,20 +62,12 @@ impl Player {
     self.send(PlayerCommand::SendState).await
   }
 
-  pub async fn apply_now_playing(
-    &self,
-    source: NowPlayingSource,
-    update: libbridgething::NowPlayingUpdate,
-  ) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyNowPlaying(source, update)).await
+  pub async fn apply_now_playing(&self, update: libbridgething::NowPlayingUpdate) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyNowPlaying(update)).await
   }
 
-  pub async fn apply_artwork_id(&self, source: NowPlayingSource, asset_id: String) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyArtworkId(source, asset_id)).await
-  }
-
-  pub async fn apply_iap2_queue(&self, items: Vec<QueueItem>) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyIap2Queue(items)).await
+  pub async fn apply_artwork_id(&self, asset_id: String) -> PlayerResult<()> {
+    self.send(PlayerCommand::ApplyArtworkId(asset_id)).await
   }
 
   pub async fn apply_companion_queue(&self, snapshot: libbridgething::gateway::QueueSnapshot) -> PlayerResult<()> {
@@ -83,16 +78,20 @@ impl Player {
     self.send(PlayerCommand::ApplyCompanionSnapshot(snapshot)).await
   }
 
-  pub async fn apply_enrichment(&self, offer: libbridgething::gateway::NowPlayingEnrichment) -> PlayerResult<()> {
-    self.send(PlayerCommand::ApplyEnrichment(offer)).await
-  }
-
   pub async fn apply_transport_intent(&self, playing: bool) -> PlayerResult<()> {
     self.send(PlayerCommand::ApplyTransportIntent(playing)).await
   }
 
   pub async fn apply_seek_intent(&self, position_ms: u32) -> PlayerResult<()> {
     self.send(PlayerCommand::ApplySeekIntent(position_ms)).await
+  }
+
+  pub async fn reset_companion(&self) -> PlayerResult<()> {
+    self.send(PlayerCommand::ResetCompanion).await
+  }
+
+  pub fn recently_played_gen(&self) -> u64 {
+    self.snapshot_rx.borrow().recently_played_gen
   }
 
   pub fn state_reply(&self) -> PlayerStateReply {
@@ -138,7 +137,18 @@ fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {
     iap2_repeat_mode: state.iap2_repeat_mode(),
     iap2_set_elapsed_time_available: state.iap2_set_elapsed_time_available(),
     current_artwork_id: state.current_artwork_id(),
+    recently_played_gen: state.recently_played_gen(),
   }
+}
+
+fn rolled_off(prev: &Option<QueueItem>, current: &Option<QueueItem>) -> Option<QueueItem> {
+  let prev = prev.as_ref()?;
+  let prev_pid = prev.persistent_id.as_deref()?;
+  if prev.title.as_deref().is_none_or(|t| t.trim().is_empty()) {
+    return None;
+  }
+  let current_pid = current.as_ref().and_then(|q| q.persistent_id.as_deref());
+  (current_pid != Some(prev_pid)).then(|| prev.clone())
 }
 
 async fn run_actor(
@@ -150,11 +160,13 @@ async fn run_actor(
 ) {
   let mut last_sig: Option<BroadcastSig> = None;
   let mut pinned_head: Option<String> = None;
+  let mut prev_current: Option<QueueItem> = None;
   let mut asset_events = Some(assets.subscribe());
 
   loop {
     let force;
     let kind;
+    let mut outgoing_position_ms = 0;
     tokio::select! {
       cmd = cmd_rx.recv() => {
         let Some(cmd) = cmd else {
@@ -162,18 +174,19 @@ async fn run_actor(
           return;
         };
         kind = ProcessedKind::for_command(&cmd);
-        force = forces_broadcast(&cmd);
+        let cmd_force = forces_broadcast(&cmd);
+        outgoing_position_ms = state.current_position_ms();
         match cmd {
           PlayerCommand::SendState => {}
-          PlayerCommand::ApplyNowPlaying(source, update) => state.apply_now_playing(source, update),
-          PlayerCommand::ApplyArtworkId(source, id) => state.apply_artwork_id(source, id),
-          PlayerCommand::ApplyIap2Queue(items) => state.replace_iap2_queue(items),
+          PlayerCommand::ApplyNowPlaying(update) => state.apply_now_playing(update),
+          PlayerCommand::ApplyArtworkId(id) => state.apply_artwork_id(id),
           PlayerCommand::ApplyCompanionQueue(snapshot) => state.apply_companion_queue(snapshot),
           PlayerCommand::ApplyCompanionSnapshot(snap) => state.apply_companion_snapshot(snap),
-          PlayerCommand::ApplyEnrichment(offer) => state.apply_enrichment(offer),
           PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
           PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
+          PlayerCommand::ResetCompanion => state.reset_companion(),
         }
+        force = cmd_force || state.take_position_resync();
       }
       ev = async {
         match &mut asset_events {
@@ -197,11 +210,16 @@ async fn run_actor(
       }
     }
 
-    let snapshot = snapshot_of(&state);
+    let mut snapshot = snapshot_of(&state);
+    if let Some(outgoing) = rolled_off(&prev_current, &snapshot.queue_reply.current) {
+      state.note_rolled_off(outgoing, outgoing_position_ms);
+      snapshot = snapshot_of(&state);
+    }
+    prev_current = snapshot.queue_reply.current.clone();
     let _ = snapshot_tx.send(snapshot.clone());
 
     let sig = BroadcastSig::of(&snapshot);
-    if force || last_sig.as_ref() != Some(&sig) {
+    if !holds_incomplete_transition(&snapshot, last_sig.as_ref()) && (force || last_sig.as_ref() != Some(&sig)) {
       last_sig = Some(sig);
       if let Err(err) = broadcast_for(&bus, kind, snapshot).await {
         tracing::warn!(?err, "player actor: snapshot broadcast failed");
@@ -218,10 +236,10 @@ async fn reconcile_head_pin(assets: &AssetCache, state: &PlayerState, pinned_hea
     return;
   }
   if let Some(old) = pinned_head.take() {
-    let _ = assets.set_retention(&old, Retention::MEM_LRU).await;
+    let _ = assets.set_retention(&old, Retention::DISK_LRU).await;
   }
   if let Some(new) = desired {
-    let _ = assets.set_retention(&new, Retention::MEM_PINNED).await;
+    let _ = assets.set_retention(&new, Retention::DISK_PINNED).await;
     *pinned_head = Some(new);
   }
 }
@@ -243,14 +261,28 @@ impl BroadcastSig {
   }
 }
 
+fn holds_incomplete_transition(snapshot: &PlayerSnapshot, last: Option<&BroadcastSig>) -> bool {
+  let Some(new) = snapshot.state_reply.state.track.as_ref() else {
+    return false;
+  };
+  if new.title.as_deref().is_some_and(|t| !t.trim().is_empty()) {
+    return false;
+  }
+  let Some(prev) = last.and_then(|s| s.state.state.track.as_ref()) else {
+    return false;
+  };
+  let prev_titled = prev.title.as_deref().is_some_and(|t| !t.trim().is_empty());
+  prev_titled && new.persistent_id != prev.persistent_id
+}
+
 fn forces_broadcast(cmd: &PlayerCommand) -> bool {
   matches!(
     cmd,
     PlayerCommand::SendState
-      | PlayerCommand::ApplyNowPlaying(..)
       | PlayerCommand::ApplyCompanionSnapshot(..)
       | PlayerCommand::ApplyTransportIntent(..)
       | PlayerCommand::ApplySeekIntent(..)
+      | PlayerCommand::ResetCompanion
   )
 }
 
@@ -263,7 +295,7 @@ enum ProcessedKind {
 impl ProcessedKind {
   fn for_command(cmd: &PlayerCommand) -> Self {
     match cmd {
-      PlayerCommand::ApplyIap2Queue(_) | PlayerCommand::ApplyCompanionQueue(_) => Self::QueueOnly,
+      PlayerCommand::ApplyCompanionQueue(_) => Self::QueueOnly,
       _ => Self::Full,
     }
   }
@@ -304,3 +336,76 @@ pub enum PlayerError {
 }
 
 crate::impl_broadcast_failure_from!(PlayerError);
+
+#[cfg(test)]
+mod tests {
+  use libbridgething::{MediaItemUpdate, NowPlayingUpdate};
+
+  use super::*;
+  use crate::authority::AuthorityRegistry;
+
+  fn titled(pid: &str, title: &str) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(pid.into()),
+        title: Some(title.into()),
+        duration_ms: Some(180_000),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    }
+  }
+
+  fn pid_only(pid: &str) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some(pid.into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    }
+  }
+
+  fn snap_after(updates: &[NowPlayingUpdate]) -> PlayerSnapshot {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    for u in updates {
+      state.apply_now_playing(u.clone());
+    }
+    snapshot_of(&state)
+  }
+
+  #[test]
+  fn holds_title_less_real_track_change() {
+    let last = BroadcastSig::of(&snap_after(&[titled("iap2:track:a", "Song A")]));
+    let new = snap_after(&[titled("iap2:track:a", "Song A"), pid_only("iap2:track:b")]);
+    assert!(holds_incomplete_transition(&new, Some(&last)));
+  }
+
+  #[test]
+  fn releases_once_new_track_has_title() {
+    let last = BroadcastSig::of(&snap_after(&[titled("iap2:track:a", "Song A")]));
+    let new = snap_after(&[titled("iap2:track:a", "Song A"), titled("iap2:track:b", "Song B")]);
+    assert!(!holds_incomplete_transition(&new, Some(&last)));
+  }
+
+  #[test]
+  fn does_not_hold_cold_start() {
+    let new = snap_after(&[pid_only("iap2:track:b")]);
+    assert!(!holds_incomplete_transition(&new, None));
+  }
+
+  #[test]
+  fn idle_unlatches_the_hold() {
+    let last = BroadcastSig::of(&snap_after(&[titled("iap2:track:a", "Song A")]));
+    let idle = NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:0000000000000000".into()),
+        title: Some(String::new()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    };
+    let new = snap_after(&[titled("iap2:track:a", "Song A"), idle]);
+    assert!(!holds_incomplete_transition(&new, Some(&last)));
+  }
+}

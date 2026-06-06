@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{LogEntry, OtaError, OtaProgress, RangeSpec};
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte
-/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// offset the first `TransferFragment` should start at: 0 for fresh pushes, or
 /// the daemon's recovered partial length for a resume.
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -81,9 +81,9 @@ pub struct OtaAssetRange {
 }
 
 /// Daemon-side cancel for an in-flight range request: libcurl gave up
-/// (timeout, OTA failed, daemon is shutting down). Companion stops
-/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
-/// resources it held open.
+/// (timeout, OTA failed, daemon is shutting down). Companion stops the
+/// fragment stream for `request_id` and frees any resources it held
+/// open.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]

@@ -7,10 +7,12 @@ import Foundation
 public struct Album: Codable, Sendable {
 	public let id: String
 	public let name: String
+	public let artwork_id: String?
 
-	public init(id: String, name: String) {
+	public init(id: String, name: String, artwork_id: String?) {
 		self.id = id
 		self.name = name
+		self.artwork_id = artwork_id
 	}
 }
 
@@ -31,13 +33,17 @@ public struct ArtProfile: Codable, Sendable {
 public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
+	public let artwork_id: String?
 
-	public init(id: String, name: String) {
+	public init(id: String, name: String, artwork_id: String?) {
 		self.id = id
 		self.name = name
+		self.artwork_id = artwork_id
 	}
 }
 
+/// Invalidate the daemon-side cached asset for `id`. The companion's
+/// escape hatch when it knows an asset it previously served is stale.
 public struct AssetClear: Codable, Sendable {
 	public let id: String
 
@@ -46,43 +52,18 @@ public struct AssetClear: Codable, Sendable {
 	}
 }
 
-/// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
-/// without the retention hint - the daemon picks retention for assets
-/// it asked for, since the lifecycle is request-scoped rather than
-/// companion-managed.
-public struct AssetGotReply: Codable, Sendable {
-	public let id: String
-	public let bytes: Data
-	public let mime: String?
-
-	public init(id: String, bytes: Data, mime: String?) {
-		self.id = id
-		self.bytes = bytes
-		self.mime = mime
-	}
-}
-
-/// Domain error response for an `AssetRequest`: the companion does not
-/// have the requested asset.
-public struct AssetNotFoundReply: Codable, Sendable {
-	public let id: String
-
-	public init(id: String) {
-		self.id = id
-	}
-}
-
-public enum AssetRetention: Codable, Sendable {
-	case lru
-	case pinned
-	case ttl(TtlRetention)
-	case persistent
+/// Standard embedding for a byte payload that may or may not warrant a
+/// fragment stream. Senders pick by size: a small payload rides inline
+/// in the carrying message (one frame, no machinery); a large one
+/// declares a stream and fragments follow. Receivers resolve both arms
+/// through one path.
+public enum TransferBody: Codable, Sendable {
+	case inline(Data)
+	case stream(TransferRef)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case lru,
-			pinned,
-			ttl,
-			persistent
+		case inline,
+			stream
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -93,131 +74,58 @@ public enum AssetRetention: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
 			switch type {
-			case .lru:
-				self = .lru
-				return
-			case .pinned:
-				self = .pinned
-				return
-			case .ttl:
-				if let content = try? container.decode(TtlRetention.self, forKey: .data) {
-					self = .ttl(content)
+			case .inline:
+				if let content = try? container.decode(Data.self, forKey: .data) {
+					self = .inline(content)
 					return
 				}
-			case .persistent:
-				self = .persistent
-				return
+			case .stream:
+				if let content = try? container.decode(TransferRef.self, forKey: .data) {
+					self = .stream(content)
+					return
+				}
 			}
 		}
-		throw DecodingError.typeMismatch(AssetRetention.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for AssetRetention"))
+		throw DecodingError.typeMismatch(TransferBody.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for TransferBody"))
 	}
 
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .lru:
-			try container.encode(CodingKeys.lru, forKey: .type)
-		case .pinned:
-			try container.encode(CodingKeys.pinned, forKey: .type)
-		case .ttl(let content):
-			try container.encode(CodingKeys.ttl, forKey: .type)
+		case .inline(let content):
+			try container.encode(CodingKeys.inline, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .persistent:
-			try container.encode(CodingKeys.persistent, forKey: .type)
+		case .stream(let content):
+			try container.encode(CodingKeys.stream, forKey: .type)
+			try container.encode(content, forKey: .data)
 		}
 	}
 }
 
-/// Single-frame asset push for small, latency-critical, memory-resident
-/// assets (album art). The payload size must be at most
-/// `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
-/// `Persistent`. Larger payloads or persistent retention require the
-/// chunked `PushBegin`/`PushChunk` flow.
-public struct AssetPush: Codable, Sendable {
+/// Typed terminal response for an `AssetRequest`. Small assets arrive
+/// inline; larger ones declare a stream whose ref id is the originating
+/// request id, with the bytes following as `TransferFragment` events on
+/// the bulk lane (so now-playing traffic preempts them between
+/// fragments).
+public struct AssetGotReply: Codable, Sendable {
 	public let id: String
-	public let bytes: Data
 	public let mime: String?
-	public let retention: AssetRetention
+	public let body: TransferBody
 
-	public init(id: String, bytes: Data, mime: String?, retention: AssetRetention) {
+	public init(id: String, mime: String?, body: TransferBody) {
 		self.id = id
-		self.bytes = bytes
 		self.mime = mime
-		self.retention = retention
+		self.body = body
 	}
 }
 
-/// Drop the daemon-side partial for `id`. The companion's escape hatch
-/// when it wants to clean up a push it can no longer complete.
-public struct AssetPushAbandon: Codable, Sendable {
+/// Domain error response for an `AssetRequest`: the companion does not
+/// have the requested asset.
+public struct AssetNotFoundReply: Codable, Sendable {
 	public let id: String
 
 	public init(id: String) {
 		self.id = id
-	}
-}
-
-/// Open or resume a chunked asset push. Daemon responds with
-/// `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
-/// `AssetPushChunk` should start at, 0 for fresh pushes) or
-/// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
-/// mismatched size/sha, budget exhausted, etc.).
-/// 
-/// Required for any push with `retention = Persistent` and for any push
-/// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
-public struct AssetPushBegin: Codable, Sendable {
-	public let id: String
-	public let expectedSize: UInt32
-	public let expectedSha256: String?
-	public let mime: String?
-	public let retention: AssetRetention
-
-	public init(id: String, expectedSize: UInt32, expectedSha256: String?, mime: String?, retention: AssetRetention) {
-		self.id = id
-		self.expectedSize = expectedSize
-		self.expectedSha256 = expectedSha256
-		self.mime = mime
-		self.retention = retention
-	}
-}
-
-/// Successful response to `AssetPushBegin`. `resume_from_offset` is the
-/// byte offset the next `AssetPushChunk` should start at: 0 for fresh
-/// pushes, or the daemon's recovered partial length for a resume.
-public struct AssetPushBeginAck: Codable, Sendable {
-	public let resumeFromOffset: UInt32
-
-	public init(resumeFromOffset: UInt32) {
-		self.resumeFromOffset = resumeFromOffset
-	}
-}
-
-/// Domain-error response to `AssetPushBegin`: the daemon refuses to
-/// start or resume this push (conflicting in-flight id, budget
-/// exhausted, oversized, etc.).
-public struct AssetPushBeginRejected: Codable, Sendable {
-	public let reason: String
-
-	public init(reason: String) {
-		self.reason = reason
-	}
-}
-
-/// Streaming chunk of an asset push opened by `AssetPushBegin`.
-/// `offset` must equal the daemon's current `received` for this id.
-/// `last:true` triggers post-stream verify (size + optional sha256)
-/// and commit to the asset cache.
-public struct AssetPushChunk: Codable, Sendable {
-	public let id: String
-	public let offset: UInt32
-	public let bytes: Data
-	public let last: Bool
-
-	public init(id: String, offset: UInt32, bytes: Data, last: Bool) {
-		self.id = id
-		self.offset = offset
-		self.bytes = bytes
-		self.last = last
 	}
 }
 
@@ -282,9 +190,14 @@ public enum CompanionAuthorityScope: String, Codable, Sendable {
 
 public struct AuthorityClaim: Codable, Sendable {
 	public let scope: CompanionAuthorityScope
+	/// App bundle the companion represents (e.g. `com.spotify.client`).
+	/// The daemon's now-playing gate compares it against iAP2's foreground
+	/// app to override a still-claimed companion when another app takes over.
+	public let appBundle: String?
 
-	public init(scope: CompanionAuthorityScope) {
+	public init(scope: CompanionAuthorityScope, appBundle: String?) {
 		self.scope = scope
+		self.appBundle = appBundle
 	}
 }
 
@@ -1077,21 +990,6 @@ public struct Earcon: Codable, Sendable {
 	}
 }
 
-/// Playback context the companion's track plays from (playlist / album /
-/// artist / show). `kind` is opaque to the daemon - it forwards the
-/// string to webapps that render "playing from <name>".
-public struct EnrichmentContext: Codable, Sendable {
-	public let uri: String
-	public let name: String?
-	public let kind: String?
-
-	public init(uri: String, name: String?, kind: String?) {
-		self.uri = uri
-		self.name = name
-		self.kind = kind
-	}
-}
-
 public struct EnumField: Codable, Sendable {
 	public let key: String
 	public let label: String
@@ -1348,6 +1246,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 	case player(GatewayToBridgePlayerMsg)
 	case system(GatewayToBridgeSystemMsg)
 	case time(GatewayToBridgeTimeMsg)
+	case transfer(GatewayToBridgeTransferMsg)
 	case tunnel(GatewayToBridgeTunnelMsg)
 	case voice(GatewayToBridgeVoiceMsg)
 	case webapp(GatewayToBridgeWebappMsg)
@@ -1368,6 +1267,7 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			player,
 			system,
 			time,
+			transfer,
 			tunnel,
 			voice,
 			webapp,
@@ -1452,6 +1352,11 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 					self = .time(content)
 					return
 				}
+			case .transfer:
+				if let content = try? container.decode(GatewayToBridgeTransferMsg.self, forKey: .data) {
+					self = .transfer(content)
+					return
+				}
 			case .tunnel:
 				if let content = try? container.decode(GatewayToBridgeTunnelMsg.self, forKey: .data) {
 					self = .tunnel(content)
@@ -1521,6 +1426,9 @@ public enum GatewayToBridgeMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .time(let content):
 			try container.encode(CodingKeys.time, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .transfer(let content):
+			try container.encode(CodingKeys.transfer, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .tunnel(let content):
 			try container.encode(CodingKeys.tunnel, forKey: .type)
@@ -2010,8 +1918,10 @@ public struct MediaItem: Codable, Sendable {
 	public let persistentId: String?
 	public let title: String?
 	public let album: String?
+	public let albumUri: String?
 	public let albumArtist: String?
 	public let artist: String?
+	public let artistUri: String?
 	public let liked: Bool?
 	public let artworkId: String?
 	public let durationMs: UInt32?
@@ -2023,13 +1933,15 @@ public struct MediaItem: Codable, Sendable {
 	public let isBanned: Bool?
 	public let chapterCount: UInt16?
 
-	public init(uri: String?, persistentId: String?, title: String?, album: String?, albumArtist: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, chapterCount: UInt16?) {
+	public init(uri: String?, persistentId: String?, title: String?, album: String?, albumUri: String?, albumArtist: String?, artist: String?, artistUri: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, chapterCount: UInt16?) {
 		self.uri = uri
 		self.persistentId = persistentId
 		self.title = title
 		self.album = album
+		self.albumUri = albumUri
 		self.albumArtist = albumArtist
 		self.artist = artist
+		self.artistUri = artistUri
 		self.liked = liked
 		self.artworkId = artworkId
 		self.durationMs = durationMs
@@ -2054,8 +1966,10 @@ public struct MediaItemUpdate: Codable, Sendable {
 	public let persistentId: String?
 	public let title: String?
 	public let album: String?
+	public let albumUri: String?
 	public let albumArtist: String?
 	public let artist: String?
+	public let artistUri: String?
 	public let liked: Bool?
 	public let artworkId: String?
 	public let durationMs: UInt32?
@@ -2068,12 +1982,14 @@ public struct MediaItemUpdate: Codable, Sendable {
 	public let isResidentOnDevice: Bool?
 	public let chapterCount: UInt16?
 
-	public init(persistentId: String?, title: String?, album: String?, albumArtist: String?, artist: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, isResidentOnDevice: Bool?, chapterCount: UInt16?) {
+	public init(persistentId: String?, title: String?, album: String?, albumUri: String?, albumArtist: String?, artist: String?, artistUri: String?, liked: Bool?, artworkId: String?, durationMs: UInt32?, mediaTypes: [MediaType]?, trackNumber: UInt16?, trackCount: UInt16?, isLikeSupported: Bool?, isBanSupported: Bool?, isBanned: Bool?, isResidentOnDevice: Bool?, chapterCount: UInt16?) {
 		self.persistentId = persistentId
 		self.title = title
 		self.album = album
+		self.albumUri = albumUri
 		self.albumArtist = albumArtist
 		self.artist = artist
+		self.artistUri = artistUri
 		self.liked = liked
 		self.artworkId = artworkId
 		self.durationMs = durationMs
@@ -2680,51 +2596,6 @@ public struct NotificationRemoved: Codable, Sendable {
 	}
 }
 
-/// One row in the player queue. Lean cross-platform shape - gateways
-/// that have richer per-track data still surface what fields they have.
-/// `uri` is required because every queued item must be addressable for
-/// `skipToIndex`. `persistent_id` is the platform-stable id when
-/// available; webapps treat it as opaque.
-public struct QueueItem: Codable, Sendable {
-	public let uri: String
-	public let title: String?
-	public let artist: String?
-	public let album: String?
-	public let artworkId: String?
-	public let durationMs: UInt32?
-	public let persistentId: String?
-
-	public init(uri: String, title: String?, artist: String?, album: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?) {
-		self.uri = uri
-		self.title = title
-		self.artist = artist
-		self.album = album
-		self.artworkId = artworkId
-		self.durationMs = durationMs
-		self.persistentId = persistentId
-	}
-}
-
-/// Non-authoritative decoration the iOS companion offers for the track
-/// iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
-/// companion echoes from the last `PlaybackHint`, so the daemon can match
-/// this offer to the live iAP2 identity by exact equality. `head` is the
-/// companion's current Spotify track. The companion never claims authority
-/// - the daemon overlays art / uri onto the iAP2 identity only when the
-/// offer provably describes the playing track. The queue rides its own
-/// `QueueChanged` surface (on-change), not this frequent per-hint offer.
-public struct NowPlayingEnrichment: Codable, Sendable {
-	public let anchorPid: String?
-	public let head: QueueItem?
-	public let context: EnrichmentContext?
-
-	public init(anchorPid: String?, head: QueueItem?, context: EnrichmentContext?) {
-		self.anchorPid = anchorPid
-		self.head = head
-		self.context = context
-	}
-}
-
 /// Three-state shuffle. iAP2 and Apple Music distinguish track-level
 /// from album-level shuffle; companion gateways without that distinction
 /// project to `Songs` when on. Webapps that just need an on/off signal
@@ -2834,8 +2705,8 @@ public struct OtaAbandon: Codable, Sendable {
 
 /// Commit every staged bandaid piece (daemon / hub / stock) as one
 /// transaction, then restart bridgething.service once. Bandaid pushes
-/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage on `last:true`
-/// (phase reaches `Writing`/100 but the daemon does NOT restart); the
+/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
+/// completion (phase reaches `Writing`/100, the daemon does NOT restart); the
 /// companion sends `OtaActivate` after the final piece to swap them all
 /// live with a single restart. Image OTAs never use this -- they reboot
 /// at write completion.
@@ -2887,36 +2758,14 @@ public struct OtaAssetRange: Codable, Sendable {
 }
 
 /// Daemon-side cancel for an in-flight range request: libcurl gave up
-/// (timeout, OTA failed, daemon is shutting down). Companion stops
-/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
-/// resources it held open.
+/// (timeout, OTA failed, daemon is shutting down). Companion stops the
+/// fragment stream for `request_id` and frees any resources it held
+/// open.
 public struct OtaAssetRangeAbandon: Codable, Sendable {
 	@MsgpackUuid public var requestId: UUID
 
 	public init(requestId: UUID) {
 		self.requestId = requestId
-	}
-}
-
-/// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
-/// the Bulk lane in order: parts in declaration order, chunks in
-/// ascending `offset`. `offset` is absolute within the asset, not
-/// within the part - matches what the daemon's HTTP-Range writer needs
-/// to feed libcurl. `last:true` only on the final chunk of the final
-/// part for this `request_id`.
-public struct OtaAssetRangeChunk: Codable, Sendable {
-	@MsgpackUuid public var requestId: UUID
-	public let partIndex: UInt32
-	public let offset: UInt32
-	public let bytes: Data
-	public let last: Bool
-
-	public init(requestId: UUID, partIndex: UInt32, offset: UInt32, bytes: Data, last: Bool) {
-		self.requestId = requestId
-		self.partIndex = partIndex
-		self.offset = offset
-		self.bytes = bytes
-		self.last = last
 	}
 }
 
@@ -2933,9 +2782,9 @@ public struct OtaAssetRangeRejected: Codable, Sendable {
 	}
 }
 
-/// Resolved range the companion is about to stream. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow as
-/// `OtaAssetRangeChunk` events on the Bulk lane.
+/// Resolved range the companion is about to serve. `start` and `length`
+/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
+/// `TransferBody`.
 public struct RangePart: Codable, Sendable {
 	public let start: UInt32
 	public let length: UInt32
@@ -2947,18 +2796,21 @@ public struct RangePart: Codable, Sendable {
 }
 
 /// Successful response to `OtaAssetRange`. The companion has the asset
-/// (or refetched it from `update_url_base`) and is about to stream the
-/// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
-/// `parts` echoes the resolved ranges in the order they will be sent;
-/// `total_size` is the asset's full byte length (for `Content-Range`
-/// totals).
+/// (or refetched it from `update_url_base`) and serves the resolved
+/// ranges in `body`: small results inline, larger ones as a fragment
+/// stream whose offsets are stream-relative (0..sum of part lengths,
+/// parts concatenated in declaration order - the daemon's HTTP-Range
+/// writer maps them to absolute positions via `parts`). `total_size` is
+/// the asset's full byte length (for `Content-Range` totals).
 public struct OtaAssetRangeReply: Codable, Sendable {
 	public let totalSize: UInt32
 	public let parts: [RangePart]
+	public let body: TransferBody
 
-	public init(totalSize: UInt32, parts: [RangePart]) {
+	public init(totalSize: UInt32, parts: [RangePart], body: TransferBody) {
 		self.totalSize = totalSize
 		self.parts = parts
+		self.body = body
 	}
 }
 
@@ -2986,17 +2838,37 @@ public enum OtaKind: String, Codable, Sendable {
 	case installedWebapp
 }
 
+/// Handle to a fragment stream, embedded in the typed message that
+/// opens a transfer (a pull reply or a push begin). The bytes travel
+/// out-of-band as `TransferFragment` events keyed by `id`; the
+/// transfer completes when `total_size` bytes have arrived. For pull
+/// replies `id` is the originating request id.
+public struct TransferRef: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let totalSize: UInt32
+	public let sha256: String?
+
+	public init(id: UUID, totalSize: UInt32, sha256: String?) {
+		self.id = id
+		self.totalSize = totalSize
+		self.sha256 = sha256
+	}
+}
+
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
-/// `OtaBeginAck { resume_from_offset }` (the byte offset the next
-/// `OtaChunk` should start at, 0 for fresh pushes) or
+/// `OtaBeginAck { resume_from_offset }` (the byte offset the first
+/// `TransferFragment` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }`.
 /// 
 /// `kind` selects the backend. See `OtaKind`.
 /// 
 /// `update_id` is the sha256 of the artifact, hex-encoded. Content-
 /// addressed so resume across daemon restarts and retries-after-failure
-/// both work without companion-side state to track.
+/// both work without companion-side state to track. `transfer.id` is
+/// minted per attempt and only correlates the fragment stream; the
+/// daemon binds it to the `update_id`-keyed partial, so a reconnect
+/// with a fresh transfer id still resumes the same bytes.
 /// 
 /// `update_url_base` is image-kind only: the server prefix the companion
 /// may refetch the .zck delta from on cache miss while serving range
@@ -3005,20 +2877,18 @@ public struct OtaBegin: Codable, Sendable {
 	public let kind: OtaKind
 	public let updateId: String
 	public let updateUrlBase: String?
-	public let expectedSha256: String
-	public let expectedSize: UInt32
+	public let transfer: TransferRef
 
-	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, expectedSha256: String, expectedSize: UInt32) {
+	public init(kind: OtaKind, updateId: String, updateUrlBase: String?, transfer: TransferRef) {
 		self.kind = kind
 		self.updateId = updateId
 		self.updateUrlBase = updateUrlBase
-		self.expectedSha256 = expectedSha256
-		self.expectedSize = expectedSize
+		self.transfer = transfer
 	}
 }
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte
-/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// offset the first `TransferFragment` should start at: 0 for fresh pushes, or
 /// the daemon's recovered partial length for a resume.
 public struct OtaBeginAck: Codable, Sendable {
 	public let resumeFromOffset: UInt32
@@ -3039,37 +2909,17 @@ public struct OtaBeginRejected: Codable, Sendable {
 	}
 }
 
-/// Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
-/// equal the daemon's current `received` for the transfer (chunks are
-/// strictly in-order; the companion learns the resume offset from
-/// `OtaBeginAck`). `last:true` triggers post-stream verify (size +
-/// sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
-/// phase progress events.
-public struct OtaChunk: Codable, Sendable {
-	public let updateId: String
-	public let offset: UInt32
-	public let bytes: Data
-	public let last: Bool
-
-	public init(updateId: String, offset: UInt32, bytes: Data, last: Bool) {
-		self.updateId = updateId
-		self.offset = offset
-		self.bytes = bytes
-		self.last = last
-	}
-}
-
 /// Terminal error from the OTA orchestrator. After an `OtaError` the
 /// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
 public enum OtaErrorCode: String, Codable, Sendable {
-	/// Companion sent chunks for an `update_id` that was never begun
+	/// Companion sent fragments for an `update_id` that was never begun
 	/// (or was abandoned mid-stream).
 	case unknownUpdate
-	/// `OtaChunk.offset` did not match the daemon's `received`.
+	/// A fragment's offset did not match the daemon's `received`.
 	case offsetMismatch
-	/// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
+	/// Streamed total's sha256 did not match `OtaBegin.transfer.sha256`.
 	case hashMismatch
-	/// Streamed total's byte length did not match `OtaBegin.expected_size`.
+	/// Streamed total's byte length did not match `OtaBegin.transfer.total_size`.
 	case sizeMismatch
 	/// `CancelUpdate` arrived during a cancelable phase.
 	case cancelled
@@ -3543,24 +3393,16 @@ public struct Playback: Codable, Sendable {
 	}
 }
 
-/// Invalidation signal fired when the daemon observes an iAP2 NowPlaying
-/// state change the companion can't see directly. Carries enough context
-/// for the companion to filter ("is this for the app I care about?") and
-/// dedupe ("did the track actually change?"). The companion is expected
-/// to react with its own data fetch (e.g. Spotify Web API) - the hint
-/// itself is not a state source. `persistent_id` is iAP2's opaque hex
-/// identifier; do not treat it as a service URI.
-public struct PlaybackHint: Codable, Sendable {
-	public let appBundle: String?
-	public let persistentId: String?
-	public let playing: Bool?
-	public let durationMs: UInt32?
+/// What the current track is playing from: the playlist / album / show /
+/// artist context. Webapps render "playing from <name>"; `uri` lets them
+/// drill into it. `name` is `None` until the companion resolves it.
+public struct PlaybackContext: Codable, Sendable {
+	public let uri: String
+	public let name: String?
 
-	public init(appBundle: String?, persistentId: String?, playing: Bool?, durationMs: UInt32?) {
-		self.appBundle = appBundle
-		self.persistentId = persistentId
-		self.playing = playing
-		self.durationMs = durationMs
+	public init(uri: String, name: String?) {
+		self.uri = uri
+		self.name = name
 	}
 }
 
@@ -3588,6 +3430,35 @@ public struct PlayerOptions: Codable, Sendable {
 	}
 }
 
+/// One row in the player queue. Lean cross-platform shape - gateways
+/// that have richer per-track data still surface what fields they have.
+/// `uri` is required because every queued item must be addressable for
+/// `skipToIndex`. `persistent_id` is the platform-stable id when
+/// available; webapps treat it as opaque.
+public struct QueueItem: Codable, Sendable {
+	public let uri: String
+	public let title: String?
+	public let artist: String?
+	public let artistUri: String?
+	public let album: String?
+	public let albumUri: String?
+	public let artworkId: String?
+	public let durationMs: UInt32?
+	public let persistentId: String?
+
+	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?) {
+		self.uri = uri
+		self.title = title
+		self.artist = artist
+		self.artistUri = artistUri
+		self.album = album
+		self.albumUri = albumUri
+		self.artworkId = artworkId
+		self.durationMs = durationMs
+		self.persistentId = persistentId
+	}
+}
+
 /// Full player snapshot the daemon broadcasts to webapps. Initial value
 /// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
 /// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
@@ -3597,12 +3468,14 @@ public struct PlayerState: Codable, Sendable {
 	public let playback: Playback
 	public let queue: [QueueItem]
 	public let options: PlayerOptions
+	public let context: PlaybackContext?
 
-	public init(track: MediaItem?, playback: Playback, queue: [QueueItem], options: PlayerOptions) {
+	public init(track: MediaItem?, playback: Playback, queue: [QueueItem], options: PlayerOptions, context: PlaybackContext?) {
 		self.track = track
 		self.playback = playback
 		self.queue = queue
 		self.options = options
+		self.context = context
 	}
 }
 
@@ -3648,14 +3521,14 @@ public struct PodcastEpisode: Codable, Sendable {
 	}
 }
 
-/// Queue update from the companion. `order` is the complete queue as a
-/// list of item uris, every message - so it is a full ordering, not an
-/// op-delta with a baseline to track. `items` carries full metadata only
-/// for uris the daemon does not already hold from the previous message on
-/// this connection; the daemon rebuilds the queue from `order` against its
-/// last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
-/// is a link reset and the companion re-sends a full ordering on reconnect;
-/// no revision numbers or resync are needed.
+/// Full queue replacement from the companion. `order` is the upcoming
+/// queue as a list of item uris, current excluded; `items` carries full
+/// metadata for every uri in `order`, so the daemon rebuilds the queue
+/// from the snapshot alone. The companion sends one only when the upcoming
+/// list materially changes (context switch, reorder, add-to-queue), never
+/// on a plain advance - the daemon derives the post-advance next by
+/// locating the now-playing track in the held queue. Both sides drop this
+/// state on disconnect; no deltas, revisions, or resync to track.
 public struct QueueSnapshot: Codable, Sendable {
 	public let order: [String]
 	public let items: [QueueItem]
@@ -4005,6 +3878,35 @@ public struct Track: Codable, Sendable {
 		self.duration_ms = duration_ms
 		self.image_id = image_id
 		self.saved = saved
+	}
+}
+
+/// Sender-side abort of an in-flight transfer (source lost the bytes,
+/// upstream fetch failed). The receiver drops the bound sink; partial
+/// disk state is kept for resumable transfers and discarded otherwise.
+public struct TransferAbandon: Codable, Sendable {
+	@MsgpackUuid public var transferId: UUID
+	public let reason: String
+
+	public init(transferId: UUID, reason: String) {
+		self.transferId = transferId
+		self.reason = reason
+	}
+}
+
+/// One slice of a transfer's bytes. Variable-size and offset-addressed:
+/// fragments are sent in offset order on the transfer's priority lane,
+/// sized by the sender to its preemption budget. Receivers route by
+/// `transfer_id` to the sink bound when the transfer opened.
+public struct TransferFragment: Codable, Sendable {
+	@MsgpackUuid public var transferId: UUID
+	public let offset: UInt32
+	public let bytes: Data
+
+	public init(transferId: UUID, offset: UInt32, bytes: Data) {
+		self.transferId = transferId
+		self.offset = offset
+		self.bytes = bytes
 	}
 }
 
@@ -4664,15 +4566,67 @@ public enum AncsAuthState: String, Codable, Sendable {
 	case unauthorized
 }
 
-public enum BridgeToGatewayAssetMsg: Codable, Sendable {
-	case request(AssetRequest)
-	case pushBeginAck(AssetPushBeginAck)
-	case pushBeginRejected(AssetPushBeginRejected)
+public enum AssetRetention: Codable, Sendable {
+	case lru
+	case pinned
+	case ttl(TtlRetention)
+	case persistent
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case request,
-			pushBeginAck,
-			pushBeginRejected
+		case lru,
+			pinned,
+			ttl,
+			persistent
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case type, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .type) {
+			switch type {
+			case .lru:
+				self = .lru
+				return
+			case .pinned:
+				self = .pinned
+				return
+			case .ttl:
+				if let content = try? container.decode(TtlRetention.self, forKey: .data) {
+					self = .ttl(content)
+					return
+				}
+			case .persistent:
+				self = .persistent
+				return
+			}
+		}
+		throw DecodingError.typeMismatch(AssetRetention.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for AssetRetention"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .lru:
+			try container.encode(CodingKeys.lru, forKey: .type)
+		case .pinned:
+			try container.encode(CodingKeys.pinned, forKey: .type)
+		case .ttl(let content):
+			try container.encode(CodingKeys.ttl, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .persistent:
+			try container.encode(CodingKeys.persistent, forKey: .type)
+		}
+	}
+}
+
+public enum BridgeToGatewayAssetMsg: Codable, Sendable {
+	case request(AssetRequest)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case request
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -4688,16 +4642,6 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 					self = .request(content)
 					return
 				}
-			case .pushBeginAck:
-				if let content = try? container.decode(AssetPushBeginAck.self, forKey: .data) {
-					self = .pushBeginAck(content)
-					return
-				}
-			case .pushBeginRejected:
-				if let content = try? container.decode(AssetPushBeginRejected.self, forKey: .data) {
-					self = .pushBeginRejected(content)
-					return
-				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayAssetMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayAssetMsg"))
@@ -4708,12 +4652,6 @@ public enum BridgeToGatewayAssetMsg: Codable, Sendable {
 		switch self {
 		case .request(let content):
 			try container.encode(CodingKeys.request, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .pushBeginAck(let content):
-			try container.encode(CodingKeys.pushBeginAck, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .pushBeginRejected(let content):
-			try container.encode(CodingKeys.pushBeginRejected, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5328,7 +5266,6 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 	case setRepeat(SetRepeat)
 	case setSpeed(SetSpeed)
 	case setCrossfade(SetCrossfade)
-	case hint(PlaybackHint)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case play,
@@ -5342,8 +5279,7 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			setShuffle,
 			setRepeat,
 			setSpeed,
-			setCrossfade,
-			hint
+			setCrossfade
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5406,11 +5342,6 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 					self = .setCrossfade(content)
 					return
 				}
-			case .hint:
-				if let content = try? container.decode(PlaybackHint.self, forKey: .data) {
-					self = .hint(content)
-					return
-				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayPlayerMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayPlayerMsg"))
@@ -5450,9 +5381,6 @@ public enum BridgeToGatewayPlayerMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .setCrossfade(let content):
 			try container.encode(CodingKeys.setCrossfade, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .hint(let content):
-			try container.encode(CodingKeys.hint, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5938,20 +5866,12 @@ public enum ForwardMessage: Codable, Sendable {
 }
 
 public enum GatewayToBridgeAssetMsg: Codable, Sendable {
-	case push(AssetPush)
 	case clear(AssetClear)
-	case pushBegin(AssetPushBegin)
-	case pushChunk(AssetPushChunk)
-	case pushAbandon(AssetPushAbandon)
 	case got(AssetGotReply)
 	case notFound(AssetNotFoundReply)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case push,
-			clear,
-			pushBegin,
-			pushChunk,
-			pushAbandon,
+		case clear,
 			got,
 			notFound
 	}
@@ -5964,29 +5884,9 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
 		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
 			switch type {
-			case .push:
-				if let content = try? container.decode(AssetPush.self, forKey: .data) {
-					self = .push(content)
-					return
-				}
 			case .clear:
 				if let content = try? container.decode(AssetClear.self, forKey: .data) {
 					self = .clear(content)
-					return
-				}
-			case .pushBegin:
-				if let content = try? container.decode(AssetPushBegin.self, forKey: .data) {
-					self = .pushBegin(content)
-					return
-				}
-			case .pushChunk:
-				if let content = try? container.decode(AssetPushChunk.self, forKey: .data) {
-					self = .pushChunk(content)
-					return
-				}
-			case .pushAbandon:
-				if let content = try? container.decode(AssetPushAbandon.self, forKey: .data) {
-					self = .pushAbandon(content)
 					return
 				}
 			case .got:
@@ -6007,20 +5907,8 @@ public enum GatewayToBridgeAssetMsg: Codable, Sendable {
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
 		switch self {
-		case .push(let content):
-			try container.encode(CodingKeys.push, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .clear(let content):
 			try container.encode(CodingKeys.clear, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .pushBegin(let content):
-			try container.encode(CodingKeys.pushBegin, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .pushChunk(let content):
-			try container.encode(CodingKeys.pushChunk, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .pushAbandon(let content):
-			try container.encode(CodingKeys.pushAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .got(let content):
 			try container.encode(CodingKeys.got, forKey: .event)
@@ -6087,10 +5975,11 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 	}
 }
 
-/// Companion declares per-scope authority. `Claim` is idempotent and may
-/// be re-issued to refresh the freshness timestamp. `Release` is the
-/// "stop preferring my data for this scope" signal. Stale claims fall
-/// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+/// Companion declares per-scope authority. `Release` is the "stop
+/// preferring my data for this scope" signal. Non-now-playing claims
+/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
+/// hold until release / disconnect / app-change arbitration (the
+/// companion declares its `app_bundle` so the daemon can arbitrate).
 public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 	case claim(AuthorityClaim)
 	case release(AuthorityRelease)
@@ -6691,24 +6580,19 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 	}
 }
 
-/// Gateway -> bridge player events. `Snapshot` is the initial-state event
-/// fired at announce when the companion claims player authority;
-/// `Delta` is the ongoing partial-update stream (the only delta-shaped
-/// event in the wire protocol - every other surface uses snapshots).
-/// `QueueChanged` fires when the queue mutates without a track change
-/// (companion-side reorder, prefetch). `EnrichmentOffer` is the iOS
-/// non-authoritative decoration path (see `NowPlayingEnrichment`).
+/// Gateway -> bridge player events. The companion is authoritative for
+/// now-playing: `Snapshot` carries the full player state and is the sole
+/// metadata/playback source (driven by the dealer push). `QueueChanged`
+/// carries a full queue replacement when the upcoming list materially
+/// changes; the daemon derives the post-advance next from the held
+/// snapshot, so a plain advance costs no queue traffic.
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
-	case delta(NowPlayingUpdate)
 	case queueChanged(QueueSnapshot)
-	case enrichmentOffer(NowPlayingEnrichment)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
-			delta,
-			queueChanged,
-			enrichmentOffer
+			queueChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6724,19 +6608,9 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 					self = .snapshot(content)
 					return
 				}
-			case .delta:
-				if let content = try? container.decode(NowPlayingUpdate.self, forKey: .data) {
-					self = .delta(content)
-					return
-				}
 			case .queueChanged:
 				if let content = try? container.decode(QueueSnapshot.self, forKey: .data) {
 					self = .queueChanged(content)
-					return
-				}
-			case .enrichmentOffer:
-				if let content = try? container.decode(NowPlayingEnrichment.self, forKey: .data) {
-					self = .enrichmentOffer(content)
 					return
 				}
 			}
@@ -6750,14 +6624,8 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 		case .snapshot(let content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .delta(let content):
-			try container.encode(CodingKeys.delta, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .queueChanged(let content):
 			try container.encode(CodingKeys.queueChanged, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .enrichmentOffer(let content):
-			try container.encode(CodingKeys.enrichmentOffer, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6765,13 +6633,11 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 
 public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	case otaBegin(OtaBegin)
-	case otaChunk(OtaChunk)
 	case otaAbandon(OtaAbandon)
 	case otaActivate(OtaActivate)
 	case cancelUpdate
 	case otaAssetRangeReply(OtaAssetRangeReply)
 	case otaAssetRangeRejected(OtaAssetRangeRejected)
-	case otaAssetRangeChunk(OtaAssetRangeChunk)
 	case deviceGetNickname
 	case deviceSetNickname(DeviceSetNickname)
 	case logsTail(LogsTail)
@@ -6780,13 +6646,11 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaBegin,
-			otaChunk,
 			otaAbandon,
 			otaActivate,
 			cancelUpdate,
 			otaAssetRangeReply,
 			otaAssetRangeRejected,
-			otaAssetRangeChunk,
 			deviceGetNickname,
 			deviceSetNickname,
 			logsTail,
@@ -6805,11 +6669,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			case .otaBegin:
 				if let content = try? container.decode(OtaBegin.self, forKey: .data) {
 					self = .otaBegin(content)
-					return
-				}
-			case .otaChunk:
-				if let content = try? container.decode(OtaChunk.self, forKey: .data) {
-					self = .otaChunk(content)
 					return
 				}
 			case .otaAbandon:
@@ -6833,11 +6692,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			case .otaAssetRangeRejected:
 				if let content = try? container.decode(OtaAssetRangeRejected.self, forKey: .data) {
 					self = .otaAssetRangeRejected(content)
-					return
-				}
-			case .otaAssetRangeChunk:
-				if let content = try? container.decode(OtaAssetRangeChunk.self, forKey: .data) {
-					self = .otaAssetRangeChunk(content)
 					return
 				}
 			case .deviceGetNickname:
@@ -6874,9 +6728,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 		case .otaBegin(let content):
 			try container.encode(CodingKeys.otaBegin, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .otaChunk(let content):
-			try container.encode(CodingKeys.otaChunk, forKey: .event)
-			try container.encode(content, forKey: .data)
 		case .otaAbandon(let content):
 			try container.encode(CodingKeys.otaAbandon, forKey: .event)
 			try container.encode(content, forKey: .data)
@@ -6890,9 +6741,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .otaAssetRangeRejected(let content):
 			try container.encode(CodingKeys.otaAssetRangeRejected, forKey: .event)
-			try container.encode(content, forKey: .data)
-		case .otaAssetRangeChunk(let content):
-			try container.encode(CodingKeys.otaAssetRangeChunk, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .deviceGetNickname:
 			try container.encode(CodingKeys.deviceGetNickname, forKey: .event)
@@ -6946,6 +6794,51 @@ public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 		switch self {
 		case .snapshot(let content):
 			try container.encode(CodingKeys.snapshot, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
+public enum GatewayToBridgeTransferMsg: Codable, Sendable {
+	case fragment(TransferFragment)
+	case abandon(TransferAbandon)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case fragment,
+			abandon
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .fragment:
+				if let content = try? container.decode(TransferFragment.self, forKey: .data) {
+					self = .fragment(content)
+					return
+				}
+			case .abandon:
+				if let content = try? container.decode(TransferAbandon.self, forKey: .data) {
+					self = .abandon(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(GatewayToBridgeTransferMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeTransferMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .fragment(let content):
+			try container.encode(CodingKeys.fragment, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .abandon(let content):
+			try container.encode(CodingKeys.abandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -7428,6 +7321,7 @@ public enum PlayerError: Codable, Sendable {
 public enum Priority: String, Codable, Sendable {
 	case normal
 	case bulk
+	case background
 }
 
 

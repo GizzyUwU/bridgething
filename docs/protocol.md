@@ -280,7 +280,7 @@ for network-tethered companions on the same LAN.
 | ------------- | ------------------------------------------------------------------------------------- |
 | port          | 8892                                                                                  |
 | transport     | WebSocket binary frames, each carrying one or more `BridgeEndec` frames               |
-| ws frame cap  | 1 MiB per WS message (covers single-frame assets + msgpack overhead)                  |
+| ws frame cap  | 1 MiB per WS message (covers a pulled asset reply + msgpack overhead)                  |
 | address shape | each connecting peer is assigned a synthetic 6-byte address `0xfe:0xfe:<u32 counter>` |
 
 The synthetic address shape means a single bridgething daemon can
@@ -313,16 +313,16 @@ webapp from a gateway.
 | limit                               | value   | enforced where                                                            |
 | ----------------------------------- | ------- | ------------------------------------------------------------------------- |
 | **request timeout**                 | 10 s    | `crates/core/src/bluetooth/mod.rs::REQUEST_TIMEOUT`                       |
-| **single-frame `Asset.Push`**       | 256 KiB | `crates/lib/src/gateway/from/asset.rs::ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` |
 | **WS message cap (NetworkGateway)** | 1 MiB   | `crates/core/src/bluetooth/network/mod.rs::WS_MAX_FRAME_BYTES`            |
-| **chunked transfer chunk size**     | 16 KiB  | application-layer convention; see `crates/lib/src/shared/asset.rs`        |
+| **chunked transfer chunk size**     | 16 KiB  | application-layer convention; see `crates/core/src/transfer/`             |
 
-Anything above the single-frame asset cap **must** ship via
-`AssetPushBegin` + `AssetPushChunk` + `AssetPushCommit` (the chunked
-surface). The same shape applies to OTA payloads (`OtaBegin` /
-`OtaChunk` / `OtaCommit`). Chunked transfers stream chunk-at-a-time to
-disk on the daemon side; do not try to build up a giant single-frame
-push and rely on the WS cap to "just work" - the daemon will reject it.
+Large payloads ship through the generic transfer surface: the typed
+begin/terminal message embeds a `TransferRef` (or a `TransferBody`,
+inline-or-stream) and the bytes follow as `transfer.fragment` events on
+the sender's chosen priority lane. OTA images stream fragment-at-a-time
+to disk on the daemon side; do not build up a giant single message and
+rely on the WS cap to "just work" - the daemon bounds every frame at
+the WS cap.
 
 ## versioning
 

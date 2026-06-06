@@ -11,7 +11,8 @@ import java.util.UUID
 @Serializable
 data class Album (
 	val id: String,
-	val name: String
+	val name: String,
+	val artwork_id: String? = null
 )
 
 /// Art render sizes a webapp declares so the companion warms exactly the
@@ -27,23 +28,42 @@ data class ArtProfile (
 @Serializable
 data class Artist (
 	val id: String,
-	val name: String
+	val name: String,
+	val artwork_id: String? = null
 )
 
+/// Invalidate the daemon-side cached asset for `id`. The companion's
+/// escape hatch when it knows an asset it previously served is stale.
 @Serializable
 data class AssetClear (
 	val id: String
 )
 
-/// Typed response payload for an `AssetRequest`. Mirrors `AssetPush`
-/// without the retention hint - the daemon picks retention for assets
-/// it asked for, since the lifecycle is request-scoped rather than
-/// companion-managed.
+/// Standard embedding for a byte payload that may or may not warrant a
+/// fragment stream. Senders pick by size: a small payload rides inline
+/// in the carrying message (one frame, no machinery); a large one
+/// declares a stream and fragments follow. Receivers resolve both arms
+/// through one path.
+@Serializable(with = TransferBodySerializer::class)
+sealed class TransferBody {
+	@Serializable
+	@SerialName("inline")
+	data class Inline(val data: ByteArray): TransferBody()
+	@Serializable
+	@SerialName("stream")
+	data class Stream(val data: TransferRef): TransferBody()
+}
+
+/// Typed terminal response for an `AssetRequest`. Small assets arrive
+/// inline; larger ones declare a stream whose ref id is the originating
+/// request id, with the bytes following as `TransferFragment` events on
+/// the bulk lane (so now-playing traffic preempts them between
+/// fragments).
 @Serializable
 data class AssetGotReply (
 	val id: String,
-	val bytes: ByteArray,
-	val mime: String? = null
+	val mime: String? = null,
+	val body: TransferBody
 )
 
 /// Domain error response for an `AssetRequest`: the companion does not
@@ -51,87 +71,6 @@ data class AssetGotReply (
 @Serializable
 data class AssetNotFoundReply (
 	val id: String
-)
-
-@Serializable(with = AssetRetentionSerializer::class)
-sealed class AssetRetention {
-	@Serializable
-	@SerialName("lru")
-	object Lru: AssetRetention()
-	@Serializable
-	@SerialName("pinned")
-	object Pinned: AssetRetention()
-	@Serializable
-	@SerialName("ttl")
-	data class Ttl(val data: TtlRetention): AssetRetention()
-	@Serializable
-	@SerialName("persistent")
-	object Persistent: AssetRetention()
-}
-
-/// Single-frame asset push for small, latency-critical, memory-resident
-/// assets (album art). The payload size must be at most
-/// `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES` and `retention` must not be
-/// `Persistent`. Larger payloads or persistent retention require the
-/// chunked `PushBegin`/`PushChunk` flow.
-@Serializable
-data class AssetPush (
-	val id: String,
-	val bytes: ByteArray,
-	val mime: String? = null,
-	val retention: AssetRetention
-)
-
-/// Drop the daemon-side partial for `id`. The companion's escape hatch
-/// when it wants to clean up a push it can no longer complete.
-@Serializable
-data class AssetPushAbandon (
-	val id: String
-)
-
-/// Open or resume a chunked asset push. Daemon responds with
-/// `AssetPushBeginAck { resume_from_offset }` (the byte offset the next
-/// `AssetPushChunk` should start at, 0 for fresh pushes) or
-/// `AssetPushBeginRejected { reason }` (conflicting in-flight id with
-/// mismatched size/sha, budget exhausted, etc.).
-/// 
-/// Required for any push with `retention = Persistent` and for any push
-/// larger than `ASSET_PUSH_SINGLE_FRAME_MAX_BYTES`.
-@Serializable
-data class AssetPushBegin (
-	val id: String,
-	val expectedSize: UInt,
-	val expectedSha256: String? = null,
-	val mime: String? = null,
-	val retention: AssetRetention
-)
-
-/// Successful response to `AssetPushBegin`. `resume_from_offset` is the
-/// byte offset the next `AssetPushChunk` should start at: 0 for fresh
-/// pushes, or the daemon's recovered partial length for a resume.
-@Serializable
-data class AssetPushBeginAck (
-	val resumeFromOffset: UInt
-)
-
-/// Domain-error response to `AssetPushBegin`: the daemon refuses to
-/// start or resume this push (conflicting in-flight id, budget
-/// exhausted, oversized, etc.).
-@Serializable
-data class AssetPushBeginRejected (
-	val reason: String
-)
-
-/// Streaming chunk of an asset push opened by `AssetPushBegin`.
-/// `offset` must equal the daemon's current `received` for this id.
-/// `last:true` triggers post-stream verify (size + optional sha256)
-/// and commit to the asset cache.
-@Serializable
-data class AssetPushChunk (
-	val id: String,
-	val offset: UInt,
-	val bytes: ByteArray,
-	val last: Boolean
 )
 
 @Serializable
@@ -186,7 +125,11 @@ enum class CompanionAuthorityScope(val string: String) {
 
 @Serializable
 data class AuthorityClaim (
-	val scope: CompanionAuthorityScope
+	val scope: CompanionAuthorityScope,
+	/// App bundle the companion represents (e.g. `com.spotify.client`).
+	/// The daemon's now-playing gate compares it against iAP2's foreground
+	/// app to override a still-claimed companion when another app takes over.
+	val appBundle: String? = null
 )
 
 @Serializable
@@ -636,16 +579,6 @@ data class Earcon (
 	val name: String
 )
 
-/// Playback context the companion's track plays from (playlist / album /
-/// artist / show). `kind` is opaque to the daemon - it forwards the
-/// string to webapps that render "playing from <name>".
-@Serializable
-data class EnrichmentContext (
-	val uri: String,
-	val name: String? = null,
-	val kind: String? = null
-)
-
 @Serializable
 data class EnumField (
 	val key: String,
@@ -825,6 +758,9 @@ sealed class GatewayToBridgeMsgData {
 	@Serializable
 	@SerialName("time")
 	data class Time(val data: GatewayToBridgeTimeMsg): GatewayToBridgeMsgData()
+	@Serializable
+	@SerialName("transfer")
+	data class Transfer(val data: GatewayToBridgeTransferMsg): GatewayToBridgeMsgData()
 	@Serializable
 	@SerialName("tunnel")
 	data class Tunnel(val data: GatewayToBridgeTunnelMsg): GatewayToBridgeMsgData()
@@ -1168,8 +1104,10 @@ data class MediaItem (
 	val persistentId: String? = null,
 	val title: String? = null,
 	val album: String? = null,
+	val albumUri: String? = null,
 	val albumArtist: String? = null,
 	val artist: String? = null,
+	val artistUri: String? = null,
 	val liked: Boolean? = null,
 	val artworkId: String? = null,
 	val durationMs: UInt? = null,
@@ -1194,8 +1132,10 @@ data class MediaItemUpdate (
 	val persistentId: String? = null,
 	val title: String? = null,
 	val album: String? = null,
+	val albumUri: String? = null,
 	val albumArtist: String? = null,
 	val artist: String? = null,
+	val artistUri: String? = null,
 	val liked: Boolean? = null,
 	val artworkId: String? = null,
 	val durationMs: UInt? = null,
@@ -1572,37 +1512,6 @@ data class NotificationRemoved (
 	val reason: DismissReason
 )
 
-/// One row in the player queue. Lean cross-platform shape - gateways
-/// that have richer per-track data still surface what fields they have.
-/// `uri` is required because every queued item must be addressable for
-/// `skipToIndex`. `persistent_id` is the platform-stable id when
-/// available; webapps treat it as opaque.
-@Serializable
-data class QueueItem (
-	val uri: String,
-	val title: String? = null,
-	val artist: String? = null,
-	val album: String? = null,
-	val artworkId: String? = null,
-	val durationMs: UInt? = null,
-	val persistentId: String? = null
-)
-
-/// Non-authoritative decoration the iOS companion offers for the track
-/// iAP2 says is playing. `anchor_pid` is the iAP2 `persistent_id` the
-/// companion echoes from the last `PlaybackHint`, so the daemon can match
-/// this offer to the live iAP2 identity by exact equality. `head` is the
-/// companion's current Spotify track. The companion never claims authority
-/// - the daemon overlays art / uri onto the iAP2 identity only when the
-/// offer provably describes the playing track. The queue rides its own
-/// `QueueChanged` surface (on-change), not this frequent per-hint offer.
-@Serializable
-data class NowPlayingEnrichment (
-	val anchorPid: String? = null,
-	val head: QueueItem? = null,
-	val context: EnrichmentContext? = null
-)
-
 /// Three-state shuffle. iAP2 and Apple Music distinguish track-level
 /// from album-level shuffle; companion gateways without that distinction
 /// project to `Songs` when on. Webapps that just need an on/off signal
@@ -1688,8 +1597,8 @@ data class OtaAbandon (
 
 /// Commit every staged bandaid piece (daemon / hub / stock) as one
 /// transaction, then restart bridgething.service once. Bandaid pushes
-/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage on `last:true`
-/// (phase reaches `Writing`/100 but the daemon does NOT restart); the
+/// (`OtaKind::Daemon`, `OtaKind::BuiltinWebapp`) stage at stream
+/// completion (phase reaches `Writing`/100, the daemon does NOT restart); the
 /// companion sends `OtaActivate` after the final piece to swap them all
 /// live with a single restart. Image OTAs never use this -- they reboot
 /// at write completion.
@@ -1729,27 +1638,12 @@ data class OtaAssetRange (
 )
 
 /// Daemon-side cancel for an in-flight range request: libcurl gave up
-/// (timeout, OTA failed, daemon is shutting down). Companion stops
-/// sending `OtaAssetRangeChunk` events for `request_id` and frees any
-/// resources it held open.
+/// (timeout, OTA failed, daemon is shutting down). Companion stops the
+/// fragment stream for `request_id` and frees any resources it held
+/// open.
 @Serializable
 data class OtaAssetRangeAbandon (
 	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID
-)
-
-/// Streaming bytes for one part of an `OtaAssetRange` reply. Sent on
-/// the Bulk lane in order: parts in declaration order, chunks in
-/// ascending `offset`. `offset` is absolute within the asset, not
-/// within the part - matches what the daemon's HTTP-Range writer needs
-/// to feed libcurl. `last:true` only on the final chunk of the final
-/// part for this `request_id`.
-@Serializable
-data class OtaAssetRangeChunk (
-	@Serializable(with = MsgpackUuidSerializer::class) val requestId: UUID,
-	val partIndex: UInt,
-	val offset: UInt,
-	val bytes: ByteArray,
-	val last: Boolean
 )
 
 /// Domain-error response to `OtaAssetRange`: the companion can't serve
@@ -1762,9 +1656,9 @@ data class OtaAssetRangeRejected (
 	val reason: String
 )
 
-/// Resolved range the companion is about to stream. `start` and `length`
-/// echo the corresponding `RangeSpec`; the bytes follow as
-/// `OtaAssetRangeChunk` events on the Bulk lane.
+/// Resolved range the companion is about to serve. `start` and `length`
+/// echo the corresponding `RangeSpec`; the bytes follow in the reply's
+/// `TransferBody`.
 @Serializable
 data class RangePart (
 	val start: UInt,
@@ -1772,15 +1666,17 @@ data class RangePart (
 )
 
 /// Successful response to `OtaAssetRange`. The companion has the asset
-/// (or refetched it from `update_url_base`) and is about to stream the
-/// requested ranges as `OtaAssetRangeChunk` events on the Bulk lane.
-/// `parts` echoes the resolved ranges in the order they will be sent;
-/// `total_size` is the asset's full byte length (for `Content-Range`
-/// totals).
+/// (or refetched it from `update_url_base`) and serves the resolved
+/// ranges in `body`: small results inline, larger ones as a fragment
+/// stream whose offsets are stream-relative (0..sum of part lengths,
+/// parts concatenated in declaration order - the daemon's HTTP-Range
+/// writer maps them to absolute positions via `parts`). `total_size` is
+/// the asset's full byte length (for `Content-Range` totals).
 @Serializable
 data class OtaAssetRangeReply (
 	val totalSize: UInt,
-	val parts: List<RangePart>
+	val parts: List<RangePart>,
+	val body: TransferBody
 )
 
 /// What the streamed bytes are going to be applied as.
@@ -1812,17 +1708,32 @@ enum class OtaKind(val string: String) {
 	InstalledWebapp("installedWebapp"),
 }
 
+/// Handle to a fragment stream, embedded in the typed message that
+/// opens a transfer (a pull reply or a push begin). The bytes travel
+/// out-of-band as `TransferFragment` events keyed by `id`; the
+/// transfer completes when `total_size` bytes have arrived. For pull
+/// replies `id` is the originating request id.
+@Serializable
+data class TransferRef (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val totalSize: UInt,
+	val sha256: String? = null
+)
+
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
-/// `OtaBeginAck { resume_from_offset }` (the byte offset the next
-/// `OtaChunk` should start at, 0 for fresh pushes) or
+/// `OtaBeginAck { resume_from_offset }` (the byte offset the first
+/// `TransferFragment` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }`.
 /// 
 /// `kind` selects the backend. See `OtaKind`.
 /// 
 /// `update_id` is the sha256 of the artifact, hex-encoded. Content-
 /// addressed so resume across daemon restarts and retries-after-failure
-/// both work without companion-side state to track.
+/// both work without companion-side state to track. `transfer.id` is
+/// minted per attempt and only correlates the fragment stream; the
+/// daemon binds it to the `update_id`-keyed partial, so a reconnect
+/// with a fresh transfer id still resumes the same bytes.
 /// 
 /// `update_url_base` is image-kind only: the server prefix the companion
 /// may refetch the .zck delta from on cache miss while serving range
@@ -1832,12 +1743,11 @@ data class OtaBegin (
 	val kind: OtaKind,
 	val updateId: String,
 	val updateUrlBase: String? = null,
-	val expectedSha256: String,
-	val expectedSize: UInt
+	val transfer: TransferRef
 )
 
 /// Successful response to `OtaBegin`. `resume_from_offset` is the byte
-/// offset the next `OtaChunk` should start at: 0 for fresh pushes, or
+/// offset the first `TransferFragment` should start at: 0 for fresh pushes, or
 /// the daemon's recovered partial length for a resume.
 @Serializable
 data class OtaBeginAck (
@@ -1852,35 +1762,21 @@ data class OtaBeginRejected (
 	val reason: String
 )
 
-/// Streaming chunk of a .swu push opened by `OtaBegin`. `offset` must
-/// equal the daemon's current `received` for the transfer (chunks are
-/// strictly in-order; the companion learns the resume offset from
-/// `OtaBeginAck`). `last:true` triggers post-stream verify (size +
-/// sha256) followed by `Verifying`/`Writing`/`Confirming`/`Reboot`
-/// phase progress events.
-@Serializable
-data class OtaChunk (
-	val updateId: String,
-	val offset: UInt,
-	val bytes: ByteArray,
-	val last: Boolean
-)
-
 /// Terminal error from the OTA orchestrator. After an `OtaError` the
 /// orchestrator is back to idle and a fresh `OtaBegin` may be sent.
 @Serializable
 enum class OtaErrorCode(val string: String) {
-	/// Companion sent chunks for an `update_id` that was never begun
+	/// Companion sent fragments for an `update_id` that was never begun
 	/// (or was abandoned mid-stream).
 	@SerialName("unknownUpdate")
 	UnknownUpdate("unknownUpdate"),
-	/// `OtaChunk.offset` did not match the daemon's `received`.
+	/// A fragment's offset did not match the daemon's `received`.
 	@SerialName("offsetMismatch")
 	OffsetMismatch("offsetMismatch"),
-	/// Streamed total's sha256 did not match `OtaBegin.expected_sha256`.
+	/// Streamed total's sha256 did not match `OtaBegin.transfer.sha256`.
 	@SerialName("hashMismatch")
 	HashMismatch("hashMismatch"),
-	/// Streamed total's byte length did not match `OtaBegin.expected_size`.
+	/// Streamed total's byte length did not match `OtaBegin.transfer.total_size`.
 	@SerialName("sizeMismatch")
 	SizeMismatch("sizeMismatch"),
 	/// `CancelUpdate` arrived during a cancelable phase.
@@ -2244,19 +2140,13 @@ data class Playback (
 	val appleMusicRadioAd: Boolean? = null
 )
 
-/// Invalidation signal fired when the daemon observes an iAP2 NowPlaying
-/// state change the companion can't see directly. Carries enough context
-/// for the companion to filter ("is this for the app I care about?") and
-/// dedupe ("did the track actually change?"). The companion is expected
-/// to react with its own data fetch (e.g. Spotify Web API) - the hint
-/// itself is not a state source. `persistent_id` is iAP2's opaque hex
-/// identifier; do not treat it as a service URI.
+/// What the current track is playing from: the playlist / album / show /
+/// artist context. Webapps render "playing from <name>"; `uri` lets them
+/// drill into it. `name` is `None` until the companion resolves it.
 @Serializable
-data class PlaybackHint (
-	val appBundle: String? = null,
-	val persistentId: String? = null,
-	val playing: Boolean? = null,
-	val durationMs: UInt? = null
+data class PlaybackContext (
+	val uri: String,
+	val name: String? = null
 )
 
 @Serializable
@@ -2275,6 +2165,24 @@ data class PlayerOptions (
 	val crossfade_ms: UInt? = null
 )
 
+/// One row in the player queue. Lean cross-platform shape - gateways
+/// that have richer per-track data still surface what fields they have.
+/// `uri` is required because every queued item must be addressable for
+/// `skipToIndex`. `persistent_id` is the platform-stable id when
+/// available; webapps treat it as opaque.
+@Serializable
+data class QueueItem (
+	val uri: String,
+	val title: String? = null,
+	val artist: String? = null,
+	val artistUri: String? = null,
+	val album: String? = null,
+	val albumUri: String? = null,
+	val artworkId: String? = null,
+	val durationMs: UInt? = null,
+	val persistentId: String? = null
+)
+
 /// Full player snapshot the daemon broadcasts to webapps. Initial value
 /// arrives on `BridgeToClientPlayerMsg::StateChange` at connect time;
 /// subsequent changes flow as `NowPlayingUpdate` deltas the client SDK
@@ -2284,7 +2192,8 @@ data class PlayerState (
 	val track: MediaItem? = null,
 	val playback: Playback,
 	val queue: List<QueueItem>,
-	val options: PlayerOptions
+	val options: PlayerOptions,
+	val context: PlaybackContext? = null
 )
 
 /// Lean cross-platform shape for a playlist. `uri` is what `player.play`
@@ -2314,14 +2223,14 @@ data class PodcastEpisode (
 	val artworkId: String? = null
 )
 
-/// Queue update from the companion. `order` is the complete queue as a
-/// list of item uris, every message - so it is a full ordering, not an
-/// op-delta with a baseline to track. `items` carries full metadata only
-/// for uris the daemon does not already hold from the previous message on
-/// this connection; the daemon rebuilds the queue from `order` against its
-/// last queue plus `items`. The iAP2 link is reliable-delivery, so a drop
-/// is a link reset and the companion re-sends a full ordering on reconnect;
-/// no revision numbers or resync are needed.
+/// Full queue replacement from the companion. `order` is the upcoming
+/// queue as a list of item uris, current excluded; `items` carries full
+/// metadata for every uri in `order`, so the daemon rebuilds the queue
+/// from the snapshot alone. The companion sends one only when the upcoming
+/// list materially changes (context switch, reorder, add-to-queue), never
+/// on a plain advance - the daemon derives the post-advance next by
+/// locating the now-playing track in the held queue. Both sides drop this
+/// state on disconnect; no deltas, revisions, or resync to track.
 @Serializable
 data class QueueSnapshot (
 	val order: List<String>,
@@ -2528,6 +2437,26 @@ data class Track (
 	val duration_ms: UInt,
 	val image_id: String,
 	val saved: Boolean
+)
+
+/// Sender-side abort of an in-flight transfer (source lost the bytes,
+/// upstream fetch failed). The receiver drops the bound sink; partial
+/// disk state is kept for resumable transfers and discarded otherwise.
+@Serializable
+data class TransferAbandon (
+	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
+	val reason: String
+)
+
+/// One slice of a transfer's bytes. Variable-size and offset-addressed:
+/// fragments are sent in offset order on the transfer's priority lane,
+/// sized by the sender to its preemption budget. Receivers route by
+/// `transfer_id` to the sink bound when the transfer opened.
+@Serializable
+data class TransferFragment (
+	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
+	val offset: UInt,
+	val bytes: ByteArray
 )
 
 @Serializable
@@ -2969,17 +2898,27 @@ enum class AncsAuthState(val string: String) {
 	Unauthorized("unauthorized"),
 }
 
+@Serializable(with = AssetRetentionSerializer::class)
+sealed class AssetRetention {
+	@Serializable
+	@SerialName("lru")
+	object Lru: AssetRetention()
+	@Serializable
+	@SerialName("pinned")
+	object Pinned: AssetRetention()
+	@Serializable
+	@SerialName("ttl")
+	data class Ttl(val data: TtlRetention): AssetRetention()
+	@Serializable
+	@SerialName("persistent")
+	object Persistent: AssetRetention()
+}
+
 @Serializable(with = BridgeToGatewayAssetMsgSerializer::class)
 sealed class BridgeToGatewayAssetMsg {
 	@Serializable
 	@SerialName("request")
 	data class Request(val data: AssetRequest): BridgeToGatewayAssetMsg()
-	@Serializable
-	@SerialName("pushBeginAck")
-	data class PushBeginAck(val data: AssetPushBeginAck): BridgeToGatewayAssetMsg()
-	@Serializable
-	@SerialName("pushBeginRejected")
-	data class PushBeginRejected(val data: AssetPushBeginRejected): BridgeToGatewayAssetMsg()
 }
 
 @Serializable(with = BridgeToGatewayAudioMsgSerializer::class)
@@ -3185,9 +3124,6 @@ sealed class BridgeToGatewayPlayerMsg {
 	@Serializable
 	@SerialName("setCrossfade")
 	data class SetCrossfade(val data: dev.bridgething.schema.SetCrossfade): BridgeToGatewayPlayerMsg()
-	@Serializable
-	@SerialName("hint")
-	data class Hint(val data: PlaybackHint): BridgeToGatewayPlayerMsg()
 }
 
 @Serializable(with = BridgeToGatewaySystemMsgSerializer::class)
@@ -3329,20 +3265,8 @@ sealed class ForwardMessage {
 @Serializable(with = GatewayToBridgeAssetMsgSerializer::class)
 sealed class GatewayToBridgeAssetMsg {
 	@Serializable
-	@SerialName("push")
-	data class Push(val data: AssetPush): GatewayToBridgeAssetMsg()
-	@Serializable
 	@SerialName("clear")
 	data class Clear(val data: AssetClear): GatewayToBridgeAssetMsg()
-	@Serializable
-	@SerialName("pushBegin")
-	data class PushBegin(val data: AssetPushBegin): GatewayToBridgeAssetMsg()
-	@Serializable
-	@SerialName("pushChunk")
-	data class PushChunk(val data: AssetPushChunk): GatewayToBridgeAssetMsg()
-	@Serializable
-	@SerialName("pushAbandon")
-	data class PushAbandon(val data: AssetPushAbandon): GatewayToBridgeAssetMsg()
 	@Serializable
 	@SerialName("got")
 	data class Got(val data: AssetGotReply): GatewayToBridgeAssetMsg()
@@ -3364,10 +3288,11 @@ sealed class GatewayToBridgeAudioMsg {
 	data class VolumeChanged(val data: dev.bridgething.schema.VolumeChanged): GatewayToBridgeAudioMsg()
 }
 
-/// Companion declares per-scope authority. `Claim` is idempotent and may
-/// be re-issued to refresh the freshness timestamp. `Release` is the
-/// "stop preferring my data for this scope" signal. Stale claims fall
-/// back automatically after `AUTHORITY_STALE_TIMEOUT_SECS` (default 5).
+/// Companion declares per-scope authority. `Release` is the "stop
+/// preferring my data for this scope" signal. Non-now-playing claims
+/// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
+/// hold until release / disconnect / app-change arbitration (the
+/// companion declares its `app_bundle` so the daemon can arbitrate).
 @Serializable(with = GatewayToBridgeAuthorityMsgSerializer::class)
 sealed class GatewayToBridgeAuthorityMsg {
 	@Serializable
@@ -3520,27 +3445,20 @@ sealed class GatewayToBridgePhoneMsg {
 	data class StateReply(val data: PhoneStateReply): GatewayToBridgePhoneMsg()
 }
 
-/// Gateway -> bridge player events. `Snapshot` is the initial-state event
-/// fired at announce when the companion claims player authority;
-/// `Delta` is the ongoing partial-update stream (the only delta-shaped
-/// event in the wire protocol - every other surface uses snapshots).
-/// `QueueChanged` fires when the queue mutates without a track change
-/// (companion-side reorder, prefetch). `EnrichmentOffer` is the iOS
-/// non-authoritative decoration path (see `NowPlayingEnrichment`).
+/// Gateway -> bridge player events. The companion is authoritative for
+/// now-playing: `Snapshot` carries the full player state and is the sole
+/// metadata/playback source (driven by the dealer push). `QueueChanged`
+/// carries a full queue replacement when the upcoming list materially
+/// changes; the daemon derives the post-advance next from the held
+/// snapshot, so a plain advance costs no queue traffic.
 @Serializable(with = GatewayToBridgePlayerMsgSerializer::class)
 sealed class GatewayToBridgePlayerMsg {
 	@Serializable
 	@SerialName("snapshot")
 	data class Snapshot(val data: PlayerState): GatewayToBridgePlayerMsg()
 	@Serializable
-	@SerialName("delta")
-	data class Delta(val data: NowPlayingUpdate): GatewayToBridgePlayerMsg()
-	@Serializable
 	@SerialName("queueChanged")
 	data class QueueChanged(val data: QueueSnapshot): GatewayToBridgePlayerMsg()
-	@Serializable
-	@SerialName("enrichmentOffer")
-	data class EnrichmentOffer(val data: NowPlayingEnrichment): GatewayToBridgePlayerMsg()
 }
 
 @Serializable(with = GatewayToBridgeSystemMsgSerializer::class)
@@ -3548,9 +3466,6 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("otaBegin")
 	data class OtaBegin(val data: dev.bridgething.schema.OtaBegin): GatewayToBridgeSystemMsg()
-	@Serializable
-	@SerialName("otaChunk")
-	data class OtaChunk(val data: dev.bridgething.schema.OtaChunk): GatewayToBridgeSystemMsg()
 	@Serializable
 	@SerialName("otaAbandon")
 	data class OtaAbandon(val data: dev.bridgething.schema.OtaAbandon): GatewayToBridgeSystemMsg()
@@ -3566,9 +3481,6 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("otaAssetRangeRejected")
 	data class OtaAssetRangeRejected(val data: dev.bridgething.schema.OtaAssetRangeRejected): GatewayToBridgeSystemMsg()
-	@Serializable
-	@SerialName("otaAssetRangeChunk")
-	data class OtaAssetRangeChunk(val data: dev.bridgething.schema.OtaAssetRangeChunk): GatewayToBridgeSystemMsg()
 	@Serializable
 	@SerialName("deviceGetNickname")
 	object DeviceGetNickname: GatewayToBridgeSystemMsg()
@@ -3595,6 +3507,16 @@ sealed class GatewayToBridgeTimeMsg {
 	@Serializable
 	@SerialName("snapshot")
 	data class Snapshot(val data: TimeInfo): GatewayToBridgeTimeMsg()
+}
+
+@Serializable(with = GatewayToBridgeTransferMsgSerializer::class)
+sealed class GatewayToBridgeTransferMsg {
+	@Serializable
+	@SerialName("fragment")
+	data class Fragment(val data: TransferFragment): GatewayToBridgeTransferMsg()
+	@Serializable
+	@SerialName("abandon")
+	data class Abandon(val data: TransferAbandon): GatewayToBridgeTransferMsg()
 }
 
 @Serializable(with = GatewayToBridgeTunnelMsgSerializer::class)
@@ -3769,6 +3691,8 @@ enum class Priority(val string: String) {
 	Normal("normal"),
 	@SerialName("bulk")
 	Bulk("bulk"),
+	@SerialName("background")
+	Background("background"),
 }
 
 /// Generated type representing the anonymous struct variant `WebappNotFound` of the `WebappError` Rust enum

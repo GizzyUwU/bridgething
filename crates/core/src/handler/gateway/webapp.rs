@@ -3,8 +3,8 @@ use libbridgething::{
   client::{BridgeToClientConfigMsgEvent, ConfigChanged},
   gateway::{
     BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, WebappActive,
-    WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList, WebappConfigListReply,
-    WebappConfigSet, WebappIcon, WebappIconReply, WebappList, WebappSwitchTo, WebappUninstall,
+    WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList,
+    WebappConfigListReply, WebappConfigSet, WebappIcon, WebappIconReply, WebappList, WebappSwitchTo, WebappUninstall,
   },
 };
 use uuid::Uuid;

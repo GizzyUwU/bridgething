@@ -79,7 +79,6 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "player.play", "player.pause", "player.queue", "player.resume",
         "player.seekTo", "player.setCrossfade", "player.setRepeat", "player.setShuffle",
         "player.setSpeed", "player.skipNext", "player.skipPrev", "player.skipToIndex",
-        "player.hint",
         // library favorites
         "library.favoritesSet", "library.favoritesSetMany", "library.favoritesToggle",
         // geo

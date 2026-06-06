@@ -27,6 +27,8 @@ public protocol BridgethingGlue: Sendable {
     func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
     func setArtProfile(heroPx: Int, thumbPx: Int) async
 
+    func handlePeerConnected() async
+
     /// Inbound transport-control verbs. Default impls throw `GlueError.notImplemented`;
     func play(_ uri: PlayUri) async throws
     func queue(_ req: QueueUri) async throws
@@ -61,11 +63,6 @@ public protocol BridgethingGlue: Sendable {
     /// responsive, `rateLimited`/`unreachable` when degraded. Distinct from auth.
     func setServiceHealthObserver(_ observer: @escaping @Sendable (GlueServiceHealth) -> Void) async
 
-    /// Daemon-observed iAP2 playback hint. The hint is not authoritative; the glue
-    /// should fetch from its own data source and push back via `gateway.player.delta`.
-    /// Filter on `appBundle` to avoid spurious fetches from other apps. Default impl is a no-op.
-    func handlePlaybackHint(_ hint: PlaybackHint) async
-
     /// Bytes for an asset id this glue produced. Return nil if the id isn't owned by this glue.
     func asset(id: String) async throws -> AssetBytes?
 
@@ -80,19 +77,13 @@ public protocol BridgethingGlue: Sendable {
 public struct GlueDebugState: Sendable {
     public let authorityPlaybackHeld: Bool
     public let authorityMetadataHeld: Bool
-    public let baselinePollActive: Bool
-    public let hintFetchActive: Bool
 
     public init(
         authorityPlaybackHeld: Bool = false,
-        authorityMetadataHeld: Bool = false,
-        baselinePollActive: Bool = false,
-        hintFetchActive: Bool = false
+        authorityMetadataHeld: Bool = false
     ) {
         self.authorityPlaybackHeld = authorityPlaybackHeld
         self.authorityMetadataHeld = authorityMetadataHeld
-        self.baselinePollActive = baselinePollActive
-        self.hintFetchActive = hintFetchActive
     }
 }
 
@@ -120,11 +111,11 @@ public extension BridgethingGlue {
     func favoritesToggle(_: ItemRef) async throws { throw GlueError.notImplemented }
     func favoritesSet(_: ItemRef, liked _: Bool) async throws { throw GlueError.notImplemented }
     func favoritesSetMany(_: [FavoritesSet]) async throws { throw GlueError.notImplemented }
-    func handlePlaybackHint(_: PlaybackHint) async {}
     func asset(id _: String) async throws -> AssetBytes? { nil }
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
     func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
     func setArtProfile(heroPx _: Int, thumbPx _: Int) async {}
+    func handlePeerConnected() async {}
 
     /// Default for glues without an auth surface: report ready immediately.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {

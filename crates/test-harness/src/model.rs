@@ -30,7 +30,7 @@ use bridgething_iap2::csm::now_playing::{
   RepeatMode as Iap2Repeat, ShuffleMode as Iap2Shuffle,
 };
 use libbridgething::{
-  CompanionAuthorityScope, MediaItemUpdate, NowPlayingUpdate, PlaybackUpdate, RepeatMode, ShuffleMode,
+  CompanionAuthorityScope, MediaItemUpdate, PlaybackState, PlaybackUpdate, PlayerState, RepeatMode, ShuffleMode,
   client::{PlayerQueueReply, PlayerStateReply},
 };
 
@@ -47,7 +47,7 @@ const NONMUSIC_PREFIX: &str = "nonmusic-";
 pub enum ModelEvent {
   Iap2NowPlaying(Iap2NowPlaying),
   Iap2Artwork { transfer_id: u8, bytes_len: usize },
-  CompanionDelta(NowPlayingUpdate),
+  CompanionSnapshot(PlayerState),
   AuthorityClaim(CompanionAuthorityScope),
   AuthorityRelease(CompanionAuthorityScope),
 }
@@ -118,7 +118,6 @@ pub struct Model {
   iap2_playback: PlaybackUpdate,
   companion_metadata: MediaItemUpdate,
   companion_playback: PlaybackUpdate,
-  iap2_queue: Vec<QueueEntry>,
   companion_queue: Vec<QueueEntry>,
 
   authority: HashSet<CompanionAuthorityScope>,
@@ -165,7 +164,7 @@ impl Model {
     match event {
       ModelEvent::Iap2NowPlaying(update) => self.apply_iap2_now_playing(update),
       ModelEvent::Iap2Artwork { transfer_id, .. } => self.apply_iap2_artwork(*transfer_id),
-      ModelEvent::CompanionDelta(update) => self.apply_companion_delta(update),
+      ModelEvent::CompanionSnapshot(snapshot) => self.apply_companion_snapshot(snapshot),
       ModelEvent::AuthorityClaim(scope) => {
         self.authority.insert(*scope);
       }
@@ -175,13 +174,60 @@ impl Model {
     }
   }
 
-  fn apply_companion_delta(&mut self, update: &NowPlayingUpdate) {
-    let media = update.media_item.clone().unwrap_or_default();
-    let playback = update.playback.clone().unwrap_or_default();
-    self.player_apply_now_playing(
-      NowPlayingSource::Companion,
-      (media, playback, update.media_item.is_some(), update.playback.is_some()),
-    );
+  // mirror of the daemon's player/state.rs::apply_companion_snapshot: a snapshot is a full replace
+  // of the companion accumulators (never an accumulate), and never touches the companion queue
+  // (that rides QueueChanged).
+  fn apply_companion_snapshot(&mut self, snapshot: &PlayerState) {
+    let PlayerState {
+      track,
+      playback,
+      options,
+      ..
+    } = snapshot;
+
+    self.companion_metadata = match track {
+      Some(t) => MediaItemUpdate {
+        persistent_id: t.persistent_id.clone(),
+        title: t.title.clone(),
+        album: t.album.clone(),
+        album_uri: t.album_uri.clone(),
+        album_artist: t.album_artist.clone(),
+        artist: t.artist.clone(),
+        artist_uri: t.artist_uri.clone(),
+        liked: t.liked,
+        artwork_id: t.artwork_id.clone(),
+        duration_ms: t.duration_ms,
+        media_types: t.media_types.clone(),
+        track_number: t.track_number,
+        track_count: t.track_count,
+        is_like_supported: t.is_like_supported,
+        is_ban_supported: t.is_ban_supported,
+        is_banned: t.is_banned,
+        is_resident_on_device: None,
+        chapter_count: t.chapter_count,
+      },
+      None => MediaItemUpdate::default(),
+    };
+
+    self.companion_playback = PlaybackUpdate {
+      playing: Some(matches!(playback.state, PlaybackState::Playing)),
+      position_ms: Some(playback.position_ms),
+      shuffle: Some(playback.shuffle),
+      shuffle_mode: playback.shuffle_mode,
+      repeat: Some(playback.repeat),
+      app_bundle: None,
+      app_display_name: None,
+      queue_index: playback.queue_index,
+      queue_count: playback.queue_count,
+      queue_chapter_index: playback.queue_chapter_index,
+      playback_speed: Some(options.speed),
+      set_elapsed_time_available: playback.set_elapsed_time_available,
+      queue_list_avail: playback.queue_list_avail,
+      apple_music_radio_ad: playback.apple_music_radio_ad,
+      apple_music_radio_station_name: None,
+    };
+
+    self.recompute();
   }
 
   // --- router half (handler/iap2.rs) ---
@@ -206,7 +252,7 @@ impl Model {
     }
 
     let lib_update = translate_now_playing(update, pid_hex.as_deref());
-    self.player_apply_now_playing(NowPlayingSource::Iap2, lib_update);
+    self.player_apply_now_playing(lib_update);
   }
 
   fn apply_iap2_artwork(&mut self, transfer_id: u8) {
@@ -219,21 +265,16 @@ impl Model {
       _ => return,
     };
     self.assets.insert(asset_id.clone());
-    self.player_apply_artwork_id(NowPlayingSource::Iap2, asset_id);
+    self.player_apply_artwork_id(asset_id);
   }
 
   // --- player half (player/state.rs) ---
 
-  fn player_apply_now_playing(
-    &mut self,
-    source: NowPlayingSource,
-    update: (MediaItemUpdate, PlaybackUpdate, bool, bool),
-  ) {
+  // iap2 is the only producer of now-playing deltas; the companion drives now-playing through
+  // apply_companion_snapshot, so this always targets the iap2 accumulators.
+  fn player_apply_now_playing(&mut self, update: (MediaItemUpdate, PlaybackUpdate, bool, bool)) {
     let (media, playback, has_media, has_playback) = update;
-    let (meta_target, play_target) = match source {
-      NowPlayingSource::Iap2 => (&mut self.iap2_metadata, &mut self.iap2_playback),
-      NowPlayingSource::Companion => (&mut self.companion_metadata, &mut self.companion_playback),
-    };
+    let (meta_target, play_target) = (&mut self.iap2_metadata, &mut self.iap2_playback);
     if has_media {
       if let Some(new_pid) = media.persistent_id.as_ref()
         && meta_target.persistent_id.as_ref() != Some(new_pid)
@@ -249,12 +290,8 @@ impl Model {
     self.recompute();
   }
 
-  fn player_apply_artwork_id(&mut self, source: NowPlayingSource, asset_id: String) {
-    let meta_target = match source {
-      NowPlayingSource::Iap2 => &mut self.iap2_metadata,
-      NowPlayingSource::Companion => &mut self.companion_metadata,
-    };
-    meta_target.artwork_id = Some(asset_id);
+  fn player_apply_artwork_id(&mut self, asset_id: String) {
+    self.iap2_metadata.artwork_id = Some(asset_id);
     self.recompute();
   }
 
@@ -270,8 +307,10 @@ impl Model {
         persistent_id: c.persistent_id.clone().or_else(|| i.persistent_id.clone()),
         title: c.title.clone().or_else(|| i.title.clone()),
         album: c.album.clone().or_else(|| i.album.clone()),
+        album_uri: c.album_uri.clone().or_else(|| i.album_uri.clone()),
         album_artist: c.album_artist.clone().or_else(|| i.album_artist.clone()),
         artist: c.artist.clone().or_else(|| i.artist.clone()),
+        artist_uri: c.artist_uri.clone().or_else(|| i.artist_uri.clone()),
         liked: c.liked.or(i.liked),
         artwork_id: c.artwork_id.clone(),
         duration_ms: c.duration_ms.or(i.duration_ms),
@@ -322,7 +361,7 @@ impl Model {
     if self.companion_authoritative(CompanionAuthorityScope::NowPlayingMetadata) {
       &self.companion_queue
     } else {
-      &self.iap2_queue
+      &[]
     }
   }
 
@@ -448,12 +487,6 @@ impl Model {
   }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum NowPlayingSource {
-  Iap2,
-  Companion,
-}
-
 fn default_track() -> TrackModel {
   TrackModel::default()
 }
@@ -510,8 +543,10 @@ fn translate_media_item(media: &MediaItemAttributes, track_key: Option<&str>) ->
     persistent_id: track_key.map(|key| format!("iap2:track:{key}")),
     title: media.title.clone(),
     album: media.album.clone(),
+    album_uri: None,
     album_artist: media.album_artist.clone(),
     artist: media.artist.clone(),
+    artist_uri: None,
     liked: media.liked,
     artwork_id: None,
     duration_ms: media.duration_ms,
@@ -540,7 +575,7 @@ fn translate_playback(play: &PlaybackAttributes) -> PlaybackUpdate {
     queue_chapter_index: play.queue_chapter_index,
     playback_speed: play.playback_speed_hundredths.map(|h| f32::from(h) / 100.0),
     set_elapsed_time_available: play.set_elapsed_time_available,
-    queue_list_avail: play.queue_list_avail,
+    queue_list_avail: None,
     apple_music_radio_ad: play.apple_music_radio_ad,
     apple_music_radio_station_name: play.apple_music_radio_station_name.clone(),
   }

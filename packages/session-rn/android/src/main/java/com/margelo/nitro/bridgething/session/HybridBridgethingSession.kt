@@ -138,8 +138,8 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().spotifyAuthConfig()
     }
 
-    override fun completeSpotifySignIn(accessToken: String, refreshToken: String, usesDealer: Boolean): Promise<Unit> = Promise.async {
-        require().completeSpotifySignIn(accessToken, refreshToken, usesDealer)
+    override fun completeSpotifySignIn(accessToken: String, refreshToken: String): Promise<Unit> = Promise.async {
+        require().completeSpotifySignIn(accessToken, refreshToken)
     }
 
     override fun snapshot(): Promise<BridgethingSessionSnapshot> = Promise.async {

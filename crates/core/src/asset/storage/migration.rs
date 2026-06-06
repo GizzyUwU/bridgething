@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-  vec![Box::new(M0001CreateAssets)]
+  vec![Box::new(M0001CreateAssets), Box::new(M0002AddPinnedFlag)]
 }
 
 struct M0001CreateAssets;
@@ -50,6 +50,39 @@ impl MigrationTrait for M0001CreateAssets {
   }
 }
 
+struct M0002AddPinnedFlag;
+
+impl MigrationName for M0002AddPinnedFlag {
+  fn name(&self) -> &str {
+    "m0002_add_pinned_flag"
+  }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for M0002AddPinnedFlag {
+  async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .alter_table(
+        Table::alter()
+          .table(Assets::Table)
+          .add_column(ColumnDef::new(Assets::Pinned).boolean().not_null().default(true))
+          .to_owned(),
+      )
+      .await
+  }
+
+  async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+    manager
+      .alter_table(
+        Table::alter()
+          .table(Assets::Table)
+          .drop_column(Assets::Pinned)
+          .to_owned(),
+      )
+      .await
+  }
+}
+
 #[derive(DeriveIden)]
 enum Assets {
   Table,
@@ -59,4 +92,5 @@ enum Assets {
   ByteLen,
   InsertedAt,
   AccessedAt,
+  Pinned,
 }
