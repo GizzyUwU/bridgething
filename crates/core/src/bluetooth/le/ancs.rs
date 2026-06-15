@@ -150,19 +150,20 @@ impl Ancs {
         || self.last_auth_probe.elapsed() >= ATTRIBUTE_AUTH_PROBE_INTERVAL)
   }
 
-  pub async fn pump(&mut self) {
+  pub async fn pump(&mut self) -> bool {
     let Some(item) = self.pending.pop_front() else {
-      return;
+      return true;
     };
     let cmd = build_get_attributes(item.uid);
     if let Err(err) = self.control_point.write_ext(&cmd, &write_request()).await {
       tracing::warn!(uid = item.uid, ?err, "ANCS GNA write failed; dropping");
-      return;
+      return false;
     }
     if self.consecutive_timeouts >= ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
       self.last_auth_probe = Instant::now();
     }
     self.in_flight = Some(item);
+    true
   }
 
   pub async fn on_notification_source(&mut self, frame: &[u8], bus: &WireEventBus) {

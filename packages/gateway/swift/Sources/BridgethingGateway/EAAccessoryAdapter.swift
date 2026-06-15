@@ -25,18 +25,23 @@
   /// ready, so `EASession(accessory:forProtocol:)` returns nil for a few seconds.
   /// Opens therefore retry with backoff, and the peer is reported connected only
   /// once both streams reach `.openCompleted` (not when the session object is
-  /// created). Exhausting the retries yields `.linkFailed`.
+  /// created). Exhausting the fast retries yields `.linkFailed` once, then a slow
+  /// background retry keeps running so the link self-heals when the accessory is
+  /// ready again (recreating an `EASession` races the previous one's async release,
+  /// so a single fast burst is not enough on a mid-session drop).
   public final class EAAccessoryAdapter: NSObject, Adapter, @unchecked Sendable {
     public nonisolated let events: AsyncStream<AdapterEvent>
     private let eventContinuation: AsyncStream<AdapterEvent>.Continuation
 
     private let protocolString: String
     private let maxOpenAttempts = 6
+    private let slowRetryInterval = 5.0
 
     // The trailing state is only read or mutated from the main thread: public methods hop via
     // MainActor.run and stream/notification callbacks fire on main because we scheduled them there.
     private var sessions: [String: SessionState] = [:]
     private var retryTasks: [String: Task<Void, Never>] = [:]
+    private var linkFailedReported: Set<String> = []
     private var observers: [NSObjectProtocol] = []
     private var started = false
 
@@ -93,6 +98,7 @@
 
         for (_, task) in self.retryTasks { task.cancel() }
         self.retryTasks.removeAll()
+        self.linkFailedReported.removeAll()
         for (_, session) in self.sessions {
           session.tearDown()
         }
@@ -105,6 +111,7 @@
     public func disconnect(deviceId: String) async throws {
       let known = await MainActor.run { () -> Bool in
         self.retryTasks.removeValue(forKey: deviceId)?.cancel()
+        self.linkFailedReported.remove(deviceId)
         guard let session = self.sessions.removeValue(forKey: deviceId) else { return false }
         session.tearDown()
         self.eventContinuation.yield(.disconnected(deviceId: deviceId))
@@ -116,6 +123,7 @@
     public func reconnect(deviceId: String) async throws {
       try await MainActor.run {
         self.retryTasks.removeValue(forKey: deviceId)?.cancel()
+        self.linkFailedReported.remove(deviceId)
         self.sessions.removeValue(forKey: deviceId)?.tearDown()
         guard let accessory = EAAccessoryManager.shared().connectedAccessories
           .first(where: { Self.deviceId(for: $0) == deviceId })
@@ -146,6 +154,7 @@
       let id = state.deviceId
       guard sessions[id] === state else { return }
       retryTasks.removeValue(forKey: id)?.cancel()
+      linkFailedReported.remove(id)
       eaLog.info("ea link up for \(id)")
       eventContinuation.yield(.connected(Device(id: id, name: state.accessory.name)))
     }
@@ -171,12 +180,14 @@
         scheduleRetryOrFail(accessory: state.accessory, attempt: 0, reason: reason)
       } else {
         eaLog.info("ea link ended for \(id) (\(reason)); accessory gone")
+        linkFailedReported.remove(id)
         eventContinuation.yield(.disconnected(deviceId: id))
       }
     }
 
     private func handleDisconnect(deviceId: String) {
       retryTasks.removeValue(forKey: deviceId)?.cancel()
+      linkFailedReported.remove(deviceId)
       if let session = sessions.removeValue(forKey: deviceId) {
         session.tearDown()
         eventContinuation.yield(.disconnected(deviceId: deviceId))
@@ -200,23 +211,25 @@
 
     private func scheduleRetryOrFail(accessory: EAAccessory, attempt: Int, reason: String) {
       let id = Self.deviceId(for: accessory)
-      guard attempt + 1 < maxOpenAttempts else {
-        eaLog.error("link failed for \(id) after \(attempt + 1) attempts: \(reason)")
+      let exhausted = attempt + 1 >= maxOpenAttempts
+      if exhausted, linkFailedReported.insert(id).inserted {
+        eaLog.error("link failed for \(id) after \(attempt + 1) attempts: \(reason); continuing slow retry")
         eventContinuation.yield(.linkFailed(deviceId: id, name: accessory.name, reason: reason))
-        return
       }
-      let delay = min(0.5 * pow(2.0, Double(attempt)), 4.0)
+      let delay = exhausted ? slowRetryInterval : min(0.5 * pow(2.0, Double(attempt)), 4.0)
+      let nextAttempt = exhausted ? attempt : attempt + 1
       retryTasks[id]?.cancel()
-      // re-resolve the accessory by id inside the task rather than capturing the
-      // non-Sendable EAAccessory across the actor hop; if it's gone, give up.
       retryTasks[id] = Task { @MainActor [weak self] in
         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         guard let self, !Task.isCancelled else { return }
         self.retryTasks.removeValue(forKey: id)
         guard let next = EAAccessoryManager.shared().connectedAccessories
           .first(where: { Self.deviceId(for: $0) == id })
-        else { return }
-        self.tryOpenSession(for: next, attempt: attempt + 1)
+        else {
+          self.linkFailedReported.remove(id)
+          return
+        }
+        self.tryOpenSession(for: next, attempt: nextAttempt)
       }
     }
 
@@ -305,7 +318,9 @@
           return out.write(base, maxLength: currentWrite.count)
         }
         if written < 0 {
-          eaLog.warning("ea write error for \(deviceId): \(String(describing: out.streamError))")
+          eaLog.warning("ea write error for \(deviceId): \(String(describing: out.streamError)); dropping link")
+          owner?.linkDropped(self, reason: "write error")
+          return
         }
         if written <= 0 { break }
         currentWrite.removeSubrange(0 ..< written)
@@ -330,7 +345,9 @@
             return input.read(base, maxLength: ptr.count)
           }
           if n < 0 {
-            eaLog.warning("ea read error for \(deviceId): \(String(describing: input.streamError))")
+            eaLog.warning("ea read error for \(deviceId): \(String(describing: input.streamError)); dropping link")
+            owner?.linkDropped(self, reason: "read error")
+            return
           }
           if n <= 0 { break }
           owner?.handleInbound(deviceId: deviceId, bytes: Data(buffer.prefix(n)))

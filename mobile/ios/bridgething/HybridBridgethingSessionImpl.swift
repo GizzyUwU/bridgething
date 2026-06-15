@@ -7,7 +7,21 @@ import BridgethingSession
 import CryptoKit
 import Foundation
 import NitroModules
+import React
 import UIKit
+
+/// Forwards a React Native reload-start to a closure so the backend can drop its JS callbacks before the runtime is torn down.
+private final class ReloadDetacher: NSObject, RCTReloadListener {
+    private let onReload: () -> Void
+    init(onReload: @escaping () -> Void) {
+        self.onReload = onReload
+        super.init()
+    }
+
+    func didReceiveReloadCommand() {
+        onReload()
+    }
+}
 
 /// `BridgethingSessionBackend` impl. JS owns preferences and reapplies them on bootstrap.
 public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unchecked Sendable {
@@ -46,6 +60,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public static var eaProtocolString: String = "com.bridgething.gateway"
 
     private let stateLock = NSLock()
+    private var foreground = false
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var reloadDetacher: ReloadDetacher?
     private var companion: BridgethingCompanion?
     private var eventsTask: Task<Void, Never>?
     private var authTask: Task<Void, Never>?
@@ -72,7 +89,54 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var lastAuthState: BridgethingAuthState = .idleState()
     private var lastServiceHealth: BridgethingServiceHealth = toRNServiceHealth(.ok)
 
-    public init() {}
+    public init() {
+        observeAppLifecycle()
+        registerReloadDetach()
+    }
+
+    deinit {
+        let center = NotificationCenter.default
+        for token in lifecycleObservers { center.removeObserver(token) }
+    }
+
+    private func observeAppLifecycle() {
+        let center = NotificationCenter.default
+        let active = center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.setForeground(true) }
+        let background = center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.setForeground(false) }
+        lifecycleObservers = [active, background]
+    }
+
+    private func setForeground(_ value: Bool) {
+        stateLock.withLock { foreground = value }
+    }
+
+    private func registerReloadDetach() {
+        let detacher = ReloadDetacher { [weak self] in self?.detachObservers() }
+        reloadDetacher = detacher
+        RCTRegisterReloadCommandListener(detacher)
+    }
+
+    private func detachObservers() {
+        stateLock.withLock {
+            onProviderChanged = nil
+            onAuthStateChanged = nil
+            onServiceHealthChanged = nil
+            onPeerConnected = nil
+            onPeerDisconnected = nil
+            onPeerLinkFailed = nil
+            onNowPlayingChanged = nil
+            onAncsAuthStatusChanged = nil
+            onLog = nil
+            onWebappsChanged = nil
+            onDeviceMetaChanged = nil
+            onOtaEvent = nil
+            onCatalogEvent = nil
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -919,13 +983,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     // MARK: - Emit helpers
 
     private func emitProvider(_ info: BridgethingProviderInfo?) {
-        stateLock.withLock { onProviderChanged }?(info)
+        stateLock.withLock { foreground ? onProviderChanged : nil }?(info)
     }
 
     private func emitServiceHealth(_ health: BridgethingServiceHealth) {
         let cb = stateLock.withLock { () -> (@Sendable (BridgethingServiceHealth) -> Void)? in
             lastServiceHealth = health
-            return onServiceHealthChanged
+            return foreground ? onServiceHealthChanged : nil
         }
         cb?(health)
     }
@@ -933,49 +997,49 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private func emitAuth(_ state: BridgethingAuthState) {
         let cb = stateLock.withLock { () -> (@Sendable (BridgethingAuthState) -> Void)? in
             lastAuthState = state
-            return onAuthStateChanged
+            return foreground ? onAuthStateChanged : nil
         }
         cb?(state)
     }
 
     private func emitPeerConnected(_ peer: BridgethingSessionPeer) {
-        stateLock.withLock { onPeerConnected }?(peer)
+        stateLock.withLock { foreground ? onPeerConnected : nil }?(peer)
     }
 
     private func emitPeerDisconnected(_ id: String) {
-        stateLock.withLock { onPeerDisconnected }?(id)
+        stateLock.withLock { foreground ? onPeerDisconnected : nil }?(id)
     }
 
     private func emitPeerLinkFailed(_ peer: BridgethingSessionPeer) {
-        stateLock.withLock { onPeerLinkFailed }?(peer)
+        stateLock.withLock { foreground ? onPeerLinkFailed : nil }?(peer)
     }
 
     private func emitNowPlaying(_ np: BridgethingNowPlaying?) {
-        stateLock.withLock { onNowPlayingChanged }?(np)
+        stateLock.withLock { foreground ? onNowPlayingChanged : nil }?(np)
     }
 
     private func emitAncsAuthStatus(_ status: BridgethingAncsAuthStatus) {
-        stateLock.withLock { onAncsAuthStatusChanged }?(status)
+        stateLock.withLock { foreground ? onAncsAuthStatusChanged : nil }?(status)
     }
 
     private func emitLog(_ level: String, _ message: String) {
-        stateLock.withLock { onLog }?(level, message)
+        stateLock.withLock { foreground ? onLog : nil }?(level, message)
     }
 
     private func emitWebappsChanged(_ deviceId: String) {
-        stateLock.withLock { onWebappsChanged }?(deviceId)
+        stateLock.withLock { foreground ? onWebappsChanged : nil }?(deviceId)
     }
 
     private func emitDeviceMetaChanged(_ deviceId: String, _ meta: BridgethingDeviceMeta) {
-        stateLock.withLock { onDeviceMetaChanged }?(deviceId, meta)
+        stateLock.withLock { foreground ? onDeviceMetaChanged : nil }?(deviceId, meta)
     }
 
     private func emitCatalogEvent(_ event: BridgethingCatalogEvent) {
-        stateLock.withLock { onCatalogEvent }?(event)
+        stateLock.withLock { foreground ? onCatalogEvent : nil }?(event)
     }
 
     private func emitOtaEvent(_ event: BridgethingOtaEvent) {
-        stateLock.withLock { onOtaEvent }?(event)
+        stateLock.withLock { foreground ? onOtaEvent : nil }?(event)
     }
 
     // MARK: - Wire → RN conversion

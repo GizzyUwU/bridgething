@@ -9,15 +9,13 @@
 
 use std::{
   io,
-  os::fd::{AsRawFd, FromRawFd, OwnedFd},
+  os::fd::{AsRawFd, OwnedFd},
 };
 
 use bluer::Adapter;
 
-// bluetooth socket constants (not in the libc crate).
-const AF_BLUETOOTH: libc::c_int = 31;
-const BTPROTO_HCI: libc::c_int = 1;
-const HCI_CHANNEL_RAW: u16 = 0;
+use super::hci::{hci_index, open_raw_hci};
+
 const HCI_COMMAND_PKT: u8 = 0x01;
 
 // Write_Inquiry_Scan_Activity (OGF 0x03, OCF 0x1E) and Write_Inquiry_Scan_Type
@@ -42,42 +40,6 @@ pub(crate) fn apply_fast_inquiry_scan(adapter: &Adapter) -> io::Result<()> {
   )?;
   send_command(&sock, OP_WRITE_INQ_SCAN_TYPE, &[INQ_SCAN_TYPE_INTERLACED])?;
   Ok(())
-}
-
-fn hci_index(adapter: &Adapter) -> io::Result<u16> {
-  adapter
-    .name()
-    .strip_prefix("hci")
-    .and_then(|n| n.parse::<u16>().ok())
-    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "adapter name is not hciN"))
-}
-
-fn open_raw_hci(dev: u16) -> io::Result<OwnedFd> {
-  // struct sockaddr_hci is { sa_family_t hci_family; u16 hci_dev; u16 hci_channel; },
-  // 6 bytes in native order. built as a buffer so there is no FFI struct to dead-field lint.
-  let mut addr = [0u8; 6];
-  addr[0..2].copy_from_slice(&(AF_BLUETOOTH as u16).to_ne_bytes());
-  addr[2..4].copy_from_slice(&dev.to_ne_bytes());
-  addr[4..6].copy_from_slice(&HCI_CHANNEL_RAW.to_ne_bytes());
-
-  // SAFETY: standard socket(2) + bind(2) on the raw HCI channel; the fd is
-  // wrapped in OwnedFd so it closes on drop, and bind only reads addr for its len.
-  unsafe {
-    let fd = libc::socket(AF_BLUETOOTH, libc::SOCK_RAW | libc::SOCK_CLOEXEC, BTPROTO_HCI);
-    if fd < 0 {
-      return Err(io::Error::last_os_error());
-    }
-    let sock = OwnedFd::from_raw_fd(fd);
-    if libc::bind(
-      fd,
-      addr.as_ptr() as *const libc::sockaddr,
-      addr.len() as libc::socklen_t,
-    ) < 0
-    {
-      return Err(io::Error::last_os_error());
-    }
-    Ok(sock)
-  }
 }
 
 fn send_command(sock: &OwnedFd, opcode: u16, params: &[u8]) -> io::Result<()> {

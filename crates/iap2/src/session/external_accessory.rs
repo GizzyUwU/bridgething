@@ -46,7 +46,7 @@ use crate::{
   link::Iap2Command,
 };
 
-const STREAM_INBOUND_CAPACITY: usize = 32;
+const STREAM_INBOUND_CAPACITY: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppLaunchState {

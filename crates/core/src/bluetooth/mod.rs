@@ -28,6 +28,7 @@ mod rfcomm;
 
 mod adapter;
 mod auth;
+mod hci;
 #[cfg(debug_assertions)]
 mod debug;
 mod packer;

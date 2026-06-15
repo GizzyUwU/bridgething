@@ -198,6 +198,8 @@ impl ProfileManager {
     let _ = self.peers.set_paired(mac, true).await;
     let _ = self.peers.confirm_pairing(mac).await;
 
+    self.iap2_reconnect.kick(mac).await;
+
     if new_device {
       self
         .bus

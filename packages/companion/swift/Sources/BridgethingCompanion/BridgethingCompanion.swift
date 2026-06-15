@@ -6,6 +6,7 @@ import Foundation
 import Logging
 #if os(iOS)
     import ExternalAccessory
+    import UIKit
 #endif
 
 private let osLog = Logger(label: "dev.bridgething.companion.core")
@@ -443,6 +444,16 @@ public actor BridgethingCompanion {
 
     private func spawnDispatchers() {
         tasks.append(Task { [weak self] in await self?.runConnectAnnouncer() })
+        #if os(iOS)
+            tasks.append(Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIApplication.didBecomeActiveNotification
+                ) {
+                    guard let self else { return }
+                    await self.reestablishAncsLink()
+                }
+            })
+        #endif
         tasks.append(Task { [weak self] in await self?.runPlayerDispatch() })
         tasks.append(Task { [weak self] in await self?.runAssetDispatch() })
         tasks.append(Task { [weak self] in await self?.runLibraryDispatch() })

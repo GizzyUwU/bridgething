@@ -38,12 +38,14 @@ use advertise::LeAdvertisement;
 use ancs::AuthStateReporter;
 use pair_trigger::{PAIR_TRIGGER_SERVICE, PairTrigger};
 
+use super::hci;
 use crate::{bluetooth::BluetoothMan, net::WireEventBus, state::AudioManager};
 
 const COMMAND_MAILBOX_CAP: usize = 16;
 const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 const ANCS_REPROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const LE_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 enum LeCommand {
@@ -254,6 +256,7 @@ impl LeSession {
 
     let mut backoff = TRANSIENT_BACKOFF_INITIAL;
     let mut absent_logged = false;
+    let mut down_logged = false;
 
     loop {
       if cancel.is_cancelled() {
@@ -268,6 +271,7 @@ impl LeSession {
         &mut invoke_rx,
         &cancel,
         &mut absent_logged,
+        &mut down_logged,
         &mut backoff,
       )
       .await;
@@ -275,11 +279,9 @@ impl LeSession {
         Ok(LoopExit::Cancelled) => return,
         Ok(LoopExit::ReprobeAncs) => {}
         Ok(LoopExit::ConnectionLost) => {
-          let d = backoff;
-          backoff = (backoff * 2).min(TRANSIENT_BACKOFF_MAX);
           tokio::select! {
             _ = cancel.cancelled() => return,
-            _ = time::sleep(d) => {}
+            _ = time::sleep(LE_PROBE_INTERVAL) => {}
           }
         }
         Err(err) if cancel.is_cancelled() => {
@@ -317,6 +319,13 @@ async fn find_service(services: &[Service], uuid: Uuid) -> Option<Service> {
   None
 }
 
+fn le_acl_up(adapter: &Adapter, address: Address) -> bool {
+  hci::le_acl_connected(adapter, address).unwrap_or_else(|err| {
+    tracing::warn!(%address, ?err, "LE ACL query failed; treating LE as down");
+    false
+  })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn attempt(
   adapter: &Adapter,
@@ -327,21 +336,25 @@ async fn attempt(
   invoke_rx: &mut mpsc::Receiver<(u32, u8)>,
   cancel: &CancellationToken,
   absent_logged: &mut bool,
+  down_logged: &mut bool,
   backoff: &mut Duration,
 ) -> Result<LoopExit, bluer::Error> {
+  if !le_acl_up(adapter, address) {
+    if !*down_logged {
+      tracing::debug!(%address, "LE ACL down; polling for iOS to connect");
+      *down_logged = true;
+    }
+    return Ok(LoopExit::ConnectionLost);
+  }
   let device = adapter.device(address)?;
-  let pre_connected = device.is_connected().await.unwrap_or(false);
-  let pre_paired = device.is_paired().await.unwrap_or(false);
-  let pre_resolved = device.is_services_resolved().await.unwrap_or(false);
-  tracing::debug!(
-    %address,
-    connected = pre_connected,
-    paired = pre_paired,
-    services_resolved = pre_resolved,
-    "LE attempt: pre-discover state"
-  );
+  if *down_logged {
+    let services_resolved = device.is_services_resolved().await.unwrap_or(false);
+    tracing::debug!(%address, services_resolved, "LE ACL up; discovering");
+    *down_logged = false;
+  }
 
   let services = device.services().await?;
+
   let ancs_svc = find_service(&services, ancs::ANCS_SERVICE).await;
   let ams_svc = find_service(&services, ams::AMS_SERVICE).await;
 
@@ -399,6 +412,8 @@ async fn attempt(
 
   let reprobe = time::sleep(ANCS_REPROBE_INTERVAL);
   tokio::pin!(reprobe);
+  let probe = time::sleep(LE_PROBE_INTERVAL);
+  tokio::pin!(probe);
 
   loop {
     if cancel.is_cancelled() {
@@ -407,8 +422,11 @@ async fn attempt(
     }
     if let Some(a) = &mut ancs
       && a.pump_allowed()
+      && !a.pump().await
+      && !le_acl_up(adapter, address)
     {
-      a.pump().await;
+      tracing::debug!(%address, "LE ACL gone after GNA write error; connection lost");
+      return Ok(LoopExit::ConnectionLost);
     }
 
     tokio::select! {
@@ -454,6 +472,13 @@ async fn attempt(
       _ = &mut reprobe, if !ancs_present => {
         tracing::debug!(%address, "ANCS re-probe interval elapsed; re-discovering");
         return Ok(LoopExit::ReprobeAncs);
+      }
+      _ = &mut probe => {
+        if !le_acl_up(adapter, address) {
+          tracing::debug!(%address, "LE ACL dropped; connection lost");
+          return Ok(LoopExit::ConnectionLost);
+        }
+        probe.as_mut().reset(time::Instant::now() + LE_PROBE_INTERVAL);
       }
     }
   }

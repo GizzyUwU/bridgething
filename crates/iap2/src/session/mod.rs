@@ -216,6 +216,7 @@ impl<M: MfiAccess> Iap2Session<M> {
 
   async fn run_inner(&mut self) -> Result<()> {
     let mut control_buf = BytesMut::new();
+    let mut companion_connected_last = false;
 
     loop {
       while let Some(frame) = CsmCodec.decode(&mut control_buf)? {
@@ -231,6 +232,15 @@ impl<M: MfiAccess> Iap2Session<M> {
             ea.ensure_app_launch_requested(bundle, &self.link_command_tx).await?;
           }
         }
+      }
+
+      let companion_connected = self.ea.as_ref().is_some_and(EaFlow::has_open_streams);
+      if companion_connected != companion_connected_last {
+        companion_connected_last = companion_connected;
+        self
+          .now_playing
+          .reconcile_companion(companion_connected, &self.link_command_tx)
+          .await?;
       }
 
       tokio::select! {

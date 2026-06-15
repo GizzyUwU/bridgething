@@ -39,15 +39,20 @@ public struct AncsSetupResult: Sendable {
         public static let advertisedName = "Bridgething"
     }
 
-    /// AccessorySetupKit + CoreBluetooth coordinator for the ANCS LE-pair
-    /// flow. iAP2 already paired BR/EDR; iOS won't initiate
+    /// AccessorySetupKit + CoreBluetooth coordinator for the LE link that
+    /// carries ANCS and AMS. iAP2 already paired BR/EDR; iOS won't initiate
     /// SMP-over-BR/EDR cross-transport key derivation against an existing
     /// SC bond, so the second LE pair has to be driven from the iPhone
     /// side. ASK does it cleanly on iOS 18+: the picker tap performs
     /// SMP, after which the app's CBCentralManager retrieves the
-    /// peripheral by `bluetoothIdentifier` and connects with
-    /// `CBConnectPeripheralOptionRequiresANCS = true` so iOS surfaces
-    /// the ANCS authorization prompt while the app is foreground.
+    /// peripheral by `bluetoothIdentifier` and connects.
+    ///
+    /// The explicit pair flow connects with
+    /// `CBConnectPeripheralOptionRequiresANCS = true` so iOS surfaces the
+    /// ANCS authorization prompt while the app is foreground, with a
+    /// plain-connect fallback if the gated connect hangs. The persistent
+    /// link (peer reconnects, LE drops) always connects plain: RequiresANCS
+    /// gates the whole LE ACL on ANCS, and AMS must not ride that gate.
     ///
     /// Only the iOS 18+ path is implemented; the host app targets iOS 18.
     @available(iOS 18.0, *)
@@ -73,11 +78,6 @@ public struct AncsSetupResult: Sendable {
             lastAuthState = state
         }
 
-        /// Run the ASK pair flow. Returns once the picker-side outcome is
-        /// known (paired / alreadyPaired / cancelled / failed). The
-        /// daemon-observed ANCS authorization state may transition
-        /// asynchronously after; the caller subscribes to the wire
-        /// stream for the final word.
         func pair() async -> AncsSetupResult {
             askLog.info("pair() begin")
             await activateIfNeeded()
@@ -90,7 +90,7 @@ public struct AncsSetupResult: Sendable {
             if hasMatchingExistingAccessory() {
                 let accessory = currentAccessory()
                 if let accessory {
-                    triggerAncsConnect(for: accessory)
+                    triggerConnect(for: accessory, requiresAncs: true)
                 }
                 return AncsSetupResult(kind: .alreadyPaired, authState: lastAuthState)
             }
@@ -101,11 +101,10 @@ public struct AncsSetupResult: Sendable {
             }
         }
 
-        // re-drive the bond for an already-paired accessory, picker-less; the bond gates both ancs and ams.
         func reconnectIfPaired() async {
             await activateIfNeeded()
             guard sessionActivated, let accessory = currentAccessory() else { return }
-            triggerAncsConnect(for: accessory)
+            triggerConnect(for: accessory, requiresAncs: false)
         }
 
         // MARK: - ASK plumbing
@@ -146,7 +145,7 @@ public struct AncsSetupResult: Sendable {
                 finishActivation()
             case .accessoryAdded:
                 if let accessory = event.accessory {
-                    triggerAncsConnect(for: accessory)
+                    triggerConnect(for: accessory, requiresAncs: true)
                     completePending(.paired)
                 }
             case .accessoryRemoved:
@@ -218,14 +217,14 @@ public struct AncsSetupResult: Sendable {
             completePending(kind)
         }
 
-        // MARK: - CoreBluetooth: connect with RequiresANCS to fire the auth prompt
+        // MARK: - CoreBluetooth: bring the LE link up; RequiresANCS only for the explicit pair flow
 
-        private func triggerAncsConnect(for accessory: ASAccessory) {
+        private func triggerConnect(for accessory: ASAccessory, requiresAncs: Bool) {
             guard let identifier = accessory.bluetoothIdentifier else { return }
             ensureCentralManager()
-            guard let central, let delegate = centralDelegate else { return }
+            guard let delegate = centralDelegate else { return }
             delegate.targetIdentifier = identifier
-            delegate.attemptConnect()
+            delegate.connect(requiringAncs: requiresAncs)
         }
 
         private func ensureCentralManager() {
@@ -243,46 +242,162 @@ public struct AncsSetupResult: Sendable {
         weak var central: CBCentralManager?
         var targetIdentifier: UUID?
         private var connecting: CBPeripheral?
+        private var requiresAncs = false
+        private var ancsFallbackTask: Task<Void, Never>?
+        private var scanFallbackTask: Task<Void, Never>?
+        private var retryTask: Task<Void, Never>?
+
+        private static let ancsGateDeadline: UInt64 = 10_000_000_000
+        private static let scanDeadline: UInt64 = 8_000_000_000
+
+        func connect(requiringAncs: Bool) {
+            if requiringAncs { requiresAncs = true }
+            attemptConnect()
+        }
 
         nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
             MainActor.assumeIsolated { self.attemptConnect() }
         }
 
         func attemptConnect() {
-            guard let central, central.state == .poweredOn,
-                  let id = targetIdentifier,
-                  let peripheral = central.retrievePeripherals(withIdentifiers: [id]).first
-            else { return }
-            connecting = peripheral
-            peripheral.delegate = self
-            // RequiresANCS gates the connection on ANCS being exposed; after SMP iOS pops the
-            // notification-sharing prompt while the app is foreground. String key, no Swift constant.
-            let options: [String: Any] = ["kCBConnectOptionRequiresANCS": NSNumber(value: true)]
-            central.connect(peripheral, options: options)
+            guard let central, central.state == .poweredOn, targetIdentifier != nil else { return }
+            if let p = connecting {
+                if p.state == .connected { return }
+                if p.state == .connecting, requiresAncs { return }
+                if p.state == .connecting {
+                    askLog.warning("re-driving over a wedged LE connect; cancelling stale attempt before rescanning")
+                }
+                cancelInFlightConnect()
+            }
+            askLog.info("scanning for pair-trigger service to LE-connect")
+            central.scanForPeripherals(withServices: [AncsBluetooth.pairTriggerService], options: nil)
+            armScanFallback()
         }
 
-        // CB delivers delegate callbacks on the main queue we configured, so assumeIsolated is a
-        // thread-checked no-op. The peripheral is held in `connecting` and re-looked-up MainActor-side
-        // rather than passed across the isolation boundary (CBPeripheral is not Sendable under Swift 6).
+        private func cancelInFlightConnect() {
+            ancsFallbackTask?.cancel()
+            ancsFallbackTask = nil
+            retryTask?.cancel()
+            retryTask = nil
+            if let peripheral = connecting {
+                central?.cancelPeripheralConnection(peripheral)
+            }
+            connecting = nil
+        }
+
+        nonisolated func centralManager(
+            _: CBCentralManager,
+            didDiscover peripheral: CBPeripheral,
+            advertisementData _: [String: Any],
+            rssi _: NSNumber
+        ) {
+            let discovered = peripheral.identifier
+            MainActor.assumeIsolated { self.handleDidDiscover(discovered) }
+        }
+
+        @MainActor
+        private func handleDidDiscover(_ identifier: UUID) {
+            guard identifier == targetIdentifier else { return }
+            guard let central, let peripheral = central.retrievePeripherals(withIdentifiers: [identifier]).first
+            else { return }
+            askLog.info("discovered target over LE; connecting (requiresAncs=\(self.requiresAncs))")
+            central.stopScan()
+            scanFallbackTask?.cancel()
+            scanFallbackTask = nil
+            issueConnect(to: peripheral)
+        }
+
+        private func armScanFallback() {
+            scanFallbackTask?.cancel()
+            scanFallbackTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: Self.scanDeadline)
+                guard let self, !Task.isCancelled else { return }
+                self.central?.stopScan()
+                guard let central = self.central,
+                      let id = self.targetIdentifier,
+                      let peripheral = central.retrievePeripherals(withIdentifiers: [id]).first
+                else { return }
+                askLog.warning("LE discovery silent; falling back to retrieve-based connect")
+                self.issueConnect(to: peripheral)
+            }
+        }
+
+        private func issueConnect(to peripheral: CBPeripheral) {
+            guard let central else { return }
+            connecting = peripheral
+            peripheral.delegate = self
+            if requiresAncs {
+                let options: [String: Any] = ["kCBConnectOptionRequiresANCS": NSNumber(value: true)]
+                central.connect(peripheral, options: options)
+                armAncsGateFallback()
+            } else {
+                central.connect(peripheral, options: nil)
+            }
+        }
+
+        private func armAncsGateFallback() {
+            ancsFallbackTask?.cancel()
+            ancsFallbackTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: Self.ancsGateDeadline)
+                guard let self, !Task.isCancelled else { return }
+                guard let peripheral = self.connecting, peripheral.state != .connected else { return }
+                askLog.warning("RequiresANCS connect stuck in \(peripheral.state.rawValue); falling back to plain connect")
+                self.requiresAncs = false
+                self.central?.cancelPeripheralConnection(peripheral)
+                self.issueConnect(to: peripheral)
+            }
+        }
+
         nonisolated func centralManager(_: CBCentralManager, didConnect _: CBPeripheral) {
             MainActor.assumeIsolated { self.handleDidConnect() }
         }
 
         @MainActor
         private func handleDidConnect() {
+            askLog.info("LE link connected (requiresAncs=\(self.requiresAncs))")
+            ancsFallbackTask?.cancel()
+            ancsFallbackTask = nil
+            scanFallbackTask?.cancel()
+            scanFallbackTask = nil
+            central?.stopScan()
+            requiresAncs = false
             connecting?.discoverServices([AncsBluetooth.pairTriggerService])
         }
 
         nonisolated func centralManager(
             _: CBCentralManager,
             didFailToConnect _: CBPeripheral,
-            error _: Error?
+            error: Error?
         ) {
-            // Connection failures here are non-fatal; the daemon eventually observes ANCS
-            // authorization (or not) and emits the wire event.
+            MainActor.assumeIsolated { self.handleDidFail(error: error) }
         }
 
-        nonisolated func centralManager(_: CBCentralManager, didDisconnectPeripheral _: CBPeripheral, error _: Error?) {}
+        @MainActor
+        private func handleDidFail(error: Error?) {
+            askLog.warning("LE connect failed (\(String(describing: error))); retrying plain")
+            requiresAncs = false
+            scheduleRetry()
+        }
+
+        nonisolated func centralManager(_: CBCentralManager, didDisconnectPeripheral _: CBPeripheral, error: Error?) {
+            MainActor.assumeIsolated { self.handleDidDisconnect(error: error) }
+        }
+
+        @MainActor
+        private func handleDidDisconnect(error: Error?) {
+            askLog.warning("LE link dropped (\(String(describing: error))); reconnecting")
+            requiresAncs = false
+            attemptConnect()
+        }
+
+        private func scheduleRetry() {
+            retryTask?.cancel()
+            retryTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.attemptConnect()
+            }
+        }
 
         nonisolated func peripheral(_: CBPeripheral, didDiscoverServices _: Error?) {
             MainActor.assumeIsolated { self.handleDidDiscoverServices() }
@@ -310,7 +425,6 @@ public struct AncsSetupResult: Sendable {
                   let svc = p.services?.first(where: { $0.uuid == AncsBluetooth.pairTriggerService }),
                   let ch = svc.characteristics?.first(where: { $0.uuid == AncsBluetooth.pairTriggerChar })
             else { return }
-            // Idempotent encrypt-read; forces SMP on the rare path where it didn't complete. Empty value.
             p.readValue(for: ch)
         }
 

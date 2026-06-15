@@ -1,7 +1,10 @@
 package com.bridgething
 
+import android.app.Activity
+import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.os.Bundle
 import android.provider.Settings
 import dev.bridgething.companion.AndroidNotificationActionBackend
 import dev.bridgething.companion.AndroidPhoneBackend
@@ -34,7 +37,15 @@ public object CompanionHolder {
     public var adapter: BluetoothSocketAdapter? = null
         private set
 
+    @Volatile
+    public var foreground: Boolean = false
+        private set
+
+    private var lifecycleRegistered = false
+    private var startedActivities = 0
+
     public suspend fun ensureStarted(context: Context): BridgethingCompanion = mutex.withLock {
+        (context.applicationContext as? Application)?.let { ensureLifecycleObserver(it) }
         companion?.let { return it }
         val appCtx = context.applicationContext
         val transport = BluetoothSocketAdapter()
@@ -65,6 +76,28 @@ public object CompanionHolder {
             val device = runCatching { ba.getRemoteDevice(mac) }.getOrNull() ?: continue
             scope.launch { runCatching { transport.connect(device) } }
         }
+    }
+
+    private fun ensureLifecycleObserver(app: Application) {
+        if (lifecycleRegistered) return
+        lifecycleRegistered = true
+        app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) {
+                startedActivities++
+                foreground = true
+            }
+
+            override fun onActivityStopped(activity: Activity) {
+                startedActivities = (startedActivities - 1).coerceAtLeast(0)
+                if (startedActivities == 0) foreground = false
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
     }
 
     public suspend fun shutdown() {

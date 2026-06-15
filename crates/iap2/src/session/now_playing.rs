@@ -52,6 +52,7 @@ pub(super) struct NowPlayingFlow {
   art_subscribed: bool,
   position_subscribed: bool,
   subscribed_at: Option<Instant>,
+  last_app_bundle: Option<String>,
 }
 
 impl NowPlayingFlow {
@@ -63,6 +64,7 @@ impl NowPlayingFlow {
       art_subscribed: false,
       position_subscribed: true,
       subscribed_at: None,
+      last_app_bundle: None,
     }
   }
 
@@ -88,19 +90,20 @@ impl NowPlayingFlow {
   /// Opt in/out of iOS FileTransfer cover art and the ~1Hz position delta based on the active
   /// app. When a companion-served app (e.g. Spotify) is playing we skip both iOS art and the
   /// position flood: the companion's dealer already supplies sized art and a live bar position.
-  /// Art is held off through a settle window when no companion has attached yet (avoids a one-shot
-  /// flood); position has no settle gate (it is tiny and iAP2 is its only source until a companion
-  /// is actually serving).
   async fn reconcile_subscription(
     &mut self,
-    app_bundle: Option<&str>,
+    delta_bundle: Option<&str>,
     companion_connected: bool,
     link_command_tx: &mpsc::Sender<Iap2Command>,
   ) -> Result<()> {
-    let Some(bundle) = app_bundle.filter(|b| !b.is_empty()) else {
-      return Ok(());
+    if let Some(b) = delta_bundle.filter(|b| !b.is_empty())
+      && self.last_app_bundle.as_deref() != Some(b) {
+        self.last_app_bundle = Some(b.to_string());
+      }
+    let is_suppress = match self.last_app_bundle.as_deref() {
+      Some(bundle) => self.artwork_suppress_bundles.iter().any(|b| b == bundle),
+      None => return Ok(()),
     };
-    let is_suppress = self.artwork_suppress_bundles.iter().any(|b| b == bundle);
     let companion_serving = is_suppress && companion_connected;
     let desired_art = if !is_suppress {
       true
@@ -116,7 +119,7 @@ impl NowPlayingFlow {
     self.art_subscribed = desired_art;
     self.position_subscribed = desired_position;
     tracing::debug!(
-      bundle,
+      bundle = self.last_app_bundle.as_deref().unwrap_or_default(),
       artwork = desired_art,
       position = desired_position,
       "iap2 now-playing: changing subscription"
@@ -127,6 +130,20 @@ impl NowPlayingFlow {
     )
     .await?;
     Ok(())
+  }
+
+  /// Reconcile the subscription when companion presence changes, independent of an inbound delta.
+  /// iOS stops emitting position deltas once position is suppressed, so a companion drop would
+  /// otherwise never re-enable the iAP2 bar (no delta arrives to trigger `handle`).
+  pub(super) async fn reconcile_companion(
+    &mut self,
+    companion_connected: bool,
+    link_command_tx: &mpsc::Sender<Iap2Command>,
+  ) -> Result<()> {
+    if !matches!(self.state, NowPlayingState::Subscribed) {
+      return Ok(());
+    }
+    self.reconcile_subscription(None, companion_connected, link_command_tx).await
   }
 
   /// Process one NowPlaying-range CSM. Always returns `Ok(None)`; NowPlaying has no terminal
@@ -244,6 +261,40 @@ mod tests {
       .await
       .unwrap();
     assert!(link_rx.try_recv().is_err());
+  }
+
+  #[tokio::test]
+  async fn position_only_deltas_suppress_after_companion_attaches_post_announce() {
+    let (_np_tx, np_rx) = mpsc::channel(4);
+    let (link_tx, mut link_rx) = mpsc::channel(8);
+    let mut f = NowPlayingFlow::new(np_rx, vec!["com.spotify.client".to_string()]);
+    f.state = NowPlayingState::Subscribed;
+
+    // spotify announces foreground before the companion ea stream is up (the connect race).
+    f.subscribed_at = Some(Instant::now() - ART_SETTLE - Duration::from_millis(1));
+    f.reconcile_subscription(Some("com.spotify.client"), false, &link_tx)
+      .await
+      .unwrap();
+    assert!(f.position_subscribed, "no companion yet -> iAP2 still owns the bar");
+    while link_rx.try_recv().is_ok() {} // drain art reconcile from the settle elapse
+
+    // companion attaches, but ios now only emits position-only deltas (no app_bundle). the flow
+    // must remember spotify is foreground and drop the position flood off the shared link anyway.
+    f.reconcile_subscription(None, true, &link_tx).await.unwrap();
+    assert!(
+      !f.position_subscribed,
+      "position-only delta still drops the flood via the remembered bundle"
+    );
+    assert!(link_rx.try_recv().is_ok(), "re-subscribed to stop the position flood");
+
+    // companion drops while suppressed -> ios is no longer sending position deltas, so the
+    // companion-transition hook must re-enable position without an inbound delta.
+    f.reconcile_companion(false, &link_tx).await.unwrap();
+    assert!(
+      f.position_subscribed,
+      "companion drop re-enables the iAP2 bar even with no delta to trigger it"
+    );
+    assert!(link_rx.try_recv().is_ok(), "re-subscribed to restore position on companion drop");
   }
 
   #[tokio::test]

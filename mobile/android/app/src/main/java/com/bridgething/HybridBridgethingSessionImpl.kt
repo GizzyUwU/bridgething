@@ -99,6 +99,7 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -213,15 +214,15 @@ public class HybridBridgethingSessionImpl(
         }
         if (!firstAttach) return
 
-        c.setNowPlayingObserver { np -> handleNowPlaying(np) }
-        c.setAncsAuthStateObserver { state -> emitAncsAuthStatus(toRnAncsAuthStatus(state)) }
+        c.setNowPlayingObserver { np -> safeEmit { handleNowPlaying(np) } }
+        c.setAncsAuthStateObserver { state -> safeEmit { emitAncsAuthStatus(toRnAncsAuthStatus(state)) } }
         if (logStreamingDesired) {
-            c.setLogObserver { level, message -> onLog?.invoke(level.raw, message) }
+            c.setLogObserver { level, message -> safeEmit { if (CompanionHolder.foreground) onLog?.invoke(level.raw, message) } }
             scope.launch { c.setDeviceLogStreaming(true) }
         }
-        eventsJob = scope.launch { c.gateway.events.collect { event -> handleGatewayEvent(event) } }
-        otaJob = scope.launch { c.ota.events.collect { ev -> onOtaEvent?.invoke(toRnOtaEvent(ev)) } }
-        catalogJob = scope.launch { c.catalog.events.collect { ev -> onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } }
+        eventsJob = scope.launch { c.gateway.events.collect { event -> safeEmit { handleGatewayEvent(event) } } }
+        otaJob = scope.launch { c.ota.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onOtaEvent?.invoke(toRnOtaEvent(ev)) } } }
+        catalogJob = scope.launch { c.catalog.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } } }
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
         runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
@@ -818,7 +819,7 @@ public class HybridBridgethingSessionImpl(
         logStreamingDesired = enabled
         val c = companion ?: return
         if (enabled) {
-            c.setLogObserver { level, msg -> onLog?.invoke(level.raw, msg) }
+            c.setLogObserver { level, msg -> safeEmit { if (CompanionHolder.foreground) onLog?.invoke(level.raw, msg) } }
         } else {
             c.setLogObserver(null)
         }
@@ -848,7 +849,7 @@ public class HybridBridgethingSessionImpl(
     }
 
     private fun emitWebappsChanged(deviceId: String) {
-        onWebappsChanged?.invoke(deviceId)
+        if (CompanionHolder.foreground) onWebappsChanged?.invoke(deviceId)
     }
 
     private fun <T> unwrapVoid(result: RequestResult<T, Nothing>, label: String): T = when (result) {
@@ -957,11 +958,11 @@ public class HybridBridgethingSessionImpl(
                     linkError = null,
                 )
                 peers[event.device.id] = peer
-                onPeerConnected?.invoke(peer)
+                if (CompanionHolder.foreground) onPeerConnected?.invoke(peer)
             }
             is GatewayEvent.Disconnected -> {
                 peers.remove(event.deviceId)
-                onPeerDisconnected?.invoke(event.deviceId)
+                if (CompanionHolder.foreground) onPeerDisconnected?.invoke(event.deviceId)
             }
             is GatewayEvent.Message -> Unit
             is GatewayEvent.DecodeError -> Unit
@@ -997,11 +998,21 @@ public class HybridBridgethingSessionImpl(
         emitNowPlaying(mapped)
     }
 
-    private fun emitProvider(info: BridgethingProviderInfo?) { onProviderChanged?.invoke(info) }
-    private fun emitAuth(state: BridgethingAuthState) { lastAuthState = state; onAuthStateChanged?.invoke(state) }
+    private inline fun safeEmit(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // dropped: stale callback from a torn-down runtime
+        }
+    }
+
+    private fun emitProvider(info: BridgethingProviderInfo?) { if (CompanionHolder.foreground) onProviderChanged?.invoke(info) }
+    private fun emitAuth(state: BridgethingAuthState) { lastAuthState = state; if (CompanionHolder.foreground) onAuthStateChanged?.invoke(state) }
     private fun emitServiceHealth(health: BridgethingServiceHealth) {
         lastServiceHealth = health
-        onServiceHealthChanged?.invoke(health)
+        if (CompanionHolder.foreground) onServiceHealthChanged?.invoke(health)
     }
 
     private fun toRnServiceHealth(health: GlueServiceHealth): BridgethingServiceHealth = when (health) {
@@ -1010,8 +1021,8 @@ public class HybridBridgethingSessionImpl(
             BridgethingServiceHealth(BridgethingServiceHealthKind.RATELIMITED, health.retryAfterSeconds.toDouble())
         is GlueServiceHealth.Unreachable -> BridgethingServiceHealth(BridgethingServiceHealthKind.UNREACHABLE, null)
     }
-    private fun emitNowPlaying(np: BridgethingNowPlaying?) { onNowPlayingChanged?.invoke(np) }
-    private fun emitAncsAuthStatus(status: BridgethingAncsAuthStatus) { onAncsAuthStatusChanged?.invoke(status) }
+    private fun emitNowPlaying(np: BridgethingNowPlaying?) { if (CompanionHolder.foreground) onNowPlayingChanged?.invoke(np) }
+    private fun emitAncsAuthStatus(status: BridgethingAncsAuthStatus) { if (CompanionHolder.foreground) onAncsAuthStatusChanged?.invoke(status) }
 
     private fun idleState() = authState(BridgethingAuthKind.IDLE)
 
