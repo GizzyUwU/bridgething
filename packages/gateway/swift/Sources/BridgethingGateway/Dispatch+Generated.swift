@@ -482,6 +482,20 @@ public struct LibrarySurface: Sendable {
     }
   }
 
+  /// Send `Library::LibraryChanged` to every connected peer (broadcast).
+  public func libraryChanged(_ payload: LibraryChanged, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.libraryChanged(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `Net` wire surface.
@@ -1528,6 +1542,24 @@ public struct SystemSurface: Sendable {
           guard case .system(let outer) = message.data else { continue }
           guard case .otaAssetRange(let payload) = outer else { continue }
           let handle = OtaAssetRangeHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of typed inbound `KeepalivePing` requests with handles for typed responses.
+  public var keepaliveRequests: AsyncStream<(handle: KeepalivePingHandle, req: KeepalivePing)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .system(let outer) = message.data else { continue }
+          guard case .keepalive(let payload) = outer else { continue }
+          let handle = KeepalivePingHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
           continuation.yield((handle: handle, req: payload))
         }
         continuation.finish()
@@ -2916,6 +2948,12 @@ public struct LibrarySurfaceForDevice: Sendable {
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
+  /// Send `Library::LibraryChanged` to this peer.
+  public func libraryChanged(_ payload: LibraryChanged, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .library(.libraryChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
 }
 
 /// Per-peer methods for the `Net` wire surface (deviceId is baked in).
@@ -3885,6 +3923,25 @@ public struct SystemSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of typed inbound `KeepalivePing` requests with handles for typed responses.
+  public var keepaliveRequests: AsyncStream<(handle: KeepalivePingHandle, req: KeepalivePing)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          guard case .message(let deviceId, let message) = event else { continue }
+          guard deviceId == self.deviceId else { continue }
+          guard case .request = message.meta else { continue }
+          guard case .system(let outer) = message.data else { continue }
+          guard case .keepalive(let payload) = outer else { continue }
+          let handle = KeepalivePingHandle(gateway: gateway, deviceId: deviceId, requestId: message.id)
+          continuation.yield((handle: handle, req: payload))
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `System::OtaAbandon` to this peer.
   public func otaAbandon(_ payload: OtaAbandon, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .system(.otaAbandon(payload)))
@@ -4811,13 +4868,13 @@ public final class GeoGetOnceHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: GeoGetOnceReply) async throws {
+  public func respond(_ response: GeoGetOnceReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .geo(.getOnceReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: GeoErrorReply) async throws {
@@ -4850,13 +4907,13 @@ public final class LibraryBrowseRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: BrowseReply) async throws {
+  public func respond(_ response: BrowseReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.browseReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -4889,13 +4946,13 @@ public final class LibraryResolveContextRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: ContextResolveReply) async throws {
+  public func respond(_ response: ContextResolveReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.contextResolveReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -4928,13 +4985,13 @@ public final class LibrarySearchRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: SearchReply) async throws {
+  public func respond(_ response: SearchReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.searchReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -4967,13 +5024,13 @@ public final class LibraryRecommendationsRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: RecommendationsReply) async throws {
+  public func respond(_ response: RecommendationsReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.recommendationsReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -5006,13 +5063,13 @@ public final class LibraryFavoritesListRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: FavoritesListReply) async throws {
+  public func respond(_ response: FavoritesListReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.favoritesListReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -5045,13 +5102,13 @@ public final class LibraryFavoritesContainsRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: FavoritesContainsReply) async throws {
+  public func respond(_ response: FavoritesContainsReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .library(.favoritesContainsReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LibraryErrorReply) async throws {
@@ -5084,13 +5141,13 @@ public final class NetFetchRequestMsgHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: NetFetchReply) async throws {
+  public func respond(_ response: NetFetchReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .net(.fetchReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: NetFetchErrorReply) async throws {
@@ -5123,13 +5180,13 @@ public final class NetWsOpenHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: NetWsOpenReply) async throws {
+  public func respond(_ response: NetWsOpenReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .net(.wsOpenReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: NetWsErrorReply) async throws {
@@ -5162,13 +5219,13 @@ public final class PhoneStateGetHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: PhoneStateReply) async throws {
+  public func respond(_ response: PhoneStateReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .phone(.stateReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondProtocolErr(_ error: WireError) async throws {
@@ -5192,13 +5249,13 @@ public final class OtaAssetRangeHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: OtaAssetRangeReply) async throws {
+  public func respond(_ response: OtaAssetRangeReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .system(.otaAssetRangeReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: OtaAssetRangeRejected) async throws {
@@ -5208,6 +5265,36 @@ public final class OtaAssetRangeHandle: @unchecked Sendable {
       data: .system(.otaAssetRangeRejected(error))
     )
     try await gateway.send(deviceId: deviceId, msg)
+  }
+
+  public func respondProtocolErr(_ error: WireError) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID(),
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .error(error)
+    )
+    try await gateway.send(deviceId: deviceId, msg)
+  }
+}
+
+public final class KeepalivePingHandle: @unchecked Sendable {
+  private let gateway: BridgethingGateway
+  public let deviceId: String
+  public let requestId: UUID
+
+  init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {
+    self.gateway = gateway
+    self.deviceId = deviceId
+    self.requestId = requestId
+  }
+
+  public func respond(_ response: KeepaliveAck, priority: Priority? = nil, compression: Compression? = nil) async throws {
+    let msg = GatewayToBridgeMsg(
+      id: UUID(),
+      meta: .response(ResponseMeta(requestId: requestId)),
+      data: .system(.keepaliveAck(response))
+    )
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondProtocolErr(_ error: WireError) async throws {
@@ -5231,13 +5318,13 @@ public final class TunnelOpenHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: TunnelOpenReply) async throws {
+  public func respond(_ response: TunnelOpenReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .tunnel(.openReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: TunnelErrorReply) async throws {
@@ -5270,13 +5357,13 @@ public final class AssetRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: AssetGotReply) async throws {
+  public func respond(_ response: AssetGotReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .asset(.got(response))
     )
-    try await gateway.send(deviceId: deviceId, msg, priority: .bulk)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .bulk, compression: compression)
   }
 
   public func respondErr(_ error: AssetNotFoundReply) async throws {
@@ -5309,13 +5396,13 @@ public final class LyricsRequestHandle: @unchecked Sendable {
     self.requestId = requestId
   }
 
-  public func respond(_ response: LyricsReply) async throws {
+  public func respond(_ response: LyricsReply, priority: Priority? = nil, compression: Compression? = nil) async throws {
     let msg = GatewayToBridgeMsg(
       id: UUID(),
       meta: .response(ResponseMeta(requestId: requestId)),
       data: .lyrics(.lyricsReply(response))
     )
-    try await gateway.send(deviceId: deviceId, msg)
+    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? .normal, compression: compression)
   }
 
   public func respondErr(_ error: LyricsErrorReply) async throws {

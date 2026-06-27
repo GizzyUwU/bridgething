@@ -5,7 +5,6 @@ import BridgethingSession
 import BridgethingSpotifyGlue
 import BridgethingTidalGlue
 import Foundation
-import Spotiny
 
 /// Populates the static provider registry and installs the session backend.
 /// Call from `application(_:didFinishLaunchingWithOptions:)` before React Native starts.
@@ -15,7 +14,8 @@ enum BridgethingApp {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
-    private static let spotifyTokenStore = TokenStore(service: "dev.bridgething.spotify")
+    private static let spotifyWorkerBase = "https://thinglabs.sh/auth"
+    private static let spotifyTokenStore = SpotifyKeychainStore(service: "dev.bridgething.spotify")
 
     static func installBridgething() {
         HybridBridgethingSessionImpl.hostInfo = HostInfo(
@@ -32,12 +32,8 @@ enum BridgethingApp {
                 displayName: SpotifyGlue.displayName,
                 available: true,
                 factory: { makeSpotifyGlue() },
-                // clear BOTH stores: ours and spotiny's own keychain, which it reads as a fallback.
-                signOut: {
-                    spotifyTokenStore.clear()
-                    SpotinyClient.eraseTokens()
-                },
-                hasCredentials: { spotifyTokenStore.load().refresh?.isEmpty == false }
+                signOut: { spotifyTokenStore.clear() },
+                hasCredentials: { spotifyTokenStore.loadRefreshToken() != nil }
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id: AppleMusicGlue.name,
@@ -60,94 +56,44 @@ enum BridgethingApp {
 
     static let spotifyProviderId = SpotifyGlue.name
 
-    private static let spotifyScopes: [String] = [
-        "user-read-playback-state",
-        "user-modify-playback-state",
-        "user-read-currently-playing",
-        "user-read-playback-position",
-        "user-top-read",
-        "user-read-recently-played",
-        "playlist-read-private",
-        "playlist-read-collaborative",
-        "playlist-modify-private",
-        "playlist-modify-public",
-        "user-follow-modify",
-        "user-follow-read",
-        "user-library-read",
-        "user-library-modify",
-        "user-read-private",
-    ]
-
-    private static var pkceClientID: String {
-        (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_PKCE_CLIENT_ID") as? String) ?? ""
-    }
-
-    static func spotifyAuthConfig() -> BridgethingSpotifyAuthConfig {
-        BridgethingSpotifyAuthConfig(
-            scopes: spotifyScopes,
-            pkceClientId: pkceClientID,
-            pkceRedirectUri: "https://discord.com/api/connections/spotify/callback",
-            pkceAuthorizeUrl: "https://accounts.spotify.com/authorize",
-            pkceTokenUrl: "https://accounts.spotify.com/api/token"
-        )
-    }
-
-    static func persistSpotifyTokens(access: String, refresh: String) {
-        spotifyTokenStore.save(access: access, refresh: refresh)
+    private static var authPsk: String {
+        (Bundle.main.object(forInfoDictionaryKey: "BRIDGETHING_AUTH_PSK") as? String) ?? ""
     }
 
     private static func makeSpotifyGlue() -> SpotifyGlue {
-        let initial = spotifyTokenStore.load()
-        return SpotifyGlue(
-            authenticatorFactory: spotifyAuthenticatorFactory(),
-            accessToken: initial.access ?? "",
-            refreshToken: initial.refresh ?? "",
-            onTokensRefreshed: { access, refresh in
-                spotifyTokenStore.save(access: access, refresh: refresh)
-            }
+        SpotifyGlue(
+            workerBase: spotifyWorkerBase,
+            psk: authPsk,
+            deviceId: spotifyTokenStore.deviceId(),
+            tokenStore: spotifyTokenStore
         )
-    }
-
-    private static func spotifyAuthenticatorFactory() -> SpotifyAuthenticatorFactory {
-        let configuration = OAuthConfiguration(
-            authorizationEndpoint: URL(string: "https://accounts.spotify.com/authorize")!,
-            tokenEndpoint: URL(string: "https://accounts.spotify.com/api/token")!,
-            clientID: pkceClientID,
-            redirectURI: "https://discord.com/api/connections/spotify/callback",
-            scopes: spotifyScopes
-        )
-        return { WebViewPKCEAuthenticator(configuration: configuration) }
     }
 }
 
-/// Keychain-backed token persistence for Spotify credentials.
-private final class TokenStore: @unchecked Sendable {
+private final class SpotifyKeychainStore: Spotify.TokenStore, @unchecked Sendable {
     private let service: String
 
     init(service: String) {
         self.service = service
     }
 
-    struct Tokens {
-        let access: String?
-        let refresh: String?
-    }
-
-    func load() -> Tokens {
-        Tokens(
-            access: read(account: "access"),
-            refresh: read(account: "refresh")
-        )
-    }
-
-    func save(access: String, refresh: String) {
-        write(account: "access", value: access)
-        write(account: "refresh", value: refresh)
-    }
+    func loadRefreshToken() -> String? { read(account: "refresh") }
+    func saveRefreshToken(token: String) { write(account: "refresh", value: token) }
+    func loadUsername() -> String? { read(account: "username") }
+    func saveUsername(username: String) { write(account: "username", value: username) }
 
     func clear() {
-        delete(account: "access")
         delete(account: "refresh")
+        delete(account: "username")
+    }
+
+    func deviceId() -> String {
+        if let existing = read(account: "device_id") { return existing }
+        var bytes = [UInt8](repeating: 0, count: 20)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let id = bytes.map { String(format: "%02x", $0) }.joined()
+        write(account: "device_id", value: id)
+        return id
     }
 
     private func read(account: String) -> String? {
@@ -159,10 +105,14 @@ private final class TokenStore: @unchecked Sendable {
             kSecReturnData as String: true,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8)
-        else { return nil }
+        let status = SecItemCopyMatching(q as CFDictionary, &item)
+        if status != errSecSuccess {
+            if status != errSecItemNotFound {
+                NSLog("bridgething: keychain read failed for \(account): \(status)")
+            }
+            return nil
+        }
+        guard let data = item as? Data, let value = String(data: data, encoding: .utf8) else { return nil }
         return value
     }
 
@@ -174,12 +124,16 @@ private final class TokenStore: @unchecked Sendable {
         ]
         let attrs: [String: Any] = [
             kSecValueData as String: Data(value.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
+        var status = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
         if status == errSecItemNotFound {
             var insert = q
             insert.merge(attrs) { _, b in b }
-            SecItemAdd(insert as CFDictionary, nil)
+            status = SecItemAdd(insert as CFDictionary, nil)
+        }
+        if status != errSecSuccess {
+            NSLog("bridgething: keychain write failed for \(account): \(status)")
         }
     }
 

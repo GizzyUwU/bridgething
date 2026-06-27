@@ -266,6 +266,23 @@ public class LibrarySurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Library::LibraryChanged` to every connected peer (broadcast). */
+  public suspend fun libraryChanged(payload: LibraryChanged, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryChanged(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
   /** Stream of typed inbound `LibraryBrowseRequest` requests. */
   public val browseRequests: Flow<Pair<LibraryBrowseRequestHandle, LibraryBrowseRequest>> = gateway.events
     .filterIsInstance<GatewayEvent.Message>()
@@ -1203,6 +1220,17 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       handle to inner.data
     }
 
+  /** Stream of typed inbound `KeepalivePing` requests. */
+  public val keepaliveRequests: Flow<Pair<KeepalivePingHandle, KeepalivePing>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.Keepalive ?: return@mapNotNull null
+      val handle = KeepalivePingHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
 }
 
 /** Cross-peer methods for the `Tunnel` wire surface. */
@@ -2058,6 +2086,16 @@ public class LibrarySurfaceForDevice(
       id = UUID.randomUUID(),
       meta = MsgMeta.Event,
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoriteChanged(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Library::LibraryChanged` to this peer. */
+  public suspend fun libraryChanged(payload: LibraryChanged, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.LibraryChanged(payload)),
     )
     gateway.send(deviceId, msg, priority)
   }
@@ -2919,6 +2957,18 @@ public class SystemSurfaceForDevice(
       handle to inner.data
     }
 
+  /** Stream of typed inbound `KeepalivePing` requests. */
+  public val keepaliveRequests: Flow<Pair<KeepalivePingHandle, KeepalivePing>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.message.meta is MsgMeta.Request }
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.System ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewaySystemMsg.Keepalive ?: return@mapNotNull null
+      val handle = KeepalivePingHandle(gateway, it.deviceId, it.message.id)
+      handle to inner.data
+    }
+
 }
 
 /** Per-peer methods for the `Tunnel` wire surface (deviceId is baked in). */
@@ -3642,13 +3692,13 @@ public class GeoGetOnceHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: GeoGetOnceReply) {
+  public suspend fun respond(response: GeoGetOnceReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Geo(GatewayToBridgeGeoMsg.GetOnceReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: GeoErrorReply) {
@@ -3675,13 +3725,13 @@ public class LibraryBrowseRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: BrowseReply) {
+  public suspend fun respond(response: BrowseReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.BrowseReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3708,13 +3758,13 @@ public class LibraryResolveContextRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: ContextResolveReply) {
+  public suspend fun respond(response: ContextResolveReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.ContextResolveReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3741,13 +3791,13 @@ public class LibrarySearchRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: SearchReply) {
+  public suspend fun respond(response: SearchReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.SearchReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3774,13 +3824,13 @@ public class LibraryRecommendationsRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: RecommendationsReply) {
+  public suspend fun respond(response: RecommendationsReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.RecommendationsReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3807,13 +3857,13 @@ public class LibraryFavoritesListRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: FavoritesListReply) {
+  public suspend fun respond(response: FavoritesListReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesListReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3840,13 +3890,13 @@ public class LibraryFavoritesContainsRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: FavoritesContainsReply) {
+  public suspend fun respond(response: FavoritesContainsReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Library(GatewayToBridgeLibraryMsg.FavoritesContainsReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LibraryErrorReply) {
@@ -3873,13 +3923,13 @@ public class NetFetchRequestMsgHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: NetFetchReply) {
+  public suspend fun respond(response: NetFetchReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.FetchReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: NetFetchErrorReply) {
@@ -3906,13 +3956,13 @@ public class NetWsOpenHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: NetWsOpenReply) {
+  public suspend fun respond(response: NetWsOpenReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Net(GatewayToBridgeNetMsg.WsOpenReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: NetWsErrorReply) {
@@ -3939,13 +3989,13 @@ public class PhoneStateGetHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: PhoneStateReply) {
+  public suspend fun respond(response: PhoneStateReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Phone(GatewayToBridgePhoneMsg.StateReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondProtocolErr(error: WireError) {
@@ -3963,13 +4013,13 @@ public class OtaAssetRangeHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: OtaAssetRangeReply) {
+  public suspend fun respond(response: OtaAssetRangeReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.OtaAssetRangeReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: OtaAssetRangeRejected) {
@@ -3991,18 +4041,42 @@ public class OtaAssetRangeHandle internal constructor(
   }
 }
 
+public class KeepalivePingHandle internal constructor(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+  public val requestId: UUID,
+) {
+  public suspend fun respond(response: KeepaliveAck, priority: Priority? = null, compression: Compression? = null) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.System(GatewayToBridgeSystemMsg.KeepaliveAck(response)),
+    )
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
+  }
+
+  public suspend fun respondProtocolErr(error: WireError) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
+      data = GatewayToBridgeMsgData.Error(error),
+    )
+    gateway.send(deviceId, msg)
+  }
+}
+
 public class TunnelOpenHandle internal constructor(
   private val gateway: BridgethingGateway,
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: TunnelOpenReply) {
+  public suspend fun respond(response: TunnelOpenReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Tunnel(GatewayToBridgeTunnelMsg.OpenReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: TunnelErrorReply) {
@@ -4029,13 +4103,13 @@ public class AssetRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: AssetGotReply) {
+  public suspend fun respond(response: AssetGotReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Asset(GatewayToBridgeAssetMsg.Got(response)),
     )
-    gateway.send(deviceId, msg, Priority.Bulk)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Bulk, compression = compression)
   }
 
   public suspend fun respondErr(error: AssetNotFoundReply) {
@@ -4062,13 +4136,13 @@ public class LyricsRequestHandle internal constructor(
   public val deviceId: String,
   public val requestId: UUID,
 ) {
-  public suspend fun respond(response: LyricsReply) {
+  public suspend fun respond(response: LyricsReply, priority: Priority? = null, compression: Compression? = null) {
     val msg = GatewayToBridgeMsg(
       id = UUID.randomUUID(),
       meta = MsgMeta.Response(ResponseMeta(requestId = requestId)),
       data = GatewayToBridgeMsgData.Lyrics(GatewayToBridgeLyricsMsg.LyricsReply(response)),
     )
-    gateway.send(deviceId, msg)
+    gateway.send(deviceId, msg, priority = priority ?: Priority.Normal, compression = compression)
   }
 
   public suspend fun respondErr(error: LyricsErrorReply) {

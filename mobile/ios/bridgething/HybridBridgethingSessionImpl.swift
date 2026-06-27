@@ -235,13 +235,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    public func spotifyAuthConfig() async -> BridgethingSpotifyAuthConfig { BridgethingApp.spotifyAuthConfig() }
-
-    public func completeSpotifySignIn(accessToken: String, refreshToken: String) async throws {
-        BridgethingApp.persistSpotifyTokens(access: accessToken, refresh: refreshToken)
-        try await setActiveProvider(id: BridgethingApp.spotifyProviderId)
-    }
-
     public func setActiveProvider(id: String?) async throws {
         stateLock.lock(); let prevTask = authTask; stateLock.unlock()
         prevTask?.cancel()
@@ -820,6 +813,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public func requestNotificationAccess() async throws { throw SessionError.unsupportedOnPlatform }
     public func isDefaultDialer() async -> Bool { false }
     public func requestDefaultDialer() async throws { throw SessionError.unsupportedOnPlatform }
+    public func forgetCompanionDevice(mac: String) async throws {}
+    public func isIgnoringBatteryOptimizations() async -> Bool { false }
+    public func requestIgnoreBatteryOptimizations() async throws { throw SessionError.unsupportedOnPlatform }
     public func revokeRuntimePermissions(permissions: [String]) async -> Bool { false }
     public func killApp() async {
         // apple rejects explicit process termination.

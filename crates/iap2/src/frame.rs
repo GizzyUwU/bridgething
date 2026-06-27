@@ -12,6 +12,12 @@ use tokio_util::codec::{Decoder, Encoder};
 /// Length of the link-layer header in bytes.
 pub const LINK_HEADER_LEN: usize = 9;
 
+/// One checksum byte trails every payload-bearing link packet.
+pub const PAYLOAD_TRAILER: usize = 1;
+
+/// Wire bytes a payload-bearing link packet spends on framing: header + trailing checksum.
+pub const LINK_FRAME_OVERHEAD: usize = LINK_HEADER_LEN + PAYLOAD_TRAILER;
+
 /// First two bytes of every link-layer packet.
 pub const LINK_MAGIC: [u8; 2] = [0xFF, 0x5A];
 

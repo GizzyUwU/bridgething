@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package sp.recent;
+
+message RecentlyPlayed {
+  repeated Entry items = 1;
+}
+
+message Entry {
+  string context_uri = 1;
+  int64 played_at = 2;
+  string track_uri = 3;
+}

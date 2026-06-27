@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod audio;
+mod browse_content;
 mod geo_watchers;
 pub mod log_tap;
 pub mod meta;
@@ -32,6 +33,7 @@ mod tunnel_routes;
 mod webapps;
 
 pub use audio::{AudioError, AudioManager};
+pub use browse_content::BrowseContentCache;
 pub use geo_watchers::{GeoWatchers, WatchAggregate, WatchChange};
 pub use log_tap::{LogTap, LogTapLayer};
 pub use root_browse::RootBrowseCache;
@@ -73,6 +75,7 @@ pub struct AppState {
   pub log_tap: LogTap,
   pub tunnel_routes: TunnelRoutes,
   pub root_browse: RootBrowseCache,
+  pub browse_content: BrowseContentCache,
   pub transfer_sinks: TransferSinks,
 
   db: DatabaseConnection,
@@ -144,6 +147,7 @@ impl AppState {
       log_tap,
       tunnel_routes,
       root_browse: RootBrowseCache::default(),
+      browse_content: BrowseContentCache::default(),
       transfer_sinks,
       db,
       meta_store,

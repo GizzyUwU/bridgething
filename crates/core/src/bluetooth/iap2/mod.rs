@@ -28,7 +28,7 @@ use bluer::{
 };
 use bridgething_iap2::{
   HidCommand, IAP2_ACCESSORY_UUID, IAP2_DEVICE_UUID, IAP2_RFCOMM_CHANNEL, Iap2Command, Iap2Event as Iap2InternalEvent,
-  Iap2Session, Link, LinkConfig, Lsp, NowPlayingCommand, SessionEvent,
+  Iap2Session, Link, LinkConfig, Lsp, NowPlayingAuthorityState, NowPlayingCommand, SessionEvent,
   csm::identification::{CarthingIdentification, EaProtocol, EaProtocolMatchAction, IdentificationConfig},
   session::{TelephonyCommand, WorkerMfiAccess},
 };
@@ -36,14 +36,14 @@ use bridgething_mfi::MfiAuth;
 pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
 use futures::StreamExt;
 use tokio::{
-  sync::{RwLock, mpsc},
+  sync::{RwLock, mpsc, watch},
   task::JoinHandle,
 };
 
 mod ea;
 
 use super::BluetoothResult;
-use crate::state::meta::SuperbirdMeta;
+use crate::{authority::AuthorityRegistry, state::meta::SuperbirdMeta};
 
 const IAP2_PROFILE_NAME: &str = "iAP2";
 const IAP2_CLIENT_PROFILE_NAME: &str = "iAP2 (device dial-in)";
@@ -112,9 +112,17 @@ struct ActiveSession {
   hid_tx: mpsc::Sender<HidCommand>,
   np_tx: mpsc::Sender<NowPlayingCommand>,
   tel_tx: mpsc::Sender<TelephonyCommand>,
-  _link_handle: JoinHandle<bridgething_iap2::Result<()>>,
-  _session_handle: JoinHandle<bridgething_iap2::Result<()>>,
-  _shovel_handle: JoinHandle<()>,
+  link_handle: JoinHandle<bridgething_iap2::Result<()>>,
+  session_handle: JoinHandle<bridgething_iap2::Result<()>>,
+  shovel_handle: JoinHandle<()>,
+}
+
+impl ActiveSession {
+  fn abort(&self) {
+    self.link_handle.abort();
+    self.session_handle.abort();
+    self.shovel_handle.abort();
+  }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -201,6 +209,7 @@ pub struct Iap2Manager {
   transport_rx: mpsc::Receiver<Iap2TransportCommand>,
   telephony_rx: mpsc::Receiver<TelephonyCommand>,
   events_tx: mpsc::Sender<Iap2Event>,
+  now_playing_authority: watch::Receiver<NowPlayingAuthorityState>,
   next_generation: u64,
   session_dead_tx: mpsc::Sender<(Address, u64)>,
   session_dead_rx: mpsc::Receiver<(Address, u64)>,
@@ -272,6 +281,7 @@ impl Iap2Manager {
     session: &Session,
     adapter: Adapter,
     meta: &SuperbirdMeta,
+    authority: &AuthorityRegistry,
   ) -> BluetoothResult<Option<JoinHandle<()>>> {
     let mfi_worker = match probe_and_spawn_worker().await {
       Ok(w) => w,
@@ -334,6 +344,7 @@ impl Iap2Manager {
       transport_rx,
       telephony_rx,
       events_tx,
+      now_playing_authority: authority.now_playing_subscription_rx(),
       next_generation: 0,
       session_dead_tx,
       session_dead_rx,
@@ -388,7 +399,10 @@ impl Iap2Manager {
 
     let stream = request.accept()?;
 
-    self.sessions.remove(&address);
+    if let Some(stale) = self.sessions.remove(&address) {
+      tracing::debug!(%address, "aborting stale iAP2 session stack before replacing it");
+      stale.abort();
+    }
     self.active_sessions.remove(&address).await;
     self.cancel_reconnect(&address);
 
@@ -403,7 +417,7 @@ impl Iap2Manager {
     let (tel_tx, tel_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
 
     let link_config = LinkConfig::new(Lsp::accessory_default());
-    let _link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
+    let link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
 
     let mfi = self.mfi_worker.handle();
     let session = Iap2Session::with_app_launch(
@@ -416,11 +430,12 @@ impl Iap2Manager {
       session_events_tx,
       hid_rx,
       np_rx,
+      self.now_playing_authority.clone(),
       tel_rx,
     );
-    let _session_handle = tokio::spawn(session.run());
+    let session_handle = tokio::spawn(session.run());
 
-    let _shovel_handle = tokio::spawn(shovel_session_events(
+    let shovel_handle = tokio::spawn(shovel_session_events(
       address,
       generation,
       session_events_rx,
@@ -436,9 +451,9 @@ impl Iap2Manager {
         hid_tx,
         np_tx,
         tel_tx,
-        _link_handle,
-        _session_handle,
-        _shovel_handle,
+        link_handle,
+        session_handle,
+        shovel_handle,
       },
     );
 

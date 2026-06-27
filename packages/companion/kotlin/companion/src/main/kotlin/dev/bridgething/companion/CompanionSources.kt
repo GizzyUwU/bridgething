@@ -5,6 +5,8 @@ import dev.bridgething.schema.AcceptCallAction
 import dev.bridgething.schema.CommunicationsState
 import dev.bridgething.schema.DtmfTone
 import dev.bridgething.schema.EndCallAction
+import dev.bridgething.schema.Notification as WireNotification
+import dev.bridgething.schema.NotificationRemoved
 import dev.bridgething.schema.PhoneCall
 import dev.bridgething.schema.PhoneCallEnded
 import dev.bridgething.schema.PhoneInitiateAction
@@ -54,18 +56,24 @@ public interface AudioBackend {
     public suspend fun playEarcon(name: String): Boolean
 }
 
-/**
- * Notification-action backend seam. iOS handles notification actions over ANCS, so the
- * `invokePositive` / `invokeNegative` path is Android-only; the SDK default is a no-op and the
- * host app injects [AndroidNotificationActionBackend] wired to its NotificationListenerService.
- */
-public interface NotificationActionBackend {
+/** outbound notification events the [NotificationBackend] emits and the [NotificationDispatcher] relays. */
+public sealed interface NotificationOutEvent {
+    public data class Posted(val notification: WireNotification) : NotificationOutEvent
+    public data class Removed(val removed: NotificationRemoved) : NotificationOutEvent
+}
+
+/** Notification backend seam (bidirectional, mirroring [PhoneBackend]). */
+public interface NotificationBackend {
+    public val events: Flow<NotificationOutEvent>
+    public fun activeNotifications(): List<WireNotification>
     public suspend fun invokePositive(id: String)
     public suspend fun invokeNegative(id: String)
 }
 
-/** Default backend: drops invokes (iOS uses ANCS; an Android host injects a real one). */
-public object NoOpNotificationActionBackend : NotificationActionBackend {
+/** Default backend: no notifications. */
+public object NoOpNotificationBackend : NotificationBackend {
+    override val events: Flow<NotificationOutEvent> = emptyFlow()
+    override fun activeNotifications(): List<WireNotification> = emptyList()
     override suspend fun invokePositive(id: String) {}
     override suspend fun invokeNegative(id: String) {}
 }
@@ -100,6 +108,60 @@ public interface PhoneBackend {
     public suspend fun mute(muted: Boolean)
     public suspend fun dtmf(callId: String?, tone: DtmfTone)
     public suspend fun stateGet(): PhoneState
+}
+
+/**
+ * System-media backend seam the [SystemMediaSource] is driven by. [AndroidMediaSessionGateway]
+ * is the real `MediaSessionManager`-backed impl (authorized by the notification-listener grant the
+ * app already holds, no extra permission).
+ */
+public interface MediaSessionGateway {
+    /** whether the notification-listener grant `MediaSessionManager` requires is currently held. */
+    public val isAccessGranted: Boolean
+
+    /** active media sessions, most-recently-active first; empty when access is not granted. */
+    public fun activeSessions(): List<SystemMediaSession>
+
+    /** observe active-set + per-session state changes; the returned handle stops observing. re-entrant. */
+    public fun listen(onChanged: () -> Unit): MediaSessionListenHandle
+}
+
+public interface MediaSessionListenHandle {
+    public fun stop()
+}
+
+/** one foreign media session: the readable now-playing state plus its transport controls. */
+public interface SystemMediaSession {
+    public val packageName: String
+
+    /** current metadata + playback, or null when the session exposes nothing renderable. */
+    public fun snapshot(): SystemMediaSnapshot?
+
+    public fun play()
+    public fun pause()
+    public fun skipNext()
+    public fun skipPrev()
+    public fun seekTo(positionMs: Long)
+}
+
+/** reduced now-playing read from a foreign MediaSession's metadata + playback state. */
+public data class SystemMediaSnapshot(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val durationMs: Long?,
+    val positionMs: Long,
+    val playing: Boolean,
+    val canSeek: Boolean,
+)
+
+/** Default backend: no system sessions (iOS uses iAP2; an Android host injects a real one). */
+public object NoOpMediaSessionGateway : MediaSessionGateway {
+    override val isAccessGranted: Boolean = false
+    override fun activeSessions(): List<SystemMediaSession> = emptyList()
+    override fun listen(onChanged: () -> Unit): MediaSessionListenHandle = object : MediaSessionListenHandle {
+        override fun stop() {}
+    }
 }
 
 /** Default backend: no telephony (iOS uses iAP2; an Android host injects a real one). */

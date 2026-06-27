@@ -17,6 +17,7 @@ public enum WireSurfaceManifest {
     "net.fetch",
     "net.wsOpen",
     "phone.stateGet",
+    "system.keepalive",
     "system.otaAssetRange",
     "tunnel.open",
   ]

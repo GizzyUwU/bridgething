@@ -107,6 +107,7 @@ struct Keep {
   _emulator: JoinHandle<bridgething_iap2::Result<()>>,
   _hid_tx: mpsc::Sender<bridgething_iap2::session::HidCommand>,
   _np_tx: mpsc::Sender<bridgething_iap2::session::NowPlayingCommand>,
+  _np_authority_tx: tokio::sync::watch::Sender<bridgething_iap2::NowPlayingAuthorityState>,
   _tel_tx: mpsc::Sender<bridgething_iap2::session::TelephonyCommand>,
 }
 
@@ -134,16 +135,20 @@ where
   let (sess_ev_tx, acc_events) = mpsc::channel(64);
   let (hid_tx, hid_rx) = mpsc::channel(8);
   let (np_tx, np_rx) = mpsc::channel(8);
+  let (np_authority_tx, np_authority_rx) =
+    tokio::sync::watch::channel(bridgething_iap2::NowPlayingAuthorityState::default());
   let (tel_tx, tel_rx) = mpsc::channel(8);
   let session = Iap2Session::with_app_launch(
     ident,
     app_launch_bundle,
+    Vec::new(),
     FakeMfi,
     acc_cmd_tx,
     acc_link_ev_rx,
     sess_ev_tx,
     hid_rx,
     np_rx,
+    np_authority_rx,
     tel_rx,
   );
   let session = tokio::spawn(session.run());
@@ -170,6 +175,7 @@ where
       _emulator: emulator,
       _hid_tx: hid_tx,
       _np_tx: np_tx,
+      _np_authority_tx: np_authority_tx,
       _tel_tx: tel_tx,
     },
   };

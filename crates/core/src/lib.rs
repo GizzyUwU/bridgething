@@ -232,6 +232,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     peers.clone(),
     installed_apply,
     transfer_sinks.clone(),
+    assets.clone(),
   );
 
   let state = AppState::assemble(StateAssembly {

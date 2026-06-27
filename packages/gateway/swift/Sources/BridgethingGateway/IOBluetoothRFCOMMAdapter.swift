@@ -1,5 +1,6 @@
 #if canImport(IOBluetooth)
 
+  import BridgethingSchema
   import Foundation
   import IOBluetooth
 
@@ -200,7 +201,13 @@
     let channel: IOBluetoothRFCOMMChannel
     weak var owner: IOBluetoothRFCOMMAdapter?
 
-    private var pendingWrites = Data()
+    private var normalQueue: [Data] = []
+    private var bulkQueue: [Data] = []
+    private var backgroundQueue: [Data] = []
+    private var currentWrite = Data()
+    private var queuedBytes = 0
+    private let highWaterBytes = 4 << 20
+    private let hardCapBytes = 8 << 20
     private var inFlight = false
     private var didNotifyConnected = false
 
@@ -217,23 +224,52 @@
     func tearDown() {
       channel.setDelegate(nil)
       _ = channel.close()
-      pendingWrites.removeAll(keepingCapacity: false)
+      normalQueue.removeAll(keepingCapacity: false)
+      bulkQueue.removeAll(keepingCapacity: false)
+      backgroundQueue.removeAll(keepingCapacity: false)
+      currentWrite.removeAll(keepingCapacity: false)
+      queuedBytes = 0
       inFlight = false
     }
 
     func enqueueWrite(_ data: Data) {
-      pendingWrites.append(data)
+      switch data.count >= 16 ? Priority.fromByte(data[data.startIndex + 5]) : .normal {
+      case .normal: normalQueue.append(data)
+      case .bulk: bulkQueue.append(data)
+      case .background: backgroundQueue.append(data)
+      }
+      queuedBytes += data.count
+      enforceBackpressure()
       drainOutput()
     }
 
+    private func enforceBackpressure() {
+      while queuedBytes > highWaterBytes, !backgroundQueue.isEmpty || !bulkQueue.isEmpty {
+        let dropped = backgroundQueue.isEmpty ? bulkQueue.removeFirst() : backgroundQueue.removeFirst()
+        queuedBytes -= dropped.count
+      }
+      if queuedBytes > hardCapBytes {
+        owner?.handleChannelClosed(deviceId: deviceId, hadConnected: didNotifyConnected)
+      }
+    }
+
+    private func nextFrame() -> Data? {
+      if !normalQueue.isEmpty { return normalQueue.removeFirst() }
+      if !bulkQueue.isEmpty { return bulkQueue.removeFirst() }
+      if !backgroundQueue.isEmpty { return backgroundQueue.removeFirst() }
+      return nil
+    }
+
     private func drainOutput() {
-      guard !inFlight, !pendingWrites.isEmpty else { return }
-      // RFCOMM has a per-channel MTU that caps a single writeAsync;
-      // chunk the queued bytes to it. Typical MTU is ~500 bytes.
+      guard !inFlight else { return }
+      if currentWrite.isEmpty {
+        guard let frame = nextFrame() else { return }
+        currentWrite = frame
+      }
+      // RFCOMM has a per-channel MTU that caps a single writeAsync; chunk to it. Typical MTU ~500 bytes.
       let mtu = Int(channel.getMTU())
-      let take = min(mtu, pendingWrites.count)
-      let chunk = pendingWrites.prefix(take)
-      pendingWrites.removeFirst(take)
+      let take = min(mtu, currentWrite.count)
+      let chunk = currentWrite.prefix(take)
       inFlight = true
       let status = chunk.withUnsafeBytes { raw -> IOReturn in
         guard let base = raw.baseAddress else { return kIOReturnNoMemory }
@@ -246,7 +282,10 @@
       if status != kIOReturnSuccess {
         inFlight = false
         owner?.handleChannelClosed(deviceId: deviceId, hadConnected: didNotifyConnected)
+        return
       }
+      currentWrite.removeFirst(take)
+      queuedBytes -= take
     }
 
     // MARK: - IOBluetoothRFCOMMChannelDelegate

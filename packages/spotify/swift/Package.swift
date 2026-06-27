@@ -12,32 +12,38 @@ let package = Package(
   ],
   dependencies: [
     .package(name: "Bridgething", path: "../../.."),
-    .package(name: "Spotiny", path: "spotiny"),
   ],
   targets: [
+    .binaryTarget(
+      name: "SpotifyFFI",
+      path: "Frameworks/SpotifyFFI.xcframework"
+    ),
+    .target(
+      name: "Spotify",
+      dependencies: ["SpotifyFFI"],
+      path: "Sources/Spotify",
+      linkerSettings: [
+        .linkedFramework("SystemConfiguration"),
+        .linkedFramework("Security"),
+        .linkedFramework("CoreFoundation"),
+        .unsafeFlags(["-Xlinker", "-no_compact_unwind"]),
+      ]
+    ),
     .target(
       name: "BridgethingSpotifyGlue",
       dependencies: [
         .product(name: "BridgethingGlue", package: "Bridgething"),
         .product(name: "BridgethingGateway", package: "Bridgething"),
         .product(name: "BridgethingSchema", package: "Bridgething"),
-        .product(name: "Spotiny", package: "Spotiny"),
+        "Spotify",
       ],
       path: "Sources/BridgethingSpotifyGlue"
-    ),
-    .executableTarget(
-      name: "spotify-login",
-      dependencies: [
-        .product(name: "Spotiny", package: "Spotiny"),
-        .product(name: "BridgethingTestKit", package: "Bridgething"),
-      ],
-      path: "Sources/SpotifyLogin"
     ),
     .testTarget(
       name: "BridgethingSpotifyGlueTests",
       dependencies: [
         "BridgethingSpotifyGlue",
-        .product(name: "Spotiny", package: "Spotiny"),
+        "Spotify",
         .product(name: "BridgethingCompanion", package: "Bridgething"),
         .product(name: "BridgethingTestKit", package: "Bridgething"),
         .product(name: "BridgethingGateway", package: "Bridgething"),

@@ -204,6 +204,9 @@ export function updateNickname(
 }
 
 export function forgetKnownDevice(deviceId: string): void {
+  void getSession()
+    .forgetCompanionDevice(deviceId)
+    .catch(() => {});
   useSessionStore.setState({ ledger: persistForget(deviceId) });
 }
 

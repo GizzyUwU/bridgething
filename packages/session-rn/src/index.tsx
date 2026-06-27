@@ -19,7 +19,6 @@ import type {
   BridgethingServiceHealth,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
-  BridgethingSpotifyAuthConfig,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
   BridgethingSession as NativeBridgethingSession,
@@ -63,7 +62,6 @@ export type {
   BridgethingServiceHealthKind,
   BridgethingSessionPeer,
   BridgethingSessionSnapshot,
-  BridgethingSpotifyAuthConfig,
   BridgethingWebappIcon,
   BridgethingWebappInfo,
 } from './specs/BridgethingSession.nitro';
@@ -175,14 +173,6 @@ export class BridgethingSession {
 
   async signOut(): Promise<void> {
     await this.native.signOut();
-  }
-
-  async spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig> {
-    return this.native.spotifyAuthConfig();
-  }
-
-  async completeSpotifySignIn(accessToken: string, refreshToken: string): Promise<void> {
-    await this.native.completeSpotifySignIn(accessToken, refreshToken);
   }
 
   async currentProvider(): Promise<BridgethingProviderInfo | null> {
@@ -329,6 +319,18 @@ export class BridgethingSession {
 
   async requestDefaultDialer(): Promise<void> {
     await this.native.requestDefaultDialer();
+  }
+
+  async forgetCompanionDevice(mac: string): Promise<void> {
+    await this.native.forgetCompanionDevice(mac);
+  }
+
+  async isIgnoringBatteryOptimizations(): Promise<boolean> {
+    return this.native.isIgnoringBatteryOptimizations();
+  }
+
+  async requestIgnoreBatteryOptimizations(): Promise<void> {
+    await this.native.requestIgnoreBatteryOptimizations();
   }
 
   async revokeRuntimePermissions(permissions: string[]): Promise<boolean> {

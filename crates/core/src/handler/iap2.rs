@@ -5,7 +5,7 @@
 //! `Iap2EventRouter::route` for each event. State mutation lives here,
 //! one variant per arm.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bluer::Address;
 use bridgething_iap2::{
@@ -16,10 +16,10 @@ use bridgething_iap2::{
   },
 };
 use libbridgething::{
-  DeviceType, MediaItemUpdate, MediaType as LibMediaType, NowPlayingUpdate, PeerIap2Status, PlaybackUpdate,
-  ShuffleMode as LibShuffleMode,
+  DeviceType, MediaItemUpdate, MediaType as LibMediaType, NowPlayingUpdate, PeerCompanionStatus, PeerIap2Status,
+  PlaybackUpdate, ShuffleMode as LibShuffleMode, gateway::KeepalivePing,
 };
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
   asset::Retention,
@@ -89,6 +89,7 @@ pub struct Iap2EventRouter {
   reconnect: Iap2ReconnectHandle,
   pending_art: Iap2PendingArt,
   np_checkpoint: NowPlayingCheckpointMap,
+  keepalive: Mutex<HashMap<Address, JoinHandle<()>>>,
 }
 
 impl Iap2EventRouter {
@@ -106,6 +107,20 @@ impl Iap2EventRouter {
       reconnect,
       pending_art,
       np_checkpoint: Mutex::new(HashMap::new()),
+      keepalive: Mutex::new(HashMap::new()),
+    }
+  }
+
+  async fn start_ea_keepalive(&self, address: Address) {
+    let handle = spawn_ea_keepalive(self.bluetooth.clone(), self.state.clone(), address);
+    if let Some(prev) = self.keepalive.lock().await.insert(address, handle) {
+      prev.abort();
+    }
+  }
+
+  async fn stop_ea_keepalive(&self, address: Address) {
+    if let Some(handle) = self.keepalive.lock().await.remove(&address) {
+      handle.abort();
     }
   }
 
@@ -126,6 +141,7 @@ impl Iap2EventRouter {
         }
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::LinkUp).await;
         self.bluetooth.le.attach(address).await;
+        self.start_ea_keepalive(address).await;
       }
       SessionEvent::Authenticated => {
         tracing::info!(%address, "iAP2 authenticated");
@@ -273,6 +289,7 @@ impl Iap2EventRouter {
       }
       SessionEvent::LinkDown(reason) => {
         tracing::info!(%address, %reason, "iAP2 link down");
+        self.stop_ea_keepalive(address).await;
         let _ = self.state.peers.set_iap2(address, PeerIap2Status::None).await;
         self.bluetooth.le.detach(address).await;
         self.np_checkpoint.lock().await.remove(&address);
@@ -281,6 +298,46 @@ impl Iap2EventRouter {
       }
     }
   }
+}
+
+const EA_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const EA_KEEPALIVE_RTT: Duration = Duration::from_secs(7);
+const EA_KEEPALIVE_MAX_MISSES: u32 = 3;
+
+fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, address: Address) -> JoinHandle<()> {
+  tokio::spawn(async move {
+    let mut seq: u32 = 0;
+    let mut armed = false;
+    let mut misses: u32 = 0;
+    let mut tripped = false;
+    let mut tick = tokio::time::interval(EA_KEEPALIVE_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+      tick.tick().await;
+      let result = bluetooth
+        .gateway_man
+        .request_with_timeout(Some(address), KeepalivePing { seq }, EA_KEEPALIVE_RTT)
+        .await;
+      seq = seq.wrapping_add(1);
+      match result {
+        Ok(_ack) => {
+          armed = true;
+          misses = 0;
+          tripped = false;
+        }
+        Err(_) => {
+          if armed && !tripped {
+            misses += 1;
+            if misses >= EA_KEEPALIVE_MAX_MISSES {
+              tripped = true;
+              tracing::warn!(%address, "ea session wedged (keepalive unanswered); dropping companion to iap2");
+              state.peers.set_companion(address, PeerCompanionStatus::None).await;
+            }
+          }
+        }
+      }
+    }
+  })
 }
 
 fn delta_track_key(media: Option<&MediaItemAttributes>, current: Option<&str>) -> Option<String> {
@@ -299,8 +356,6 @@ fn is_real_pid_key(key: &str) -> bool {
   key.len() == 16 && key != IDLE_PID_HEX && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-// pid-less tracks (Spotify-on-iOS, non-music apps) collide on the literal "nonmusic" slot
-// because iAP2's transfer-id is u8 and reused. Hash a stable content fingerprint instead.
 fn nonmusic_key(title: &str, artist: Option<&str>) -> String {
   use std::hash::{DefaultHasher, Hash, Hasher};
   let mut hasher = DefaultHasher::new();

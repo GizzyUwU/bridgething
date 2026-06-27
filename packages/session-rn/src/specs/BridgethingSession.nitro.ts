@@ -26,15 +26,6 @@ export type BridgethingAuthState = {
   message?: string;
 };
 
-// build-injected Spotify auth config handed to the RN sign-in layer
-export type BridgethingSpotifyAuthConfig = {
-  scopes: string[];
-  pkceClientId: string;
-  pkceRedirectUri: string;
-  pkceAuthorizeUrl: string;
-  pkceTokenUrl: string;
-};
-
 // signed-in but degraded: the provider's API is throttling or unreachable.
 // distinct from auth (tokens are still valid), so the UI keeps "signed in".
 export type BridgethingServiceHealthKind = 'ok' | 'rateLimited' | 'unreachable';
@@ -298,9 +289,6 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   cancelAuth(): Promise<void>;
   signOut(): Promise<void>;
 
-  spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig>;
-  completeSpotifySignIn(accessToken: string, refreshToken: string): Promise<void>;
-
   snapshot(): Promise<BridgethingSessionSnapshot>;
 
   deviceLogSnapshot(limit: number): Promise<BridgethingDeviceLogLine[]>;
@@ -349,6 +337,11 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   isDefaultDialer(): Promise<boolean>;
   requestDefaultDialer(): Promise<void>;
+
+  forgetCompanionDevice(mac: string): Promise<void>;
+
+  isIgnoringBatteryOptimizations(): Promise<boolean>;
+  requestIgnoreBatteryOptimizations(): Promise<void>;
 
   revokeRuntimePermissions(permissions: string[]): Promise<boolean>;
   killApp(): Promise<void>;

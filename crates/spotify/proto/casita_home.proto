@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package sp.casita;
+
+message HomeResponse {
+  Body body = 1;
+}
+
+message Body {
+  repeated Section sections = 1;
+}
+
+message Section {
+  SectionId id = 1;
+  Carousel shortcuts = 2;
+  Carousel carousel = 3;
+  Carousel list_carousel = 10;
+}
+
+message SectionId {
+  string uri = 1;
+}
+
+message Carousel {
+  Header header = 1;
+  ItemContainer items = 2;
+  int32 layout = 3;
+}
+
+message Header {
+  Title title = 2;
+}
+
+message Title {
+  string text = 1;
+  CallToAction cta = 3;
+}
+
+message CallToAction {
+  string label = 1;
+  string uri = 2;
+}
+
+message ItemContainer {
+  ItemList inner = 1;
+  ListRef list_ref = 3;
+}
+
+message ItemList {
+  repeated Item items = 1;
+}
+
+message Item {
+  string uri = 1;
+}
+
+message ListRef {
+  string uri = 1;
+}

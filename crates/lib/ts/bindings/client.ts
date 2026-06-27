@@ -648,14 +648,7 @@ export type PlayerErrorReply = { error: PlayerError };
 
 export type PlayerQueueReply = { current: QueueItem | null; items: Array<QueueItem>; previous: Array<QueueItem> };
 
-export type PlayerStateReply = {
-  state: PlayerState;
-  /**
-   * Foreground app when a non-companion source owns now-playing (the iap2 / other-app case);
-   * `None` for the companion's own playback or idle. Drives the stock OtherMedia view.
-   */
-  activeApp: CurrentlyActiveApplication | null;
-};
+export type PlayerStateReply = { state: PlayerState; activeApp: CurrentlyActiveApplication | null };
 
 export type QueueUri = { uri: string; position: QueuePosition };
 

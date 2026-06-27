@@ -7,6 +7,16 @@ use typeshare::typeshare;
 use super::transfer::{TransferBody, TransferRef};
 use crate::{LogLevel, LogSource, OtaKind, RangePart};
 
+/// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+pub struct KeepaliveAck {
+  pub seq: u32,
+}
+
 /// Companion-initiated OTA: opens or resumes a streaming push of an
 /// update artifact identified by its sha256. The daemon responds with
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the first
@@ -227,4 +237,6 @@ pub enum GatewayToBridgeSystemMsg {
   LogsSubscribe(LogsSubscribe),
   #[bridge_command]
   LogsUnsubscribe(LogsUnsubscribe),
+  #[bridge_response]
+  KeepaliveAck(KeepaliveAck),
 }

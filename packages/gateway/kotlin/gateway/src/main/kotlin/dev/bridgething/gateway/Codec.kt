@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.util.zip.Deflater
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -118,22 +119,36 @@ public class Codec(
   private val msgpack = MsgPack.Default
   private val json = Json { ignoreUnknownKeys = true }
 
+  public companion object {
+    public const val AUTO_GZIP_PAYLOAD_THRESHOLD: Int = 16 * 1024 - 128
+  }
+
   public fun <T> encode(
     serializer: SerializationStrategy<T>,
     message: T,
     priority: Priority = Priority.Normal,
-    compression: Compression = defaultCompression,
+    compression: Compression? = null,
     encoding: Encoding = defaultEncoding,
   ): ByteArray {
     val payload = when (encoding) {
       Encoding.MSGPACK -> msgpack.encodeToByteArray(serializer, message)
       Encoding.JSON -> json.encodeToString(serializer, message).encodeToByteArray()
     }
-    val body = when (compression) {
+    var comp = compression ?: defaultCompression
+    var body = when (comp) {
       Compression.NONE -> payload
       Compression.GZIP -> gzip(payload)
     }
-    val header = FrameHeader(compression, encoding, priority, body.size.toLong())
+    if (compression == null && comp == Compression.NONE && priority == Priority.Normal &&
+      payload.size > AUTO_GZIP_PAYLOAD_THRESHOLD
+    ) {
+      val gzipped = gzip(payload)
+      if (gzipped.size < payload.size) {
+        comp = Compression.GZIP
+        body = gzipped
+      }
+    }
+    val header = FrameHeader(comp, encoding, priority, body.size.toLong())
     return header.write() + body
   }
 
@@ -157,7 +172,7 @@ public class Codec(
 
   private fun gzip(input: ByteArray): ByteArray {
     val out = ByteArrayOutputStream(input.size)
-    GZIPOutputStream(out).use { it.write(input) }
+    object : GZIPOutputStream(out) { init { def.setLevel(Deflater.BEST_SPEED) } }.use { it.write(input) }
     return out.toByteArray()
   }
 

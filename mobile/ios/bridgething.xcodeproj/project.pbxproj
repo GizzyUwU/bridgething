@@ -16,7 +16,6 @@
 		29B54422A3AC4543A51CA516 /* Outfit-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DCB841C5F0384D4F84D2FA3A /* Outfit-SemiBold.ttf */; };
 		2EEBCB58BB4C8FABE67C2E1C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		3A2E5194E671495BB69D4FCD /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 92FD12EF2CA04AC78A5DA12B /* Inter-Regular.ttf */; };
-		3B02C793BAC72F1B294EAA73 /* Spotiny in Frameworks */ = {isa = PBXBuildFile; productRef = 551530E258B5741A425B6B22 /* Spotiny */; };
 		4BD53FBDDB8C4BD5A06AF5A0 /* Outfit-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF3A93B38AEF41FEB0A84550 /* Outfit-Light.ttf */; };
 		6E84EDDB26BD5F95073E6040 /* BridgethingLyrics in Frameworks */ = {isa = PBXBuildFile; productRef = 36F56798DD80B12C33156F70 /* BridgethingLyrics */; };
 		72010B89238448ABB08972C6 /* Outfit-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E933859026B94647ACD128BF /* Outfit-Medium.ttf */; };
@@ -78,7 +77,6 @@
 				C90677CED5F4F396FA808345 /* BridgethingSpotifyGlue in Frameworks */,
 				1B16E5853653557376728421 /* BridgethingAppleMusicGlue in Frameworks */,
 				ED6C51592E60E3F272DF62BC /* BridgethingTidalGlue in Frameworks */,
-				3B02C793BAC72F1B294EAA73 /* Spotiny in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,7 +194,6 @@
 				7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */,
 				37EB35D1D6F792B888BCCF58 /* BridgethingAppleMusicGlue */,
 				951DEFFC70F323C14864A561 /* BridgethingTidalGlue */,
-				551530E258B5741A425B6B22 /* Spotiny */,
 			);
 			productName = bridgething;
 			productReference = 13B07F961A680F5B00A75B9A /* bridgething.app */;
@@ -227,7 +224,6 @@
 			packageReferences = (
 				B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */,
 				28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */,
-				05863CB4B6BDD7D73E10A973 /* XCLocalSwiftPackageReference "spotiny" */,
 			);
 			productRefGroup = 83CBBA001A601CBA00E9B192 /* Products */;
 			projectDirPath = "";
@@ -608,10 +604,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		05863CB4B6BDD7D73E10A973 /* XCLocalSwiftPackageReference "spotiny" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../packages/spotify/swift/spotiny;
-		};
 		28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../packages/spotify/swift;
@@ -642,11 +634,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingAppleMusicGlue;
-		};
-		551530E258B5741A425B6B22 /* Spotiny */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 05863CB4B6BDD7D73E10A973 /* XCLocalSwiftPackageReference "spotiny" */;
-			productName = Spotiny;
 		};
 		63A2BDB8419785846352F797 /* BridgethingSchema */ = {
 			isa = XCSwiftPackageProductDependency;

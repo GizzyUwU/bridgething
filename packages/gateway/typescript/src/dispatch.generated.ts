@@ -50,7 +50,10 @@ import type {
   GeoGetOnce,
   GeoGetOnceReply,
   GeoWatch,
+  KeepaliveAck,
+  KeepalivePing,
   LibraryBrowseRequest,
+  LibraryChanged,
   LibraryErrorReply,
   LibraryFavoritesContainsRequest,
   LibraryFavoritesListRequest,
@@ -333,6 +336,7 @@ export type SystemInboundHandlers = {
   logsSubscribeReply: (deviceId: string, msg: LogsSubscribeReply) => void;
   logEntry: (deviceId: string, msg: LogEntry) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
+  keepalive: (handle: KeepalivePingHandle, req: KeepalivePing) => Promise<void> | void;
 };
 
 export type SystemDeviceInboundHandlers = {
@@ -348,6 +352,7 @@ export type SystemDeviceInboundHandlers = {
   logsSubscribeReply: (msg: LogsSubscribeReply) => void;
   logEntry: (msg: LogEntry) => void;
   otaAssetRange: (handle: OtaAssetRangeHandle, req: OtaAssetRange) => Promise<void> | void;
+  keepalive: (handle: KeepalivePingHandle, req: KeepalivePing) => Promise<void> | void;
 };
 
 export type TunnelInboundHandlers = {
@@ -1064,6 +1069,21 @@ export class LibrarySurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'library', data: { event: 'favoriteChanged', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Library::LibraryChanged` to every connected peer (broadcast). */
+  async libraryChanged(payload: LibraryChanged, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'library', data: { event: 'libraryChanged', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2195,6 +2215,26 @@ export class SystemSurface {
     });
   }
 
+  /** Typed inbound `KeepalivePing` request: handler is given a typed handle for the response. */
+  onKeepalive(handler: (handle: KeepalivePingHandle, req: KeepalivePing) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'keepalive') return;
+      const handle = new KeepalivePingHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onKeepalive handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants. */
   subscribe(handlers: SystemInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -2264,6 +2304,20 @@ export class SystemSurface {
             return;
           }
           const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'keepalive': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.keepalive;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('System: no handler for inner', 'keepalive');
+            return;
+          }
+          const handle = new KeepalivePingHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -3992,6 +4046,16 @@ export class LibrarySurfaceForDevice {
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
+
+  /** Send `Library::LibraryChanged` to this peer. */
+  async libraryChanged(payload: LibraryChanged, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'library', data: { event: 'libraryChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
 }
 
 export class NetSurfaceForDevice {
@@ -5098,6 +5162,27 @@ export class SystemSurfaceForDevice {
     });
   }
 
+  /** Typed inbound `KeepalivePing` request from this peer: handler is given a typed handle for the response. */
+  onKeepalive(handler: (handle: KeepalivePingHandle, req: KeepalivePing) => Promise<void> | void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const message = event.message;
+      if (message.meta.kind !== 'request') return;
+      const data = message.data;
+      if (data.type !== 'system') return;
+      const inner = data.data;
+      if (inner.event !== 'keepalive') return;
+      const handle = new KeepalivePingHandle(this._gateway, event.deviceId, message.id);
+      const result = handler(handle, inner.data);
+      if (result && typeof result.then === 'function') {
+        result.catch((err: unknown) => {
+          this._gateway.logger.error('onKeepalive handler threw:', err);
+        });
+      }
+    });
+  }
+
   /** Exhaustive subscribe over all inbound `System` variants from this peer. */
   subscribe(handlers: SystemDeviceInboundHandlers): () => void {
     return this._subscribe(handlers, false);
@@ -5168,6 +5253,20 @@ export class SystemSurfaceForDevice {
             return;
           }
           const handle = new OtaAssetRangeHandle(this._gateway, event.deviceId, event.message.id);
+          const result = handler(handle, inner.data);
+          if (result && typeof result.then === 'function') {
+            result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
+          }
+          return;
+        }
+        case 'keepalive': {
+          if (event.message.meta.kind !== 'request') return;
+          const handler = handlers.keepalive;
+          if (!handler) {
+            if (!partial) this._gateway.logger.warn('System: no handler for inner', 'keepalive');
+            return;
+          }
+          const handle = new KeepalivePingHandle(this._gateway, event.deviceId, event.message.id);
           const result = handler(handle, inner.data);
           if (result && typeof result.then === 'function') {
             result.catch((err: unknown) => this._gateway.logger.error('subscribe handler threw:', err));
@@ -6687,6 +6786,32 @@ export class OtaAssetRangeHandle {
   }
 }
 
+export class KeepalivePingHandle {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+    public readonly requestId: string,
+  ) {}
+
+  async respond(response: KeepaliveAck): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this.requestId } },
+      data: { type: 'system', data: { event: 'keepaliveAck', data: response } },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+
+  async respondProtocolErr(error: WireError): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'response', data: { requestId: this.requestId } },
+      data: { type: 'error', data: error },
+    };
+    await this._gateway.send(this.deviceId, msg);
+  }
+}
+
 export class TunnelOpenHandle {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -7596,6 +7721,19 @@ function outerSubscribeGateway(
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
             return;
           }
+          case 'keepalive': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.keepalive;
+            if (!handler) {
+              if (!partial) g.logger.warn('System: no handler for inner', 'keepalive');
+              return;
+            }
+            const handle = new KeepalivePingHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
           default: {
             if (!partial) g.logger.warn('System: no handler for inner', inner);
             return;
@@ -8272,6 +8410,19 @@ function outerSubscribeDevice(
               return;
             }
             const handle = new OtaAssetRangeHandle(g, event.deviceId, event.message.id);
+            const result = handler(handle, inner.data);
+            if (result && typeof result.then === 'function')
+              result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));
+            return;
+          }
+          case 'keepalive': {
+            if (event.message.meta.kind !== 'request') return;
+            const handler = innerHandlers.keepalive;
+            if (!handler) {
+              if (!partial) g.logger.warn('System: no handler for inner', 'keepalive');
+              return;
+            }
+            const handle = new KeepalivePingHandle(g, event.deviceId, event.message.id);
             const result = handler(handle, inner.data);
             if (result && typeof result.then === 'function')
               result.catch((err: unknown) => g.logger.error('subscribe handler threw:', err));

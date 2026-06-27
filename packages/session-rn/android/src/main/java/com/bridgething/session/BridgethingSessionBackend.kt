@@ -20,7 +20,6 @@ import com.margelo.nitro.bridgething.session.BridgethingProviderInfo
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
 import com.margelo.nitro.bridgething.session.BridgethingSessionSnapshot
-import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 
@@ -34,8 +33,6 @@ public interface BridgethingSessionBackend {
     public suspend fun cancelAuth()
     public suspend fun signOut()
     public suspend fun currentProvider(): BridgethingProviderInfo?
-    public suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig
-    public suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String)
 
     public suspend fun snapshot(): BridgethingSessionSnapshot
     public suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine>
@@ -79,6 +76,11 @@ public interface BridgethingSessionBackend {
 
     public suspend fun isDefaultDialer(): Boolean
     public suspend fun requestDefaultDialer()
+
+    public suspend fun forgetCompanionDevice(mac: String)
+
+    public suspend fun isIgnoringBatteryOptimizations(): Boolean
+    public suspend fun requestIgnoreBatteryOptimizations()
 
     public suspend fun revokeRuntimePermissions(permissions: Array<String>): Boolean
     public suspend fun killApp()

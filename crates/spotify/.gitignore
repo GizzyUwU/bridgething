@@ -1,0 +1,4 @@
+# uniffi bindings are regenerated from the compiled lib
+/bindings/
+# mobile packaging scratch (xcframework staging, lipo output, headers)
+/build/

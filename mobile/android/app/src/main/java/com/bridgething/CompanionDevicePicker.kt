@@ -114,6 +114,31 @@ public object CompanionDevicePicker {
         }
     }
 
+    /**
+     * Forget an associated Car Thing: stop observing its presence and disassociate it so the OS no longer
+     * wakes us for it and `associations()` no longer returns it.
+     */
+    public fun forget(context: Context, mac: String) {
+        val manager = context.applicationContext
+            .getSystemService(Context.COMPANION_DEVICE_SERVICE) as? CompanionDeviceManager ?: return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val matches = runCatching { manager.myAssociations }.getOrDefault(emptyList())
+                .filter { it.deviceMacAddress?.toString().equals(mac, ignoreCase = true) }
+            for (assoc in matches) {
+                assoc.deviceMacAddress?.toString()?.let { stopObserving(manager, it) }
+                runCatching { manager.disassociate(assoc.id) }
+            }
+        } else {
+            stopObserving(manager, mac)
+            runCatching { @Suppress("DEPRECATION") manager.disassociate(mac) }
+        }
+    }
+
+    private fun stopObserving(manager: CompanionDeviceManager, mac: String) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        runCatching { @Suppress("DEPRECATION") manager.stopObservingDevicePresence(mac) }
+    }
+
     private fun toWireDevice(device: BluetoothDevice): BridgethingBtDevice {
         val name = try { device.name } catch (_: SecurityException) { null }
         return BridgethingBtDevice(

@@ -11,8 +11,6 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func cancelAuth() async
     func signOut() async
     func currentProvider() async -> BridgethingProviderInfo?
-    func spotifyAuthConfig() async -> BridgethingSpotifyAuthConfig
-    func completeSpotifySignIn(accessToken: String, refreshToken: String) async throws
 
     func snapshot() async -> BridgethingSessionSnapshot
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
@@ -56,6 +54,11 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func isDefaultDialer() async -> Bool
     func requestDefaultDialer() async throws
+
+    func forgetCompanionDevice(mac: String) async throws
+
+    func isIgnoringBatteryOptimizations() async -> Bool
+    func requestIgnoreBatteryOptimizations() async throws
 
     func revokeRuntimePermissions(permissions: [String]) async -> Bool
     func killApp() async
@@ -205,16 +208,6 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func signOut() throws -> Promise<Void> {
         Promise.async {
             await (try Self.backend()).signOut()
-        }
-    }
-
-    public func spotifyAuthConfig() throws -> Promise<BridgethingSpotifyAuthConfig> {
-        Promise.async { await (try Self.backend()).spotifyAuthConfig() }
-    }
-
-    public func completeSpotifySignIn(accessToken: String, refreshToken: String) throws -> Promise<Void> {
-        Promise.async {
-            try await Self.backend().completeSpotifySignIn(accessToken: accessToken, refreshToken: refreshToken)
         }
     }
 
@@ -435,6 +428,18 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     public func requestDefaultDialer() throws -> Promise<Void> {
         Promise.async { try await Self.backend().requestDefaultDialer() }
+    }
+
+    public func forgetCompanionDevice(mac: String) throws -> Promise<Void> {
+        Promise.async { try await Self.backend().forgetCompanionDevice(mac: mac) }
+    }
+
+    public func isIgnoringBatteryOptimizations() throws -> Promise<Bool> {
+        Promise.async { await (try Self.backend()).isIgnoringBatteryOptimizations() }
+    }
+
+    public func requestIgnoreBatteryOptimizations() throws -> Promise<Void> {
+        Promise.async { try await Self.backend().requestIgnoreBatteryOptimizations() }
     }
 
     // MARK: - Runtime permission revoke

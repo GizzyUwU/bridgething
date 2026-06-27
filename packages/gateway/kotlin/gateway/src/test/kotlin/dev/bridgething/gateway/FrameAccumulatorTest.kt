@@ -75,6 +75,41 @@ class FrameAccumulatorTest {
   }
 
   @Test
+  fun `reassembles large frame across many chunks`() {
+    val big = ByteArray(64 * 1024) { (it and 0xff).toByte() }
+    val msg = BridgeToGatewayMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
+      data = BridgeToGatewayMsgData.Forward(
+        dev.bridgething.schema.ForwardMessage.Binary(big),
+      ),
+    )
+    val frame = codec.encode(BridgeToGatewayMsg.serializer(), msg)
+    val acc = FrameAccumulator()
+    var off = 0
+    val chunk = 4096
+    while (off < frame.size) {
+      val end = minOf(off + chunk, frame.size)
+      acc.append(frame.copyOfRange(off, end))
+      if (end < frame.size) assertNull(acc.nextFrame())
+      off = end
+    }
+    assertArrayEquals(frame, acc.nextFrame())
+    assertNull(acc.nextFrame())
+  }
+
+  @Test
+  fun `drains many sequential frames without unbounded growth`() {
+    val acc = FrameAccumulator()
+    repeat(1000) {
+      val frame = makeAckFrame()
+      acc.append(frame)
+      assertArrayEquals(frame, acc.nextFrame())
+    }
+    assertEquals(0, acc.bufferedByteCount)
+  }
+
+  @Test
   fun `throws on bad magic`() {
     val acc = FrameAccumulator()
     val bytes = ByteArray(FrameHeader.LENGTH)

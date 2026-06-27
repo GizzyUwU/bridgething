@@ -25,7 +25,9 @@ use capabilities::*;
 use chrome::*;
 use geo::*;
 use libbridgething::{
-  gateway::{GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeTransferMsg},
+  gateway::{
+    GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeTransferMsg, TransferBody,
+  },
   wire::MsgMeta,
 };
 use library::*;
@@ -86,7 +88,13 @@ impl GatewayHandler {
     match data {
       GatewayToBridgeMsgData::Asset(asset_msg) => match asset_msg {
         GatewayToBridgeAssetMsg::Got(reply) => {
-          tracing::debug!(id = %reply.id, "late asset reply past its request timeout; dropping");
+          tracing::debug!(id = %reply.id, "late asset reply past its request timeout; caching");
+          if let TransferBody::Stream(transfer) = &reply.body {
+            self.state.transfer_sinks.bind_memory(transfer.id);
+          }
+          let assets = self.state.assets.clone();
+          let sinks = self.state.transfer_sinks.clone();
+          tokio::spawn(async move { cache_late_asset(assets, sinks, reply).await });
         }
         GatewayToBridgeAssetMsg::NotFound(reply) => {
           tracing::debug!(id = %reply.id, "late asset not-found past its request timeout; ignoring");
@@ -185,11 +193,10 @@ impl GatewayHandler {
           self
             .state
             .transfer_sinks
-            .fragment(f.transfer_id, f.offset, f.bytes.into())
-            .await;
+            .fragment(f.transfer_id, f.offset, f.bytes.into());
         }
         GatewayToBridgeTransferMsg::Abandon(a) => {
-          self.state.transfer_sinks.abandon(a.transfer_id, a.reason).await;
+          self.state.transfer_sinks.abandon(a.transfer_id, a.reason);
         }
       },
       GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {

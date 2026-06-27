@@ -116,6 +116,23 @@ pub struct LogsSubscribeReply {
   pub token: String,
 }
 
+/// Periodic liveness probe the daemon sends over the iAP2 EA link.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS, WireRequest)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "gateway.ts")]
+#[wire_request(
+  direction = BridgeToGateway,
+  surface = System,
+  request_variant = Keepalive,
+  response = crate::gateway::KeepaliveAck,
+  response_variant = KeepaliveAck,
+)]
+pub struct KeepalivePing {
+  pub seq: u32,
+}
+
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
@@ -139,7 +156,6 @@ pub enum BridgeToGatewaySystemMsg {
   DeviceNickname(DeviceNicknameReply),
   #[bridge_response]
   DeviceNicknameRejected(DeviceNicknameRejected),
-  /// event broadcast when the nickname changes
   #[bridge_event]
   DeviceNicknameChanged(DeviceNicknameReply),
   #[bridge_response]
@@ -148,4 +164,6 @@ pub enum BridgeToGatewaySystemMsg {
   LogsSubscribeReply(LogsSubscribeReply),
   #[bridge_event]
   LogEntry(LogEntry),
+  #[bridge_request]
+  Keepalive(KeepalivePing),
 }

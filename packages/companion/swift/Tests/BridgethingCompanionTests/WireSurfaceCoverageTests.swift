@@ -37,6 +37,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
             artist: "a", track: "b", album: nil, durationMs: nil, isrc: nil
         )))),
         "tunnel.open": .tunnel(.open(TunnelOpen(tunnelId: UUID(), host: "127.0.0.1", port: 1))),
+        "system.keepalive": .system(.keepalive(KeepalivePing(seq: 0))),
     ]
 
     private static let handledElsewhere: Set<String> = [

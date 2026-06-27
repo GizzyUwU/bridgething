@@ -86,15 +86,7 @@ export type AssetNotFoundReply = { id: string };
 
 export type AssetRequest = { id: string; requestId: string };
 
-export type AuthorityClaim = {
-  scope: CompanionAuthorityScope;
-  /**
-   * App bundle the companion represents (e.g. `com.spotify.client`).
-   * The daemon's now-playing gate compares it against iAP2's foreground
-   * app to override a still-claimed companion when another app takes over.
-   */
-  appBundle: string | null;
-};
+export type AuthorityClaim = { scope: CompanionAuthorityScope; appBundle: string | null };
 
 export type AuthorityRelease = { scope: CompanionAuthorityScope };
 
@@ -218,7 +210,8 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'deviceNicknameChanged'; data: DeviceNicknameReply }
   | { event: 'logsTailReply'; data: LogsTailReply }
   | { event: 'logsSubscribeReply'; data: LogsSubscribeReply }
-  | { event: 'logEntry'; data: LogEntry };
+  | { event: 'logEntry'; data: LogEntry }
+  | { event: 'keepalive'; data: KeepalivePing };
 
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
@@ -330,8 +323,7 @@ export type GatewayToBridgeAudioMsg =
  * Companion declares per-scope authority. `Release` is the "stop
  * preferring my data for this scope" signal. Non-now-playing claims
  * fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
- * hold until release / disconnect / app-change arbitration (the
- * companion declares its `app_bundle` so the daemon can arbitrate).
+ * hold until release / disconnect / app-change arbitration.
  */
 export type GatewayToBridgeAuthorityMsg =
   | { event: 'claim'; data: AuthorityClaim }
@@ -361,7 +353,8 @@ export type GatewayToBridgeLibraryMsg =
   | { event: 'favoritesListReply'; data: FavoritesListReply }
   | { event: 'favoritesContainsReply'; data: FavoritesContainsReply }
   | { event: 'libraryErrorReply'; data: LibraryErrorReply }
-  | { event: 'favoriteChanged'; data: FavoriteChanged };
+  | { event: 'favoriteChanged'; data: FavoriteChanged }
+  | { event: 'libraryChanged'; data: LibraryChanged };
 
 export type GatewayToBridgeLyricsMsg =
   | { event: 'lyricsReply'; data: LyricsReply }
@@ -445,7 +438,8 @@ export type GatewayToBridgeSystemMsg =
   | { event: 'deviceSetNickname'; data: DeviceSetNickname }
   | { event: 'logsTail'; data: LogsTail }
   | { event: 'logsSubscribe'; data: LogsSubscribe }
-  | { event: 'logsUnsubscribe'; data: LogsUnsubscribe };
+  | { event: 'logsUnsubscribe'; data: LogsUnsubscribe }
+  | { event: 'keepaliveAck'; data: KeepaliveAck };
 
 /**
  * Companion-driven time surface. Companion sends `Snapshot` at announce
@@ -494,6 +488,21 @@ export type GeoGetOnceReply = { position: Position };
  */
 export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
 
+/**
+ * Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
+ * Presence is the whole signal (the app is alive and draining the ea stream).
+ */
+export type KeepaliveAck = { seq: number };
+
+/**
+ * Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
+ * the outbound frame keeps iOS from suspending the companion process (which
+ * would freeze the dealer ws and drop now-playing authority), and the reply
+ * proves the app is draining the stream. A run of unanswered probes is a
+ * wedged session no disconnect would surface. `seq` is for log correlation.
+ */
+export type KeepalivePing = { seq: number };
+
 export type LibraryBrowseRequest = {
   /**
    * Drilldown node id from a prior `BrowseFolder`. `None` means "root".
@@ -502,6 +511,13 @@ export type LibraryBrowseRequest = {
   limit: number;
   offset: number;
 };
+
+/**
+ * Fired when the user mutates their library on the gateway-side app while
+ * connected (a like, a playlist edit) and the change did NOT originate from a
+ * daemon command - so the daemon must invalidate any cached browse / home view.
+ */
+export type LibraryChanged = { scope: LibraryScope };
 
 export type LibraryErrorReply = { error: LibraryError };
 
@@ -533,6 +549,13 @@ export type LibraryRecommendationsRequest = {
  * knows by `context_uri`.
  */
 export type LibraryResolveContextRequest = { uri: string };
+
+/**
+ * Which slice of the user's library changed, so a consumer can scope a
+ * refetch. The daemon invalidates its home cache on any scope; the
+ * distinction is informational for richer webapp consumers.
+ */
+export type LibraryScope = 'saved' | 'playlists';
 
 export type LibrarySearchRequest = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
 

@@ -271,14 +271,18 @@ public actor OtaService {
 
     /// Install a third-party webapp bundle into the device's writable
     /// registry via `OtaKind.installedWebapp`. Reuses the OTA chunk pump;
-    /// no staging, no activate, no restart. The terminal is the daemon's
-    /// `WebappInstalled` event (success, carrying the `WebappInfo`) or an
-    /// `OtaError` (failure).
+    /// no staging, no activate, no restart.
     public func installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
         bundlePath: URL
     ) async -> WebappInstallResult {
+        if inFlight.contains(deviceId) {
+            return .failed(reason: "another update is already in flight for this device")
+        }
+        inFlight.insert(deviceId)
+        defer { inFlight.remove(deviceId) }
+
         let totalSize: UInt64
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: bundlePath.path)
@@ -300,20 +304,22 @@ public actor OtaService {
             return .failed(reason: "sha256 failed: \(error.localizedDescription)")
         }
 
-        // subscribe before streaming so the terminal event cannot be missed.
+        let live = gateway.liveEvents
         let terminalTask = Task<WebappInstallResult, Never> {
             await withTaskGroup(of: WebappInstallResult.self) { group in
                 group.addTask {
-                    for await pair in gateway.webapp.webappInstalled where pair.deviceId == deviceId {
-                        return .installed(pair.msg)
+                    for await event in live {
+                        guard case let .message(eventDeviceId, message) = event, eventDeviceId == deviceId else { continue }
+                        switch message.data {
+                        case let .webapp(.webappInstalled(info)):
+                            return .installed(info)
+                        case let .system(.otaError(err)):
+                            return .failed(reason: "[\(err.code)] \(err.msg)")
+                        default:
+                            continue
+                        }
                     }
-                    return .failed(reason: "installed stream ended")
-                }
-                group.addTask {
-                    for await pair in gateway.system.otaError where pair.deviceId == deviceId {
-                        return .failed(reason: "[\(pair.msg.code)] \(pair.msg.msg)")
-                    }
-                    return .failed(reason: "error stream ended")
+                    return .failed(reason: "event stream ended")
                 }
                 group.addTask {
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -370,16 +376,10 @@ public actor OtaService {
 
     // MARK: - manifest poll loop
 
-    /// Returns the most recent `BridgeThingMeta` the daemon announced
-    /// for `deviceId`, or nil if none has been seen yet.
     public func meta(deviceId: String) -> BridgeThingMeta? {
         deviceMeta[deviceId]
     }
 
-    /// Set or replace the manifest poll configuration. Pass nil to
-    /// disable polling (range serving + manual push still work). The
-    /// new config takes effect immediately: any in-flight poll task is
-    /// cancelled and a fresh one starts.
     public func setPollConfig(_ config: OtaPollConfig?) {
         pollConfig = config
         pollTask?.cancel()
@@ -390,31 +390,21 @@ public actor OtaService {
         }
     }
 
-    /// Run one poll iteration immediately, regardless of where the
-    /// interval timer is. Useful when the host app foregrounds and
-    /// wants a fresh check.
     public func pollNow() async {
         guard let config = pollConfig, let gateway = attachedGateway else { return }
         await poll(config: config, gateway: gateway)
     }
 
-    /// One-shot "check now": polls the channel and emits `updateAvailable` /
-    /// `channelMismatch` for connected devices without persisting config or
-    /// auto-pushing. Independent of the background poll loop.
     public func checkNow(channel: String, rootURL: URL) async {
         guard let gateway = attachedGateway else { return }
         let transient = OtaPollConfig(rootURL: rootURL, channel: channel, autoPush: false)
         await poll(config: transient, gateway: gateway)
     }
 
-    /// Full discover manifest for the version picker.
     public func discoverManifest(rootURL: URL) async throws -> OtaDiscoverManifest {
         try await fetchManifest(url: rootURL.appendingPathComponent("manifest.json"))
     }
 
-    /// Manual install of a specific composite version. Pushes the daemon delta
-    /// first (the image check rides the next poll once the daemon restarts),
-    /// then the image delta. Reuses the auto-push engine; ignores `autoPush`.
     public func applyVersion(deviceId: String, channel: String, version: String, rootURL: URL) async {
         guard let gateway = attachedGateway else {
             eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: "gateway not attached"))
@@ -451,8 +441,6 @@ public actor OtaService {
     }
 
     private func runPollLoop(config: OtaPollConfig) async {
-        // First poll fires immediately so a freshly-launched app
-        // checks before the interval clock first ticks.
         while !Task.isCancelled {
             if let gateway = attachedGateway {
                 await poll(config: config, gateway: gateway)
@@ -493,8 +481,6 @@ public actor OtaService {
             if release.yanked != nil || release.deprecated { return }
         }
 
-        // Snapshot device list so per-device downloads don't keep the actor blocked; reentrant polls
-        // observe the inFlight set and skip.
         let snapshot = deviceMeta
         for (deviceId, meta) in snapshot {
             await reconcileDevice(
@@ -548,7 +534,6 @@ public actor OtaService {
                     gateway: gateway
                 )
             }
-            // Daemon push restarts the gateway link; the image check waits for the next poll cycle.
             return
         }
 
@@ -667,8 +652,6 @@ public actor OtaService {
         case let .failed(reason):
             eventContinuation.yield(.failed(deviceId: deviceId, kind: kind, reason: reason))
         case .idle, .streaming, .applying, .staged:
-            // Stream ended without a terminal snapshot; treat as success since the auto path
-            // only finishes on a committed batch (.completed) or an explicit failure.
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         }
     }
@@ -974,10 +957,14 @@ public actor OtaService {
         return await terminalTask.value
     }
 
-    /// Watch the progress + error streams and resolve to a terminal: the
-    /// mode's success snapshot when the phase predicate fires, or `.failed`
-    /// on an `OtaError`. The error arm parks (rather than returning) if its
-    /// stream ends without an error, so the progress arm wins the race.
+    private static let otaIdleDeadline: TimeInterval = 60
+
+    private actor ProgressClock {
+        private var last = Date()
+        func touch() { last = Date() }
+        func idleSeconds() -> TimeInterval { Date().timeIntervalSince(last) }
+    }
+
     private func awaitTerminal(
         gateway: BridgethingGateway,
         mode: DriveMode,
@@ -988,28 +975,49 @@ public actor OtaService {
         case .full: success = .completed
         case .stage: success = .staged
         }
+        let clock = ProgressClock()
+        let live = gateway.liveEvents
         return Task {
-            await withTaskGroup(of: OtaPhaseSnapshot.self) { group in
+            await withTaskGroup(of: OtaPhaseSnapshot?.self) { group in
                 group.addTask {
-                    for await ev in gateway.system.otaProgress {
-                        progress.yield(.applying(phase: ev.msg.phase, percent: Int(ev.msg.percent)))
-                        let done: Bool
-                        switch mode {
-                        case .full: done = ev.msg.phase == .reboot
-                        case .stage: done = ev.msg.phase == .writing && ev.msg.percent >= 100
+                    for await event in live {
+                        guard case let .message(_, message) = event,
+                              case let .system(outer) = message.data
+                        else { continue }
+                        switch outer {
+                        case let .otaProgress(ev):
+                            await clock.touch()
+                            progress.yield(.applying(phase: ev.phase, percent: Int(ev.percent)))
+                            let done: Bool
+                            switch mode {
+                            case .full: done = ev.phase == .reboot
+                            case .stage: done = ev.phase == .writing && ev.percent >= 100
+                            }
+                            if done { return success }
+                        case let .otaError(ev):
+                            return .failed(reason: "[\(ev.code)] \(ev.msg)")
+                        default:
+                            continue
                         }
-                        if done { break }
                     }
-                    return success
+                    return nil
                 }
                 group.addTask {
-                    for await ev in gateway.system.otaError {
-                        return .failed(reason: "[\(ev.msg.code)] \(ev.msg.msg)")
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(15))
+                        if await clock.idleSeconds() > Self.otaIdleDeadline {
+                            return .failed(reason: "ota stalled: no progress within \(Int(Self.otaIdleDeadline))s")
+                        }
                     }
-                    try? await Task.sleep(for: .seconds(3600))
-                    return success
+                    return nil
                 }
-                let result = await group.next() ?? success
+                var result: OtaPhaseSnapshot = .failed(reason: "ota ended without a terminal")
+                for await r in group {
+                    if let r {
+                        result = r
+                        break
+                    }
+                }
                 group.cancelAll()
                 return result
             }

@@ -3,10 +3,12 @@ package com.bridgething
 import android.app.Activity
 import android.app.Application
 import android.bluetooth.BluetoothManager
+import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
-import dev.bridgething.companion.AndroidNotificationActionBackend
+import dev.bridgething.companion.AndroidMediaSessionGateway
+import dev.bridgething.companion.AndroidNotificationBackend
 import dev.bridgething.companion.AndroidPhoneBackend
 import dev.bridgething.companion.BridgethingCompanion
 import dev.bridgething.companion.CompanionCapabilityFlags
@@ -49,21 +51,28 @@ public object CompanionHolder {
         companion?.let { return it }
         val appCtx = context.applicationContext
         val transport = BluetoothSocketAdapter()
+        val notificationBackend = AndroidNotificationBackend(
+            activeShade = { NotificationBridgeRegistry.listener?.activeWireNotifications() ?: emptyList() },
+            resolveAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
+        )
         val c = BridgethingCompanion(
             context = appCtx,
             adapter = transport,
             lyricsResolver = HybridBridgethingSessionImpl.lyricsResolver,
             host = makeHostInfo(appCtx),
             capabilities = CompanionCapabilityFlags(),
-            notificationActions = AndroidNotificationActionBackend { id, positive ->
-                NotificationBridgeRegistry.listener?.actionIntent(id, positive)
-            },
+            notifications = notificationBackend,
             phone = AndroidPhoneBackend(appCtx),
+            mediaSessions = AndroidMediaSessionGateway(
+                appCtx,
+                ComponentName(appCtx, BridgethingNotificationListener::class.java),
+            ),
         )
         c.start()
         companion = c
         adapter = transport
         NotificationBridgeRegistry.companion = c
+        NotificationBridgeRegistry.backend = notificationBackend
         reconnectAssociated(appCtx)
         c
     }
@@ -98,17 +107,6 @@ public object CompanionHolder {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
-    }
-
-    public suspend fun shutdown() {
-        val prior = mutex.withLock {
-            val c = companion
-            companion = null
-            adapter = null
-            NotificationBridgeRegistry.companion = null
-            c
-        }
-        prior?.stop()
     }
 
     @Suppress("HardwareIds")

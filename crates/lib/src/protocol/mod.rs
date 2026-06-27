@@ -15,6 +15,7 @@ use crate::Priority;
 const HEADER_LEN: usize = 16;
 const MAGIC: u16 = 0xdead;
 const VERSION: u8 = 2;
+const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 
 const COMPRESSION_NONE: u8 = 0x00;
 const COMPRESSION_GZIP: u8 = 0x01;

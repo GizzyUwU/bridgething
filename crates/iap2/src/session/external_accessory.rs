@@ -17,14 +17,21 @@
 //! channel ends) tears down the per-stream state and emits
 //! `SessionEvent::EaStreamClosed`.
 //!
-//! `ensure_app_launch_requested` is the post-Identified hook the
-//! session calls once: it dispatches `RequestAppLaunch` with the
-//! configured bundle id (typically `com.bridgething.gateway`). iOS
-//! either foregrounds the matching app, opens a Settings deeplink, or
-//! silently no-ops if the app isn't installed. Idempotent; subsequent
-//! calls are no-ops.
+//! `ensure_app_launch_requested` is the post-Identified hook the session
+//! calls once per inbound control CSM (not a timer): it dispatches
+//! `RequestAppLaunch` with the configured bundle id (typically
+//! `com.bridgething.gateway`). iOS either foregrounds the matching app,
+//! opens a Settings deeplink, or silently no-ops if the app isn't
+//! installed. It is suppressed while an EA stream is open and re-armed
+//! when iOS reaps the companion (a peer Stop, or the inbound consumer
+//! dropping) with the control link still up. A global cooldown caps the
+//! send rate so a stream flap cannot spam it, and an attempt cap gives up
+//! on a link where the companion never opens a stream.
 
-use std::collections::HashMap;
+use std::{
+  collections::HashMap,
+  time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -48,16 +55,28 @@ use crate::{
 
 const STREAM_INBOUND_CAPACITY: usize = 64;
 
+// give up re-requesting the companion launch after this many sends on a cold link (the companion never
+// opens its stream). a companion that does open resets the counter, so normal background/foreground
+// cycling keeps relaunching.
+const MAX_APP_LAUNCH_ATTEMPTS: u32 = 6;
+// hard floor between any two RequestAppLaunch sends. caps the send RATE regardless of how fast iOS
+// flaps the stream (open-then-reaped), which would otherwise re-arm and resend on the very next csm.
+const APP_LAUNCH_RETRY_COOLDOWN: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppLaunchState {
-  Idle,
-  Requested,
+  // no ea stream open; a launch request may be (re)sent, subject to the cooldown + attempt cap.
+  Armed,
+  // an ea stream is open, so the companion is up and nothing to ask for.
+  Active,
 }
 
 pub(super) struct EaFlow {
   streams: HashMap<u16, mpsc::Sender<Bytes>>,
   chunker: EaChunker,
   app_launch: AppLaunchState,
+  relaunch_attempts: u32,
+  last_launch_sent: Option<Instant>,
 }
 
 impl std::fmt::Debug for EaFlow {
@@ -65,6 +84,7 @@ impl std::fmt::Debug for EaFlow {
     f.debug_struct("EaFlow")
       .field("streams", &self.streams.keys().collect::<Vec<_>>())
       .field("app_launch", &self.app_launch)
+      .field("relaunch_attempts", &self.relaunch_attempts)
       .finish()
   }
 }
@@ -74,7 +94,9 @@ impl EaFlow {
     Self {
       streams: HashMap::new(),
       chunker: EaChunker::new(link_command_tx, peer_max_len),
-      app_launch: AppLaunchState::Idle,
+      app_launch: AppLaunchState::Armed,
+      relaunch_attempts: 0,
+      last_launch_sent: None,
     }
   }
 
@@ -83,31 +105,39 @@ impl EaFlow {
       || msg_id == StopExternalAccessoryProtocolSession::CSM_MSG_ID
   }
 
-  /// True while at least one EA stream is open, i.e. a companion app is attached.
-  pub(super) fn has_open_streams(&self) -> bool {
-    !self.streams.is_empty()
-  }
-
-  /// Idempotent post-Identified kick: sends `RequestAppLaunch` once per session. iOS silently
-  /// ignores it unless the bundle id names an installed app declaring our EA protocol string in
-  /// its `UISupportedExternalAccessoryProtocols` Info.plist key.
+  /// Sends `RequestAppLaunch` to foreground the companion. iOS silently ignores it unless the bundle id
+  /// names an installed app declaring our EA protocol string in its `UISupportedExternalAccessoryProtocols`.
+  /// Suppressed while an EA stream is open (so it never steals foreground from another app); re-armed when
+  /// iOS reaps the companion (Stop, or the inbound consumer dropping) with the control link still up.
   pub(super) async fn ensure_app_launch_requested(
     &mut self,
     bundle_id: &str,
     link_command_tx: &mpsc::Sender<Iap2Command>,
   ) -> Result<()> {
-    if matches!(self.app_launch, AppLaunchState::Idle) {
-      tracing::debug!(bundle_id, "iap2 ea: sending RequestAppLaunch");
-      send_csm(
-        RequestAppLaunch {
-          bundle_id: bundle_id.to_string(),
-          launch_method: AppLaunchMethod::WithoutUserAlert,
-        },
-        link_command_tx,
-      )
-      .await?;
-      self.app_launch = AppLaunchState::Requested;
+    if matches!(self.app_launch, AppLaunchState::Active) || self.relaunch_attempts >= MAX_APP_LAUNCH_ATTEMPTS {
+      return Ok(());
     }
+    let now = Instant::now();
+    if let Some(last) = self.last_launch_sent
+      && now.duration_since(last) < APP_LAUNCH_RETRY_COOLDOWN
+    {
+      return Ok(());
+    }
+    tracing::debug!(
+      bundle_id,
+      attempt = self.relaunch_attempts + 1,
+      "iap2 ea: sending RequestAppLaunch"
+    );
+    send_csm(
+      RequestAppLaunch {
+        bundle_id: bundle_id.to_string(),
+        launch_method: AppLaunchMethod::WithoutUserAlert,
+      },
+      link_command_tx,
+    )
+    .await?;
+    self.relaunch_attempts += 1;
+    self.last_launch_sent = Some(now);
     Ok(())
   }
 
@@ -182,6 +212,9 @@ impl EaFlow {
       },
     )
     .await;
+
+    self.app_launch = AppLaunchState::Active;
+    self.relaunch_attempts = 0;
     Ok(())
   }
 
@@ -192,6 +225,9 @@ impl EaFlow {
   ) {
     if self.streams.remove(&stop.session_id).is_some() {
       tracing::info!(stream_id = stop.session_id, "iap2 ea: stream closed by peer");
+      if self.streams.is_empty() {
+        self.app_launch = AppLaunchState::Armed;
+      }
       emit(
         session_events_tx,
         SessionEvent::EaStreamClosed {
@@ -205,7 +241,7 @@ impl EaFlow {
   /// Strip the leading u16-BE EA-stream-id from a session_id=3 link
   /// payload and route the rest to the matching per-stream inbound
   /// channel. Drops chunks for stream ids we don't know about.
-  pub(super) async fn dispatch_link_data(&mut self, payload: Bytes) {
+  pub(super) async fn dispatch_link_data(&mut self, payload: Bytes, session_events_tx: &mpsc::Sender<SessionEvent>) {
     let Some((stream_id, chunk)) = split_stream_frame(&payload) else {
       tracing::warn!(
         len = payload.len(),
@@ -220,6 +256,10 @@ impl EaFlow {
     if state.send(chunk).await.is_err() {
       tracing::debug!(stream_id, "iap2 ea: inbound consumer dropped; closing stream");
       self.streams.remove(&stream_id);
+      if self.streams.is_empty() {
+        self.app_launch = AppLaunchState::Armed;
+      }
+      emit(session_events_tx, SessionEvent::EaStreamClosed { stream_id }).await;
     }
   }
 }
@@ -317,7 +357,7 @@ mod tests {
     let mut wire = BytesMut::new();
     wire.extend_from_slice(&0x0100u16.to_be_bytes());
     wire.extend_from_slice(&[0xDE, 0xAD]);
-    flow.dispatch_link_data(wire.freeze()).await;
+    flow.dispatch_link_data(wire.freeze(), &events_tx).await;
 
     let chunk = inbound_rx.recv().await.unwrap();
     assert_eq!(&chunk[..], &[0xDE, 0xAD]);
@@ -344,5 +384,96 @@ mod tests {
       }
     }
     assert_eq!(launches, 1, "RequestAppLaunch sent exactly once");
+  }
+
+  #[tokio::test]
+  async fn app_launch_rearms_after_stream_close() {
+    let (link_tx, mut link_rx) = mpsc::channel(64);
+    let (events_tx, mut events_rx) = mpsc::channel(64);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+
+    // companion opens its EA stream (iOS launched it) -> Active; a launch request is suppressed so it
+    // never steals foreground from whatever app is on screen.
+    let start: CsmFrame = StartExternalAccessoryProtocolSession {
+      protocol_id: 1,
+      session_id: 0x0100,
+    }
+    .into();
+    flow.handle(start, &link_tx, &events_tx).await.unwrap();
+    assert!(matches!(
+      events_rx.recv().await.unwrap(),
+      SessionEvent::EaStreamOpened { stream_id: 0x0100, .. }
+    ));
+    // drain the StatusExternalAccessoryProtocolSession Ok reply (rides the control session)
+    assert!(matches!(
+      link_rx.recv().await.unwrap(),
+      Iap2Command::Send { session_id: 1, .. }
+    ));
+    flow
+      .ensure_app_launch_requested("com.bridgething.gateway", &link_tx)
+      .await
+      .unwrap();
+    assert!(link_rx.try_recv().is_err(), "no relaunch while the EA stream is open");
+
+    // ios reaps the companion -> Stop -> re-arm; the relaunch fires (no prior send, so no cooldown gate)
+    let stop: CsmFrame = StopExternalAccessoryProtocolSession { session_id: 0x0100 }.into();
+    flow.handle(stop, &link_tx, &events_tx).await.unwrap();
+    assert!(matches!(
+      events_rx.recv().await.unwrap(),
+      SessionEvent::EaStreamClosed { stream_id: 0x0100 }
+    ));
+    flow
+      .ensure_app_launch_requested("com.bridgething.gateway", &link_tx)
+      .await
+      .unwrap();
+    assert!(
+      matches!(link_rx.try_recv(), Ok(Iap2Command::Send { session_id: 1, .. })),
+      "RequestAppLaunch re-requested after the companion stream closed"
+    );
+  }
+
+  // a dropped inbound consumer (decode error / bus close) removes the last stream without a peer Stop;
+  // the launch must re-arm and an EaStreamClosed must fire so the gateway clears the companion - otherwise
+  // the launch latch stays Active forever and the companion can never be re-foregrounded.
+  #[tokio::test]
+  async fn app_launch_rearms_after_consumer_drop() {
+    let (link_tx, mut link_rx) = mpsc::channel(64);
+    let (events_tx, mut events_rx) = mpsc::channel(64);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+
+    let start: CsmFrame = StartExternalAccessoryProtocolSession {
+      protocol_id: 1,
+      session_id: 0x0100,
+    }
+    .into();
+    flow.handle(start, &link_tx, &events_tx).await.unwrap();
+    let inbound_rx = match events_rx.recv().await.unwrap() {
+      SessionEvent::EaStreamOpened { inbound_rx, .. } => inbound_rx,
+      other => panic!("unexpected event: {other:?}"),
+    };
+    assert!(matches!(
+      link_rx.recv().await.unwrap(),
+      Iap2Command::Send { session_id: 1, .. }
+    )); // Status Ok
+
+    // the upstream consumer drops its receiver; the next inbound chunk fails to enqueue.
+    drop(inbound_rx);
+    let mut wire = BytesMut::new();
+    wire.extend_from_slice(&0x0100u16.to_be_bytes());
+    wire.extend_from_slice(&[0xDE, 0xAD]);
+    flow.dispatch_link_data(wire.freeze(), &events_tx).await;
+    assert!(matches!(
+      events_rx.recv().await.unwrap(),
+      SessionEvent::EaStreamClosed { stream_id: 0x0100 }
+    ));
+
+    flow
+      .ensure_app_launch_requested("com.bridgething.gateway", &link_tx)
+      .await
+      .unwrap();
+    assert!(
+      matches!(link_rx.try_recv(), Ok(Iap2Command::Send { session_id: 1, .. })),
+      "a dropped inbound consumer must re-arm the relaunch"
+    );
   }
 }

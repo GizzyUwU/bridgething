@@ -46,11 +46,11 @@ pub use hid::HidCommand;
 use hid::HidFlow;
 use identification::IdentificationFlow;
 pub use mfi_worker::{MfiHandle, WorkerMfiAccess};
-pub use now_playing::NowPlayingCommand;
 use now_playing::NowPlayingFlow;
+pub use now_playing::{NowPlayingAuthorityState, NowPlayingCommand};
 pub use telephony::TelephonyCommand;
 use telephony::TelephonyFlow;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
@@ -134,6 +134,7 @@ pub struct Iap2Session<M: MfiAccess> {
   auth: AuthFlow,
   ident: IdentificationFlow,
   now_playing: NowPlayingFlow,
+  now_playing_authority: watch::Receiver<NowPlayingAuthorityState>,
   ea: Option<EaFlow>,
   file_transfer: FileTransferFlow,
   hid: HidFlow,
@@ -151,6 +152,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     session_events_tx: mpsc::Sender<SessionEvent>,
     hid_command_rx: mpsc::Receiver<HidCommand>,
     now_playing_command_rx: mpsc::Receiver<NowPlayingCommand>,
+    now_playing_authority: watch::Receiver<NowPlayingAuthorityState>,
     telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
     Self::with_app_launch(
@@ -163,6 +165,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       session_events_tx,
       hid_command_rx,
       now_playing_command_rx,
+      now_playing_authority,
       telephony_command_rx,
     )
   }
@@ -178,12 +181,14 @@ impl<M: MfiAccess> Iap2Session<M> {
     session_events_tx: mpsc::Sender<SessionEvent>,
     hid_command_rx: mpsc::Receiver<HidCommand>,
     now_playing_command_rx: mpsc::Receiver<NowPlayingCommand>,
+    now_playing_authority: watch::Receiver<NowPlayingAuthorityState>,
     telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
     Self {
       auth: AuthFlow::new(),
       ident: IdentificationFlow::new(),
       now_playing: NowPlayingFlow::new(now_playing_command_rx, artwork_suppress_bundles),
+      now_playing_authority,
       ea: None,
       file_transfer: FileTransferFlow::new(link_command_tx.clone()),
       hid: HidFlow::new(hid_command_rx),
@@ -216,7 +221,8 @@ impl<M: MfiAccess> Iap2Session<M> {
 
   async fn run_inner(&mut self) -> Result<()> {
     let mut control_buf = BytesMut::new();
-    let mut companion_connected_last = false;
+    let mut np_authority_last = NowPlayingAuthorityState::default();
+    let mut np_authority_closed = false;
 
     loop {
       while let Some(frame) = CsmCodec.decode(&mut control_buf)? {
@@ -234,12 +240,12 @@ impl<M: MfiAccess> Iap2Session<M> {
         }
       }
 
-      let companion_connected = self.ea.as_ref().is_some_and(EaFlow::has_open_streams);
-      if companion_connected != companion_connected_last {
-        companion_connected_last = companion_connected;
+      let np_authority = *self.now_playing_authority.borrow_and_update();
+      if np_authority != np_authority_last {
+        np_authority_last = np_authority;
         self
           .now_playing
-          .reconcile_companion(companion_connected, &self.link_command_tx)
+          .reconcile_companion(np_authority, &self.link_command_tx)
           .await?;
       }
 
@@ -258,7 +264,7 @@ impl<M: MfiAccess> Iap2Session<M> {
               control_buf.extend_from_slice(&payload);
             } else if session_id == ea_transport::EA_LINK_SESSION_ID {
               if let Some(ea) = self.ea.as_mut() {
-                ea.dispatch_link_data(payload).await;
+                ea.dispatch_link_data(payload, &self.session_events_tx).await;
               } else {
                 tracing::warn!("iap2 session: EA data received before link Established");
               }
@@ -305,6 +311,11 @@ impl<M: MfiAccess> Iap2Session<M> {
             tracing::warn!(?err, "iap2 session: telephony command dispatch failed");
           }
         }
+        res = self.now_playing_authority.changed(), if !np_authority_closed => {
+          if res.is_err() {
+            np_authority_closed = true;
+          }
+        }
       }
     }
   }
@@ -332,15 +343,10 @@ impl<M: MfiAccess> Iap2Session<M> {
         .await;
     }
     if NowPlayingFlow::handles(msg_id) {
-      let companion_connected = self.ea.as_ref().is_some_and(EaFlow::has_open_streams);
+      let authority = *self.now_playing_authority.borrow();
       return self
         .now_playing
-        .handle(
-          frame,
-          companion_connected,
-          &self.link_command_tx,
-          &self.session_events_tx,
-        )
+        .handle(frame, authority, &self.link_command_tx, &self.session_events_tx)
         .await;
     }
     if EaFlow::handles(msg_id) {

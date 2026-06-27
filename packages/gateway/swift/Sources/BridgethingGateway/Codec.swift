@@ -145,11 +145,11 @@ public struct Codec: Sendable {
     var comp = compression ?? defaultCompression
     var body: Data = switch comp {
     case .none: payload
-    case .gzip: try payload.gzipped()
+    case .gzip: try payload.gzipped(level: .bestSpeed)
     }
 
     if compression == nil, comp == .none, priority == .normal, payload.count > Self.autoGzipPayloadThreshold {
-      let gzipped = try payload.gzipped()
+      let gzipped = try payload.gzipped(level: .bestSpeed)
       if gzipped.count < payload.count {
         comp = .gzip
         body = gzipped

@@ -6,7 +6,7 @@ use bluer::{
 };
 use futures::StreamExt;
 use libbridgething::{
-  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, PeerCompanionStatus, Priority,
+  BRIDGETHING_PROFILE_UUID, BRIDGETHING_RFCOMM_CHANNEL, Device, DeviceType, PeerCompanionStatus, Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
   protocol::{BridgeEndec, EnvelopeProbe, encode_bridge_frame},
   wire::MsgMeta,
@@ -332,6 +332,13 @@ impl RfcommGateway {
 
     self.connections.insert(address, connection);
     self.peer_owners.register(address, GatewayType::Rfcomm);
+    let placeholder = Device {
+      name: address.to_string(),
+      device_type: DeviceType::Unknown,
+      mac: address.to_string(),
+      default: false,
+    };
+    self.peers.ensure_exists(address, placeholder).await;
     let _ = self.peers.set_companion(address, PeerCompanionStatus::Pending).await;
 
     Ok(())

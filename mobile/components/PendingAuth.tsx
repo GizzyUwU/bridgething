@@ -1,13 +1,10 @@
 import type { BridgethingAuthState } from '@bridgething/session-react-native';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { ActivityIndicator, Linking, Text, View } from 'react-native';
+import InAppBrowser from 'react-native-inappbrowser-reborn';
 
 import { Button } from './Button';
 
-/**
- * Pending / failed states for OAuth provider sign-in. Pending mode
- * shows the device-code text and a cancel; failed shows the daemon
- * reason + retry. Hidden entirely when state is idle / authenticated.
- */
 export function PendingAuth({
   state,
   onCancel,
@@ -17,6 +14,24 @@ export function PendingAuth({
   onCancel?: () => void;
   onRetry?: () => void;
 }) {
+  const pendingUrl =
+    state.kind === 'pending'
+      ? (state.verificationUrlComplete ?? state.verificationUrl ?? null)
+      : null;
+
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingUrl) {
+      openedFor.current = null;
+      return;
+    }
+    const key =
+      state.kind === 'pending' ? (state.userCode ?? pendingUrl) : pendingUrl;
+    if (openedFor.current === key) return;
+    openedFor.current = key;
+    void openAuthUrl(pendingUrl);
+  }, [pendingUrl, state]);
+
   if (state.kind === 'pending') {
     return (
       <View
@@ -45,6 +60,17 @@ export function PendingAuth({
             >
               {state.userCode}
             </Text>
+          </View>
+        ) : null}
+        {pendingUrl ? (
+          <View className="mt-3 self-start">
+            <Button
+              variant="secondary"
+              size="sm"
+              onPress={() => void openAuthUrl(pendingUrl)}
+            >
+              open authorization
+            </Button>
           </View>
         ) : null}
         {state.verificationUrl ? (
@@ -82,4 +108,20 @@ export function PendingAuth({
     );
   }
   return null;
+}
+
+async function openAuthUrl(url: string) {
+  try {
+    if (await InAppBrowser.isAvailable()) {
+      await InAppBrowser.open(url, {
+        animated: true,
+        modalEnabled: true,
+        enableDefaultShare: false,
+      });
+    } else {
+      await Linking.openURL(url);
+    }
+  } catch {
+    // the code + url are shown in the card as a manual fallback.
+  }
 }

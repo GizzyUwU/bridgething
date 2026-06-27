@@ -131,7 +131,7 @@ impl ProfileManager {
         BluetoothConnectionEvent::DeviceRemoved { mac } => {
           tracing::info!("bluetooth device removed with mac address: {:?}", &mac);
 
-          self.peers.remove(mac).await;
+          self.peers.remove_bluez(mac).await;
           if let Err(err) = self.devices.remove(mac.to_string()).await {
             tracing::warn!(?err, "failed to remove device store entry on DeviceRemoved");
           }

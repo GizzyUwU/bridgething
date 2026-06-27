@@ -7,6 +7,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Activity,
+  BatteryCharging,
   Bell,
   Cable,
   ChevronDown,
@@ -76,7 +77,6 @@ import {
   useSession,
 } from '../lib/session';
 import { relativeTime } from '../lib/utils';
-import { cancelSignIn, signIn as signInSpotify } from '../lib/spotify-auth';
 import { DEFAULT_OTA_POLL_CONFIG } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
@@ -190,8 +190,7 @@ export function SettingsScreen({ navigation }: Props) {
     if (signInBusy) return;
     setSignInBusy(id);
     try {
-      if (id === 'spotify') await signInSpotify();
-      else await session.setActiveProvider(id);
+      await session.setActiveProvider(id);
     } catch {
       // failures surface via authState
     } finally {
@@ -200,7 +199,7 @@ export function SettingsScreen({ navigation }: Props) {
   };
 
   const cancelAuth = () => {
-    cancelSignIn();
+    void session.cancelAuth();
     setSignInBusy(null);
   };
 
@@ -440,6 +439,7 @@ export function SettingsScreen({ navigation }: Props) {
                   />
                 ) : null}
                 {Platform.OS === 'android' ? <DefaultDialerRow /> : null}
+                {Platform.OS === 'android' ? <BatteryOptimizationRow /> : null}
                 <FlagRow
                   icon={Globe}
                   title="HTTP proxy"
@@ -1038,6 +1038,78 @@ function DefaultDialerRow() {
       trailing={
         <Switch
           value={Boolean(granted)}
+          onValueChange={handleToggle}
+          disabled={busy}
+        />
+      }
+    />
+  );
+}
+
+function BatteryOptimizationRow() {
+  const session = getSession();
+  const [exempt, setExempt] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setExempt(await session.isIgnoringBatteryOptimizations());
+    } catch {
+      setExempt(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  const subtitle = exempt
+    ? 'background connection is protected from doze'
+    : 'tap to keep the Car Thing connected in the background';
+
+  const request = async () => {
+    setBusy(true);
+    try {
+      await session.requestIgnoreBatteryOptimizations();
+      await refresh();
+    } catch (err) {
+      Alert.alert(
+        'failed to request',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggle = async (next: boolean) => {
+    if (!next) {
+      Alert.alert(
+        'change in settings',
+        'android only lets you re-enable battery optimization from system settings.',
+      );
+      return;
+    }
+    if (!exempt) await request();
+  };
+
+  return (
+    <ListRow
+      icon={BatteryCharging}
+      iconTint="default"
+      title="background connection"
+      subtitle={subtitle}
+      onPress={!exempt ? request : undefined}
+      trailing={
+        <Switch
+          value={Boolean(exempt)}
           onValueChange={handleToggle}
           disabled={busy}
         />

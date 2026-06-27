@@ -1,13 +1,15 @@
 package com.bridgething
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.pm.PackageManager
 import android.service.notification.NotificationListenerService
+import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import dev.bridgething.companion.AndroidNotificationBackend
 import dev.bridgething.companion.BridgethingCompanion
-import dev.bridgething.gateway.notifications
 import dev.bridgething.schema.DismissReason
 import dev.bridgething.schema.NotificationAction
 import dev.bridgething.schema.NotificationApp
@@ -15,23 +17,13 @@ import dev.bridgething.schema.NotificationCategory
 import dev.bridgething.schema.NotificationFlags
 import dev.bridgething.schema.NotificationRemoved
 import dev.bridgething.schema.Notification as WireNotification
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 
-/**
- * Forwards notifications to every connected Car Thing via the running companion's gateway.
- * The OS constructs this service independently of the host app, so the companion is looked
- * up through [NotificationBridgeRegistry] rather than injected directly.
- */
 public class BridgethingNotificationListener : NotificationListenerService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationBridgeRegistry.listener = this
+        NotificationBridgeRegistry.companion?.refreshSystemMedia()
         Log.i(TAG, "notification listener connected")
     }
 
@@ -43,7 +35,6 @@ public class BridgethingNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         if (NotificationBridgeRegistry.listener === this) NotificationBridgeRegistry.listener = null
-        scope.cancel()
         super.onDestroy()
     }
 
@@ -52,35 +43,30 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         return sbn.notification?.actions?.getOrNull(if (positive) 0 else 1)?.actionIntent
     }
 
+    /** the current shade as wire notifications, flagged preExisting for connect-time backfill. */
+    fun activeWireNotifications(): List<WireNotification> =
+        activeNotifications?.filterNot { shouldSkip(it) }?.map { toWireNotification(it, preExisting = true) } ?: emptyList()
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val sbnIt = sbn ?: return
         if (shouldSkip(sbnIt)) return
-        val companion = NotificationBridgeRegistry.companion ?: return
-        val wire = toWireNotification(sbnIt)
-        scope.launch {
-            runCatching { companion.gateway.notifications.posted(wire) }
-                .onFailure { Log.w(TAG, "notifications.posted failed: ${it.message}") }
-        }
+        NotificationBridgeRegistry.backend?.emitPosted(toWireNotification(sbnIt, preExisting = false))
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
         val sbnIt = sbn ?: return
         if (shouldSkip(sbnIt)) return
-        val companion = NotificationBridgeRegistry.companion ?: return
-        val dismissReason = if (reason == REASON_CLICK) DismissReason.Acted else DismissReason.UserDismissed
-        scope.launch {
-            runCatching {
-                companion.gateway.notifications.removed(
-                    NotificationRemoved(id = sbnIt.key, reason = dismissReason)
-                )
-            }.onFailure { Log.w(TAG, "notifications.removed failed: ${it.message}") }
+        val dismissReason = when (reason) {
+            REASON_APP_CANCEL, REASON_APP_CANCEL_ALL, REASON_LISTENER_CANCEL, REASON_LISTENER_CANCEL_ALL ->
+                DismissReason.RemoteDismissed
+            REASON_CLICK -> DismissReason.Acted
+            else -> DismissReason.UserDismissed
         }
+        NotificationBridgeRegistry.backend?.emitRemoved(NotificationRemoved(id = sbnIt.key, reason = dismissReason))
     }
 
     private fun shouldSkip(sbn: StatusBarNotification): Boolean {
-        // skip our own package to prevent looping notifications back to the device.
         if (sbn.packageName == applicationContext.packageName) return true
-        // group summaries and ongoing events (media, foreground services) are not user-facing alerts.
         val n = sbn.notification ?: return true
         if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return true
         if ((n.flags and Notification.FLAG_ONGOING_EVENT) != 0) return true
@@ -98,7 +84,7 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         }
     }.takeIf { it.isNotEmpty() }
 
-    private fun toWireNotification(sbn: StatusBarNotification): WireNotification {
+    private fun toWireNotification(sbn: StatusBarNotification, preExisting: Boolean): WireNotification {
         val n = sbn.notification
         val extras = n.extras
         val title = extras?.let {
@@ -108,13 +94,11 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         val subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
         val displayName = resolveAppLabel(sbn.packageName)
 
-        // n.priority is deprecated post-api-26 but still populated by legacy notifications; channel
-        // importance lookup would need NotificationManager round-trips per event.
-        @Suppress("DEPRECATION")
+        val importance = channelImportance(sbn.key)
         val flags = NotificationFlags(
-            silent = (n.flags and Notification.FLAG_NO_CLEAR) != 0,
-            important = n.priority >= Notification.PRIORITY_HIGH,
-            preExisting = false,
+            silent = importance < NotificationManager.IMPORTANCE_DEFAULT,
+            important = importance >= NotificationManager.IMPORTANCE_HIGH,
+            preExisting = preExisting,
         )
 
         val actions = n.actions
@@ -139,6 +123,12 @@ public class BridgethingNotificationListener : NotificationListenerService() {
         )
     }
 
+    private fun channelImportance(key: String): Int = runCatching {
+        val ranking = Ranking()
+        val imp = if (currentRanking.getRanking(key, ranking)) ranking.importance else NotificationManager.IMPORTANCE_DEFAULT
+        if (imp < NotificationManager.IMPORTANCE_NONE) NotificationManager.IMPORTANCE_DEFAULT else imp
+    }.getOrDefault(NotificationManager.IMPORTANCE_DEFAULT)
+
     private fun mapCategory(raw: String?): NotificationCategory = when (raw) {
         Notification.CATEGORY_CALL -> NotificationCategory.IncomingCall
         Notification.CATEGORY_MISSED_CALL -> NotificationCategory.MissedCall
@@ -156,10 +146,13 @@ public class BridgethingNotificationListener : NotificationListenerService() {
     }
 }
 
-/** bridges the OS-constructed listener to the running companion. */
+/** bridges the OS-constructed listener to the running companion + its notification backend. */
 public object NotificationBridgeRegistry {
     @Volatile
     public var companion: BridgethingCompanion? = null
+
+    @Volatile
+    public var backend: AndroidNotificationBackend? = null
 
     @Volatile
     public var listener: BridgethingNotificationListener? = null

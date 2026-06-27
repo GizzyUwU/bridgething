@@ -2,18 +2,16 @@ package com.bridgething
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.HybridBridgethingSession
 import dev.bridgething.applemusic.AppleMusicGlue
 import dev.bridgething.companion.HostInfo
 import dev.bridgething.lyrics.LrclibResolver
-import dev.bridgething.spotify.PkceRefreshAuthenticator
-import dev.bridgething.spotify.PkceRefreshConfig
-import dev.bridgething.spotify.SpotifyAuthenticatorFactory
 import dev.bridgething.spotify.SpotifyGlue
 import dev.bridgething.tidal.TidalGlue
+import uniffi.spotify.TokenStore as SpTokenStore
 
 /**
  * Wires the Nitro session module's static registry and installs the real
@@ -23,39 +21,9 @@ import dev.bridgething.tidal.TidalGlue
  */
 public object BridgethingApp {
     public const val APP_NAME: String = "bridgething"
-
     public const val SPOTIFY_PROVIDER_ID: String = "spotify"
 
-    private val SPOTIFY_SCOPES: List<String> = listOf(
-        "user-read-playback-state",
-        "user-modify-playback-state",
-        "user-read-currently-playing",
-        "user-read-playback-position",
-        "user-top-read",
-        "user-read-recently-played",
-        "playlist-read-private",
-        "playlist-read-collaborative",
-        "playlist-modify-private",
-        "playlist-modify-public",
-        "user-follow-modify",
-        "user-follow-read",
-        "user-library-read",
-        "user-library-modify",
-        "user-read-private",
-    )
-
-    public fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingSpotifyAuthConfig(
-        scopes = SPOTIFY_SCOPES.toTypedArray(),
-        pkceClientId = BuildConfig.BRIDGETHING_PKCE_CLIENT_ID,
-        pkceRedirectUri = "https://discord.com/api/connections/spotify/callback",
-        pkceAuthorizeUrl = "https://accounts.spotify.com/authorize",
-        pkceTokenUrl = "https://accounts.spotify.com/api/token",
-    )
-
-    public fun persistSpotifyTokens(context: Context, access: String, refresh: String) {
-        SpotifyTokenStore(context.applicationContext)
-            .save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
-    }
+    private const val SPOTIFY_WORKER_BASE: String = "https://thinglabs.sh/auth"
 
     public fun installBridgething(context: Context) {
         val app = context.applicationContext
@@ -70,7 +38,7 @@ public object BridgethingApp {
         )
         HybridBridgethingSessionImpl.lyricsResolver = LrclibResolver()
 
-        val spotifyTokenStore = SpotifyTokenStore(app)
+        val spotifyTokenStore = SpotifyKeychainStore(app)
 
         HybridBridgethingSessionImpl.registry = listOf(
             HybridBridgethingSessionImpl.ProviderRegistration(
@@ -79,7 +47,7 @@ public object BridgethingApp {
                 available = true,
                 factory = { makeSpotifyGlue(spotifyTokenStore, app.cacheDir) },
                 signOut = { spotifyTokenStore.clear() },
-                hasCredentials = { !spotifyTokenStore.load().refresh.isNullOrEmpty() },
+                hasCredentials = { spotifyTokenStore.loadRefreshToken() != null },
             ),
             HybridBridgethingSessionImpl.ProviderRegistration(
                 id = "appleMusic",
@@ -100,57 +68,56 @@ public object BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(app))
     }
 
-    private fun makeSpotifyGlue(store: SpotifyTokenStore, cacheDir: java.io.File): SpotifyGlue {
-        val seed = store.load()
-        val pkceConfig = PkceRefreshConfig(
-            clientId = BuildConfig.BRIDGETHING_PKCE_CLIENT_ID,
-            tokenUrl = "https://accounts.spotify.com/api/token",
-        )
-        val authenticatorFactory: SpotifyAuthenticatorFactory = { PkceRefreshAuthenticator(pkceConfig) }
-        return SpotifyGlue(
-            authenticatorFactory = authenticatorFactory,
-            accessToken = seed.access ?: "",
-            refreshToken = seed.refresh ?: "",
-            onTokensRefreshed = { access, refresh ->
-                store.save(SpotifyTokenStore.Tokens(access.ifEmpty { null }, refresh.ifEmpty { null }))
-            },
+    private fun makeSpotifyGlue(store: SpotifyKeychainStore, cacheDir: java.io.File): SpotifyGlue =
+        SpotifyGlue(
+            workerBase = SPOTIFY_WORKER_BASE,
+            psk = BuildConfig.BRIDGETHING_AUTH_PSK,
+            deviceId = store.deviceId(),
+            tokenStore = store,
             cacheDir = cacheDir,
         )
-    }
 }
 
-private class SpotifyTokenStore(private val context: Context) {
-    data class Tokens(val access: String?, val refresh: String?)
-
-    private val prefs: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        @Suppress("DEPRECATION")
-        EncryptedSharedPreferences.create(
-            context,
-            "dev.bridgething.spotify",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+/**
+ * EncryptedSharedPreferences token store: the rotating carthing refresh token
+ * + the resolved canonical username + a stable connect/dealer device id.
+ */
+private class SpotifyKeychainStore(context: Context) : SpTokenStore {
+    private val prefs: SharedPreferences? by lazy {
+        try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            @Suppress("DEPRECATION")
+            EncryptedSharedPreferences.create(
+                context,
+                "dev.bridgething.spotify",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (e: Exception) {
+            Log.e("BridgethingSetup", "spotify token store unavailable", e)
+            null
+        }
     }
 
-    fun load(): Tokens = Tokens(
-        prefs.getString("access", null),
-        prefs.getString("refresh", null),
-    )
-
-    fun save(tokens: Tokens) {
-        prefs.edit()
-            .apply {
-                if (tokens.access != null) putString("access", tokens.access) else remove("access")
-                if (tokens.refresh != null) putString("refresh", tokens.refresh) else remove("refresh")
-            }
-            .apply()
-    }
+    override fun loadRefreshToken(): String? = prefs?.getString("refresh", null)
+    override fun saveRefreshToken(token: String) { prefs?.edit()?.putString("refresh", token)?.apply() }
+    override fun loadUsername(): String? = prefs?.getString("username", null)
+    override fun saveUsername(username: String) { prefs?.edit()?.putString("username", username)?.apply() }
 
     fun clear() {
-        prefs.edit().remove("access").remove("refresh").apply()
+        prefs?.edit()?.remove("refresh")?.remove("username")?.apply()
+    }
+
+    /** a stable 40-hex device id, generated once and persisted (ephemeral if the store is down). */
+    fun deviceId(): String {
+        prefs?.getString("device_id", null)?.let { return it }
+        val bytes = ByteArray(20)
+        java.security.SecureRandom().nextBytes(bytes)
+        val id = bytes.joinToString("") { "%02x".format(it) }
+        prefs?.edit()?.putString("device_id", id)?.apply()
+        return id
     }
 }

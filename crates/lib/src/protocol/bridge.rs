@@ -6,7 +6,10 @@ use tokio_util::{
   codec::{Decoder, Encoder},
 };
 
-use super::{COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, TypedDecodeError, VERSION};
+use super::{
+  COMPRESSION_NONE, ENCODING_MSGPACK, EndecError, EndecState, HEADER_LEN, MAGIC, MAX_FRAME_LEN, TypedDecodeError,
+  VERSION,
+};
 use crate::{
   Priority,
   gateway::{BridgeToGatewayMsg, GatewayToBridgeMsg},
@@ -97,50 +100,88 @@ impl Decoder for BridgeEndec {
   type Error = EndecError;
 
   fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-    if src.is_empty() {
-      return Ok(None);
-    }
+    loop {
+      if src.is_empty() {
+        return Ok(None);
+      }
 
-    let state = self.state.get_or_insert_default();
+      let state = self.state.get_or_insert_default();
 
-    if state.packet == 0 {
-      if src.len() < HEADER_LEN {
-        tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
+      if state.packet == 0 {
+        if src.len() < HEADER_LEN {
+          tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
+          state.packet += 1;
+          return Ok(None);
+        }
+
+        let magic = u16::from_be_bytes([src[0], src[1]]);
+        if magic != MAGIC {
+          self.state = None;
+          if resync_to_magic(src) {
+            tracing::warn!(target: "libbridgething::protocol::bridge::decoder", "invalid magic {magic:#x}; resynced to next frame");
+            continue;
+          }
+          return Ok(None);
+        }
+
+        let version = src[2];
+        if version != VERSION {
+          tracing::warn!(target: "libbridgething::protocol::bridge::decoder", "unsupported version {version}; resyncing");
+          self.state = None;
+          src.advance(1);
+          if resync_to_magic(src) {
+            continue;
+          }
+          return Ok(None);
+        }
+
+        let length = u64::from_be_bytes(src[8..16].try_into().unwrap()) as usize;
+        if length > MAX_FRAME_LEN {
+          tracing::warn!(target: "libbridgething::protocol::bridge::decoder", "frame length {length} over cap; resyncing");
+          self.state = None;
+          src.advance(1);
+          if resync_to_magic(src) {
+            continue;
+          }
+          return Ok(None);
+        }
+
+        state.version = version;
+        state.compression = src[3].into();
+        state.encoding = src[4].into();
+        state.priority = Priority::from_byte(src[5]);
+        // src[6..8] reserved
+        state.length = length as u64;
+        state.total_length = HEADER_LEN + length;
+        tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message length {}, compression {:?}, encoding {:?}, priority {:?}", state.length, state.compression, state.encoding, state.priority);
+      }
+
+      if src.len() < state.total_length {
+        tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message not complete ({}/{} bytes)", src.len(),state.total_length);
         state.packet += 1;
         return Ok(None);
       }
 
-      let magic = u16::from_be_bytes([src[0], src[1]]);
-      if magic != MAGIC {
-        tracing::error!(target: "libbridgething::protocol::bridge::decoder", "invalid magic: {:#x}", magic);
-        // drop junk
-        src.clear();
-        return Err(EndecError::InvalidMagic);
-      }
-
-      state.version = src[2];
-      if state.version != VERSION {
-        tracing::error!(target: "libbridgething::protocol::bridge::decoder", "unsupported version: {}", state.version);
-        // drop junk
-        src.clear();
-        return Err(EndecError::UnsupportedVersion(state.version));
-      }
-
-      state.compression = src[3].into();
-      state.encoding = src[4].into();
-      state.priority = Priority::from_byte(src[5]);
-      // src[6..8] reserved
-      state.length = u64::from_be_bytes(src[8..16].try_into().unwrap());
-      state.total_length = HEADER_LEN + state.length as usize;
-      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message length {}, compression {:?}, encoding {:?}, priority {:?}", state.length, state.compression, state.encoding, state.priority);
+      return self.finish_frame(src);
     }
+  }
+}
 
-    if src.len() < state.total_length {
-      tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message not complete ({}/{} bytes)", src.len(),state.total_length);
-      state.packet += 1;
-      return Ok(None);
-    }
+fn resync_to_magic(src: &mut BytesMut) -> bool {
+  let magic = MAGIC.to_be_bytes();
+  if let Some(pos) = src.windows(magic.len()).position(|w| w == magic) {
+    src.advance(pos);
+    true
+  } else {
+    let drop = src.len().saturating_sub(magic.len() - 1);
+    src.advance(drop);
+    false
+  }
+}
 
+impl BridgeEndec {
+  fn finish_frame(&mut self, src: &mut BytesMut) -> Result<Option<PrioritizedFrame<GatewayToBridgeMsg>>, EndecError> {
+    let state = self.state.as_ref().expect("finish_frame called with a populated state");
     src.advance(HEADER_LEN);
     let body = src.split_to(state.length as usize);
 
@@ -235,4 +276,113 @@ pub fn encode_bridge_frame(priority: Priority, msg: &BridgeToGatewayMsg, dst: &m
 
   dst.extend_from_slice(&packed);
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use uuid::Uuid;
+
+  use super::{
+    super::{COMPRESSION_NONE, ENCODING_MSGPACK, MAGIC, VERSION},
+    *,
+  };
+  use crate::{
+    gateway::{AssetNotFoundReply, GatewayToBridgeAssetMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData},
+    wire::MsgMeta,
+  };
+
+  fn sample(asset_id: &str) -> GatewayToBridgeMsg {
+    GatewayToBridgeMsg {
+      id: Uuid::now_v7(),
+      meta: MsgMeta::Request,
+      data: GatewayToBridgeMsgData::Asset(GatewayToBridgeAssetMsg::NotFound(AssetNotFoundReply {
+        id: asset_id.into(),
+      })),
+    }
+  }
+
+  fn frame_bytes(msg: &GatewayToBridgeMsg) -> Vec<u8> {
+    let body = rmp_serde::to_vec_named(msg).unwrap();
+    let mut out = BytesMut::new();
+    out.put_u16(MAGIC);
+    out.put_u8(VERSION);
+    out.put_u8(COMPRESSION_NONE);
+    out.put_u8(ENCODING_MSGPACK);
+    out.put_u8(Priority::Normal.as_byte());
+    out.put_bytes(0, 2);
+    out.put_u64(body.len() as u64);
+    out.extend_from_slice(&body);
+    out.to_vec()
+  }
+
+  #[test]
+  fn decodes_back_to_back_frames() {
+    let mut codec = BridgeEndec::default();
+    let (a, b) = (sample("art/a"), sample("art/b"));
+    let mut buf = BytesMut::new();
+    buf.extend_from_slice(&frame_bytes(&a));
+    buf.extend_from_slice(&frame_bytes(&b));
+    assert_eq!(codec.decode(&mut buf).unwrap().expect("first").msg.id, a.id);
+    assert_eq!(codec.decode(&mut buf).unwrap().expect("second").msg.id, b.id);
+    assert!(codec.decode(&mut buf).unwrap().is_none());
+  }
+
+  #[test]
+  fn resyncs_past_leading_garbage() {
+    let mut codec = BridgeEndec::default();
+    let msg = sample("art/x");
+    let mut buf = BytesMut::new();
+    buf.extend_from_slice(&[0x01, 0x02, 0x03, 0xde, 0x00, 0xff]); // junk, incl a lone magic-hi byte
+    buf.extend_from_slice(&frame_bytes(&msg));
+    assert_eq!(
+      codec.decode(&mut buf).unwrap().expect("frame after resync").msg.id,
+      msg.id
+    );
+  }
+
+  #[test]
+  fn corrupt_frame_does_not_kill_the_stream() {
+    // a frame whose body is not valid msgpack must not drop the connection: the next valid frame
+    // still decodes. this is the bug that wedged the iAP2 EA gateway on a single bad byte.
+    let mut codec = BridgeEndec::default();
+    let good = sample("art/good");
+    let mut buf = BytesMut::new();
+    buf.put_u16(MAGIC);
+    buf.put_u8(VERSION);
+    buf.put_u8(COMPRESSION_NONE);
+    buf.put_u8(ENCODING_MSGPACK);
+    buf.put_u8(Priority::Normal.as_byte());
+    buf.put_bytes(0, 2);
+    buf.put_u64(3);
+    buf.extend_from_slice(&[0xff, 0xff, 0xff]); // a 3-byte non-msgpack body
+    buf.extend_from_slice(&frame_bytes(&good));
+
+    let first = codec.decode(&mut buf);
+    assert!(
+      matches!(&first, Err(e) if e.is_recoverable()),
+      "a bad body is a recoverable typed-decode error, not a stream kill: {first:?}"
+    );
+    assert_eq!(
+      codec.decode(&mut buf).unwrap().expect("recovered frame").msg.id,
+      good.id
+    );
+  }
+
+  #[test]
+  fn resync_to_magic_finds_next_frame_start() {
+    let mut buf = BytesMut::from(&[0x11, 0x22, 0xde, 0xad, 0x99][..]);
+    assert!(resync_to_magic(&mut buf));
+    assert_eq!(&buf[..], &[0xde, 0xad, 0x99]);
+  }
+
+  #[test]
+  fn resync_to_magic_keeps_tail_when_absent() {
+    let mut buf = BytesMut::from(&[0x11, 0x22, 0x33, 0xde][..]);
+    assert!(!resync_to_magic(&mut buf));
+    assert_eq!(
+      &buf[..],
+      &[0xde],
+      "keeps a trailing byte for a magic that straddles reads"
+    );
+  }
 }

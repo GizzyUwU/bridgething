@@ -1,6 +1,5 @@
 package dev.bridgething.gateway
 
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
 /**
@@ -26,6 +25,8 @@ public class FrameAccumulator(
          * actually arrive.
          */
         public const val DEFAULT_MAX_PAYLOAD_SIZE: Int = 8 * 1024 * 1024
+
+        private const val INITIAL_CAPACITY: Int = 8 * 1024
     }
 
     public sealed class Exception(message: String) : RuntimeException(message) {
@@ -45,10 +46,14 @@ public class FrameAccumulator(
             Exception("payload $payloadLength exceeds max $max")
     }
 
-    private val buffer = ByteArrayOutputStream()
+    private var buffer = ByteArray(INITIAL_CAPACITY)
+    private var readPos = 0
+    private var writePos = 0
 
     public fun append(chunk: ByteArray) {
-        buffer.write(chunk)
+        ensureCapacity(chunk.size)
+        chunk.copyInto(buffer, writePos)
+        writePos += chunk.size
     }
 
     /**
@@ -59,10 +64,10 @@ public class FrameAccumulator(
      * has lost framing and there's no safe resync.
      */
     public fun nextFrame(): ByteArray? {
-        val bytes = buffer.toByteArray()
-        if (bytes.size < FrameHeader.LENGTH) return null
+        val available = writePos - readPos
+        if (available < FrameHeader.LENGTH) return null
 
-        val header = ByteBuffer.wrap(bytes, 0, FrameHeader.LENGTH)
+        val header = ByteBuffer.wrap(buffer, readPos, FrameHeader.LENGTH)
         val magic = header.short.toInt() and 0xffff
         if (magic != FrameHeader.MAGIC) throw Exception.InvalidMagic(magic)
         val version = header.get()
@@ -80,18 +85,43 @@ public class FrameAccumulator(
         if (payloadLen > maxPayloadSize) throw Exception.PayloadTooLarge(payloadLen, maxPayloadSize)
 
         val total = FrameHeader.LENGTH + payloadLen.toInt()
-        if (bytes.size < total) return null
+        if (available < total) return null
 
-        val frame = bytes.copyOfRange(0, total)
-        val rest = bytes.copyOfRange(total, bytes.size)
-        buffer.reset()
-        if (rest.isNotEmpty()) buffer.write(rest)
+        val frame = buffer.copyOfRange(readPos, readPos + total)
+        readPos += total
+        compactIfNeeded()
         return frame
     }
 
-    public val bufferedByteCount: Int get() = buffer.size()
+    public val bufferedByteCount: Int get() = writePos - readPos
 
     public fun reset() {
-        buffer.reset()
+        readPos = 0
+        writePos = 0
+    }
+
+    private fun ensureCapacity(extra: Int) {
+        if (readPos > 0 && writePos + extra > buffer.size) compact()
+        val needed = writePos + extra
+        if (needed <= buffer.size) return
+        var cap = buffer.size
+        while (cap < needed) cap = cap shl 1
+        buffer = buffer.copyOf(cap)
+    }
+
+    private fun compactIfNeeded() {
+        if (readPos == writePos) {
+            readPos = 0
+            writePos = 0
+        } else if (readPos >= buffer.size / 2) {
+            compact()
+        }
+    }
+
+    private fun compact() {
+        if (readPos == 0) return
+        buffer.copyInto(buffer, 0, readPos, writePos)
+        writePos -= readPos
+        readPos = 0
     }
 }

@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { SpotifyAuthWebView } from './components/SpotifyAuthWebView';
 import { Press } from './components/Press';
 import { Wordmark } from './components/Wordmark';
 import { bootstrapSession, reconcileSnapshot } from './lib/session';
@@ -195,7 +194,6 @@ export default function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      <SpotifyAuthWebView />
     </SafeAreaProvider>
   );
 }

@@ -43,7 +43,8 @@ use tokio::{
 use tokio_util::bytes::Bytes;
 
 pub const MEMORY_BUDGET_BYTES: usize = 8 * 1024 * 1024;
-pub const DISK_BUDGET_BYTES: usize = 50 * 1024 * 1024;
+pub const DISK_BUDGET_BYTES: usize = 512 * 1024 * 1024;
+pub const DISK_FREE_HEADROOM_BYTES: usize = 128 * 1024 * 1024;
 const TTL_SWEEP_INTERVAL: Duration = Duration::from_secs(15);
 const EVENT_BROADCAST_CAPACITY: usize = 64;
 const COMMAND_MAILBOX_CAPACITY: usize = 16;
@@ -209,6 +210,17 @@ impl AssetCache {
 
   pub fn subscribe(&self) -> broadcast::Receiver<AssetCacheEvent> {
     self.inner.events_tx.subscribe()
+  }
+
+  pub async fn reserve_disk(&self, need_bytes: u64) -> Result<(), AssetError> {
+    let (ack, rx) = oneshot::channel();
+    self
+      .inner
+      .cmd_tx
+      .send(actor::Command::ReserveDisk { need_bytes, ack })
+      .await
+      .map_err(|_| AssetError::CacheClosed)?;
+    rx.await.map_err(|_| AssetError::CacheClosed)
   }
 }
 

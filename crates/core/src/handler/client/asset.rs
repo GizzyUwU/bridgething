@@ -1,4 +1,4 @@
-use std::{sync::LazyLock, time::Duration};
+use std::sync::LazyLock;
 
 use libbridgething::{
   client::{
@@ -16,7 +16,7 @@ use super::{HandlerResult, MsgHandle};
 use crate::{
   asset::{
     CachedAsset, Retention,
-    wait::{ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
+    wait::{ASSET_STREAM_TIMEOUT, ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
   },
   bluetooth::BluetoothMan,
   state::State,
@@ -26,7 +26,6 @@ use crate::{
 const PRELOAD_IDS_MAX: usize = 64;
 const PRELOAD_PARALLELISM: usize = 16;
 const IAP2_ART_PREFIX: &str = "iap2/art/";
-const ASSET_STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 static PRELOAD_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(PRELOAD_PARALLELISM));
 
 #[derive(Debug)]
@@ -103,7 +102,7 @@ pub(crate) async fn resolve_asset(state: &State, bluetooth: &BluetoothMan, id: &
   } else if state.gateway_info().is_none() {
     FetchOutcome::NotFound
   } else {
-    fetch_via_companion(state, bluetooth, id).await
+    fetch_via_companion(state, bluetooth, id, Retention::DISK_LRU).await
   }
 }
 
@@ -124,6 +123,14 @@ async fn fetch_iap2_art(state: &State, id: &str) -> FetchOutcome {
     .await
 }
 
+fn non_empty(bytes: Bytes, mime: Option<String>, id: &str) -> Option<(Bytes, Option<String>)> {
+  if bytes.is_empty() {
+    tracing::debug!(%id, "companion returned an empty asset body; treating as not found");
+    return None;
+  }
+  Some((bytes, mime))
+}
+
 pub(crate) async fn request_asset_body(
   sinks: &TransferSinks,
   bluetooth: &BluetoothMan,
@@ -140,7 +147,7 @@ pub(crate) async fn request_asset_body(
     Ok(got) => match got.body {
       TransferBody::Inline(bytes) => {
         sinks.unbind(request_id);
-        Some((Bytes::from(bytes), got.mime))
+        non_empty(Bytes::from(bytes), got.mime, id)
       }
       TransferBody::Stream(transfer) => {
         if transfer.id != request_id {
@@ -152,7 +159,7 @@ pub(crate) async fn request_asset_body(
           .collect_memory(request_id, transfer.total_size, ASSET_STREAM_TIMEOUT)
           .await
         {
-          Some(bytes) => Some((bytes, got.mime)),
+          Some(bytes) => non_empty(bytes, got.mime, id),
           None => {
             tracing::warn!(%id, "asset fragment reassembly failed or timed out");
             None
@@ -173,7 +180,12 @@ pub(crate) async fn request_asset_body(
   }
 }
 
-async fn fetch_via_companion(state: &State, bluetooth: &BluetoothMan, id: &str) -> FetchOutcome {
+pub(crate) async fn fetch_via_companion(
+  state: &State,
+  bluetooth: &BluetoothMan,
+  id: &str,
+  retention: Retention,
+) -> FetchOutcome {
   let cache = state.assets.clone();
   let sinks = state.transfer_sinks.clone();
   let bluetooth = bluetooth.clone();
@@ -184,7 +196,7 @@ async fn fetch_via_companion(state: &State, bluetooth: &BluetoothMan, id: &str) 
       match request_asset_body(&sinks, &bluetooth, &id_owned).await {
         Some((bytes, mime)) => {
           if let Err(err) = cache
-            .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), Retention::DISK_LRU)
+            .insert_internal(id_owned.clone(), bytes.clone(), mime.clone(), retention)
             .await
           {
             tracing::warn!(?err, "failed to insert daemon-fetched asset into cache");

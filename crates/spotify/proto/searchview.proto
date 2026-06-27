@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package sp.searchview;
+
+message SearchResponse {
+  repeated SearchItem items = 1;
+  TypeCounts type_counts = 10;
+}
+
+message TypeCounts {
+  repeated TypeCount counts = 1;
+}
+
+message TypeCount {
+  string type = 1;
+  Count count = 4;
+}
+
+message Count {
+  int32 value = 1;
+}
+
+message EntityRef {
+  string uri = 1;
+  string name = 2;
+}
+
+message SearchItem {
+  string uri = 1;
+  string name = 2;
+  string image = 3;
+  ArtistMeta artist = 4;
+  TrackMeta track = 5;
+  AlbumMeta album = 6;
+  PlaylistMeta playlist = 7;
+  Section section = 14;
+}
+
+message ArtistMeta {
+  int32 verified = 1;
+}
+
+message TrackMeta {
+  EntityRef album = 3;
+  repeated EntityRef artists = 4;
+  int32 flag = 14;
+  Duration duration = 18;
+}
+
+message Duration {
+  int32 seconds = 1;
+}
+
+message AlbumMeta {
+  string artist_name = 1;
+  int32 f2 = 2;
+  int32 year = 3;
+  int32 album_type = 4;
+  repeated EntityRef artists = 7;
+}
+
+message PlaylistMeta {
+  int32 f1 = 1;
+  int32 f2 = 2;
+  int32 score = 3;
+  repeated string tags = 6;
+}
+
+message Section {
+  int32 kind = 1;
+  repeated SectionEntry entries = 2;
+}
+
+message SectionEntry {
+  EntityWrapper item = 2;
+}
+
+message EntityWrapper {
+  SearchItem entity = 1;
+}

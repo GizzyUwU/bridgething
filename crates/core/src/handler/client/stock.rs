@@ -174,7 +174,8 @@ impl LegacyStockHandler {
       match super::library::browse_request(
         &self.handle.bluetooth.gateway_man,
         &self.handle.state.root_browse,
-        self.handle.state.player.recently_played_gen(),
+        &self.handle.state.browse_content,
+        &self.handle.state.player,
         req,
       )
       .await
@@ -214,7 +215,8 @@ impl LegacyStockHandler {
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
       &self.handle.state.root_browse,
-      self.handle.state.player.recently_played_gen(),
+      &self.handle.state.browse_content,
+      &self.handle.state.player,
       req,
     )
     .await
@@ -530,7 +532,8 @@ impl LegacyStockHandler {
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
       &self.handle.state.root_browse,
-      self.handle.state.player.recently_played_gen(),
+      &self.handle.state.browse_content,
+      &self.handle.state.player,
       req,
     )
     .await
@@ -566,7 +569,8 @@ impl LegacyStockHandler {
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
       &self.handle.state.root_browse,
-      self.handle.state.player.recently_played_gen(),
+      &self.handle.state.browse_content,
+      &self.handle.state.player,
       req,
     )
     .await
@@ -855,17 +859,9 @@ async fn warm_preset_art(state: &State, bluetooth: &BluetoothMan, id: &str) {
   if matches!(state.assets.contains(id).await, Ok(true)) {
     return;
   }
-  let Some((bytes, mime)) = super::asset::request_asset_body(&state.transfer_sinks, bluetooth, id).await else {
-    return;
-  };
-  if !bytes.is_empty()
-    && let Err(err) = state
-      .assets
-      .insert_internal(id.to_string(), bytes, mime, Retention::DISK_PINNED)
-      .await
-  {
-    tracing::warn!(?err, %id, "failed to warm preset art into cache");
-  }
+  // route through the coalesced fetch_or_wait pull path so a concurrent get + this warm dedup to one
+  // companion request and a miss arms the negative cache; pin on success.
+  super::asset::fetch_via_companion(state, bluetooth, id, Retention::DISK_PINNED).await;
 }
 
 async fn backfill_preset_art(state: State, bluetooth: BluetoothMan, missing: Vec<StockPreset>) {

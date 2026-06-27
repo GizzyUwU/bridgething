@@ -134,14 +134,6 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
     override fun cancelAuth(): Promise<Unit> = Promise.async { backend?.cancelAuth() }
     override fun signOut(): Promise<Unit> = Promise.async { backend?.signOut() }
 
-    override fun spotifyAuthConfig(): Promise<BridgethingSpotifyAuthConfig> = Promise.async {
-        require().spotifyAuthConfig()
-    }
-
-    override fun completeSpotifySignIn(accessToken: String, refreshToken: String): Promise<Unit> = Promise.async {
-        require().completeSpotifySignIn(accessToken, refreshToken)
-    }
-
     override fun snapshot(): Promise<BridgethingSessionSnapshot> = Promise.async {
         require().snapshot()
     }
@@ -294,6 +286,18 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun requestDefaultDialer(): Promise<Unit> = Promise.async {
         require().requestDefaultDialer()
+    }
+
+    override fun forgetCompanionDevice(mac: String): Promise<Unit> = Promise.async {
+        require().forgetCompanionDevice(mac)
+    }
+
+    override fun isIgnoringBatteryOptimizations(): Promise<Boolean> = Promise.async {
+        backend?.isIgnoringBatteryOptimizations() ?: false
+    }
+
+    override fun requestIgnoreBatteryOptimizations(): Promise<Unit> = Promise.async {
+        require().requestIgnoreBatteryOptimizations()
     }
 
     override fun revokeRuntimePermissions(permissions: Array<String>): Promise<Boolean> = Promise.async {

@@ -20,11 +20,8 @@ use tokio::{
 use super::{encode_packet, write_packet};
 use crate::{
   error::Result,
-  frame::{ControlBits, LINK_HEADER_LEN, LinkCodec, LinkPacket, Lsp},
+  frame::{ControlBits, LINK_FRAME_OVERHEAD, LinkCodec, LinkPacket, Lsp},
 };
-
-const PAYLOAD_TRAILER: usize = 1;
-const FRAME_OVERHEAD: usize = LINK_HEADER_LEN + PAYLOAD_TRAILER;
 
 #[derive(Debug, Clone, Copy)]
 struct LinkParams {
@@ -38,7 +35,7 @@ impl LinkParams {
   fn from_peer_lsp(lsp: &Lsp) -> Self {
     Self {
       max_outgoing: lsp.max_outgoing.max(1),
-      max_payload_len: lsp.max_len.saturating_sub(FRAME_OVERHEAD as u16).max(1),
+      max_payload_len: lsp.max_len.saturating_sub(LINK_FRAME_OVERHEAD as u16).max(1),
       retransmission_timeout: Duration::from_millis(lsp.retransmission_timeout_ms as u64),
       max_retransmissions: lsp.max_retransmissions.max(1),
     }
@@ -64,7 +61,6 @@ pub(super) struct EstablishedState {
   params: LinkParams,
 
   last_sent_psn: u8,
-  last_acked_psn: u8,
   unacked: VecDeque<UnackedPacket>,
   pending_send: VecDeque<(u8, Bytes)>,
 
@@ -79,7 +75,6 @@ impl EstablishedState {
     Self {
       params: LinkParams::from_peer_lsp(peer_lsp),
       last_sent_psn: initial_psn,
-      last_acked_psn: initial_psn,
       unacked: VecDeque::new(),
       pending_send: VecDeque::new(),
       last_received_in_sequence_psn: peer_initial_psn,
@@ -204,8 +199,7 @@ impl EstablishedState {
       let dist = ack_value.wrapping_sub(front.seq);
       // ack is last-received-in-sequence psn; dist 0..=127 acks this entry, 128..=255 stays queued.
       if dist <= 127 {
-        let p = self.unacked.pop_front().unwrap();
-        self.last_acked_psn = p.seq;
+        self.unacked.pop_front();
       } else {
         break;
       }
@@ -355,7 +349,7 @@ mod tests {
   fn enqueue_send_chunks_at_max_payload_len() {
     let mut state = EstablishedState::new(99, 50, &test_lsp(127, 60, 3));
     let max_payload = state.params.max_payload_len as usize;
-    assert_eq!(max_payload, 60 - FRAME_OVERHEAD);
+    assert_eq!(max_payload, 60 - LINK_FRAME_OVERHEAD);
     let total = max_payload * 2 + 5;
     let payload = Bytes::from(vec![0xABu8; total]);
     state.enqueue_send(1, payload);
@@ -430,7 +424,6 @@ mod tests {
     });
     state.handle_inbound_ack(102);
     assert!(state.unacked.is_empty());
-    assert_eq!(state.last_acked_psn, 101);
   }
 
   #[test]
@@ -450,7 +443,6 @@ mod tests {
     });
     state.handle_inbound_ack(101);
     assert!(state.unacked.is_empty());
-    assert_eq!(state.last_acked_psn, 101);
   }
 
   #[test]
@@ -476,7 +468,6 @@ mod tests {
     });
     state.handle_inbound_ack(1);
     assert!(state.unacked.is_empty());
-    assert_eq!(state.last_acked_psn, 0);
   }
 
   #[test]

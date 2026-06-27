@@ -203,9 +203,7 @@ impl TransportController {
   }
 
   fn companion_owns_playback(&self) -> bool {
-    self
-      .authority
-      .is_authoritative(CompanionAuthorityScope::NowPlayingPlayback)
+    self.player.companion_playback_authoritative()
   }
 
   fn companion_owns_volume(&self) -> bool {

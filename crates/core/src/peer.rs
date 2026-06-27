@@ -18,14 +18,19 @@
 //! transitions because BlueZ does not reliably toggle `Paired` during
 //! re-pair on a cached device.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet},
+  net::SocketAddr,
+  time::Duration,
+};
 
 use bluer::Address;
 use libbridgething::{
   Device, GatewayInfo, Peer, PeerCompanionStatus, PeerIap2Status,
   client::{
-    BluetoothPairingResult, BluetoothStatus, BridgeToClientBluetoothMsg, BridgeToClientPeerMsg,
-    ConnectedDevice as WireConnectedDevice, PairedDevicesMap, PeerSnapshotMap,
+    BluetoothPairingResult, BluetoothStatus, BridgeToClientBluetoothMsg, BridgeToClientBluetoothMsgEvent,
+    BridgeToClientPeerMsg, BridgeToClientPeerMsgEvent, ConnectedDevice as WireConnectedDevice, PairedDevicesMap,
+    PeerSnapshotMap,
   },
   wire::MsgMeta,
 };
@@ -40,6 +45,7 @@ use crate::{
 };
 
 const PEER_CMD_CAPACITY: usize = 64;
+const USEFUL_LINK_DOWN_GRACE: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Default, Clone)]
 pub struct PeerSnapshot {
@@ -83,13 +89,22 @@ enum PeerCommand {
   Remove {
     mac: Address,
   },
+  RemoveBluez {
+    mac: Address,
+  },
   NotePinShown {
     mac: Address,
   },
   ConfirmPairing {
     mac: Address,
   },
+  SeedTo {
+    addr: SocketAddr,
+  },
   ResyncStockConnection,
+  FlushPendingDisconnect {
+    epoch: u64,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +128,7 @@ impl PeerTracker {
     let (snapshot_tx, snapshot_rx) = watch::channel(PeerSnapshot::default());
     tokio::spawn(run_actor(
       cmd_rx,
+      cmd_tx.clone(),
       snapshot_tx,
       bus,
       player,
@@ -181,12 +197,20 @@ impl PeerTracker {
     self.send(PeerCommand::Remove { mac }).await;
   }
 
+  pub async fn remove_bluez(&self, mac: Address) {
+    self.send(PeerCommand::RemoveBluez { mac }).await;
+  }
+
   pub async fn note_pin_shown(&self, mac: Address) {
     self.send(PeerCommand::NotePinShown { mac }).await;
   }
 
   pub async fn confirm_pairing(&self, mac: Address) {
     self.send(PeerCommand::ConfirmPairing { mac }).await;
+  }
+
+  pub async fn seed_to(&self, addr: SocketAddr) {
+    self.send(PeerCommand::SeedTo { addr }).await;
   }
 
   pub async fn resync_stock_connection(&self) {
@@ -218,11 +242,17 @@ struct PeerActor {
   stream_routes: RouteTable,
   log_tap: LogTap,
   snapshot_tx: watch::Sender<PeerSnapshot>,
+  cmd_tx: mpsc::Sender<PeerCommand>,
+  disconnect_gen: u64,
+  pending_bluez_removals: HashSet<Address>,
+  presented_connected: bool,
+  presented_device: Option<Device>,
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_actor(
   mut cmd_rx: mpsc::Receiver<PeerCommand>,
+  cmd_tx: mpsc::Sender<PeerCommand>,
   snapshot_tx: watch::Sender<PeerSnapshot>,
   bus: WireEventBus,
   player: Player,
@@ -243,6 +273,11 @@ async fn run_actor(
     stream_routes,
     log_tap,
     snapshot_tx,
+    cmd_tx,
+    disconnect_gen: 0,
+    pending_bluez_removals: HashSet::new(),
+    presented_connected: false,
+    presented_device: None,
   };
 
   while let Some(cmd) = cmd_rx.recv().await {
@@ -263,11 +298,14 @@ impl PeerActor {
       PeerCommand::SetLanguage { mac, language } => self.set_language(mac, language).await,
       PeerCommand::SetUuid { mac, uuid } => self.set_uuid(mac, uuid).await,
       PeerCommand::Remove { mac } => self.remove(mac).await,
+      PeerCommand::RemoveBluez { mac } => self.remove_bluez(mac).await,
       PeerCommand::NotePinShown { mac } => {
         self.pin_pending.insert(mac);
       }
       PeerCommand::ConfirmPairing { mac } => self.confirm_pairing(mac).await,
+      PeerCommand::SeedTo { addr } => self.seed_to(addr).await,
       PeerCommand::ResyncStockConnection => self.resync_stock_connection().await,
+      PeerCommand::FlushPendingDisconnect { epoch } => self.flush_pending_disconnect(epoch).await,
     }
   }
 
@@ -278,6 +316,7 @@ impl PeerActor {
   }
 
   async fn upsert(&mut self, mac: Address, device: Device) {
+    self.pending_bluez_removals.remove(&mac);
     let prior = self.peers.get(&mac).cloned();
     let entry = self.peers.entry(mac).or_insert_with(|| Peer::new(device.clone()));
     entry.device = device;
@@ -286,6 +325,7 @@ impl PeerActor {
   }
 
   async fn ensure_exists(&mut self, mac: Address, device: Device) {
+    self.pending_bluez_removals.remove(&mac);
     if self.peers.contains_key(&mac) {
       return;
     }
@@ -315,6 +355,7 @@ impl PeerActor {
     let snapshot = peer.clone();
     let diff = Diff::compute(mac, Some(prior), Some(snapshot), &self.peers);
     self.broadcast_diff(diff).await;
+    self.maybe_complete_bluez_removal(mac).await;
   }
 
   async fn set_companion(&mut self, mac: Address, companion: PeerCompanionStatus) {
@@ -326,6 +367,7 @@ impl PeerActor {
     let snapshot = peer.clone();
     let diff = Diff::compute(mac, Some(prior), Some(snapshot), &self.peers);
     self.broadcast_diff(diff).await;
+    self.maybe_complete_bluez_removal(mac).await;
   }
 
   async fn set_display_name(&mut self, mac: Address, display_name: String) {
@@ -363,12 +405,28 @@ impl PeerActor {
 
   async fn remove(&mut self, mac: Address) {
     self.pin_pending.remove(&mac);
+    self.pending_bluez_removals.remove(&mac);
     let prior = self.peers.remove(&mac);
     if prior.is_none() {
       return;
     }
     let diff = Diff::compute(mac, prior, None, &self.peers);
     self.broadcast_diff(diff).await;
+  }
+
+  async fn remove_bluez(&mut self, mac: Address) {
+    if self.peers.get(&mac).is_some_and(Peer::has_useful_link) {
+      self.pin_pending.remove(&mac);
+      self.pending_bluez_removals.insert(mac);
+      return;
+    }
+    self.remove(mac).await;
+  }
+
+  async fn maybe_complete_bluez_removal(&mut self, mac: Address) {
+    if self.pending_bluez_removals.contains(&mac) && self.peers.get(&mac).is_some_and(|p| !p.has_useful_link()) {
+      self.remove(mac).await;
+    }
   }
 
   async fn confirm_pairing(&mut self, mac: Address) {
@@ -388,17 +446,83 @@ impl PeerActor {
     }
   }
 
-  async fn resync_stock_connection(&mut self) {
-    let device = self
+  async fn seed_to(&mut self, addr: SocketAddr) {
+    let snapshot: HashMap<String, Peer> = self
       .peers
-      .values()
-      .find(|p| p.has_useful_link())
-      .map(|p| p.device.clone());
-    let Some(device) = device else {
+      .iter()
+      .map(|(mac, peer)| (mac.to_string(), peer.clone()))
+      .collect();
+    if let Err(err) = self
+      .bus
+      .send_event(addr, BridgeToClientPeerMsgEvent::Snapshot(PeerSnapshotMap(snapshot)))
+      .await
+    {
+      tracing::debug!(?err, %addr, "peer seed snapshot send failed");
+    }
+
+    let connected = self.presented_connected;
+    if let Some(device) = self.presented_device.clone()
+      && let Err(err) = self
+        .bus
+        .send_event(
+          addr,
+          BridgeToClientBluetoothMsgEvent::ConnectedDevice(WireConnectedDevice {
+            name: device.name.clone(),
+            mac: device.mac.clone(),
+          }),
+        )
+        .await
+    {
+      tracing::debug!(?err, %addr, "peer seed connected-device send failed");
+    }
+    if let Err(err) = self
+      .bus
+      .send_event(
+        addr,
+        BridgeToClientBluetoothMsgEvent::Status(BluetoothStatus { connected }),
+      )
+      .await
+    {
+      tracing::debug!(?err, %addr, "peer seed bluetooth-status send failed");
+    }
+  }
+
+  async fn resync_stock_connection(&mut self) {
+    let Some(device) = self
+      .presented_connected
+      .then(|| self.presented_device.clone())
+      .flatten()
+    else {
+      if let Err(errs) = broadcast_stock_disconnection(&self.bus).await {
+        log_broadcast_errors("resync stock disconnection", errs);
+      }
       return;
     };
     if let Err(errs) = broadcast_stock_connection(&self.bus, &device, &self.capabilities).await {
       log_broadcast_errors("resync_stock_connection", errs);
+    }
+    if let Err(errs) = self
+      .bus
+      .broadcast(
+        BridgeToClientBluetoothMsg::ConnectedDevice(WireConnectedDevice {
+          name: device.name.clone(),
+          mac: device.mac.clone(),
+        }),
+        MsgMeta::Event,
+      )
+      .await
+    {
+      log_broadcast_errors("resync connected device", errs);
+    }
+    if let Err(errs) = self
+      .bus
+      .broadcast(
+        BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: true }),
+        MsgMeta::Event,
+      )
+      .await
+    {
+      log_broadcast_errors("resync bluetooth status", errs);
     }
     if let Err(err) = self.player.send_state().await {
       tracing::warn!(?err, "failed to send player state during stock resync");
@@ -456,6 +580,9 @@ impl PeerActor {
     }
 
     if diff.useful_link_transitioned_up {
+      self.disconnect_gen = self.disconnect_gen.wrapping_add(1);
+      self.presented_connected = true;
+      self.presented_device = diff.useful_device.clone();
       if let Some(device) = diff.useful_device.as_ref() {
         if let Err(errs) = self
           .bus
@@ -487,19 +614,14 @@ impl PeerActor {
       {
         log_broadcast_errors("bluetooth status up", errs);
       }
-    } else if diff.useful_link_transitioned_down {
-      if let Err(errs) = self
-        .bus
-        .broadcast(
-          BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: false }),
-          MsgMeta::Event,
-        )
-        .await
-      {
-        log_broadcast_errors("bluetooth status down", errs);
-      }
-      if let Err(errs) = broadcast_stock_disconnection(&self.bus).await {
-        log_broadcast_errors("stock disconnection", errs);
+    } else if self.presented_connected && !self.peers.values().any(|p| p.has_useful_link()) {
+      if diff.removed || diff.companion_lost.is_some() {
+        self.disconnect_gen = self.disconnect_gen.wrapping_add(1);
+        self.presented_connected = false;
+        self.presented_device = None;
+        self.broadcast_useful_link_down().await;
+      } else if diff.useful_link_transitioned_down {
+        self.schedule_disconnect_flush();
       }
     }
 
@@ -517,6 +639,44 @@ impl PeerActor {
       }
       self.tear_down_net_routes().await;
     }
+  }
+
+  async fn broadcast_useful_link_down(&self) {
+    if let Err(errs) = self
+      .bus
+      .broadcast(
+        BridgeToClientBluetoothMsg::Status(BluetoothStatus { connected: false }),
+        MsgMeta::Event,
+      )
+      .await
+    {
+      log_broadcast_errors("bluetooth status down", errs);
+    }
+    if let Err(errs) = broadcast_stock_disconnection(&self.bus).await {
+      log_broadcast_errors("stock disconnection", errs);
+    }
+  }
+
+  fn schedule_disconnect_flush(&mut self) {
+    self.disconnect_gen = self.disconnect_gen.wrapping_add(1);
+    let epoch = self.disconnect_gen;
+    let cmd_tx = self.cmd_tx.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(USEFUL_LINK_DOWN_GRACE).await;
+      let _ = cmd_tx.send(PeerCommand::FlushPendingDisconnect { epoch }).await;
+    });
+  }
+
+  async fn flush_pending_disconnect(&mut self, epoch: u64) {
+    if epoch != self.disconnect_gen {
+      return;
+    }
+    if self.peers.values().any(|p| p.has_useful_link()) {
+      return;
+    }
+    self.presented_connected = false;
+    self.presented_device = None;
+    self.broadcast_useful_link_down().await;
   }
 
   async fn tear_down_net_routes(&self) {
@@ -568,6 +728,7 @@ struct Diff {
   useful_link_transitioned_down: bool,
   useful_device: Option<Device>,
   companion_lost: Option<Address>,
+  removed: bool,
 }
 
 impl Diff {
@@ -618,6 +779,7 @@ impl Diff {
         None
       },
       companion_lost,
+      removed: prior.is_some() && current.is_none(),
     }
   }
 }

@@ -22,12 +22,13 @@
 
 use std::{sync::Arc, time::Duration};
 
-use bluer::{Adapter, Address, gatt::remote::Service};
+use bluer::{Adapter, Address, Device, gatt::remote::Service};
 use futures::{Stream, StreamExt, stream};
 use libbridgething::{AncsAuthState, client::VolumeChanged};
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+use zbus::Connection;
 
 mod advertise;
 mod ams;
@@ -46,6 +47,7 @@ const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 const ANCS_REPROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const LE_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+const GATT_SERVICE_INTERFACE: &str = "org.bluez.GattService1";
 
 #[derive(Debug)]
 enum LeCommand {
@@ -254,6 +256,14 @@ impl LeSession {
       cancel,
     } = self;
 
+    let conn = match Connection::system().await {
+      Ok(conn) => conn,
+      Err(err) => {
+        tracing::error!(%address, ?err, "LE session: system bus connect failed; aborting session");
+        return;
+      }
+    };
+
     let mut backoff = TRANSIENT_BACKOFF_INITIAL;
     let mut absent_logged = false;
     let mut down_logged = false;
@@ -263,6 +273,7 @@ impl LeSession {
         return;
       }
       let outcome = attempt(
+        &conn,
         &adapter,
         address,
         &bus,
@@ -308,6 +319,50 @@ fn pending_stream() -> NotifyStream {
   Box::pin(stream::pending())
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ServiceEnumError {
+  #[error(transparent)]
+  Zbus(#[from] zbus::Error),
+  #[error(transparent)]
+  ZbusFdo(#[from] zbus::fdo::Error),
+  #[error(transparent)]
+  Bluer(#[from] bluer::Error),
+}
+
+async fn enumerate_services(
+  conn: &Connection,
+  device: &Device,
+  adapter_name: &str,
+  address: Address,
+) -> Result<Vec<Service>, ServiceEnumError> {
+  let om = zbus::fdo::ObjectManagerProxy::builder(conn)
+    .destination("org.bluez")?
+    .path("/")?
+    .build()
+    .await?;
+  let objects = om.get_managed_objects().await?;
+
+  let prefix = format!(
+    "/org/bluez/{adapter_name}/dev_{}/service",
+    address.to_string().replace(':', "_")
+  );
+
+  let mut services = Vec::new();
+  for (path, ifaces) in &objects {
+    let Some(rest) = path.as_str().strip_prefix(&prefix) else {
+      continue;
+    };
+    // a child char/desc carries a further path segment; only the bare service node is wanted.
+    if rest.contains('/') || !ifaces.keys().any(|i| i.as_str() == GATT_SERVICE_INTERFACE) {
+      continue;
+    }
+    if let Ok(id) = u16::from_str_radix(rest, 16) {
+      services.push(device.service(id).await?);
+    }
+  }
+  Ok(services)
+}
+
 async fn find_service(services: &[Service], uuid: Uuid) -> Option<Service> {
   for svc in services {
     if let Ok(u) = svc.uuid().await
@@ -328,6 +383,7 @@ fn le_acl_up(adapter: &Adapter, address: Address) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 async fn attempt(
+  conn: &Connection,
   adapter: &Adapter,
   address: Address,
   bus: &WireEventBus,
@@ -353,7 +409,13 @@ async fn attempt(
     *down_logged = false;
   }
 
-  let services = device.services().await?;
+  let services = match enumerate_services(conn, &device, adapter.name(), address).await {
+    Ok(services) => services,
+    Err(err) => {
+      tracing::warn!(%address, ?err, "LE GATT enumeration failed; will retry");
+      return Ok(LoopExit::ConnectionLost);
+    }
+  };
 
   let ancs_svc = find_service(&services, ancs::ANCS_SERVICE).await;
   let ams_svc = find_service(&services, ams::AMS_SERVICE).await;

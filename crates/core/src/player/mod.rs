@@ -28,7 +28,9 @@ pub struct PlayerSnapshot {
   pub iap2_repeat_mode: Option<RepeatMode>,
   pub iap2_set_elapsed_time_available: Option<bool>,
   pub current_artwork_id: Option<String>,
-  pub recently_played_gen: u64,
+  pub root_browse_gen: u64,
+  pub home_recents: Vec<QueueItem>,
+  pub companion_playback_authoritative: bool,
 }
 
 #[derive(Debug)]
@@ -41,6 +43,7 @@ enum PlayerCommand {
   ApplyTransportIntent(bool),
   ApplySeekIntent(u32),
   ResetCompanion,
+  NoteLibraryChanged,
 }
 
 #[derive(Debug, Clone)]
@@ -90,8 +93,16 @@ impl Player {
     self.send(PlayerCommand::ResetCompanion).await
   }
 
-  pub fn recently_played_gen(&self) -> u64 {
-    self.snapshot_rx.borrow().recently_played_gen
+  pub async fn note_library_changed(&self) -> PlayerResult<()> {
+    self.send(PlayerCommand::NoteLibraryChanged).await
+  }
+
+  pub fn root_browse_gen(&self) -> u64 {
+    self.snapshot_rx.borrow().root_browse_gen
+  }
+
+  pub fn home_recents(&self) -> Vec<QueueItem> {
+    self.snapshot_rx.borrow().home_recents.clone()
   }
 
   pub fn state_reply(&self) -> PlayerStateReply {
@@ -118,6 +129,10 @@ impl Player {
     self.snapshot_rx.borrow().iap2_set_elapsed_time_available
   }
 
+  pub fn companion_playback_authoritative(&self) -> bool {
+    self.snapshot_rx.borrow().companion_playback_authoritative
+  }
+
   async fn send(&self, cmd: PlayerCommand) -> PlayerResult<()> {
     self.cmd_tx.send(cmd).await.map_err(|_| PlayerError::ActorDropped)
   }
@@ -137,7 +152,9 @@ fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {
     iap2_repeat_mode: state.iap2_repeat_mode(),
     iap2_set_elapsed_time_available: state.iap2_set_elapsed_time_available(),
     current_artwork_id: state.current_artwork_id(),
-    recently_played_gen: state.recently_played_gen(),
+    root_browse_gen: state.root_browse_gen(),
+    home_recents: state.home_recents(),
+    companion_playback_authoritative: state.companion_playback_authoritative(),
   }
 }
 
@@ -185,6 +202,7 @@ async fn run_actor(
           PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
           PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
           PlayerCommand::ResetCompanion => state.reset_companion(),
+          PlayerCommand::NoteLibraryChanged => state.note_library_changed(),
         }
         force = cmd_force || state.take_position_resync();
       }

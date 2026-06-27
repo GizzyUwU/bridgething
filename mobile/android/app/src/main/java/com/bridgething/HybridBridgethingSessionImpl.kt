@@ -42,7 +42,6 @@ import com.margelo.nitro.bridgething.session.BridgethingRepeatMode
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealth
 import com.margelo.nitro.bridgething.session.BridgethingServiceHealthKind
 import com.margelo.nitro.bridgething.session.BridgethingSessionPeer
-import com.margelo.nitro.bridgething.session.BridgethingSpotifyAuthConfig
 import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappRole
@@ -273,13 +272,6 @@ public class HybridBridgethingSessionImpl(
     override suspend fun availableProviders(): Array<BridgethingProviderInfo> = registry.map {
         BridgethingProviderInfo(id = it.id, displayName = it.displayName, available = it.available)
     }.toTypedArray()
-
-    override suspend fun spotifyAuthConfig(): BridgethingSpotifyAuthConfig = BridgethingApp.spotifyAuthConfig()
-
-    override suspend fun completeSpotifySignIn(accessToken: String, refreshToken: String) {
-        BridgethingApp.persistSpotifyTokens(context, accessToken, refreshToken)
-        setActiveProvider(BridgethingApp.SPOTIFY_PROVIDER_ID)
-    }
 
     override suspend fun setActiveProvider(id: String?) {
         authJob?.cancel()
@@ -773,6 +765,30 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
+    override suspend fun forgetCompanionDevice(mac: String) {
+        val ctx = context.applicationContext
+        CompanionDevicePicker.forget(ctx, mac)
+        runCatching { CompanionHolder.adapter?.disconnect(mac) }
+        if (CompanionDevicePicker.associations(ctx).isEmpty()) {
+            BridgethingConnectionService.stop(ctx)
+        }
+    }
+
+    override suspend fun isIgnoringBatteryOptimizations(): Boolean {
+        val ctx = context.applicationContext
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return false
+        return pm.isIgnoringBatteryOptimizations(ctx.packageName)
+    }
+
+    override suspend fun requestIgnoreBatteryOptimizations() {
+        val ctx = context.applicationContext
+        @Suppress("BatteryLife")
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:${ctx.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(intent)
+    }
+
     override suspend fun revokeRuntimePermissions(permissions: Array<String>): Boolean {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
             return false
@@ -791,14 +807,11 @@ public class HybridBridgethingSessionImpl(
     }
 
     override suspend fun killApp() {
-        // finishAffinity doesn't drop the pid so the queued revoke never applies.
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     override suspend fun presentPairPicker(): BridgethingBtDevice? {
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
-        // observe the new association, keep it alive, and connect now so the peer appears
-        // without an app restart.
         CompanionDevicePicker.startObservingPresence(context)
         BridgethingConnectionService.start(context)
         CompanionHolder.reconnectAssociated(context)

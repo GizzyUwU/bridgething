@@ -7,7 +7,7 @@ import androidx.annotation.RequiresApi
 /**
  * Bound by the system when an associated Car Thing appears in BT range (API
  * 31+). Wakes the connection foreground service from cold so the link comes
- * back without the user opening the app, then lets it go when the device leaves.
+ * back without the user opening the app.
  */
 @RequiresApi(31)
 public class BridgethingPresenceService : CompanionDeviceService() {
@@ -15,9 +15,7 @@ public class BridgethingPresenceService : CompanionDeviceService() {
         BridgethingConnectionService.start(this)
     }
 
-    override fun onDeviceDisappeared(associationInfo: AssociationInfo) {
-        BridgethingConnectionService.stop(this)
-    }
+    override fun onDeviceDisappeared(associationInfo: AssociationInfo) {}
 
     @Deprecated("string overload is how 31-32 deliver presence; 33+ use the AssociationInfo variant")
     override fun onDeviceAppeared(address: String) {
@@ -25,7 +23,5 @@ public class BridgethingPresenceService : CompanionDeviceService() {
     }
 
     @Deprecated("string overload is how 31-32 deliver presence; 33+ use the AssociationInfo variant")
-    override fun onDeviceDisappeared(address: String) {
-        BridgethingConnectionService.stop(this)
-    }
+    override fun onDeviceDisappeared(address: String) {}
 }

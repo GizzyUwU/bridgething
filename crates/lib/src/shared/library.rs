@@ -123,6 +123,11 @@ pub enum LibraryItem {
   Station(Station),
 }
 
+/// Wire-contract node id for the "recently played" browse shelf. A gateway that surfaces a
+/// recently-played folder in its root browse gives it this id so the daemon can overlay its own
+/// live recently-played history onto that shelf without a refetch; other folders use opaque ids.
+pub const RECENTS_NODE_ID: &str = "recently-played";
+
 /// One row in a `BrowseResult`: either a folder (drilldown) or a leaf
 /// item the user can play / queue / favorite.
 #[typeshare]

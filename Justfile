@@ -46,6 +46,26 @@ spotify-codegen:
   swift build --package-path tools/spotify-codegen
   bash tools/spotify-codegen/scripts/generate-kotlin.sh
 
+# --- Spotify first-party client (uniffi) mobile packaging ---
+
+# Build the spotify rust client as an ios xcframework + swift wrapper.
+spotify-ios:
+  bash crates/spotify/scripts/build-xcframework.sh
+
+# Build the spotify rust client as android jniLibs + kotlin bindings.
+spotify-android:
+  bash crates/spotify/scripts/build-jnilibs.sh
+
+# --- Mobile app artifacts ---
+
+# Build a release apk (debug-signed for sideload). Runs on mac and linux.
+apk: spotify-android
+  bash mobile/scripts/build-apk.sh
+
+# Build an unsigned ipa for sideloading. Requires macos.
+ipa: spotify-ios
+  bash mobile/scripts/build-ipa.sh
+
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
 

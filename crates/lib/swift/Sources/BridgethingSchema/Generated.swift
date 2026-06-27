@@ -190,9 +190,6 @@ public enum CompanionAuthorityScope: String, Codable, Sendable {
 
 public struct AuthorityClaim: Codable, Sendable {
 	public let scope: CompanionAuthorityScope
-	/// App bundle the companion represents (e.g. `com.spotify.client`).
-	/// The daemon's now-playing gate compares it against iAP2's foreground
-	/// app to override a still-claimed companion when another app takes over.
 	public let appBundle: String?
 
 	public init(scope: CompanionAuthorityScope, appBundle: String?) {
@@ -1570,6 +1567,29 @@ public struct HttpHeader: Codable, Sendable {
 	}
 }
 
+/// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
+/// Presence is the whole signal (the app is alive and draining the ea stream).
+public struct KeepaliveAck: Codable, Sendable {
+	public let seq: UInt32
+
+	public init(seq: UInt32) {
+		self.seq = seq
+	}
+}
+
+/// Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
+/// the outbound frame keeps iOS from suspending the companion process (which
+/// would freeze the dealer ws and drop now-playing authority), and the reply
+/// proves the app is draining the stream. A run of unanswered probes is a
+/// wedged session no disconnect would surface. `seq` is for log correlation.
+public struct KeepalivePing: Codable, Sendable {
+	public let seq: UInt32
+
+	public init(seq: UInt32) {
+		self.seq = seq
+	}
+}
+
 public struct LibraryBrowseRequest: Codable, Sendable {
 	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	public let nodeId: String?
@@ -1580,6 +1600,25 @@ public struct LibraryBrowseRequest: Codable, Sendable {
 		self.nodeId = nodeId
 		self.limit = limit
 		self.offset = offset
+	}
+}
+
+/// Which slice of the user's library changed, so a consumer can scope a
+/// refetch. The daemon invalidates its home cache on any scope; the
+/// distinction is informational for richer webapp consumers.
+public enum LibraryScope: String, Codable, Sendable {
+	case saved
+	case playlists
+}
+
+/// Fired when the user mutates their library on the gateway-side app while
+/// connected (a like, a playlist edit) and the change did NOT originate from a
+/// daemon command - so the daemon must invalidate any cached browse / home view.
+public struct LibraryChanged: Codable, Sendable {
+	public let scope: LibraryScope
+
+	public init(scope: LibraryScope) {
+		self.scope = scope
 	}
 }
 
@@ -5400,6 +5439,8 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case logsTailReply(LogsTailReply)
 	case logsSubscribeReply(LogsSubscribeReply)
 	case logEntry(LogEntry)
+	/// ea-link liveness probe: keeps ios scheduling the companion, and an unanswered run flags a wedge
+	case keepalive(KeepalivePing)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaProgress,
@@ -5413,7 +5454,8 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			deviceNicknameChanged,
 			logsTailReply,
 			logsSubscribeReply,
-			logEntry
+			logEntry,
+			keepalive
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5484,6 +5526,11 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 					self = .logEntry(content)
 					return
 				}
+			case .keepalive:
+				if let content = try? container.decode(KeepalivePing.self, forKey: .data) {
+					self = .keepalive(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewaySystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewaySystemMsg"))
@@ -5527,6 +5574,9 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .logEntry(let content):
 			try container.encode(CodingKeys.logEntry, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .keepalive(let content):
+			try container.encode(CodingKeys.keepalive, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5978,8 +6028,7 @@ public enum GatewayToBridgeAudioMsg: Codable, Sendable {
 /// Companion declares per-scope authority. `Release` is the "stop
 /// preferring my data for this scope" signal. Non-now-playing claims
 /// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
-/// hold until release / disconnect / app-change arbitration (the
-/// companion declares its `app_bundle` so the daemon can arbitrate).
+/// hold until release / disconnect / app-change arbitration.
 public enum GatewayToBridgeAuthorityMsg: Codable, Sendable {
 	case claim(AuthorityClaim)
 	case release(AuthorityRelease)
@@ -6164,6 +6213,7 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 	case favoritesContainsReply(FavoritesContainsReply)
 	case libraryErrorReply(LibraryErrorReply)
 	case favoriteChanged(FavoriteChanged)
+	case libraryChanged(LibraryChanged)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case browseReply,
@@ -6173,7 +6223,8 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			favoritesListReply,
 			favoritesContainsReply,
 			libraryErrorReply,
-			favoriteChanged
+			favoriteChanged,
+			libraryChanged
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6224,6 +6275,11 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 					self = .favoriteChanged(content)
 					return
 				}
+			case .libraryChanged:
+				if let content = try? container.decode(LibraryChanged.self, forKey: .data) {
+					self = .libraryChanged(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeLibraryMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeLibraryMsg"))
@@ -6255,6 +6311,9 @@ public enum GatewayToBridgeLibraryMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .favoriteChanged(let content):
 			try container.encode(CodingKeys.favoriteChanged, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .libraryChanged(let content):
+			try container.encode(CodingKeys.libraryChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -6643,6 +6702,9 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	case logsTail(LogsTail)
 	case logsSubscribe(LogsSubscribe)
 	case logsUnsubscribe(LogsUnsubscribe)
+	/// proof-of-life reply to a `BridgeToGatewaySystemMsg::Keepalive`; an unanswered run flags a wedged
+	/// ea session (link up, app not draining) that no disconnect would surface
+	case keepaliveAck(KeepaliveAck)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case otaBegin,
@@ -6655,7 +6717,8 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			deviceSetNickname,
 			logsTail,
 			logsSubscribe,
-			logsUnsubscribe
+			logsUnsubscribe,
+			keepaliveAck
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6717,6 +6780,11 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 					self = .logsUnsubscribe(content)
 					return
 				}
+			case .keepaliveAck:
+				if let content = try? container.decode(KeepaliveAck.self, forKey: .data) {
+					self = .keepaliveAck(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeSystemMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeSystemMsg"))
@@ -6755,6 +6823,9 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .logsUnsubscribe(let content):
 			try container.encode(CodingKeys.logsUnsubscribe, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .keepaliveAck(let content):
+			try container.encode(CodingKeys.keepaliveAck, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}

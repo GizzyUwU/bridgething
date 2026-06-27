@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import dev.bridgething.gateway.Adapter
 import dev.bridgething.gateway.AssetRequestHandle
 import dev.bridgething.gateway.BridgethingGateway
+import dev.bridgething.gateway.Compression
 import dev.bridgething.gateway.GatewayEvent
 import dev.bridgething.gateway.LyricsRequestHandle
 import dev.bridgething.gateway.RequestResult
@@ -24,6 +25,7 @@ import dev.bridgething.gateway.webapp
 import dev.bridgething.glue.AssetBytes
 import dev.bridgething.glue.BridgethingGlue
 import dev.bridgething.glue.GlueNowPlaying
+import dev.bridgething.glue.NowPlayingTransport
 import dev.bridgething.lyrics.Lyrics as DomainLyrics
 import dev.bridgething.lyrics.LyricsResolver
 import dev.bridgething.lyrics.TrackIdentity
@@ -41,6 +43,7 @@ import dev.bridgething.schema.BridgeToGatewayPlayerMsg
 import dev.bridgething.schema.CompanionAuthorityScope
 import dev.bridgething.schema.GatewayCapabilities
 import dev.bridgething.schema.GatewayInfo
+import dev.bridgething.schema.KeepaliveAck
 import dev.bridgething.schema.LogEntry
 import dev.bridgething.schema.LogLevel
 import dev.bridgething.schema.LogSource
@@ -130,7 +133,7 @@ public data class HostInfo(
  */
 public data class CompanionCapabilityFlags(
     val geo: Boolean = true,
-    val notifications: Boolean = false,
+    val notifications: Boolean = true,
     val netFetch: Boolean = true,
     val netWs: Boolean = true,
     val audioTts: Boolean = true,
@@ -161,8 +164,9 @@ public class BridgethingCompanion(
     geo: GeoSource = GeoController(context = context.applicationContext),
     volume: VolumeSource = VolumeMonitor(context = context.applicationContext),
     audio: AudioBackend = AndroidAudioBackend(context = context.applicationContext),
-    notificationActions: NotificationActionBackend = NoOpNotificationActionBackend,
+    notifications: NotificationBackend = NoOpNotificationBackend,
     phone: PhoneBackend = NoOpPhoneBackend,
+    mediaSessions: MediaSessionGateway = NoOpMediaSessionGateway,
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
@@ -178,9 +182,13 @@ public class BridgethingCompanion(
     private val tunnelDispatcher = TunnelDispatcher()
     private val audioDispatcher = AudioDispatcher(backend = audio)
     private val phoneDispatcher = PhoneDispatcher(backend = phone)
-    private val notificationActions: NotificationActionBackend = notificationActions
+    @Volatile private var notificationsEnabled: Boolean = capabilities.notifications
+    private val notificationDispatcher = NotificationDispatcher(notifications) { notificationsEnabled }
     private val geoController: GeoSource = geo
     private val volumeMonitor: VolumeSource = volume
+    private val nowPlayingHub = NowPlayingHub(gateway)
+    @Volatile private var activeAppBundles: Set<String> = emptySet()
+    private val systemMediaSource = SystemMediaSource(mediaSessions, nowPlayingHub) { activeAppBundles }
 
     private val supervisor: CompletableJob = SupervisorJob()
     private val scope = CoroutineScope(supervisor + Dispatchers.Default + CoroutineName("bridgething-companion"))
@@ -243,6 +251,8 @@ public class BridgethingCompanion(
             started = false
         }
         for (job in toCancel) job.cancel()
+        systemMediaSource.stop()
+        nowPlayingHub.stop()
 
         deviceLogMutex.withLock {
             deviceLogJob?.cancel()
@@ -266,6 +276,7 @@ public class BridgethingCompanion(
         runCatching { tunnelDispatcher.stop() }
         runCatching { audioDispatcher.stop() }
         runCatching { phoneDispatcher.stop() }
+        runCatching { notificationDispatcher.stop() }
         runCatching { ota.stop() }
         runCatching { catalog.stop() }
 
@@ -283,13 +294,18 @@ public class BridgethingCompanion(
         }
         if (previous != null) {
             log(CompanionLogLevel.Info, "detaching glue ${previous.name}")
+            nowPlayingHub.unregister(previous.name)
             runCatching { previous.detach() }
+            runCatching { previous.setNowPlayingSink(null) }
             nowPlayingObserver?.invoke(null)
         }
+        activeAppBundles = glue?.appBundles?.toSet() ?: emptySet()
         if (glue != null) {
             nowPlayingObserver?.let { glue.setNowPlayingObserver(it) }
+            glue.setNowPlayingSink(nowPlayingHub)
             try {
                 glue.attach(gateway)
+                nowPlayingHub.register(glue.name, glue)
                 log(CompanionLogLevel.Info, "attached glue ${glue.name}")
             } catch (e: Throwable) {
                 log(CompanionLogLevel.Error, "glue ${glue.name} attach failed: ${e.message ?: e.toString()}")
@@ -301,8 +317,18 @@ public class BridgethingCompanion(
 
     public fun current(): BridgethingGlue? = activeGlue
 
+    /**
+     * Re-attach the system-media observer after a notification-access grant. The active-sessions listener
+     * cannot register before the grant, so the host calls this once access lands (e.g. on the
+     * NotificationListenerService binding) to start surfacing foreign-app now-playing.
+     */
+    public fun refreshSystemMedia() {
+        systemMediaSource.refresh()
+    }
+
     public suspend fun setCapabilityFlags(flags: CompanionCapabilityFlags) {
         stateMutex.withLock { capFlags = flags }
+        notificationsEnabled = flags.notifications
         announceCapabilities()
     }
 
@@ -423,13 +449,17 @@ public class BridgethingCompanion(
     }
 
     private fun spawnDispatchers() {
+        nowPlayingHub.start(scope)
+        nowPlayingHub.register(SystemMediaSource.SOURCE_ID, systemMediaSource)
+        systemMediaSource.start()
         dispatchers.add(scope.launch { runConnectAnnouncer() })
+        dispatchers.add(scope.launch { runKeepaliveResponder() })
         dispatchers.add(scope.launch { runPlayerDispatch() })
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })
         dispatchers.add(scope.launch { runAncsAuthDispatch() })
         dispatchers.add(scope.launch { runWebappProfileDispatch() })
-        dispatchers.add(scope.launch { runNotificationInvokeDispatch() })
+        dispatchers.add(scope.launch { notificationDispatcher.start(gateway) })
         dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
         dispatchers.add(scope.launch { tunnelDispatcher.start(gateway) })
@@ -438,6 +468,12 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { ota.start(gateway) })
         dispatchers.add(scope.launch { catalog.start(gateway) })
         dispatchers.add(scope.launch { geoController.start(gateway) })
+    }
+
+    private suspend fun runKeepaliveResponder() {
+        gateway.system.keepaliveRequests.collect { (handle, req) ->
+            handle.respond(KeepaliveAck(seq = req.seq))
+        }
     }
 
     private suspend fun runWebappProfileDispatch() {
@@ -456,7 +492,9 @@ public class BridgethingCompanion(
                     announceCapabilities()
                     emitTimeSnapshot()
                     activeGlue?.handlePeerConnected()
+                    nowPlayingHub.onConnect()
                     phoneDispatcher.announce(gateway)
+                    notificationDispatcher.replay(gateway, event.device.id)
                     val subscribe = deviceLogMutex.withLock {
                         connectedDeviceIds.add(event.device.id)
                         deviceLogStreaming
@@ -477,7 +515,6 @@ public class BridgethingCompanion(
         }
     }
 
-    // the device has no battery-backed RTC; the companion is the wall-clock authority.
     private suspend fun emitTimeSnapshot() {
         runCatching { gateway.time.snapshot(currentTimeInfo()) }
     }
@@ -499,26 +536,29 @@ public class BridgethingCompanion(
         gateway.events.collect { event ->
             if (event !is GatewayEvent.Message) return@collect
             val data = event.message.data as? BridgeToGatewayMsgData.Player ?: return@collect
-            val glue = activeGlue ?: return@collect
-            scope.launch { dispatchPlayer(data.data, glue) }
+            scope.launch { dispatchPlayer(data.data) }
         }
     }
 
-    private suspend fun dispatchPlayer(player: BridgeToGatewayPlayerMsg, glue: BridgethingGlue) {
+    private suspend fun dispatchPlayer(player: BridgeToGatewayPlayerMsg) {
+        val glue = activeGlue
+        val transport: NowPlayingTransport? = nowPlayingHub.currentTransport() ?: glue
         try {
             when (player) {
-                is BridgeToGatewayPlayerMsg.Play -> glue.play(player.data)
-                is BridgeToGatewayPlayerMsg.Queue -> glue.queue(player.data)
-                BridgeToGatewayPlayerMsg.Pause -> glue.pause()
-                BridgeToGatewayPlayerMsg.Resume -> glue.resume()
-                BridgeToGatewayPlayerMsg.SkipNext -> glue.skipNext()
-                BridgeToGatewayPlayerMsg.SkipPrev -> glue.skipPrev()
-                is BridgeToGatewayPlayerMsg.SkipToIndex -> glue.skipToIndex(player.data.index)
-                is BridgeToGatewayPlayerMsg.SeekTo -> glue.seekTo(player.data.positionMs)
-                is BridgeToGatewayPlayerMsg.SetShuffle -> glue.setShuffle(player.data.on)
-                is BridgeToGatewayPlayerMsg.SetRepeat -> glue.setRepeat(player.data.mode)
-                is BridgeToGatewayPlayerMsg.SetSpeed -> glue.setSpeed(player.data.speed)
-                is BridgeToGatewayPlayerMsg.SetCrossfade -> glue.setCrossfade(player.data.durationMs)
+                is BridgeToGatewayPlayerMsg.Play ->
+                    if (glue != null) glue.play(player.data) else log(CompanionLogLevel.Warn, "play dropped: no music provider")
+                is BridgeToGatewayPlayerMsg.Queue ->
+                    if (glue != null) glue.queue(player.data) else log(CompanionLogLevel.Warn, "queue dropped: no music provider")
+                BridgeToGatewayPlayerMsg.Pause -> transport?.pause()
+                BridgeToGatewayPlayerMsg.Resume -> transport?.resume()
+                BridgeToGatewayPlayerMsg.SkipNext -> transport?.skipNext()
+                BridgeToGatewayPlayerMsg.SkipPrev -> transport?.skipPrev()
+                is BridgeToGatewayPlayerMsg.SkipToIndex -> transport?.skipToIndex(player.data.index)
+                is BridgeToGatewayPlayerMsg.SeekTo -> transport?.seekTo(player.data.positionMs)
+                is BridgeToGatewayPlayerMsg.SetShuffle -> transport?.setShuffle(player.data.on)
+                is BridgeToGatewayPlayerMsg.SetRepeat -> transport?.setRepeat(player.data.mode)
+                is BridgeToGatewayPlayerMsg.SetSpeed -> transport?.setSpeed(player.data.speed)
+                is BridgeToGatewayPlayerMsg.SetCrossfade -> transport?.setCrossfade(player.data.durationMs)
             }
         } catch (e: Throwable) {
             log(CompanionLogLevel.Warn, "player verb $player failed: ${e.message ?: e.toString()}")
@@ -612,12 +652,6 @@ public class BridgethingCompanion(
         }
     }
 
-    // iOS routes notification actions over ANCS, so this path is Android-only.
-    private suspend fun runNotificationInvokeDispatch(): Unit = coroutineScope {
-        launch { gateway.notifications.invokePositive.collect { (_, msg) -> launch { notificationActions.invokePositive(msg.id) } } }
-        launch { gateway.notifications.invokeNegative.collect { (_, msg) -> launch { notificationActions.invokeNegative(msg.id) } } }
-    }
-
     // MARK: - library dispatch
 
     private suspend fun runLibraryDispatch(): Unit = coroutineScope {
@@ -640,7 +674,14 @@ public class BridgethingCompanion(
             respondLibraryError(e, { runCatching { handle.respondProtocolErr(it) } }, { runCatching { handle.respondErr(it) } })
             return
         }
-        runCatching { handle.respond(BrowseReply(result)) }
+        val isRoot = req.nodeId == null || req.nodeId == "" || req.nodeId == "root"
+        runCatching {
+            if (isRoot) {
+                handle.respond(BrowseReply(result), priority = Priority.Bulk, compression = Compression.GZIP)
+            } else {
+                handle.respond(BrowseReply(result))
+            }
+        }
     }
 
     private suspend fun handleResolveContext(handle: LibraryResolveContextRequestHandle, req: LibraryResolveContextRequest) {

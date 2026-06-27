@@ -18,8 +18,6 @@ public protocol AudioBackend: Sendable {
 }
 
 #if canImport(AVFoundation)
-    /// volume is a no-op on ios: the car head unit drives volume through AMS, not the gateway surface.
-    /// `AVSpeechSynthesizer` has no per-utterance cancel, so cancel(id:) and cancelAll() both stop current speech.
     public final class AvAudioBackend: AudioBackend, @unchecked Sendable {
         private let synth = AVSpeechSynthesizer()
         private let delegate = SpeechDelegate()
@@ -50,10 +48,17 @@ public protocol AudioBackend: Sendable {
             if let voice {
                 utterance.voice = AVSpeechSynthesisVoice(identifier: voice) ?? AVSpeechSynthesisVoice(language: voice)
             }
+            let deadline = Self.speakDeadline(for: text)
             return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                delegate.register(utterance, onStart: onStart) { completed in cont.resume(returning: completed) }
+                delegate.register(utterance, deadlineNanos: deadline, onStart: onStart) { completed in cont.resume(returning: completed) }
                 synth.speak(utterance)
             }
+        }
+
+        private static func speakDeadline(for text: String) -> UInt64 {
+            let perChar = 0.12
+            let seconds = max(15.0, Double(text.count) * perChar + 10.0)
+            return UInt64(seconds * 1_000_000_000)
         }
 
         public func cancel(id: UUID) async {
@@ -79,7 +84,7 @@ public protocol AudioBackend: Sendable {
         }
     }
 
-    private final class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    final class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
         private struct Entry {
             let onStart: @Sendable () -> Void
             let onFinish: @Sendable (Bool) -> Void
@@ -87,14 +92,23 @@ public protocol AudioBackend: Sendable {
 
         private let lock = NSLock()
         private var entries: [ObjectIdentifier: Entry] = [:]
+        private var watchdogs: [ObjectIdentifier: Task<Void, Never>] = [:]
 
         func register(
             _ utterance: AVSpeechUtterance,
+            deadlineNanos: UInt64 = 0,
             onStart: @escaping @Sendable () -> Void,
             onFinish: @escaping @Sendable (Bool) -> Void
         ) {
+            let key = ObjectIdentifier(utterance)
             lock.lock()
-            entries[ObjectIdentifier(utterance)] = Entry(onStart: onStart, onFinish: onFinish)
+            entries[key] = Entry(onStart: onStart, onFinish: onFinish)
+            if deadlineNanos > 0 {
+                watchdogs[key] = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: deadlineNanos)
+                    self?.resolve(key, completed: false)
+                }
+            }
             lock.unlock()
         }
 
@@ -106,16 +120,17 @@ public protocol AudioBackend: Sendable {
         }
 
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-            finish(utterance, completed: true)
+            resolve(ObjectIdentifier(utterance), completed: true)
         }
 
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-            finish(utterance, completed: false)
+            resolve(ObjectIdentifier(utterance), completed: false)
         }
 
-        private func finish(_ utterance: AVSpeechUtterance, completed: Bool) {
+        func resolve(_ key: ObjectIdentifier, completed: Bool) {
             lock.lock()
-            let entry = entries.removeValue(forKey: ObjectIdentifier(utterance))
+            let entry = entries.removeValue(forKey: key)
+            watchdogs.removeValue(forKey: key)?.cancel()
             lock.unlock()
             entry?.onFinish(completed)
         }

@@ -42,7 +42,6 @@ import {
   useSession,
   waitForPeer,
 } from '../lib/session';
-import { cancelSignIn, signIn as signInSpotify } from '../lib/spotify-auth';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
@@ -111,8 +110,7 @@ export function SetupScreen({ navigation, route }: Props) {
     if (busyProviderId || !provider.available) return;
     setBusyProviderId(provider.id);
     try {
-      if (provider.id === 'spotify') await signInSpotify();
-      else await session.setActiveProvider(provider.id);
+      await session.setActiveProvider(provider.id);
     } catch {
       // failures surface via authState
     } finally {
@@ -121,7 +119,7 @@ export function SetupScreen({ navigation, route }: Props) {
   };
 
   const cancelAuth = () => {
-    cancelSignIn();
+    void session.cancelAuth();
     setBusyProviderId(null);
   };
 

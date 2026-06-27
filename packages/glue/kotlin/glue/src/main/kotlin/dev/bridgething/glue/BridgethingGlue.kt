@@ -15,10 +15,7 @@ import dev.bridgething.schema.LibraryRecommendationsRequest
 import dev.bridgething.schema.LibrarySearchRequest
 import dev.bridgething.schema.MusicProvider
 import dev.bridgething.schema.NowPlayingUpdate
-import dev.bridgething.schema.PlayUri
-import dev.bridgething.schema.QueueUri
 import dev.bridgething.schema.RecommendationsResult
-import dev.bridgething.schema.RepeatMode
 import dev.bridgething.schema.SearchResult
 
 /**
@@ -26,15 +23,17 @@ import dev.bridgething.schema.SearchResult
  *
  * Lifecycle-managed by `BridgethingCompanion`: `attach(gateway)` is called
  * after the gateway is running; inbound player verbs / asset / lyrics requests
- * are dispatched to the corresponding methods. Outbound events (NowPlayingUpdate
- * deltas, authority claim/release) are the glue's own responsibility.
+ * are dispatched to the corresponding methods. Outbound now-playing is produced
+ * by pushing snapshots/queue to the [NowPlayingSink] the companion injects via
+ * [setNowPlayingSink]; the companion's hub is the sole emitter + authority
+ * arbiter, so a glue never calls `gateway.player`/`gateway.authority` directly.
  *
  * Glues contribute `uriSchemes`, `musicProvider`, and `lyricsSupported`;
  * other capabilities (geo, net, audioTts, ...) are companion-level.
  * Default impls throw [GlueError.NotImplemented]; concrete glues override
  * what they support.
  */
-interface BridgethingGlue {
+interface BridgethingGlue : NowPlayingTransport {
     val name: String
     val displayName: String
     val capabilities: Set<GlueCapability>
@@ -42,21 +41,10 @@ interface BridgethingGlue {
     val musicProvider: MusicProvider
     val lyricsSupported: Boolean
 
+    val appBundles: List<String> get() = emptyList()
+
     suspend fun attach(gateway: BridgethingGateway)
     suspend fun detach()
-
-    suspend fun play(uri: PlayUri): Unit = throw GlueError.NotImplemented
-    suspend fun pause(): Unit = throw GlueError.NotImplemented
-    suspend fun resume(): Unit = throw GlueError.NotImplemented
-    suspend fun skipNext(): Unit = throw GlueError.NotImplemented
-    suspend fun skipPrev(): Unit = throw GlueError.NotImplemented
-    suspend fun skipToIndex(index: UInt): Unit = throw GlueError.NotImplemented
-    suspend fun seekTo(positionMs: UInt): Unit = throw GlueError.NotImplemented
-    suspend fun queue(req: QueueUri): Unit = throw GlueError.NotImplemented
-    suspend fun setShuffle(on: Boolean): Unit = throw GlueError.NotImplemented
-    suspend fun setRepeat(mode: RepeatMode): Unit = throw GlueError.NotImplemented
-    suspend fun setSpeed(speed: Float): Unit = throw GlueError.NotImplemented
-    suspend fun setCrossfade(durationMs: UInt?): Unit = throw GlueError.NotImplemented
 
     // Library surface. Default impls throw NotImplemented; the companion maps that to a
     // protocol `Unimplemented` reply (recognized verb, no backend) vs a domain LibraryError.
@@ -85,12 +73,19 @@ interface BridgethingGlue {
 
     /**
      * Subscribe to NowPlaying mirror updates. The active glue invokes the
-     * observer with deltas alongside its outbound `gateway.player.delta`
-     * events; the companion forwards these to the phone-side UI shell.
-     * `null` means "nothing playing / source went away". Default impl is
-     * no-op for stub glues.
+     * observer with deltas alongside its outbound now-playing snapshots; the
+     * companion forwards these to the phone-side UI shell. `null` means
+     * "nothing playing / source went away". Default impl is no-op for stub glues.
      */
     suspend fun setNowPlayingObserver(observer: (GlueNowPlaying?) -> Unit) {}
+
+    /**
+     * The companion injects the hub sink here before [attach]; `null` on detach.
+     * Glues that produce now-playing push snapshots/queue to it instead of
+     * calling the gateway, so the hub stays the sole emitter + authority
+     * arbiter (the daemon cannot arbitrate two companion sources). Default no-op.
+     */
+    suspend fun setNowPlayingSink(sink: NowPlayingSink?) {}
 
     /**
      * Set the art render sizes (hero / thumb px) the active webapp declares, so the

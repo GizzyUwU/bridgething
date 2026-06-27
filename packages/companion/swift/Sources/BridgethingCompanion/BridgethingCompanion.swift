@@ -96,9 +96,7 @@ public actor BridgethingCompanion {
         private let geoController: GeoController
     #endif
     #if os(iOS)
-        private let volumeMonitor: VolumeMonitor
         private let audioKeepAlive = BackgroundAudioKeepAlive()
-        private var connectedPeerCount = 0
     #endif
 
     public init(
@@ -125,9 +123,6 @@ public actor BridgethingCompanion {
         #if canImport(CoreLocation)
             geoController = GeoController(provider: geoProvider)
         #endif
-        #if os(iOS)
-            volumeMonitor = VolumeMonitor()
-        #endif
     }
 
     public func start() async throws {
@@ -151,15 +146,6 @@ public actor BridgethingCompanion {
             }
         #endif
 
-        #if os(iOS)
-            await volumeMonitor.start { [weak self] level, muted in
-                Task { await self?.broadcastVolume(level: level, muted: muted) }
-            }
-            if let snapshot = await volumeMonitor.snapshot() {
-                await broadcastVolume(level: snapshot.level, muted: snapshot.muted)
-                try? await gateway.authority.claim(AuthorityClaim(scope: .volume, appBundle: nil))
-            }
-        #endif
     }
 
     public func stop() async {
@@ -175,10 +161,7 @@ public actor BridgethingCompanion {
         deviceLogStreaming = false
 
         #if os(iOS)
-            await volumeMonitor.stop()
             await audioKeepAlive.deactivate()
-            connectedPeerCount = 0
-            try? await gateway.authority.release(AuthorityRelease(scope: .volume))
         #endif
         #if canImport(CoreLocation)
             await geoController.stop()
@@ -444,6 +427,7 @@ public actor BridgethingCompanion {
 
     private func spawnDispatchers() {
         tasks.append(Task { [weak self] in await self?.runConnectAnnouncer() })
+        tasks.append(Task { [weak self] in await self?.runKeepaliveResponder() })
         #if os(iOS)
             tasks.append(Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(
@@ -493,6 +477,7 @@ public actor BridgethingCompanion {
             switch event {
             case let .connected(device):
                 log(.info, "peer connected: \(device.name) [\(device.id)]")
+                let wasEmpty = connectedDeviceIds.isEmpty
                 connectedDeviceIds.insert(device.id)
                 if deviceLogStreaming { await subscribeDeviceLogs(device.id) }
                 await announceCapabilities()
@@ -500,24 +485,33 @@ public actor BridgethingCompanion {
                 await activeGlue?.handlePeerConnected()
                 #if os(iOS)
                     await reestablishAncsLink()
-                    connectedPeerCount += 1
-                    if connectedPeerCount == 1 { await audioKeepAlive.activate() }
+                    if wasEmpty { await audioKeepAlive.activate() }
                 #endif
             case let .disconnected(id):
-                log(.info, "peer disconnected: \(id)")
-                connectedDeviceIds.remove(id)
-                deviceLogTokens.removeValue(forKey: id)
-                #if os(iOS)
-                    connectedPeerCount = max(0, connectedPeerCount - 1)
-                    if connectedPeerCount == 0 { await audioKeepAlive.deactivate() }
-                #endif
+                await handlePeerGone(id, reason: "disconnected")
             case let .linkFailed(device, reason):
                 log(.warn, "peer link failed: \(device.name) [\(device.id)]: \(reason)")
+                await handlePeerGone(device.id, reason: "linkFailed")
             case let .decodeError(id, description):
                 log(.warn, "[\(id)] decode error: \(description)")
             case .message:
                 continue
             }
+        }
+    }
+
+    private func handlePeerGone(_ id: String, reason: String) async {
+        guard connectedDeviceIds.remove(id) != nil else { return }
+        log(.info, "peer gone (\(reason)): \(id)")
+        deviceLogTokens.removeValue(forKey: id)
+        #if os(iOS)
+            if connectedDeviceIds.isEmpty { await audioKeepAlive.deactivate() }
+        #endif
+    }
+
+    private func runKeepaliveResponder() async {
+        for await (handle, req) in gateway.system.keepaliveRequests {
+            try? await handle.respond(KeepaliveAck(seq: req.seq))
         }
     }
 
@@ -660,7 +654,12 @@ public actor BridgethingCompanion {
                     try? await handle.respondErr(LibraryErrorReply(error: Self.noProvider)); return
                 }
                 do {
-                    try await handle.respond(BrowseReply(result: glue.browse(req)))
+                    let isRoot = req.nodeId == nil || req.nodeId == "" || req.nodeId == "root"
+                    try await handle.respond(
+                        BrowseReply(result: glue.browse(req)),
+                        priority: isRoot ? .bulk : nil,
+                        compression: isRoot ? .gzip : nil
+                    )
                 } catch {
                     await Self.failLibrary(error, onProtocol: { try? await handle.respondProtocolErr($0) }, onDomain: { try? await handle.respondErr($0) })
                 }
@@ -845,11 +844,6 @@ public actor BridgethingCompanion {
         try? await handle.respond(LyricsReply(lyrics: wire))
     }
 
-    private func broadcastVolume(level: Float, muted: Bool) async {
-        try? await gateway.audio.volumeChanged(VolumeChanged(level: level, muted: muted))
-    }
-
-    // the device has no battery-backed RTC; the companion is the wall-clock authority.
     private func emitTimeSnapshot() async {
         try? await gateway.time.snapshot(Self.currentTimeInfo())
     }

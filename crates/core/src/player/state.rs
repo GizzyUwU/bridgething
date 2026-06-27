@@ -43,7 +43,8 @@ pub struct PlayerState {
 
   companion_queue: Vec<QueueItem>,
   recently_played: Vec<QueueItem>,
-  recently_played_gen: u64,
+  home_recents: Vec<QueueItem>,
+  root_browse_gen: u64,
 
   present_ids: HashSet<String>,
 
@@ -57,6 +58,7 @@ pub struct PlayerState {
 struct TransportIntent {
   playing: bool,
   expires: Instant,
+  mismatches: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +90,8 @@ impl PlayerState {
 
       companion_queue: Vec::new(),
       recently_played: Vec::new(),
-      recently_played_gen: 0,
+      home_recents: Vec::new(),
+      root_browse_gen: 0,
 
       present_ids: HashSet::new(),
 
@@ -119,8 +122,12 @@ impl PlayerState {
     self.authority.is_authoritative(scope) && !self.iap2_foreground_is_other_app()
   }
 
+  pub(crate) fn companion_playback_authoritative(&self) -> bool {
+    self.companion_now_playing_authoritative(CompanionAuthorityScope::NowPlayingPlayback)
+  }
+
   fn iap2_foreground_is_other_app(&self) -> bool {
-    let Some(iap2) = self.iap2_playback.app_bundle.as_deref() else {
+    let Some(iap2) = self.iap2_playback.app_bundle.as_deref().filter(|b| !b.is_empty()) else {
       return false;
     };
     match self.authority.companion_app_bundle() {
@@ -136,6 +143,7 @@ impl PlayerState {
     self.transport_intent = Some(TransportIntent {
       playing,
       expires: Instant::now() + TRANSPORT_INTENT_WINDOW,
+      mismatches: 0,
     });
   }
 
@@ -188,22 +196,38 @@ impl PlayerState {
 
   pub(crate) fn note_rolled_off(&mut self, outgoing: QueueItem, played_ms: usize) {
     if self.recently_played.first().map(|q| &q.uri) != Some(&outgoing.uri) {
-      self.recently_played.insert(0, outgoing);
+      self.recently_played.insert(0, outgoing.clone());
       self.recently_played.truncate(RECENTLY_PLAYED_CAP);
     }
-    if played_ms >= RECENTLY_PLAYED_MIN_MS {
-      self.recently_played_gen = self.recently_played_gen.wrapping_add(1);
+    if played_ms >= RECENTLY_PLAYED_MIN_MS && self.home_recents.first().map(|q| &q.uri) != Some(&outgoing.uri) {
+      self.home_recents.insert(0, outgoing);
+      self.home_recents.truncate(RECENTLY_PLAYED_CAP);
     }
   }
 
-  pub(crate) fn recently_played_gen(&self) -> u64 {
-    self.recently_played_gen
+  pub(crate) fn home_recents(&self) -> Vec<QueueItem> {
+    self.home_recents.clone()
+  }
+
+  pub(crate) fn root_browse_gen(&self) -> u64 {
+    self.root_browse_gen
+  }
+
+  pub(crate) fn note_library_changed(&mut self) {
+    self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
   }
 
   pub(crate) fn reset_companion(&mut self) {
     self.companion_queue.clear();
     self.recently_played.clear();
-    self.recently_played_gen = self.recently_played_gen.wrapping_add(1);
+    self.home_recents.clear();
+    self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
+    self.companion_metadata = MediaItemUpdate::default();
+    self.companion_playback = PlaybackUpdate::default();
+    self.context = None;
+    let merged_meta = self.merged_metadata();
+    let merged_play = self.merged_playback();
+    self.apply_merged(merged_meta, merged_play);
   }
 
   pub(crate) fn apply_companion_snapshot(&mut self, snapshot: WirePlayerState) {
@@ -265,7 +289,22 @@ impl PlayerState {
   }
 
   pub(crate) fn apply_now_playing(&mut self, update: NowPlayingUpdate) {
-    let NowPlayingUpdate { media_item, playback } = update;
+    let NowPlayingUpdate {
+      mut media_item,
+      mut playback,
+    } = update;
+
+    if is_idle_sentinel(media_item.as_ref()) {
+      let duration = media_item.as_ref().and_then(|m| m.duration_ms).filter(|d| *d > 0);
+      playback = None;
+      media_item = duration.map(|d| MediaItemUpdate {
+        duration_ms: Some(d),
+        ..MediaItemUpdate::default()
+      });
+      if media_item.is_none() {
+        return;
+      }
+    }
 
     let meta_target = &mut self.iap2_metadata;
     let play_target = &mut self.iap2_playback;
@@ -465,7 +504,20 @@ impl PlayerState {
           self.transport_intent = None;
         }
         Some(_) => {
-          accept_position = false;
+          let sustained = self
+            .transport_intent
+            .as_mut()
+            .map(|i| {
+              i.mismatches = i.mismatches.saturating_add(1);
+              i.mismatches >= 2
+            })
+            .unwrap_or(true);
+          if sustained {
+            self.playing = playing;
+            self.transport_intent = None;
+          } else {
+            accept_position = false;
+          }
         }
         None => {
           self.playing = playing;
@@ -664,6 +716,15 @@ fn build_media_item(track: &Track, merged: &MediaItemUpdate, art_id: Option<Stri
     is_banned: merged.is_banned,
     chapter_count: merged.chapter_count,
   }
+}
+
+fn is_idle_sentinel(media: Option<&MediaItemUpdate>) -> bool {
+  media.is_some_and(|m| {
+    m.persistent_id
+      .as_deref()
+      .is_some_and(|p| p.ends_with("0000000000000000"))
+      && m.title.as_deref() == Some("")
+  })
 }
 
 fn accumulate_media(target: &mut MediaItemUpdate, src: MediaItemUpdate) {
@@ -913,8 +974,39 @@ mod tests {
   }
 
   #[test]
-  fn current_artwork_id_filters_idle_track() {
+  fn transport_gate_follows_the_audible_app() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    auth.set_companion_app_bundle(Some("com.spotify.client".to_string()));
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    assert!(
+      state.companion_playback_authoritative(),
+      "companion owns playback with no other foreground"
+    );
+
+    // a different iAP2 foreground app (the YouTube case) hands control to iAP2, not the companion.
+    state.apply_now_playing(iap2_app("vid", "Clip", "com.google.ios.youtube", true));
+    assert!(!state.companion_playback_authoritative());
+
+    // the iOS empty-bundle idle sentinel must not flap control away from the companion.
+    state.apply_now_playing(iap2_app("vid", "", "", true));
+    assert!(state.companion_playback_authoritative());
+
+    // Spotify foreground again restores companion control.
+    state.apply_now_playing(iap2_app("track:a", "A", "com.spotify.client", true));
+    assert!(state.companion_playback_authoritative());
+  }
+
+  #[test]
+  fn idle_sentinel_does_not_clobber_held_track_or_art() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(iap2_track("iap2:track:a", "Track A"));
+    state.apply_artwork_id("iap2/art/a/5".to_string());
+    assert_eq!(artwork_id_of(&state), Some("iap2/art/a/5".to_string()));
+
+    // the transient iOS idle sentinel (pid 0 + empty title) must not wipe the held track or art.
+    // iAP2 re-sends play-state only on a song change, so a clobber would not recover until the next
+    // track; ignoring the sentinel at ingest keeps the real now-playing stable across the blip.
     state.apply_now_playing(NowPlayingUpdate {
       media_item: Some(MediaItemUpdate {
         persistent_id: Some("iap2:track:0000000000000000".to_string()),
@@ -923,8 +1015,14 @@ mod tests {
       }),
       playback: None,
     });
-    state.apply_artwork_id("iap2/art/0000000000000000/1".to_string());
-    assert_eq!(state.current_artwork_id(), None);
+
+    assert_eq!(
+      artwork_id_of(&state),
+      Some("iap2/art/a/5".to_string()),
+      "idle sentinel must not wipe held iap2 art"
+    );
+    let track = state.replies().0.state.track.expect("held track preserved");
+    assert_eq!(track.persistent_id.as_deref(), Some("iap2:track:a"));
   }
 
   #[test]
@@ -958,6 +1056,73 @@ mod tests {
 
   fn media(state: &PlayerState) -> MediaItem {
     state.replies().0.state.track.expect("track present")
+  }
+
+  #[test]
+  fn idle_sentinel_real_duration_is_absorbed_into_held_track() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+
+    // a youtube-style source has no persistent id: iOS keys the title under a synthesized nonmusic id
+    // and that delta carries no duration.
+    state.apply_now_playing(iap2_track(
+      "iap2:track:nonmusic-57052159de5875d2",
+      "What Happened To All The Ads?",
+    ));
+    assert_eq!(media(&state).duration_ms, None, "title delta carries no duration");
+
+    // iOS rides the real duration on a zero-pid, empty-title sentinel-shaped delta. it must reach the
+    // held track (the stock webapp freezes its progress bar on a 0 duration) without resetting the
+    // track or clobbering the held title.
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:0000000000000000".to_string()),
+        title: Some(String::new()),
+        duration_ms: Some(1_044_700),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    });
+
+    let track = media(&state);
+    assert_eq!(
+      track.persistent_id.as_deref(),
+      Some("iap2:track:nonmusic-57052159de5875d2"),
+      "held track identity survives the sentinel"
+    );
+    assert_eq!(
+      track.title.as_deref(),
+      Some("What Happened To All The Ads?"),
+      "held title is not clobbered by the sentinel's empty title"
+    );
+    assert_eq!(
+      track.duration_ms,
+      Some(1_044_700),
+      "real duration carried on the zero-pid sentinel is absorbed into the held track"
+    );
+  }
+
+  #[test]
+  fn idle_sentinel_without_real_data_is_still_dropped() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(iap2_track("iap2:track:nonmusic-abc", "A Video"));
+
+    // a pure idle blip (zero pid, empty title, zero duration) carries nothing useful and must not
+    // disturb the held track.
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:0000000000000000".to_string()),
+        title: Some(String::new()),
+        duration_ms: Some(0),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    });
+
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("iap2:track:nonmusic-abc"),
+      "pure idle sentinel leaves the held track untouched"
+    );
   }
 
   #[test]
@@ -1213,34 +1378,129 @@ mod tests {
   }
 
   #[test]
-  fn recently_played_pushes_front_and_gates_home_gen_on_duration() {
+  fn rolled_off_feeds_queue_previous_always_and_home_recents_only_on_full_listens() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     let a = qitem("spotify:track:a", "A", "X", None, None);
     let b = qitem("spotify:track:b", "B", "X", None, None);
 
     state.note_rolled_off(a.clone(), 5_000);
+    // queue "previous" keeps every roll-off (navigation history).
     assert_eq!(state.recently_played, vec![a.clone()]);
-    assert_eq!(
-      state.recently_played_gen(),
-      0,
-      "a sub-30s play does not invalidate home"
-    );
+    // a sub-30s skip is not a listen, so it never reaches the home shelf...
+    assert!(state.home_recents().is_empty(), "a sub-30s skip is not a home listen");
+    // ...and a roll-off never invalidates the cached home (the overlay handles freshness).
+    assert_eq!(state.root_browse_gen(), 0, "a roll-off never bumps the home cache gen");
 
     state.note_rolled_off(b.clone(), 45_000);
-    assert_eq!(state.recently_played, vec![b, a], "most-recent-first");
-    assert_eq!(state.recently_played_gen(), 1, "a >=30s play invalidates home");
+    assert_eq!(state.recently_played, vec![b.clone(), a], "most-recent-first");
+    assert_eq!(state.home_recents(), vec![b], ">=30s play lands on the home shelf");
+    assert_eq!(state.root_browse_gen(), 0, "still no gen bump for a full listen");
   }
 
   #[test]
-  fn reset_companion_clears_queue_and_bumps_home_gen() {
+  fn reset_companion_clears_queue_and_recents_and_bumps_home_gen() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
     state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None), 45_000);
-    let before = state.recently_played_gen();
+    let before = state.root_browse_gen();
+    assert_eq!(state.home_recents().len(), 1);
 
     state.reset_companion();
     assert!(state.companion_queue.is_empty());
     assert!(state.recently_played.is_empty());
-    assert_eq!(state.recently_played_gen(), before + 1);
+    assert!(state.home_recents().is_empty());
+    assert_eq!(state.root_browse_gen(), before + 1);
+  }
+
+  #[test]
+  fn note_library_changed_bumps_home_gen_without_clearing_queue() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
+    state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None), 45_000);
+    let before = state.root_browse_gen();
+
+    state.note_library_changed();
+    assert_eq!(
+      state.root_browse_gen(),
+      before + 1,
+      "a phone-side library mutation invalidates the home cache"
+    );
+    assert!(
+      !state.companion_queue.is_empty(),
+      "a library change must not disturb the live queue"
+    );
+    assert_eq!(state.home_recents().len(), 1, "a library change must not clear recents");
+  }
+
+  #[test]
+  fn reset_companion_falls_back_to_iap2_view_immediately() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+
+    // an iap2-only track is the live fallback view.
+    state.apply_now_playing(iap2_track("iap2:track:fallback", "iAP2 Song"));
+
+    // the companion takes over and a different track is on-screen.
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(companion_snapshot(
+      "spotify:track:x",
+      "Spotify Song",
+      Some("img/x"),
+      true,
+    ));
+    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:y", "Y", "Z", None, None)]));
+    assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:x"));
+
+    // companion lost: authority dropped and reset_companion called, mirroring peer.rs companion_lost.
+    auth.drop_all();
+    state.reset_companion();
+
+    let m = media(&state);
+    assert_eq!(
+      m.persistent_id.as_deref(),
+      Some("iap2:track:fallback"),
+      "the forced post-disconnect broadcast reflects the iap2-only fallback, not the stale companion track"
+    );
+    assert_eq!(m.title.as_deref(), Some("iAP2 Song"));
+    let queue = state.replies().1;
+    assert!(queue.items.is_empty(), "the stale companion queue is cleared");
+  }
+
+  #[test]
+  fn sustained_transport_mismatch_accepts_source_play_state() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(playing_track("iap2:track:a", 1_000));
+
+    // user taps pause: optimistic paused state in flight.
+    state.set_transport_intent(false);
+    assert!(!state.playing);
+
+    // first delta still reports playing (stale, command not yet reflected): ride over the optimism.
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert!(
+      !state.playing,
+      "a single stale mismatch rides over the optimistic state"
+    );
+
+    // second delta still reports playing: the command failed phone-side, accept the source.
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert!(
+      state.playing,
+      "a sustained mismatch cancels the intent and accepts the source play state"
+    );
   }
 }

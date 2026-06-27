@@ -66,6 +66,7 @@ use tokio::{
 };
 
 use crate::{
+  asset::AssetCache,
   peer::PeerTracker,
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
@@ -127,6 +128,7 @@ impl OtaOrchestrator {
     peers: PeerTracker,
     installed_apply: InstalledWebappApply,
     sinks: TransferSinks,
+    assets: AssetCache,
   ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
     let actor = OtaActor {
@@ -137,6 +139,7 @@ impl OtaOrchestrator {
       peers,
       installed_apply,
       sinks,
+      assets,
       self_tx: cmd_tx.clone(),
       cmd_rx,
       state: OtaState::Idle,
@@ -218,6 +221,7 @@ struct OtaActor {
   peers: PeerTracker,
   installed_apply: InstalledWebappApply,
   sinks: TransferSinks,
+  assets: AssetCache,
   self_tx: mpsc::Sender<Command>,
   cmd_rx: mpsc::Receiver<Command>,
   state: OtaState,
@@ -344,6 +348,11 @@ impl OtaActor {
       }
     };
     let expected_size = req.transfer.total_size as u64;
+    if target_dir.is_none()
+      && let Err(err) = self.assets.reserve_disk(expected_size).await
+    {
+      tracing::warn!(?err, update_id = %req.update_id, "ota: asset cache reserve_disk failed; proceeding");
+    }
     let result = self
       .transfers
       .begin(req.update_id.clone(), expected_size, Some(expected_sha256), target_dir)
@@ -903,6 +912,8 @@ mod tests {
     });
     let peers = PeerTracker::noop();
     let sinks = TransferSinks::default();
+    let asset_db = crate::db::open(None).await.unwrap();
+    let (assets, _asset_handle) = AssetCache::init(asset_db, root.join("assets")).await.unwrap().spawn();
     let (ota, _ota_handle) = OtaOrchestrator::spawn(
       transfers,
       events_tx,
@@ -911,6 +922,7 @@ mod tests {
       peers,
       installed_apply,
       sinks.clone(),
+      assets,
     );
     Harness {
       ota,
@@ -965,7 +977,7 @@ mod tests {
       .expect("begin ok");
     assert_eq!(ack.resume_from_offset, 0);
 
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
 
     let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
       matches!(
@@ -999,7 +1011,7 @@ mod tests {
       .await
       .expect("begin ok");
 
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1032,7 +1044,7 @@ mod tests {
       )
       .await
       .expect("begin ok");
-    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes));
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1088,9 +1100,7 @@ mod tests {
       )
       .await
       .expect("first begin ok");
-    h.sinks
-      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
     // fragments ride the sink channel, cancel rides the command mailbox; let
     // the actor land the fragment before cancelling.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1115,9 +1125,7 @@ mod tests {
       .expect("resume begin ok");
     assert_eq!(ack.resume_from_offset, 10);
 
-    h.sinks
-      .fragment(tid_for(&sha), 10, Bytes::from(bytes[10..].to_vec()))
-      .await;
+    h.sinks.fragment(tid_for(&sha), 10, Bytes::from(bytes[10..].to_vec()));
     let _ = wait_for(&mut h.events, Duration::from_secs(10), |ev| {
       matches!(
         ev,
@@ -1147,7 +1155,7 @@ mod tests {
       )
       .await
       .unwrap();
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
     let _ = wait_for(
       &mut h.events,
       Duration::from_secs(5),
@@ -1195,9 +1203,7 @@ mod tests {
       )
       .await
       .unwrap();
-    h.sinks
-      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
     tokio::time::sleep(Duration::from_millis(200)).await;
     h.ota.abandon(sha.clone()).await;
     let ack = h
@@ -1285,7 +1291,7 @@ mod tests {
       )
       .await
       .expect("stage begin ok");
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
     wait_for(&mut h.events, Duration::from_secs(5), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaProgress(p) if p.phase == OtaPhase::Writing && p.percent == 100)
     })
@@ -1346,7 +1352,7 @@ mod tests {
       .await
       .expect("daemon begin ok");
 
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1380,7 +1386,7 @@ mod tests {
       )
       .await
       .expect("daemon begin ok");
-    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&bogus_sha), 0, Bytes::from(bytes));
 
     let err = wait_for(&mut h.events, Duration::from_secs(2), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))
@@ -1494,9 +1500,7 @@ mod tests {
       )
       .await
       .expect("daemon begin ok");
-    h.sinks
-      .fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()))
-      .await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
     tokio::time::sleep(Duration::from_millis(200)).await;
     h.ota.cancel().await;
 
@@ -1542,7 +1546,7 @@ mod tests {
       )
       .await
       .expect("installed-webapp begin ok");
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
 
     wait_for(
       &mut h.events,
@@ -1583,7 +1587,7 @@ mod tests {
       )
       .await
       .expect("installed-webapp begin ok");
-    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes)).await;
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes));
 
     let err = wait_for(&mut h.events, Duration::from_secs(5), |ev| {
       matches!(ev, BridgeToGatewaySystemMsgEvent::OtaError(_))

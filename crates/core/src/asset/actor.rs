@@ -1,5 +1,6 @@
 use std::{
   collections::{HashMap, HashSet},
+  os::unix::ffi::OsStrExt,
   path::{Path, PathBuf},
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +12,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::bytes::Bytes;
 
 use super::{
-  AssetError, CachedAsset, DISK_BUDGET_BYTES, MEMORY_BUDGET_BYTES, TTL_SWEEP_INTERVAL,
+  AssetError, CachedAsset, DISK_BUDGET_BYTES, DISK_FREE_HEADROOM_BYTES, MEMORY_BUDGET_BYTES, TTL_SWEEP_INTERVAL,
   storage::{AssetActiveModel, AssetColumn, AssetEntity},
 };
 
@@ -128,6 +129,10 @@ pub(super) enum Command {
   },
   ClearAll {
     ack: oneshot::Sender<Result<(), AssetError>>,
+  },
+  ReserveDisk {
+    need_bytes: u64,
+    ack: oneshot::Sender<()>,
   },
 }
 
@@ -318,6 +323,10 @@ impl AssetActor {
       Command::ClearAll { ack } => {
         let result = self.handle_clear_all().await;
         let _ = ack.send(result);
+      }
+      Command::ReserveDisk { need_bytes, ack } => {
+        self.reserve_disk(need_bytes).await;
+        let _ = ack.send(());
       }
     }
   }
@@ -623,18 +632,47 @@ impl AssetActor {
   }
 
   async fn evict_until_under_disk_budget(&mut self) {
-    while self.disk_byte_total > DISK_BUDGET_BYTES {
+    self.enforce_disk_limits(DISK_FREE_HEADROOM_BYTES as u64).await;
+  }
+
+  async fn reserve_disk(&mut self, need_bytes: u64) {
+    let floor = (DISK_FREE_HEADROOM_BYTES as u64).saturating_add(need_bytes);
+    self.enforce_disk_limits(floor).await;
+  }
+
+  async fn enforce_disk_limits(&mut self, min_free: u64) {
+    let mut free = partition_free_bytes(&self.blobs_dir);
+    while disk_over_limit(self.disk_byte_total as u64, free, DISK_BUDGET_BYTES as u64, min_free) {
       let Some(victim) = self.pick_disk_evictable_victim() else {
         break;
       };
+      let freed = self.entries.get(&victim).map_or(0, |e| e.byte_len) as u64;
       tracing::warn!(
         id = %victim,
         total = self.disk_byte_total,
+        free,
         budget = DISK_BUDGET_BYTES,
+        min_free,
         "asset cache: evicting disk asset under disk pressure"
       );
       self.evict_entry(&victim).await;
       let _ = self.events_tx.send(AssetCacheEvent::Cleared { id: victim });
+      free = free.saturating_add(freed);
+    }
+    while free < min_free {
+      let Some(victim) = self.pick_disk_pinned_victim() else {
+        break;
+      };
+      let freed = self.entries.get(&victim).map_or(0, |e| e.byte_len) as u64;
+      tracing::warn!(
+        id = %victim,
+        free,
+        min_free,
+        "asset cache: evicting pinned disk asset under emergency free-space pressure"
+      );
+      self.evict_entry(&victim).await;
+      let _ = self.events_tx.send(AssetCacheEvent::Cleared { id: victim });
+      free = free.saturating_add(freed);
     }
   }
 
@@ -673,12 +711,20 @@ impl AssetActor {
       .or_else(|| best_pinned.map(|(id, _)| id.to_string()))
   }
 
-  // oldest-accessed non-pinned disk entry; pinned presets survive budget pressure here.
   fn pick_disk_evictable_victim(&self) -> Option<String> {
     self
       .entries
       .iter()
       .filter(|(_, e)| matches!(e.storage, EntryStorage::Disk(_)) && !matches!(e.retention.lifetime, Lifetime::Pinned))
+      .min_by_key(|(_, e)| (e.accessed_at, e.lru_seq))
+      .map(|(id, _)| id.clone())
+  }
+
+  fn pick_disk_pinned_victim(&self) -> Option<String> {
+    self
+      .entries
+      .iter()
+      .filter(|(_, e)| matches!(e.storage, EntryStorage::Disk(_)) && matches!(e.retention.lifetime, Lifetime::Pinned))
       .min_by_key(|(_, e)| (e.accessed_at, e.lru_seq))
       .map(|(id, _)| id.clone())
   }
@@ -756,6 +802,24 @@ fn safe_blob_name(id: &str) -> String {
   let mut h = Sha256::new();
   h.update(id.as_bytes());
   hex::encode(h.finalize())
+}
+
+fn disk_over_limit(current_bytes: u64, free_bytes: u64, budget: u64, headroom: u64) -> bool {
+  current_bytes > budget || free_bytes < headroom
+}
+
+fn partition_free_bytes(path: &Path) -> u64 {
+  let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+    return u64::MAX;
+  };
+  // SAFETY: statvfs takes a NUL-terminated path and writes a POSIX struct into our
+  // stack allocation; both pointers are valid for the duration of the call.
+  let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+  let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+  if rc != 0 {
+    return u64::MAX;
+  }
+  (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
 }
 
 async fn rename_or_copy(source: &Path, dest: &Path) -> Result<(), AssetError> {
@@ -1146,5 +1210,68 @@ mod tests {
     // pinned presets are filtered out even when oldest, so the next victim is the remaining art.
     a.entries.get_mut("preset/0").unwrap().accessed_at = 1;
     assert_eq!(a.pick_disk_evictable_victim().as_deref(), Some("art/new"));
+  }
+
+  const MB: u64 = 1024 * 1024;
+
+  #[test]
+  fn disk_over_limit_trips_on_budget_alone() {
+    // ample free space, but the cache is past its soft byte budget.
+    assert!(disk_over_limit(600 * MB, 4096 * MB, 512 * MB, 128 * MB));
+  }
+
+  #[test]
+  fn disk_over_limit_trips_on_free_floor_alone() {
+    // cache is small, but the partition has dipped below the free-space floor.
+    assert!(disk_over_limit(10 * MB, 64 * MB, 512 * MB, 128 * MB));
+  }
+
+  #[test]
+  fn disk_over_limit_satisfied_when_under_budget_and_above_floor() {
+    assert!(!disk_over_limit(400 * MB, 256 * MB, 512 * MB, 128 * MB));
+    // exactly at the budget and exactly at the floor are both within limits.
+    assert!(!disk_over_limit(512 * MB, 128 * MB, 512 * MB, 128 * MB));
+  }
+
+  #[test]
+  fn disk_over_limit_models_reserve_floor() {
+    // reserve raises the floor to headroom + need; a partition that satisfies the
+    // bare headroom can still trip once the incoming download is accounted for.
+    let headroom = 128 * MB;
+    let need = 300 * MB;
+    let reserve_floor = headroom + need;
+    assert!(!disk_over_limit(50 * MB, 200 * MB, 512 * MB, headroom));
+    assert!(disk_over_limit(50 * MB, 200 * MB, 512 * MB, reserve_floor));
+  }
+
+  #[tokio::test]
+  async fn pinned_disk_victim_is_oldest_pinned_and_none_without_pins() {
+    let mut a = fresh().await;
+    assert!(a.pick_disk_pinned_victim().is_none());
+    a.handle_insert("art/lru".into(), Bytes::from_static(b"lru"), None, Retention::DISK_LRU)
+      .await
+      .unwrap();
+    // a disk cache holding only non-pinned art yields no pinned victim.
+    assert!(a.pick_disk_pinned_victim().is_none());
+    a.handle_insert(
+      "preset/a".into(),
+      Bytes::from_static(b"a"),
+      None,
+      Retention::DISK_PINNED,
+    )
+    .await
+    .unwrap();
+    a.handle_insert(
+      "preset/b".into(),
+      Bytes::from_static(b"b"),
+      None,
+      Retention::DISK_PINNED,
+    )
+    .await
+    .unwrap();
+    a.entries.get_mut("preset/a").unwrap().accessed_at = 5;
+    a.entries.get_mut("preset/b").unwrap().accessed_at = 50;
+    // oldest-accessed pinned entry is the emergency victim; lru art is never returned here.
+    assert_eq!(a.pick_disk_pinned_victim().as_deref(), Some("preset/a"));
   }
 }

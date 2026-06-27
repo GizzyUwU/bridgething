@@ -248,6 +248,9 @@
     private var bulkQueue: [Data] = []
     private var backgroundQueue: [Data] = []
     private var currentWrite = Data()
+    private var queuedBytes = 0
+    private let highWaterBytes = 4 << 20
+    private let hardCapBytes = 8 << 20
 
     private var inputOpen = false
     private var outputOpen = false
@@ -296,7 +299,20 @@
       case .bulk: bulkQueue.append(frame)
       case .background: backgroundQueue.append(frame)
       }
+      queuedBytes += frame.count
+      enforceBackpressure()
       drainOutput()
+    }
+
+    private func enforceBackpressure() {
+      while queuedBytes > highWaterBytes, !backgroundQueue.isEmpty || !bulkQueue.isEmpty {
+        let dropped = backgroundQueue.isEmpty ? bulkQueue.removeFirst() : backgroundQueue.removeFirst()
+        queuedBytes -= dropped.count
+      }
+      if queuedBytes > hardCapBytes {
+        eaLog.warning("ea writer backlog \(queuedBytes) bytes over hard cap for \(deviceId); dropping stalled link")
+        owner?.linkDropped(self, reason: "writer backlog exceeded")
+      }
     }
 
     private func drainOutput() {
@@ -324,6 +340,7 @@
         }
         if written <= 0 { break }
         currentWrite.removeSubrange(0 ..< written)
+        queuedBytes -= written
       }
     }
 

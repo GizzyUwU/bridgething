@@ -58,6 +58,9 @@ public class BluetoothSocketAdapter(
 
     private val mutex = Mutex()
     private val sessions = mutableMapOf<String, Session>()
+    private val devices = mutableMapOf<String, BluetoothDevice>()
+    private val reconnectJobs = mutableMapOf<String, Job>()
+    @Volatile private var stopped = false
 
     private val incomingEvents: Channel<AdapterEvent> = Channel(Channel.UNLIMITED)
     override val events: Flow<AdapterEvent> = incomingEvents.consumeAsFlow()
@@ -69,10 +72,14 @@ public class BluetoothSocketAdapter(
     }
 
     override suspend fun stop() {
+        stopped = true
         val toClose: List<Session>
         mutex.withLock {
             toClose = sessions.values.toList()
             sessions.clear()
+            devices.clear()
+            reconnectJobs.values.forEach { it.cancel() }
+            reconnectJobs.clear()
         }
         toClose.forEach { it.close() }
         incomingEvents.close()
@@ -80,10 +87,18 @@ public class BluetoothSocketAdapter(
     }
 
     override suspend fun disconnect(deviceId: String) {
-        val session = mutex.withLock { sessions.remove(deviceId) }
-            ?: throw AdapterException.UnknownDevice(deviceId)
+        val session = mutex.withLock {
+            devices.remove(deviceId)
+            reconnectJobs.remove(deviceId)?.cancel()
+            sessions.remove(deviceId)
+        } ?: throw AdapterException.UnknownDevice(deviceId)
         session.close()
         incomingEvents.send(AdapterEvent.Disconnected(deviceId))
+    }
+
+    override suspend fun reconnect(deviceId: String) {
+        val device = mutex.withLock { devices[deviceId] } ?: return
+        runCatching { connect(device) }
     }
 
     override suspend fun send(deviceId: String, frame: ByteArray) {
@@ -100,6 +115,11 @@ public class BluetoothSocketAdapter(
     @SuppressLint("MissingPermission")
     public suspend fun connect(device: BluetoothDevice): Device = withContext(Dispatchers.IO) {
         val deviceId = device.address
+        mutex.withLock {
+            devices[deviceId] = device
+            sessions[deviceId]
+        }?.let { return@withContext it.device }
+
         val deviceName = try {
             device.name ?: deviceId
         } catch (_: SecurityException) {
@@ -125,7 +145,18 @@ public class BluetoothSocketAdapter(
         }
 
         val session = Session(this@BluetoothSocketAdapter, info, socket)
-        mutex.withLock { sessions[deviceId] = session }
+        val installed = mutex.withLock {
+            if (sessions.containsKey(deviceId)) {
+                false
+            } else {
+                sessions[deviceId] = session
+                true
+            }
+        }
+        if (!installed) {
+            runCatching { socket.close() }
+            return@withContext mutex.withLock { sessions[deviceId] }?.device ?: info
+        }
         session.start()
         incomingEvents.send(AdapterEvent.Connected(info))
         info
@@ -135,13 +166,40 @@ public class BluetoothSocketAdapter(
         incomingEvents.send(AdapterEvent.Bytes(deviceId, bytes))
     }
 
-    internal suspend fun emitDisconnected(deviceId: String) {
-        mutex.withLock { sessions.remove(deviceId) }
+    internal suspend fun emitDisconnected(deviceId: String, session: Session) {
+        val device = mutex.withLock {
+            if (sessions[deviceId] !== session) return@withLock null
+            sessions.remove(deviceId)
+            devices[deviceId]
+        } ?: return
         incomingEvents.send(AdapterEvent.Disconnected(deviceId))
+        if (!stopped) scheduleReconnect(deviceId, device)
+    }
+
+    private suspend fun scheduleReconnect(deviceId: String, device: BluetoothDevice) {
+        val job = ioScope.launch {
+            var delayMs = RECONNECT_BASE_MS
+            while (isActive) {
+                if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
+                kotlinx.coroutines.delay(delayMs)
+                if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
+                if (runCatching { connect(device) }.isSuccess) return@launch
+                delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
+            }
+        }
+        mutex.withLock {
+            reconnectJobs.remove(deviceId)?.cancel()
+            reconnectJobs[deviceId] = job
+        }
+    }
+
+    private companion object {
+        const val RECONNECT_BASE_MS = 1_000L
+        const val RECONNECT_MAX_MS = 30_000L
     }
 }
 
-private class Session(
+internal class Session(
     val owner: BluetoothSocketAdapter,
     val device: Device,
     val socket: BluetoothSocket,
@@ -166,7 +224,7 @@ private class Session(
             } catch (_: IOException) {
                 // stream is dead; disconnect is routed in finally.
             } finally {
-                owner.emitDisconnected(device.id)
+                owner.emitDisconnected(device.id, this@Session)
                 runCatching { socket.close() }
             }
         }

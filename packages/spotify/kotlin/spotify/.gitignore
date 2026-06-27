@@ -1,0 +1,2 @@
+# .so built by `just spotify-android` (rust uniffi client; regenerated)
+/src/main/jniLibs/

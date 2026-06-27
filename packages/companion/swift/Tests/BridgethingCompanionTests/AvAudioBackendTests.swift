@@ -28,6 +28,17 @@ import XCTest
             await fulfillment(of: [done], timeout: 15)
             XCTAssertGreaterThan(collector.total, 0, "real TTS should render non-silent PCM frames")
         }
+
+        func testSpeechDelegateResolveFiresOnceUnderDoubleResolve() {
+            let delegate = SpeechDelegate()
+            let utterance = AVSpeechUtterance(string: "x")
+            let key = ObjectIdentifier(utterance)
+            let counter = FrameCounter()
+            delegate.register(utterance, onStart: {}) { _ in counter.add(1) }
+            delegate.resolve(key, completed: false)
+            delegate.resolve(key, completed: true)
+            XCTAssertEqual(counter.total, 1, "onFinish must fire exactly once across repeated resolves")
+        }
     }
 
     private final class FrameCounter: @unchecked Sendable {

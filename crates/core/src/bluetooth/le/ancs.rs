@@ -299,9 +299,9 @@ fn build_get_attributes(uid: u32) -> Vec<u8> {
   cmd.extend_from_slice(&SUBTITLE_MAX.to_le_bytes());
   cmd.push(ATTR_MESSAGE);
   cmd.extend_from_slice(&MESSAGE_MAX.to_le_bytes());
-  cmd.push(ATTR_DATE);
   cmd.push(ATTR_POSITIVE_ACTION_LABEL);
   cmd.push(ATTR_NEGATIVE_ACTION_LABEL);
+  cmd.push(ATTR_DATE);
   cmd
 }
 
@@ -357,11 +357,11 @@ fn parse_gna_response(buf: &[u8]) -> Option<(NotificationFields, usize)> {
       _ => {}
     }
     idx += len;
-    if attr_id == ATTR_NEGATIVE_ACTION_LABEL || attr_id == ATTR_DATE {
+    if attr_id == ATTR_DATE {
       return Some((fields, idx));
     }
   }
-  Some((fields, idx))
+  None
 }
 
 /// ANCS dates arrive as `yyyyMMdd'T'HHmmss` UTC.
@@ -423,6 +423,12 @@ async fn emit_notification(bus: &WireEventBus, meta: &PendingNotification, field
     positive_action,
     negative_action,
   };
+  tracing::debug!(
+    id = %notification.id,
+    app = %notification.app.bundle_id,
+    title = ?notification.title,
+    "ANCS notification emitted"
+  );
   let event = match meta.event_id {
     EVENT_MODIFIED => BridgeToClientNotificationsMsgEvent::Updated(notification),
     _ => BridgeToClientNotificationsMsgEvent::Posted(notification),
@@ -455,4 +461,92 @@ pub enum AncsError {
   CharacteristicMissing(Uuid),
   #[error(transparent)]
   Bluer(#[from] bluer::Error),
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn attr(id: u8, value: &[u8]) -> Vec<u8> {
+    let mut v = vec![id];
+    v.extend_from_slice(&(value.len() as u16).to_le_bytes());
+    v.extend_from_slice(value);
+    v
+  }
+
+  // a GNA response carries the requested attributes in request order; iOS zero-fills
+  // missing ones (length 0) and build_get_attributes requests Date last, so a real
+  // response ends with the Date attribute.
+  fn gna_response(uid: u32, with_labels: bool) -> Vec<u8> {
+    let mut r = vec![COMMAND_GET_NOTIFICATION_ATTRIBUTES];
+    r.extend_from_slice(&uid.to_le_bytes());
+    r.extend(attr(ATTR_APP_IDENTIFIER, b"com.apple.mobilephone"));
+    r.extend(attr(ATTR_TITLE, b"DYNATA"));
+    r.extend(attr(ATTR_SUBTITLE, b""));
+    r.extend(attr(ATTR_MESSAGE, b"Missed Call"));
+    if with_labels {
+      r.extend(attr(ATTR_POSITIVE_ACTION_LABEL, b"Call Back"));
+      r.extend(attr(ATTR_NEGATIVE_ACTION_LABEL, b"Dismiss"));
+    }
+    r.extend(attr(ATTR_DATE, b"20260526T134500"));
+    r
+  }
+
+  #[test]
+  fn date_is_requested_last() {
+    // date terminates the response parse, so it must be the final requested attribute.
+    let cmd = build_get_attributes(0x2a);
+    assert_eq!(cmd.last().copied(), Some(ATTR_DATE));
+  }
+
+  #[test]
+  fn parses_full_response_including_trailing_labels() {
+    let resp = gna_response(7, true);
+    let (fields, consumed) = parse_gna_response(&resp).expect("complete response parses");
+    assert_eq!(consumed, resp.len(), "whole response consumed, nothing left over");
+    assert_eq!(fields.app_id.as_deref(), Some("com.apple.mobilephone"));
+    assert_eq!(fields.title.as_deref(), Some("DYNATA"));
+    assert_eq!(fields.subtitle.as_deref(), Some(""));
+    assert_eq!(fields.message.as_deref(), Some("Missed Call"));
+    assert_eq!(fields.positive_label.as_deref(), Some("Call Back"));
+    assert_eq!(fields.negative_label.as_deref(), Some("Dismiss"));
+    assert!(fields.date_unix_s.is_some());
+  }
+
+  #[test]
+  fn back_to_back_responses_do_not_corrupt() {
+    // the original bug terminated before the trailing labels, leaving their bytes to
+    // poison the next response. a complete response must be consumed exactly so the
+    // following one still starts at its command byte.
+    let mut buf = gna_response(1, true);
+    let first_len = buf.len();
+    buf.extend(gna_response(2, true));
+    let (f1, consumed) = parse_gna_response(&buf).expect("first response parses");
+    assert_eq!(
+      consumed, first_len,
+      "first consumed exactly; remainder is the second response"
+    );
+    assert_eq!(f1.message.as_deref(), Some("Missed Call"));
+    let (f2, _) = parse_gna_response(&buf[consumed..]).expect("second response parses from remainder");
+    assert_eq!(f2.message.as_deref(), Some("Missed Call"));
+  }
+
+  #[test]
+  fn response_without_labels_terminates_on_date() {
+    let resp = gna_response(0, false);
+    let (fields, consumed) = parse_gna_response(&resp).expect("parses");
+    assert_eq!(consumed, resp.len());
+    assert_eq!(fields.message.as_deref(), Some("Missed Call"));
+    assert!(fields.positive_label.is_none());
+    assert!(fields.date_unix_s.is_some());
+  }
+
+  #[test]
+  fn fragmented_response_without_date_yields_none() {
+    // a response still missing its Date terminator must wait for more, not parse as complete.
+    let full = gna_response(3, true);
+    let date_attr_len = 3 + "20260526T134500".len();
+    let partial = &full[..full.len() - date_attr_len];
+    assert!(parse_gna_response(partial).is_none());
+  }
 }

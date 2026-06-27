@@ -113,6 +113,12 @@ impl<'a> LibrarySurface<'a> {
       .event(GatewayToBridgeLibraryMsgEvent::FavoriteChanged(payload))
       .await
   }
+  pub async fn library_changed(&self, payload: LibraryChanged) -> Result<(), SdkError> {
+    self
+      .0
+      .event(GatewayToBridgeLibraryMsgEvent::LibraryChanged(payload))
+      .await
+  }
 }
 
 /// Methods scoped to the `Net` wire surface.

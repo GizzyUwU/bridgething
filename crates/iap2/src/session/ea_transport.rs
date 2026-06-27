@@ -14,11 +14,14 @@
 use bytes::{Bytes, BytesMut};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::link::Iap2Command;
+use crate::{frame::LINK_FRAME_OVERHEAD, link::Iap2Command};
 
 /// Link session id used by `Lsp::accessory_default` for EA traffic. Must match the
 /// `SessionTriple { session_type: 2, ... }` declared in the SYN.
 pub(crate) const EA_LINK_SESSION_ID: u8 = 3;
+
+/// u16-BE stream-id prefixed onto every EA link payload.
+const EA_STREAM_ID_PREFIX_LEN: usize = 2;
 
 const LANE_CAPACITY: usize = 16;
 
@@ -120,9 +123,12 @@ pub(crate) fn split_stream_frame(payload: &Bytes) -> Option<(u16, Bytes)> {
 }
 
 const fn max_chunk_payload(peer_max_len: u16) -> usize {
-  // 2 bytes of the link budget go to the stream-id prefix.
+  // the link spends LINK_FRAME_OVERHEAD per packet and we prepend the stream-id prefix; both come
+  // out of the peer's max_len. budgeting only the prefix overflows the link, which then re-splits
+  // the packet into an unprefixed continuation frame and corrupts the EA byte stream.
+  let overhead = LINK_FRAME_OVERHEAD + EA_STREAM_ID_PREFIX_LEN;
   let total = peer_max_len as usize;
-  if total <= 2 { 1 } else { total - 2 }
+  if total <= overhead { 1 } else { total - overhead }
 }
 
 async fn chunker_task(
@@ -395,5 +401,38 @@ mod tests {
   #[test]
   fn split_stream_frame_rejects_short() {
     assert!(split_stream_frame(&Bytes::from_static(&[0x01])).is_none());
+  }
+
+  #[tokio::test]
+  async fn prefixed_packet_never_exceeds_link_payload_budget() {
+    // a full chunk plus its stream-id prefix must fit one link packet; if it overflows the link
+    // re-splits it into an unprefixed continuation frame and corrupts the EA byte stream.
+    let peer_max_len: u16 = 2048;
+    let link_budget = peer_max_len as usize - LINK_FRAME_OVERHEAD;
+    let max_chunk = max_chunk_payload(peer_max_len);
+
+    let (link_tx, mut link_rx) = mpsc::channel(256);
+    let (n_tx, n_rx) = mpsc::channel(8);
+    let (_b_tx, b_rx) = mpsc::channel(8);
+    let (_g_tx, g_rx) = mpsc::channel(8);
+    tokio::spawn(chunker_task(n_rx, b_rx, g_rx, link_tx, max_chunk));
+
+    n_tx
+      .send((0x0100, Bytes::from(vec![0xAB; max_chunk * 3 + 7])))
+      .await
+      .unwrap();
+    drop(n_tx);
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+    let chunks = drain_chunks(&mut link_rx);
+    assert!(!chunks.is_empty());
+    for c in &chunks {
+      assert!(
+        c.len() <= link_budget,
+        "wire packet {} bytes exceeds link payload budget {}",
+        c.len(),
+        link_budget
+      );
+    }
   }
 }

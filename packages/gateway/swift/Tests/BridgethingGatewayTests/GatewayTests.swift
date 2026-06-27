@@ -175,6 +175,109 @@ final class GatewayTests: XCTestCase {
     await gateway.stop()
   }
 
+  func testBodyDecodeErrorSkipsOneFrameKeepsDraining() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+    adapter.simulate(.connected(testDevice))
+
+    let good = BridgeToGatewayMsg(id: UUID(), meta: .command, data: .ack)
+    var bad = try codec.encode(BridgeToGatewayMsg(id: UUID(), meta: .command, data: .ack))
+    for i in FrameHeader.length ..< bad.count {
+      bad[bad.startIndex.advanced(by: i)] = 0xFF
+    }
+    var combined = bad
+    combined.append(try codec.encode(good))
+    adapter.simulate(.bytes(deviceId: testDevice.id, combined))
+
+    var iter = gateway.events.makeAsyncIterator()
+    _ = await iter.next() // .connected
+    guard case .decodeError = await iter.next() else {
+      XCTFail("expected a decodeError for the corrupt body"); return
+    }
+    guard case .message(_, let msg) = await iter.next() else {
+      XCTFail("expected the trailing good frame to still decode"); return
+    }
+    XCTAssertEqual(msg.id, good.id)
+
+    await gateway.stop()
+  }
+
+  func testFramingLossDropsLinkAndReconnects() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+    adapter.simulate(.connected(testDevice))
+
+    var corrupt = try codec.encode(BridgeToGatewayMsg(id: UUID(), meta: .command, data: .ack))
+    corrupt[corrupt.startIndex] = 0x00
+    adapter.simulate(.bytes(deviceId: testDevice.id, corrupt))
+
+    var iter = gateway.events.makeAsyncIterator()
+    _ = await iter.next() // .connected
+    guard case .decodeError = await iter.next() else {
+      XCTFail("expected a decodeError on framing loss"); return
+    }
+
+    for _ in 0 ..< 50 {
+      if adapter.reconnectCalls == [testDevice.id] { break }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    XCTAssertEqual(adapter.reconnectCalls, [testDevice.id])
+
+    await gateway.stop()
+  }
+
+  func testPendingRequestFailsOnDisconnect() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+    adapter.simulate(.connected(testDevice))
+
+    let deviceId = testDevice.id
+    let requestTask = Task {
+      try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: .seconds(30))
+    }
+    var sentIter = adapter.sentFrames.makeAsyncIterator()
+    _ = await sentIter.next()
+
+    adapter.simulate(.disconnected(deviceId: deviceId))
+
+    do {
+      _ = try await requestTask.value
+      XCTFail("expected the in-flight request to fail on disconnect")
+    } catch let error as BridgethingGatewayError {
+      XCTAssertEqual(error, .disconnected)
+    }
+
+    await gateway.stop()
+  }
+
+  func testPendingRequestFailsOnFlapReconnect() async throws {
+    let adapter = InMemoryAdapter()
+    let gateway = BridgethingGateway(adapter: adapter, codec: codec)
+    try await gateway.start()
+    adapter.simulate(.connected(testDevice))
+
+    let deviceId = testDevice.id
+    let requestTask = Task {
+      try await gateway.request(deviceId: deviceId, .webapp(.list), timeout: .seconds(30))
+    }
+    var sentIter = adapter.sentFrames.makeAsyncIterator()
+    _ = await sentIter.next()
+
+    adapter.simulate(.connected(testDevice))
+
+    do {
+      _ = try await requestTask.value
+      XCTFail("expected the in-flight request to fail on flap reconnect")
+    } catch let error as BridgethingGatewayError {
+      XCTAssertEqual(error, .disconnected)
+    }
+
+    await gateway.stop()
+  }
+
   func testRequestTimeoutFiresWhenNoResponseArrives() async throws {
     let adapter = InMemoryAdapter()
     let gateway = BridgethingGateway(adapter: adapter, codec: codec)
@@ -202,7 +305,8 @@ extension BridgethingGatewayError: Equatable {
     case (.notRunning, .notRunning),
          (.alreadyRunning, .alreadyRunning),
          (.requestTimedOut, .requestTimedOut),
-         (.shutdown, .shutdown):
+         (.shutdown, .shutdown),
+         (.disconnected, .disconnected):
       return true
     case (.unexpectedResponse(let a), .unexpectedResponse(let b)):
       return a == b

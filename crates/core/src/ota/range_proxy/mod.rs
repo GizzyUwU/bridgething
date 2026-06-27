@@ -254,7 +254,7 @@ mod tests {
     let mut rx = sinks.bind_forward(req_id);
     proxy.begin_range_active(req_id).await.unwrap();
 
-    sinks.fragment(req_id, 0, Bytes::from_static(b"x")).await;
+    sinks.fragment(req_id, 0, Bytes::from_static(b"x"));
     assert!(matches!(rx.recv().await, Some(TransferEvent::Fragment { .. })));
 
     proxy.deactivate().await;

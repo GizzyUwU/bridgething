@@ -28,9 +28,9 @@ mod rfcomm;
 
 mod adapter;
 mod auth;
-mod hci;
 #[cfg(debug_assertions)]
 mod debug;
+mod hci;
 mod packer;
 mod peer_owners;
 mod scan;
@@ -98,13 +98,10 @@ pub(crate) struct BluetoothBootstrap {
 
 #[cfg(feature = "test-tap")]
 impl BluetoothBootstrap {
-  /// Clone of the iAP2 event sender for the headless inject lane.
   pub(crate) fn iap2_inject_tx(&self) -> Iap2InjectTx {
     self.iap2_bootstrap.events_tx()
   }
 
-  /// Subscribe-able broadcast of outbound iAP2 transport commands, fed by the
-  /// headless coordinator's drain loop.
   pub(crate) fn iap2_outbound_tap(&self) -> Iap2OutboundTapTx {
     self.iap2_bootstrap.outbound_tap_tx()
   }
@@ -175,9 +172,6 @@ impl BluetoothManager {
         } = bootstrap;
         tracing::debug!("bringing up gateway transports + iap2 router with no radio (headless)");
 
-        // no live iAP2 session drains the outbound transport channel off-radio,
-        // so the coordinator drains it and rebroadcasts each command onto the
-        // tap a scenario observes (and keeps the bounded channel from backing up).
         let (mut outbound_rx, outbound_tap_tx) = iap2_bootstrap.into_headless_outbound();
         tokio::spawn(async move {
           while let Some(cmd) = outbound_rx.recv().await {
@@ -272,8 +266,14 @@ impl BluetoothManager {
           .await?;
 
         tracing::debug!("setting up iap2 manager");
-        let _iap2_handle =
-          Iap2Manager::start(iap2_bootstrap, &session, adapter.clone(), deps.meta.static_meta()).await?;
+        let _iap2_handle = Iap2Manager::start(
+          iap2_bootstrap,
+          &session,
+          adapter.clone(),
+          deps.meta.static_meta(),
+          &state.authority,
+        )
+        .await?;
 
         tracing::debug!("setting up le dispatcher");
         let _le_handle = le_bootstrap
@@ -624,7 +624,20 @@ impl GatewayMan {
     priority: Priority,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
     self
-      .request_with_id_priority(Uuid::now_v7(), address, req, priority)
+      .request_with_id_priority(Uuid::now_v7(), address, req, priority, REQUEST_TIMEOUT)
+      .await
+  }
+
+  pub async fn request_with_timeout<
+    R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>,
+  >(
+    &self,
+    address: Option<Address>,
+    req: R,
+    timeout: Duration,
+  ) -> Result<R::Response, RequestError<R::DomainError>> {
+    self
+      .request_with_id_priority(Uuid::now_v7(), address, req, Priority::Normal, timeout)
       .await
   }
 
@@ -634,7 +647,9 @@ impl GatewayMan {
     address: Option<Address>,
     req: R,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
-    self.request_with_id_priority(id, address, req, Priority::Normal).await
+    self
+      .request_with_id_priority(id, address, req, Priority::Normal, REQUEST_TIMEOUT)
+      .await
   }
 
   async fn request_with_id_priority<
@@ -645,6 +660,7 @@ impl GatewayMan {
     address: Option<Address>,
     req: R,
     priority: Priority,
+    timeout: Duration,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
     let (tx, rx) = oneshot::channel();
     self
@@ -662,7 +678,7 @@ impl GatewayMan {
       .send_all(OutboundGatewayMessage::new(address, msg).with_priority(priority))
       .await;
 
-    match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+    match tokio::time::timeout(timeout, rx).await {
       Ok(Ok(data)) => R::extract(data),
       Ok(Err(_)) => {
         self.pending.lock().expect("pending poisoned").remove(&id);

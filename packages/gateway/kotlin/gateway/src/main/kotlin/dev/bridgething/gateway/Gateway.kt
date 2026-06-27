@@ -69,12 +69,6 @@ public class BridgethingGateway(
   private val pendingRequests = mutableMapOf<UUID, CompletableDeferred<BridgeToGatewayMsg>>()
   private var consumerJob: Job? = null
 
-  // Broadcast, not fan-out: every dispatcher collector must see every event. A
-  // `Channel.receiveAsFlow()` distributes each event to only ONE of the competing
-  // collectors, so the companion's many surface dispatchers would drop most events.
-  // replay lets a dispatcher that subscribes slightly after start() still catch recent
-  // events; all companion dispatchers subscribe at start before any peer connects, so
-  // replay never re-delivers in practice.
   private val outboundEvents = MutableSharedFlow<GatewayEvent>(
     replay = 16,
     extraBufferCapacity = 256,
@@ -133,8 +127,9 @@ public class BridgethingGateway(
     deviceId: String,
     message: GatewayToBridgeMsg,
     priority: Priority = Priority.Normal,
+    compression: Compression? = null,
   ) {
-    val frame = codec.encode(GatewayToBridgeMsg.serializer(), message, priority = priority)
+    val frame = codec.encode(GatewayToBridgeMsg.serializer(), message, priority = priority, compression = compression)
     adapter.send(deviceId, frame)
   }
 

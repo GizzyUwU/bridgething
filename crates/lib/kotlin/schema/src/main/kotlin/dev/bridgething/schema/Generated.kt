@@ -126,9 +126,6 @@ enum class CompanionAuthorityScope(val string: String) {
 @Serializable
 data class AuthorityClaim (
 	val scope: CompanionAuthorityScope,
-	/// App bundle the companion represents (e.g. `com.spotify.client`).
-	/// The daemon's now-playing gate compares it against iAP2's foreground
-	/// app to override a still-claimed companion when another app takes over.
 	val appBundle: String? = null
 )
 
@@ -871,12 +868,48 @@ data class HttpHeader (
 	val value: String
 )
 
+/// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
+/// Presence is the whole signal (the app is alive and draining the ea stream).
+@Serializable
+data class KeepaliveAck (
+	val seq: UInt
+)
+
+/// Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
+/// the outbound frame keeps iOS from suspending the companion process (which
+/// would freeze the dealer ws and drop now-playing authority), and the reply
+/// proves the app is draining the stream. A run of unanswered probes is a
+/// wedged session no disconnect would surface. `seq` is for log correlation.
+@Serializable
+data class KeepalivePing (
+	val seq: UInt
+)
+
 @Serializable
 data class LibraryBrowseRequest (
 	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	val nodeId: String? = null,
 	val limit: UInt,
 	val offset: UInt
+)
+
+/// Which slice of the user's library changed, so a consumer can scope a
+/// refetch. The daemon invalidates its home cache on any scope; the
+/// distinction is informational for richer webapp consumers.
+@Serializable
+enum class LibraryScope(val string: String) {
+	@SerialName("saved")
+	Saved("saved"),
+	@SerialName("playlists")
+	Playlists("playlists"),
+}
+
+/// Fired when the user mutates their library on the gateway-side app while
+/// connected (a like, a playlist edit) and the change did NOT originate from a
+/// daemon command - so the daemon must invalidate any cached browse / home view.
+@Serializable
+data class LibraryChanged (
+	val scope: LibraryScope
 )
 
 /// Generated type representing the anonymous struct variant `NotFound` of the `LibraryError` Rust enum
@@ -3165,6 +3198,10 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("logEntry")
 	data class LogEntry(val data: dev.bridgething.schema.LogEntry): BridgeToGatewaySystemMsg()
+	/// ea-link liveness probe: keeps ios scheduling the companion, and an unanswered run flags a wedge
+	@Serializable
+	@SerialName("keepalive")
+	data class Keepalive(val data: KeepalivePing): BridgeToGatewaySystemMsg()
 }
 
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
@@ -3291,8 +3328,7 @@ sealed class GatewayToBridgeAudioMsg {
 /// Companion declares per-scope authority. `Release` is the "stop
 /// preferring my data for this scope" signal. Non-now-playing claims
 /// fall back automatically after `STALE_TIMEOUT`; the now-playing scopes
-/// hold until release / disconnect / app-change arbitration (the
-/// companion declares its `app_bundle` so the daemon can arbitrate).
+/// hold until release / disconnect / app-change arbitration.
 @Serializable(with = GatewayToBridgeAuthorityMsgSerializer::class)
 sealed class GatewayToBridgeAuthorityMsg {
 	@Serializable
@@ -3361,6 +3397,9 @@ sealed class GatewayToBridgeLibraryMsg {
 	@Serializable
 	@SerialName("favoriteChanged")
 	data class FavoriteChanged(val data: dev.bridgething.schema.FavoriteChanged): GatewayToBridgeLibraryMsg()
+	@Serializable
+	@SerialName("libraryChanged")
+	data class LibraryChanged(val data: dev.bridgething.schema.LibraryChanged): GatewayToBridgeLibraryMsg()
 }
 
 @Serializable(with = GatewayToBridgeLyricsMsgSerializer::class)
@@ -3496,6 +3535,11 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("logsUnsubscribe")
 	data class LogsUnsubscribe(val data: dev.bridgething.schema.LogsUnsubscribe): GatewayToBridgeSystemMsg()
+	/// proof-of-life reply to a `BridgeToGatewaySystemMsg::Keepalive`; an unanswered run flags a wedged
+	/// ea session (link up, app not draining) that no disconnect would surface
+	@Serializable
+	@SerialName("keepaliveAck")
+	data class KeepaliveAck(val data: dev.bridgething.schema.KeepaliveAck): GatewayToBridgeSystemMsg()
 }
 
 /// Companion-driven time surface. Companion sends `Snapshot` at announce

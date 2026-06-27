@@ -465,13 +465,9 @@ fn swift_request_handle_class(r: &TypedRequestEntry) -> String {
   out.push_str(
     "  init(gateway: BridgethingGateway, deviceId: String, requestId: UUID) {\n    self.gateway = gateway\n    self.deviceId = deviceId\n    self.requestId = requestId\n  }\n\n",
   );
-  let send_suffix = if r.is_bulk_byte_stream() {
-    ", priority: .bulk"
-  } else {
-    ""
-  };
+  let default_priority = if r.is_bulk_byte_stream() { ".bulk" } else { ".normal" };
   out.push_str(&format!(
-    "  public func respond(_ response: {}) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID(),\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{resp_variant_camel}(response))\n    )\n    try await gateway.send(deviceId: deviceId, msg{send_suffix})\n  }}\n\n",
+    "  public func respond(_ response: {}, priority: Priority? = nil, compression: Compression? = nil) async throws {{\n    let msg = GatewayToBridgeMsg(\n      id: UUID(),\n      meta: .response(ResponseMeta(requestId: requestId)),\n      data: .{surface_camel}(.{resp_variant_camel}(response))\n    )\n    try await gateway.send(deviceId: deviceId, msg, priority: priority ?? {default_priority}, compression: compression)\n  }}\n\n",
     r.response
   ));
   if let (Some(err_type), Some(err_disc)) = (&r.error, &r.error_disc) {

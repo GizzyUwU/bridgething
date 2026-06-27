@@ -3,8 +3,12 @@
 //! (pull surfaces bind at request time, push surfaces at their begin
 //! request), then fragments route by id: memory sinks reassemble in place
 //! under a hard cap, forward sinks relay to the owning subsystem (OTA disk
-//! pump, range-proxy HTTP body) over a bounded channel. Fragments for
-//! unknown ids are dropped - a cancelled or timed-out stream, not an error.
+//! pump, range-proxy HTTP body). Memory fragments reassemble inline on the
+//! caller (they never block); forward fragments are handed to a per-transfer
+//! demux task that owns the blocking send to the consumer so a stalled
+//! consumer (slow range client, fsync hitch) never head-of-line-blocks the
+//! shared inbound bus. Fragments for unknown ids are dropped - a cancelled or
+//! timed-out stream, not an error.
 
 use std::{
   collections::HashMap,
@@ -20,7 +24,8 @@ use tokio_util::bytes::{Bytes, BytesMut};
 use uuid::Uuid;
 
 pub const MEMORY_SINK_CAP: usize = 256 * 1024;
-const FORWARD_CAPACITY: usize = 16;
+const FORWARD_CONSUMER_CAPACITY: usize = 16;
+const FORWARD_INGEST_CAPACITY: usize = 16;
 
 #[derive(Debug)]
 pub enum TransferEvent {
@@ -62,71 +67,84 @@ impl TransferSinks {
   }
 
   pub fn bind_forward(&self, id: Uuid) -> mpsc::Receiver<TransferEvent> {
-    let (tx, rx) = mpsc::channel(FORWARD_CAPACITY);
-    self.inner.bindings.lock().unwrap().insert(id, Binding::Forward(tx));
-    rx
+    let (ingest_tx, mut ingest_rx) = mpsc::channel::<TransferEvent>(FORWARD_INGEST_CAPACITY);
+    let (consumer_tx, consumer_rx) = mpsc::channel(FORWARD_CONSUMER_CAPACITY);
+    self
+      .inner
+      .bindings
+      .lock()
+      .unwrap()
+      .insert(id, Binding::Forward(ingest_tx));
+    let inner = self.inner.clone();
+    tokio::spawn(async move {
+      while let Some(event) = ingest_rx.recv().await {
+        if consumer_tx.send(event).await.is_err() {
+          break;
+        }
+      }
+      inner.bindings.lock().unwrap().remove(&id);
+    });
+    consumer_rx
   }
 
   pub fn unbind(&self, id: Uuid) {
     self.inner.bindings.lock().unwrap().remove(&id);
   }
 
-  pub async fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) {
-    let forward = {
-      let mut bindings = self.inner.bindings.lock().unwrap();
-      match bindings.get_mut(&id) {
-        None => {
-          tracing::trace!(%id, "fragment for unbound transfer; dropping");
-          return;
-        }
-        Some(Binding::Memory(state)) => {
-          if !state.failed {
-            if offset as usize != state.buf.len() {
-              tracing::warn!(%id, expected = state.buf.len(), got = offset, "transfer fragment out of order");
-              state.failed = true;
-            } else if state.buf.len() + bytes.len() > MEMORY_SINK_CAP {
-              tracing::warn!(%id, "transfer exceeds memory sink cap");
-              state.failed = true;
-            } else {
-              state.buf.extend_from_slice(&bytes);
-            }
-          }
-          None
-        }
-        Some(Binding::Forward(tx)) => Some(tx.clone()),
-      }
-    };
+  pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) {
+    use mpsc::error::TrySendError;
 
-    match forward {
-      None => self.inner.progress.notify_waiters(),
-      Some(tx) => {
-        if tx.send(TransferEvent::Fragment { offset, bytes }).await.is_err() {
-          tracing::debug!(%id, "transfer consumer gone; unbinding");
-          self.unbind(id);
+    let mut bindings = self.inner.bindings.lock().unwrap();
+    match bindings.get_mut(&id) {
+      None => {
+        tracing::trace!(%id, "fragment for unbound transfer; dropping");
+      }
+      Some(Binding::Memory(state)) => {
+        if !state.failed {
+          if offset as usize != state.buf.len() {
+            tracing::warn!(%id, expected = state.buf.len(), got = offset, "transfer fragment out of order");
+            state.failed = true;
+          } else if state.buf.len() + bytes.len() > MEMORY_SINK_CAP {
+            tracing::warn!(%id, "transfer exceeds memory sink cap");
+            state.failed = true;
+          } else {
+            state.buf.extend_from_slice(&bytes);
+          }
+        }
+        drop(bindings);
+        self.inner.progress.notify_waiters();
+      }
+      Some(Binding::Forward(tx)) => {
+        match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
+          Ok(()) => {}
+          Err(TrySendError::Full(_)) => {
+            tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
+            bindings.remove(&id);
+          }
+          Err(TrySendError::Closed(_)) => {
+            tracing::debug!(%id, "transfer consumer gone; unbinding");
+            bindings.remove(&id);
+          }
         }
       }
     }
   }
 
-  pub async fn abandon(&self, id: Uuid, reason: String) {
-    let forward = {
-      let mut bindings = self.inner.bindings.lock().unwrap();
-      match bindings.get_mut(&id) {
-        None => return,
-        Some(Binding::Memory(state)) => {
-          tracing::debug!(%id, %reason, "transfer abandoned by sender");
-          state.failed = true;
-          None
-        }
-        Some(Binding::Forward(tx)) => Some(tx.clone()),
+  pub fn abandon(&self, id: Uuid, reason: String) {
+    let mut bindings = self.inner.bindings.lock().unwrap();
+    match bindings.get_mut(&id) {
+      None => {}
+      Some(Binding::Memory(state)) => {
+        tracing::debug!(%id, %reason, "transfer abandoned by sender");
+        state.failed = true;
+        drop(bindings);
+        self.inner.progress.notify_waiters();
       }
-    };
-
-    match forward {
-      None => self.inner.progress.notify_waiters(),
-      Some(tx) => {
-        let _ = tx.send(TransferEvent::Abandon { reason }).await;
-        self.unbind(id);
+      Some(Binding::Forward(_)) => {
+        let Some(Binding::Forward(tx)) = bindings.remove(&id) else {
+          return;
+        };
+        let _ = tx.try_send(TransferEvent::Abandon { reason });
       }
     }
   }
@@ -149,7 +167,12 @@ impl TransferSinks {
               bindings.remove(&id);
               return None;
             }
-            Some(Binding::Memory(state)) if state.buf.len() >= total_size as usize => {
+            Some(Binding::Memory(state)) if state.buf.len() > total_size as usize => {
+              tracing::warn!(%id, got = state.buf.len(), total = total_size, "transfer overshoots declared size");
+              bindings.remove(&id);
+              return None;
+            }
+            Some(Binding::Memory(state)) if state.buf.len() == total_size as usize => {
               let Some(Binding::Memory(state)) = bindings.remove(&id) else {
                 return None;
               };
@@ -185,8 +208,8 @@ mod tests {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     sinks.bind_memory(id);
-    sinks.fragment(id, 0, frag(b"hello ")).await;
-    sinks.fragment(id, 6, frag(b"world")).await;
+    sinks.fragment(id, 0, frag(b"hello "));
+    sinks.fragment(id, 6, frag(b"world"));
     let got = sinks
       .collect_memory(id, 11, Duration::from_secs(1))
       .await
@@ -203,8 +226,8 @@ mod tests {
       let sinks = sinks.clone();
       tokio::spawn(async move { sinks.collect_memory(id, 4, Duration::from_secs(1)).await })
     };
-    sinks.fragment(id, 0, frag(b"ab")).await;
-    sinks.fragment(id, 2, frag(b"cd")).await;
+    sinks.fragment(id, 0, frag(b"ab"));
+    sinks.fragment(id, 2, frag(b"cd"));
     let got = bg.await.unwrap().expect("collected");
     assert_eq!(&got[..], b"abcd");
   }
@@ -214,8 +237,23 @@ mod tests {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     sinks.bind_memory(id);
-    sinks.fragment(id, 2, frag(b"late")).await;
+    sinks.fragment(id, 2, frag(b"late"));
     assert!(sinks.collect_memory(id, 4, Duration::from_millis(200)).await.is_none());
+  }
+
+  #[tokio::test]
+  async fn contiguous_overshoot_past_total_fails() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    sinks.bind_memory(id);
+    // a well-behaved companion sends exactly total_size; a final fragment that grows the buffer past
+    // the declared total is trailing junk and must fail rather than cache the over-long asset.
+    sinks.fragment(id, 0, frag(b"hello"));
+    sinks.fragment(id, 5, frag(b" world"));
+    assert!(
+      sinks.collect_memory(id, 5, Duration::from_millis(200)).await.is_none(),
+      "an overshoot past total_size fails the stream"
+    );
   }
 
   #[tokio::test]
@@ -240,8 +278,8 @@ mod tests {
       let sinks = sinks.clone();
       tokio::spawn(async move { sinks.collect_memory(id, 100, Duration::from_secs(5)).await })
     };
-    sinks.fragment(id, 0, frag(b"partial")).await;
-    sinks.abandon(id, "source evicted".into()).await;
+    sinks.fragment(id, 0, frag(b"partial"));
+    sinks.abandon(id, "source evicted".into());
     let got = tokio::time::timeout(Duration::from_millis(500), bg)
       .await
       .expect("resolves well before the collect timeout")
@@ -254,8 +292,8 @@ mod tests {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     let mut rx = sinks.bind_forward(id);
-    sinks.fragment(id, 0, frag(b"aa")).await;
-    sinks.abandon(id, "curl gave up".into()).await;
+    sinks.fragment(id, 0, frag(b"aa"));
+    sinks.abandon(id, "curl gave up".into());
 
     match rx.recv().await.unwrap() {
       TransferEvent::Fragment { offset, bytes } => {
@@ -268,24 +306,53 @@ mod tests {
       TransferEvent::Abandon { reason } => assert_eq!(reason, "curl gave up"),
       other => panic!("expected abandon, got {other:?}"),
     }
-    // abandon unbinds; later fragments drop silently.
-    sinks.fragment(id, 2, frag(b"bb")).await;
+    // abandon unbinds; later fragments drop silently and the demux closes the consumer channel.
+    sinks.fragment(id, 2, frag(b"bb"));
     assert!(rx.recv().await.is_none());
   }
 
   #[tokio::test]
-  async fn dropped_forward_receiver_unbinds_lazily() {
+  async fn forward_stall_past_buffer_abandons_off_the_bus() {
+    let sinks = TransferSinks::default();
+    let id = Uuid::now_v7();
+    // hold the consumer without ever draining it so both the demux and ingest buffers fill.
+    let _rx = sinks.bind_forward(id);
+    let mut abandoned = false;
+    for offset in 0..(FORWARD_INGEST_CAPACITY + FORWARD_CONSUMER_CAPACITY + 8) as u32 {
+      sinks.fragment(id, offset, frag(b"x"));
+      if sinks.inner.bindings.lock().unwrap().get(&id).is_none() {
+        abandoned = true;
+        break;
+      }
+      tokio::task::yield_now().await;
+    }
+    assert!(
+      abandoned,
+      "a forward consumer that never drains is abandoned rather than blocking the caller"
+    );
+  }
+
+  #[tokio::test]
+  async fn dropped_forward_receiver_unbinds() {
     let sinks = TransferSinks::default();
     let id = Uuid::now_v7();
     let rx = sinks.bind_forward(id);
     drop(rx);
-    sinks.fragment(id, 0, frag(b"aa")).await;
-    assert!(sinks.inner.bindings.lock().unwrap().get(&id).is_none());
+    // the demux only learns the consumer is gone when it fails to forward; drive one fragment through
+    // and let it run, then the binding is cleared.
+    sinks.fragment(id, 0, frag(b"aa"));
+    for _ in 0..100 {
+      if sinks.inner.bindings.lock().unwrap().get(&id).is_none() {
+        return;
+      }
+      tokio::task::yield_now().await;
+    }
+    panic!("dropped forward receiver did not unbind");
   }
 
   #[tokio::test]
   async fn unknown_id_fragments_drop() {
     let sinks = TransferSinks::default();
-    sinks.fragment(Uuid::now_v7(), 0, frag(b"zz")).await;
+    sinks.fragment(Uuid::now_v7(), 0, frag(b"zz"));
   }
 }

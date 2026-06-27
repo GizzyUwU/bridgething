@@ -7,7 +7,9 @@ import dev.bridgething.schema.BridgeToGatewayLibraryMsg
 import dev.bridgething.schema.BridgeToGatewayLyricsMsg
 import dev.bridgething.schema.BridgeToGatewayMsgData
 import dev.bridgething.schema.BridgeToGatewayPhoneMsg
+import dev.bridgething.schema.BridgeToGatewaySystemMsg
 import dev.bridgething.schema.BridgeToGatewayTunnelMsg
+import dev.bridgething.schema.KeepalivePing
 import dev.bridgething.schema.TunnelOpen
 import dev.bridgething.schema.LibraryBrowseRequest
 import dev.bridgething.schema.LibraryResolveContextRequest
@@ -61,6 +63,7 @@ class WireSurfaceCoverageTest {
         // closed port refuses fast, giving an ErrorReply that proves the dispatcher answers
         "tunnel.open" to BridgeToGatewayMsgData.Tunnel(BridgeToGatewayTunnelMsg.Open(TunnelOpen(tunnelId = UUID.randomUUID(), host = "127.0.0.1", port = 1u))),
         "phone.stateGet" to BridgeToGatewayMsgData.Phone(BridgeToGatewayPhoneMsg.StateGet),
+        "system.keepalive" to BridgeToGatewayMsgData.System(BridgeToGatewaySystemMsg.Keepalive(KeepalivePing(seq = 0u))),
     )
 
     // proven to reply but require real I/O outside this hermetic ratchet

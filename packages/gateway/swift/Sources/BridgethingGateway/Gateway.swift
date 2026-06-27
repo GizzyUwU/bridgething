@@ -14,6 +14,7 @@ public enum BridgethingGatewayError: Error, Sendable {
   case alreadyRunning
   case requestTimedOut
   case shutdown
+  case disconnected
   case unexpectedResponse(String)
 }
 
@@ -29,7 +30,12 @@ public actor BridgethingGateway {
 
   private var consumerTask: Task<Void, Never>?
   private var buffers: [String: FrameAccumulator] = [:]
-  private var pendingRequests: [UUID: CheckedContinuation<BridgeToGatewayMsg, Error>] = [:]
+  private var pendingRequests: [UUID: PendingRequest] = [:]
+
+  private struct PendingRequest {
+    let deviceId: String
+    let continuation: CheckedContinuation<BridgeToGatewayMsg, Error>
+  }
 
   private let broadcaster = EventBroadcaster()
 
@@ -42,6 +48,13 @@ public actor BridgethingGateway {
   /// the broadcaster fans yields out to each subscribed continuation.
   public nonisolated var events: AsyncStream<GatewayEvent> {
     broadcaster.subscribe()
+  }
+
+  /// Live-only event stream: a new subscriber gets no replayed history, only events emitted after
+  /// it subscribes. Terminal-detection (OTA / install) uses this so a prior op's terminal still in
+  /// the replay window cannot resolve a fresh op to the wrong outcome.
+  public nonisolated var liveEvents: AsyncStream<GatewayEvent> {
+    broadcaster.subscribe(replay: false)
   }
 
   public init(adapter: any Adapter, codec: Codec = Codec()) {
@@ -65,8 +78,8 @@ public actor BridgethingGateway {
     consumerTask = nil
     await adapter.stop()
 
-    for (_, cont) in pendingRequests {
-      cont.resume(throwing: BridgethingGatewayError.shutdown)
+    for (_, pending) in pendingRequests {
+      pending.continuation.resume(throwing: BridgethingGatewayError.shutdown)
     }
     pendingRequests.removeAll()
     buffers.removeAll()
@@ -93,9 +106,10 @@ public actor BridgethingGateway {
   public func send(
     deviceId: String,
     _ message: GatewayToBridgeMsg,
-    priority: Priority = .normal
+    priority: Priority = .normal,
+    compression: Compression? = nil
   ) async throws {
-    let frame = try codec.encode(message, priority: priority)
+    let frame = try codec.encode(message, priority: priority, compression: compression)
     try await adapter.send(deviceId: deviceId, frame: frame)
   }
 
@@ -118,7 +132,7 @@ public actor BridgethingGateway {
     let frame = try codec.encode(msg)
 
     return try await withCheckedThrowingContinuation { cont in
-      pendingRequests[id] = cont
+      pendingRequests[id] = PendingRequest(deviceId: deviceId, continuation: cont)
 
       Task { [weak self] in
         do {
@@ -138,27 +152,42 @@ public actor BridgethingGateway {
   // MARK: - private
 
   private func failPendingRequest(id: UUID, with error: Error) {
-    if let cont = pendingRequests.removeValue(forKey: id) {
-      cont.resume(throwing: error)
+    if let pending = pendingRequests.removeValue(forKey: id) {
+      pending.continuation.resume(throwing: error)
+    }
+  }
+
+  /// fail every in-flight request bound to a device. without this, a request awaiting a reply when
+  /// the link drops hangs the full timeout (30s) instead of failing fast.
+  private func failPendingRequests(forDevice deviceId: String, with error: Error) {
+    let victims = pendingRequests.filter { $0.value.deviceId == deviceId }
+    for (id, pending) in victims {
+      pendingRequests.removeValue(forKey: id)
+      pending.continuation.resume(throwing: error)
     }
   }
 
   private func completePendingRequest(id: UUID, with msg: BridgeToGatewayMsg) -> Bool {
-    guard let cont = pendingRequests.removeValue(forKey: id) else { return false }
-    cont.resume(returning: msg)
+    guard let pending = pendingRequests.removeValue(forKey: id) else { return false }
+    pending.continuation.resume(returning: msg)
     return true
   }
 
   private func handleAdapterEvent(_ event: AdapterEvent) {
     switch event {
     case let .connected(device):
+      if buffers[device.id] != nil {
+        failPendingRequests(forDevice: device.id, with: BridgethingGatewayError.disconnected)
+      }
       buffers[device.id] = FrameAccumulator()
       broadcaster.emit(.connected(device))
     case let .disconnected(id):
       buffers.removeValue(forKey: id)
+      failPendingRequests(forDevice: id, with: BridgethingGatewayError.disconnected)
       broadcaster.emit(.disconnected(deviceId: id))
     case let .linkFailed(id, name, reason):
       buffers.removeValue(forKey: id)
+      failPendingRequests(forDevice: id, with: BridgethingGatewayError.disconnected)
       broadcaster.emit(.linkFailed(device: Device(id: id, name: name), reason: reason))
     case let .bytes(id, chunk):
       ingest(deviceId: id, chunk: chunk)
@@ -172,19 +201,37 @@ public actor BridgethingGateway {
   private func ingest(deviceId: String, chunk: Data) {
     var accumulator = buffers[deviceId] ?? FrameAccumulator()
     accumulator.append(chunk)
-    do {
-      while let frame = try accumulator.nextFrame() {
+    while true {
+      let frame: Data?
+      do {
+        frame = try accumulator.nextFrame()
+      } catch {
+        broadcaster.emit(.decodeError(deviceId: deviceId, description: String(describing: error)))
+        dropLink(deviceId: deviceId)
+        return
+      }
+      guard let frame else {
+        buffers[deviceId] = accumulator
+        return
+      }
+      do {
         let msg = try codec.decode(BridgeToGatewayMsg.self, from: frame)
         if case let .response(r) = msg.meta, completePendingRequest(id: r.requestId, with: msg) {
           continue
         }
         broadcaster.emit(.message(deviceId: deviceId, msg))
+      } catch {
+        broadcaster.emit(.decodeError(deviceId: deviceId, description: String(describing: error)))
       }
-      buffers[deviceId] = accumulator
-    } catch {
-      buffers[deviceId] = FrameAccumulator()
-      broadcaster.emit(.decodeError(deviceId: deviceId, description: String(describing: error)))
     }
+  }
+
+  /// framing loss is unrecoverable mid-stream: drop everything buffered for the peer, fail its
+  /// in-flight requests, and ask the adapter to re-dial a clean stream.
+  private func dropLink(deviceId: String) {
+    buffers.removeValue(forKey: deviceId)
+    failPendingRequests(forDevice: deviceId, with: BridgethingGatewayError.disconnected)
+    Task { [weak self] in try? await self?.adapter.reconnect(deviceId: deviceId) }
   }
 }
 
@@ -212,7 +259,7 @@ final class EventBroadcaster: @unchecked Sendable {
   private var replay: [GatewayEvent] = []
   private var finished = false
 
-  func subscribe() -> AsyncStream<GatewayEvent> {
+  func subscribe(replay shouldReplay: Bool = true) -> AsyncStream<GatewayEvent> {
     AsyncStream(bufferingPolicy: .bufferingNewest(1024)) { continuation in
       let id = UUID()
       lock.lock()
@@ -221,8 +268,10 @@ final class EventBroadcaster: @unchecked Sendable {
         continuation.finish()
         return
       }
-      for e in replay {
-        continuation.yield(e)
+      if shouldReplay {
+        for e in replay {
+          continuation.yield(e)
+        }
       }
       subscribers[id] = continuation
       lock.unlock()

@@ -366,11 +366,14 @@ impl ClientManager {
       }
     }
 
-    if send_capabilities_snapshot && let Err(err) = state.capabilities.send_snapshot_to(address).await {
-      tracing::warn!(
-        ?err,
-        "failed to seed capabilities snapshot for new modern client {address}"
-      );
+    if send_capabilities_snapshot {
+      if let Err(err) = state.capabilities.send_snapshot_to(address).await {
+        tracing::warn!(
+          ?err,
+          "failed to seed capabilities snapshot for new modern client {address}"
+        );
+      }
+      state.peers.seed_to(address).await;
     }
 
     Ok(())
