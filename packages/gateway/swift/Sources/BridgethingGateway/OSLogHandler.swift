@@ -13,7 +13,7 @@ public struct OSLogHandler: LogHandler {
 
   public init(label: String) {
     self.label = label
-    self.osLog = os.Logger(subsystem: "dev.bridgething", category: label)
+    self.osLog = os.Logger(subsystem: "com.bridgething", category: label)
   }
 
   public subscript(metadataKey key: String) -> Logging.Logger.Metadata.Value? {

@@ -2,10 +2,14 @@
 
 use std::time::{Duration, Instant};
 
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
-use crate::error::{Error, Result};
+use crate::{
+  error::{Error, Result},
+  httpx::{HttpExecutor, HttpMethod, HttpRequest, HttpResponse, form_urlencode, headers_to_vec},
+};
 
 pub const DEFAULT_WORKER_BASE: &str = "https://thinglabs.sh/auth";
 pub const DEFAULT_SCOPE: &str = "streaming,user-read-playback-state,user-modify-playback-state,\
@@ -39,7 +43,7 @@ struct BearerState {
 pub struct Auth {
   base: String,
   psk: String,
-  http: reqwest::Client,
+  exec: HttpExecutor,
   store: Box<dyn TokenStore>,
   state: Mutex<BearerState>,
 }
@@ -77,15 +81,11 @@ fn default_token_ttl() -> u64 {
 }
 
 impl Auth {
-  pub fn new(base: impl Into<String>, psk: impl Into<String>, store: Box<dyn TokenStore>) -> Self {
+  pub fn new(base: impl Into<String>, psk: impl Into<String>, store: Box<dyn TokenStore>, exec: HttpExecutor) -> Self {
     Auth {
       base: base.into().trim_end_matches('/').to_string(),
       psk: psk.into(),
-      http: reqwest::Client::builder()
-        .timeout(crate::http::HTTP_REQUEST_TIMEOUT)
-        .connect_timeout(crate::http::HTTP_CONNECT_TIMEOUT)
-        .build()
-        .expect("reqwest client builds"),
+      exec,
       store,
       state: Mutex::new(BearerState {
         refresh_token: None,
@@ -110,23 +110,38 @@ impl Auth {
     false
   }
 
-  fn worker_post(&self, path: &str) -> reqwest::RequestBuilder {
+  async fn worker_form(&self, path: &str, pairs: &[(&str, &str)]) -> Result<HttpResponse> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+      AUTHORIZATION,
+      HeaderValue::from_str(&format!("Bearer {}", self.psk)).map_err(Error::other)?,
+    );
+    headers.insert(
+      CONTENT_TYPE,
+      HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
     self
-      .http
-      .post(format!("{}{}", self.base, path))
-      .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", self.psk))
+      .exec
+      .execute(HttpRequest {
+        method: HttpMethod::Post,
+        url: format!("{}{}", self.base, path),
+        headers: headers_to_vec(&headers),
+        body: form_urlencode(pairs),
+        timeout_ms: 0,
+      })
+      .await
   }
 
   pub async fn begin_device_flow(&self) -> Result<DeviceFlow> {
     let resp = self
-      .worker_post("/api/device/code")
-      .form(&[("scope", DEFAULT_SCOPE), ("description", "bridgething-carthing")])
-      .send()
+      .worker_form(
+        "/api/device/code",
+        &[("scope", DEFAULT_SCOPE), ("description", "bridgething-carthing")],
+      )
       .await?;
-    let status = resp.status();
-    let text = resp.text().await?;
-    if !status.is_success() {
-      return Err(Error::status("device/code", status.as_u16(), text));
+    let text = resp.text();
+    if !resp.ok() {
+      return Err(Error::status("device/code", resp.status, text));
     }
     let dc: DeviceCodeResp = serde_json::from_str(&text)?;
     Ok(DeviceFlow {
@@ -150,9 +165,7 @@ impl Auth {
       }
       tokio::time::sleep(Duration::from_secs(interval)).await;
       let resp = match self
-        .worker_post("/api/token")
-        .form(&[("grant_type", DEVICE_GRANT), ("device_code", &flow.device_code)])
-        .send()
+        .worker_form("/api/token", &[("grant_type", DEVICE_GRANT), ("device_code", &flow.device_code)])
         .await
       {
         Ok(r) => r,
@@ -161,14 +174,8 @@ impl Auth {
           continue;
         }
       };
-      let status = resp.status();
-      let body = match resp.text().await {
-        Ok(t) => t,
-        Err(e) => {
-          tracing::warn!("device-flow poll read failed: {e}");
-          continue;
-        }
-      };
+      let status = resp.status;
+      let body = resp.text();
       let tok: TokenResp = match serde_json::from_str(&body) {
         Ok(t) => t,
         Err(e) => {
@@ -176,7 +183,7 @@ impl Auth {
           continue;
         }
       };
-      if status.is_success()
+      if (200..300).contains(&status)
         && let (Some(access), Some(refresh)) = (tok.access_token, tok.refresh_token)
       {
         self.adopt(refresh, access, tok.expires_in).await;
@@ -192,6 +199,7 @@ impl Auth {
   }
 
   async fn adopt(&self, refresh: String, bearer: String, ttl: u64) {
+    tracing::debug!(ttl_s = ttl, "auth: adopting new tokens");
     self.store.save_refresh_token(refresh.clone());
     let mut st = self.state.lock().await;
     st.refresh_token = Some(refresh);
@@ -216,18 +224,17 @@ impl Auth {
         None => return Err(Error::NotPaired),
       },
     };
+    tracing::debug!("auth: bearer expired, refreshing");
     let resp = self
-      .worker_post("/api/token")
-      .form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
-      .send()
+      .worker_form("/api/token", &[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
       .await?;
-    let status = resp.status();
-    let text = resp.text().await?;
-    if status == reqwest::StatusCode::BAD_REQUEST {
+    let status = resp.status;
+    let text = resp.text();
+    if status == 400 {
       return Err(Error::InvalidGrant);
     }
-    if !status.is_success() {
-      return Err(Error::status("token/refresh", status.as_u16(), text));
+    if !resp.ok() {
+      return Err(Error::status("token/refresh", status, text));
     }
     let tok: TokenResp = serde_json::from_str(&text)?;
     let bearer = tok.access_token.ok_or(Error::InvalidGrant)?;
@@ -239,6 +246,7 @@ impl Auth {
     }
     st.bearer = Some(bearer.clone());
     st.bearer_exp = Instant::now() + Duration::from_secs(tok.expires_in);
+    tracing::debug!(ttl_s = tok.expires_in, "auth: bearer refreshed");
     Ok(bearer)
   }
 }

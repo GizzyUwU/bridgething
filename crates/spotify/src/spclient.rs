@@ -19,6 +19,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use crate::{
   error::{Error, Result},
   http::{SPCLIENT, SpHttp, random_hex},
+  httpx::{HttpMethod, with_query},
   proto::custom::{
     casita_home::HomeResponse,
     collection::{Item as CollectionWriteItem, WriteRequest},
@@ -65,50 +66,44 @@ impl SpClient {
   }
 
   async fn get_proto<T: Message>(&self, url: String, query: &[(&str, String)], what: &str) -> Result<T> {
+    tracing::debug!(%what, "spclient: get");
     let headers = self.http.headers(false).await?;
-    let resp = self.http.http.get(url).headers(headers).query(query).send().await?;
-    let status = resp.status();
-    let bytes = resp.bytes().await?;
-    if !status.is_success() {
-      return Err(Error::status(
-        what,
-        status.as_u16(),
-        String::from_utf8_lossy(&bytes).into_owned(),
-      ));
+    let resp = self
+      .http
+      .send(HttpMethod::Get, with_query(url, query)?, headers, Vec::new(), 0)
+      .await?;
+    if !resp.ok() {
+      return Err(Error::status(what, resp.status, resp.text()));
     }
-    Ok(T::parse_from_bytes(&bytes)?)
+    Ok(T::parse_from_bytes(&resp.body)?)
   }
 
   async fn post_proto<T: Message>(&self, url: String, body: Vec<u8>, what: &str) -> Result<T> {
+    tracing::debug!(%what, "spclient: post");
     let headers = self.http.headers(false).await?;
-    let resp = self.http.http.post(url).headers(headers).body(body).send().await?;
-    let status = resp.status();
-    let bytes = resp.bytes().await?;
-    if !status.is_success() {
-      return Err(Error::status(
-        what,
-        status.as_u16(),
-        String::from_utf8_lossy(&bytes).into_owned(),
-      ));
+    let resp = self.http.send(HttpMethod::Post, url, headers, body, 0).await?;
+    if !resp.ok() {
+      return Err(Error::status(what, resp.status, resp.text()));
     }
-    Ok(T::parse_from_bytes(&bytes)?)
+    Ok(T::parse_from_bytes(&resp.body)?)
   }
 
   pub async fn product_state(&self) -> Result<serde_json::Value> {
     let headers = self.http.headers(true).await?;
     let resp = self
       .http
-      .http
-      .get(format!("{SPCLIENT}/melody/v1/product_state"))
-      .headers(headers)
-      .send()
+      .send(
+        HttpMethod::Get,
+        format!("{SPCLIENT}/melody/v1/product_state"),
+        headers,
+        Vec::new(),
+        0,
+      )
       .await?;
-    let status = resp.status();
-    let text = resp.text().await?;
-    if !status.is_success() {
-      return Err(Error::status("product_state", status.as_u16(), text));
+    if !resp.ok() {
+      return Err(Error::status("product_state", resp.status, resp.text()));
     }
-    Ok(serde_json::from_str(&text)?)
+    Ok(serde_json::from_slice(&resp.body)?)
   }
 
   pub async fn get_home(&self, locale: &str) -> Result<HomeResponse> {
@@ -255,22 +250,18 @@ impl SpClient {
     headers.insert(ACCEPT, HeaderValue::from_static(COLLECTION_CT));
     let resp = self
       .http
-      .http
-      .post(format!("{SPCLIENT}/collection/v2/paging"))
-      .headers(headers)
-      .body(body)
-      .send()
+      .send(
+        HttpMethod::Post,
+        format!("{SPCLIENT}/collection/v2/paging"),
+        headers,
+        body,
+        0,
+      )
       .await?;
-    let status = resp.status();
-    let bytes = resp.bytes().await?;
-    if !status.is_success() {
-      return Err(Error::status(
-        "collection_paging",
-        status.as_u16(),
-        String::from_utf8_lossy(&bytes).into_owned(),
-      ));
+    if !resp.ok() {
+      return Err(Error::status("collection_paging", resp.status, resp.text()));
     }
-    Ok(util::parse_collection_page(&bytes))
+    Ok(util::parse_collection_page(&resp.body))
   }
 
   pub async fn collection_write(&self, username: &str, set: &str, add: &[String], remove: &[String]) -> Result<u16> {
@@ -295,13 +286,15 @@ impl SpClient {
     headers.insert(ACCEPT, HeaderValue::from_static(COLLECTION_CT));
     let resp = self
       .http
-      .http
-      .post(format!("{SPCLIENT}/collection/v2/write"))
-      .headers(headers)
-      .body(req.write_to_bytes()?)
-      .send()
+      .send(
+        HttpMethod::Post,
+        format!("{SPCLIENT}/collection/v2/write"),
+        headers,
+        req.write_to_bytes()?,
+        0,
+      )
       .await?;
-    Ok(resp.status().as_u16())
+    Ok(resp.status)
   }
 }
 

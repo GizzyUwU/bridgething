@@ -15,7 +15,7 @@ enum BridgethingApp {
     }
 
     private static let spotifyWorkerBase = "https://thinglabs.sh/auth"
-    private static let spotifyTokenStore = SpotifyKeychainStore(service: "dev.bridgething.spotify")
+    private static let spotifyTokenStore = SpotifyKeychainStore(service: "com.bridgething.spotify")
 
     static func installBridgething() {
         HybridBridgethingSessionImpl.hostInfo = HostInfo(

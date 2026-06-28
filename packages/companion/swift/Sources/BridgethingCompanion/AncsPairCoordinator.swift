@@ -26,7 +26,7 @@ public struct AncsSetupResult: Sendable {
     import Logging
     import UIKit
 
-    private let askLog = Logger(label: "dev.bridgething.companion.ancs")
+    private let askLog = Logger(label: "com.bridgething.companion.ancs")
 
     /// Service UUIDs the daemon advertises and hosts for the ANCS LE-bond
     /// bring-up. These match the daemon's pair-trigger service byte-for-byte;

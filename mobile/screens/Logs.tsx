@@ -23,9 +23,12 @@ type LevelFilter = (typeof LEVELS)[number];
 
 export function LogsScreen({}: Props) {
   const entries = useDiagnostics(s => s.deviceLogs);
-  const streaming = useDiagnostics(s => s.logStreaming);
-  const setStreaming = useDiagnostics(s => s.setLogStreaming);
+  const deviceStreaming = useDiagnostics(s => s.deviceLogStreaming);
+  const localStreaming = useDiagnostics(s => s.localLogStreaming);
+  const setDeviceStreaming = useDiagnostics(s => s.setDeviceLogStreaming);
+  const setLocalStreaming = useDiagnostics(s => s.setLocalLogStreaming);
   const clearLogs = useDiagnostics(s => s.clearDeviceLogs);
+  const streaming = deviceStreaming || localStreaming;
   const [filter, setFilter] = useState<LevelFilter>('all');
 
   const filtered = useMemo(() => {
@@ -67,9 +70,16 @@ export function LogsScreen({}: Props) {
           </Text>
           <View className="flex-row gap-1.5">
             <ToolbarBtn
-              icon={streaming ? Pause : Play}
-              label={streaming ? 'stop' : 'start'}
-              onPress={() => setStreaming(!streaming)}
+              icon={deviceStreaming ? Pause : Play}
+              label="device"
+              active={deviceStreaming}
+              onPress={() => setDeviceStreaming(!deviceStreaming)}
+            />
+            <ToolbarBtn
+              icon={localStreaming ? Pause : Play}
+              label="phone"
+              active={localStreaming}
+              onPress={() => setLocalStreaming(!localStreaming)}
             />
             <ToolbarBtn icon={Share2} label="share" onPress={share} />
             <ToolbarBtn
@@ -87,7 +97,7 @@ export function LogsScreen({}: Props) {
             {entries.length === 0
               ? streaming
                 ? 'streaming; no log lines yet'
-                : 'press start to stream device logs'
+                : 'press device or phone to stream logs'
               : 'no entries match this filter'}
           </Text>
         </View>
@@ -108,11 +118,13 @@ function ToolbarBtn({
   label,
   onPress,
   destructive,
+  active,
 }: {
   icon: import('lucide-react-native').LucideIcon;
   label: string;
   onPress: () => void;
   destructive?: boolean;
+  active?: boolean;
 }) {
   const color = destructive ? 'hsl(0 72% 50%)' : 'hsl(199 100% 44%)';
   return (
@@ -121,7 +133,7 @@ function ToolbarBtn({
       scaleTo={0.92}
       className={`flex-row items-center gap-1.5 rounded-full px-2.5 py-1 ${
         destructive ? 'bg-destructive-soft' : 'bg-primary-soft'
-      }`}
+      } ${active ? 'border border-primary' : ''}`}
     >
       <Icon size={12} color={color} strokeWidth={2.4} />
       <Text

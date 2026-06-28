@@ -4,6 +4,8 @@ import Spotify
 public protocol SpotifyClientProviding: AnyObject, Sendable {
     func connect() async throws
     func disconnect() async
+    func resync() async
+    func currentPositionMs() async -> UInt32?
 
     func pause() async throws
     func resume() async throws

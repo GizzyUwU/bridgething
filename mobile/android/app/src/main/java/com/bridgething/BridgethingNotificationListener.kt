@@ -8,15 +8,15 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import dev.bridgething.companion.AndroidNotificationBackend
-import dev.bridgething.companion.BridgethingCompanion
-import dev.bridgething.schema.DismissReason
-import dev.bridgething.schema.NotificationAction
-import dev.bridgething.schema.NotificationApp
-import dev.bridgething.schema.NotificationCategory
-import dev.bridgething.schema.NotificationFlags
-import dev.bridgething.schema.NotificationRemoved
-import dev.bridgething.schema.Notification as WireNotification
+import com.bridgething.companion.AndroidNotificationBackend
+import com.bridgething.companion.BridgethingCompanion
+import com.bridgething.schema.DismissReason
+import com.bridgething.schema.NotificationAction
+import com.bridgething.schema.NotificationApp
+import com.bridgething.schema.NotificationCategory
+import com.bridgething.schema.NotificationFlags
+import com.bridgething.schema.NotificationRemoved
+import com.bridgething.schema.Notification as WireNotification
 
 public class BridgethingNotificationListener : NotificationListenerService() {
 

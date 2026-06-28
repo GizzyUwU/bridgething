@@ -2,7 +2,10 @@ import Foundation
 
 #if os(iOS)
     import AVFoundation
+    import os
     import UIKit
+
+    private let keepAliveLog = Logger(subsystem: "com.bridgething.companion", category: "keepalive")
 
     enum CompanionAudioSession {
         static func activateMixedPlayback() {
@@ -21,6 +24,7 @@ import Foundation
         func activate() {
             guard !active else { return }
             active = true
+            keepAliveLog.info("keepalive activate")
             registerObservers()
             startPlayer()
             startWatchdog()
@@ -28,6 +32,7 @@ import Foundation
 
         func deactivate() {
             active = false
+            keepAliveLog.info("keepalive deactivate")
             watchdog?.cancel()
             watchdog = nil
             for token in observers { NotificationCenter.default.removeObserver(token) }
@@ -58,6 +63,7 @@ import Foundation
             } else {
                 startPlayer()
             }
+            keepAliveLog.info("keepalive tick playing=\(self.player?.isPlaying ?? false, privacy: .public)")
         }
 
         private func rebuild() {

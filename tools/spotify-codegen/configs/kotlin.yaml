@@ -1,9 +1,9 @@
 generatorName: kotlin
 inputSpec: Sources/SpotifyOpenAPI/openapi.yaml
 outputDir: ../../packages/spotify/kotlin
-modelPackage: dev.bridgething.spotify.api.model
-apiPackage: dev.bridgething.spotify.api
-packageName: dev.bridgething.spotify.api
+modelPackage: com.bridgething.spotify.api.model
+apiPackage: com.bridgething.spotify.api
+packageName: com.bridgething.spotify.api
 modelNamePrefix: ""
 generateModelTests: false
 generateModelDocumentation: false

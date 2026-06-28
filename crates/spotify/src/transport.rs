@@ -26,14 +26,17 @@ impl WsInbox {
 #[uniffi::export]
 impl WsInbox {
   pub fn on_open(&self) {
+    tracing::debug!("ws: open");
     let _ = self.tx.send(WsEvent::Open);
   }
 
   pub fn on_text(&self, text: String) {
+    tracing::trace!(frame = %text, "ws: recv");
     let _ = self.tx.send(WsEvent::Text(text));
   }
 
   pub fn on_closed(&self, reason: String) {
+    tracing::debug!(%reason, "ws: closed");
     let _ = self.tx.send(WsEvent::Closed(reason));
   }
 }
@@ -42,7 +45,7 @@ impl WsInbox {
 pub trait WsTransport: Send + Sync {
   fn connect(&self, url: String, inbox: Arc<WsInbox>);
   fn send_text(&self, text: String);
-  fn close(&self);
+  fn disconnect(&self);
 }
 
 #[derive(Default)]
@@ -63,6 +66,7 @@ impl TungsteniteTransport {
 
 impl WsTransport for TungsteniteTransport {
   fn connect(&self, url: String, inbox: Arc<WsInbox>) {
+    tracing::debug!("ws: connecting (native transport)");
     let (out, out_rx) = mpsc::unbounded_channel::<String>();
     let task = tokio::spawn(run(url, inbox, out_rx));
     if let Some(prev) = self.conn.lock().unwrap().replace(Conn { out, task }) {
@@ -71,12 +75,14 @@ impl WsTransport for TungsteniteTransport {
   }
 
   fn send_text(&self, text: String) {
+    tracing::trace!(frame = %text, "ws: send");
     if let Some(conn) = self.conn.lock().unwrap().as_ref() {
       let _ = conn.out.send(text);
     }
   }
 
-  fn close(&self) {
+  fn disconnect(&self) {
+    tracing::debug!("ws: disconnect (native transport)");
     if let Some(conn) = self.conn.lock().unwrap().take() {
       conn.task.abort();
     }

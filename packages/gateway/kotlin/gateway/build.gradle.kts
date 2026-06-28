@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.gateway"
+  namespace = "com.bridgething.gateway"
   compileSdk = 36
 
   defaultConfig {

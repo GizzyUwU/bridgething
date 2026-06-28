@@ -23,6 +23,8 @@ use tokio::{
 use crate::{
   auth::Auth,
   error::{Error, Result},
+  http::SpHttp,
+  httpx::{HttpMethod, with_query},
 };
 
 const SPOTIFY_VERSION: u64 = 124200290;
@@ -62,7 +64,7 @@ fn rand_bytes(n: usize) -> Vec<u8> {
   (0..n).map(|_| rand::random::<u8>()).collect()
 }
 
-pub async fn resolve_and_cache(auth: &Auth, http: &reqwest::Client, device_id: &str) -> Result<String> {
+pub async fn resolve_and_cache(auth: &Auth, http: &SpHttp, device_id: &str) -> Result<String> {
   if let Some(u) = auth.store().load_username() {
     return Ok(u);
   }
@@ -74,7 +76,7 @@ pub async fn resolve_and_cache(auth: &Auth, http: &reqwest::Client, device_id: &
 
 const AP_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn resolve_username(http: &reqwest::Client, access_token: &str, device_id: &str) -> Result<String> {
+pub async fn resolve_username(http: &SpHttp, access_token: &str, device_id: &str) -> Result<String> {
   tokio::time::timeout(AP_HANDSHAKE_TIMEOUT, async {
     let (host, port) = apresolve(http).await?;
     let sock = TcpStream::connect((host.as_str(), port)).await.map_err(Error::other)?;
@@ -85,14 +87,12 @@ pub async fn resolve_username(http: &reqwest::Client, access_token: &str, device
   .map_err(|_| Error::other("ap username resolution timed out"))?
 }
 
-async fn apresolve(http: &reqwest::Client) -> Result<(String, u16)> {
-  let v: Value = http
-    .get("https://apresolve.spotify.com/")
-    .query(&[("type", "accesspoint")])
-    .send()
-    .await?
-    .json()
+async fn apresolve(http: &SpHttp) -> Result<(String, u16)> {
+  let url = with_query("https://apresolve.spotify.com/".to_string(), &[("type", "accesspoint".to_string())])?;
+  let resp = http
+    .send(HttpMethod::Get, url, reqwest::header::HeaderMap::new(), Vec::new(), 0)
     .await?;
+  let v: Value = serde_json::from_slice(&resp.body)?;
   let entry = v["accesspoint"][0]
     .as_str()
     .ok_or_else(|| Error::other("apresolve returned no accesspoint"))?;

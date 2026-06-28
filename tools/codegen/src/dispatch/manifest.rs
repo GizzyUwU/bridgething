@@ -19,7 +19,7 @@ use super::plan::{EntryCategory, Plan, surfaces};
 const SWIFT_OUTPUT: &str = "packages/gateway/swift/Sources/BridgethingGateway/WireSurfaceManifest+Generated.swift";
 const KOTLIN_OUTPUT: &str =
   "packages/gateway/kotlin/gateway/src/main/kotlin/dev/bridgething/gateway/WireSurfaceManifest.kt";
-const KOTLIN_PACKAGE: &str = "dev.bridgething.gateway";
+const KOTLIN_PACKAGE: &str = "com.bridgething.gateway";
 
 struct ManifestData {
   requests: Vec<String>,

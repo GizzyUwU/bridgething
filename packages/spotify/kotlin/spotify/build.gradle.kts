@@ -4,11 +4,15 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.spotify"
+  namespace = "com.bridgething.spotify"
   compileSdk = 36
 
   defaultConfig {
     minSdk = 26
+  }
+
+  buildFeatures {
+    buildConfig = true
   }
 
   compileOptions {

@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use crate::{
   auth::Auth,
   error::{Error, Result},
+  httpx::{HttpExecutor, HttpMethod, HttpRequest, HttpResponse, headers_to_vec},
   util,
 };
 
@@ -40,22 +41,16 @@ struct ClientToken {
 
 #[derive(Clone)]
 pub struct SpHttp {
-  pub http: reqwest::Client,
+  pub exec: HttpExecutor,
   pub auth: Arc<Auth>,
   ct: Arc<Mutex<ClientToken>>,
   market: Arc<Mutex<Option<(String, String)>>>,
 }
 
 impl SpHttp {
-  pub fn new(auth: Arc<Auth>) -> Self {
-    let http = reqwest::Client::builder()
-      .user_agent(format!("Spotify/{CLIENT_VERSION} Android/36 (SM-X810)"))
-      .timeout(HTTP_REQUEST_TIMEOUT)
-      .connect_timeout(HTTP_CONNECT_TIMEOUT)
-      .build()
-      .expect("reqwest client builds");
+  pub fn new(auth: Arc<Auth>, exec: HttpExecutor) -> Self {
     SpHttp {
-      http,
+      exec,
       auth,
       ct: Arc::new(Mutex::new(ClientToken {
         device_id: random_hex(20),
@@ -65,6 +60,26 @@ impl SpHttp {
       })),
       market: Arc::new(Mutex::new(None)),
     }
+  }
+
+  pub async fn send(
+    &self,
+    method: HttpMethod,
+    url: String,
+    headers: HeaderMap,
+    body: Vec<u8>,
+    timeout_ms: u32,
+  ) -> Result<HttpResponse> {
+    self
+      .exec
+      .execute(HttpRequest {
+        method,
+        url,
+        headers: headers_to_vec(&headers),
+        body,
+        timeout_ms,
+      })
+      .await
   }
 
   pub async fn set_market(&self, country: &str, catalogue: &str) {
@@ -114,13 +129,16 @@ impl SpHttp {
     {
       return Some(t.clone());
     }
+    tracing::debug!("client-token: minting");
     match self.mint_client_token(&st.device_id).await {
       Some((tok, ttl)) => {
         st.token = Some(tok.clone());
         st.exp = Instant::now() + Duration::from_secs(ttl);
+        tracing::debug!(ttl_s = ttl, "client-token: minted");
         Some(tok)
       }
       None => {
+        tracing::warn!("client-token: mint failed, disabling client-token header");
         st.disabled = true;
         None
       }
@@ -129,20 +147,16 @@ impl SpHttp {
 
   async fn mint_client_token(&self, device_id: &str) -> Option<(String, u64)> {
     let body = util::client_token_request(CT_CLIENT_VERSION, DESKTOP_CLIENT_ID, device_id);
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT, HeaderValue::from_static(PROTO_CT));
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(PROTO_CT));
     let resp = self
-      .http
-      .post(CLIENTTOKEN_URL)
-      .header(ACCEPT, PROTO_CT)
-      .header(CONTENT_TYPE, PROTO_CT)
-      .timeout(Duration::from_secs(5))
-      .body(body)
-      .send()
+      .send(HttpMethod::Post, CLIENTTOKEN_URL.to_string(), headers, body, 5000)
       .await
       .ok()?;
-    if !resp.status().is_success() {
+    if !resp.ok() {
       return None;
     }
-    let bytes = resp.bytes().await.ok()?;
-    util::parse_client_token(&bytes)
+    util::parse_client_token(&resp.body)
   }
 }

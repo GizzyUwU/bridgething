@@ -1,4 +1,4 @@
-package dev.bridgething.schema
+package com.bridgething.schema
 
 import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackNullableDynamicSerializer
 import kotlinx.serialization.InternalSerializationApi
@@ -40,7 +40,7 @@ import kotlinx.serialization.json.longOrNull
 public object UniversalValueSerializer : KSerializer<JsonElement> {
     @OptIn(InternalSerializationApi::class)
     override val descriptor: SerialDescriptor =
-        buildSerialDescriptor("dev.bridgething.schema.Value", SerialKind.CONTEXTUAL)
+        buildSerialDescriptor("com.bridgething.schema.Value", SerialKind.CONTEXTUAL)
 
     override fun serialize(encoder: Encoder, value: JsonElement) {
         if (encoder is JsonEncoder) {

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.applemusic"
+  namespace = "com.bridgething.applemusic"
   compileSdk = 36
 
   defaultConfig {

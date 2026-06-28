@@ -46,51 +46,51 @@ import com.margelo.nitro.bridgething.session.BridgethingWebappIcon
 import com.margelo.nitro.bridgething.session.BridgethingWebappInfo
 import com.margelo.nitro.bridgething.session.BridgethingWebappRole
 import com.margelo.nitro.bridgething.session.BridgethingWebappSource
-import dev.bridgething.companion.AncsSetupKind
-import dev.bridgething.companion.BridgethingCompanion
-import dev.bridgething.companion.BridgethingCompanionVersion
-import dev.bridgething.companion.CatalogAppListing
-import dev.bridgething.companion.CatalogAppUpdate
-import dev.bridgething.companion.CatalogEvent
-import dev.bridgething.companion.CatalogPollConfig as KCatalogPollConfig
-import dev.bridgething.companion.CompanionCapabilityFlags
-import dev.bridgething.companion.CompanionLogLevel
-import dev.bridgething.companion.DeviceLogRing
-import dev.bridgething.companion.HostInfo
-import dev.bridgething.companion.OtaCompositeVersion
-import dev.bridgething.companion.OtaDiscoverManifest
-import dev.bridgething.companion.OtaPhaseSnapshot
-import dev.bridgething.companion.OtaPollConfig as KOtaPollConfig
-import dev.bridgething.companion.OtaPollEvent
-import dev.bridgething.companion.WebappInstallResult
-import dev.bridgething.gateway.GatewayEvent
-import dev.bridgething.gateway.RequestResult
-import dev.bridgething.gateway.device
-import dev.bridgething.gateway.webapp
-import dev.bridgething.glue.BridgethingGlue
-import dev.bridgething.glue.GlueAuthState
-import dev.bridgething.glue.GlueDebugState
-import dev.bridgething.glue.GlueNowPlaying
-import dev.bridgething.schema.BridgeThingMeta
-import dev.bridgething.glue.GlueServiceHealth
-import dev.bridgething.lyrics.LrclibResolver
-import dev.bridgething.lyrics.LyricsResolver
-import dev.bridgething.schema.AncsAuthState
-import dev.bridgething.schema.ConfigField
-import dev.bridgething.schema.OtaKind
-import dev.bridgething.schema.OtaPhase
-import dev.bridgething.schema.Priority
-import dev.bridgething.schema.RepeatMode
-import dev.bridgething.schema.WebappConfigDelete
-import dev.bridgething.schema.WebappConfigList
-import dev.bridgething.schema.WebappConfigSet
-import dev.bridgething.schema.WebappError
-import dev.bridgething.schema.WebappIcon
-import dev.bridgething.schema.WebappInfo
-import dev.bridgething.schema.WebappRole
-import dev.bridgething.schema.WebappSource
-import dev.bridgething.schema.WebappSwitchTo
-import dev.bridgething.schema.WebappUninstall
+import com.bridgething.companion.AncsSetupKind
+import com.bridgething.companion.BridgethingCompanion
+import com.bridgething.companion.BridgethingCompanionVersion
+import com.bridgething.companion.CatalogAppListing
+import com.bridgething.companion.CatalogAppUpdate
+import com.bridgething.companion.CatalogEvent
+import com.bridgething.companion.CatalogPollConfig as KCatalogPollConfig
+import com.bridgething.companion.CompanionCapabilityFlags
+import com.bridgething.companion.CompanionLogLevel
+import com.bridgething.companion.DeviceLogRing
+import com.bridgething.companion.HostInfo
+import com.bridgething.companion.OtaCompositeVersion
+import com.bridgething.companion.OtaDiscoverManifest
+import com.bridgething.companion.OtaPhaseSnapshot
+import com.bridgething.companion.OtaPollConfig as KOtaPollConfig
+import com.bridgething.companion.OtaPollEvent
+import com.bridgething.companion.WebappInstallResult
+import com.bridgething.gateway.GatewayEvent
+import com.bridgething.gateway.RequestResult
+import com.bridgething.gateway.device
+import com.bridgething.gateway.webapp
+import com.bridgething.glue.BridgethingGlue
+import com.bridgething.glue.GlueAuthState
+import com.bridgething.glue.GlueDebugState
+import com.bridgething.glue.GlueNowPlaying
+import com.bridgething.schema.BridgeThingMeta
+import com.bridgething.glue.GlueServiceHealth
+import com.bridgething.lyrics.LrclibResolver
+import com.bridgething.lyrics.LyricsResolver
+import com.bridgething.schema.AncsAuthState
+import com.bridgething.schema.ConfigField
+import com.bridgething.schema.OtaKind
+import com.bridgething.schema.OtaPhase
+import com.bridgething.schema.Priority
+import com.bridgething.schema.RepeatMode
+import com.bridgething.schema.WebappConfigDelete
+import com.bridgething.schema.WebappConfigList
+import com.bridgething.schema.WebappConfigSet
+import com.bridgething.schema.WebappError
+import com.bridgething.schema.WebappIcon
+import com.bridgething.schema.WebappInfo
+import com.bridgething.schema.WebappRole
+import com.bridgething.schema.WebappSource
+import com.bridgething.schema.WebappSwitchTo
+import com.bridgething.schema.WebappUninstall
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -202,6 +202,7 @@ public class HybridBridgethingSessionImpl(
 
     @Volatile
     private var logStreamingDesired: Boolean = false
+    private var localLogStreamingDesired: Boolean = false
 
     override suspend fun start() {
         // the foreground service owns the companion's lifetime; the UI just borrows the reference.
@@ -215,10 +216,9 @@ public class HybridBridgethingSessionImpl(
 
         c.setNowPlayingObserver { np -> safeEmit { handleNowPlaying(np) } }
         c.setAncsAuthStateObserver { state -> safeEmit { emitAncsAuthStatus(toRnAncsAuthStatus(state)) } }
-        if (logStreamingDesired) {
-            c.setLogObserver { level, message -> safeEmit { if (CompanionHolder.foreground) onLog?.invoke(level.raw, message) } }
-            scope.launch { c.setDeviceLogStreaming(true) }
-        }
+        reconcileLogObserver(c)
+        if (logStreamingDesired) scope.launch { c.setDeviceLogStreaming(true) }
+        if (localLogStreamingDesired) c.setLocalLogStreaming(true)
         eventsJob = scope.launch { c.gateway.events.collect { event -> safeEmit { handleGatewayEvent(event) } } }
         otaJob = scope.launch { c.ota.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onOtaEvent?.invoke(toRnOtaEvent(ev)) } } }
         catalogJob = scope.launch { c.catalog.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } } }
@@ -831,12 +831,23 @@ public class HybridBridgethingSessionImpl(
     override fun setLogStreamingEnabled(enabled: Boolean) {
         logStreamingDesired = enabled
         val c = companion ?: return
-        if (enabled) {
+        reconcileLogObserver(c)
+        scope.launch { c.setDeviceLogStreaming(enabled) }
+    }
+
+    override fun setLocalLogStreamingEnabled(enabled: Boolean) {
+        localLogStreamingDesired = enabled
+        val c = companion ?: return
+        reconcileLogObserver(c)
+        c.setLocalLogStreaming(enabled)
+    }
+
+    private fun reconcileLogObserver(c: BridgethingCompanion) {
+        if (logStreamingDesired || localLogStreamingDesired) {
             c.setLogObserver { level, msg -> safeEmit { if (CompanionHolder.foreground) onLog?.invoke(level.raw, msg) } }
         } else {
             c.setLogObserver(null)
         }
-        scope.launch { c.setDeviceLogStreaming(enabled) }
     }
 
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }

@@ -86,6 +86,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
     private var onCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
     private var logStreamingDesired: Bool = false
+    private var localLogStreamingDesired: Bool = false
     private var lastAuthState: BridgethingAuthState = .idleState()
     private var lastServiceHealth: BridgethingServiceHealth = toRNServiceHealth(.ok)
 
@@ -158,12 +159,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         await companion.setAncsAuthStateObserver { [weak self] state in
             self?.emitAncsAuthStatus(toRNAncsAuthStatus(state))
         }
-        if stateLock.withLock({ logStreamingDesired }) {
-            await companion.setLogObserver { [weak self] level, message in
-                self?.emitLog(level.rawValue, message)
-            }
-            await companion.setDeviceLogStreaming(true)
-        }
+        let (deviceDesired, localDesired) = stateLock.withLock { (logStreamingDesired, localLogStreamingDesired) }
+        await reconcileLogObserver(companion)
+        if deviceDesired { await companion.setDeviceLogStreaming(true) }
+        if localDesired { await companion.setLocalLogStreaming(true) }
 
         try await companion.start()
 
@@ -763,18 +762,32 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             return self.companion
         }
         guard let companion else { return }
-        if enabled {
-            Task { [weak self] in
-                await companion.setLogObserver { [weak self] level, message in
-                    self?.emitLog(level.rawValue, message)
-                }
-                await companion.setDeviceLogStreaming(true)
+        Task { [weak self] in
+            await self?.reconcileLogObserver(companion)
+            await companion.setDeviceLogStreaming(enabled)
+        }
+    }
+
+    public func setLocalLogStreamingEnabled(_ enabled: Bool) {
+        let companion: BridgethingCompanion? = stateLock.withLock {
+            localLogStreamingDesired = enabled
+            return self.companion
+        }
+        guard let companion else { return }
+        Task { [weak self] in
+            await self?.reconcileLogObserver(companion)
+            await companion.setLocalLogStreaming(enabled)
+        }
+    }
+
+    private func reconcileLogObserver(_ companion: BridgethingCompanion) async {
+        let wantObserver = stateLock.withLock { logStreamingDesired || localLogStreamingDesired }
+        if wantObserver {
+            await companion.setLogObserver { [weak self] level, message in
+                self?.emitLog(level.rawValue, message)
             }
         } else {
-            Task {
-                await companion.setDeviceLogStreaming(false)
-                await companion.setLogObserver(nil)
-            }
+            await companion.setLogObserver(nil)
         }
     }
 

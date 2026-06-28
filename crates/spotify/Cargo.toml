@@ -51,6 +51,7 @@ num-bigint = "0.4.6"
 hmac = "0.13.0"
 sha1 = "0.11.0"
 uniffi = { version = "0.31.2", features = ["cli", "tokio"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [build-dependencies]
 protobuf-codegen = "3.7.2"

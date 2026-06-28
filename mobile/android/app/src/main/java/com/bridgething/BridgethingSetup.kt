@@ -6,11 +6,11 @@ import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.margelo.nitro.bridgething.session.HybridBridgethingSession
-import dev.bridgething.applemusic.AppleMusicGlue
-import dev.bridgething.companion.HostInfo
-import dev.bridgething.lyrics.LrclibResolver
-import dev.bridgething.spotify.SpotifyGlue
-import dev.bridgething.tidal.TidalGlue
+import com.bridgething.applemusic.AppleMusicGlue
+import com.bridgething.companion.HostInfo
+import com.bridgething.lyrics.LrclibResolver
+import com.bridgething.spotify.SpotifyGlue
+import com.bridgething.tidal.TidalGlue
 import uniffi.spotify.TokenStore as SpTokenStore
 
 /**
@@ -91,7 +91,7 @@ private class SpotifyKeychainStore(context: Context) : SpTokenStore {
             @Suppress("DEPRECATION")
             EncryptedSharedPreferences.create(
                 context,
-                "dev.bridgething.spotify",
+                "com.bridgething.spotify",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,

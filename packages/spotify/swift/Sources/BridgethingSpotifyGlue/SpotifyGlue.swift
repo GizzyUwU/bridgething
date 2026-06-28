@@ -8,8 +8,13 @@ import os
     import CoreGraphics
     import ImageIO
 #endif
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 public typealias WireRepeat = BridgethingSchema.RepeatMode
+
+private typealias LibraryItem = BridgethingSchema.LibraryItem
 
 private typealias SpPlayerState = Spotify.PlayerState
 private typealias SpTrack = Spotify.Track
@@ -27,7 +32,7 @@ private let defaultThumbEdge = 96
 private let queueMax = 50
 private let queueRunwayFloor = 8
 private let spotifyAppBundle = "com.spotify.client"
-private let glueLog = Logger(subsystem: "dev.bridgething.spotify", category: "glue")
+private let glueLog = Logger(subsystem: "com.bridgething.spotify", category: "glue")
 
 public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public static let name: String = "spotify"
@@ -50,6 +55,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var client: (any SpotifyClientProviding)?
     private var gateway: BridgethingGateway?
     private var connectTask: Task<Void, Never>?
+    private var foregroundTask: Task<Void, Never>?
 
     private let stateLock = NSLock()
     private var heldScopes: Set<CompanionAuthorityScope> = []
@@ -100,7 +106,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         self.clientFactory = clientFactory ?? { store, observer in
             let client = SpotifyClient.create(base: workerBase, psk: psk, deviceId: deviceId, store: store, observer: observer)
             #if canImport(Darwin)
+                #if DEBUG
+                    let directive = "spotify=trace"
+                #else
+                    let directive = "spotify=info"
+                #endif
+                initLogging(sink: OsLogSink(), directive: directive)
                 client.setWsTransport(transport: UrlSessionWsTransport())
+                client.setHttpTransport(transport: UrlSessionHttpTransport())
             #endif
             return client
         }
@@ -138,6 +151,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 self?.currentAuthObserver()?(.failed("sign-in error: \(error)"))
             }
         }
+        #if os(iOS)
+            foregroundTask = Task { [weak client] in
+                for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) {
+                    await client?.resync()
+                }
+            }
+        #endif
     }
 
     public func detach() async {
@@ -147,6 +167,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
         connectTask?.cancel()
         connectTask = nil
+        foregroundTask?.cancel()
+        foregroundTask = nil
         if let client { await client.disconnect() }
         await releaseAllAuthority()
         let npObs = stateLock.withLock { nowPlayingObserver }
@@ -222,8 +244,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         guard currentGateway() != nil else { return }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
-        let pending = stateLock.withLock { lastState }
-        guard let pending, pending.track != nil else { return }
+        guard var pending = stateLock.withLock({ lastState }), pending.track != nil else { return }
+        if let fresh = await client?.currentPositionMs() { pending.positionMs = fresh }
         enqueue(.player(snapshot: makeSnapshot(from: pending), hasItem: true, onRemote: pending.onRemoteSpeaker))
         let queue = stateLock.withLock { lastQueueItems }
         if !queue.isEmpty {

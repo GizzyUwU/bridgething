@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.tidal"
+  namespace = "com.bridgething.tidal"
   compileSdk = 36
 
   defaultConfig {

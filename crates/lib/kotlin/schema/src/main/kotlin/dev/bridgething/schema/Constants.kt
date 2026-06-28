@@ -1,4 +1,4 @@
-package dev.bridgething.schema
+package com.bridgething.schema
 
 import java.util.UUID
 

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.glue"
+  namespace = "com.bridgething.glue"
   compileSdk = 36
 
   defaultConfig {

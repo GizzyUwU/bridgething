@@ -123,7 +123,8 @@ export type SessionEvent =
 export class BridgethingSession {
   private readonly native: NativeBridgethingSession;
   private readonly listeners: Set<(event: SessionEvent) => void> = new Set();
-  private logSubscriberCount = 0;
+  private logStreamingEnabled = false;
+  private localLogStreamingEnabled = false;
 
   constructor(options: { native?: NativeBridgethingSession } = {}) {
     this.native = options.native ?? createNativeSession();
@@ -138,17 +139,15 @@ export class BridgethingSession {
   }
 
   setLogStreamingEnabled(enabled: boolean): void {
-    if (enabled) {
-      this.logSubscriberCount += 1;
-      if (this.logSubscriberCount === 1) {
-        this.native.setLogStreamingEnabled(true);
-      }
-    } else {
-      this.logSubscriberCount = Math.max(0, this.logSubscriberCount - 1);
-      if (this.logSubscriberCount === 0) {
-        this.native.setLogStreamingEnabled(false);
-      }
-    }
+    if (enabled === this.logStreamingEnabled) return;
+    this.logStreamingEnabled = enabled;
+    this.native.setLogStreamingEnabled(enabled);
+  }
+
+  setLocalLogStreamingEnabled(enabled: boolean): void {
+    if (enabled === this.localLogStreamingEnabled) return;
+    this.localLogStreamingEnabled = enabled;
+    this.native.setLocalLogStreamingEnabled(enabled);
   }
 
   async start(): Promise<void> {

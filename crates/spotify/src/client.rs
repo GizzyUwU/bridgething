@@ -17,6 +17,7 @@ use crate::{
   dealer::{Dealer, DealerEvent, DealerWriter, active_device},
   error::{Error, Result},
   http::SpHttp,
+  httpx::{HttpExecutor, HttpTransport},
   model::{
     self, AuthState, BrowseItem, BrowsePage, Device, LibraryScope, PlayerState, ProductState, Queue, RepeatMode,
     SearchResults, Shelf, Track,
@@ -46,6 +47,7 @@ pub trait Observer: Send + Sync {
 struct Shared {
   writer: Mutex<Option<DealerWriter>>,
   cluster: Mutex<Option<Cluster>>,
+  last_active: Mutex<Option<String>>,
 }
 
 #[derive(uniffi::Object)]
@@ -54,6 +56,7 @@ pub struct SpotifyClient {
   http: SpHttp,
   spc: SpClient,
   dealer: Dealer,
+  exec: HttpExecutor,
   observer: Arc<dyn Observer>,
   shared: Arc<Shared>,
   username: Mutex<Option<String>>,
@@ -62,8 +65,8 @@ pub struct SpotifyClient {
 }
 
 impl SpotifyClient {
-  pub fn new(auth: Arc<Auth>, device_id: String, observer: Arc<dyn Observer>) -> Self {
-    let http = SpHttp::new(auth.clone());
+  pub fn new(auth: Arc<Auth>, device_id: String, exec: HttpExecutor, observer: Arc<dyn Observer>) -> Self {
+    let http = SpHttp::new(auth.clone(), exec.clone());
     let spc = SpClient::new(http.clone());
     let dealer = Dealer::new(http.clone(), device_id);
     SpotifyClient {
@@ -71,15 +74,28 @@ impl SpotifyClient {
       http,
       spc,
       dealer,
+      exec,
       observer,
       shared: Arc::new(Shared {
         writer: Mutex::new(None),
         cluster: Mutex::new(None),
+        last_active: Mutex::new(None),
       }),
       username: Mutex::new(None),
       liked: Arc::new(Mutex::new(None)),
       loop_handle: Mutex::new(None),
     }
+  }
+
+  fn spawn_events_loop(&self) -> JoinHandle<()> {
+    tokio::spawn(events_loop(
+      self.dealer.clone(),
+      self.spc.clone(),
+      self.observer.clone(),
+      self.shared.clone(),
+      self.liked.clone(),
+      self.dealer.device_id().to_string(),
+    ))
   }
 
   async fn username(&self) -> Result<String> {
@@ -97,9 +113,19 @@ impl SpotifyClient {
   }
 
   async fn target(&self) -> Result<String> {
+    let last_active = self.shared.last_active.lock().await.clone();
     let guard = self.shared.cluster.lock().await;
     let cluster = guard.as_ref().ok_or_else(|| Error::other("no cluster yet"))?;
-    active_device(cluster, self.dealer.device_id()).ok_or_else(|| Error::other("no reachable target device"))
+    match active_device(cluster, self.dealer.device_id(), last_active.as_deref()) {
+      Some(target) => Ok(target),
+      None => {
+        tracing::warn!(
+          devices = cluster.device.len(),
+          "spotify command: no reachable target device (phone spotify likely not an active connect device)"
+        );
+        Err(Error::other("no reachable target device"))
+      }
+    }
   }
 
   async fn album_for_track(&self, uri: &str) -> Option<String> {
@@ -347,12 +373,17 @@ impl SpotifyClient {
     store: Box<dyn TokenStore>,
     observer: Box<dyn Observer>,
   ) -> Arc<Self> {
-    let auth = Arc::new(Auth::new(base, psk, store));
-    Arc::new(Self::new(auth, device_id, Arc::from(observer)))
+    let exec = HttpExecutor::new();
+    let auth = Arc::new(Auth::new(base, psk, store, exec.clone()));
+    Arc::new(Self::new(auth, device_id, exec, Arc::from(observer)))
   }
 
   pub fn set_ws_transport(&self, transport: Arc<dyn WsTransport>) {
     self.dealer.set_transport(transport);
+  }
+
+  pub fn set_http_transport(&self, transport: Arc<dyn HttpTransport>) {
+    self.exec.set(transport);
   }
 
   pub async fn connect(&self) -> Result<()> {
@@ -397,7 +428,7 @@ impl SpotifyClient {
       tracing::info!("spotify connect: device flow approved");
     }
 
-    let username = match aplogin::resolve_and_cache(self.auth.as_ref(), &self.http.http, self.dealer.device_id()).await
+    let username = match aplogin::resolve_and_cache(self.auth.as_ref(), &self.http, self.dealer.device_id()).await
     {
       Ok(u) => Some(u),
       Err(e) if is_auth_terminal(&e) => {
@@ -427,16 +458,20 @@ impl SpotifyClient {
       username: username.unwrap_or_default(),
     });
 
-    let handle = tokio::spawn(events_loop(
-      self.dealer.clone(),
-      self.spc.clone(),
-      self.observer.clone(),
-      self.shared.clone(),
-      self.liked.clone(),
-      self.dealer.device_id().to_string(),
-    ));
-    *self.loop_handle.lock().await = Some(handle);
+    *self.loop_handle.lock().await = Some(self.spawn_events_loop());
     Ok(())
+  }
+
+  pub async fn resync(&self) {
+    let mut guard = self.loop_handle.lock().await;
+    if guard.is_none() {
+      return;
+    }
+    tracing::info!("spotify resync: re-establishing dealer on request");
+    if let Some(h) = guard.take() {
+      h.abort();
+    }
+    *guard = Some(self.spawn_events_loop());
   }
 
   pub async fn disconnect(&self) {
@@ -445,6 +480,13 @@ impl SpotifyClient {
     }
     *self.shared.writer.lock().await = None;
     *self.shared.cluster.lock().await = None;
+    *self.shared.last_active.lock().await = None;
+  }
+
+  pub async fn current_position_ms(&self) -> Option<u32> {
+    let guard = self.shared.cluster.lock().await;
+    let cluster = guard.as_ref()?;
+    (!cluster.player_state.track.uri.is_empty()).then(|| model::position_now(&cluster.player_state))
   }
 
   // ---- commands -----------------------------------------------------------
@@ -823,6 +865,11 @@ async fn events_loop(
     match dealer.open().await {
       Ok((mut stream, writer)) => match writer.cluster().await {
         Ok(cluster) => {
+          tracing::info!(
+            active_device = %cluster.active_device_id,
+            devices = cluster.device.len(),
+            "dealer connected"
+          );
           *shared.writer.lock().await = Some(writer);
           let mut emitter = Emitter {
             spc: &spc,
@@ -837,6 +884,9 @@ async fn events_loop(
             ctx_names: HashMap::new(),
           };
           emitter.emit(&cluster, true).await;
+          if !cluster.active_device_id.is_empty() {
+            *shared.last_active.lock().await = Some(cluster.active_device_id.clone());
+          }
           *shared.cluster.lock().await = Some(cluster);
           let mut pending_saved = false;
           let mut pending_playlists = false;
@@ -847,6 +897,9 @@ async fn events_loop(
               event = stream.next_event() => match event {
                 Ok(Some(DealerEvent::Cluster(cluster))) => {
                   emitter.emit(&cluster, false).await;
+                  if !cluster.active_device_id.is_empty() {
+                    *shared.last_active.lock().await = Some(cluster.active_device_id.clone());
+                  }
                   *shared.cluster.lock().await = Some(cluster);
                 }
                 Ok(Some(DealerEvent::LibraryChanged(scope))) => {

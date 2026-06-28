@@ -57,7 +57,7 @@ import Spotify
             task?.send(.string(text)) { _ in }
         }
 
-        func close() {
+        func disconnect() {
             lock.withLock {
                 generation &+= 1
                 task?.cancel(with: .normalClosure, reason: nil)

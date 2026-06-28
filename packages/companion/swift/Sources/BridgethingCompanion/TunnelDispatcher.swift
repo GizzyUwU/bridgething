@@ -12,7 +12,7 @@ public actor TunnelDispatcher {
     private var closeTask: Task<Void, Never>?
 
     #if canImport(Network)
-        private static let queue = DispatchQueue(label: "dev.bridgething.tunnel", attributes: .concurrent)
+        private static let queue = DispatchQueue(label: "com.bridgething.tunnel", attributes: .concurrent)
         private var connections: [UUID: NWConnection] = [:]
         private var pumps: [UUID: Task<Void, Never>] = [:]
         private let connectTimeout: Duration

@@ -242,6 +242,18 @@ fn repeat_of(ps: &PbPlayerState) -> RepeatMode {
   }
 }
 
+pub fn position_now(ps: &PbPlayerState) -> u32 {
+  let duration_ms = clamp_ms(ps.duration);
+  let base = clamp_ms(ps.position_as_of_timestamp);
+  if ps.is_playing && !ps.is_paused && ps.timestamp > 0 {
+    let elapsed = clamp_ms((crate::util::now_ms() as i64).saturating_sub(ps.timestamp));
+    let live = base.saturating_add(elapsed);
+    if duration_ms > 0 { live.min(duration_ms) } else { live }
+  } else {
+    base
+  }
+}
+
 pub fn player_state(cluster: &Cluster) -> PlayerState {
   let ps = &cluster.player_state;
   let r = &ps.restrictions;
@@ -252,14 +264,7 @@ pub fn player_state(cluster: &Cluster) -> PlayerState {
   };
   let duration_ms = clamp_ms(ps.duration);
   let playing = ps.is_playing && !ps.is_paused;
-  let base = clamp_ms(ps.position_as_of_timestamp);
-  let position_ms = if playing && ps.timestamp > 0 {
-    let elapsed = clamp_ms((crate::util::now_ms() as i64).saturating_sub(ps.timestamp));
-    let live = base.saturating_add(elapsed);
-    if duration_ms > 0 { live.min(duration_ms) } else { live }
-  } else {
-    base
-  };
+  let position_ms = position_now(ps);
   PlayerState {
     context_uri: ps.context_uri.clone(),
     context_name: ps
@@ -580,5 +585,39 @@ mod tests {
     assert_eq!(q.next[0].name, "A");
     assert_eq!(q.next[0].duration_ms, 1000);
     assert!(q.next.iter().all(|t| t.uri != "spotify:delimiter"));
+  }
+
+  #[test]
+  fn position_now_extrapolates_while_playing() {
+    let mut ps = PbPlayerState::new();
+    ps.is_playing = true;
+    ps.is_paused = false;
+    ps.position_as_of_timestamp = 1_000;
+    ps.duration = 180_000;
+    ps.timestamp = (crate::util::now_ms() as i64) - 5_000;
+    let pos = position_now(&ps);
+    assert!(
+      (6_000..=6_500).contains(&pos),
+      "playhead extrapolates anchor+elapsed (~6000ms), got {pos}"
+    );
+  }
+
+  #[test]
+  fn position_now_is_frozen_while_paused() {
+    let mut ps = PbPlayerState::new();
+    ps.is_paused = true;
+    ps.position_as_of_timestamp = 42_000;
+    ps.timestamp = (crate::util::now_ms() as i64) - 5_000;
+    assert_eq!(position_now(&ps), 42_000, "a paused playhead does not advance");
+  }
+
+  #[test]
+  fn position_now_clamps_to_duration() {
+    let mut ps = PbPlayerState::new();
+    ps.is_playing = true;
+    ps.position_as_of_timestamp = 170_000;
+    ps.duration = 180_000;
+    ps.timestamp = (crate::util::now_ms() as i64) - 60_000;
+    assert_eq!(position_now(&ps), 180_000, "extrapolation never runs past the track duration");
   }
 }

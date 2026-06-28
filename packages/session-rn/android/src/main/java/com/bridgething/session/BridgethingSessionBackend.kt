@@ -95,6 +95,7 @@ public interface BridgethingSessionBackend {
     public fun setOnAncsAuthStatusChanged(callback: (BridgethingAncsAuthStatus) -> Unit)
     public fun setOnLog(callback: (String, String) -> Unit)
     public fun setLogStreamingEnabled(enabled: Boolean)
+    public fun setLocalLogStreamingEnabled(enabled: Boolean)
     public fun setOnWebappsChanged(callback: (String) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)

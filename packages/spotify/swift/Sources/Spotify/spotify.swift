@@ -425,6 +425,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -572,6 +588,350 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
+
+
+
+public protocol HttpSinkProtocol: AnyObject, Sendable {
+    
+    func complete(response: HttpResponse) 
+    
+    func fail(reason: String) 
+    
+}
+open class HttpSink: HttpSinkProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_spotify_fn_clone_httpsink(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_spotify_fn_free_httpsink(handle, $0) }
+    }
+
+    
+
+    
+open func complete(response: HttpResponse)  {try! rustCall() {
+    uniffi_spotify_fn_method_httpsink_complete(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeHttpResponse_lower(response),$0
+    )
+}
+}
+    
+open func fail(reason: String)  {try! rustCall() {
+    uniffi_spotify_fn_method_httpsink_fail(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(reason),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpSink: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = HttpSink
+
+    public static func lift(_ handle: UInt64) throws -> HttpSink {
+        return HttpSink(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: HttpSink) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpSink {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: HttpSink, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpSink_lift(_ handle: UInt64) throws -> HttpSink {
+    return try FfiConverterTypeHttpSink.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpSink_lower(_ value: HttpSink) -> UInt64 {
+    return FfiConverterTypeHttpSink.lower(value)
+}
+
+
+
+
+
+
+public protocol HttpTransport: AnyObject, Sendable {
+    
+    func execute(request: HttpRequest, sink: HttpSink) 
+    
+}
+open class HttpTransportImpl: HttpTransport, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_spotify_fn_clone_httptransport(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_spotify_fn_free_httptransport(handle, $0) }
+    }
+
+    
+
+    
+open func execute(request: HttpRequest, sink: HttpSink)  {try! rustCall() {
+    uniffi_spotify_fn_method_httptransport_execute(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeHttpRequest_lower(request),
+        FfiConverterTypeHttpSink_lower(sink),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceHttpTransport {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceHttpTransport = UniffiVTableCallbackInterfaceHttpTransport(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeHttpTransport.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface HttpTransport: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeHttpTransport.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface HttpTransport: handle missing in uniffiClone")
+            }
+        },
+        execute: { (
+            uniffiHandle: UInt64,
+            request: RustBuffer,
+            sink: UInt64,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeHttpTransport.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.execute(
+                     request: try FfiConverterTypeHttpRequest_lift(request),
+                     sink: try FfiConverterTypeHttpSink_lift(sink)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceHttpTransport> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceHttpTransport>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitHttpTransport() {
+    uniffi_spotify_fn_init_callback_vtable_httptransport(UniffiCallbackInterfaceHttpTransport.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpTransport: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<HttpTransport>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = HttpTransport
+
+    public static func lift(_ handle: UInt64) throws -> HttpTransport {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return HttpTransportImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: HttpTransport) -> UInt64 {
+         if let rustImpl = value as? HttpTransportImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpTransport {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: HttpTransport, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpTransport_lift(_ handle: UInt64) throws -> HttpTransport {
+    return try FfiConverterTypeHttpTransport.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpTransport_lower(_ value: HttpTransport) -> UInt64 {
+    return FfiConverterTypeHttpTransport.lower(value)
+}
+
+
+
 
 
 
@@ -584,6 +944,12 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     func completeDeviceFlow(flow: DeviceFlow) async throws 
     
     func connect() async throws 
+    
+    /**
+     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
+     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
+     */
+    func currentPositionMs() async  -> UInt32?
     
     func disconnect() async 
     
@@ -605,11 +971,15 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func resume() async throws 
     
+    func resync() async 
+    
     func rootBrowse() async throws  -> [Shelf]
     
     func search(query: String, limit: UInt32) async throws  -> SearchResults
     
     func seek(positionMs: Int64) async throws 
+    
+    func setHttpTransport(transport: HttpTransport) 
     
     func setRepeat(mode: RepeatMode) async throws 
     
@@ -756,6 +1126,28 @@ open func connect()async throws   {
             freeFunc: ffi_spotify_rust_future_free_void,
             liftFunc: { $0 },
             errorHandler: FfiConverterTypeError_lift
+        )
+}
+    
+    /**
+     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
+     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
+     */
+open func currentPositionMs()async  -> UInt32?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_current_position_ms(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_rust_buffer,
+            completeFunc: ffi_spotify_rust_future_complete_rust_buffer,
+            freeFunc: ffi_spotify_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionUInt32.lift,
+            errorHandler: nil
+            
         )
 }
     
@@ -930,6 +1322,24 @@ open func resume()async throws   {
         )
 }
     
+open func resync()async   {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_resync(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_void,
+            completeFunc: ffi_spotify_rust_future_complete_void,
+            freeFunc: ffi_spotify_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: nil
+            
+        )
+}
+    
 open func rootBrowse()async throws  -> [Shelf]  {
     return
         try  await uniffiRustCallAsync(
@@ -979,6 +1389,14 @@ open func seek(positionMs: Int64)async throws   {
             liftFunc: { $0 },
             errorHandler: FfiConverterTypeError_lift
         )
+}
+    
+open func setHttpTransport(transport: HttpTransport)  {try! rustCall() {
+    uniffi_spotify_fn_method_spotifyclient_set_http_transport(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeHttpTransport_lower(transport),$0
+    )
+}
 }
     
 open func setRepeat(mode: RepeatMode)async throws   {
@@ -1282,7 +1700,7 @@ public protocol WsTransport: AnyObject, Sendable {
     
     func sendText(text: String) 
     
-    func close() 
+    func disconnect() 
     
 }
 open class WsTransportImpl: WsTransport, @unchecked Sendable {
@@ -1355,8 +1773,8 @@ open func sendText(text: String)  {try! rustCall() {
 }
 }
     
-open func close()  {try! rustCall() {
-    uniffi_spotify_fn_method_wstransport_close(
+open func disconnect()  {try! rustCall() {
+    uniffi_spotify_fn_method_wstransport_disconnect(
             self.uniffiCloneHandle(),$0
     )
 }
@@ -1440,7 +1858,7 @@ fileprivate struct UniffiCallbackInterfaceWsTransport {
                 writeReturn: writeReturn
             )
         },
-        close: { (
+        disconnect: { (
             uniffiHandle: UInt64,
             uniffiOutReturn: UnsafeMutableRawPointer,
             uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
@@ -1450,7 +1868,7 @@ fileprivate struct UniffiCallbackInterfaceWsTransport {
                 guard let uniffiObj = try? FfiConverterTypeWsTransport.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
-                return uniffiObj.close(
+                return uniffiObj.disconnect(
                 )
             }
 
@@ -1924,6 +2342,184 @@ public func FfiConverterTypeDeviceFlow_lift(_ buf: RustBuffer) throws -> DeviceF
 #endif
 public func FfiConverterTypeDeviceFlow_lower(_ value: DeviceFlow) -> RustBuffer {
     return FfiConverterTypeDeviceFlow.lower(value)
+}
+
+
+public struct HttpHeader: Equatable, Hashable {
+    public var name: String
+    public var value: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, value: String) {
+        self.name = name
+        self.value = value
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HttpHeader: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpHeader: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpHeader {
+        return
+            try HttpHeader(
+                name: FfiConverterString.read(from: &buf), 
+                value: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HttpHeader, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpHeader_lift(_ buf: RustBuffer) throws -> HttpHeader {
+    return try FfiConverterTypeHttpHeader.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpHeader_lower(_ value: HttpHeader) -> RustBuffer {
+    return FfiConverterTypeHttpHeader.lower(value)
+}
+
+
+public struct HttpRequest: Equatable, Hashable {
+    public var method: HttpMethod
+    public var url: String
+    public var headers: [HttpHeader]
+    public var body: Data
+    public var timeoutMs: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(method: HttpMethod, url: String, headers: [HttpHeader], body: Data, timeoutMs: UInt32) {
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.body = body
+        self.timeoutMs = timeoutMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HttpRequest: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpRequest {
+        return
+            try HttpRequest(
+                method: FfiConverterTypeHttpMethod.read(from: &buf), 
+                url: FfiConverterString.read(from: &buf), 
+                headers: FfiConverterSequenceTypeHttpHeader.read(from: &buf), 
+                body: FfiConverterData.read(from: &buf), 
+                timeoutMs: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HttpRequest, into buf: inout [UInt8]) {
+        FfiConverterTypeHttpMethod.write(value.method, into: &buf)
+        FfiConverterString.write(value.url, into: &buf)
+        FfiConverterSequenceTypeHttpHeader.write(value.headers, into: &buf)
+        FfiConverterData.write(value.body, into: &buf)
+        FfiConverterUInt32.write(value.timeoutMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpRequest_lift(_ buf: RustBuffer) throws -> HttpRequest {
+    return try FfiConverterTypeHttpRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpRequest_lower(_ value: HttpRequest) -> RustBuffer {
+    return FfiConverterTypeHttpRequest.lower(value)
+}
+
+
+public struct HttpResponse: Equatable, Hashable {
+    public var status: UInt16
+    public var headers: [HttpHeader]
+    public var body: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(status: UInt16, headers: [HttpHeader], body: Data) {
+        self.status = status
+        self.headers = headers
+        self.body = body
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension HttpResponse: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpResponse: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpResponse {
+        return
+            try HttpResponse(
+                status: FfiConverterUInt16.read(from: &buf), 
+                headers: FfiConverterSequenceTypeHttpHeader.read(from: &buf), 
+                body: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HttpResponse, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.status, into: &buf)
+        FfiConverterSequenceTypeHttpHeader.write(value.headers, into: &buf)
+        FfiConverterData.write(value.body, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpResponse_lift(_ buf: RustBuffer) throws -> HttpResponse {
+    return try FfiConverterTypeHttpResponse.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpResponse_lower(_ value: HttpResponse) -> RustBuffer {
+    return FfiConverterTypeHttpResponse.lower(value)
 }
 
 
@@ -2622,6 +3218,80 @@ public func FfiConverterTypeError_lower(_ value: Error) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum HttpMethod: Equatable, Hashable {
+    
+    case get
+    case post
+    case put
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension HttpMethod: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHttpMethod: FfiConverterRustBuffer {
+    typealias SwiftType = HttpMethod
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HttpMethod {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .get
+        
+        case 2: return .post
+        
+        case 3: return .put
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: HttpMethod, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .get:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .post:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .put:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpMethod_lift(_ buf: RustBuffer) throws -> HttpMethod {
+    return try FfiConverterTypeHttpMethod.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHttpMethod_lower(_ value: HttpMethod) -> RustBuffer {
+    return FfiConverterTypeHttpMethod.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum LibraryScope: Equatable, Hashable {
     
     case saved
@@ -2759,6 +3429,145 @@ public func FfiConverterTypeRepeatMode_lower(_ value: RepeatMode) -> RustBuffer 
     return FfiConverterTypeRepeatMode.lower(value)
 }
 
+
+
+
+
+public protocol LogSink: AnyObject, Sendable {
+    
+    func log(level: String, target: String, message: String) 
+    
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceLogSink {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceLogSink = UniffiVTableCallbackInterfaceLogSink(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterCallbackInterfaceLogSink.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface LogSink: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterCallbackInterfaceLogSink.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface LogSink: handle missing in uniffiClone")
+            }
+        },
+        log: { (
+            uniffiHandle: UInt64,
+            level: RustBuffer,
+            target: RustBuffer,
+            message: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceLogSink.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.log(
+                     level: try FfiConverterString.lift(level),
+                     target: try FfiConverterString.lift(target),
+                     message: try FfiConverterString.lift(message)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceLogSink> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceLogSink>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitLogSink() {
+    uniffi_spotify_fn_init_callback_vtable_logsink(UniffiCallbackInterfaceLogSink.vtablePtr)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceLogSink {
+    fileprivate static let handleMap = UniffiHandleMap<LogSink>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceLogSink : FfiConverter {
+    typealias SwiftType = LogSink
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceLogSink_lift(_ handle: UInt64) throws -> LogSink {
+    return try FfiConverterCallbackInterfaceLogSink.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceLogSink_lower(_ v: LogSink) -> UInt64 {
+    return FfiConverterCallbackInterfaceLogSink.lower(v)
+}
 
 
 
@@ -3408,6 +4217,31 @@ fileprivate struct FfiConverterSequenceTypeDevice: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeHttpHeader: FfiConverterRustBuffer {
+    typealias SwiftType = [HttpHeader]
+
+    public static func write(_ value: [HttpHeader], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeHttpHeader.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [HttpHeader] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [HttpHeader]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeHttpHeader.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeShelf: FfiConverterRustBuffer {
     typealias SwiftType = [Shelf]
 
@@ -3502,6 +4336,13 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
+public func initLogging(sink: LogSink, directive: String)  {try! rustCall() {
+    uniffi_spotify_fn_func_init_logging(
+        FfiConverterCallbackInterfaceLogSink_lower(sink),
+        FfiConverterString.lower(directive),$0
+    )
+}
+}
 
 private enum InitializationResult {
     case ok
@@ -3518,6 +4359,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_spotify_checksum_func_init_logging() != 6520) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_spotify_checksum_method_spotifyclient_begin_device_flow() != 35538) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3528,6 +4372,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_connect() != 427) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 45014) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_disconnect() != 46556) {
@@ -3560,6 +4407,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24967) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3567,6 +4417,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_seek() != 29853) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_spotifyclient_set_http_transport() != 22718) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_set_repeat() != 4672) {
@@ -3590,6 +4443,15 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_transfer() != 35984) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_spotify_checksum_method_httpsink_complete() != 61546) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_httpsink_fail() != 37344) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_httptransport_execute() != 19884) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_spotify_checksum_method_wsinbox_on_closed() != 29910) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3605,7 +4467,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_wstransport_send_text() != 36175) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_wstransport_close() != 19118) {
+    if (uniffi_spotify_checksum_method_wstransport_disconnect() != 40870) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_constructor_spotifyclient_create() != 10060) {
@@ -3638,8 +4500,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_observer_on_library_changed() != 28513) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_spotify_checksum_method_logsink_log() != 52378) {
+        return InitializationResult.apiChecksumMismatch
+    }
 
+    uniffiCallbackInitHttpTransport()
     uniffiCallbackInitWsTransport()
+    uniffiCallbackInitLogSink()
     uniffiCallbackInitObserver()
     uniffiCallbackInitTokenStore()
     return InitializationResult.ok

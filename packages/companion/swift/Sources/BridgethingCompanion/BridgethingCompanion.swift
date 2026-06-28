@@ -9,7 +9,7 @@ import Logging
     import UIKit
 #endif
 
-private let osLog = Logger(label: "dev.bridgething.companion.core")
+private let osLog = Logger(label: "com.bridgething.companion.core")
 
 public enum CompanionLogLevel: String, Sendable {
     case debug, info, warn, error
@@ -82,6 +82,7 @@ public actor BridgethingCompanion {
     private var ancsAuthState: AncsAuthState = .unknown
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
     private var deviceLogStreaming = false
+    private var localLogStreaming = false
     private var connectedDeviceIds: Set<String> = []
     private var deviceLogTokens: [String: String] = [:]
     private var deviceLogTask: Task<Void, Never>?
@@ -159,6 +160,8 @@ public actor BridgethingCompanion {
         deviceLogTokens.removeAll()
         connectedDeviceIds.removeAll()
         deviceLogStreaming = false
+        localLogStreaming = false
+        refreshLocalLogSink()
 
         #if os(iOS)
             await audioKeepAlive.deactivate()
@@ -229,12 +232,35 @@ public actor BridgethingCompanion {
 
     public func setLogObserver(_ observer: (@Sendable (CompanionLogLevel, String) -> Void)?) {
         logObserver = observer
+        refreshLocalLogSink()
+    }
+
+    private func refreshLocalLogSink() {
+        guard localLogStreaming, let observer = logObserver else {
+            LocalLogRelay.shared.setSink(nil)
+            return
+        }
+        LocalLogRelay.shared.setSink { level, target, message in
+            let companionLevel: CompanionLogLevel = switch level {
+            case "ERROR": .error
+            case "WARN": .warn
+            case "INFO": .info
+            default: .debug
+            }
+            let line = "[\(target)] \(message)"
+            DeviceLogRing.shared.push(level: companionLevel.rawValue, message: line)
+            observer(companionLevel, line)
+        }
     }
 
     // MARK: - device log streaming
 
-    /// Subscribes to the daemon's tracing log over the gateway and forwards entries through
-    /// `logObserver`.
+    public func setLocalLogStreaming(_ enabled: Bool) {
+        guard enabled != localLogStreaming else { return }
+        localLogStreaming = enabled
+        refreshLocalLogSink()
+    }
+
     public func setDeviceLogStreaming(_ enabled: Bool) async {
         guard enabled != deviceLogStreaming else { return }
         deviceLogStreaming = enabled

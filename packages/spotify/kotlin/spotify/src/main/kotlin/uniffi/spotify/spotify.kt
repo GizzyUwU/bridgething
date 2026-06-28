@@ -314,7 +314,7 @@ internal inline fun<T, reified E: Throwable> uniffiTraitInterfaceCallWithError(
         }
     }
 }
-// Initial value and increment amount for handles.
+// Initial value and increment amount for handles. 
 // These ensure that Kotlin-generated handles always have the lowest bit set
 private const val UNIFFI_HANDLEMAP_INITIAL = 1.toLong()
 private const val UNIFFI_HANDLEMAP_DELTA = 2.toLong()
@@ -324,7 +324,7 @@ private const val UNIFFI_HANDLEMAP_DELTA = 2.toLong()
 // This is used pass an opaque 64-bit handle representing a foreign object to the Rust code.
 internal class UniffiHandleMap<T: Any> {
     private val map = ConcurrentHashMap<Long, T>()
-    // Start
+    // Start 
     private val counter = java.util.concurrent.atomic.AtomicLong(UNIFFI_HANDLEMAP_INITIAL)
 
     val size: Int
@@ -647,6 +647,12 @@ internal interface UniffiCallbackInterfaceObserverMethod3 : com.sun.jna.Callback
 internal interface UniffiCallbackInterfaceObserverMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`scope`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceLogSinkMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`level`: RustBuffer.ByValue,`target`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceHttpTransportMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`request`: RustBuffer.ByValue,`sink`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceWsTransportMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`url`: RustBuffer.ByValue,`inbox`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
@@ -715,28 +721,66 @@ internal open class UniffiVTableCallbackInterfaceObserver(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "connect", "sendText", "close")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "log")
+internal open class UniffiVTableCallbackInterfaceLogSink(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `log`: UniffiCallbackInterfaceLogSinkMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `log`: UniffiCallbackInterfaceLogSinkMethod0? = null,
+    ): UniffiVTableCallbackInterfaceLogSink(`uniffiFree`,`uniffiClone`,`log`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceLogSink) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `log` = other.`log`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "execute")
+internal open class UniffiVTableCallbackInterfaceHttpTransport(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `execute`: UniffiCallbackInterfaceHttpTransportMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `execute`: UniffiCallbackInterfaceHttpTransportMethod0? = null,
+    ): UniffiVTableCallbackInterfaceHttpTransport(`uniffiFree`,`uniffiClone`,`execute`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceHttpTransport) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `execute` = other.`execute`
+    }
+
+}
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "connect", "sendText", "disconnect")
 internal open class UniffiVTableCallbackInterfaceWsTransport(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
     @JvmField internal var `connect`: UniffiCallbackInterfaceWsTransportMethod0? = null,
     @JvmField internal var `sendText`: UniffiCallbackInterfaceWsTransportMethod1? = null,
-    @JvmField internal var `close`: UniffiCallbackInterfaceWsTransportMethod2? = null,
+    @JvmField internal var `disconnect`: UniffiCallbackInterfaceWsTransportMethod2? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
         `uniffiClone`: UniffiCallbackInterfaceClone? = null,
         `connect`: UniffiCallbackInterfaceWsTransportMethod0? = null,
         `sendText`: UniffiCallbackInterfaceWsTransportMethod1? = null,
-        `close`: UniffiCallbackInterfaceWsTransportMethod2? = null,
-    ): UniffiVTableCallbackInterfaceWsTransport(`uniffiFree`,`uniffiClone`,`connect`,`sendText`,`close`,), Structure.ByValue
+        `disconnect`: UniffiCallbackInterfaceWsTransportMethod2? = null,
+    ): UniffiVTableCallbackInterfaceWsTransport(`uniffiFree`,`uniffiClone`,`connect`,`sendText`,`disconnect`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceWsTransport) {
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
         `connect` = other.`connect`
         `sendText` = other.`sendText`
-        `close` = other.`close`
+        `disconnect` = other.`disconnect`
     }
 
 }
@@ -763,6 +807,8 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_spotify_checksum_func_init_logging(
+    ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_begin_device_flow(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_browse(
@@ -770,6 +816,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_spotify_checksum_method_spotifyclient_complete_device_flow(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_connect(
+    ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_current_position_ms(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_disconnect(
     ): Int
@@ -791,11 +839,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resume(
     ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_resync(
+    ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_root_browse(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_search(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_seek(
+    ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_set_http_transport(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_set_repeat(
     ): Int
@@ -811,6 +863,12 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_transfer(
     ): Int
+    external fun uniffi_spotify_checksum_method_httpsink_complete(
+    ): Int
+    external fun uniffi_spotify_checksum_method_httpsink_fail(
+    ): Int
+    external fun uniffi_spotify_checksum_method_httptransport_execute(
+    ): Int
     external fun uniffi_spotify_checksum_method_wsinbox_on_closed(
     ): Int
     external fun uniffi_spotify_checksum_method_wsinbox_on_open(
@@ -821,7 +879,7 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_wstransport_send_text(
     ): Int
-    external fun uniffi_spotify_checksum_method_wstransport_close(
+    external fun uniffi_spotify_checksum_method_wstransport_disconnect(
     ): Int
     external fun uniffi_spotify_checksum_constructor_spotifyclient_create(
     ): Int
@@ -843,213 +901,243 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_observer_on_library_changed(
     ): Int
+    external fun uniffi_spotify_checksum_method_logsink_log(
+    ): Int
     external fun ffi_spotify_uniffi_contract_version(
     ): Int
 
-
+        
 }
 
 internal object UniffiLib {
-
+    
     // The Cleaner for the whole library
     internal val CLEANER: UniffiCleaner by lazy {
         UniffiCleaner.create()
     }
-
+    
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "spotify"))
+        uniffiCallbackInterfaceHttpTransport.register(this)
         uniffiCallbackInterfaceWsTransport.register(this)
+        uniffiCallbackInterfaceLogSink.register(this)
         uniffiCallbackInterfaceObserver.register(this)
         uniffiCallbackInterfaceTokenStore.register(this)
-
+        
     }
-    external fun uniffi_spotify_fn_clone_spotifyclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun uniffi_spotify_fn_free_spotifyclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_constructor_spotifyclient_create(`base`: RustBuffer.ByValue,`psk`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`store`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_begin_device_flow(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_browse(`ptr`: Long,`nodeId`: RustBuffer.ByValue,`limit`: Int,`offset`: Int,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_complete_device_flow(`ptr`: Long,`flow`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_connect(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_disconnect(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_favorites_contains(`ptr`: Long,`uris`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_favorites_list(`ptr`: Long,`limit`: Int,`offset`: Int,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_favorites_set(`ptr`: Long,`uri`: RustBuffer.ByValue,`liked`: Byte,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_pause(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_play(`ptr`: Long,`uri`: RustBuffer.ByValue,`skipToUri`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_product(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_queue_uri(`ptr`: Long,`uri`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_resolve_context(`ptr`: Long,`uri`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_resume(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_root_browse(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_search(`ptr`: Long,`query`: RustBuffer.ByValue,`limit`: Int,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_seek(`ptr`: Long,`positionMs`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_set_repeat(`ptr`: Long,`mode`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_set_shuffle(`ptr`: Long,`on`: Byte,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_set_volume(`ptr`: Long,`percent`: Double,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_set_ws_transport(`ptr`: Long,`transport`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_spotifyclient_skip_next(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_skip_prev(`ptr`: Long,
-    ): Long
-    external fun uniffi_spotify_fn_method_spotifyclient_transfer(`ptr`: Long,`deviceId`: RustBuffer.ByValue,
-    ): Long
-    external fun uniffi_spotify_fn_clone_wsinbox(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun uniffi_spotify_fn_free_wsinbox(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wsinbox_on_closed(`ptr`: Long,`reason`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wsinbox_on_open(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wsinbox_on_text(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_clone_wstransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun uniffi_spotify_fn_free_wstransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_init_callback_vtable_wstransport(`vtable`: UniffiVTableCallbackInterfaceWsTransport,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wstransport_connect(`ptr`: Long,`url`: RustBuffer.ByValue,`inbox`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wstransport_send_text(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_method_wstransport_close(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun uniffi_spotify_fn_init_callback_vtable_tokenstore(`vtable`: UniffiVTableCallbackInterfaceTokenStore,
-    ): Unit
-    external fun uniffi_spotify_fn_init_callback_vtable_observer(`vtable`: UniffiVTableCallbackInterfaceObserver,
-    ): Unit
-    external fun ffi_spotify_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    external fun ffi_spotify_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    external fun ffi_spotify_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    external fun ffi_spotify_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    external fun ffi_spotify_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_u8(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_u8(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    external fun ffi_spotify_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_i8(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_i8(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    external fun ffi_spotify_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_u16(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_u16(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    external fun ffi_spotify_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_i16(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_i16(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Short
-    external fun ffi_spotify_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_u32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_u32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    external fun ffi_spotify_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_i32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_i32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    external fun ffi_spotify_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_u64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_u64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun ffi_spotify_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_i64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_i64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    external fun ffi_spotify_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_f32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_f32(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Float
-    external fun ffi_spotify_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_f64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_f64(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Double
-    external fun ffi_spotify_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_rust_buffer(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_rust_buffer(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    external fun ffi_spotify_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_cancel_void(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_free_void(`handle`: Long,
-    ): Unit
-    external fun ffi_spotify_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
+    external fun uniffi_spotify_fn_clone_spotifyclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_free_spotifyclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_constructor_spotifyclient_create(`base`: RustBuffer.ByValue,`psk`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`store`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_begin_device_flow(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_browse(`ptr`: Long,`nodeId`: RustBuffer.ByValue,`limit`: Int,`offset`: Int,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_complete_device_flow(`ptr`: Long,`flow`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_connect(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_current_position_ms(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_disconnect(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_favorites_contains(`ptr`: Long,`uris`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_favorites_list(`ptr`: Long,`limit`: Int,`offset`: Int,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_favorites_set(`ptr`: Long,`uri`: RustBuffer.ByValue,`liked`: Byte,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_pause(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_play(`ptr`: Long,`uri`: RustBuffer.ByValue,`skipToUri`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_product(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_queue_uri(`ptr`: Long,`uri`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_resolve_context(`ptr`: Long,`uri`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_resume(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_resync(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_root_browse(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_search(`ptr`: Long,`query`: RustBuffer.ByValue,`limit`: Int,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_seek(`ptr`: Long,`positionMs`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_set_http_transport(`ptr`: Long,`transport`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_spotifyclient_set_repeat(`ptr`: Long,`mode`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_set_shuffle(`ptr`: Long,`on`: Byte,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_set_volume(`ptr`: Long,`percent`: Double,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_set_ws_transport(`ptr`: Long,`transport`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_spotifyclient_skip_next(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_skip_prev(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_transfer(`ptr`: Long,`deviceId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_clone_httpsink(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_free_httpsink(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_httpsink_complete(`ptr`: Long,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_httpsink_fail(`ptr`: Long,`reason`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_clone_httptransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_free_httptransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_init_callback_vtable_httptransport(`vtable`: UniffiVTableCallbackInterfaceHttpTransport,
+): Unit
+external fun uniffi_spotify_fn_method_httptransport_execute(`ptr`: Long,`request`: RustBuffer.ByValue,`sink`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_clone_wsinbox(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_free_wsinbox(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_wsinbox_on_closed(`ptr`: Long,`reason`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_wsinbox_on_open(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_wsinbox_on_text(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_clone_wstransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_spotify_fn_free_wstransport(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_init_callback_vtable_wstransport(`vtable`: UniffiVTableCallbackInterfaceWsTransport,
+): Unit
+external fun uniffi_spotify_fn_method_wstransport_connect(`ptr`: Long,`url`: RustBuffer.ByValue,`inbox`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_wstransport_send_text(`ptr`: Long,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_method_wstransport_disconnect(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_spotify_fn_init_callback_vtable_tokenstore(`vtable`: UniffiVTableCallbackInterfaceTokenStore,
+): Unit
+external fun uniffi_spotify_fn_init_callback_vtable_observer(`vtable`: UniffiVTableCallbackInterfaceObserver,
+): Unit
+external fun uniffi_spotify_fn_init_callback_vtable_logsink(`vtable`: UniffiVTableCallbackInterfaceLogSink,
+): Unit
+external fun uniffi_spotify_fn_func_init_logging(`sink`: Long,`directive`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun ffi_spotify_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_spotify_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_spotify_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun ffi_spotify_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_spotify_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_u8(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_u8(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_spotify_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_i8(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_i8(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun ffi_spotify_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_u16(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_u16(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_spotify_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_i16(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_i16(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Short
+external fun ffi_spotify_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_u32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_u32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_spotify_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_i32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_i32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_spotify_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_u64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_u64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun ffi_spotify_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_i64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_i64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun ffi_spotify_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_f32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_f32(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Float
+external fun ffi_spotify_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_f64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_f64(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Double
+external fun ffi_spotify_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_rust_buffer(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_rust_buffer(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_spotify_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_spotify_rust_future_cancel_void(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_free_void(`handle`: Long,
+): Unit
+external fun ffi_spotify_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 
-
+    
 }
 
 private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
@@ -1063,6 +1151,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_spotify_checksum_func_init_logging() != 6520) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_begin_device_flow() != 35538) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1073,6 +1164,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_connect() != 427) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 45014) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_disconnect() != 46556) {
@@ -1105,6 +1199,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24967) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1112,6 +1209,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_seek() != 29853) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_set_http_transport() != 22718) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_set_repeat() != 4672) {
@@ -1135,22 +1235,31 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_transfer() != 35984) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wsinbox_on_closed() != 5296) {
+    if (lib.uniffi_spotify_checksum_method_httpsink_complete() != 61546) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wsinbox_on_open() != 14685) {
+    if (lib.uniffi_spotify_checksum_method_httpsink_fail() != 37344) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wsinbox_on_text() != 27964) {
+    if (lib.uniffi_spotify_checksum_method_httptransport_execute() != 19884) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wstransport_connect() != 57505) {
+    if (lib.uniffi_spotify_checksum_method_wsinbox_on_closed() != 29910) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wstransport_send_text() != 34136) {
+    if (lib.uniffi_spotify_checksum_method_wsinbox_on_open() != 28521) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_wstransport_close() != 21890) {
+    if (lib.uniffi_spotify_checksum_method_wsinbox_on_text() != 65031) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_wstransport_connect() != 11349) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_wstransport_send_text() != 36175) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_wstransport_disconnect() != 40870) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_constructor_spotifyclient_create() != 10060) {
@@ -1181,6 +1290,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_observer_on_library_changed() != 28513) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_logsink_log() != 52378) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1298,7 +1410,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/**
+/** 
  * Placeholder object used to signal that we're constructing an interface with a FFI handle.
  *
  * This is the first argument for interface constructors that input a raw handle. It exists is that
@@ -1309,7 +1421,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
  * */
 object UniffiWithHandle
 
-/**
+/** 
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
@@ -1409,6 +1521,33 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    fun lift(value: Int): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
+    }
 }
 
 /**
@@ -1606,6 +1745,594 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
     }
 }
 
+/**
+ * @suppress
+ */
+public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
+    override fun read(buf: ByteBuffer): ByteArray {
+        val len = buf.getInt()
+        val byteArr = ByteArray(len)
+        buf.get(byteArr)
+        return byteArr
+    }
+    override fun allocationSize(value: ByteArray): ULong {
+        return 4UL + value.size.toULong()
+    }
+    override fun write(value: ByteArray, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        buf.put(value)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface HttpSinkInterface {
+    
+    fun `complete`(`response`: HttpResponse)
+    
+    fun `fail`(`reason`: kotlin.String)
+    
+    companion object
+}
+
+open class HttpSink: Disposable, AutoCloseable, HttpSinkInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_spotify_fn_free_httpsink(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_spotify_fn_clone_httpsink(handle, status)
+        }
+    }
+
+    override fun `complete`(`response`: HttpResponse)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_spotify_fn_method_httpsink_complete(
+        it,
+        FfiConverterTypeHttpResponse.lower(`response`),_status)
+}
+    }
+    
+    
+
+    override fun `fail`(`reason`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_spotify_fn_method_httpsink_fail(
+        it,
+        FfiConverterString.lower(`reason`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpSink: FfiConverter<HttpSink, Long> {
+    override fun lower(value: HttpSink): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): HttpSink {
+        return HttpSink(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): HttpSink {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: HttpSink) = 8UL
+
+    override fun write(value: HttpSink, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface HttpTransport {
+    
+    fun `execute`(`request`: HttpRequest, `sink`: HttpSink)
+    
+    companion object
+}
+
+open class HttpTransportImpl: Disposable, AutoCloseable, HttpTransport
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_spotify_fn_free_httptransport(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_spotify_fn_clone_httptransport(handle, status)
+        }
+    }
+
+    override fun `execute`(`request`: HttpRequest, `sink`: HttpSink)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_spotify_fn_method_httptransport_execute(
+        it,
+        FfiConverterTypeHttpRequest.lower(`request`),FfiConverterTypeHttpSink.lower(`sink`),_status)
+}
+    }
+    
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceHttpTransport {
+    internal object `execute`: UniffiCallbackInterfaceHttpTransportMethod0 {
+        override fun callback(`uniffiHandle`: Long,`request`: RustBuffer.ByValue,`sink`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeHttpTransport.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`execute`(
+                    FfiConverterTypeHttpRequest.lift(`request`),
+                    FfiConverterTypeHttpSink.lift(`sink`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeHttpTransport.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeHttpTransport.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceHttpTransport.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `execute`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_spotify_fn_init_callback_vtable_httptransport(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpTransport: FfiConverter<HttpTransport, Long> {
+    internal val handleMap = UniffiHandleMap<HttpTransport>()
+
+    override fun lower(value: HttpTransport): Long {
+        if (value is HttpTransportImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): HttpTransport {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return HttpTransportImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): HttpTransport {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: HttpTransport) = 8UL
+
+    override fun write(value: HttpTransport, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
 
 // This template implements a class for working with a Rust struct via a handle
 // to the live Rust struct on the other side of the FFI.
@@ -1703,55 +2430,65 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 
 public interface SpotifyClientInterface {
-
+    
     suspend fun `beginDeviceFlow`(): DeviceFlow
-
+    
     suspend fun `browse`(`nodeId`: kotlin.String, `limit`: kotlin.UInt, `offset`: kotlin.UInt): BrowsePage
-
+    
     suspend fun `completeDeviceFlow`(`flow`: DeviceFlow)
-
+    
     suspend fun `connect`()
-
+    
+    /**
+     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
+     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
+     */
+    suspend fun `currentPositionMs`(): kotlin.UInt?
+    
     suspend fun `disconnect`()
-
+    
     suspend fun `favoritesContains`(`uris`: List<kotlin.String>): List<kotlin.Boolean>
-
+    
     suspend fun `favoritesList`(`limit`: kotlin.UInt, `offset`: kotlin.UInt): BrowsePage
-
+    
     suspend fun `favoritesSet`(`uri`: kotlin.String, `liked`: kotlin.Boolean)
-
+    
     suspend fun `pause`()
-
+    
     suspend fun `play`(`uri`: kotlin.String, `skipToUri`: kotlin.String?)
-
+    
     suspend fun `product`(): ProductState
-
+    
     suspend fun `queueUri`(`uri`: kotlin.String)
-
+    
     suspend fun `resolveContext`(`uri`: kotlin.String): BrowseItem
-
+    
     suspend fun `resume`()
-
+    
+    suspend fun `resync`()
+    
     suspend fun `rootBrowse`(): List<Shelf>
-
+    
     suspend fun `search`(`query`: kotlin.String, `limit`: kotlin.UInt): SearchResults
-
+    
     suspend fun `seek`(`positionMs`: kotlin.Long)
-
+    
+    fun `setHttpTransport`(`transport`: HttpTransport)
+    
     suspend fun `setRepeat`(`mode`: RepeatMode)
-
+    
     suspend fun `setShuffle`(`on`: kotlin.Boolean)
-
+    
     suspend fun `setVolume`(`percent`: kotlin.Double)
-
+    
     fun `setWsTransport`(`transport`: WsTransport)
-
+    
     suspend fun `skipNext`()
-
+    
     suspend fun `skipPrev`()
-
+    
     suspend fun `transfer`(`deviceId`: kotlin.String)
-
+    
     companion object
 }
 
@@ -1851,7 +2588,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         }
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `beginDeviceFlow`() : DeviceFlow {
@@ -1859,7 +2596,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_begin_device_flow(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -1872,7 +2609,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `browse`(`nodeId`: kotlin.String, `limit`: kotlin.UInt, `offset`: kotlin.UInt) : BrowsePage {
@@ -1893,7 +2630,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `completeDeviceFlow`(`flow`: DeviceFlow) {
@@ -1909,13 +2646,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `connect`() {
@@ -1923,7 +2660,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_connect(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -1931,20 +2668,44 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
+    
+    /**
+     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
+     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
+     */
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `currentPositionMs`() : kotlin.UInt? {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_current_position_ms(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalUInt.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
 
+    
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `disconnect`() {
         return uniffiRustCallAsync(
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_disconnect(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -1952,13 +2713,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         UniffiNullRustCallStatusErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `favoritesContains`(`uris`: List<kotlin.String>) : List<kotlin.Boolean> {
@@ -1979,7 +2740,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `favoritesList`(`limit`: kotlin.UInt, `offset`: kotlin.UInt) : BrowsePage {
@@ -2000,7 +2761,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `favoritesSet`(`uri`: kotlin.String, `liked`: kotlin.Boolean) {
@@ -2016,13 +2777,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `pause`() {
@@ -2030,7 +2791,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_pause(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -2038,13 +2799,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `play`(`uri`: kotlin.String, `skipToUri`: kotlin.String?) {
@@ -2060,13 +2821,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `product`() : ProductState {
@@ -2074,7 +2835,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_product(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -2087,7 +2848,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `queueUri`(`uri`: kotlin.String) {
@@ -2103,13 +2864,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `resolveContext`(`uri`: kotlin.String) : BrowseItem {
@@ -2130,7 +2891,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `resume`() {
@@ -2138,7 +2899,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_resume(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -2146,13 +2907,34 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
+    
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `resync`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_resync(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
 
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `rootBrowse`() : List<Shelf> {
@@ -2160,7 +2942,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_root_browse(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -2173,7 +2955,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `search`(`query`: kotlin.String, `limit`: kotlin.UInt) : SearchResults {
@@ -2194,7 +2976,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `seek`(`positionMs`: kotlin.Long) {
@@ -2210,13 +2992,25 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
+    override fun `setHttpTransport`(`transport`: HttpTransport)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_spotify_fn_method_spotifyclient_set_http_transport(
+        it,
+        FfiConverterTypeHttpTransport.lower(`transport`),_status)
+}
+    }
+    
+    
 
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `setRepeat`(`mode`: RepeatMode) {
@@ -2232,13 +3026,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `setShuffle`(`on`: kotlin.Boolean) {
@@ -2254,13 +3048,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `setVolume`(`percent`: kotlin.Double) {
@@ -2276,14 +3070,14 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
     override fun `setWsTransport`(`transport`: WsTransport)
-        =
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_spotifyclient_set_ws_transport(
@@ -2291,10 +3085,10 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         FfiConverterTypeWsTransport.lower(`transport`),_status)
 }
     }
+    
+    
 
-
-
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `skipNext`() {
@@ -2302,7 +3096,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_skip_next(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -2310,13 +3104,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `skipPrev`() {
@@ -2324,7 +3118,7 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_skip_prev(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
@@ -2332,13 +3126,13 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
-
+    
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `transfer`(`deviceId`: kotlin.String) {
@@ -2354,33 +3148,33 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         Exception.ErrorHandler,
     )
     }
 
+    
+
+    
 
 
-
-
-
-
+    
     companion object {
          fun `create`(`base`: kotlin.String, `psk`: kotlin.String, `deviceId`: kotlin.String, `store`: TokenStore, `observer`: Observer): SpotifyClient {
             return FfiConverterTypeSpotifyClient.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_constructor_spotifyclient_create(
-
+    
         FfiConverterString.lower(`base`),FfiConverterString.lower(`psk`),FfiConverterString.lower(`deviceId`),FfiConverterTypeTokenStore.lower(`store`),FfiConverterTypeObserver.lower(`observer`),_status)
 }
     )
     }
+    
 
-
-
+        
     }
-
+    
 }
 
 
@@ -2503,36 +3297,17 @@ public object FfiConverterTypeSpotifyClient: FfiConverter<SpotifyClient, Long> {
 //
 
 
-/**
- * the rust end of the inbound channel, handed to the transport on connect. its methods are
- * called from the transport's own thread (a tokio worker for tungstenite, the URLSession
- * delivery queue for ios) and only enqueue, so they never block.
- */
 public interface WsInboxInterface {
-
-    /**
-     * the socket closed or errored; `reason` is for logging only.
-     */
+    
     fun `onClosed`(`reason`: kotlin.String)
-
-    /**
-     * the socket finished its upgrade and is ready.
-     */
+    
     fun `onOpen`()
-
-    /**
-     * a text frame arrived.
-     */
+    
     fun `onText`(`text`: kotlin.String)
-
+    
     companion object
 }
 
-/**
- * the rust end of the inbound channel, handed to the transport on connect. its methods are
- * called from the transport's own thread (a tokio worker for tungstenite, the URLSession
- * delivery queue for ios) and only enqueue, so they never block.
- */
 open class WsInbox: Disposable, AutoCloseable, WsInboxInterface
 {
 
@@ -2629,11 +3404,8 @@ open class WsInbox: Disposable, AutoCloseable, WsInboxInterface
         }
     }
 
-
-    /**
-     * the socket closed or errored; `reason` is for logging only.
-     */override fun `onClosed`(`reason`: kotlin.String)
-        =
+    override fun `onClosed`(`reason`: kotlin.String)
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_wsinbox_on_closed(
@@ -2641,14 +3413,11 @@ open class WsInbox: Disposable, AutoCloseable, WsInboxInterface
         FfiConverterString.lower(`reason`),_status)
 }
     }
+    
+    
 
-
-
-
-    /**
-     * the socket finished its upgrade and is ready.
-     */override fun `onOpen`()
-        =
+    override fun `onOpen`()
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_wsinbox_on_open(
@@ -2656,14 +3425,11 @@ open class WsInbox: Disposable, AutoCloseable, WsInboxInterface
         _status)
 }
     }
+    
+    
 
-
-
-
-    /**
-     * a text frame arrived.
-     */override fun `onText`(`text`: kotlin.String)
-        =
+    override fun `onText`(`text`: kotlin.String)
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_wsinbox_on_text(
@@ -2671,21 +3437,21 @@ open class WsInbox: Disposable, AutoCloseable, WsInboxInterface
         FfiConverterString.lower(`text`),_status)
 }
     }
+    
+    
+
+    
+
+    
 
 
-
-
-
-
-
-
-
-
+    
+    
     /**
      * @suppress
      */
     companion object
-
+    
 }
 
 
@@ -2808,37 +3574,17 @@ public object FfiConverterTypeWsInbox: FfiConverter<WsInbox, Long> {
 //
 
 
-/**
- * the socket the dealer runs over. implementable in rust (the tungstenite default) or by a
- * foreign platform (ios URLSession). a fresh logical connection is established per `connect`;
- * the impl replaces any prior socket.
- */
 public interface WsTransport {
-
-    /**
-     * dial `url` and start delivering frames + lifecycle into `inbox` until close or the next
-     * `connect`. must return promptly; do the actual dialing on the impl's own runloop/runtime.
-     */
+    
     fun `connect`(`url`: kotlin.String, `inbox`: WsInbox)
-
-    /**
-     * best-effort outbound text. fire-and-forget: never blocks, drops if the socket is gone.
-     */
+    
     fun `sendText`(`text`: kotlin.String)
-
-    /**
-     * tear down the current socket.
-     */
-    fun `close`()
-
+    
+    fun `disconnect`()
+    
     companion object
 }
 
-/**
- * the socket the dealer runs over. implementable in rust (the tungstenite default) or by a
- * foreign platform (ios URLSession). a fresh logical connection is established per `connect`;
- * the impl replaces any prior socket.
- */
 open class WsTransportImpl: Disposable, AutoCloseable, WsTransport
 {
 
@@ -2935,12 +3681,8 @@ open class WsTransportImpl: Disposable, AutoCloseable, WsTransport
         }
     }
 
-
-    /**
-     * dial `url` and start delivering frames + lifecycle into `inbox` until close or the next
-     * `connect`. must return promptly; do the actual dialing on the impl's own runloop/runtime.
-     */override fun `connect`(`url`: kotlin.String, `inbox`: WsInbox)
-        =
+    override fun `connect`(`url`: kotlin.String, `inbox`: WsInbox)
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_wstransport_connect(
@@ -2948,14 +3690,11 @@ open class WsTransportImpl: Disposable, AutoCloseable, WsTransport
         FfiConverterString.lower(`url`),FfiConverterTypeWsInbox.lower(`inbox`),_status)
 }
     }
+    
+    
 
-
-
-
-    /**
-     * best-effort outbound text. fire-and-forget: never blocks, drops if the socket is gone.
-     */override fun `sendText`(`text`: kotlin.String)
-        =
+    override fun `sendText`(`text`: kotlin.String)
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_wstransport_send_text(
@@ -2963,36 +3702,33 @@ open class WsTransportImpl: Disposable, AutoCloseable, WsTransport
         FfiConverterString.lower(`text`),_status)
 }
     }
+    
+    
 
-
-
-
-    /**
-     * tear down the current socket.
-     */override fun `close`()
-        =
+    override fun `disconnect`()
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_spotify_fn_method_wstransport_close(
+    UniffiLib.uniffi_spotify_fn_method_wstransport_disconnect(
         it,
         _status)
 }
     }
+    
+    
+
+    
+
+    
 
 
-
-
-
-
-
-
-
-
+    
+    
     /**
      * @suppress
      */
     companion object
-
+    
 }
 
 
@@ -3024,11 +3760,11 @@ internal object uniffiCallbackInterfaceWsTransport {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `close`: UniffiCallbackInterfaceWsTransportMethod2 {
+    internal object `disconnect`: UniffiCallbackInterfaceWsTransportMethod2 {
         override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeWsTransport.handleMap.get(uniffiHandle)
             val makeCall = { ->
-                uniffiObj.`close`(
+                uniffiObj.`disconnect`(
                 )
             }
             val writeReturn = { _: Unit -> Unit }
@@ -3053,7 +3789,7 @@ internal object uniffiCallbackInterfaceWsTransport {
         uniffiClone,
         `connect`,
         `sendText`,
-        `close`,
+        `disconnect`,
     )
 
     // Registers the foreign callback with the Rust side.
@@ -3105,17 +3841,17 @@ public object FfiConverterTypeWsTransport: FfiConverter<WsTransport, Long> {
 
 data class Album (
     var `uri`: kotlin.String
-    ,
+    , 
     var `name`: kotlin.String
-    ,
+    , 
     var `imageId`: kotlin.String
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3148,15 +3884,15 @@ public object FfiConverterTypeAlbum: FfiConverterRustBuffer<Album> {
 
 data class Artist (
     var `uri`: kotlin.String
-    ,
+    , 
     var `name`: kotlin.String
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3186,38 +3922,31 @@ public object FfiConverterTypeArtist: FfiConverterRustBuffer<Artist> {
 
 data class BrowseItem (
     var `uri`: kotlin.String
-    ,
+    , 
     var `title`: kotlin.String
-    ,
-    /**
-     * artist names (tracks/albums), publisher (shows), show name (episodes), owner (playlists).
-     */
+    , 
     var `subtitle`: kotlin.String
-    ,
-    /**
-     * art ref: a bare i.scdn.co hex, or a full foreign-cdn url (blend/dj/daily-mix
-     * covers). the glue wraps either into an asset id + downsamples.
-     */
+    , 
     var `imageId`: kotlin.String
-    ,
+    , 
     var `artists`: List<Artist>
-    ,
+    , 
     var `album`: Album
-    ,
+    , 
     var `durationMs`: kotlin.UInt
-    ,
+    , 
     var `saved`: kotlin.Boolean
-    ,
+    , 
     var `playable`: kotlin.Boolean
-    ,
+    , 
     var `hasChildren`: kotlin.Boolean
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3269,22 +3998,19 @@ public object FfiConverterTypeBrowseItem: FfiConverterRustBuffer<BrowseItem> {
 
 
 
-/**
- * one page of a drill-in browse. total/has_more drive the wire BrowseResult paging.
- */
 data class BrowsePage (
     var `items`: List<BrowseItem>
-    ,
+    , 
     var `total`: kotlin.UInt?
-    ,
+    , 
     var `hasMore`: kotlin.Boolean
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3317,21 +4043,21 @@ public object FfiConverterTypeBrowsePage: FfiConverterRustBuffer<BrowsePage> {
 
 data class Device (
     var `id`: kotlin.String
-    ,
+    , 
     var `name`: kotlin.String
-    ,
+    , 
     var `kind`: kotlin.String
-    ,
+    , 
     var `isActive`: kotlin.Boolean
-    ,
+    , 
     var `volume`: kotlin.Float
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3370,21 +4096,21 @@ public object FfiConverterTypeDevice: FfiConverterRustBuffer<Device> {
 
 data class DeviceFlow (
     var `deviceCode`: kotlin.String
-    ,
+    , 
     var `userCode`: kotlin.String
-    ,
+    , 
     var `verificationUri`: kotlin.String
-    ,
+    , 
     var `interval`: kotlin.ULong
-    ,
+    , 
     var `expiresIn`: kotlin.ULong
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3421,52 +4147,181 @@ public object FfiConverterTypeDeviceFlow: FfiConverterRustBuffer<DeviceFlow> {
 
 
 
+data class HttpHeader (
+    var `name`: kotlin.String
+    , 
+    var `value`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpHeader: FfiConverterRustBuffer<HttpHeader> {
+    override fun read(buf: ByteBuffer): HttpHeader {
+        return HttpHeader(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HttpHeader) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`value`)
+    )
+
+    override fun write(value: HttpHeader, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`value`, buf)
+    }
+}
+
+
+
+data class HttpRequest (
+    var `method`: HttpMethod
+    , 
+    var `url`: kotlin.String
+    , 
+    var `headers`: List<HttpHeader>
+    , 
+    var `body`: kotlin.ByteArray
+    , 
+    var `timeoutMs`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpRequest: FfiConverterRustBuffer<HttpRequest> {
+    override fun read(buf: ByteBuffer): HttpRequest {
+        return HttpRequest(
+            FfiConverterTypeHttpMethod.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeHttpHeader.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HttpRequest) = (
+            FfiConverterTypeHttpMethod.allocationSize(value.`method`) +
+            FfiConverterString.allocationSize(value.`url`) +
+            FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
+            FfiConverterByteArray.allocationSize(value.`body`) +
+            FfiConverterUInt.allocationSize(value.`timeoutMs`)
+    )
+
+    override fun write(value: HttpRequest, buf: ByteBuffer) {
+            FfiConverterTypeHttpMethod.write(value.`method`, buf)
+            FfiConverterString.write(value.`url`, buf)
+            FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
+            FfiConverterByteArray.write(value.`body`, buf)
+            FfiConverterUInt.write(value.`timeoutMs`, buf)
+    }
+}
+
+
+
+data class HttpResponse (
+    var `status`: kotlin.UShort
+    , 
+    var `headers`: List<HttpHeader>
+    , 
+    var `body`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpResponse: FfiConverterRustBuffer<HttpResponse> {
+    override fun read(buf: ByteBuffer): HttpResponse {
+        return HttpResponse(
+            FfiConverterUShort.read(buf),
+            FfiConverterSequenceTypeHttpHeader.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HttpResponse) = (
+            FfiConverterUShort.allocationSize(value.`status`) +
+            FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
+            FfiConverterByteArray.allocationSize(value.`body`)
+    )
+
+    override fun write(value: HttpResponse, buf: ByteBuffer) {
+            FfiConverterUShort.write(value.`status`, buf)
+            FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
+            FfiConverterByteArray.write(value.`body`, buf)
+    }
+}
+
+
+
 data class PlayerState (
     var `track`: Track?
-    ,
+    , 
     var `contextUri`: kotlin.String
-    ,
+    , 
     var `contextName`: kotlin.String
-    ,
+    , 
     var `isPaused`: kotlin.Boolean
-    ,
+    , 
     var `positionMs`: kotlin.UInt
-    ,
+    , 
     var `durationMs`: kotlin.UInt
-    ,
+    , 
     var `shuffle`: kotlin.Boolean
-    ,
+    , 
     var `repeat`: RepeatMode
-    ,
+    , 
     var `playingRemotely`: kotlin.Boolean
-    ,
+    , 
     var `remoteDeviceId`: kotlin.String
-    ,
-    /**
-     * the active device is a non-phone target (speaker/cast/computer), i.e. spotify is
-     * casting off the phone. the ios glue withholds authority here so the daemon falls
-     * back to the phone-local iap2 state instead of merging a remote frankenstein card.
-     */
+    , 
     var `onRemoteSpeaker`: kotlin.Boolean
-    ,
+    , 
     var `canSeek`: kotlin.Boolean
-    ,
+    , 
     var `canSkipNext`: kotlin.Boolean
-    ,
+    , 
     var `canSkipPrev`: kotlin.Boolean
-    ,
+    , 
     var `canToggleShuffle`: kotlin.Boolean
-    ,
+    , 
     var `canRepeatContext`: kotlin.Boolean
-    ,
+    , 
     var `canRepeatTrack`: kotlin.Boolean
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3539,26 +4394,23 @@ public object FfiConverterTypePlayerState: FfiConverterRustBuffer<PlayerState> {
 
 
 
-/**
- * the product gate, derived from melody/product_state (never hardcoded).
- */
 data class ProductState (
     var `product`: kotlin.String
-    ,
+    , 
     var `catalogue`: kotlin.String
-    ,
+    , 
     var `country`: kotlin.String
-    ,
+    , 
     var `isPremium`: kotlin.Boolean
-    ,
+    , 
     var `canUseSuperbird`: kotlin.Boolean
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3597,17 +4449,17 @@ public object FfiConverterTypeProductState: FfiConverterRustBuffer<ProductState>
 
 data class Queue (
     var `previous`: List<Track>
-    ,
+    , 
     var `current`: Track?
-    ,
+    , 
     var `next`: List<Track>
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3640,19 +4492,19 @@ public object FfiConverterTypeQueue: FfiConverterRustBuffer<Queue> {
 
 data class SearchResults (
     var `tracks`: List<BrowseItem>
-    ,
+    , 
     var `albums`: List<BrowseItem>
-    ,
+    , 
     var `artists`: List<BrowseItem>
-    ,
+    , 
     var `playlists`: List<BrowseItem>
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3688,17 +4540,17 @@ public object FfiConverterTypeSearchResults: FfiConverterRustBuffer<SearchResult
 
 data class Shelf (
     var `id`: kotlin.String
-    ,
+    , 
     var `title`: kotlin.String
-    ,
+    , 
     var `items`: List<BrowseItem>
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3731,29 +4583,29 @@ public object FfiConverterTypeShelf: FfiConverterRustBuffer<Shelf> {
 
 data class Track (
     var `uri`: kotlin.String
-    ,
+    , 
     var `uid`: kotlin.String
-    ,
+    , 
     var `name`: kotlin.String
-    ,
+    , 
     var `artists`: List<Artist>
-    ,
+    , 
     var `album`: Album
-    ,
+    , 
     var `durationMs`: kotlin.UInt
-    ,
+    , 
     var `imageId`: kotlin.String
-    ,
+    , 
     var `isEpisode`: kotlin.Boolean
-    ,
+    , 
     var `saved`: kotlin.Boolean
-
+    
 ){
+    
 
+    
 
-
-
-
+    
     companion object
 }
 
@@ -3803,43 +4655,43 @@ public object FfiConverterTypeTrack: FfiConverterRustBuffer<Track> {
 
 
 sealed class AuthState {
-
+    
     object LoggedOut : AuthState()
-
-
+    
+    
     data class Pending(
-        val `url`: kotlin.String,
+        val `url`: kotlin.String, 
         val `code`: kotlin.String) : AuthState()
-
+        
     {
-
+        
 
         companion object
     }
-
+    
     data class LoggedIn(
         val `username`: kotlin.String) : AuthState()
-
+        
     {
-
+        
 
         companion object
     }
-
+    
     data class Failed(
         val `reason`: kotlin.String) : AuthState()
-
+        
     {
-
+        
 
         companion object
     }
+    
 
+    
 
-
-
-
-
+    
+    
 
 
     companion object
@@ -3930,31 +4782,31 @@ public object FfiConverterTypeAuthState : FfiConverterRustBuffer<AuthState>{
 
 
 sealed class Exception(message: String): kotlin.Exception(message) {
-
+        
         class Http(message: String) : Exception(message)
-
+        
         class Ws(message: String) : Exception(message)
-
+        
         class Protobuf(message: String) : Exception(message)
-
+        
         class Json(message: String) : Exception(message)
-
+        
         class Url(message: String) : Exception(message)
-
+        
         class InvalidGrant(message: String) : Exception(message)
-
+        
         class NotPaired(message: String) : Exception(message)
-
+        
         class PairingTimeout(message: String) : Exception(message)
-
+        
         class NoUsername(message: String) : Exception(message)
-
+        
         class Auth(message: String) : Exception(message)
-
+        
         class Status(message: String) : Exception(message)
-
+        
         class Other(message: String) : Exception(message)
-
+        
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<Exception> {
         override fun lift(error_buf: RustBuffer.ByValue): Exception = FfiConverterTypeError.lift(error_buf)
@@ -3966,7 +4818,7 @@ sealed class Exception(message: String): kotlin.Exception(message) {
  */
 public object FfiConverterTypeError : FfiConverterRustBuffer<Exception> {
     override fun read(buf: ByteBuffer): Exception {
-
+        
             return when(buf.getInt()) {
             1 -> Exception.Http(FfiConverterString.read(buf))
             2 -> Exception.Ws(FfiConverterString.read(buf))
@@ -3982,7 +4834,7 @@ public object FfiConverterTypeError : FfiConverterRustBuffer<Exception> {
             12 -> Exception.Other(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
-
+        
     }
 
     override fun allocationSize(value: Exception): ULong {
@@ -4046,18 +4898,48 @@ public object FfiConverterTypeError : FfiConverterRustBuffer<Exception> {
 
 
 
+
+enum class HttpMethod {
+    
+    GET,
+    POST,
+    PUT;
+
+    
+
+
+    companion object
+}
+
+
 /**
- * which slice of the user's library the dealer reported as changed elsewhere. saved =
- * collection sets (liked tracks, saved albums, followed artists, saved shows); playlists =
- * the rootlist or a playlist's contents. carries no decoded payload; the fact is the signal.
+ * @suppress
  */
+public object FfiConverterTypeHttpMethod: FfiConverterRustBuffer<HttpMethod> {
+    override fun read(buf: ByteBuffer) = try {
+        HttpMethod.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: HttpMethod) = 4UL
+
+    override fun write(value: HttpMethod, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 
 enum class LibraryScope {
-
+    
     SAVED,
     PLAYLISTS;
 
-
+    
 
 
     companion object
@@ -4087,12 +4969,12 @@ public object FfiConverterTypeLibraryScope: FfiConverterRustBuffer<LibraryScope>
 
 
 enum class RepeatMode {
-
+    
     OFF,
     CONTEXT,
     TRACK;
 
-
+    
 
 
     companion object
@@ -4122,18 +5004,80 @@ public object FfiConverterTypeRepeatMode: FfiConverterRustBuffer<RepeatMode> {
 
 
 
+public interface LogSink {
+    
+    fun `log`(`level`: kotlin.String, `target`: kotlin.String, `message`: kotlin.String)
+    
+    companion object
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceLogSink {
+    internal object `log`: UniffiCallbackInterfaceLogSinkMethod0 {
+        override fun callback(`uniffiHandle`: Long,`level`: RustBuffer.ByValue,`target`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeLogSink.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`log`(
+                    FfiConverterString.lift(`level`),
+                    FfiConverterString.lift(`target`),
+                    FfiConverterString.lift(`message`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeLogSink.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeLogSink.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceLogSink.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `log`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_spotify_fn_init_callback_vtable_logsink(vtable)
+    }
+}
+
+/**
+ * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
+ *
+ * @suppress
+ */
+public object FfiConverterTypeLogSink: FfiConverterCallbackInterface<LogSink>()
+
+
+
+
+
 public interface Observer {
-
+    
     fun `onPlayer`(`state`: PlayerState)
-
+    
     fun `onQueue`(`queue`: Queue)
-
+    
     fun `onDevices`(`devices`: List<Device>)
-
+    
     fun `onAuth`(`state`: AuthState)
-
+    
     fun `onLibraryChanged`(`scope`: LibraryScope)
-
+    
     companion object
 }
 
@@ -4243,15 +5187,15 @@ public object FfiConverterTypeObserver: FfiConverterCallbackInterface<Observer>(
 
 
 public interface TokenStore {
-
+    
     fun `loadRefreshToken`(): kotlin.String?
-
+    
     fun `saveRefreshToken`(`token`: kotlin.String)
-
+    
     fun `loadUsername`(): kotlin.String?
-
+    
     fun `saveUsername`(`username`: kotlin.String)
-
+    
     companion object
 }
 
@@ -4583,6 +5527,34 @@ public object FfiConverterSequenceTypeDevice: FfiConverterRustBuffer<List<Device
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeHttpHeader: FfiConverterRustBuffer<List<HttpHeader>> {
+    override fun read(buf: ByteBuffer): List<HttpHeader> {
+        val len = buf.getInt()
+        return List<HttpHeader>(len) {
+            FfiConverterTypeHttpHeader.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HttpHeader>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHttpHeader.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HttpHeader>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHttpHeader.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeShelf: FfiConverterRustBuffer<List<Shelf>> {
     override fun read(buf: ByteBuffer): List<Shelf> {
         val len = buf.getInt()
@@ -4632,3 +5604,21 @@ public object FfiConverterSequenceTypeTrack: FfiConverterRustBuffer<List<Track>>
         }
     }
 }
+
+
+
+
+
+
+
+ fun `initLogging`(`sink`: LogSink, `directive`: kotlin.String)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_spotify_fn_func_init_logging(
+    
+        FfiConverterTypeLogSink.lower(`sink`),FfiConverterString.lower(`directive`),_status)
+}
+    
+    
+
+

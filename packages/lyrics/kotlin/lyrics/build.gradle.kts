@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.lyrics"
+  namespace = "com.bridgething.lyrics"
   compileSdk = 36
 
   defaultConfig {

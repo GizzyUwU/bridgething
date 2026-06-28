@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-  namespace = "dev.bridgething.companion"
+  namespace = "com.bridgething.companion"
   compileSdk = 36
 
   defaultConfig {

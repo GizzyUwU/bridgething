@@ -73,6 +73,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setOnAncsAuthStatusChanged(_ callback: @escaping @Sendable (BridgethingAncsAuthStatus) -> Void)
     func setOnLog(_ callback: @escaping @Sendable (String, String) -> Void)
     func setLogStreamingEnabled(_ enabled: Bool)
+    func setLocalLogStreamingEnabled(_ enabled: Bool)
 
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
@@ -545,6 +546,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let backend = Self._backend
         Self.stateLock.unlock()
         backend?.setLogStreamingEnabled(enabled)
+    }
+
+    public func setLocalLogStreamingEnabled(enabled: Bool) throws {
+        // pre-backend toggles are dropped; the backend installer sets initial state
+        Self.stateLock.lock()
+        let backend = Self._backend
+        Self.stateLock.unlock()
+        backend?.setLocalLogStreamingEnabled(enabled)
     }
 
     public func setOnWebappsChanged(callback: @escaping (String) -> Void) throws {

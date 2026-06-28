@@ -39,9 +39,12 @@ final class SpotifyGlueTests: XCTestCase {
         var productState = Spotify.ProductState(product: "premium", catalogue: "premium", country: "US", isPremium: true, canUseSuperbird: true)
         var likedWrites: [(String, Bool)] = []
         var playCalls: [(uri: String, skipToUri: String?)] = []
+        var currentPosition: UInt32?
 
         func connect() async throws {}
         func disconnect() async {}
+        func resync() async {}
+        func currentPositionMs() async -> UInt32? { currentPosition }
         func pause() async throws {}
         func resume() async throws {}
         func skipNext() async throws {}
@@ -152,6 +155,25 @@ final class SpotifyGlueTests: XCTestCase {
         }
         guard case let .authority(.claim(c)) = claim.data else { return XCTFail("expected claim") }
         XCTAssertEqual(c.appBundle, "com.spotify.client")
+    }
+
+    func testPeerReconnectReplaysFreshPositionNotStaleZero() async throws {
+        let fake = FakeClient()
+        fake.currentPosition = 90_000
+        let h = try await boot(fake)
+        defer { Task { await h.companion.stop() } }
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
+        let first = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
+        guard case let .player(.snapshot(stale)) = first.data else { return XCTFail("expected snapshot") }
+        XCTAssertEqual(stale.playback.positionMs, 0, "the cached now-playing position is frozen at the last dealer event")
+
+        await h.glue.handlePeerConnected()
+        let replay = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .player(.snapshot(ps)) = $0.data, ps.playback.positionMs == 90_000 { return true }
+            return false
+        }
+        guard case let .player(.snapshot(ps)) = replay.data else { return XCTFail("expected replay snapshot") }
+        XCTAssertEqual(ps.playback.positionMs, 90_000, "peer-connect replay must refresh the stale cached position")
     }
 
     func testCastToRemoteSpeakerWithholdsAuthority() async throws {

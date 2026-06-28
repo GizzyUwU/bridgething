@@ -6,7 +6,7 @@ plugins {
 }
 
 allprojects {
-  group = "dev.bridgething"
+  group = "com.bridgething"
   version = "0.1.0"
 
   repositories {

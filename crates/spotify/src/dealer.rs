@@ -3,7 +3,7 @@
 use std::{
   io::Read,
   sync::{Arc, Mutex},
-  time::{Duration, Instant},
+  time::Duration,
 };
 
 use base64::Engine;
@@ -15,13 +15,14 @@ use librespot_protocol::{
   devices::DeviceType,
 };
 use protobuf::{Message, MessageField};
-use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::{
   error::{Error, Result},
   http::{ANDROID_CLIENT_ID, SPCLIENT, SpHttp, random_hex},
+  httpx::{HttpMethod, with_query},
   model::LibraryScope,
   transport::{TungsteniteTransport, WsEvent, WsInbox, WsTransport},
   util::now_ms,
@@ -54,15 +55,9 @@ impl Dealer {
   }
 
   async fn dealer_host(&self) -> Result<String> {
-    let v: Value = self
-      .http
-      .http
-      .get("https://apresolve.spotify.com/")
-      .query(&[("type", "dealer")])
-      .send()
-      .await?
-      .json()
-      .await?;
+    let url = with_query("https://apresolve.spotify.com/".to_string(), &[("type", "dealer".to_string())])?;
+    let resp = self.http.send(HttpMethod::Get, url, HeaderMap::new(), Vec::new(), 0).await?;
+    let v: Value = serde_json::from_slice(&resp.body)?;
     let host = v["dealer"][0]
       .as_str()
       .ok_or_else(|| Error::other("apresolve returned no dealer host"))?;
@@ -71,6 +66,7 @@ impl Dealer {
 
   pub async fn open(&self) -> Result<(DealerStream, DealerWriter)> {
     let host = self.dealer_host().await?;
+    tracing::debug!(%host, "dealer: opening websocket");
     let bearer = self.http.auth.bearer().await?;
     let url = format!("wss://{host}/?access_token={bearer}");
     let transport = self.transport.lock().unwrap().clone();
@@ -81,6 +77,7 @@ impl Dealer {
         Some(WsEvent::Text(t)) => {
           let v: Value = serde_json::from_str(t.as_str())?;
           if let Some(cid) = v["headers"]["Spotify-Connection-Id"].as_str() {
+            tracing::debug!(connection_id = %cid, "dealer: websocket connected");
             break cid.to_string();
           }
         }
@@ -104,15 +101,14 @@ impl Dealer {
         rx,
         transport,
         ping,
-        last_activity: Instant::now(),
+        awaiting_response: false,
       },
       writer,
     ))
   }
 }
 
-const DEALER_PING_INTERVAL: Duration = Duration::from_secs(30);
-const DEALER_IDLE_DEADLINE: Duration = Duration::from_secs(75);
+const DEALER_PING_INTERVAL: Duration = Duration::from_secs(20);
 
 pub enum DealerEvent {
   Cluster(Cluster),
@@ -123,7 +119,7 @@ pub struct DealerStream {
   rx: mpsc::UnboundedReceiver<WsEvent>,
   transport: Arc<dyn WsTransport>,
   ping: tokio::time::Interval,
-  last_activity: Instant,
+  awaiting_response: bool,
 }
 
 impl DealerStream {
@@ -132,16 +128,18 @@ impl DealerStream {
       let event = tokio::select! {
         e = self.rx.recv() => e,
         _ = self.ping.tick() => {
-          if self.last_activity.elapsed() > DEALER_IDLE_DEADLINE {
-            tracing::warn!("dealer: no frames within idle deadline; treating link as dead");
+          if self.awaiting_response {
+            tracing::warn!("dealer: ping unanswered within interval; treating link as dead");
             return Ok(None);
           }
+          tracing::debug!("dealer: ping");
           self.transport.send_text(r#"{"type":"ping"}"#.to_string());
+          self.awaiting_response = true;
           continue;
         }
       };
       let Some(event) = event else { return Ok(None) };
-      self.last_activity = Instant::now();
+      self.awaiting_response = false;
       let text = match event {
         WsEvent::Text(t) => t,
         WsEvent::Open => continue,
@@ -151,7 +149,9 @@ impl DealerStream {
         Ok(v) => v,
         Err(_) => continue,
       };
-      match msg["type"].as_str() {
+      let kind = msg["type"].as_str();
+      tracing::trace!(?kind, frame = %text, "dealer: raw frame");
+      match kind {
         Some("ping") => {
           self.transport.send_text(r#"{"type":"pong"}"#.to_string());
         }
@@ -165,12 +165,15 @@ impl DealerStream {
         Some("message") => {
           let uri = msg["uri"].as_str().unwrap_or("");
           if uri.starts_with("hm://collection/") {
+            tracing::debug!("dealer: library changed (saved)");
             return Ok(Some(DealerEvent::LibraryChanged(LibraryScope::Saved)));
           }
           if uri.starts_with("hm://playlist/") {
+            tracing::debug!("dealer: library changed (playlists)");
             return Ok(Some(DealerEvent::LibraryChanged(LibraryScope::Playlists)));
           }
           if !uri.contains("connect-state/v1/cluster") {
+            tracing::trace!(%uri, "dealer: ignoring non-cluster message");
             continue;
           }
           let gz = msg["headers"]["Transfer-Encoding"].as_str() == Some("gzip");
@@ -192,6 +195,11 @@ impl DealerStream {
                   }
                 };
                 if let Some(cluster) = upd.cluster.into_option() {
+                  tracing::debug!(
+                    active_device = %cluster.active_device_id,
+                    track = %cluster.player_state.track.uri,
+                    "dealer: cluster update"
+                  );
                   return Ok(Some(DealerEvent::Cluster(cluster)));
                 }
               }
@@ -254,17 +262,11 @@ impl DealerWriter {
       HeaderValue::from_str(&self.connection_id).map_err(Error::other)?,
     );
     let url = format!("{SPCLIENT}/connect-state/v1/devices/{}", self.device_id);
-    let resp = self.http.http.put(url).headers(headers).body(body).send().await?;
-    let status = resp.status();
-    let bytes = resp.bytes().await?;
-    if !status.is_success() {
-      return Err(Error::status(
-        "get_cluster",
-        status.as_u16(),
-        String::from_utf8_lossy(&bytes).into_owned(),
-      ));
+    let resp = self.http.send(HttpMethod::Put, url, headers, body, 0).await?;
+    if !resp.ok() {
+      return Err(Error::status("get_cluster", resp.status, resp.text()));
     }
-    Ok(Cluster::parse_from_bytes(&bytes)?)
+    Ok(Cluster::parse_from_bytes(&resp.body)?)
   }
 
   async fn player_command(&self, target: &str, command: Value) -> Result<(u16, String)> {
@@ -277,20 +279,15 @@ impl DealerWriter {
       "X-Spotify-Connection-Id",
       HeaderValue::from_str(&self.connection_id).map_err(Error::other)?,
     );
-    let resp = self
-      .http
-      .http
-      .post(url)
-      .headers(headers)
-      .json(&json!({ "command": command }))
-      .send()
-      .await?;
-    let status = resp.status();
-    let body = resp.text().await?;
-    if !status.is_success() {
-      return Err(Error::status("player_command", status.as_u16(), body));
+    let endpoint = command["endpoint"].as_str().unwrap_or("?");
+    tracing::debug!(%target, %endpoint, command = %command, "dealer: player command");
+    let body = serde_json::to_vec(&json!({ "command": command }))?;
+    let resp = self.http.send(HttpMethod::Post, url, headers, body, 0).await?;
+    if !resp.ok() {
+      return Err(Error::status("player_command", resp.status, resp.text()));
     }
-    Ok((status.as_u16(), body))
+    tracing::trace!(%endpoint, status = resp.status, "dealer: player command ok");
+    Ok((resp.status, resp.text()))
   }
 
   pub async fn pause(&self, target: &str) -> Result<(u16, String)> {
@@ -356,13 +353,14 @@ impl DealerWriter {
         "command_id": random_hex(16),
         "interaction_id": random_hex(16),
     });
-    let resp = self.http.http.post(url).headers(headers).json(&body).send().await?;
-    let status = resp.status();
-    let text = resp.text().await?;
-    if !status.is_success() {
-      return Err(Error::status("transfer", status.as_u16(), text));
+    let resp = self
+      .http
+      .send(HttpMethod::Post, url, headers, serde_json::to_vec(&body)?, 0)
+      .await?;
+    if !resp.ok() {
+      return Err(Error::status("transfer", resp.status, resp.text()));
     }
-    Ok((status.as_u16(), text))
+    Ok((resp.status, resp.text()))
   }
 
   pub async fn set_volume(&self, target: &str, percent: f64) -> Result<(u16, i32)> {
@@ -385,17 +383,12 @@ impl DealerWriter {
     );
     let resp = self
       .http
-      .http
-      .put(url)
-      .headers(headers)
-      .body(cmd.write_to_bytes()?)
-      .send()
+      .send(HttpMethod::Put, url, headers, cmd.write_to_bytes()?, 0)
       .await?;
-    let status = resp.status();
-    if !status.is_success() {
-      return Err(Error::status("set_volume", status.as_u16(), resp.text().await?));
+    if !resp.ok() {
+      return Err(Error::status("set_volume", resp.status, resp.text()));
     }
-    Ok((status.as_u16(), raw))
+    Ok((resp.status, raw))
   }
 }
 
@@ -413,9 +406,15 @@ fn decode_payload(p: &str, gzipped: bool) -> Result<Vec<u8>> {
   Ok(out)
 }
 
-pub fn active_device(cluster: &Cluster, me: &str) -> Option<String> {
+pub fn active_device(cluster: &Cluster, me: &str, last_active: Option<&str>) -> Option<String> {
   if !cluster.active_device_id.is_empty() {
     return Some(cluster.active_device_id.clone());
+  }
+  if let Some(la) = last_active
+    && la != me
+    && cluster.device.contains_key(la)
+  {
+    return Some(la.to_string());
   }
   let mut speaker = None;
   let mut any = None;

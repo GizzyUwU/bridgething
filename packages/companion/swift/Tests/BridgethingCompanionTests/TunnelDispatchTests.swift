@@ -75,12 +75,12 @@ import XCTest
 
     private final class EchoServer: @unchecked Sendable {
         private let listener: NWListener
-        private let queue = DispatchQueue(label: "dev.bridgething.test.echo")
+        private let queue = DispatchQueue(label: "com.bridgething.test.echo")
 
         init() throws {
             listener = try NWListener(using: .tcp)
             listener.newConnectionHandler = { conn in
-                conn.start(queue: DispatchQueue(label: "dev.bridgething.test.echo.conn"))
+                conn.start(queue: DispatchQueue(label: "com.bridgething.test.echo.conn"))
                 func pump() {
                     conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
                         if let data, !data.isEmpty {

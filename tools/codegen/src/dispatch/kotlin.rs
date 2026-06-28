@@ -21,8 +21,8 @@ use super::{
 
 const KOTLIN_OUTPUT: &str =
   "packages/gateway/kotlin/gateway/src/main/kotlin/dev/bridgething/gateway/Dispatch.generated.kt";
-const KOTLIN_PACKAGE: &str = "dev.bridgething.gateway";
-const KOTLIN_SCHEMA_PACKAGE: &str = "dev.bridgething.schema";
+const KOTLIN_PACKAGE: &str = "com.bridgething.gateway";
+const KOTLIN_SCHEMA_PACKAGE: &str = "com.bridgething.schema";
 
 pub fn emit_kotlin(plan: &Plan) -> Result<()> {
   let surfaces = surfaces(plan);

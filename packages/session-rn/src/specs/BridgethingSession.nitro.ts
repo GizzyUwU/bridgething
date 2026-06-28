@@ -356,6 +356,7 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setOnAncsAuthStatusChanged(callback: (status: BridgethingAncsAuthStatus) => void): void;
   setOnLog(callback: (level: string, message: string) => void): void;
   setLogStreamingEnabled(enabled: boolean): void;
+  setLocalLogStreamingEnabled(enabled: boolean): void;
 
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;

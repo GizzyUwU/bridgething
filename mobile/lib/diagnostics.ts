@@ -15,23 +15,27 @@ export type DeviceLogLine = {
 };
 
 type DiagState = {
-  logStreaming: boolean;
+  deviceLogStreaming: boolean;
+  localLogStreaming: boolean;
   deviceLogs: DeviceLogLine[];
 
   ingestDeviceLog(level: string, message: string): void;
   seedDeviceLogs(lines: BridgethingDeviceLogLine[]): void;
-  setLogStreaming(on: boolean): void;
+  setDeviceLogStreaming(on: boolean): void;
+  setLocalLogStreaming(on: boolean): void;
   clearDeviceLogs(): void;
 };
 
 let logCounter = 0;
 
 export const useDiagnosticsStore = create<DiagState>((set, get) => ({
-  logStreaming: false,
+  deviceLogStreaming: false,
+  localLogStreaming: false,
   deviceLogs: [],
 
   ingestDeviceLog: (level, message) => {
-    if (!get().logStreaming) return;
+    const s = get();
+    if (!s.deviceLogStreaming && !s.localLogStreaming) return;
     set(s => {
       const next = [
         ...s.deviceLogs,
@@ -53,8 +57,8 @@ export const useDiagnosticsStore = create<DiagState>((set, get) => ({
     set({ deviceLogs: mapped });
   },
 
-  setLogStreaming: on => {
-    set({ logStreaming: on });
+  setDeviceLogStreaming: on => {
+    set({ deviceLogStreaming: on });
     getSession().setLogStreamingEnabled(on);
     if (on) {
       getSession()
@@ -62,6 +66,11 @@ export const useDiagnosticsStore = create<DiagState>((set, get) => ({
         .then(lines => get().seedDeviceLogs(lines))
         .catch(() => {});
     }
+  },
+
+  setLocalLogStreaming: on => {
+    set({ localLogStreaming: on });
+    getSession().setLocalLogStreamingEnabled(on);
   },
 
   clearDeviceLogs: () => set({ deviceLogs: [] }),
@@ -82,7 +91,7 @@ export async function startDiagnostics(): Promise<void> {
     AppState.addEventListener('change', next => {
       if (next !== 'active') return;
       const s = useDiagnosticsStore.getState();
-      if (!s.logStreaming) return;
+      if (!s.deviceLogStreaming) return;
       session
         .deviceLogSnapshot(LOG_LIMIT)
         .then(lines => s.seedDeviceLogs(lines))

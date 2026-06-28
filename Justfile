@@ -46,7 +46,7 @@ spotify-codegen:
   swift build --package-path tools/spotify-codegen
   bash tools/spotify-codegen/scripts/generate-kotlin.sh
 
-# --- Spotify first-party client (uniffi) mobile packaging ---
+# --- Spotify client (uniffi) mobile packaging ---
 
 # Build the spotify rust client as an ios xcframework + swift wrapper.
 spotify-ios:

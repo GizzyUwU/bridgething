@@ -358,6 +358,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setLogStreamingEnabled(enabled)
     }
 
+    override fun setLocalLogStreamingEnabled(enabled: Boolean) {
+        backend?.setLocalLogStreamingEnabled(enabled)
+    }
+
     override fun setOnWebappsChanged(callback: (deviceId: String) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnWebappsChanged) { pendingWebappsChanged = it }
     }

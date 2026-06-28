@@ -24,6 +24,7 @@ use spotify::{
   client::{Observer, SpotifyClient},
   dealer::{Dealer, active_device},
   http::{ANDROID_CLIENT_ID, SPCLIENT, SpHttp, random_hex},
+  httpx::{HttpExecutor, HttpMethod},
   model::{AuthState, Device, LibraryScope, PlayerState, Queue},
   spclient::SpClient,
   store::{FileTokenStore, load_or_make_device_id},
@@ -52,20 +53,21 @@ async fn main() -> Result<(), Boxed> {
     store.save_refresh_token(seed);
   }
   let device_id = load_or_make_device_id(&state_dir);
-  let auth = Arc::new(Auth::new(base, psk, Box::new(store)));
+  let exec = HttpExecutor::new();
+  let auth = Arc::new(Auth::new(base, psk, Box::new(store), exec.clone()));
 
   if !auth.is_paired().await {
     eprintln!("not paired; starting device-code flow...");
     pair(&auth).await?;
   }
 
-  let http = SpHttp::new(auth.clone());
+  let http = SpHttp::new(auth.clone(), exec.clone());
   let spc = SpClient::new(http.clone());
   let dealer = Dealer::new(http.clone(), device_id);
 
   let username = match username {
     Some(u) => Some(u),
-    None => spotify::aplogin::resolve_and_cache(auth.as_ref(), &http.http, dealer.device_id())
+    None => spotify::aplogin::resolve_and_cache(auth.as_ref(), &http, dealer.device_id())
       .await
       .ok(),
   };
@@ -109,14 +111,14 @@ async fn main() -> Result<(), Boxed> {
     }
     "watch" => {
       let secs: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
       client.connect().await?;
       println!("watching {secs}s - play/pause/skip on Spotify to see deltas...");
       tokio::time::sleep(Duration::from_secs(secs)).await;
       client.disconnect().await;
     }
     "product" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
       let p = client.product().await?;
       println!(
         "product={} catalogue={} country={} premium={} can_use_superbird={}",
@@ -124,7 +126,7 @@ async fn main() -> Result<(), Boxed> {
       );
     }
     "root" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
       client.connect().await?;
       let shelves = client.root_browse().await?;
       println!("root: {} shelves", shelves.len());
@@ -135,7 +137,7 @@ async fn main() -> Result<(), Boxed> {
     }
     "lib" => {
       let node = args.get(2).map(String::as_str).unwrap_or("playlists");
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
       client.connect().await?;
       let page = client.browse(node, 20, 0).await?;
       println!(
@@ -156,7 +158,7 @@ async fn main() -> Result<(), Boxed> {
       client.disconnect().await;
     }
     "fav" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
       client.connect().await?;
       let page = client.favorites_list(20, 0).await?;
       println!("favorites: {} items (total={:?})", page.items.len(), page.total);
@@ -168,7 +170,7 @@ async fn main() -> Result<(), Boxed> {
     "whoami" => whoami(&http).await?,
     "apwhoami" => {
       let bearer = http.auth.bearer().await?;
-      match spotify::aplogin::resolve_username(&http.http, &bearer, dealer.device_id()).await {
+      match spotify::aplogin::resolve_username(&http, &bearer, dealer.device_id()).await {
         Ok(u) => println!("canonical username = {u}"),
         Err(e) => println!("AP login failed: {e}"),
       }
@@ -228,13 +230,15 @@ async fn whoami(http: &SpHttp) -> Result<(), Boxed> {
 
   println!("== product_state (full) ==");
   let resp = http
-    .http
-    .get(format!("{SPCLIENT}/melody/v1/product_state"))
-    .headers(http.headers(true).await?)
-    .send()
+    .send(
+      HttpMethod::Get,
+      format!("{SPCLIENT}/melody/v1/product_state"),
+      http.headers(true).await?,
+      Vec::new(),
+      0,
+    )
     .await?;
-  let body = resp.text().await?;
-  println!("{body}");
+  println!("{}", String::from_utf8_lossy(&resp.body));
 
   println!("\n== login5 one_time_token = access_token ==");
   let mut ci = ClientInfo::new();
@@ -245,16 +249,20 @@ async fn whoami(http: &SpHttp) -> Result<(), Boxed> {
   let mut req = LoginRequest::new();
   req.client_info = MessageField::some(ci);
   req.login_method = Some(Login_method::OneTimeToken(ott));
+  let mut headers = reqwest::header::HeaderMap::new();
+  headers.insert(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_static("application/x-protobuf"));
+  headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/x-protobuf"));
   let resp = http
-    .http
-    .post("https://login5.spotify.com/v3/login")
-    .header(reqwest::header::ACCEPT, "application/x-protobuf")
-    .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
-    .body(req.write_to_bytes()?)
-    .send()
+    .send(
+      HttpMethod::Post,
+      "https://login5.spotify.com/v3/login".to_string(),
+      headers,
+      req.write_to_bytes()?,
+      0,
+    )
     .await?;
-  let status = resp.status();
-  let bytes = resp.bytes().await?;
+  let status = resp.status;
+  let bytes = resp.body;
   println!("  login5 -> {status} ({} bytes)", bytes.len());
   match LoginResponse::parse_from_bytes(&bytes) {
     Ok(lr) => match lr.response {
@@ -383,7 +391,7 @@ async fn print_search(spc: &SpClient, q: &str) -> Result<(), Boxed> {
 async fn write_cmd(dealer: &Dealer, cmd: &str, arg: Option<&str>) -> Result<(), Boxed> {
   let (_stream, writer) = dealer.open().await?;
   let cluster = writer.cluster().await?;
-  let target = active_device(&cluster, dealer.device_id()).ok_or("no reachable target device")?;
+  let target = active_device(&cluster, dealer.device_id(), None).ok_or("no reachable target device")?;
   let (status, body) = match cmd {
     "pause" => writer.pause(&target).await?,
     "resume" => writer.resume(&target).await?,

@@ -31,6 +31,8 @@ const TAP_TARGET_DENYLIST: &[&str] = &[
   "bridgething::state::log_tap",
   "libbridgething::protocol",
   "bridgething::rfcomm::frame",
+  "bridgething::net",
+  "bridgething::ws::connection::send",
 ];
 
 fn tap_denied(target: &str) -> bool {
@@ -299,6 +301,9 @@ mod tests {
     assert!(tap_denied("libbridgething::protocol::bridge::encode"));
     assert!(tap_denied("libbridgething::protocol::gateway::decoder"));
     assert!(tap_denied("bridgething::rfcomm::frame"));
+    assert!(tap_denied("bridgething::net::connection"));
+    assert!(tap_denied("bridgething::net::connman"));
+    assert!(tap_denied("bridgething::ws::connection::send"));
     assert!(!tap_denied("bridgething::bluetooth::rfcomm"));
     assert!(!tap_denied("bridgething::rfcomm::decode"));
     assert!(!tap_denied("bridgething::als"));
@@ -314,6 +319,8 @@ mod tests {
       tracing::trace!(target: "bridgething::state::log_tap", "self-feedback");
       tracing::trace!(target: "libbridgething::protocol::bridge::encode", "codec-noise");
       tracing::trace!(target: "bridgething::rfcomm::frame", "gateway-traffic");
+      tracing::trace!(target: "bridgething::ws::connection::send", "ws-send-feedback");
+      tracing::trace!(target: "bridgething::net::connman", "net-send-feedback");
     });
     let messages: Vec<String> = tap
       .inner
@@ -330,7 +337,7 @@ mod tests {
     assert!(
       messages
         .iter()
-        .all(|m| !["self-feedback", "codec-noise", "gateway-traffic"].contains(&m.as_str())),
+        .all(|m| !["self-feedback", "codec-noise", "gateway-traffic", "ws-send-feedback", "net-send-feedback"].contains(&m.as_str())),
       "denied targets must never enter the tap: {messages:?}"
     );
   }
