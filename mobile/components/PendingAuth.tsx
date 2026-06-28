@@ -52,7 +52,7 @@ export function PendingAuth({
         {state.userCode ? (
           <View className="mt-3">
             <Text className="text-[12px] text-muted-foreground">
-              enter this code in your browser
+              enter this code at spotify.com/pair
             </Text>
             <Text
               className="mt-1 font-mono text-[28px] font-semibold tracking-[0.2em] text-foreground"
@@ -110,7 +110,18 @@ export function PendingAuth({
   return null;
 }
 
+const SPOTIFY_SCHEME = 'spotify://';
+
 async function openAuthUrl(url: string) {
+  try {
+    if (await Linking.canOpenURL(SPOTIFY_SCHEME)) {
+      await Linking.openURL(url);
+      return;
+    }
+  } catch {
+    // fall through to the in-app browser path
+  }
+
   try {
     if (await InAppBrowser.isAvailable()) {
       await InAppBrowser.open(url, {
@@ -118,9 +129,9 @@ async function openAuthUrl(url: string) {
         modalEnabled: true,
         enableDefaultShare: false,
       });
-    } else {
-      await Linking.openURL(url);
+      return;
     }
+    await Linking.openURL(url);
   } catch {
     // the code + url are shown in the card as a manual fallback.
   }

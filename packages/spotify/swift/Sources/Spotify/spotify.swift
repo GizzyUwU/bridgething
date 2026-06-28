@@ -945,10 +945,6 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func connect() async throws 
     
-    /**
-     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
-     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
-     */
     func currentPositionMs() async  -> UInt32?
     
     func disconnect() async 
@@ -1129,10 +1125,6 @@ open func connect()async throws   {
         )
 }
     
-    /**
-     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
-     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
-     */
 open func currentPositionMs()async  -> UInt32?  {
     return
         try!  await uniffiRustCallAsync(
@@ -4374,7 +4366,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_connect() != 427) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 45014) {
+    if (uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 34021) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_disconnect() != 46556) {

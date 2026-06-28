@@ -4,17 +4,6 @@
 <dict>
 	<key>BRIDGETHING_AUTH_PSK</key>
 	<string>$(BRIDGETHING_AUTH_PSK)</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.bridgething.gateway</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>bridgething</string>
-			</array>
-		</dict>
-	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -35,10 +24,25 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.bridgething.gateway</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>bridgething</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAccessorySetupBluetoothNames</key>
@@ -66,12 +70,25 @@
 	<string>bridgething forwards your location to Car Thing webapps that ask for it (weather, navigation, etc).</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Medium.ttf</string>
+		<string>Outfit-Bold.ttf</string>
+		<string>Outfit-Regular.ttf</string>
+		<string>Outfit-SemiBold.ttf</string>
+		<string>Outfit-ExtraLight.ttf</string>
+		<string>Inter-Bold.ttf</string>
+		<string>Outfit-ExtraBold.ttf</string>
+		<string>Inter-Regular.ttf</string>
+		<string>Outfit-Medium.ttf</string>
+		<string>Outfit-Light.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>external-accessory</string>
 		<string>bluetooth-central</string>
-		<string>processing</string>
 		<string>fetch</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
@@ -97,19 +114,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Medium.ttf</string>
-		<string>Outfit-Bold.ttf</string>
-		<string>Outfit-Regular.ttf</string>
-		<string>Outfit-SemiBold.ttf</string>
-		<string>Outfit-ExtraLight.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Outfit-ExtraBold.ttf</string>
-		<string>Inter-Regular.ttf</string>
-		<string>Outfit-Medium.ttf</string>
-		<string>Outfit-Light.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-	</array>
 </dict>
 </plist>
