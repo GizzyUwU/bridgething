@@ -29,6 +29,15 @@ public class BridgethingConnectionService : Service() {
     override fun onBind(intent: Intent?) = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!canRunConnectedDeviceService()) {
+            // Starting a connectedDevice FGS without a qualifying runtime
+            // permission throws SecurityException and takes the whole app down
+            // (and crash-loops on every relaunch while a device stays
+            // associated). Bail soft; a later start - once the user grants
+            // Bluetooth access during pairing - will succeed.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
@@ -45,6 +54,18 @@ public class BridgethingConnectionService : Service() {
         }
         // restart if the OS reaps us while a device is still associated.
         return START_STICKY
+    }
+
+    /**
+     * A connectedDevice FGS legally needs one of the BLUETOOTH_* runtime
+     * permissions (or a normal anyOf like CHANGE_NETWORK_STATE) held. Below
+     * Android 12 the legacy BLUETOOTH permission is install-time granted, so
+     * the check only matters on S+ where BLUETOOTH_CONNECT must be granted.
+     */
+    private fun canRunConnectedDeviceService(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return true
+        return ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     override fun onDestroy() {

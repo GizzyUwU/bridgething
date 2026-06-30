@@ -3,6 +3,7 @@ package com.bridgething.gateway
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.util.Log
 import com.bridgething.schema.BridgethingProtocol
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -113,7 +114,7 @@ public class BluetoothSocketAdapter(
      * `BLUETOOTH_CONNECT` runtime permission already granted.
      */
     @SuppressLint("MissingPermission")
-    public suspend fun connect(device: BluetoothDevice): Device = withContext(Dispatchers.IO) {
+    public suspend fun connect(device: BluetoothDevice, scheduleOnFailure: Boolean = true): Device = withContext(Dispatchers.IO) {
         val deviceId = device.address
         mutex.withLock {
             devices[deviceId] = device
@@ -127,9 +128,12 @@ public class BluetoothSocketAdapter(
         }
         val info = Device(id = deviceId, name = deviceName)
 
+        Log.i(TAG, "opening rfcomm to $deviceId ($deviceName) uuid=$serviceUuid bonded=${device.bondState == BluetoothDevice.BOND_BONDED}")
+
         val socket: BluetoothSocket = try {
             device.createRfcommSocketToServiceRecord(serviceUuid)
         } catch (e: IOException) {
+            Log.w(TAG, "createRfcommSocket for $deviceId failed: ${e.message}")
             throw AdapterException.TransportFailure(
                 "createRfcommSocket for $deviceId failed: ${e.message}"
             )
@@ -141,8 +145,25 @@ public class BluetoothSocketAdapter(
             socket.connect()
         } catch (e: IOException) {
             runCatching { socket.close() }
+            val aclUp = isAclConnected(device)
+            val bonded = device.bondState == BluetoothDevice.BOND_BONDED
+            Log.w(TAG, "rfcomm connect to $deviceId failed (aclConnected=$aclUp bonded=$bonded): ${e.message}")
+            // A first connect to an unbonded Car Thing is expected to fail - it's
+            // what kicks off Android pairing. Retry so a later attempt lands once
+            // the bond completes. Only surface LinkFailed when we're already
+            // bonded AND link-connected but the daemon still won't answer; that's
+            // the real "can't reach the daemon" case, not pairing-in-progress.
+            if (aclUp && bonded) {
+                incomingEvents.send(
+                    AdapterEvent.LinkFailed(info, "rfcomm connect to $deviceId failed: ${e.message}")
+                )
+            }
+            if (scheduleOnFailure && !stopped && mutex.withLock { devices.containsKey(deviceId) }) {
+                scheduleReconnect(deviceId, device)
+            }
             throw AdapterException.TransportFailure("rfcomm connect to $deviceId failed: ${e.message}")
         }
+        Log.i(TAG, "rfcomm connected to $deviceId")
 
         val session = Session(this@BluetoothSocketAdapter, info, socket)
         val installed = mutex.withLock {
@@ -183,7 +204,7 @@ public class BluetoothSocketAdapter(
                 if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
                 kotlinx.coroutines.delay(delayMs)
                 if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
-                if (runCatching { connect(device) }.isSuccess) return@launch
+                if (runCatching { connect(device, scheduleOnFailure = false) }.isSuccess) return@launch
                 delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
             }
         }
@@ -193,7 +214,22 @@ public class BluetoothSocketAdapter(
         }
     }
 
+    /**
+     * Whether the phone currently holds a baseband (ACL) link to [device].
+     * There is no public API for classic-Bluetooth connection state, so this
+     * reflects the hidden `BluetoothDevice.isConnected()`. Defaults to `false`
+     * if reflection is unavailable - we'd rather under-report link failures
+     * than raise false ones.
+     */
+    private fun isAclConnected(device: BluetoothDevice): Boolean = try {
+        val method = BluetoothDevice::class.java.getMethod("isConnected")
+        method.invoke(device) as? Boolean ?: false
+    } catch (_: Throwable) {
+        false
+    }
+
     private companion object {
+        const val TAG = "BridgethingBT"
         const val RECONNECT_BASE_MS = 1_000L
         const val RECONNECT_MAX_MS = 30_000L
     }

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.ComponentName
+import android.util.Log
 import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
@@ -28,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
  * never torn down on device-disappear (idles with no peer instead).
  */
 public object CompanionHolder {
+    private const val TAG = "BridgethingBT"
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -78,12 +80,33 @@ public object CompanionHolder {
     }
 
     public fun reconnectAssociated(context: Context) {
-        val transport = adapter ?: return
+        val transport = adapter
+        if (transport == null) {
+            Log.w(TAG, "reconnectAssociated: no adapter yet")
+            return
+        }
         val ba = (context.applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-            ?: return
-        for (mac in CompanionDevicePicker.associations(context.applicationContext)) {
-            val device = runCatching { ba.getRemoteDevice(mac) }.getOrNull() ?: continue
-            scope.launch { runCatching { transport.connect(device) } }
+        if (ba == null) {
+            Log.w(TAG, "reconnectAssociated: bluetooth adapter unavailable")
+            return
+        }
+        val macs = CompanionDevicePicker.associations(context.applicationContext)
+        Log.i(TAG, "reconnectAssociated: ${macs.size} association(s) $macs")
+        for (mac in macs) {
+            // CDM hands back lowercase MACs (MacAddress.toString()), but
+            // BluetoothAdapter.getRemoteDevice rejects anything but uppercase
+            // with IllegalArgumentException. Normalize or the connect silently
+            // never happens.
+            val device = runCatching { ba.getRemoteDevice(mac.uppercase()) }.getOrNull()
+            if (device == null) {
+                Log.w(TAG, "reconnectAssociated: getRemoteDevice($mac) failed")
+                continue
+            }
+            Log.i(TAG, "reconnectAssociated: connecting $mac (bondState=${device.bondState})")
+            scope.launch {
+                runCatching { transport.connect(device) }
+                    .onFailure { Log.w(TAG, "reconnectAssociated: connect($mac) failed: ${it.message}") }
+            }
         }
     }
 

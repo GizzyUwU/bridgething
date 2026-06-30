@@ -1166,7 +1166,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_connect() != 427) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 45014) {
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_current_position_ms() != 34021) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_disconnect() != 46556) {
@@ -2439,10 +2439,6 @@ public interface SpotifyClientInterface {
     
     suspend fun `connect`()
     
-    /**
-     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
-     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
-     */
     suspend fun `currentPositionMs`(): kotlin.UInt?
     
     suspend fun `disconnect`()
@@ -2675,10 +2671,6 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     }
 
     
-    /**
-     * current playhead from the last cluster, extrapolated to now; the cached snapshot position is
-     * frozen at the last dealer event so a peer-connect replay needs a fresh value.
-     */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `currentPositionMs`() : kotlin.UInt? {
         return uniffiRustCallAsync(

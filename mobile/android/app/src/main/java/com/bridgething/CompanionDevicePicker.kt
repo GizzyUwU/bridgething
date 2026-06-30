@@ -1,5 +1,6 @@
 package com.bridgething
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothDevice
 import android.companion.AssociationRequest
@@ -24,6 +25,7 @@ public object CompanionDevicePicker {
     private val carThingNameRegex: Pattern =
         Pattern.compile("(Car Thing|bridgething)", Pattern.CASE_INSENSITIVE)
 
+    @SuppressLint("MissingPermission")
     public suspend fun pick(context: Context): BridgethingBtDevice? {
         val activity = BridgethingActivityRegistry.currentActivity
             ?: error("CompanionDevicePicker needs a foreground activity")
@@ -43,6 +45,15 @@ public object CompanionDevicePicker {
                 } else {
                     @Suppress("DEPRECATION") data.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
                 }
+            // Kick off bonding here, straight off the user's selection while we're
+            // foreground, so Android shows the pairing DIALOG. If we instead let
+            // the background RFCOMM connect trigger the bond, the system only
+            // posts a tap-to-open notification.
+            device?.let {
+                if (it.bondState != BluetoothDevice.BOND_BONDED) {
+                    runCatching { it.createBond() }
+                }
+            }
             deferred.complete(device?.let(::toWireDevice))
         }
 
