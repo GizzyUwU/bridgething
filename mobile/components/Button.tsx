@@ -109,7 +109,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator size="small" color={iconColor} />
       ) : (
-        <View className="flex-row items-center justify-center gap-2">
+        <View className="h-full w-full flex-row items-center justify-center gap-2">
           {Icon ? <Icon size={18} color={iconColor} strokeWidth={2.4} /> : null}
           <Text className={labelClass}>{children}</Text>
         </View>

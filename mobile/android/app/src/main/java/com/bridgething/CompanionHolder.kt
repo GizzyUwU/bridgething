@@ -113,6 +113,15 @@ public object CompanionHolder {
     private fun ensureLifecycleObserver(app: Application) {
         if (lifecycleRegistered) return
         lifecycleRegistered = true
+        // The companion is usually created while the activity is already
+        // resumed, so the first onActivityStarted fired before we registered
+        // and would be missed - leaving `foreground` stuck false until the next
+        // app switch, which silently drops every foreground-gated event (auth,
+        // peer, catalog, ...) on first launch. Seed from the current activity.
+        if (BridgethingActivityRegistry.currentActivity != null) {
+            startedActivities = 1
+            foreground = true
+        }
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 startedActivities++
