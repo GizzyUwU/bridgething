@@ -539,6 +539,13 @@ public class BridgethingCompanion(
                         deviceLogTokens.remove(event.deviceId)
                     }
                 }
+                is GatewayEvent.LinkFailed -> {
+                    log(CompanionLogLevel.Warn, "peer link failed: ${event.device.name} [${event.device.id}]: ${event.reason}")
+                    deviceLogMutex.withLock {
+                        connectedDeviceIds.remove(event.device.id)
+                        deviceLogTokens.remove(event.device.id)
+                    }
+                }
                 is GatewayEvent.DecodeError -> log(CompanionLogLevel.Warn, "[${event.deviceId}] decode error: ${event.description}")
                 is GatewayEvent.Message -> Unit
             }

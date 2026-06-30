@@ -73,6 +73,7 @@ import com.bridgething.glue.GlueAuthState
 import com.bridgething.glue.GlueDebugState
 import com.bridgething.glue.GlueNowPlaying
 import com.bridgething.schema.BridgeThingMeta
+import com.bridgething.schema.BridgeToGatewayMsgData
 import com.bridgething.glue.GlueServiceHealth
 import com.bridgething.lyrics.LrclibResolver
 import com.bridgething.lyrics.LyricsResolver
@@ -1011,8 +1012,25 @@ public class HybridBridgethingSessionImpl(
                 peers.remove(event.deviceId)
                 if (CompanionHolder.foreground) onPeerDisconnected?.invoke(event.deviceId)
             }
-            is GatewayEvent.Message -> Unit
-            is GatewayEvent.DecodeError -> Unit
+            is GatewayEvent.LinkFailed -> {
+                val peer = BridgethingSessionPeer(
+                    id = event.device.id,
+                    name = event.device.name,
+                    status = BridgethingPeerLinkStatus.LINKFAILED,
+                    linkError = event.reason,
+                )
+                peers[event.device.id] = peer
+                if (CompanionHolder.foreground) onPeerLinkFailed?.invoke(peer)
+            }
+            is GatewayEvent.Message -> {
+                val data = event.message.data
+                if (data is BridgeToGatewayMsgData.Version) {
+                    if (CompanionHolder.foreground) onDeviceMetaChanged?.invoke(event.deviceId, toRnDeviceMeta(data.data))
+                }
+            }
+            is GatewayEvent.DecodeError -> {
+                if (CompanionHolder.foreground) onLog?.invoke("warn", "[${event.deviceId}] decode error: ${event.description}")
+            }
         }
     }
 

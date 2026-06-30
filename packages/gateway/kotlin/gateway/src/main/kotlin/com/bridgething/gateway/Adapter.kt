@@ -20,6 +20,14 @@ public data class Device(public val id: String, public val name: String)
 public sealed class AdapterEvent {
     public data class Connected(public val device: Device) : AdapterEvent()
     public data class Disconnected(public val deviceId: String) : AdapterEvent()
+
+    /**
+     * The transport is connected to the peer at the link level (e.g. an ACL
+     * link exists on Android) but a bridgething session could not be brought
+     * up over it - the daemon isn't reachable on its service. Distinct from
+     * [Disconnected], which means the peer is simply gone / out of range.
+     */
+    public data class LinkFailed(public val device: Device, public val reason: String) : AdapterEvent()
     public class Bytes(
         public val deviceId: String,
         public val data: ByteArray,

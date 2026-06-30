@@ -31,6 +31,10 @@ import kotlin.time.Duration.Companion.seconds
 public sealed class GatewayEvent {
   public data class Connected(public val device: Device) : GatewayEvent()
   public data class Disconnected(public val deviceId: String) : GatewayEvent()
+  public data class LinkFailed(
+    public val device: Device,
+    public val reason: String,
+  ) : GatewayEvent()
   public data class Message(
     public val deviceId: String,
     public val message: BridgeToGatewayMsg,
@@ -183,6 +187,10 @@ public class BridgethingGateway(
       is AdapterEvent.Disconnected -> {
         mutex.withLock { buffers.remove(event.deviceId) }
         outboundEvents.emit(GatewayEvent.Disconnected(event.deviceId))
+      }
+      is AdapterEvent.LinkFailed -> {
+        mutex.withLock { buffers.remove(event.device.id) }
+        outboundEvents.emit(GatewayEvent.LinkFailed(event.device, event.reason))
       }
       is AdapterEvent.Bytes -> ingest(event.deviceId, event.data)
     }
