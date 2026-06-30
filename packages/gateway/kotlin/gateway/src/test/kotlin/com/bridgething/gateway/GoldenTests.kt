@@ -8,6 +8,8 @@ import com.bridgething.schema.GatewayToBridgeMsg
 import com.bridgething.schema.GatewayToBridgeMsgData
 import com.bridgething.schema.Priority
 import com.bridgething.schema.ResponseMeta
+import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPack
+import com.ensarsarajcic.kotlinx.serialization.msgpack.MsgPackNullableDynamicSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -16,6 +18,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -52,6 +55,7 @@ class GoldenTests {
         val reEncoded = codec.encode(BridgeToGatewayMsg.serializer(), msg, priority = fixture.expectedPriority)
         val reHeader = FrameHeader.parse(reEncoded)
         assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
+        assertGoldenBytes(frame, reEncoded, fixture.name)
         val reDecoded = codec.decode(BridgeToGatewayMsg.serializer(), reEncoded)
         assertEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
@@ -63,10 +67,41 @@ class GoldenTests {
         val reEncoded = codec.encode(GatewayToBridgeMsg.serializer(), msg, priority = fixture.expectedPriority)
         val reHeader = FrameHeader.parse(reEncoded)
         assertEquals(fixture.expectedPriority, reHeader.priority, "round-trip priority changed on ${fixture.name}")
+        assertGoldenBytes(frame, reEncoded, fixture.name)
         val reDecoded = codec.decode(GatewayToBridgeMsg.serializer(), reEncoded)
         assertEquals(msg.id, reDecoded.id, "round-trip id changed on ${fixture.name}")
       }
     }
+  }
+
+  /**
+   * The Rust golden (`rmp_serde::to_vec_named`) is the canonical wire encoding.
+   * Kotlin's encode should reproduce it byte-for-byte; anything else risks the
+   * daemon failing to decode what we emit. This is the assertion the suite was
+   * missing: re-decode round-trips were symmetric about Kotlin's own quirks (an
+   * over-counted msgpack map header decodes back fine on our side) and so never
+   * noticed bytes a strict decoder like rmp-serde would reject.
+   *
+   * One tolerated divergence: Rust's `#[serde(skip_serializing_none)]` omits
+   * `None` fields, while kotlinx-serialization-msgpack writes them as explicit
+   * `nil` (it sizes maps eagerly from the descriptor, so it cannot skip an
+   * element without lying about the count). rmp-serde accepts explicit `nil`
+   * for `Option<T>` on decode, so this is wire-safe. When the bytes diverge we
+   * fall back to requiring the payload to strictly decode as well-formed msgpack
+   * - which a dishonest map header (the unit-variant over-count bug) fails.
+   */
+  private fun assertGoldenBytes(golden: ByteArray, encoded: ByteArray, name: String) {
+    if (golden.contentEquals(encoded)) return
+    val body = encoded.copyOfRange(FrameHeader.LENGTH, encoded.size)
+    runCatching { MsgPack.Default.decodeFromByteArray(MsgPackNullableDynamicSerializer, body) }
+      .onFailure {
+        fail<Unit>(
+          "encoded bytes for $name diverged from golden AND are not strictly " +
+            "decodable msgpack (${it.message})\n" +
+            "  golden : ${bytesToHex(golden)}\n" +
+            "  encoded: ${bytesToHex(encoded)}",
+        )
+      }
   }
 
   private fun assertMetaMatches(meta: MsgMeta, expectedKind: String, name: String) {
@@ -188,6 +223,9 @@ private enum class Direction {
   @kotlinx.serialization.SerialName("gateway_to_bridge")
   GATEWAY_TO_BRIDGE,
 }
+
+private fun bytesToHex(bytes: ByteArray): String =
+  bytes.joinToString("") { "%02x".format(it) }
 
 private fun hexToBytes(hex: String): ByteArray {
   require(hex.length % 2 == 0)

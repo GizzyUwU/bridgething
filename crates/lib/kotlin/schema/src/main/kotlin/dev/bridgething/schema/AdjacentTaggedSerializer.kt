@@ -84,18 +84,37 @@ public class AdjacentTaggedSerializer<T : Any>(
       element("data", buildSerialDescriptor("Any", SerialKind.CONTEXTUAL), isOptional = true)
     }
 
+  // Unit variants serialize to a single-key map `{discriminator: tag}` with no
+  // `data`. kotlinx-serialization-msgpack writes the msgpack map header eagerly
+  // from `descriptor.elementsCount` (BasicMsgPackEncoder.beginStructure ->
+  // beginCollection), so a unit variant routed through the 2-element [descriptor]
+  // stamps a header claiming a `data` entry that never gets written. msgpack's own
+  // decoder tolerates the over-count, but a strict decoder (rmp-serde on the
+  // daemon) reads the parent map's next field as the phantom payload and fails
+  // with "invalid type: map, expected unit variant". Give unit variants a
+  // 1-element descriptor so the header matches the bytes.
+  private val unitDescriptor: SerialDescriptor =
+    buildClassSerialDescriptor((baseClass.qualifiedName ?: "AdjacentTagged") + "\$Unit") {
+      element(discriminator, String.serializer().descriptor)
+    }
+
   override fun serialize(encoder: Encoder, value: T) {
     val info = variantsByClass[value::class]
       ?: error("AdjacentTaggedSerializer: no variant info for ${value::class} (not a sealed subclass of ${baseClass.simpleName}?)")
 
+    if (info.payloadSerializer == null) {
+      val composite = encoder.beginStructure(unitDescriptor)
+      composite.encodeStringElement(unitDescriptor, 0, info.tag)
+      composite.endStructure(unitDescriptor)
+      return
+    }
+
     val composite = encoder.beginStructure(descriptor)
     composite.encodeStringElement(descriptor, 0, info.tag)
-    if (info.payloadSerializer != null) {
-      val dataProp = info.klass.memberProperties.first { it.name == "data" }
-      val payload = dataProp.getter.call(value)
-        ?: error("AdjacentTaggedSerializer: variant ${info.klass.simpleName}.data was null")
-      composite.encodeSerializableElement(descriptor, 1, info.payloadSerializer, payload)
-    }
+    val dataProp = info.klass.memberProperties.first { it.name == "data" }
+    val payload = dataProp.getter.call(value)
+      ?: error("AdjacentTaggedSerializer: variant ${info.klass.simpleName}.data was null")
+    composite.encodeSerializableElement(descriptor, 1, info.payloadSerializer, payload)
     composite.endStructure(descriptor)
   }
 
