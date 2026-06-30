@@ -34,6 +34,7 @@ import {
   locationStatus,
   openAppSettings,
   type PermissionState,
+  requestBluetoothConnect,
   requestLocation,
 } from '../lib/permissions';
 import {
@@ -128,7 +129,29 @@ export function SetupScreen({ navigation, route }: Props) {
     setPairBusy(true);
     try {
       if (Platform.OS === 'android') {
-        await session.presentPairPicker();
+        // CDM finds + pairs the Car Thing for us, but the RFCOMM link and its
+        // connectedDevice foreground service need BLUETOOTH_CONNECT granted
+        // first - without it presentPairPicker's service start crashes.
+        const bt = await requestBluetoothConnect();
+        if (bt !== 'granted') {
+          Alert.alert(
+            'bluetooth permission needed',
+            'bridgething needs Bluetooth access to connect to your Car Thing. enable it in settings, then try pairing again.',
+          );
+          return;
+        }
+        const picked = await session.presentPairPicker();
+        if (!picked) return;
+        // selecting the device kicks off bonding (a system prompt) then the
+        // RFCOMM link; hold here - with the page in its "pairing" state - until
+        // the peer actually connects.
+        const connected = await waitForPeer(45000);
+        if (!connected) {
+          Alert.alert(
+            'still connecting',
+            'if a Bluetooth pairing prompt appeared, tap Pair to continue. make sure your Car Thing is on and nearby - it can take a few seconds.',
+          );
+        }
         return;
       }
       if (!(await presentPairWithGuidance())) return;
@@ -434,11 +457,12 @@ function PairPage({
             letterSpacing: -0.9,
           }}
         >
-          pair your Car Thing
+          {busy && !paired ? 'pairing your Car Thing' : 'pair your Car Thing'}
         </Text>
         <Text className="mt-2 text-[14px] leading-[20px] text-muted-foreground">
-          turn on your Car Thing and tap pair. it can take a few seconds for
-          your Car Thing to appear.
+          {busy && !paired
+            ? 'when the Bluetooth pairing prompt appears, tap Pair to continue. hang tight while your Car Thing connects.'
+            : 'turn on your Car Thing and tap pair. it can take a few seconds for your Car Thing to appear.'}
         </Text>
 
         <View className="my-10 items-center">

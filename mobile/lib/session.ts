@@ -11,7 +11,7 @@ import {
   type BridgethingSessionSnapshot,
   type SessionEvent,
 } from '@bridgething/session-react-native';
-import { Alert, Platform } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -162,6 +162,13 @@ export async function bootstrapSession(): Promise<void> {
 
   if (!wired) {
     session.subscribe(event => store.apply(event));
+    // Native gates peer/connection callbacks on our activity being foreground,
+    // so a peer that connects while a system dialog is up (CDM picker, BT
+    // pairing) never reaches JS live. Re-pull the native snapshot whenever we
+    // come back to the foreground to catch anything missed.
+    AppState.addEventListener('change', state => {
+      if (state === 'active') void reconcileSnapshot();
+    });
     wired = true;
   }
 
@@ -229,10 +236,9 @@ export async function presentPairWithGuidance(): Promise<boolean> {
 }
 
 export function waitForPeer(timeoutMs: number): Promise<boolean> {
-  const connected = useSessionStore
-    .getState()
-    .peers.some(p => p.status === 'connected');
-  if (connected) return Promise.resolve(true);
+  const isConnected = () =>
+    useSessionStore.getState().peers.some(p => p.status === 'connected');
+  if (isConnected()) return Promise.resolve(true);
   return new Promise(resolve => {
     let unsub: (() => void) | null = null;
     const done = (ok: boolean) => {
@@ -242,8 +248,11 @@ export function waitForPeer(timeoutMs: number): Promise<boolean> {
       resolve(ok);
     };
     const timer = setTimeout(() => done(false), timeoutMs);
-    unsub = getSession().subscribe(event => {
-      if (event.type === 'peerConnected') done(true);
+    // Watch the store, not the raw event: the peer can land via the live
+    // peerConnected event OR via a foreground-resume reconcile, and either
+    // should satisfy the wait.
+    unsub = useSessionStore.subscribe(state => {
+      if (state.peers.some(p => p.status === 'connected')) done(true);
     });
   });
 }
