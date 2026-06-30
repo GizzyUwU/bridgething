@@ -441,10 +441,10 @@ function PairPage({
 }) {
   return (
     <ScrollView
-      contentContainerClassName="flex-1 px-7 pb-8 pt-6"
+      contentContainerClassName="grow justify-between px-7 pb-8 pt-6"
       showsVerticalScrollIndicator={false}
     >
-      <View className="flex-1">
+      <View>
         <Text className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.18em] text-primary">
           step 2 of 3
         </Text>
