@@ -105,7 +105,12 @@ class SpotifyGlue(
     cacheDir: java.io.File? = null,
     private val clientFactory: SpotifyClientFactory = { store, observer ->
         initLogging(LogcatLogSink(), if (BuildConfig.DEBUG) "spotify=trace" else "spotify=info")
-        SpotifyClient.create(workerBase, psk, deviceId, store, observer)
+        SpotifyClient.create(workerBase, psk, deviceId, store, observer).also {
+            // The native reqwest/tungstenite transports don't work inside the
+            // uniffi async runtime on Android; install Kotlin transports like iOS
+            // does, or every worker request fails "dropped without responding".
+            it.setHttpTransport(KtorHttpTransport())
+        }
     },
 ) : BridgethingGlue {
     override val name: String = "spotify"
