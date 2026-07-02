@@ -1,9 +1,11 @@
 package com.bridgething.companion
 
+import com.bridgething.schema.BridgeToGatewayAudioMsg
 import com.bridgething.schema.BridgeToGatewayLibraryMsg
 import com.bridgething.schema.BridgeToGatewayMsgData
 import com.bridgething.schema.BridgeToGatewayPlayerMsg
 import com.bridgething.schema.SkipToIndex
+import com.bridgething.schema.GatewayToBridgeAudioMsg
 import com.bridgething.schema.GatewayToBridgeAuthorityMsg
 import com.bridgething.schema.GatewayToBridgeLibraryMsg
 import com.bridgething.schema.GatewayToBridgeMsgData
@@ -86,7 +88,18 @@ class SpotifyGlueDispatchTest {
         override suspend fun seek(positionMs: Long) {}
         override suspend fun setShuffle(on: Boolean) {}
         override suspend fun setRepeat(mode: SpRepeat) {}
-        override suspend fun setVolume(percent: Double) {}
+        var volume: Double = 50.0
+        val volumeSets = mutableListOf<Double>()
+        override suspend fun setVolume(percent: Double) {
+            volume = percent
+            volumeSets.add(percent)
+        }
+        override suspend fun volumeStep(deltaPercent: Double): Double {
+            volume = (volume + deltaPercent).coerceIn(0.0, 100.0)
+            volumeSets.add(volume)
+            return volume
+        }
+        override suspend fun activeDeviceVolumePercent(): Double? = volume
         override suspend fun queueUri(uri: String) {}
         override suspend fun transfer(deviceId: String) {}
         override suspend fun play(uri: String, skipToUri: String?) { lastPlay = uri to skipToUri }
@@ -253,6 +266,26 @@ class SpotifyGlueDispatchTest {
             (it.data as? GatewayToBridgeMsgData.Authority)?.data is GatewayToBridgeAuthorityMsg.Claim
         }
         assertTrue((claim.data as GatewayToBridgeMsgData.Authority).data is GatewayToBridgeAuthorityMsg.Claim)
+        h.companion.stop()
+    }
+
+    @Test
+    fun `volume verbs route to the remote connect device while casting off-phone`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onPlayer(state(npTrack("spotify:track:1", "Song"), remote = true))
+        h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Authority)?.data is GatewayToBridgeAuthorityMsg.Claim
+        }
+        assertTrue(h.glue.ownsVolume(), "remote playback must own volume")
+
+        h.driver.send(BridgeToGatewayMsgData.Audio(BridgeToGatewayAudioMsg.VolumeUp))
+        val changed = h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Audio)?.data is GatewayToBridgeAudioMsg.VolumeChanged
+        }
+        val vol = ((changed.data as GatewayToBridgeMsgData.Audio).data as GatewayToBridgeAudioMsg.VolumeChanged).data
+        assertEquals(0.5625f, vol.level, 0.001f, "volumeUp must step the remote connect device")
+        assertEquals(56.25, fake.volumeSets.last(), 0.01)
         h.companion.stop()
     }
 

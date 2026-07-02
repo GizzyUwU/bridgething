@@ -60,8 +60,68 @@ pub enum StockPhoneCallSend {
   PhoneCallInfo {
     remote_id: String,
     display_name: String,
-    status: PhoneCallStatus,
-    call_dir: PhoneCallDirection,
+    status: StockPhoneCallStatus,
+    call_dir: StockPhoneCallDirection,
     call_id: String,
   },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StockPhoneCallStatus {
+  Disconnected,
+  Sending,
+  Ringing,
+  Connecting,
+  Active,
+  Held,
+  Disconnecting,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StockPhoneCallDirection {
+  Incoming,
+  Outgoing,
+}
+
+impl From<PhoneCallStatus> for StockPhoneCallStatus {
+  fn from(data: PhoneCallStatus) -> Self {
+    match data {
+      PhoneCallStatus::Disconnected => StockPhoneCallStatus::Disconnected,
+      PhoneCallStatus::Sending => StockPhoneCallStatus::Sending,
+      PhoneCallStatus::Ringing => StockPhoneCallStatus::Ringing,
+      PhoneCallStatus::Connecting => StockPhoneCallStatus::Connecting,
+      PhoneCallStatus::Active => StockPhoneCallStatus::Active,
+      PhoneCallStatus::Held => StockPhoneCallStatus::Held,
+      PhoneCallStatus::Disconnecting => StockPhoneCallStatus::Disconnecting,
+    }
+  }
+}
+
+impl From<PhoneCallDirection> for StockPhoneCallDirection {
+  fn from(data: PhoneCallDirection) -> Self {
+    match data {
+      PhoneCallDirection::Incoming => StockPhoneCallDirection::Incoming,
+      PhoneCallDirection::Outgoing => StockPhoneCallDirection::Outgoing,
+    }
+  }
+}
+
+#[cfg(test)]
+mod test {
+  use super::*;
+
+  #[test]
+  fn phone_call_info_serializes_stock_casing() {
+    let msg = StockPhoneCallSend::PhoneCallInfo {
+      remote_id: "+15555550100".into(),
+      display_name: "Test Caller".into(),
+      status: PhoneCallStatus::Ringing.into(),
+      call_dir: PhoneCallDirection::Incoming.into(),
+      call_id: "call-1".into(),
+    };
+    let json = serde_json::to_value(&msg).expect("serialize");
+    assert_eq!(json["type"], "phone_call_info");
+    assert_eq!(json["status"], "Ringing");
+    assert_eq!(json["call_dir"], "Incoming");
+  }
 }

@@ -937,6 +937,8 @@ public func FfiConverterTypeHttpTransport_lower(_ value: HttpTransport) -> UInt6
 
 public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
+    func activeDeviceVolumePercent() async  -> Double?
+    
     func beginDeviceFlow() async throws  -> DeviceFlow
     
     func browse(nodeId: String, limit: UInt32, offset: UInt32) async throws  -> BrowsePage
@@ -990,6 +992,8 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     func skipPrev() async throws 
     
     func transfer(deviceId: String) async throws 
+    
+    func volumeStep(deltaPercent: Double) async throws  -> Double
     
 }
 open class SpotifyClient: SpotifyClientProtocol, @unchecked Sendable {
@@ -1056,6 +1060,24 @@ public static func create(base: String, psk: String, deviceId: String, store: To
 }
     
 
+    
+open func activeDeviceVolumePercent()async  -> Double?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_active_device_volume_percent(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_rust_buffer,
+            completeFunc: ffi_spotify_rust_future_complete_rust_buffer,
+            freeFunc: ffi_spotify_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionDouble.lift,
+            errorHandler: nil
+            
+        )
+}
     
 open func beginDeviceFlow()async throws  -> DeviceFlow  {
     return
@@ -1497,6 +1519,23 @@ open func transfer(deviceId: String)async throws   {
             completeFunc: ffi_spotify_rust_future_complete_void,
             freeFunc: ffi_spotify_rust_future_free_void,
             liftFunc: { $0 },
+            errorHandler: FfiConverterTypeError_lift
+        )
+}
+    
+open func volumeStep(deltaPercent: Double)async throws  -> Double  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_volume_step(
+                    self.uniffiCloneHandle(),
+                    FfiConverterDouble.lower(deltaPercent)
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_f64,
+            completeFunc: ffi_spotify_rust_future_complete_f64,
+            freeFunc: ffi_spotify_rust_future_free_f64,
+            liftFunc: FfiConverterDouble.lift,
             errorHandler: FfiConverterTypeError_lift
         )
 }
@@ -4036,6 +4075,30 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -4354,6 +4417,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_func_init_logging() != 6520) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_spotify_checksum_method_spotifyclient_active_device_volume_percent() != 9625) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_spotify_checksum_method_spotifyclient_begin_device_flow() != 35538) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4433,6 +4499,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_transfer() != 35984) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_spotifyclient_volume_step() != 8278) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_httpsink_complete() != 61546) {

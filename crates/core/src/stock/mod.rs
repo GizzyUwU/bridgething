@@ -189,8 +189,8 @@ fn phone_event_to_stock(msg: BridgeToClientPhoneMsg) -> StockSendMsg {
   StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
     remote_id: call.remote_id,
     display_name: call.display_name,
-    status: call.status,
-    call_dir: call.direction,
+    status: call.status.into(),
+    call_dir: call.direction.into(),
     call_id: call.call_id,
   })
 }

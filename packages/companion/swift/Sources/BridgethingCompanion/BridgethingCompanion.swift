@@ -480,6 +480,7 @@ public actor BridgethingCompanion {
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }
+            await audioDispatcher.setGlueProvider { [weak self] in await self?.current() }
             await audioDispatcher.start(gateway: gateway)
         })
         tasks.append(Task { [weak self] in

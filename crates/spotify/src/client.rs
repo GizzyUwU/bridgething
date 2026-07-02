@@ -526,6 +526,21 @@ impl SpotifyClient {
     self.writer().await?.set_volume(&self.target().await?, percent).await?;
     Ok(())
   }
+  pub async fn active_device_volume_percent(&self) -> Option<f64> {
+    let guard = self.shared.cluster.lock().await;
+    let cluster = guard.as_ref()?;
+    if cluster.active_device_id.is_empty() {
+      return None;
+    }
+    let info = cluster.device.get(&cluster.active_device_id)?;
+    Some(f64::from(info.volume) / 65535.0 * 100.0)
+  }
+  pub async fn volume_step(&self, delta_percent: f64) -> Result<f64> {
+    let current = self.active_device_volume_percent().await.unwrap_or(50.0);
+    let target = (current + delta_percent).clamp(0.0, 100.0);
+    self.set_volume(target).await?;
+    Ok(target)
+  }
   pub async fn queue_uri(&self, uri: &str) -> Result<()> {
     self.writer().await?.add_to_queue(&self.target().await?, uri).await?;
     Ok(())

@@ -8,7 +8,10 @@
 //! interpret it; webapps subscribed to the Phone SDK surface receive
 //! delta events and read the merged snapshot through `state.get`.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::Arc,
+};
 
 use bridgething_iap2::{
   csm::telephony::{
@@ -31,6 +34,7 @@ use crate::{bluetooth::iap2::Iap2TelephonyHandle, net::WireEventBus};
 #[derive(Debug, Default)]
 struct Inner {
   calls: HashMap<String, PhoneCall>,
+  announced: HashSet<String>,
   communications: CommunicationsState,
 }
 
@@ -68,15 +72,15 @@ impl TelephonyManager {
   }
 
   pub async fn apply_iap2_call_state(&self, update: Iap2CallStateUpdate) -> Result<(), TelephonyError> {
-    let Some(call_id) = update.call_uuid.clone() else {
-      tracing::debug!(
-        ?update,
-        "iap2 call-state update without CallUUID (no active call snapshot)"
-      );
-      return Ok(());
-    };
-
     let mut inner = self.inner.write().await;
+    let call_id = match update.call_uuid.clone() {
+      Some(id) => id,
+      None if inner.calls.len() == 1 => inner.calls.keys().next().cloned().expect("len checked"),
+      None => {
+        tracing::debug!(?update, "iap2 call-state update without CallUUID and no single active call");
+        return Ok(());
+      }
+    };
     let entry = inner.calls.entry(call_id.clone()).or_insert_with(|| PhoneCall {
       call_id: call_id.clone(),
       remote_id: String::new(),
@@ -90,6 +94,7 @@ impl TelephonyManager {
       is_conferenced: None,
       conference_group: None,
     });
+    let prior_status = entry.status.clone();
     if let Some(remote_id) = update.remote_id {
       entry.remote_id = remote_id;
     }
@@ -121,14 +126,36 @@ impl TelephonyManager {
       entry.started_at_unix_s = u32::try_from(start_ts).ok();
     }
     let snapshot = entry.clone();
-    drop(inner);
 
-    self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
+    if update.status.map(decode_status) == Some(PhoneCallStatus::Disconnected) {
+      inner.calls.remove(&call_id);
+      let was_announced = inner.announced.remove(&call_id);
+      drop(inner);
+      if !was_announced {
+        return Ok(());
+      }
+      let reason = iap2_end_reason(update.disconnect_reason, prior_status, snapshot.direction);
+      return self
+        .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason }))
+        .await;
+    }
+
+    if inner.announced.contains(&call_id) {
+      drop(inner);
+      return self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await;
+    }
+    if snapshot.status == PhoneCallStatus::Disconnected {
+      return Ok(());
+    }
+    inner.announced.insert(call_id);
+    drop(inner);
+    self.broadcast(BridgeToClientPhoneMsg::CallStarted(snapshot)).await
   }
 
   pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
     let mut inner = self.inner.write().await;
     inner.calls = state.active_calls.into_iter().map(|c| (c.call_id.clone(), c)).collect();
+    inner.announced = inner.calls.keys().cloned().collect();
     Ok(())
   }
 
@@ -136,6 +163,7 @@ impl TelephonyManager {
     let snapshot = call.clone();
     {
       let mut inner = self.inner.write().await;
+      inner.announced.insert(call.call_id.clone());
       inner.calls.insert(call.call_id.clone(), call);
     }
     self.broadcast(BridgeToClientPhoneMsg::CallStarted(snapshot)).await
@@ -145,6 +173,7 @@ impl TelephonyManager {
     let snapshot = call.clone();
     {
       let mut inner = self.inner.write().await;
+      inner.announced.insert(call.call_id.clone());
       inner.calls.insert(call.call_id.clone(), call);
     }
     self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await
@@ -154,6 +183,7 @@ impl TelephonyManager {
     {
       let mut inner = self.inner.write().await;
       inner.calls.remove(&call_id);
+      inner.announced.remove(&call_id);
     }
     self
       .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason }))
@@ -293,6 +323,26 @@ impl TelephonyManager {
       return Err(TelephonyError::Broadcast(errors.len()));
     }
     Ok(())
+  }
+}
+
+fn iap2_end_reason(
+  disconnect_reason: Option<u8>,
+  prior_status: PhoneCallStatus,
+  direction: PhoneCallDirection,
+) -> CallEndReason {
+  match disconnect_reason {
+    Some(1) => CallEndReason::Declined,
+    Some(2) => CallEndReason::Failed {
+      reason: "call failed".to_string(),
+    },
+    _ => {
+      if prior_status == PhoneCallStatus::Ringing && direction == PhoneCallDirection::Incoming {
+        CallEndReason::Missed
+      } else {
+        CallEndReason::Remote
+      }
+    }
   }
 }
 

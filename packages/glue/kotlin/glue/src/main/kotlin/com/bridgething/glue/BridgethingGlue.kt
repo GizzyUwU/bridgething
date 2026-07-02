@@ -107,6 +107,11 @@ interface BridgethingGlue : NowPlayingTransport {
         observer(GlueServiceHealth.Ok)
     }
 
+    suspend fun ownsVolume(): Boolean = false
+    suspend fun volumeUp(): Float = throw GlueError.NotImplemented
+    suspend fun volumeDown(): Float = throw GlueError.NotImplemented
+    suspend fun setVolume(level: Float): Float = throw GlueError.NotImplemented
+
     /** Live augmentation state for the debug surface. Default is all-false. */
     suspend fun debugState(): GlueDebugState = GlueDebugState()
 }

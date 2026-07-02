@@ -40,6 +40,8 @@ final class SpotifyGlueTests: XCTestCase {
         var likedWrites: [(String, Bool)] = []
         var playCalls: [(uri: String, skipToUri: String?)] = []
         var currentPosition: UInt32?
+        var volume: Double = 50
+        var volumeSets: [Double] = []
 
         func connect() async throws {}
         func disconnect() async {}
@@ -54,6 +56,16 @@ final class SpotifyGlueTests: XCTestCase {
         func setRepeat(mode _: Spotify.RepeatMode) async throws {}
         func queueUri(uri _: String) async throws {}
         func play(uri: String, skipToUri: String?) async throws { playCalls.append((uri, skipToUri)) }
+        func setVolume(percent: Double) async throws {
+            volume = percent
+            volumeSets.append(percent)
+        }
+        func volumeStep(deltaPercent: Double) async throws -> Double {
+            volume = min(100, max(0, volume + deltaPercent))
+            volumeSets.append(volume)
+            return volume
+        }
+        func activeDeviceVolumePercent() async -> Double? { volume }
         func product() async throws -> Spotify.ProductState { productState }
         func rootBrowse() async throws -> [Spotify.Shelf] { root }
         func browse(nodeId _: String, limit _: UInt32, offset _: UInt32) async throws -> Spotify.BrowsePage { page }
@@ -83,6 +95,14 @@ final class SpotifyGlueTests: XCTestCase {
         let driver = WireDriver(adapter: adapter)
         await driver.start()
         driver.connect()
+        // barrier: the peer-connected handler resets glue authority out of band of the
+        // emit queue; the time snapshot is its last frame, so wait it out before tests
+        // drive dealer events or claims race the reset
+        _ = try await driver.waitOutbound(timeout: .seconds(5)) {
+            if case .time(.snapshot(_)) = $0.data { return true }
+            return false
+        }
+        try await Task.sleep(for: .milliseconds(50))
         return Harness(companion: companion, driver: driver, fake: fake, glue: glue)
     }
 
@@ -95,7 +115,7 @@ final class SpotifyGlueTests: XCTestCase {
             Spotify.Shelf(id: "albums", title: "Albums", items: [item("spotify:album:1", "Album")]),
         ]
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0))), timeout: .seconds(5))
         guard case let .library(.browseReply(reply)) = resp.data else { return XCTFail("expected browseReply, got \(resp.data)") }
         XCTAssertEqual(reply.result.entries.count, 2)
@@ -112,7 +132,7 @@ final class SpotifyGlueTests: XCTestCase {
             total: 2, hasMore: false
         )
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: "albums", limit: 20, offset: 0))), timeout: .seconds(5))
         guard case let .library(.browseReply(reply)) = resp.data else { return XCTFail("expected browseReply") }
         XCTAssertEqual(reply.result.entries.count, 2)
@@ -129,7 +149,7 @@ final class SpotifyGlueTests: XCTestCase {
             artists: [], playlists: []
         )
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         let resp = try await h.driver.request(.library(.search(LibrarySearchRequest(query: "x", kinds: [.track, .album], limit: 10, offset: 0))), timeout: .seconds(5))
         guard case let .library(.searchReply(reply)) = resp.data else { return XCTFail("expected searchReply") }
         XCTAssertEqual(reply.result.items.count, 2)
@@ -141,7 +161,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testPlayerPushSnapshotsAndClaimsAuthority() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
 
         let snap = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
@@ -161,7 +181,7 @@ final class SpotifyGlueTests: XCTestCase {
         let fake = FakeClient()
         fake.currentPosition = 90_000
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
         let first = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
         guard case let .player(.snapshot(stale)) = first.data else { return XCTFail("expected snapshot") }
@@ -176,22 +196,69 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertEqual(ps.playback.positionMs, 90_000, "peer-connect replay must refresh the stale cached position")
     }
 
-    func testCastToRemoteSpeakerWithholdsAuthority() async throws {
+    func testRemoteConnectPlaybackClaimsAuthorityAndVolume() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: true))
 
-        _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
-        try await Task.sleep(for: .milliseconds(250))
-        let claims = await h.driver.outboundFrames().filter { if case .authority(.claim) = $0.data { return true }; return false }
-        XCTAssertTrue(claims.isEmpty, "spotify casting off-phone must not claim authority (ios cast gate)")
+        for scope in [CompanionAuthorityScope.nowPlayingPlayback, .nowPlayingMetadata, .volume] {
+            _ = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+                if case let .authority(.claim(c)) = $0.data, c.scope == scope { return true }
+                return false
+            }
+        }
+        let volumeState = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case .audio(.volumeChanged) = $0.data { return true }
+            return false
+        }
+        guard case let .audio(.volumeChanged(v)) = volumeState.data else { return XCTFail("expected volumeChanged") }
+        XCTAssertEqual(v.level, 0.5, accuracy: 0.001, "volume claim must seed the remote device's cluster volume")
+    }
+
+
+    func testReturnToLocalPlaybackReleasesVolumeAuthority() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: true))
+        _ = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .authority(.claim(c)) = $0.data, c.scope == .volume { return true }
+            return false
+        }
+
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: false))
+        let release = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .authority(.release(r)) = $0.data, r.scope == .volume { return true }
+            return false
+        }
+        guard case .authority(.release) = release.data else { return XCTFail("expected volume release") }
+    }
+
+    func testVolumeVerbsRouteToRemoteDeviceWhileRemote() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song"), remote: true))
+        _ = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .authority(.claim(c)) = $0.data, c.scope == .volume { return true }
+            return false
+        }
+
+        try await h.driver.send(.audio(.volumeUp))
+        let bumped = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .audio(.volumeChanged(v)) = $0.data, v.level > 0.55 { return true }
+            return false
+        }
+        guard case let .audio(.volumeChanged(v)) = bumped.data else { return XCTFail("expected volumeChanged") }
+        XCTAssertEqual(v.level, 0.5625, accuracy: 0.001, "volumeUp must step the remote connect device")
+        XCTAssertEqual(fake.volumeSets.last ?? 0, 56.25, accuracy: 0.01)
     }
 
     func testQueuePushSendsQueueChanged() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onQueue(queue: Spotify.Queue(previous: [], current: nil, next: [npTrack("spotify:track:2", "Next")]))
 
         let q = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.queueChanged) = $0.data { return true }; return false }
@@ -203,7 +270,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testLibraryChangeRelaysToGateway() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onLibraryChanged(scope: .playlists)
 
         let ev = try await h.driver.waitOutbound(timeout: .seconds(20)) {
@@ -216,7 +283,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testSkipToIndexPlaysContextSkippingToQueueUri() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         // the player push seeds the context uri; the queue push seeds the upcoming items.
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Now")))
         _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
@@ -235,7 +302,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testSkipToIndexOutOfRangeThrowsAndDoesNotPlay() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Now")))
         _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
         fake.observer?.onQueue(queue: Spotify.Queue(previous: [], current: nil, next: [npTrack("spotify:track:2", "Up1")]))
@@ -254,7 +321,7 @@ final class SpotifyGlueTests: XCTestCase {
         let fake = FakeClient()
         fake.productState = Spotify.ProductState(product: "free", catalogue: "free", country: "US", isPremium: false, canUseSuperbird: false)
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         let failed = expectation(description: "premium gate failed auth")
         await h.glue.setAuthObserver { st in if case .failed = st { failed.fulfill() } }
         fake.observer?.onAuth(state: .loggedIn(username: "u"))
@@ -264,7 +331,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testDeviceFlowPendingSurfacesPrompt() async throws {
         let fake = FakeClient()
         let h = try await boot(fake, paired: false)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         let pending = expectation(description: "pending prompt")
         await h.glue.setAuthObserver { st in
             if case let .pending(prompt) = st, prompt?.userCode == "XYZ9" { pending.fulfill() }
@@ -276,7 +343,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testLoggedOutClearsNowPlayingAndReleasesAuthority() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
 
         // a playing track claims authority + sets now-playing.
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
@@ -285,6 +352,8 @@ final class SpotifyGlueTests: XCTestCase {
             return false
         }
         let cleared = expectation(description: "now-playing cleared on logout")
+        // the deferred companion.stop() -> detach clears now-playing a second time
+        cleared.assertForOverFulfill = false
         await h.glue.setNowPlayingObserver { np in if np == nil { cleared.fulfill() } }
 
         fake.observer?.onAuth(state: .loggedOut)
@@ -302,7 +371,7 @@ final class SpotifyGlueTests: XCTestCase {
     func testNowPlayingLikedComesFromRustSaved() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
-        defer { Task { await h.companion.stop() } }
+        addTeardownBlock { await h.companion.stop() }
         fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song", saved: true)))
         let snap = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
         guard case let .player(.snapshot(ps)) = snap.data else { return XCTFail("expected snapshot") }

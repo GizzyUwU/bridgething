@@ -493,6 +493,7 @@ public class BridgethingCompanion(
         dispatchers.add(scope.launch { runLibraryDispatch() })
         dispatchers.add(scope.launch { netDispatcher.start(gateway) })
         dispatchers.add(scope.launch { tunnelDispatcher.start(gateway) })
+        audioDispatcher.setGlueProvider { current() }
         dispatchers.add(scope.launch { audioDispatcher.start(gateway) })
         dispatchers.add(scope.launch { phoneDispatcher.start(gateway) })
         dispatchers.add(scope.launch { ota.start(gateway) })

@@ -94,6 +94,7 @@ private const val QUEUE_MAX = 50
 private const val QUEUE_RUNWAY_FLOOR = 8
 private const val SPOTIFY_APP_BUNDLE = "com.spotify.client"
 private const val SPOTIFY_ANDROID_PACKAGE = "com.spotify.music"
+private const val VOLUME_STEP_PERCENT = 6.25
 
 typealias SpotifyClientFactory = (store: SpTokenStore, observer: SpObserver) -> SpotifyClientInterface
 
@@ -309,6 +310,19 @@ class SpotifyGlue(
         }
         require().setRepeat(mapped)
     }
+
+    override suspend fun ownsVolume(): Boolean =
+        lastState?.let { it.onRemoteSpeaker && it.track != null } == true
+
+    override suspend fun volumeUp(): Float = volumeStepped(VOLUME_STEP_PERCENT)
+    override suspend fun volumeDown(): Float = volumeStepped(-VOLUME_STEP_PERCENT)
+    override suspend fun setVolume(level: Float): Float {
+        require().setVolume(level.toDouble() * 100.0)
+        return level
+    }
+
+    private suspend fun volumeStepped(deltaPercent: Double): Float =
+        (require().volumeStep(deltaPercent) / 100.0).toFloat()
 
     private fun require(): SpotifyClientInterface = client ?: throw GlueError.Detached
 

@@ -66,6 +66,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var lastSentThumbEdge = defaultThumbEdge
     private var lastQueueItems: [QueueItem] = []
     private var lastState: SpPlayerState?
+    private var lastEmittedRemoteVolume: Float?
     private var likedOverride: [String: Bool] = [:]
     private var artHeroEdge = defaultHeroEdge
     private var artThumbEdge = defaultThumbEdge
@@ -218,6 +219,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         case let .player(snapshot, hasItem, onRemote):
             if hasItem {
                 await claimAuthority([.nowPlayingPlayback, .nowPlayingMetadata], forRemote: onRemote)
+                if onRemote { await emitRemoteVolumeFromCluster() }
             } else {
                 await releaseAllAuthority()
             }
@@ -630,17 +632,25 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private func claimAuthority(_ scopes: Set<CompanionAuthorityScope>, forRemote onRemote: Bool) async {
         guard let gateway = currentGateway() else { return }
-        if onRemote {
-            await releaseAllAuthority()
-            return
-        }
-        for scope in scopes {
+        var want = scopes
+        if onRemote { want.insert(.volume) }
+        for scope in want {
             let needs = stateLock.withLock { () -> Bool in
                 if heldScopes.contains(scope) { return false }
                 heldScopes.insert(scope)
                 return true
             }
-            if needs { try? await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: spotifyAppBundle)) }
+            if needs {
+                try? await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: spotifyAppBundle))
+                if scope == .volume { await emitRemoteVolumeFromCluster(force: true) }
+            }
+        }
+        if !onRemote {
+            let dropVolume = stateLock.withLock { () -> Bool in
+                lastEmittedRemoteVolume = nil
+                return heldScopes.remove(.volume) != nil
+            }
+            if dropVolume { try? await gateway.authority.release(AuthorityRelease(scope: .volume)) }
         }
     }
 
@@ -649,9 +659,49 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let scopes = stateLock.withLock { () -> [CompanionAuthorityScope] in
             let s = Array(heldScopes)
             heldScopes.removeAll()
+            lastEmittedRemoteVolume = nil
             return s
         }
         for scope in scopes { try? await gateway.authority.release(AuthorityRelease(scope: scope)) }
+    }
+
+    // MARK: - remote connect-device volume
+
+    private static let volumeStepPercent = 6.25
+
+    public func ownsVolume() async -> Bool {
+        stateLock.withLock { heldScopes.contains(.volume) }
+    }
+
+    public func volumeUp() async throws {
+        let target = try await require().volumeStep(deltaPercent: Self.volumeStepPercent)
+        await emitRemoteVolume(level: Float(target / 100.0))
+    }
+
+    public func volumeDown() async throws {
+        let target = try await require().volumeStep(deltaPercent: -Self.volumeStepPercent)
+        await emitRemoteVolume(level: Float(target / 100.0))
+    }
+
+    public func setVolume(_ level: Float) async throws {
+        try await require().setVolume(percent: Double(level) * 100.0)
+        await emitRemoteVolume(level: level)
+    }
+
+    private func emitRemoteVolumeFromCluster(force: Bool = false) async {
+        guard let pct = await client?.activeDeviceVolumePercent() else { return }
+        await emitRemoteVolume(level: Float(pct / 100.0), force: force)
+    }
+
+    private func emitRemoteVolume(level: Float, force: Bool = false) async {
+        guard let gateway = currentGateway() else { return }
+        let changed = stateLock.withLock { () -> Bool in
+            guard heldScopes.contains(.volume) else { return false }
+            if !force, let last = lastEmittedRemoteVolume, abs(last - level) < 0.005 { return false }
+            lastEmittedRemoteVolume = level
+            return true
+        }
+        if changed { try? await gateway.audio.volumeChanged(VolumeChanged(level: level, muted: false)) }
     }
 
     // MARK: - reduced -> wire mapping

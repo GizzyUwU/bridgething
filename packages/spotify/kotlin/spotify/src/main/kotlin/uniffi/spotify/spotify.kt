@@ -809,6 +809,8 @@ internal object IntegrityCheckingUniffiLib {
     }
     external fun uniffi_spotify_checksum_func_init_logging(
     ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_active_device_volume_percent(
+    ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_begin_device_flow(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_browse(
@@ -862,6 +864,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_spotify_checksum_method_spotifyclient_skip_prev(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_transfer(
+    ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_volume_step(
     ): Int
     external fun uniffi_spotify_checksum_method_httpsink_complete(
     ): Int
@@ -932,6 +936,8 @@ external fun uniffi_spotify_fn_free_spotifyclient(`handle`: Long,uniffi_out_err:
 ): Unit
 external fun uniffi_spotify_fn_constructor_spotifyclient_create(`base`: RustBuffer.ByValue,`psk`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`store`: Long,`observer`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
+external fun uniffi_spotify_fn_method_spotifyclient_active_device_volume_percent(`ptr`: Long,
+): Long
 external fun uniffi_spotify_fn_method_spotifyclient_begin_device_flow(`ptr`: Long,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_browse(`ptr`: Long,`nodeId`: RustBuffer.ByValue,`limit`: Int,`offset`: Int,
@@ -985,6 +991,8 @@ external fun uniffi_spotify_fn_method_spotifyclient_skip_next(`ptr`: Long,
 external fun uniffi_spotify_fn_method_spotifyclient_skip_prev(`ptr`: Long,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_transfer(`ptr`: Long,`deviceId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_volume_step(`ptr`: Long,`deltaPercent`: Double,
 ): Long
 external fun uniffi_spotify_fn_clone_httpsink(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1154,6 +1162,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_func_init_logging() != 6520) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_active_device_volume_percent() != 9625) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_begin_device_flow() != 35538) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1233,6 +1244,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_transfer() != 35984) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_volume_step() != 8278) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_httpsink_complete() != 61546) {
@@ -2431,6 +2445,8 @@ public object FfiConverterTypeHttpTransport: FfiConverter<HttpTransport, Long> {
 
 public interface SpotifyClientInterface {
     
+    suspend fun `activeDeviceVolumePercent`(): kotlin.Double?
+    
     suspend fun `beginDeviceFlow`(): DeviceFlow
     
     suspend fun `browse`(`nodeId`: kotlin.String, `limit`: kotlin.UInt, `offset`: kotlin.UInt): BrowsePage
@@ -2484,6 +2500,8 @@ public interface SpotifyClientInterface {
     suspend fun `skipPrev`()
     
     suspend fun `transfer`(`deviceId`: kotlin.String)
+    
+    suspend fun `volumeStep`(`deltaPercent`: kotlin.Double): kotlin.Double
     
     companion object
 }
@@ -2582,6 +2600,26 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         return uniffiRustCall() { status ->
             UniffiLib.uniffi_spotify_fn_clone_spotifyclient(handle, status)
         }
+    }
+
+    
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `activeDeviceVolumePercent`() : kotlin.Double? {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_active_device_volume_percent(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalDouble.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
     }
 
     
@@ -3141,6 +3179,27 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         // lift function
         { Unit },
         
+        // Error FFI converter
+        Exception.ErrorHandler,
+    )
+    }
+
+    
+    @Throws(Exception::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `volumeStep`(`deltaPercent`: kotlin.Double) : kotlin.Double {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_volume_step(
+                uniffiHandle,
+                FfiConverterDouble.lower(`deltaPercent`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_f64(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_f64(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_f64(future) },
+        // lift function
+        { FfiConverterDouble.lift(it) },
         // Error FFI converter
         Exception.ErrorHandler,
     )
@@ -5305,6 +5364,38 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
         } else {
             buf.put(1)
             FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?> {
+    override fun read(buf: ByteBuffer): kotlin.Double? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterDouble.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Double?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterDouble.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Double?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterDouble.write(value, buf)
         }
     }
 }

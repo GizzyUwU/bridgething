@@ -106,11 +106,9 @@ impl SpHttp {
     );
     h.insert("App-Platform", HeaderValue::from_static("Android"));
     h.insert("Spotify-App-Version", HeaderValue::from_static(CLIENT_VERSION));
-    h.insert(
-      ACCEPT,
-      HeaderValue::from_static(if json { "application/json" } else { PROTO_CT }),
-    );
-    h.insert(CONTENT_TYPE, HeaderValue::from_static(PROTO_CT));
+    let ct = HeaderValue::from_static(if json { "application/json" } else { PROTO_CT });
+    h.insert(ACCEPT, ct.clone());
+    h.insert(CONTENT_TYPE, ct);
     if let Some(tok) = self.client_token().await
       && let Ok(v) = HeaderValue::from_str(&tok)
     {

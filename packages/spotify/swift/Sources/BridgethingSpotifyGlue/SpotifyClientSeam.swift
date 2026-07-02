@@ -16,6 +16,9 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
     func setRepeat(mode: Spotify.RepeatMode) async throws
     func queueUri(uri: String) async throws
     func play(uri: String, skipToUri: String?) async throws
+    func setVolume(percent: Double) async throws
+    func volumeStep(deltaPercent: Double) async throws -> Double
+    func activeDeviceVolumePercent() async -> Double?
 
     func product() async throws -> ProductState
     func rootBrowse() async throws -> [Shelf]

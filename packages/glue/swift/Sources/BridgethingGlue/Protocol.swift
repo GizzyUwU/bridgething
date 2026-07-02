@@ -43,6 +43,11 @@ public protocol BridgethingGlue: Sendable {
     func setSpeed(_ speed: Float) async throws
     func setCrossfade(_ durationMs: UInt32?) async throws
 
+    func ownsVolume() async -> Bool
+    func volumeUp() async throws
+    func volumeDown() async throws
+    func setVolume(_ level: Float) async throws
+
     /// Library verbs; default impls throw `GlueError.notImplemented`.
     func browse(_ req: LibraryBrowseRequest) async throws -> BrowseResult
     func resolveContext(_ uri: String) async throws -> ContextResolveReply
@@ -102,6 +107,10 @@ public extension BridgethingGlue {
     func setRepeat(_: BridgethingSchema.RepeatMode) async throws { throw GlueError.notImplemented }
     func setSpeed(_: Float) async throws { throw GlueError.notImplemented }
     func setCrossfade(_: UInt32?) async throws { throw GlueError.notImplemented }
+    func ownsVolume() async -> Bool { false }
+    func volumeUp() async throws { throw GlueError.notImplemented }
+    func volumeDown() async throws { throw GlueError.notImplemented }
+    func setVolume(_: Float) async throws { throw GlueError.notImplemented }
     func browse(_: LibraryBrowseRequest) async throws -> BrowseResult { throw GlueError.notImplemented }
     func search(_: LibrarySearchRequest) async throws -> SearchResult { throw GlueError.notImplemented }
     func resolveContext(_: String) async throws -> ContextResolveReply { throw GlueError.notImplemented }

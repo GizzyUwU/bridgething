@@ -58,3 +58,6 @@ gradle.properties.local
 # Test suite: recorded Spotify HTTP cassettes + any local token cache
 **/Tests/**/Cassettes/
 *.spotify-tokens.json
+
+# spotify auth tokens
+.spotify-private/
