@@ -85,6 +85,76 @@ final class CompanionDispatchTests: XCTestCase {
         await h.companion.stop()
     }
 
+    func testDeviceNicknameChangedPatchesCachedMeta() async throws {
+        let h = try await boot()
+        let ota = await h.companion.ota
+
+        try await h.driver.send(.version(Self.testMeta(nickname: nil)), meta: .event)
+        guard await Self.waitUntil({ await ota.meta(deviceId: h.driver.deviceId) != nil }) else {
+            await h.companion.stop()
+            return XCTFail("version announce never landed in the ota meta cache")
+        }
+
+        try await h.driver.send(
+            .system(.deviceNicknameChanged(DeviceNicknameReply(nickname: "garage thing"))),
+            meta: .event
+        )
+        guard await Self.waitUntil({ await ota.meta(deviceId: h.driver.deviceId)?.nickname == "garage thing" }) else {
+            await h.companion.stop()
+            return XCTFail("nickname change never patched the cached meta")
+        }
+
+        // both updates were buffered on the single-consumer stream; reads are instant
+        let driverDeviceId = await h.driver.deviceId
+        var updates = ota.metaChanged.makeAsyncIterator()
+        let announced = await updates.next()
+        XCTAssertEqual(announced?.deviceId, driverDeviceId)
+        XCTAssertNil(announced?.meta.nickname)
+        let patched = await updates.next()
+        XCTAssertEqual(patched?.meta.nickname, "garage thing")
+        XCTAssertEqual(patched?.meta.serialNumber, "SN-TEST-0001")
+        await h.companion.stop()
+    }
+
+    private static func waitUntil(
+        deadline: Duration = .seconds(5),
+        _ predicate: () async -> Bool
+    ) async -> Bool {
+        let start = ContinuousClock.now
+        while ContinuousClock.now - start < deadline {
+            if await predicate() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await predicate()
+    }
+
+    private static func testMeta(nickname: String?) -> BridgeThingMeta {
+        BridgeThingMeta(
+            bridgethingVersion: "v0.0.1",
+            libbridgethingVersion: "0.0.1",
+            appName: "bridgething",
+            nickname: nickname,
+            appVersion: "0.0.1",
+            osName: "superbird",
+            osVersion: "2026.05.0",
+            osDescription: "test image",
+            btMac: "AA:BB:CC:DD:EE:FF",
+            serialNumber: "SN-TEST-0001",
+            fccId: "fcc",
+            icId: "ic",
+            modelName: "Car Thing",
+            channel: "dev",
+            imageVariant: "dev",
+            imageVersion: "2026.05.0",
+            imageBuildId: "build",
+            imageBuildDate: "2026-05-01",
+            imageDistro: "yocto",
+            imageMachine: "superbird",
+            discord: "",
+            credits: ""
+        )
+    }
+
     func testNetFetchRealOpenMeteoRequest() async throws {
         let h = try await boot()
         let url = "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.0&current=temperature_2m,weather_code"

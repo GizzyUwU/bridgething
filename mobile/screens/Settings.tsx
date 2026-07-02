@@ -71,6 +71,7 @@ import {
   knownDevices,
   peerDisplayName,
   presentPairWithGuidance,
+  setDeviceName,
   updateCapabilityFlags,
   updateNickname,
   updateOtaPollConfig,
@@ -368,7 +369,7 @@ export function SettingsScreen({ navigation }: Props) {
           {livePeers.map(peer => (
             <OtaDeviceCard
               key={peer.id}
-              name={peerDisplayName(peer, ledger)}
+              name={peerDisplayName(peer, ledger, metaByDevice[peer.id])}
               status={otaByDevice[peer.id]}
               onInstall={() => installLatest(peer.id)}
               onPickVersion={() =>
@@ -533,13 +534,21 @@ function DeviceRow({
   meta?: BridgethingDeviceMeta;
 }) {
   const [renameOpen, setRenameOpen] = useState(false);
+  const [deviceNameOpen, setDeviceNameOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = device.peer?.status === 'connected';
   const linkFailed = device.peer?.status === 'linkFailed';
+  const title = device.nickname ?? meta?.nickname ?? device.displayName;
 
   const menuActions: MenuAction[] = [
     { label: 'rename', onPress: () => setRenameOpen(true) },
   ];
+  if (connected) {
+    menuActions.push({
+      label: 'set device name',
+      onPress: () => setDeviceNameOpen(true),
+    });
+  }
   if (!connected && !linkFailed) {
     menuActions.push({
       label: 'forget this device',
@@ -547,6 +556,15 @@ function DeviceRow({
       onPress: () => forgetKnownDevice(device.id),
     });
   }
+
+  const submitDeviceName = (value: string | null) => {
+    void setDeviceName(device.id, value).catch((err: unknown) => {
+      Alert.alert(
+        'device name not saved',
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+  };
 
   const subtitle = connected
     ? meta
@@ -562,7 +580,7 @@ function DeviceRow({
     <>
       <ActionMenu
         visible={menuOpen}
-        title={device.displayName}
+        title={title}
         actions={menuActions}
         onClose={() => setMenuOpen(false)}
       />
@@ -575,10 +593,19 @@ function DeviceRow({
         onSubmit={value => updateNickname(device.id, value)}
         onClose={() => setRenameOpen(false)}
       />
+      <RenameSheet
+        visible={deviceNameOpen}
+        title="name your Car Thing"
+        message="this name lives on the device and shows on its screen."
+        initialValue={meta?.nickname ?? ''}
+        placeholder={meta?.modelName ?? 'Car Thing'}
+        onSubmit={submitDeviceName}
+        onClose={() => setDeviceNameOpen(false)}
+      />
       <ListRow
         icon={Cable}
         iconTint={connected ? 'primary' : 'default'}
-        title={device.displayName}
+        title={title}
         subtitle={subtitle}
         value={
           connected && meta

@@ -300,6 +300,10 @@ export class BridgethingSession {
     await this.native.reconnectPeer(deviceId);
   }
 
+  async deviceSetNickname(deviceId: string, nickname: string): Promise<void> {
+    await this.native.deviceSetNickname(deviceId, nickname);
+  }
+
   async presentPairPicker(): Promise<BridgethingBtDevice | null> {
     return this.native.presentPairPicker();
   }

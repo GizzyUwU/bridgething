@@ -266,6 +266,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.reconnectPeer(deviceId)
     }
 
+    override fun deviceSetNickname(deviceId: String, nickname: String): Promise<Unit> = Promise.async {
+        require().deviceSetNickname(deviceId, nickname)
+    }
+
     override fun presentPairPicker(): Promise<Variant_NullType_BridgethingBtDevice> = Promise.async {
         val device = require().presentPairPicker()
         if (device != null) Variant_NullType_BridgethingBtDevice.Second(device)

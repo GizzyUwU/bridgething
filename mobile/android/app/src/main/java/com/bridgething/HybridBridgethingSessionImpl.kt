@@ -66,6 +66,7 @@ import com.bridgething.companion.WebappInstallResult
 import com.bridgething.gateway.GatewayEvent
 import com.bridgething.gateway.RequestResult
 import com.bridgething.gateway.device
+import com.bridgething.gateway.system
 import com.bridgething.gateway.webapp
 import com.bridgething.glue.BridgethingGlue
 import com.bridgething.glue.GlueAuthState
@@ -77,6 +78,7 @@ import com.bridgething.lyrics.LrclibResolver
 import com.bridgething.lyrics.LyricsResolver
 import com.bridgething.schema.AncsAuthState
 import com.bridgething.schema.ConfigField
+import com.bridgething.schema.DeviceSetNickname
 import com.bridgething.schema.OtaKind
 import com.bridgething.schema.OtaPhase
 import com.bridgething.schema.Priority
@@ -142,6 +144,7 @@ public class HybridBridgethingSessionImpl(
     private var companion: BridgethingCompanion? = null
     private var eventsJob: Job? = null
     private var otaJob: Job? = null
+    private var deviceMetaJob: Job? = null
     private var catalogJob: Job? = null
     private var authJob: Job? = null
 
@@ -221,6 +224,11 @@ public class HybridBridgethingSessionImpl(
         if (localLogStreamingDesired) c.setLocalLogStreaming(true)
         eventsJob = scope.launch { c.gateway.events.collect { event -> safeEmit { handleGatewayEvent(event) } } }
         otaJob = scope.launch { c.ota.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onOtaEvent?.invoke(toRnOtaEvent(ev)) } } }
+        deviceMetaJob = scope.launch {
+            c.ota.metaChanged.collect { (id, meta) ->
+                safeEmit { if (CompanionHolder.foreground) onDeviceMetaChanged?.invoke(id, toRnDeviceMeta(meta)) }
+            }
+        }
         catalogJob = scope.launch { c.catalog.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } } }
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
@@ -241,23 +249,27 @@ public class HybridBridgethingSessionImpl(
     override suspend fun stop() {
         var priorEvents: Job? = null
         var priorOta: Job? = null
+        var priorDeviceMeta: Job? = null
         var priorCatalog: Job? = null
         var priorAuth: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
             priorEvents = eventsJob
             priorOta = otaJob
+            priorDeviceMeta = deviceMetaJob
             priorCatalog = catalogJob
             priorAuth = authJob
             priorCompanion = companion
             companion = null
             eventsJob = null
             otaJob = null
+            deviceMetaJob = null
             catalogJob = null
             authJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
+        priorDeviceMeta?.cancel()
         priorCatalog?.cancel()
         priorAuth?.cancel()
         // detach UI observers but leave the companion running in the foreground service.
@@ -611,6 +623,16 @@ public class HybridBridgethingSessionImpl(
         stateLock.withLock { companion }?.gateway?.reconnect(deviceId)
     }
 
+    override suspend fun deviceSetNickname(deviceId: String, nickname: String) {
+        val c = requireCompanion(deviceId)
+        when (val result = c.gateway.system.deviceSetNickname(deviceId, DeviceSetNickname(nickname))) {
+            // daemon broadcasts DeviceNicknameChanged; meta lands via ota.metaChanged
+            is RequestResult.Ok -> Unit
+            is RequestResult.DomainErr -> throw IllegalStateException("nickname rejected: ${result.error.reason}")
+            is RequestResult.ProtocolErr -> throw IllegalStateException("deviceSetNickname: ${result.error}")
+        }
+    }
+
     private fun otaRootUrl(raw: String?): String = raw ?: "https://ota.bridgething.com"
 
     private fun toRnOtaManifest(m: OtaDiscoverManifest): BridgethingOtaManifest {
@@ -647,6 +669,7 @@ public class HybridBridgethingSessionImpl(
         channel = meta.channel,
         modelName = meta.modelName,
         serialNumber = meta.serialNumber,
+        nickname = meta.nickname,
     )
 
     private fun rnHostInfo(): BridgethingHostInfo {

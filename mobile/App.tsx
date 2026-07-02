@@ -7,6 +7,7 @@ import {
   type Theme as NavTheme,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { PortalHost } from '@rn-primitives/portal';
 import { Settings as SettingsIcon } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
@@ -194,6 +195,8 @@ export default function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
+      {/* rn-primitives portals (ActionMenu, RenameSheet) render nothing without a mounted host */}
+      <PortalHost />
     </SafeAreaProvider>
   );
 }

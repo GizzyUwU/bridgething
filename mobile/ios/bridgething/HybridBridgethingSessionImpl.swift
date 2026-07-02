@@ -67,6 +67,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var eventsTask: Task<Void, Never>?
     private var authTask: Task<Void, Never>?
     private var otaEventsTask: Task<Void, Never>?
+    private var deviceMetaTask: Task<Void, Never>?
     private var catalogEventsTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
@@ -179,6 +180,12 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 self?.emitOtaEvent(toRNOtaEvent(event))
             }
         }
+        let metaStream = ota.metaChanged
+        let metaTask = Task { [weak self] in
+            for await (deviceId, meta) in metaStream {
+                self?.emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
+            }
+        }
         let catalogStream = await companion.catalog.events
         let catalogTask = Task { [weak self] in
             for await event in catalogStream {
@@ -188,6 +195,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.lock()
         eventsTask = task
         otaEventsTask = otaTask
+        deviceMetaTask = metaTask
         catalogEventsTask = catalogTask
         stateLock.unlock()
 
@@ -203,11 +211,13 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let auth = authTask
         let events = eventsTask
         let ota = otaEventsTask
+        let deviceMeta = deviceMetaTask
         let catalog = catalogEventsTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
         otaEventsTask = nil
+        deviceMetaTask = nil
         catalogEventsTask = nil
         authTask = nil
         stateLock.unlock()
@@ -215,6 +225,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         auth?.cancel()
         events?.cancel()
         ota?.cancel()
+        deviceMeta?.cancel()
         catalog?.cancel()
 
         await companion?.stop()
@@ -610,6 +621,22 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         try await companion.gateway.reconnect(deviceId: deviceId)
     }
 
+    public func deviceSetNickname(deviceId: String, nickname: String) async throws {
+        let companion = try requirePeerConnected(deviceId)
+        let result = try await companion.gateway.system.deviceSetNickname(
+            deviceId: deviceId, DeviceSetNickname(nickname: nickname)
+        )
+        switch result {
+        case .ok:
+            // the daemon broadcasts DeviceNicknameChanged; meta lands via ota.metaChanged
+            return
+        case let .domain(rejected):
+            throw SessionError.nicknameRejected(rejected.reason)
+        case let .protocolError(err):
+            throw SessionError.protocolError(err)
+        }
+    }
+
     private static func otaRootURL(_ raw: String?) -> URL {
         raw.flatMap(URL.init(string:)) ?? URL(string: "https://ota.bridgething.com")!
     }
@@ -899,10 +926,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             let peer = BridgethingSessionPeer(id: device.id, name: device.name, status: .linkfailed, linkError: reason)
             stateLock.withLock { peers[device.id] = peer }
             emitPeerLinkFailed(peer)
-        case let .message(deviceId, msg):
-            if case let .version(meta) = msg.data {
-                emitDeviceMetaChanged(deviceId, Self.toRNDeviceMeta(meta))
-            }
+        case .message:
+            break
         case let .decodeError(id, description):
             emitLog("warn", "[\(id)] decode error: \(description)")
         }
@@ -1089,7 +1114,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             osVersion: meta.osVersion,
             channel: meta.channel,
             modelName: meta.modelName,
-            serialNumber: meta.serialNumber
+            serialNumber: meta.serialNumber,
+            nickname: meta.nickname
         )
     }
 
@@ -1221,6 +1247,7 @@ private enum SessionError: Error {
     case installFailed(String)
     case webappError(WebappError)
     case protocolError(WireError)
+    case nicknameRejected(String)
     case unsupportedOnPlatform
 }
 

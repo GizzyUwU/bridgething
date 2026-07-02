@@ -297,7 +297,6 @@ fn forces_broadcast(cmd: &PlayerCommand) -> bool {
   matches!(
     cmd,
     PlayerCommand::SendState
-      | PlayerCommand::ApplyCompanionSnapshot(..)
       | PlayerCommand::ApplyTransportIntent(..)
       | PlayerCommand::ApplySeekIntent(..)
       | PlayerCommand::ResetCompanion
@@ -410,6 +409,15 @@ mod tests {
   fn does_not_hold_cold_start() {
     let new = snap_after(&[pid_only("iap2:track:b")]);
     assert!(!holds_incomplete_transition(&new, None));
+  }
+
+  #[test]
+  fn companion_snapshot_rides_the_signature_gate() {
+    // a companion snapshot must not bypass the broadcast gate: identical re-sends stay silent
+    // and real changes broadcast via the signature diff or the position-resync flag.
+    assert!(!forces_broadcast(&PlayerCommand::ApplyCompanionSnapshot(
+      libbridgething::PlayerState::default()
+    )));
   }
 
   #[test]

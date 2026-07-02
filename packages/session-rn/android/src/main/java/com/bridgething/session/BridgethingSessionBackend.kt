@@ -69,6 +69,8 @@ public interface BridgethingSessionBackend {
 
     public suspend fun reconnectPeer(deviceId: String)
 
+    public suspend fun deviceSetNickname(deviceId: String, nickname: String)
+
     public suspend fun presentPairPicker(): BridgethingBtDevice?
 
     public suspend fun isNotificationAccessGranted(): Boolean

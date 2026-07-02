@@ -155,6 +155,7 @@ public class OtaService(
     private var localZck: File? = null
     private var rangeServerJob: Job? = null
     private var metaJob: Job? = null
+    private var nicknameJob: Job? = null
     private var pollJob: Job? = null
 
     private var attachedGateway: BridgethingGateway? = null
@@ -167,18 +168,22 @@ public class OtaService(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
-    /** High-level poll-loop events. The host app drives UI off this stream. */
     public val events: Flow<OtaPollEvent> = eventsFlow.asSharedFlow()
 
-    /**
-     * Start serving inbound `OtaAssetRange` requests and tracking
-     * per-device [BridgeThingMeta]. Safe to call again after [stop].
-     */
+    private val metaChangedFlow = MutableSharedFlow<Pair<String, BridgeThingMeta>>(
+        replay = 16,
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.SUSPEND,
+    )
+
+    public val metaChanged: Flow<Pair<String, BridgeThingMeta>> = metaChangedFlow.asSharedFlow()
+
     public suspend fun start(gateway: BridgethingGateway) {
         mutex.withLock {
             attachedGateway = gateway
             rangeServerJob?.cancel()
             metaJob?.cancel()
+            nicknameJob?.cancel()
             rangeServerJob = scope.launch {
                 gateway.system.otaAssetRangeRequests.collect { (handle, req) ->
                     launch { handleRangeRequest(gateway, handle, req) }
@@ -193,6 +198,11 @@ public class OtaService(
                     }
                 }
             }
+            nicknameJob = scope.launch {
+                gateway.system.deviceNicknameChanged.collect { (deviceId, reply) ->
+                    recordNickname(deviceId, reply.nickname)
+                }
+            }
         }
     }
 
@@ -200,6 +210,7 @@ public class OtaService(
         mutex.withLock {
             rangeServerJob?.cancel(); rangeServerJob = null
             metaJob?.cancel(); metaJob = null
+            nicknameJob?.cancel(); nicknameJob = null
             pollJob?.cancel(); pollJob = null
             attachedGateway = null
         }
@@ -212,12 +223,6 @@ public class OtaService(
 
     public fun currentLocalZck(): File? = localZck
 
-    /**
-     * Drive an image-kind OTA from a local `.swu` (and matching `.zck`
-     * for delta fetch). Returns a flow of [OtaPhaseSnapshot]; finishes
-     * on terminal state. `updateUrlBase` is recorded on `OtaBegin.update_url_base`
-     * for future cache-miss recovery flows.
-     */
     public suspend fun pushUpdate(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -240,11 +245,6 @@ public class OtaService(
         }
     }
 
-    /**
-     * Push a new daemon binary to the bandaid. Stages it then activates the
-     * (single-piece) batch, which atomically swaps `.current` and restarts
-     * bridgething.service once. No range proxy traffic for this kind.
-     */
     public suspend fun pushDaemon(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -256,11 +256,6 @@ public class OtaService(
         }
     }
 
-    /**
-     * Push a builtin-webapp bundle (hub or stock) to the bandaid. Same
-     * stage-then-activate path as the daemon; the bundle's manifest id must
-     * be a reserved builtin or the daemon rejects the stage.
-     */
     public suspend fun pushBuiltinWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -272,11 +267,6 @@ public class OtaService(
         }
     }
 
-    /**
-     * Push a coupled set of bandaid pieces (daemon + hub + stock, in any
-     * combination) as one batch: every piece stages, then a single
-     * `OtaActivate` swaps them all live with one restart.
-     */
     public suspend fun pushBandaidBatch(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -288,12 +278,6 @@ public class OtaService(
         }
     }
 
-    /**
-     * Install a third-party webapp bundle into the device's writable registry
-     * via `OtaKind.InstalledWebapp`. Reuses the OTA chunk pump; no staging, no
-     * activate, no restart. The terminal is the daemon's `WebappInstalled`
-     * event (success, carrying the `WebappInfo`) or an `OtaError` (failure).
-     */
     override suspend fun installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -312,7 +296,6 @@ public class OtaService(
             return WebappInstallResult.Failed("sha256 failed: ${e.message ?: e.toString()}")
         }
 
-        // subscribe before streaming so the terminal event cannot be missed.
         val terminal = CompletableDeferred<WebappInstallResult>()
         val installedJob = scope.launch {
             gateway.webapp.webappInstalled.collect { (devId, info) ->
@@ -399,25 +382,14 @@ public class OtaService(
         if (cfg != null && gw != null) poll(cfg, gw)
     }
 
-    /**
-     * One-shot "check now": polls the channel and emits UpdateAvailable /
-     * ChannelMismatch for connected devices without persisting config or
-     * auto-pushing. Independent of the background poll loop.
-     */
     public suspend fun checkNow(channel: String, rootUrl: String) {
         val gw = mutex.withLock { attachedGateway } ?: return
         poll(OtaPollConfig(rootUrl = rootUrl, channel = channel, autoPush = false), gw)
     }
 
-    /** Full discover manifest for the version picker. */
     public suspend fun discoverManifest(rootUrl: String): OtaDiscoverManifest =
         fetchManifest("${rootUrl.trimEnd('/')}/manifest.json")
 
-    /**
-     * Manual install of a specific composite version. Pushes the daemon delta
-     * first (image rides the next poll once the daemon restarts), then the
-     * image delta. Reuses the auto-push engine; ignores `autoPush`.
-     */
     public suspend fun applyVersion(deviceId: String, channel: String, version: String, rootUrl: String) {
         val gateway = mutex.withLock { attachedGateway } ?: run {
             eventsFlow.emit(OtaPollEvent.Failed(deviceId, OtaKind.Image, "gateway not attached"))
@@ -459,6 +431,15 @@ public class OtaService(
 
     private suspend fun recordMeta(deviceId: String, meta: BridgeThingMeta) {
         deviceMetaMutex.withLock { deviceMeta[deviceId] = meta }
+        metaChangedFlow.emit(deviceId to meta)
+    }
+
+    private suspend fun recordNickname(deviceId: String, nickname: String?) {
+        val patched = deviceMetaMutex.withLock {
+            val existing = deviceMeta[deviceId] ?: return
+            existing.copy(nickname = nickname).also { deviceMeta[deviceId] = it }
+        }
+        metaChangedFlow.emit(deviceId to patched)
     }
 
     private suspend fun poll(config: OtaPollConfig, gateway: BridgethingGateway) {

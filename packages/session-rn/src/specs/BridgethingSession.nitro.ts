@@ -235,6 +235,7 @@ export type BridgethingDeviceMeta = {
   channel: string;
   modelName: string;
   serialNumber: string;
+  nickname?: string;
 };
 
 export type BridgethingHostInfo = {
@@ -329,6 +330,9 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setCatalogPollConfig(config: BridgethingCatalogPollConfig | null): Promise<void>;
 
   reconnectPeer(deviceId: string): Promise<void>;
+
+  // empty string clears; the daemon broadcasts the change back as a deviceMetaChanged update
+  deviceSetNickname(deviceId: string, nickname: string): Promise<void>;
 
   presentPairPicker(): Promise<BridgethingBtDevice | null>;
 

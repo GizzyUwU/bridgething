@@ -38,8 +38,10 @@ pub struct PlayerState {
 
   iap2_metadata: MediaItemUpdate,
   iap2_playback: PlaybackUpdate,
+  iap2_playback_at: Option<Instant>,
   companion_metadata: MediaItemUpdate,
   companion_playback: PlaybackUpdate,
+  companion_playback_at: Option<Instant>,
 
   companion_queue: Vec<QueueItem>,
   recently_played: Vec<QueueItem>,
@@ -50,6 +52,8 @@ pub struct PlayerState {
 
   transport_intent: Option<TransportIntent>,
   seek_intent: Option<SeekIntent>,
+
+  companion_owned: bool,
 
   position_resync: bool,
 }
@@ -85,8 +89,10 @@ impl PlayerState {
 
       iap2_metadata: MediaItemUpdate::default(),
       iap2_playback: PlaybackUpdate::default(),
+      iap2_playback_at: None,
       companion_metadata: MediaItemUpdate::default(),
       companion_playback: PlaybackUpdate::default(),
+      companion_playback_at: None,
 
       companion_queue: Vec::new(),
       recently_played: Vec::new(),
@@ -98,8 +104,20 @@ impl PlayerState {
       transport_intent: None,
       seek_intent: None,
 
+      companion_owned: false,
+
       position_resync: false,
     }
+  }
+
+  fn note_ownership(&mut self) -> bool {
+    let owns = self.companion_playback_authoritative();
+    let edge = owns != self.companion_owned;
+    self.companion_owned = owns;
+    if edge {
+      self.position_resync = true;
+    }
+    edge
   }
 
   pub(crate) fn take_position_resync(&mut self) -> bool {
@@ -224,10 +242,12 @@ impl PlayerState {
     self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
     self.companion_metadata = MediaItemUpdate::default();
     self.companion_playback = PlaybackUpdate::default();
+    self.companion_playback_at = None;
     self.context = None;
+    self.note_ownership();
     let merged_meta = self.merged_metadata();
     let merged_play = self.merged_playback();
-    self.apply_merged(merged_meta, merged_play);
+    self.apply_merged(merged_meta, merged_play, true);
   }
 
   pub(crate) fn apply_companion_snapshot(&mut self, snapshot: WirePlayerState) {
@@ -282,10 +302,12 @@ impl PlayerState {
       apple_music_radio_ad: playback.apple_music_radio_ad,
       apple_music_radio_station_name: None,
     };
+    self.companion_playback_at = Some(Instant::now());
 
+    let edge = self.note_ownership();
     let merged_meta = self.merged_metadata();
     let merged_play = self.merged_playback();
-    self.apply_merged(merged_meta, merged_play);
+    self.apply_merged(merged_meta, merged_play, self.companion_owned || edge);
   }
 
   pub(crate) fn apply_now_playing(&mut self, update: NowPlayingUpdate) {
@@ -306,34 +328,53 @@ impl PlayerState {
       }
     }
 
-    let meta_target = &mut self.iap2_metadata;
-    let play_target = &mut self.iap2_playback;
-
     if let Some(media) = media_item {
       if let Some(ref new_pid) = media.persistent_id
-        && meta_target.persistent_id.as_ref() != Some(new_pid)
+        && self.iap2_metadata.persistent_id.as_ref() != Some(new_pid)
       {
-        *meta_target = MediaItemUpdate::default();
-        play_target.position_ms = Some(0);
+        self.iap2_metadata = MediaItemUpdate::default();
+        self.iap2_playback.position_ms = Some(0);
+        self.iap2_playback_at = Some(Instant::now());
       }
-      accumulate_media(meta_target, media);
+      accumulate_media(&mut self.iap2_metadata, media);
     }
     if let Some(play) = playback {
-      accumulate_playback(play_target, play);
+      if play.position_ms.is_some() {
+        self.iap2_playback_at = Some(Instant::now());
+      }
+      accumulate_playback(&mut self.iap2_playback, play);
     }
 
+    let edge = self.note_ownership();
     let merged_meta = self.merged_metadata();
-    let merged_play = self.merged_playback();
+    let mut merged_play = self.merged_playback();
+    if self.companion_owned && !edge {
+      merged_play = self.companion_fallthrough(merged_play);
+    }
 
-    self.apply_merged(merged_meta, merged_play);
+    self.apply_merged(merged_meta, merged_play, true);
+  }
+
+  fn companion_fallthrough(&self, merged: PlaybackUpdate) -> PlaybackUpdate {
+    PlaybackUpdate {
+      playing: merged.playing.filter(|_| self.companion_playback.playing.is_none()),
+      position_ms: merged.position_ms.filter(|_| self.companion_playback.position_ms.is_none()),
+      shuffle: merged.shuffle.filter(|_| self.companion_playback.shuffle.is_none()),
+      repeat: merged.repeat.filter(|_| self.companion_playback.repeat.is_none()),
+      ..merged
+    }
   }
 
   pub(crate) fn apply_artwork_id(&mut self, asset_id: String) {
     self.iap2_metadata.artwork_id = Some(asset_id);
 
+    let edge = self.note_ownership();
     let merged_meta = self.merged_metadata();
-    let merged_play = self.merged_playback();
-    self.apply_merged(merged_meta, merged_play);
+    let mut merged_play = self.merged_playback();
+    if self.companion_owned && !edge {
+      merged_play = self.companion_fallthrough(merged_play);
+    }
+    self.apply_merged(merged_meta, merged_play, true);
   }
 
   fn merged_metadata(&self) -> MediaItemUpdate {
@@ -408,12 +449,34 @@ impl PlayerState {
     }
   }
 
+  fn extrapolated(position: Option<u32>, staged_at: Option<Instant>, playing: Option<bool>) -> Option<u32> {
+    let position = position?;
+    if playing != Some(true) {
+      return Some(position);
+    }
+    let Some(at) = staged_at else {
+      return Some(position);
+    };
+    let aged = at.elapsed().as_millis().min(u32::MAX as u128) as u32;
+    Some(position.saturating_add(aged))
+  }
+
   fn merged_playback(&self) -> PlaybackUpdate {
     let companion_authoritative = self.companion_now_playing_authoritative(CompanionAuthorityScope::NowPlayingPlayback);
+    let companion_position = Self::extrapolated(
+      self.companion_playback.position_ms,
+      self.companion_playback_at,
+      self.companion_playback.playing,
+    );
+    let iap2_position = Self::extrapolated(
+      self.iap2_playback.position_ms,
+      self.iap2_playback_at,
+      self.iap2_playback.playing,
+    );
     if companion_authoritative {
       PlaybackUpdate {
         playing: self.companion_playback.playing.or(self.iap2_playback.playing),
-        position_ms: self.companion_playback.position_ms.or(self.iap2_playback.position_ms),
+        position_ms: companion_position.or(iap2_position),
         shuffle: self.companion_playback.shuffle.or(self.iap2_playback.shuffle),
         shuffle_mode: self.companion_playback.shuffle_mode.or(self.iap2_playback.shuffle_mode),
         repeat: self.companion_playback.repeat.or(self.iap2_playback.repeat),
@@ -456,45 +519,55 @@ impl PlayerState {
           .or_else(|| self.iap2_playback.apple_music_radio_station_name.clone()),
       }
     } else {
-      self.iap2_playback.clone()
+      let mut playback = self.iap2_playback.clone();
+      playback.position_ms = iap2_position;
+      playback
     }
   }
 
-  fn apply_merged(&mut self, media: MediaItemUpdate, playback: PlaybackUpdate) {
-    let same_track = match (
-      self.track.as_ref().map(|t| t.id.as_str()),
-      media.persistent_id.as_deref(),
-    ) {
-      (Some(existing), Some(new)) => existing == new,
-      (None, _) | (_, None) => false,
-    };
-    let mut track = if same_track {
-      self.track.clone().unwrap_or_default()
-    } else {
-      Track::default()
-    };
+  fn apply_merged(&mut self, media: MediaItemUpdate, playback: PlaybackUpdate, apply_time: bool) {
+    let has_identity = media.persistent_id.is_some() || media.title.is_some();
+    let mut same_track = false;
+    if self.track.is_some() || has_identity {
+      same_track = match (
+        self.track.as_ref().map(|t| t.id.as_str()),
+        media.persistent_id.as_deref(),
+      ) {
+        (Some(existing), Some(new)) => existing == new,
+        (None, _) | (_, None) => false,
+      };
+      let mut track = if same_track {
+        self.track.clone().unwrap_or_default()
+      } else {
+        Track::default()
+      };
 
-    if let Some(id) = media.persistent_id {
-      track.id = id;
+      if let Some(id) = media.persistent_id {
+        track.id = id;
+      }
+      if let Some(title) = media.title {
+        track.name = title;
+      }
+      if let Some(album) = media.album {
+        track.album = album.into();
+      }
+      if let Some(artist) = media.artist {
+        track.artist = artist.clone().into();
+        track.artists = vec![artist.into()];
+      }
+      track.image_id = media.artwork_id.unwrap_or_default();
+      if let Some(duration) = media.duration_ms {
+        track.duration_ms = duration;
+      }
+      if let Some(liked) = media.liked {
+        track.saved = liked;
+      }
+      self.track = Some(track);
     }
-    if let Some(title) = media.title {
-      track.name = title;
+
+    if !apply_time {
+      return;
     }
-    if let Some(album) = media.album {
-      track.album = album.into();
-    }
-    if let Some(artist) = media.artist {
-      track.artist = artist.clone().into();
-      track.artists = vec![artist.into()];
-    }
-    track.image_id = media.artwork_id.unwrap_or_default();
-    if let Some(duration) = media.duration_ms {
-      track.duration_ms = duration;
-    }
-    if let Some(liked) = media.liked {
-      track.saved = liked;
-    }
-    self.track = Some(track);
 
     let mut accept_position = true;
     if let Some(playing) = playback.playing {
@@ -659,6 +732,19 @@ impl PlayerState {
       return None;
     }
     Some(track)
+  }
+
+  #[cfg(test)]
+  fn age_clocks(&mut self, by: Duration) {
+    if let Some(anchor) = self.position_anchor.as_mut() {
+      *anchor -= by;
+    }
+    if let Some(at) = self.companion_playback_at.as_mut() {
+      *at -= by;
+    }
+    if let Some(at) = self.iap2_playback_at.as_mut() {
+      *at -= by;
+    }
   }
 }
 
@@ -1466,6 +1552,344 @@ mod tests {
     assert_eq!(m.title.as_deref(), Some("iAP2 Song"));
     let queue = state.replies().1;
     assert!(queue.items.is_empty(), "the stale companion queue is cleared");
+  }
+
+  fn companion_snapshot_pos(pid: &str, title: &str, playing: bool, position_ms: u32) -> WirePlayerState {
+    WirePlayerState {
+      track: Some(MediaItem {
+        persistent_id: Some(pid.to_string()),
+        title: Some(title.to_string()),
+        artist: Some("Artist".to_string()),
+        album: Some("Album".to_string()),
+        duration_ms: Some(200_000),
+        ..MediaItem::default()
+      }),
+      playback: Playback {
+        state: if playing {
+          PlaybackState::Playing
+        } else {
+          PlaybackState::Paused
+        },
+        position_ms,
+        ..Playback::default()
+      },
+      ..WirePlayerState::default()
+    }
+  }
+
+  fn spotify_owned_state(auth: &AuthorityRegistry) -> PlayerState {
+    let mut state = PlayerState::new(auth.clone());
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Spotify Song", true, 10_000));
+    state.take_position_resync();
+    state
+  }
+
+  fn iap2_playback_delta(bundle: &str, playing: Option<bool>, position_ms: Option<u32>) -> NowPlayingUpdate {
+    NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        playing,
+        position_ms,
+        app_bundle: Some(bundle.to_string()),
+        ..PlaybackUpdate::default()
+      }),
+    }
+  }
+
+  fn view_position(state: &PlayerState) -> u32 {
+    state.replies().0.state.playback.position_ms
+  }
+
+  #[test]
+  fn staged_iap2_chatter_never_moves_a_companion_playhead() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.age_clocks(Duration::from_secs(10));
+    let before = view_position(&state);
+    assert!(before >= 19_000, "aged playhead extrapolates: {before}");
+
+    // spotify-foreground iap2 chatter arrives while the companion owns playback: it must stage
+    // into the iap2 buffers without re-applying the companion's stale stored position.
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+    assert!(
+      !state.take_position_resync(),
+      "staged iap2 chatter must not force a resync broadcast"
+    );
+    let after = view_position(&state);
+    assert!(
+      after >= before,
+      "playhead snapped backward on staged iap2 chatter: {after} < {before}"
+    );
+  }
+
+  #[test]
+  fn iap2_song_change_burst_stages_without_disturbing_companion_view() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.age_clocks(Duration::from_secs(10));
+    let before = view_position(&state);
+
+    // iap2 reports a song change as several fragments (pid, then title, then artist); the
+    // companion-owned view must hold steady through the whole burst.
+    let burst = [
+      NowPlayingUpdate {
+        media_item: Some(MediaItemUpdate {
+          persistent_id: Some("iap2:track:b".into()),
+          ..MediaItemUpdate::default()
+        }),
+        playback: Some(PlaybackUpdate {
+          playing: Some(true),
+          app_bundle: Some("com.spotify.client".into()),
+          ..PlaybackUpdate::default()
+        }),
+      },
+      NowPlayingUpdate {
+        media_item: Some(MediaItemUpdate {
+          title: Some("Track B".into()),
+          ..MediaItemUpdate::default()
+        }),
+        playback: None,
+      },
+      NowPlayingUpdate {
+        media_item: Some(MediaItemUpdate {
+          artist: Some("Artist B".into()),
+          ..MediaItemUpdate::default()
+        }),
+        playback: None,
+      },
+    ];
+    for delta in burst {
+      state.apply_now_playing(delta);
+      assert!(
+        !state.take_position_resync(),
+        "burst fragment forced a resync broadcast"
+      );
+      let m = media(&state);
+      assert_eq!(
+        m.persistent_id.as_deref(),
+        Some("spotify:track:x"),
+        "companion track identity lost mid-burst"
+      );
+      assert_eq!(m.title.as_deref(), Some("Spotify Song"));
+      let now = view_position(&state);
+      assert!(now >= before, "playhead regressed mid-burst: {now} < {before}");
+    }
+  }
+
+  #[test]
+  fn staged_iap2_play_state_does_not_burn_the_transport_intent() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+
+    // user taps pause: optimistic paused view while the command rides to the companion.
+    state.set_transport_intent(false);
+    assert!(!state.playing);
+
+    // stale iap2 play-state chatter must not count against the intent's mismatch allowance.
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+    assert!(
+      !state.playing,
+      "staged iap2 play-state burned the optimistic transport intent"
+    );
+
+    // the owner confirms: the intent resolves and the view stays paused.
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Spotify Song", false, 12_000));
+    assert!(!state.playing);
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+    assert!(!state.playing, "post-confirm iap2 chatter flipped the play state");
+  }
+
+  #[test]
+  fn iap2_artwork_ready_does_not_resync_a_companion_playhead() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.age_clocks(Duration::from_secs(10));
+    let before = view_position(&state);
+
+    state.apply_artwork_id("iap2/art/a/5".to_string());
+    assert!(
+      !state.take_position_resync(),
+      "iap2 artwork arrival forced a resync broadcast"
+    );
+    let after = view_position(&state);
+    assert!(after >= before, "playhead regressed on artwork arrival");
+    assert_eq!(
+      artwork_id_of(&state),
+      None,
+      "companion-authoritative wire art must not fall back to iap2 art"
+    );
+  }
+
+  #[test]
+  fn bundle_divergence_hard_cuts_to_the_iap2_view() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:y".into()),
+        title: Some("YouTube Video".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        position_ms: Some(5_000),
+        app_bundle: Some("com.google.ios.youtube".into()),
+        ..PlaybackUpdate::default()
+      }),
+    });
+
+    assert!(
+      state.take_position_resync(),
+      "an ownership flip is a hard cut and must broadcast"
+    );
+    let m = media(&state);
+    assert_eq!(m.persistent_id.as_deref(), Some("iap2:track:y"));
+    assert_eq!(m.title.as_deref(), Some("YouTube Video"));
+    let pos = view_position(&state);
+    assert!((4_500..=6_500).contains(&pos), "cut lands on the iap2 playhead: {pos}");
+  }
+
+  #[test]
+  fn companion_snapshot_while_iap2_owns_stages_only() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:y".into()),
+        title: Some("YouTube Video".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        position_ms: Some(5_000),
+        app_bundle: Some("com.google.ios.youtube".into()),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    state.take_position_resync();
+    state.age_clocks(Duration::from_secs(3));
+    let before = view_position(&state);
+    assert!(before >= 7_500, "aged iap2 playhead extrapolates: {before}");
+
+    // spotify changes tracks in the background: the snapshot stages for the eventual cut-back
+    // but must not disturb the live iap2 view.
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
+    assert!(
+      !state.take_position_resync(),
+      "staged companion snapshot must not force a resync broadcast"
+    );
+    let m = media(&state);
+    assert_eq!(
+      m.title.as_deref(),
+      Some("YouTube Video"),
+      "companion snapshot clobbered the iap2-owned view"
+    );
+    let after = view_position(&state);
+    assert!(
+      after >= before,
+      "playhead snapped backward on a staged companion snapshot: {after} < {before}"
+    );
+  }
+
+  #[test]
+  fn companion_claim_without_data_falls_through_to_iap2_time_fields() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+
+    // a claim is preferred data, not exclusive: with no companion snapshot ever sent, the
+    // time-sensitive fields keep tracking iap2 live instead of freezing at the claim edge.
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        repeat: Some(RepeatMode::One),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert_eq!(state.options.repeat, RepeatMode::One);
+
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: None,
+      playback: Some(PlaybackUpdate {
+        repeat: Some(RepeatMode::Off),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert_eq!(
+      state.options.repeat,
+      RepeatMode::Off,
+      "companion-unset fields track the live fallback source past the claim edge"
+    );
+  }
+
+  #[test]
+  fn out_of_band_claim_surfaces_staged_companion_state_on_next_event() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+
+    // a snapshot staged while unclaimed stays invisible and fabricates no track.
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "Song", true, 3_000));
+    assert!(
+      state.replies().0.state.track.is_none(),
+      "an unclaimed companion snapshot must not surface"
+    );
+
+    // the claim lands out-of-band in the registry with no player event of its own; the next
+    // player event crosses the ownership edge and hard cuts to the staged companion view.
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+
+    assert!(state.take_position_resync(), "the lazy claim edge is a hard cut");
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("spotify:track:x"));
+    assert!(state.playing, "staged companion play state surfaces on the cut");
+  }
+
+  #[test]
+  fn bundle_return_hard_cuts_to_the_staged_companion_view() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:y".into()),
+        title: Some("YouTube Video".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        position_ms: Some(5_000),
+        app_bundle: Some("com.google.ios.youtube".into()),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    state.take_position_resync();
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:z", "Next Song", true, 0));
+    state.take_position_resync();
+
+    // spotify played on in the background for 5s after the staged snapshot; the cut-back must
+    // land on the extrapolated live position, not the stale staged one.
+    state.age_clocks(Duration::from_secs(5));
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+
+    assert!(
+      state.take_position_resync(),
+      "an ownership flip back is a hard cut and must broadcast"
+    );
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("spotify:track:z"), "staged companion view surfaced");
+    assert_eq!(m.title.as_deref(), Some("Next Song"));
+    let pos = view_position(&state);
+    assert!(
+      (5_000..=6_500).contains(&pos),
+      "cut-back extrapolates the staged position by its age: {pos}"
+    );
   }
 
   #[test]

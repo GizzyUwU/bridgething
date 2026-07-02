@@ -6,17 +6,39 @@ import {
 } from '@bridgething/client';
 import { useEffect, useState } from 'react';
 
+import frame from './carthing-frame.png';
+
 const PHASE_KEY = 'onboarding_phase';
 
 type Step = 'pair' | 'gesture';
 
 export function Wizard({ client, onDone }: { client: BridgethingClient; onDone: () => void }) {
-  const [step, setStep] = useState<Step>('pair');
+  const [step, setStep] = useState<Step | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    client.bluetooth
+      .list()
+      .then(r => {
+        if (cancelled) return;
+        setStep(r.ok && Object.keys(r.response).length > 0 ? 'gesture' : 'pair');
+      })
+      .catch(() => {
+        if (!cancelled) setStep('pair');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   const finish = async () => {
     await client.store.put({ key: PHASE_KEY, value: 'done' });
     onDone();
   };
+
+  if (step === null) {
+    return <div className="h-full w-full bg-bt-charcoal" />;
+  }
 
   return (
     <div className="flex h-full w-full flex-col bg-bt-charcoal">
@@ -129,10 +151,10 @@ function GestureStep({ onNext }: { onNext: () => void }) {
       <div className="flex flex-1 flex-col items-center justify-center gap-8">
         <div className="bt-wordmark text-2xl font-medium text-bt-off-white">jump back to apps</div>
         <div className="max-w-[26rem] text-center text-sm text-bt-soft-gray">
-          press the far-right preset button five times to return here from any app.
+          push m five times to return here from any app.
         </div>
 
-        <PresetRow />
+        <GestureHint />
       </div>
 
       <div className="flex w-full max-w-[26rem] items-center justify-end">
@@ -147,23 +169,24 @@ function GestureStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-function PresetRow() {
+function GestureHint() {
   return (
-    <div className="flex items-center gap-3">
-      {[0, 1, 2, 3].map(i => {
-        const active = i === 3;
-        return (
-          <div
-            key={i}
-            className={`flex h-12 w-12 items-center justify-center rounded-full border ${
-              active
-                ? 'border-bt-blue bg-bt-blue/10 text-bt-blue animate-pulse'
-                : 'border-bt-soft-gray/40 text-bt-soft-gray'
-            }`}>
-            <span className="bt-wordmark text-base font-medium">{i + 1}</span>
-          </div>
-        );
-      })}
+    <div className="relative">
+      <img src={frame} alt="car thing" className="h-52 w-auto" />
+      {/* m button center sits at 86.4% x, its top edge at 15% y of the frame image */}
+      <div className="absolute top-[15%] left-[86.4%] -translate-x-1/2 -translate-y-full">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-7 w-7 animate-bounce text-bt-blue">
+          <path d="M12 5v14" />
+          <path d="m19 12-7 7-7-7" />
+        </svg>
+      </div>
     </div>
   );
 }

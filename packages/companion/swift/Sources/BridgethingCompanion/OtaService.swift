@@ -116,12 +116,10 @@ public enum OtaPollEvent: Sendable, Equatable {
 /// The host app subscribes to `events` to drive its UI; in-flight
 /// progress comes through as `progress(...)` carrying `OtaPhaseSnapshot`.
 public actor OtaService {
-    /// Where the companion reads byte ranges from when the daemon's
-    /// range proxy requests them. Range requests arriving while this
-    /// is nil are rejected with `OtaAssetRangeRejected`.
     private var localZck: URL?
     private var rangeServerTask: Task<Void, Never>?
     private var metaTask: Task<Void, Never>?
+    private var nicknameTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
 
     private var attachedGateway: BridgethingGateway?
@@ -130,20 +128,21 @@ public actor OtaService {
     private var inFlight: Set<String> = []
 
     private let eventContinuation: AsyncStream<OtaPollEvent>.Continuation
+    private let metaChangedContinuation: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>.Continuation
 
-    /// High-level poll-loop events. The host app drives UI from this
-    /// stream. Stays open across `start` / `stop` cycles; cancel by
-    /// dropping the consumer.
     public nonisolated let events: AsyncStream<OtaPollEvent>
+
+    public nonisolated let metaChanged: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>
 
     public init() {
         let (stream, continuation) = AsyncStream.makeStream(of: OtaPollEvent.self)
         events = stream
         eventContinuation = continuation
+        let (metaStream, metaContinuation) = AsyncStream.makeStream(of: (deviceId: String, meta: BridgeThingMeta).self)
+        metaChanged = metaStream
+        metaChangedContinuation = metaContinuation
     }
 
-    /// Start serving inbound `OtaAssetRange` requests and tracking
-    /// per-device `BridgeThingMeta`. Safe to call again after `stop()`.
     public func start(gateway: BridgethingGateway) async {
         attachedGateway = gateway
         rangeServerTask?.cancel()
@@ -162,6 +161,13 @@ public actor OtaService {
                 await recordMeta(deviceId: deviceId, meta: meta)
             }
         }
+        nicknameTask?.cancel()
+        nicknameTask = Task { [weak self] in
+            for await (deviceId, reply) in gateway.system.deviceNicknameChanged {
+                guard let self else { return }
+                await recordNickname(deviceId: deviceId, nickname: reply.nickname)
+            }
+        }
     }
 
     public func stop() async {
@@ -169,25 +175,20 @@ public actor OtaService {
         rangeServerTask = nil
         metaTask?.cancel()
         metaTask = nil
+        nicknameTask?.cancel()
+        nicknameTask = nil
         pollTask?.cancel()
         pollTask = nil
         attachedGateway = nil
         deviceMeta.removeAll()
     }
 
-    /// Bind the local `.zck` file the companion reads byte ranges from.
-    /// Pass nil to clear (subsequent range requests get rejected).
     public func setLocalZck(_ url: URL?) {
         localZck = url
     }
 
     public func currentLocalZck() -> URL? { localZck }
 
-    /// Drive an image-kind OTA from a local `.swu` (and matching `.zck`
-    /// for delta fetch). Yields `OtaPhaseSnapshot` updates over the
-    /// supplied `progress` continuation; finishes the continuation on
-    /// terminal state. `updateUrlBase` is recorded on
-    /// `OtaBegin.update_url_base` for future cache-miss recovery flows.
     public func pushUpdate(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -248,9 +249,6 @@ public actor OtaService {
         progress.finish()
     }
 
-    /// Push a coupled set of bandaid pieces (daemon + hub + stock, in any
-    /// combination) as one batch: every piece stages, then a single
-    /// `OtaActivate` swaps them all live with one restart.
     public func pushBandaidBatch(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -269,9 +267,6 @@ public actor OtaService {
 
     // MARK: - webapp install
 
-    /// Install a third-party webapp bundle into the device's writable
-    /// registry via `OtaKind.installedWebapp`. Reuses the OTA chunk pump;
-    /// no staging, no activate, no restart.
     public func installWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -452,6 +447,37 @@ public actor OtaService {
 
     private func recordMeta(deviceId: String, meta: BridgeThingMeta) {
         deviceMeta[deviceId] = meta
+        metaChangedContinuation.yield((deviceId: deviceId, meta: meta))
+    }
+
+    private func recordNickname(deviceId: String, nickname: String?) {
+        guard let meta = deviceMeta[deviceId] else { return }
+        let updated = BridgeThingMeta(
+            bridgethingVersion: meta.bridgethingVersion,
+            libbridgethingVersion: meta.libbridgethingVersion,
+            appName: meta.appName,
+            nickname: nickname,
+            appVersion: meta.appVersion,
+            osName: meta.osName,
+            osVersion: meta.osVersion,
+            osDescription: meta.osDescription,
+            btMac: meta.btMac,
+            serialNumber: meta.serialNumber,
+            fccId: meta.fccId,
+            icId: meta.icId,
+            modelName: meta.modelName,
+            channel: meta.channel,
+            imageVariant: meta.imageVariant,
+            imageVersion: meta.imageVersion,
+            imageBuildId: meta.imageBuildId,
+            imageBuildDate: meta.imageBuildDate,
+            imageDistro: meta.imageDistro,
+            imageMachine: meta.imageMachine,
+            discord: meta.discord,
+            credits: meta.credits
+        )
+        deviceMeta[deviceId] = updated
+        metaChangedContinuation.yield((deviceId: deviceId, meta: updated))
     }
 
     private func poll(config: OtaPollConfig, gateway: BridgethingGateway) async {

@@ -273,7 +273,40 @@ impl Model {
   // iap2 is the only producer of now-playing deltas; the companion drives now-playing through
   // apply_companion_snapshot, so this always targets the iap2 accumulators.
   fn player_apply_now_playing(&mut self, update: (MediaItemUpdate, PlaybackUpdate, bool, bool)) {
-    let (media, playback, has_media, has_playback) = update;
+    let (mut media, playback, has_media, mut has_playback) = update;
+
+    // mirrors the daemon's idle-sentinel ingest drop: a zero-pid empty-title delta is an iOS
+    // transition blip; only a real duration riding on it survives, everything else is dropped
+    // without touching the accumulators.
+    let is_idle_sentinel = has_media
+      && media
+        .persistent_id
+        .as_deref()
+        .is_some_and(|p| p.ends_with(IDLE_PID_HEX))
+      && media.title.as_deref() == Some("");
+    if is_idle_sentinel {
+      has_playback = false;
+      match media.duration_ms.filter(|d| *d > 0) {
+        Some(duration) => {
+          media = MediaItemUpdate {
+            duration_ms: Some(duration),
+            ..MediaItemUpdate::default()
+          };
+        }
+        None => {
+          // the daemon drops the pure sentinel without touching state, but the player actor
+          // still rebuilds its watch snapshot on every command, so live-merged fields (e.g. an
+          // out-of-band claim flipping the merge) surface. the daemon's wire art is derived
+          // from the live merge at snapshot build, so the mirrored track image resyncs too.
+          let merged_art = self.merged_metadata().artwork_id.unwrap_or_default();
+          if let Some(track) = self.track.as_mut() {
+            track.image_id = merged_art;
+          }
+          self.cached = self.build_projection();
+          return;
+        }
+      }
+    }
     let (meta_target, play_target) = (&mut self.iap2_metadata, &mut self.iap2_playback);
     if has_media {
       if let Some(new_pid) = media.persistent_id.as_ref()
@@ -369,38 +402,42 @@ impl Model {
     let media = self.merged_metadata();
     let playback = self.merged_playback();
 
-    let same_track = match (
-      self.track.as_ref().map(|t| t.id.as_str()),
-      media.persistent_id.as_deref(),
-    ) {
-      (Some(existing), Some(new)) => existing == new,
-      _ => false,
-    };
-    let mut track = if same_track {
-      self.track.clone().unwrap_or_default()
-    } else {
-      default_track()
-    };
-    if let Some(id) = media.persistent_id {
-      track.id = id;
+    // mirrors the daemon: an identity-free merge on an empty state does not fabricate a track
+    let has_identity = media.persistent_id.is_some() || media.title.is_some();
+    if self.track.is_some() || has_identity {
+      let same_track = match (
+        self.track.as_ref().map(|t| t.id.as_str()),
+        media.persistent_id.as_deref(),
+      ) {
+        (Some(existing), Some(new)) => existing == new,
+        _ => false,
+      };
+      let mut track = if same_track {
+        self.track.clone().unwrap_or_default()
+      } else {
+        default_track()
+      };
+      if let Some(id) = media.persistent_id {
+        track.id = id;
+      }
+      if let Some(title) = media.title {
+        track.name = title;
+      }
+      if let Some(album) = media.album {
+        track.album = album;
+      }
+      if let Some(artist) = media.artist {
+        track.artist = artist;
+      }
+      track.image_id = media.artwork_id.unwrap_or_default();
+      if let Some(duration) = media.duration_ms {
+        track.duration_ms = duration;
+      }
+      if let Some(liked) = media.liked {
+        track.saved = liked;
+      }
+      self.track = Some(track);
     }
-    if let Some(title) = media.title {
-      track.name = title;
-    }
-    if let Some(album) = media.album {
-      track.album = album;
-    }
-    if let Some(artist) = media.artist {
-      track.artist = artist;
-    }
-    track.image_id = media.artwork_id.unwrap_or_default();
-    if let Some(duration) = media.duration_ms {
-      track.duration_ms = duration;
-    }
-    if let Some(liked) = media.liked {
-      track.saved = liked;
-    }
-    self.track = Some(track);
 
     if let Some(playing) = playback.playing {
       self.playing = playing;

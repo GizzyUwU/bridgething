@@ -47,6 +47,8 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func reconnectPeer(deviceId: String) async throws
 
+    func deviceSetNickname(deviceId: String, nickname: String) async throws
+
     func presentPairPicker() async throws -> BridgethingBtDevice?
 
     func isNotificationAccessGranted() async -> Bool
@@ -401,6 +403,14 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func reconnectPeer(deviceId: String) throws -> Promise<Void> {
         Promise.async {
             try await Self.backend().reconnectPeer(deviceId: deviceId)
+        }
+    }
+
+    // MARK: - Device nickname
+
+    public func deviceSetNickname(deviceId: String, nickname: String) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().deviceSetNickname(deviceId: deviceId, nickname: nickname)
         }
     }
 

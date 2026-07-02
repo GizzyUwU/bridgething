@@ -203,6 +203,13 @@ export function updateNickname(
   useSessionStore.setState({ ledger: setDeviceNickname(deviceId, nickname) });
 }
 
+export async function setDeviceName(
+  deviceId: string,
+  name: string | null,
+): Promise<void> {
+  await getSession().deviceSetNickname(deviceId, name ?? '');
+}
+
 export function forgetKnownDevice(deviceId: string): void {
   void getSession()
     .forgetCompanionDevice(deviceId)
@@ -250,8 +257,9 @@ export function connectedPeers(
 export function peerDisplayName(
   peer: BridgethingSessionPeer,
   ledger: Record<string, DeviceLedgerEntry>,
+  meta?: BridgethingDeviceMeta,
 ): string {
-  return ledger[peer.id]?.nickname ?? peer.name;
+  return ledger[peer.id]?.nickname ?? meta?.nickname ?? peer.name;
 }
 
 export type KnownDevice = {

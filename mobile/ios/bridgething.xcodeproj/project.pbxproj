@@ -221,8 +221,8 @@
 			);
 			mainGroup = 83CBB9F61A601CBA00E9B192;
 			packageReferences = (
-				B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */,
-				28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "../../packages/spotify/swift" */,
+				B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */,
+				28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */,
 			);
 			productRefGroup = 83CBBA001A601CBA00E9B192 /* Products */;
 			projectDirPath = "";
@@ -283,13 +283,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-bridgething/Pods-bridgething-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-bridgething/Pods-bridgething-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -326,13 +322,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-bridgething/Pods-bridgething-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-bridgething/Pods-bridgething-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -611,11 +603,11 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "../../packages/spotify/swift" */ = {
+		28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../packages/spotify/swift;
 		};
-		B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */ = {
+		B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../;
 		};
@@ -624,42 +616,42 @@
 /* Begin XCSwiftPackageProductDependency section */
 		2E405B13DD58F284C50D592C /* BridgethingGlue */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingGlue;
 		};
 		302CF909B3940CFB4BD61A29 /* BridgethingGateway */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingGateway;
 		};
 		36F56798DD80B12C33156F70 /* BridgethingLyrics */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingLyrics;
 		};
 		37EB35D1D6F792B888BCCF58 /* BridgethingAppleMusicGlue */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingAppleMusicGlue;
 		};
 		63A2BDB8419785846352F797 /* BridgethingSchema */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingSchema;
 		};
 		7BFBDC5CCC1DB41C08BBAB69 /* BridgethingSpotifyGlue */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "../../packages/spotify/swift" */;
+			package = 28B304C9EB805650307747D6 /* XCLocalSwiftPackageReference "swift" */;
 			productName = BridgethingSpotifyGlue;
 		};
 		951DEFFC70F323C14864A561 /* BridgethingTidalGlue */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingTidalGlue;
 		};
 		D924249BDDDFEA6D9511A03E /* BridgethingCompanion */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference "../../" */;
+			package = B80AEC9E82FD3AA0ED6C18EA /* XCLocalSwiftPackageReference ".." */;
 			productName = BridgethingCompanion;
 		};
 /* End XCSwiftPackageProductDependency section */

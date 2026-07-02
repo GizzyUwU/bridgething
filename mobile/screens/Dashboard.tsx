@@ -212,6 +212,7 @@ function DeviceSection({
 }) {
   const session = getSession();
   const ledger = useSession(s => s.ledger);
+  const meta = useSession(s => s.deviceMeta[peer.id]);
   const [webapps, setWebapps] = useState<BridgethingWebappInfo[]>([]);
   const [active, setActive] = useState<BridgethingActiveWebapp | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -279,7 +280,7 @@ function DeviceSection({
             numberOfLines={1}
             style={{ letterSpacing: -0.3 }}
           >
-            {peerDisplayName(peer, ledger)}
+            {peerDisplayName(peer, ledger, meta)}
           </Text>
           <View className="mt-1 flex-row items-center gap-1.5">
             <View className="h-1.5 w-1.5 rounded-full bg-success" />
@@ -287,7 +288,10 @@ function DeviceSection({
               className="text-[12px] text-muted-foreground"
               numberOfLines={1}
             >
-              connected{nickname ? ` · ${peer.name}` : ''}
+              connected
+              {peerDisplayName(peer, ledger, meta) !== peer.name
+                ? ` · ${peer.name}`
+                : ''}
             </Text>
           </View>
         </View>
