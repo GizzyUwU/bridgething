@@ -106,9 +106,9 @@ class SpotifyGlue(
     private val clientFactory: SpotifyClientFactory = { store, observer ->
         initLogging(LogcatLogSink(), if (BuildConfig.DEBUG) "spotify=trace" else "spotify=info")
         SpotifyClient.create(workerBase, psk, deviceId, store, observer).also {
-            // The native reqwest/tungstenite transports don't work inside the
-            // uniffi async runtime on Android; install Kotlin transports like iOS
-            // does, or every worker request fails "dropped without responding".
+            // the crate's native reqwest/tungstenite transports are dropped by the
+            // uniffi async runtime on android, so everything rides kotlin transports.
+            it.setWsTransport(KtorWsTransport())
             it.setHttpTransport(KtorHttpTransport())
         }
     },

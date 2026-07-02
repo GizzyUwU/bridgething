@@ -41,7 +41,10 @@ dependencies {
   api("net.java.dev.jna:jna:5.17.0@aar")
   api("io.ktor:ktor-client-core:3.0.0")
   api("io.ktor:ktor-client-cio:3.0.0")
+  api("io.ktor:ktor-client-websockets:3.0.0")
   testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+  testImplementation("io.ktor:ktor-server-cio:3.0.0")
+  testImplementation("io.ktor:ktor-server-websockets:3.0.0")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
