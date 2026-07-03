@@ -138,10 +138,12 @@ where
   let (np_authority_tx, np_authority_rx) =
     tokio::sync::watch::channel(bridgething_iap2::NowPlayingAuthorityState::default());
   let (tel_tx, tel_rx) = mpsc::channel(8);
+  let (_app_launch_tx, app_launch_rx) = mpsc::channel(8);
   let session = Iap2Session::with_app_launch(
     ident,
     app_launch_bundle,
     Vec::new(),
+    app_launch_rx,
     FakeMfi,
     acc_cmd_tx,
     acc_link_ev_rx,

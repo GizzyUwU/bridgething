@@ -335,9 +335,14 @@ mod tests {
       "normal events must still be captured: {messages:?}"
     );
     assert!(
-      messages
-        .iter()
-        .all(|m| !["self-feedback", "codec-noise", "gateway-traffic", "ws-send-feedback", "net-send-feedback"].contains(&m.as_str())),
+      messages.iter().all(|m| ![
+        "self-feedback",
+        "codec-noise",
+        "gateway-traffic",
+        "ws-send-feedback",
+        "net-send-feedback"
+      ]
+      .contains(&m.as_str())),
       "denied targets must never enter the tap: {messages:?}"
     );
   }

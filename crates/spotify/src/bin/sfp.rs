@@ -111,14 +111,24 @@ async fn main() -> Result<(), Boxed> {
     }
     "watch" => {
       let secs: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver),
+      );
       client.connect().await?;
       println!("watching {secs}s - play/pause/skip on Spotify to see deltas...");
       tokio::time::sleep(Duration::from_secs(secs)).await;
       client.disconnect().await;
     }
     "product" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver),
+      );
       let p = client.product().await?;
       println!(
         "product={} catalogue={} country={} premium={} can_use_superbird={}",
@@ -126,7 +136,12 @@ async fn main() -> Result<(), Boxed> {
       );
     }
     "root" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver),
+      );
       client.connect().await?;
       let shelves = client.root_browse().await?;
       println!("root: {} shelves", shelves.len());
@@ -137,7 +152,12 @@ async fn main() -> Result<(), Boxed> {
     }
     "lib" => {
       let node = args.get(2).map(String::as_str).unwrap_or("playlists");
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver),
+      );
       client.connect().await?;
       let page = client.browse(node, 20, 0).await?;
       println!(
@@ -158,7 +178,12 @@ async fn main() -> Result<(), Boxed> {
       client.disconnect().await;
     }
     "fav" => {
-      let client = SpotifyClient::new(auth.clone(), dealer.device_id().to_string(), exec.clone(), Arc::new(PrintObserver));
+      let client = SpotifyClient::new(
+        auth.clone(),
+        dealer.device_id().to_string(),
+        exec.clone(),
+        Arc::new(PrintObserver),
+      );
       client.connect().await?;
       let page = client.favorites_list(20, 0).await?;
       println!("favorites: {} items (total={:?})", page.items.len(), page.total);
@@ -250,8 +275,14 @@ async fn whoami(http: &SpHttp) -> Result<(), Boxed> {
   req.client_info = MessageField::some(ci);
   req.login_method = Some(Login_method::OneTimeToken(ott));
   let mut headers = reqwest::header::HeaderMap::new();
-  headers.insert(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_static("application/x-protobuf"));
-  headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/x-protobuf"));
+  headers.insert(
+    reqwest::header::ACCEPT,
+    reqwest::header::HeaderValue::from_static("application/x-protobuf"),
+  );
+  headers.insert(
+    reqwest::header::CONTENT_TYPE,
+    reqwest::header::HeaderValue::from_static("application/x-protobuf"),
+  );
   let resp = http
     .send(
       HttpMethod::Post,

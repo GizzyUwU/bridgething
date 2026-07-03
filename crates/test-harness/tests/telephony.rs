@@ -188,9 +188,8 @@ async fn iap2_uuid_less_delta_advances_the_single_tracked_call() {
 
   let updated = frames
     .wait_for(CONVERGE, |f| {
-      modern_phone_event(f, "callUpdated").is_some_and(|data| {
-        data["callId"].as_str() == Some("call-4") && data["status"].as_str() == Some("active")
-      })
+      modern_phone_event(f, "callUpdated")
+        .is_some_and(|data| data["callId"].as_str() == Some("call-4") && data["status"].as_str() == Some("active"))
     })
     .await;
   assert!(updated.is_some(), "uuid-less delta did not advance the tracked call");

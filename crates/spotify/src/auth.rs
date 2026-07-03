@@ -165,7 +165,10 @@ impl Auth {
       }
       tokio::time::sleep(Duration::from_secs(interval)).await;
       let resp = match self
-        .worker_form("/api/token", &[("grant_type", DEVICE_GRANT), ("device_code", &flow.device_code)])
+        .worker_form(
+          "/api/token",
+          &[("grant_type", DEVICE_GRANT), ("device_code", &flow.device_code)],
+        )
         .await
       {
         Ok(r) => r,
@@ -226,7 +229,10 @@ impl Auth {
     };
     tracing::debug!("auth: bearer expired, refreshing");
     let resp = self
-      .worker_form("/api/token", &[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
+      .worker_form(
+        "/api/token",
+        &[("grant_type", "refresh_token"), ("refresh_token", &refresh)],
+      )
       .await?;
     let status = resp.status;
     let text = resp.text();

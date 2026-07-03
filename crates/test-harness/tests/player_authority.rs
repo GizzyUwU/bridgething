@@ -6,14 +6,14 @@
 
 use std::time::Duration;
 
+use bridgething_gateway::Gateway;
 use bridgething_iap2::csm::now_playing::{
   MediaItemAttributes as Iap2MediaItem, NowPlayingUpdate as Iap2NowPlaying, PlaybackAttributes, PlaybackState,
 };
-use bridgething_gateway::Gateway;
 use bridgething_test_harness::{Harness, Iap2Source, Iap2SourceDriver};
 use libbridgething::{
-  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlayerState,
-  PlaybackState as WirePlaybackState, gateway::AuthorityClaim,
+  CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlaybackState as WirePlaybackState,
+  PlayerState, gateway::AuthorityClaim,
 };
 
 const CONVERGE: Duration = Duration::from_secs(5);
@@ -79,9 +79,7 @@ fn is_player_frame(json: &str) -> bool {
 async fn companion_owned_harness() -> (Harness, Gateway) {
   let harness = Harness::start().await.expect("harness start");
   let _modern = harness.connect_modern_client().await.expect("modern client");
-  let registered = harness
-    .wait_for(|s| s.client_man.client_count() >= 1, CONVERGE)
-    .await;
+  let registered = harness.wait_for(|s| s.client_man.client_count() >= 1, CONVERGE).await;
   assert!(registered, "modern client never registered");
 
   let phone = harness.connect_android().await.expect("companion connect");

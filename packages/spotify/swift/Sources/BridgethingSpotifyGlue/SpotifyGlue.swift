@@ -124,6 +124,11 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private func currentGateway() -> BridgethingGateway? { stateLock.withLock { gateway } }
     private func setGateway(_ g: BridgethingGateway?) { stateLock.withLock { gateway = g } }
+
+    fileprivate func wakePhoneSpotify() {
+        guard let gateway = currentGateway() else { return }
+        Task { try? await gateway.player.requestSpotifyWake() }
+    }
     private func currentNowPlayingObserver() -> (@Sendable (GlueNowPlaying?) -> Void)? {
         stateLock.withLock { nowPlayingObserver }
     }
@@ -140,6 +145,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         startEmitter()
 
         let client = clientFactory(tokenStore, ObserverBridge(self))
+        if let real = client as? SpotifyClient {
+            real.setDeviceWaker(waker: GatewayDeviceWaker(glue: self))
+        }
         self.client = client
 
         currentAuthObserver()?(.pending(nil))
@@ -925,5 +933,17 @@ private extension LibraryItem {
         case let .album(a): return a.artwork_id
         case let .artist(a): return a.artwork_id
         }
+    }
+}
+
+final class GatewayDeviceWaker: Spotify.DeviceWaker, @unchecked Sendable {
+    private weak var glue: SpotifyGlue?
+
+    init(glue: SpotifyGlue) {
+        self.glue = glue
+    }
+
+    func wakeDevice() {
+        glue?.wakePhoneSpotify()
     }
 }

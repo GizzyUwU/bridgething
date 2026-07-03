@@ -77,7 +77,10 @@ impl TelephonyManager {
       Some(id) => id,
       None if inner.calls.len() == 1 => inner.calls.keys().next().cloned().expect("len checked"),
       None => {
-        tracing::debug!(?update, "iap2 call-state update without CallUUID and no single active call");
+        tracing::debug!(
+          ?update,
+          "iap2 call-state update without CallUUID and no single active call"
+        );
         return Ok(());
       }
     };

@@ -170,7 +170,11 @@ impl GatewayHandler {
         }
       }
       GatewayToBridgeMsgData::Player(player_msg) => {
-        if let Some(event) = player_msg.into_event() {
+        if player_msg.is_command_variant() {
+          if let Some(cmd) = player_msg.into_command() {
+            tokio::spawn(async move { cmd.dispatch(&PlayerHandler::new(handle)).await });
+          }
+        } else if let Some(event) = player_msg.into_event() {
           tokio::spawn(async move { event.dispatch(&PlayerHandler::new(handle)).await });
         }
       }

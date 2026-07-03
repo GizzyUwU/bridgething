@@ -618,6 +618,10 @@ mod tests {
     ps.position_as_of_timestamp = 170_000;
     ps.duration = 180_000;
     ps.timestamp = (crate::util::now_ms() as i64) - 60_000;
-    assert_eq!(position_now(&ps), 180_000, "extrapolation never runs past the track duration");
+    assert_eq!(
+      position_now(&ps),
+      180_000,
+      "extrapolation never runs past the track duration"
+    );
   }
 }

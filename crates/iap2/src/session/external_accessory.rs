@@ -55,13 +55,9 @@ use crate::{
 
 const STREAM_INBOUND_CAPACITY: usize = 64;
 
-// give up re-requesting the companion launch after this many sends on a cold link (the companion never
-// opens its stream). a companion that does open resets the counter, so normal background/foreground
-// cycling keeps relaunching.
 const MAX_APP_LAUNCH_ATTEMPTS: u32 = 6;
-// hard floor between any two RequestAppLaunch sends. caps the send RATE regardless of how fast iOS
-// flaps the stream (open-then-reaped), which would otherwise re-arm and resend on the very next csm.
 const APP_LAUNCH_RETRY_COOLDOWN: Duration = Duration::from_secs(10);
+const ON_DEMAND_LAUNCH_COOLDOWN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppLaunchState {
@@ -71,12 +67,25 @@ enum AppLaunchState {
   Active,
 }
 
+async fn send_app_launch(bundle_id: &str, link_command_tx: &mpsc::Sender<Iap2Command>) -> Result<()> {
+  send_csm(
+    RequestAppLaunch {
+      bundle_id: bundle_id.to_string(),
+      launch_method: AppLaunchMethod::WithoutUserAlert,
+    },
+    link_command_tx,
+  )
+  .await
+}
+
 pub(super) struct EaFlow {
   streams: HashMap<u16, mpsc::Sender<Bytes>>,
   chunker: EaChunker,
   app_launch: AppLaunchState,
   relaunch_attempts: u32,
   last_launch_sent: Option<Instant>,
+  last_on_demand_sent: Option<Instant>,
+  accept_protocol_id: Option<u8>,
 }
 
 impl std::fmt::Debug for EaFlow {
@@ -90,13 +99,19 @@ impl std::fmt::Debug for EaFlow {
 }
 
 impl EaFlow {
-  pub(super) fn new(link_command_tx: mpsc::Sender<Iap2Command>, peer_max_len: u16) -> Self {
+  pub(super) fn new(
+    link_command_tx: mpsc::Sender<Iap2Command>,
+    peer_max_len: u16,
+    accept_protocol_id: Option<u8>,
+  ) -> Self {
     Self {
       streams: HashMap::new(),
       chunker: EaChunker::new(link_command_tx, peer_max_len),
       app_launch: AppLaunchState::Armed,
       relaunch_attempts: 0,
       last_launch_sent: None,
+      last_on_demand_sent: None,
+      accept_protocol_id,
     }
   }
 
@@ -128,16 +143,34 @@ impl EaFlow {
       attempt = self.relaunch_attempts + 1,
       "iap2 ea: sending RequestAppLaunch"
     );
-    send_csm(
-      RequestAppLaunch {
-        bundle_id: bundle_id.to_string(),
-        launch_method: AppLaunchMethod::WithoutUserAlert,
-      },
-      link_command_tx,
-    )
-    .await?;
+    send_app_launch(bundle_id, link_command_tx).await?;
     self.relaunch_attempts += 1;
     self.last_launch_sent = Some(now);
+    Ok(())
+  }
+
+  /// Fire a `RequestAppLaunch` for an arbitrary bundle on demand - waking the phone's Spotify so a
+  /// Connect target exists to play to. No attempt cap (the phone re-asks off the cluster state); a short
+  /// dedupe window collapses double-taps into a single launch. Distinct from the companion keep-alive
+  /// above, which suppresses while its EA stream is open and gives up after a fixed number of tries.
+  pub(super) async fn request_app_launch(
+    &mut self,
+    bundle_id: &str,
+    link_command_tx: &mpsc::Sender<Iap2Command>,
+  ) -> Result<()> {
+    let now = Instant::now();
+    if let Some(last) = self.last_on_demand_sent
+      && now.duration_since(last) < ON_DEMAND_LAUNCH_COOLDOWN
+    {
+      tracing::debug!(
+        bundle_id,
+        "iap2 ea: on-demand RequestAppLaunch within cooldown; skipping"
+      );
+      return Ok(());
+    }
+    tracing::info!(bundle_id, "iap2 ea: sending on-demand RequestAppLaunch");
+    send_app_launch(bundle_id, link_command_tx).await?;
+    self.last_on_demand_sent = Some(now);
     Ok(())
   }
 
@@ -169,6 +202,25 @@ impl EaFlow {
     link_command_tx: &mpsc::Sender<Iap2Command>,
     session_events_tx: &mpsc::Sender<SessionEvent>,
   ) -> Result<()> {
+    if let Some(accept) = self.accept_protocol_id
+      && start.protocol_id != accept
+    {
+      tracing::info!(
+        stream_id = start.session_id,
+        protocol_id = start.protocol_id,
+        "iap2 ea: refusing StartES for a declaration-only protocol (we never terminate its stream)"
+      );
+      send_csm(
+        StatusExternalAccessoryProtocolSession {
+          session_id: start.session_id,
+          status: EaSessionStatus::Close,
+        },
+        link_command_tx,
+      )
+      .await?;
+      return Ok(());
+    }
+
     if self.streams.contains_key(&start.session_id) {
       tracing::warn!(
         stream_id = start.session_id,
@@ -276,7 +328,7 @@ mod tests {
     let (link_tx, mut link_rx) = mpsc::channel(64);
     let (events_tx, mut events_rx) = mpsc::channel(64);
     let lsp = Lsp::accessory_default();
-    let mut flow = EaFlow::new(link_tx.clone(), lsp.max_len);
+    let mut flow = EaFlow::new(link_tx.clone(), lsp.max_len, None);
 
     let start_frame: CsmFrame = StartExternalAccessoryProtocolSession {
       protocol_id: 1,
@@ -340,7 +392,7 @@ mod tests {
   async fn dispatch_routes_inbound_payload_into_stream_channel() {
     let (link_tx, _link_rx) = mpsc::channel(64);
     let (events_tx, mut events_rx) = mpsc::channel(64);
-    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, None);
 
     let start_frame: CsmFrame = StartExternalAccessoryProtocolSession {
       protocol_id: 1,
@@ -366,7 +418,7 @@ mod tests {
   #[tokio::test]
   async fn ensure_app_launch_is_idempotent() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
-    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, None);
 
     flow
       .ensure_app_launch_requested("com.bridgething.gateway", &link_tx)
@@ -387,10 +439,58 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn request_app_launch_dedupes_within_cooldown() {
+    let (link_tx, mut link_rx) = mpsc::channel(64);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, Some(1));
+
+    flow.request_app_launch("com.spotify.client", &link_tx).await.unwrap();
+    flow.request_app_launch("com.spotify.client", &link_tx).await.unwrap();
+
+    let mut launches = 0;
+    while let Ok(cmd) = link_rx.try_recv() {
+      if matches!(cmd, Iap2Command::Send { session_id: 1, .. }) {
+        launches += 1;
+      }
+    }
+    assert_eq!(
+      launches, 1,
+      "on-demand RequestAppLaunch deduped within the cooldown window"
+    );
+  }
+
+  #[tokio::test]
+  async fn refuses_start_for_declaration_only_protocol() {
+    let (link_tx, mut link_rx) = mpsc::channel(64);
+    let (events_tx, mut events_rx) = mpsc::channel(64);
+    // accept only the companion's protocol id (1); spotify's declaration-only id (2) must be refused so
+    // its WAMP bytes never route into the companion EA gateway.
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, Some(1));
+
+    let start: CsmFrame = StartExternalAccessoryProtocolSession {
+      protocol_id: 2,
+      session_id: 0x0200,
+    }
+    .into();
+    flow.handle(start, &link_tx, &events_tx).await.unwrap();
+
+    // a Close reply rides the control session, no stream opens, and the companion keep-alive stays armed.
+    assert!(matches!(
+      link_rx.recv().await.unwrap(),
+      Iap2Command::Send { session_id: 1, .. }
+    ));
+    assert!(flow.streams.is_empty(), "refused protocol must not open a stream");
+    assert!(
+      events_rx.try_recv().is_err(),
+      "no EaStreamOpened emitted for a refused protocol"
+    );
+    assert!(matches!(flow.app_launch, AppLaunchState::Armed));
+  }
+
+  #[tokio::test]
   async fn app_launch_rearms_after_stream_close() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
     let (events_tx, mut events_rx) = mpsc::channel(64);
-    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, None);
 
     // companion opens its EA stream (iOS launched it) -> Active; a launch request is suppressed so it
     // never steals foreground from whatever app is on screen.
@@ -439,7 +539,7 @@ mod tests {
   async fn app_launch_rearms_after_consumer_drop() {
     let (link_tx, mut link_rx) = mpsc::channel(64);
     let (events_tx, mut events_rx) = mpsc::channel(64);
-    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len);
+    let mut flow = EaFlow::new(link_tx.clone(), Lsp::accessory_default().max_len, None);
 
     let start: CsmFrame = StartExternalAccessoryProtocolSession {
       protocol_id: 1,

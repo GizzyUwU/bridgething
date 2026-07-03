@@ -73,6 +73,7 @@ import com.bridgething.schema.Show as WireShow
 import com.bridgething.schema.Track as WireTrack
 import uniffi.spotify.AuthState as SpAuthState
 import uniffi.spotify.BrowseItem as SpBrowseItem
+import uniffi.spotify.DeviceWaker
 import uniffi.spotify.LibraryScope as SpLibraryScope
 import uniffi.spotify.Observer as SpObserver
 import uniffi.spotify.PlayerState as SpPlayerState
@@ -104,13 +105,13 @@ class SpotifyGlue(
     private val deviceId: String,
     private val tokenStore: SpTokenStore,
     cacheDir: java.io.File? = null,
+    appContext: android.content.Context? = null,
     private val clientFactory: SpotifyClientFactory = { store, observer ->
         initLogging(LogcatLogSink(), if (BuildConfig.DEBUG) "spotify=trace" else "spotify=info")
         SpotifyClient.create(workerBase, psk, deviceId, store, observer).also {
-            // the crate's native reqwest/tungstenite transports are dropped by the
-            // uniffi async runtime on android, so everything rides kotlin transports.
             it.setWsTransport(KtorWsTransport())
             it.setHttpTransport(KtorHttpTransport())
+            appContext?.let { ctx -> it.setDeviceWaker(IntentDeviceWaker(ctx)) }
         }
     },
 ) : BridgethingGlue {
@@ -762,5 +763,22 @@ class SpotifyGlue(
             scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
             out.toByteArray()
         }.getOrNull()
+    }
+}
+
+private class IntentDeviceWaker(context: android.content.Context) : DeviceWaker {
+    private val appContext = context.applicationContext
+
+    override fun wakeDevice() {
+        for (action in intArrayOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
+            val intent = android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON).apply {
+                setPackage(SPOTIFY_ANDROID_PACKAGE)
+                putExtra(
+                    android.content.Intent.EXTRA_KEY_EVENT,
+                    android.view.KeyEvent(action, android.view.KeyEvent.KEYCODE_MEDIA_PLAY),
+                )
+            }
+            runCatching { appContext.sendBroadcast(intent) }
+        }
     }
 }

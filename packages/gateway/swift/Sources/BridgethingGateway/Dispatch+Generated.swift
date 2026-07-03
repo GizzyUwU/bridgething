@@ -1339,6 +1339,20 @@ public struct PlayerSurface: Sendable {
     }
   }
 
+  /// Send `Player::RequestSpotifyWake` to every connected peer (broadcast).
+  public func requestSpotifyWake(priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .player(.requestSpotifyWake))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
 }
 
 /// Cross-peer methods for the `System` wire surface.
@@ -3696,6 +3710,12 @@ public struct PlayerSurfaceForDevice: Sendable {
   /// Send `Player::QueueChanged` to this peer.
   public func queueChanged(_ payload: QueueSnapshot, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .player(.queueChanged(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Player::RequestSpotifyWake` to this peer.
+  public func requestSpotifyWake(priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .command, data: .player(.requestSpotifyWake))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 

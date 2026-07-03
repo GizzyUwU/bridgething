@@ -358,7 +358,9 @@ impl PlayerState {
   fn companion_fallthrough(&self, merged: PlaybackUpdate) -> PlaybackUpdate {
     PlaybackUpdate {
       playing: merged.playing.filter(|_| self.companion_playback.playing.is_none()),
-      position_ms: merged.position_ms.filter(|_| self.companion_playback.position_ms.is_none()),
+      position_ms: merged
+        .position_ms
+        .filter(|_| self.companion_playback.position_ms.is_none()),
       shuffle: merged.shuffle.filter(|_| self.companion_playback.shuffle.is_none()),
       repeat: merged.repeat.filter(|_| self.companion_playback.repeat.is_none()),
       ..merged
@@ -1883,7 +1885,11 @@ mod tests {
       "an ownership flip back is a hard cut and must broadcast"
     );
     let m = media(&state);
-    assert_eq!(m.uri.as_deref(), Some("spotify:track:z"), "staged companion view surfaced");
+    assert_eq!(
+      m.uri.as_deref(),
+      Some("spotify:track:z"),
+      "staged companion view surfaced"
+    );
     assert_eq!(m.title.as_deref(), Some("Next Song"));
     let pos = view_position(&state);
     assert!(

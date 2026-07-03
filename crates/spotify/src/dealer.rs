@@ -55,8 +55,14 @@ impl Dealer {
   }
 
   async fn dealer_host(&self) -> Result<String> {
-    let url = with_query("https://apresolve.spotify.com/".to_string(), &[("type", "dealer".to_string())])?;
-    let resp = self.http.send(HttpMethod::Get, url, HeaderMap::new(), Vec::new(), 0).await?;
+    let url = with_query(
+      "https://apresolve.spotify.com/".to_string(),
+      &[("type", "dealer".to_string())],
+    )?;
+    let resp = self
+      .http
+      .send(HttpMethod::Get, url, HeaderMap::new(), Vec::new(), 0)
+      .await?;
     let v: Value = serde_json::from_slice(&resp.body)?;
     let host = v["dealer"][0]
       .as_str()

@@ -45,7 +45,7 @@ public object BridgethingApp {
                 id = "spotify",
                 displayName = "Spotify",
                 available = true,
-                factory = { makeSpotifyGlue(spotifyTokenStore, app.cacheDir) },
+                factory = { makeSpotifyGlue(spotifyTokenStore, app.cacheDir, app) },
                 signOut = { spotifyTokenStore.clear() },
                 hasCredentials = { spotifyTokenStore.loadRefreshToken() != null },
             ),
@@ -68,13 +68,18 @@ public object BridgethingApp {
         HybridBridgethingSession.installBackend(HybridBridgethingSessionImpl(app))
     }
 
-    private fun makeSpotifyGlue(store: SpotifyKeychainStore, cacheDir: java.io.File): SpotifyGlue =
+    private fun makeSpotifyGlue(
+        store: SpotifyKeychainStore,
+        cacheDir: java.io.File,
+        appContext: android.content.Context,
+    ): SpotifyGlue =
         SpotifyGlue(
             workerBase = SPOTIFY_WORKER_BASE,
             psk = BuildConfig.BRIDGETHING_AUTH_PSK,
             deviceId = store.deviceId(),
             tokenStore = store,
             cacheDir = cacheDir,
+            appContext = appContext,
         )
 }
 

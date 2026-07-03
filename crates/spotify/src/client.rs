@@ -9,7 +9,10 @@ use std::{
 use futures::future::join_all;
 use librespot_protocol::connect::Cluster;
 use serde_json::json;
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::{
+  sync::{Mutex, Notify},
+  task::JoinHandle,
+};
 
 use crate::{
   aplogin,
@@ -44,10 +47,19 @@ pub trait Observer: Send + Sync {
   fn on_library_changed(&self, scope: LibraryScope);
 }
 
+#[uniffi::export(with_foreign)]
+pub trait DeviceWaker: Send + Sync {
+  fn wake_device(&self);
+}
+
+const DEVICE_WAKE_TIMEOUT: Duration = Duration::from_secs(8);
+
 struct Shared {
   writer: Mutex<Option<DealerWriter>>,
   cluster: Mutex<Option<Cluster>>,
   last_active: Mutex<Option<String>>,
+  device_waker: std::sync::Mutex<Option<Arc<dyn DeviceWaker>>>,
+  cluster_changed: Notify,
 }
 
 #[derive(uniffi::Object)]
@@ -80,6 +92,8 @@ impl SpotifyClient {
         writer: Mutex::new(None),
         cluster: Mutex::new(None),
         last_active: Mutex::new(None),
+        device_waker: std::sync::Mutex::new(None),
+        cluster_changed: Notify::new(),
       }),
       username: Mutex::new(None),
       liked: Arc::new(Mutex::new(None)),
@@ -125,6 +139,38 @@ impl SpotifyClient {
         );
         Err(Error::other("no reachable target device"))
       }
+    }
+  }
+
+  async fn target_or_wake(&self) -> Result<String> {
+    if let Ok(t) = self.target().await {
+      return Ok(t);
+    }
+    let waker = self.shared.device_waker.lock().unwrap().clone();
+    let Some(waker) = waker else {
+      return self.target().await;
+    };
+    tracing::info!("spotify play: no live device; asking platform to wake the phone's spotify");
+    waker.wake_device();
+    match tokio::time::timeout(DEVICE_WAKE_TIMEOUT, self.await_device()).await {
+      Ok(res) => res,
+      Err(_) => {
+        tracing::warn!("spotify play: no device registered within wake timeout");
+        Err(Error::other("no device appeared after wake"))
+      }
+    }
+  }
+
+  async fn await_device(&self) -> Result<String> {
+    let notified = self.shared.cluster_changed.notified();
+    tokio::pin!(notified);
+    loop {
+      notified.as_mut().enable();
+      if let Ok(t) = self.target().await {
+        return Ok(t);
+      }
+      notified.as_mut().await;
+      notified.set(self.shared.cluster_changed.notified());
     }
   }
 
@@ -386,6 +432,10 @@ impl SpotifyClient {
     self.exec.set(transport);
   }
 
+  pub fn set_device_waker(&self, waker: Arc<dyn DeviceWaker>) {
+    *self.shared.device_waker.lock().unwrap() = Some(waker);
+  }
+
   pub async fn connect(&self) -> Result<()> {
     if let Some(prior) = self.loop_handle.lock().await.take()
       && !prior.is_finished()
@@ -428,8 +478,7 @@ impl SpotifyClient {
       tracing::info!("spotify connect: device flow approved");
     }
 
-    let username = match aplogin::resolve_and_cache(self.auth.as_ref(), &self.http, self.dealer.device_id()).await
-    {
+    let username = match aplogin::resolve_and_cache(self.auth.as_ref(), &self.http, self.dealer.device_id()).await {
       Ok(u) => Some(u),
       Err(e) if is_auth_terminal(&e) => {
         tracing::warn!(error = %e, "spotify connect: terminal auth error resolving username");
@@ -496,7 +545,7 @@ impl SpotifyClient {
     Ok(())
   }
   pub async fn resume(&self) -> Result<()> {
-    self.writer().await?.resume(&self.target().await?).await?;
+    self.writer().await?.resume(&self.target_or_wake().await?).await?;
     Ok(())
   }
   pub async fn skip_next(&self) -> Result<()> {
@@ -552,7 +601,7 @@ impl SpotifyClient {
 
   pub async fn play(&self, uri: &str, skip_to_uri: Option<String>) -> Result<()> {
     let writer = self.writer().await?;
-    let target = self.target().await?;
+    let target = self.target_or_wake().await?;
     let (context, skip) = if uri.starts_with("spotify:track:") && skip_to_uri.is_none() {
       match self.album_for_track(uri).await {
         Some(album) => (album, Some(uri.to_string())),
@@ -903,45 +952,47 @@ async fn events_loop(
             *shared.last_active.lock().await = Some(cluster.active_device_id.clone());
           }
           *shared.cluster.lock().await = Some(cluster);
+          shared.cluster_changed.notify_waiters();
           let mut pending_saved = false;
           let mut pending_playlists = false;
           let debounce = tokio::time::sleep(LIBRARY_CHANGE_DEBOUNCE);
           tokio::pin!(debounce);
           loop {
             tokio::select! {
-              event = stream.next_event() => match event {
-                Ok(Some(DealerEvent::Cluster(cluster))) => {
-                  emitter.emit(&cluster, false).await;
-                  if !cluster.active_device_id.is_empty() {
-                    *shared.last_active.lock().await = Some(cluster.active_device_id.clone());
-                  }
-                  *shared.cluster.lock().await = Some(cluster);
-                }
-                Ok(Some(DealerEvent::LibraryChanged(scope))) => {
-                  match scope {
-                    LibraryScope::Saved => {
-                      *liked.lock().await = None;
-                      pending_saved = true;
+                event = stream.next_event() => match event {
+                  Ok(Some(DealerEvent::Cluster(cluster))) => {
+                    emitter.emit(&cluster, false).await;
+                    if !cluster.active_device_id.is_empty() {
+                      *shared.last_active.lock().await = Some(cluster.active_device_id.clone());
                     }
-                    LibraryScope::Playlists => pending_playlists = true,
+                    *shared.cluster.lock().await = Some(cluster);
+            shared.cluster_changed.notify_waiters();
                   }
-                  debounce.as_mut().reset(tokio::time::Instant::now() + LIBRARY_CHANGE_DEBOUNCE);
-                }
-                Ok(None) => break,
-                Err(e) => {
-                  tracing::warn!("dealer read error: {e}");
-                  break;
-                }
-              },
-              _ = &mut debounce, if pending_saved || pending_playlists => {
-                if std::mem::take(&mut pending_saved) {
-                  observer.on_library_changed(LibraryScope::Saved);
-                }
-                if std::mem::take(&mut pending_playlists) {
-                  observer.on_library_changed(LibraryScope::Playlists);
+                  Ok(Some(DealerEvent::LibraryChanged(scope))) => {
+                    match scope {
+                      LibraryScope::Saved => {
+                        *liked.lock().await = None;
+                        pending_saved = true;
+                      }
+                      LibraryScope::Playlists => pending_playlists = true,
+                    }
+                    debounce.as_mut().reset(tokio::time::Instant::now() + LIBRARY_CHANGE_DEBOUNCE);
+                  }
+                  Ok(None) => break,
+                  Err(e) => {
+                    tracing::warn!("dealer read error: {e}");
+                    break;
+                  }
+                },
+                _ = &mut debounce, if pending_saved || pending_playlists => {
+                  if std::mem::take(&mut pending_saved) {
+                    observer.on_library_changed(LibraryScope::Saved);
+                  }
+                  if std::mem::take(&mut pending_playlists) {
+                    observer.on_library_changed(LibraryScope::Playlists);
+                  }
                 }
               }
-            }
           }
           if std::mem::take(&mut pending_saved) {
             observer.on_library_changed(LibraryScope::Saved);
@@ -1109,5 +1160,100 @@ impl Emitter<'_> {
     let name = resolve_context_name(self.spc, uri).await?;
     self.ctx_names.insert(uri.to_string(), name.clone());
     Some(name)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+  };
+
+  use librespot_protocol::connect::Cluster;
+
+  use super::*;
+
+  struct NullStore;
+  impl TokenStore for NullStore {
+    fn load_refresh_token(&self) -> Option<String> {
+      None
+    }
+    fn save_refresh_token(&self, _token: String) {}
+    fn load_username(&self) -> Option<String> {
+      None
+    }
+    fn save_username(&self, _username: String) {}
+  }
+
+  struct NullObserver;
+  impl Observer for NullObserver {
+    fn on_player(&self, _state: PlayerState) {}
+    fn on_queue(&self, _queue: Queue) {}
+    fn on_devices(&self, _devices: Vec<Device>) {}
+    fn on_auth(&self, _state: AuthState) {}
+    fn on_library_changed(&self, _scope: LibraryScope) {}
+  }
+
+  // records wake calls; optionally injects a device into the cluster to simulate the phone's spotify
+  // registering after being woken.
+  struct FakeWaker {
+    calls: Arc<AtomicUsize>,
+    inject: Option<Arc<Shared>>,
+  }
+  impl DeviceWaker for FakeWaker {
+    fn wake_device(&self) {
+      self.calls.fetch_add(1, Ordering::SeqCst);
+      if let Some(shared) = self.inject.clone() {
+        tokio::spawn(async move {
+          *shared.cluster.lock().await = Some(active_cluster("dev1"));
+          shared.cluster_changed.notify_waiters();
+        });
+      }
+    }
+  }
+
+  fn active_cluster(id: &str) -> Cluster {
+    librespot_protocol::connect::Cluster { active_device_id: id.to_string(), ..Default::default() }
+  }
+
+  fn test_client(observer: Arc<dyn Observer>) -> SpotifyClient {
+    let exec = HttpExecutor::new();
+    let auth = Arc::new(Auth::new(
+      "https://example.invalid",
+      "psk",
+      Box::new(NullStore),
+      exec.clone(),
+    ));
+    SpotifyClient::new(auth, "me-device".to_string(), exec, observer)
+  }
+
+  #[tokio::test]
+  async fn target_or_wake_returns_existing_device_without_waking() {
+    let client = test_client(Arc::new(NullObserver));
+    *client.shared.cluster.lock().await = Some(active_cluster("dev1"));
+    let calls = Arc::new(AtomicUsize::new(0));
+    client.set_device_waker(Arc::new(FakeWaker {
+      calls: calls.clone(),
+      inject: None,
+    }));
+
+    let target = client.target_or_wake().await.unwrap();
+    assert_eq!(target, "dev1");
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no wake when a device already exists");
+  }
+
+  #[tokio::test]
+  async fn target_or_wake_wakes_and_resolves_when_device_registers() {
+    let client = test_client(Arc::new(NullObserver));
+    let calls = Arc::new(AtomicUsize::new(0));
+    client.set_device_waker(Arc::new(FakeWaker {
+      calls: calls.clone(),
+      inject: Some(client.shared.clone()),
+    }));
+
+    let target = client.target_or_wake().await.unwrap();
+    assert_eq!(target, "dev1");
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "woke exactly once");
   }
 }

@@ -96,7 +96,9 @@ impl HttpExecutor {
   pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse> {
     let transport = self.transport.read().unwrap().clone();
     let (tx, rx) = oneshot::channel();
-    let sink = Arc::new(HttpSink { tx: Mutex::new(Some(tx)) });
+    let sink = Arc::new(HttpSink {
+      tx: Mutex::new(Some(tx)),
+    });
     tracing::trace!(method = ?request.method, url = %request.url, bytes = request.body.len(), "http request");
     transport.execute(request, sink);
     match rx.await {

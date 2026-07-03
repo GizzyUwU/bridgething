@@ -1,6 +1,6 @@
 use libbridgething::{
   PlayerState,
-  gateway::{GatewayToBridgePlayerMsgEventDispatch, QueueSnapshot},
+  gateway::{GatewayToBridgePlayerMsgCommandDispatch, GatewayToBridgePlayerMsgEventDispatch, QueueSnapshot},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -25,6 +25,15 @@ impl GatewayToBridgePlayerMsgEventDispatch for PlayerHandler {
 
   async fn queue_changed(&self, params: QueueSnapshot) -> HandlerResult {
     self.handle.state.player.apply_companion_queue(params).await?;
+    Ok(())
+  }
+}
+
+impl GatewayToBridgePlayerMsgCommandDispatch for PlayerHandler {
+  type Output = HandlerResult;
+
+  async fn request_spotify_wake(&self) -> HandlerResult {
+    self.handle.bluetooth.iap2.transport.wake_spotify().await;
     Ok(())
   }
 }

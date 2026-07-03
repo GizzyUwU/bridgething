@@ -2058,6 +2058,21 @@ export class PlayerSurface {
       }),
     );
   }
+
+  /** Send `Player::RequestSpotifyWake` to every connected peer (broadcast). */
+  async requestSpotifyWake(options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'command' },
+          data: { type: 'player', data: { event: 'requestSpotifyWake' } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
 }
 
 export class SystemSurface {
@@ -4987,6 +5002,16 @@ export class PlayerSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'player', data: { event: 'queueChanged', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Player::RequestSpotifyWake` to this peer. */
+  async requestSpotifyWake(options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'command' },
+      data: { type: 'player', data: { event: 'requestSpotifyWake' } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }

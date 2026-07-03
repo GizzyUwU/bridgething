@@ -114,19 +114,17 @@ impl TransferSinks {
         drop(bindings);
         self.inner.progress.notify_waiters();
       }
-      Some(Binding::Forward(tx)) => {
-        match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
-          Ok(()) => {}
-          Err(TrySendError::Full(_)) => {
-            tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
-            bindings.remove(&id);
-          }
-          Err(TrySendError::Closed(_)) => {
-            tracing::debug!(%id, "transfer consumer gone; unbinding");
-            bindings.remove(&id);
-          }
+      Some(Binding::Forward(tx)) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => {
+          tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
+          bindings.remove(&id);
         }
-      }
+        Err(TrySendError::Closed(_)) => {
+          tracing::debug!(%id, "transfer consumer gone; unbinding");
+          bindings.remove(&id);
+        }
+      },
     }
   }
 

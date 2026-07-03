@@ -1568,7 +1568,6 @@ public struct HttpHeader: Codable, Sendable {
 }
 
 /// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
-/// Presence is the whole signal (the app is alive and draining the ea stream).
 public struct KeepaliveAck: Codable, Sendable {
 	public let seq: UInt32
 
@@ -1577,11 +1576,7 @@ public struct KeepaliveAck: Codable, Sendable {
 	}
 }
 
-/// Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
-/// the outbound frame keeps iOS from suspending the companion process (which
-/// would freeze the dealer ws and drop now-playing authority), and the reply
-/// proves the app is draining the stream. A run of unanswered probes is a
-/// wedged session no disconnect would surface. `seq` is for log correlation.
+/// Periodic liveness probe the daemon sends over the iAP2 EA link.
 public struct KeepalivePing: Codable, Sendable {
 	public let seq: UInt32
 
@@ -5434,12 +5429,10 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	case otaAssetRangeAbandon(OtaAssetRangeAbandon)
 	case deviceNickname(DeviceNicknameReply)
 	case deviceNicknameRejected(DeviceNicknameRejected)
-	/// event broadcast when the nickname changes
 	case deviceNicknameChanged(DeviceNicknameReply)
 	case logsTailReply(LogsTailReply)
 	case logsSubscribeReply(LogsSubscribeReply)
 	case logEntry(LogEntry)
-	/// ea-link liveness probe: keeps ios scheduling the companion, and an unanswered run flags a wedge
 	case keepalive(KeepalivePing)
 
 	enum CodingKeys: String, CodingKey, Codable {
@@ -6648,10 +6641,15 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
 	case queueChanged(QueueSnapshot)
+	/// Companion has a play intent but no live Connect device to target. Asks the daemon to silently wake
+	/// the phone's own Spotify over iAP2 so a device registers in the cluster. Fire-and-forget: the
+	/// companion detects the resulting device via the dealer and issues the play itself.
+	case requestSpotifyWake
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case snapshot,
-			queueChanged
+			queueChanged,
+			requestSpotifyWake
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6672,6 +6670,9 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 					self = .queueChanged(content)
 					return
 				}
+			case .requestSpotifyWake:
+				self = .requestSpotifyWake
+				return
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgePlayerMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgePlayerMsg"))
@@ -6686,6 +6687,8 @@ public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 		case .queueChanged(let content):
 			try container.encode(CodingKeys.queueChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
+		case .requestSpotifyWake:
+			try container.encode(CodingKeys.requestSpotifyWake, forKey: .event)
 		}
 	}
 }
@@ -6702,8 +6705,6 @@ public enum GatewayToBridgeSystemMsg: Codable, Sendable {
 	case logsTail(LogsTail)
 	case logsSubscribe(LogsSubscribe)
 	case logsUnsubscribe(LogsUnsubscribe)
-	/// proof-of-life reply to a `BridgeToGatewaySystemMsg::Keepalive`; an unanswered run flags a wedged
-	/// ea session (link up, app not draining) that no disconnect would surface
 	case keepaliveAck(KeepaliveAck)
 
 	enum CodingKeys: String, CodingKey, Codable {

@@ -88,7 +88,10 @@ pub async fn resolve_username(http: &SpHttp, access_token: &str, device_id: &str
 }
 
 async fn apresolve(http: &SpHttp) -> Result<(String, u16)> {
-  let url = with_query("https://apresolve.spotify.com/".to_string(), &[("type", "accesspoint".to_string())])?;
+  let url = with_query(
+    "https://apresolve.spotify.com/".to_string(),
+    &[("type", "accesspoint".to_string())],
+  )?;
   let resp = http
     .send(HttpMethod::Get, url, reqwest::header::HeaderMap::new(), Vec::new(), 0)
     .await?;

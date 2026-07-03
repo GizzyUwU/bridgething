@@ -266,7 +266,7 @@ sealed class BridgeToGatewayMsgData {
 
 /// bridgething -> gateway
 /// messages from bridgething to the gateway (mobile or desktop app).
-///
+/// 
 /// these messages will pass over bluetooth.
 @Serializable
 data class BridgeToGatewayMsg (
@@ -774,7 +774,7 @@ sealed class GatewayToBridgeMsgData {
 
 /// gateway -> bridgething
 /// messages from the gateway (mobile or desktop app) to bridgething.
-///
+/// 
 /// these messages will pass over bluetooth.
 @Serializable
 data class GatewayToBridgeMsg (
@@ -869,17 +869,12 @@ data class HttpHeader (
 )
 
 /// Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
-/// Presence is the whole signal (the app is alive and draining the ea stream).
 @Serializable
 data class KeepaliveAck (
 	val seq: UInt
 )
 
-/// Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
-/// the outbound frame keeps iOS from suspending the companion process (which
-/// would freeze the dealer ws and drop now-playing authority), and the reply
-/// proves the app is draining the stream. A run of unanswered probes is a
-/// wedged session no disconnect would surface. `seq` is for log correlation.
+/// Periodic liveness probe the daemon sends over the iAP2 EA link.
 @Serializable
 data class KeepalivePing (
 	val seq: UInt
@@ -1370,7 +1365,7 @@ data class NetWsSend (
 /// per-intent slot allowlists are enforced by the json_schema grammar at
 /// decode time, not by this struct. The wire payload omits absent slots,
 /// so a PLAY-with-artist row is just `{ "artist": "..." }` on the wire.
-///
+/// 
 /// String values are passed through verbatim from the user's transcript
 /// (no normalization at this layer); the SpotifyResolver may decorate
 /// the slots with a `uri` after catalog lookup.
@@ -1432,7 +1427,7 @@ data class NluConfidence (
 /// the gateway link for the daemon to dispatch. This is the bridgething-
 /// native shape; the daemon's stock-compat layer wraps it into the
 /// SLIMO `NluMessage` envelope when the active webapp is stock.
-///
+/// 
 /// `transcript` is the ASR output the NLU ran on; carried so the daemon
 /// can echo it for telemetry and so SHOW+UNKNOWN+query="DJ"-style
 /// stock-compat fallbacks have the raw query available.
@@ -1577,7 +1572,7 @@ enum class RepeatMode(val string: String) {
 /// identifier of the app currently driving playback (e.g.
 /// `"com.spotify.client"`). `app_bundle` is null on the Android path
 /// since it isn't a meaningful surface there.
-///
+/// 
 /// `set_elapsed_time_available` is the gate webapps must honor for
 /// scrub UI: when false, scrubbing is unsupported by the foreground
 /// app and the seek button must be disabled.
@@ -1635,7 +1630,7 @@ data class OtaAbandon (
 /// companion sends `OtaActivate` after the final piece to swap them all
 /// live with a single restart. Image OTAs never use this -- they reboot
 /// at write completion.
-///
+/// 
 /// `expected` is the set of `update_id`s the companion staged this
 /// batch. The daemon errors the activate if its staged set does not
 /// match exactly, which guards a desync where a daemon crash dropped the
@@ -1713,7 +1708,7 @@ data class OtaAssetRangeReply (
 )
 
 /// What the streamed bytes are going to be applied as.
-///
+/// 
 /// `Image` streams a `.swu` through libswupdate + slot flip + reboot.
 /// `Daemon` streams a fresh aarch64 daemon binary, atomic-rotates on
 /// the bandaid bind-mount, restarts the service. `BuiltinWebapp`
@@ -1723,7 +1718,7 @@ data class OtaAssetRangeReply (
 /// a zip bundle of a third-party (non-reserved) webapp and installs it
 /// into the writable registry; it neither stages on the bandaid nor
 /// restarts, and is never part of an `OtaActivate` batch.
-///
+/// 
 /// Companions key reboot expectations off this: image means the device
 /// power-cycles; daemon and builtin-webapp mean the daemon process
 /// restarts and the gateway link drops and reconnects; installed-webapp
@@ -1758,16 +1753,16 @@ data class TransferRef (
 /// `OtaBeginAck { resume_from_offset }` (the byte offset the first
 /// `TransferFragment` should start at, 0 for fresh pushes) or
 /// `OtaBeginRejected { reason }`.
-///
+/// 
 /// `kind` selects the backend. See `OtaKind`.
-///
+/// 
 /// `update_id` is the sha256 of the artifact, hex-encoded. Content-
 /// addressed so resume across daemon restarts and retries-after-failure
 /// both work without companion-side state to track. `transfer.id` is
 /// minted per attempt and only correlates the fragment stream; the
 /// daemon binds it to the `update_id`-keyed partial, so a reconnect
 /// with a fresh transfer id still resumes the same bytes.
-///
+/// 
 /// `update_url_base` is image-kind only: the server prefix the companion
 /// may refetch the .zck delta from on cache miss while serving range
 /// requests during the Writing phase. Ignored for non-image kinds.
@@ -1834,16 +1829,16 @@ data class OtaError (
 
 /// Stage of the OTA orchestrator. The phase set is shared between
 /// kinds, with non-image kinds emitting a subset.
-///
+/// 
 /// Image: `Streaming` -> `Verifying` -> `Writing` (libswupdate to slot)
 /// -> `Confirming` (try-counter reset) -> `Reboot`.
-///
+/// 
 /// Daemon and BuiltinWebapp: `Streaming` -> `Verifying` -> `Writing`,
 /// where `Writing`/100 means the piece is validated and staged on the
 /// bandaid (not yet live). The atomic rotate and the single `systemctl
 /// restart` happen later, on `OtaActivate`, which emits the terminal
 /// `Reboot` for the whole batch. `Confirming` is image-only.
-///
+/// 
 /// InstalledWebapp: `Streaming` -> `Verifying` -> `Writing`/0 while the
 /// bundle installs into the writable registry. There is no `Writing`/100,
 /// no `Confirming`, and no `Reboot`; the terminal signal is the
@@ -2153,7 +2148,7 @@ enum class PlaybackState(val string: String) {
 /// Per-session playback snapshot: where in the song we are, what mode is
 /// engaged. `position_ms` is the live playhead at snapshot time; webapps
 /// extrapolate forward locally while `state == Playing`.
-///
+/// 
 /// `set_elapsed_time_available` gates scrub UI: when false, the foreground
 /// app refuses absolute-position seeks and webapps must disable the scrub
 /// thumb. `None` means unknown (no signal received yet); webapps treat
@@ -2445,7 +2440,7 @@ data class StringField (
 /// (or iAP2 device's) claimed "now" in unix-epoch seconds - webapps
 /// reading time should use the device clock if any but use this as the
 /// trust anchor on first arrival.
-///
+/// 
 /// Two zone-identification paths coexist: companion gateways send
 /// `tz_iana` (an IANA zone identifier like `America/Denver`) while iAP2
 /// `DeviceTimeUpdate` only exposes numeric `utc_offset_minutes` plus a
@@ -2912,7 +2907,7 @@ data class WebappUninstall (
 /// Daemon-observed state of the ANCS GATT-client session against the
 /// connected iPhone. iOS-only; emitted on transitions so the companion
 /// app can confirm the LE-pair + ANCS authorization handshake completed.
-///
+/// 
 /// State machine:
 /// - `Unknown`: pre-boot only (no iAP2 has ever attached this session).
 /// - `Probing`: a session task is running but no determination yet,
@@ -3185,7 +3180,6 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("deviceNicknameRejected")
 	data class DeviceNicknameRejected(val data: com.bridgething.schema.DeviceNicknameRejected): BridgeToGatewaySystemMsg()
-	/// event broadcast when the nickname changes
 	@Serializable
 	@SerialName("deviceNicknameChanged")
 	data class DeviceNicknameChanged(val data: DeviceNicknameReply): BridgeToGatewaySystemMsg()
@@ -3198,7 +3192,6 @@ sealed class BridgeToGatewaySystemMsg {
 	@Serializable
 	@SerialName("logEntry")
 	data class LogEntry(val data: com.bridgething.schema.LogEntry): BridgeToGatewaySystemMsg()
-	/// ea-link liveness probe: keeps ios scheduling the companion, and an unanswered run flags a wedge
 	@Serializable
 	@SerialName("keepalive")
 	data class Keepalive(val data: KeepalivePing): BridgeToGatewaySystemMsg()
@@ -3498,6 +3491,12 @@ sealed class GatewayToBridgePlayerMsg {
 	@Serializable
 	@SerialName("queueChanged")
 	data class QueueChanged(val data: QueueSnapshot): GatewayToBridgePlayerMsg()
+	/// Companion has a play intent but no live Connect device to target. Asks the daemon to silently wake
+	/// the phone's own Spotify over iAP2 so a device registers in the cluster. Fire-and-forget: the
+	/// companion detects the resulting device via the dealer and issues the play itself.
+	@Serializable
+	@SerialName("requestSpotifyWake")
+	object RequestSpotifyWake: GatewayToBridgePlayerMsg()
 }
 
 @Serializable(with = GatewayToBridgeSystemMsgSerializer::class)
@@ -3535,8 +3534,6 @@ sealed class GatewayToBridgeSystemMsg {
 	@Serializable
 	@SerialName("logsUnsubscribe")
 	data class LogsUnsubscribe(val data: com.bridgething.schema.LogsUnsubscribe): GatewayToBridgeSystemMsg()
-	/// proof-of-life reply to a `BridgeToGatewaySystemMsg::Keepalive`; an unanswered run flags a wedged
-	/// ea session (link up, app not draining) that no disconnect would surface
 	@Serializable
 	@SerialName("keepaliveAck")
 	data class KeepaliveAck(val data: com.bridgething.schema.KeepaliveAck): GatewayToBridgeSystemMsg()
@@ -3867,7 +3864,7 @@ data class WireErrorHandlerFailedInner (
 /// Protocol-level failure the responder ships when a request could not be
 /// reached or dispatched. Carried by the `Error` variant on every
 /// `*MsgData` enum.
-///
+/// 
 /// Domain-level errors (predictable, op-specific failures the caller may
 /// want to recover from) live inside the per-op response variant, not
 /// here.
@@ -3894,3 +3891,4 @@ sealed class WireError {
 	@SerialName("handlerFailed")
 	data class HandlerFailed(val data: WireErrorHandlerFailedInner): WireError()
 }
+

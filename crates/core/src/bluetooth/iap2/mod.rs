@@ -53,6 +53,9 @@ const IAP2_EVENTS_CAPACITY: usize = 64;
 const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
+const SPOTIFY_EA_PROTOCOL: &str = "com.spotify.wamp.2.msgpack.batched";
+const COMPANION_EA_PROTOCOL_ID: u8 = 1;
+const SPOTIFY_EA_PROTOCOL_ID: u8 = 2;
 
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
@@ -112,6 +115,7 @@ struct ActiveSession {
   hid_tx: mpsc::Sender<HidCommand>,
   np_tx: mpsc::Sender<NowPlayingCommand>,
   tel_tx: mpsc::Sender<TelephonyCommand>,
+  app_launch_tx: mpsc::Sender<String>,
   link_handle: JoinHandle<bridgething_iap2::Result<()>>,
   session_handle: JoinHandle<bridgething_iap2::Result<()>>,
   shovel_handle: JoinHandle<()>,
@@ -129,6 +133,7 @@ impl ActiveSession {
 pub enum Iap2TransportCommand {
   Hid(HidCommand),
   NowPlaying(NowPlayingCommand),
+  RequestAppLaunch(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +164,17 @@ impl Iap2TransportHandle {
   pub async fn send_now_playing(&self, cmd: NowPlayingCommand) {
     if self.tx.send(Iap2TransportCommand::NowPlaying(cmd)).await.is_err() {
       tracing::debug!(?cmd, "iap2 transport command dropped; manager exited");
+    }
+  }
+
+  pub async fn wake_spotify(&self) {
+    if self
+      .tx
+      .send(Iap2TransportCommand::RequestAppLaunch(SPOTIFY_BUNDLE_ID))
+      .await
+      .is_err()
+    {
+      tracing::debug!("iap2 wake-spotify command dropped; manager exited");
     }
   }
 }
@@ -415,6 +431,7 @@ impl Iap2Manager {
     let (hid_tx, hid_rx) = mpsc::channel::<HidCommand>(IAP2_CHANNEL_CAPACITY);
     let (np_tx, np_rx) = mpsc::channel::<NowPlayingCommand>(IAP2_CHANNEL_CAPACITY);
     let (tel_tx, tel_rx) = mpsc::channel::<TelephonyCommand>(IAP2_CHANNEL_CAPACITY);
+    let (app_launch_tx, app_launch_rx) = mpsc::channel::<String>(IAP2_CHANNEL_CAPACITY);
 
     let link_config = LinkConfig::new(Lsp::accessory_default());
     let link_handle = tokio::spawn(Link::run(stream, link_config, link_events_tx, link_command_rx));
@@ -424,6 +441,7 @@ impl Iap2Manager {
       self.identification.clone(),
       Some(COMPANION_BUNDLE_ID.to_string()),
       vec![SPOTIFY_BUNDLE_ID.to_string()],
+      app_launch_rx,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -451,6 +469,7 @@ impl Iap2Manager {
         hid_tx,
         np_tx,
         tel_tx,
+        app_launch_tx,
         link_handle,
         session_handle,
         shovel_handle,
@@ -474,6 +493,11 @@ impl Iap2Manager {
       Iap2TransportCommand::NowPlaying(np) => {
         if session.np_tx.send(np).await.is_err() {
           tracing::debug!(?np, "iAP2 session NowPlaying receiver closed; dropping command");
+        }
+      }
+      Iap2TransportCommand::RequestAppLaunch(bundle) => {
+        if session.app_launch_tx.send(bundle.to_string()).await.is_err() {
+          tracing::debug!(bundle, "iAP2 session app-launch receiver closed; dropping command");
         }
       }
     }
@@ -639,12 +663,20 @@ fn build_identification(meta: &SuperbirdMeta) -> IdentificationConfig {
     firmware_version: format!("v{}", env!("CARGO_PKG_VERSION")),
     bt_mac,
   });
-  config.supported_external_accessory_protocols = vec![EaProtocol {
-    id: 1,
-    name: COMPANION_BUNDLE_ID.to_string(),
-    match_action: EaProtocolMatchAction::NoAlertAction,
-    native_transport_component_identifier: None,
-  }];
+  config.supported_external_accessory_protocols = vec![
+    EaProtocol {
+      id: COMPANION_EA_PROTOCOL_ID,
+      name: COMPANION_BUNDLE_ID.to_string(),
+      match_action: EaProtocolMatchAction::NoAlertAction,
+      native_transport_component_identifier: None,
+    },
+    EaProtocol {
+      id: SPOTIFY_EA_PROTOCOL_ID,
+      name: SPOTIFY_EA_PROTOCOL.to_string(),
+      match_action: EaProtocolMatchAction::NoAlertAction,
+      native_transport_component_identifier: None,
+    },
+  ];
   config
 }
 

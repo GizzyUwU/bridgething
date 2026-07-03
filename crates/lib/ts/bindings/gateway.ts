@@ -425,7 +425,8 @@ export type GatewayToBridgePhoneMsg =
  */
 export type GatewayToBridgePlayerMsg =
   | { event: 'snapshot'; data: PlayerState }
-  | { event: 'queueChanged'; data: QueueSnapshot };
+  | { event: 'queueChanged'; data: QueueSnapshot }
+  | { event: 'requestSpotifyWake' };
 
 export type GatewayToBridgeSystemMsg =
   | { event: 'otaBegin'; data: OtaBegin }
@@ -490,16 +491,11 @@ export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
 
 /**
  * Companion's reply to a `BridgeToGatewaySystemMsg::Keepalive`; echoes `seq`.
- * Presence is the whole signal (the app is alive and draining the ea stream).
  */
 export type KeepaliveAck = { seq: number };
 
 /**
- * Periodic liveness probe the daemon sends over the iAP2 EA link. Two jobs:
- * the outbound frame keeps iOS from suspending the companion process (which
- * would freeze the dealer ws and drop now-playing authority), and the reply
- * proves the app is draining the stream. A run of unanswered probes is a
- * wedged session no disconnect would surface. `seq` is for log correlation.
+ * Periodic liveness probe the daemon sends over the iAP2 EA link.
  */
 export type KeepalivePing = { seq: number };
 

@@ -31,6 +31,7 @@ pub struct QueueSnapshot {
 /// changes; the daemon derives the post-advance next from the held
 /// snapshot, so a plain advance costs no queue traffic.
 #[typeshare]
+#[allow(clippy::large_enum_variant)]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
@@ -41,4 +42,6 @@ pub enum GatewayToBridgePlayerMsg {
   Snapshot(PlayerState),
   #[bridge_event]
   QueueChanged(QueueSnapshot),
+  #[bridge_command]
+  RequestSpotifyWake,
 }

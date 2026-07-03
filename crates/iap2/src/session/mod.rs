@@ -127,6 +127,7 @@ pub enum SessionEvent {
 pub struct Iap2Session<M: MfiAccess> {
   identification: IdentificationConfig,
   app_launch_bundle_id: Option<String>,
+  app_launch_command_rx: mpsc::Receiver<String>,
   mfi: M,
   link_command_tx: mpsc::Sender<Iap2Command>,
   link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -155,10 +156,12 @@ impl<M: MfiAccess> Iap2Session<M> {
     now_playing_authority: watch::Receiver<NowPlayingAuthorityState>,
     telephony_command_rx: mpsc::Receiver<TelephonyCommand>,
   ) -> Self {
+    let (_app_launch_tx, app_launch_command_rx) = mpsc::channel(1);
     Self::with_app_launch(
       identification,
       None,
       Vec::new(),
+      app_launch_command_rx,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -175,6 +178,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     identification: IdentificationConfig,
     app_launch_bundle_id: Option<String>,
     artwork_suppress_bundles: Vec<String>,
+    app_launch_command_rx: mpsc::Receiver<String>,
     mfi: M,
     link_command_tx: mpsc::Sender<Iap2Command>,
     link_events_rx: mpsc::Receiver<Iap2Event>,
@@ -196,6 +200,7 @@ impl<M: MfiAccess> Iap2Session<M> {
       device: DeviceFlow::new(),
       identification,
       app_launch_bundle_id,
+      app_launch_command_rx,
       mfi,
       link_command_tx,
       link_events_rx,
@@ -223,6 +228,7 @@ impl<M: MfiAccess> Iap2Session<M> {
     let mut control_buf = BytesMut::new();
     let mut np_authority_last = NowPlayingAuthorityState::default();
     let mut np_authority_closed = false;
+    let mut app_launch_closed = false;
 
     loop {
       while let Some(frame) = CsmCodec.decode(&mut control_buf)? {
@@ -255,7 +261,15 @@ impl<M: MfiAccess> Iap2Session<M> {
           Some(Iap2Event::Established(lsp)) => {
             tracing::debug!("iap2 session: link established");
             if self.ea.is_none() {
-              self.ea = Some(EaFlow::new(self.link_command_tx.clone(), lsp.max_len));
+              let accept_id = self.app_launch_bundle_id.as_deref().and_then(|bundle| {
+                self
+                  .identification
+                  .supported_external_accessory_protocols
+                  .iter()
+                  .find(|p| p.name == bundle)
+                  .map(|p| p.id)
+              });
+              self.ea = Some(EaFlow::new(self.link_command_tx.clone(), lsp.max_len, accept_id));
             }
             emit(&self.session_events_tx, SessionEvent::LinkEstablished(lsp)).await;
           }
@@ -311,6 +325,18 @@ impl<M: MfiAccess> Iap2Session<M> {
             tracing::warn!(?err, "iap2 session: telephony command dispatch failed");
           }
         }
+        maybe_bundle = self.app_launch_command_rx.recv(), if !app_launch_closed => match maybe_bundle {
+          Some(bundle) => {
+            if let Some(ea) = self.ea.as_mut() {
+              if let Err(err) = ea.request_app_launch(&bundle, &self.link_command_tx).await {
+                tracing::warn!(?err, "iap2 session: on-demand app launch dispatch failed");
+              }
+            } else {
+              tracing::warn!(bundle, "iap2 session: on-demand app launch before link Established; dropping");
+            }
+          }
+          None => app_launch_closed = true,
+        },
         res = self.now_playing_authority.changed(), if !np_authority_closed => {
           if res.is_err() {
             np_authority_closed = true;
