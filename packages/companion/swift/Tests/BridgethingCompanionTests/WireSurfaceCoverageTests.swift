@@ -97,6 +97,8 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "phone.mute", "phone.dtmf",
         // tunnel
         "tunnel.data", "tunnel.close",
+        // transfer
+        "transfer.ack",
         // system OTA
         "system.otaProgress", "system.otaError", "system.otaBeginAck",
         "system.otaBeginRejected", "system.otaAssetRangeAbandon",

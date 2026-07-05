@@ -609,23 +609,11 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 
-/**
- * Platform seam for waking the phone's own Spotify when a play intent lands with no live Connect target.
- * iOS asks the daemon to send an iAP2 RequestAppLaunch; Android fires a local media-button intent. Called
- * fire-and-forget - the client waits for the woken device to register in the cluster, it does not block on
- * this returning.
- */
 public protocol DeviceWaker: AnyObject, Sendable {
     
     func wakeDevice() 
     
 }
-/**
- * Platform seam for waking the phone's own Spotify when a play intent lands with no live Connect target.
- * iOS asks the daemon to send an iAP2 RequestAppLaunch; Android fires a local media-button intent. Called
- * fire-and-forget - the client waits for the woken device to register in the cluster, it does not block on
- * this returning.
- */
 open class DeviceWakerImpl: DeviceWaker, @unchecked Sendable {
     fileprivate let handle: UInt64
 

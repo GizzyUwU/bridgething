@@ -966,6 +966,23 @@ public class PlayerSurface(private val gateway: BridgethingGateway) {
     }
   }
 
+  /** Send `Player::RequestSpotifyWake` to every connected peer (broadcast). */
+  public suspend fun requestSpotifyWake(priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Command,
+            data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.RequestSpotifyWake),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
 }
 
 /** Cross-peer methods for the `System` wire surface. */
@@ -1230,6 +1247,53 @@ public class SystemSurface(private val gateway: BridgethingGateway) {
       val handle = KeepalivePingHandle(gateway, it.deviceId, it.message.id)
       handle to inner.data
     }
+
+}
+
+/** Cross-peer methods for the `Transfer` wire surface. */
+public class TransferSurface(private val gateway: BridgethingGateway) {
+  /** Cross-peer stream of `Transfer::Ack` messages. */
+  public val ack: Flow<Pair<String, TransferAck>> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Transfer ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTransferMsg.Ack ?: return@mapNotNull null
+      it.deviceId to inner.data
+    }
+
+  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
+  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
+
+  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
+  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
+    val ids = gateway.connectedDeviceIds()
+    coroutineScope {
+      ids.map { deviceId ->
+        async {
+          val msg = GatewayToBridgeMsg(
+            id = UUID.randomUUID(),
+            meta = MsgMeta.Event,
+            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
+          )
+          gateway.send(deviceId, msg, priority)
+        }
+      }.awaitAll()
+    }
+  }
 
 }
 
@@ -1791,44 +1855,6 @@ public class TimeSurface(private val gateway: BridgethingGateway) {
             id = UUID.randomUUID(),
             meta = MsgMeta.Event,
             data = GatewayToBridgeMsgData.Time(GatewayToBridgeTimeMsg.Snapshot(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-}
-
-/** Cross-peer methods for the `Transfer` wire surface. */
-public class TransferSurface(private val gateway: BridgethingGateway) {
-  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
-  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
-          )
-          gateway.send(deviceId, msg, priority)
-        }
-      }.awaitAll()
-    }
-  }
-
-  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
-  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
-    val ids = gateway.connectedDeviceIds()
-    coroutineScope {
-      ids.map { deviceId ->
-        async {
-          val msg = GatewayToBridgeMsg(
-            id = UUID.randomUUID(),
-            meta = MsgMeta.Event,
-            data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
           )
           gateway.send(deviceId, msg, priority)
         }
@@ -2716,6 +2742,16 @@ public class PlayerSurfaceForDevice(
     gateway.send(deviceId, msg, priority)
   }
 
+  /** Send `Player::RequestSpotifyWake` to this peer. */
+  public suspend fun requestSpotifyWake(priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Command,
+      data = GatewayToBridgeMsgData.Player(GatewayToBridgePlayerMsg.RequestSpotifyWake),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
 }
 
 /** Per-peer methods for the `System` wire surface (deviceId is baked in). */
@@ -2968,6 +3004,43 @@ public class SystemSurfaceForDevice(
       val handle = KeepalivePingHandle(gateway, it.deviceId, it.message.id)
       handle to inner.data
     }
+
+}
+
+/** Per-peer methods for the `Transfer` wire surface (deviceId is baked in). */
+public class TransferSurfaceForDevice(
+  private val gateway: BridgethingGateway,
+  public val deviceId: String,
+) {
+  /** Stream of `Transfer::Ack` from this peer. */
+  public val ack: Flow<TransferAck> = gateway.events
+    .filterIsInstance<GatewayEvent.Message>()
+    .filter { it.deviceId == deviceId }
+    .mapNotNull {
+      val outer = it.message.data as? BridgeToGatewayMsgData.Transfer ?: return@mapNotNull null
+      val inner = outer.data as? BridgeToGatewayTransferMsg.Ack ?: return@mapNotNull null
+      inner.data
+    }
+
+  /** Send `Transfer::Fragment` to this peer. */
+  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
+
+  /** Send `Transfer::Abandon` to this peer. */
+  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
+    val msg = GatewayToBridgeMsg(
+      id = UUID.randomUUID(),
+      meta = MsgMeta.Event,
+      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
+    )
+    gateway.send(deviceId, msg, priority)
+  }
 
 }
 
@@ -3511,33 +3584,6 @@ public class TimeSurfaceForDevice(
 
 }
 
-/** Per-peer methods for the `Transfer` wire surface (deviceId is baked in). */
-public class TransferSurfaceForDevice(
-  private val gateway: BridgethingGateway,
-  public val deviceId: String,
-) {
-  /** Send `Transfer::Fragment` to this peer. */
-  public suspend fun fragment(payload: TransferFragment, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Fragment(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-  /** Send `Transfer::Abandon` to this peer. */
-  public suspend fun abandon(payload: TransferAbandon, priority: Priority = Priority.Normal) {
-    val msg = GatewayToBridgeMsg(
-      id = UUID.randomUUID(),
-      meta = MsgMeta.Event,
-      data = GatewayToBridgeMsgData.Transfer(GatewayToBridgeTransferMsg.Abandon(payload)),
-    )
-    gateway.send(deviceId, msg, priority)
-  }
-
-}
-
 /** Per-peer methods for the `Lyrics` wire surface (deviceId is baked in). */
 public class LyricsSurfaceForDevice(
   private val gateway: BridgethingGateway,
@@ -3580,6 +3626,8 @@ public class BridgethingGatewayDevice(
   public val player: PlayerSurfaceForDevice get() = PlayerSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `System` wire surface. */
   public val system: SystemSurfaceForDevice get() = SystemSurfaceForDevice(gateway, deviceId)
+  /** Per-peer methods for the `Transfer` wire surface. */
+  public val transfer: TransferSurfaceForDevice get() = TransferSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Tunnel` wire surface. */
   public val tunnel: TunnelSurfaceForDevice get() = TunnelSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Voice` wire surface. */
@@ -3598,8 +3646,6 @@ public class BridgethingGatewayDevice(
   public val chrome: ChromeSurfaceForDevice get() = ChromeSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Time` wire surface. */
   public val time: TimeSurfaceForDevice get() = TimeSurfaceForDevice(gateway, deviceId)
-  /** Per-peer methods for the `Transfer` wire surface. */
-  public val transfer: TransferSurfaceForDevice get() = TransferSurfaceForDevice(gateway, deviceId)
   /** Per-peer methods for the `Lyrics` wire surface. */
   public val lyrics: LyricsSurfaceForDevice get() = LyricsSurfaceForDevice(gateway, deviceId)
 }
@@ -3640,6 +3686,10 @@ public val BridgethingGateway.player: PlayerSurface
 public val BridgethingGateway.system: SystemSurface
   get() = SystemSurface(this)
 
+/** Methods scoped to the `Transfer` wire surface. */
+public val BridgethingGateway.transfer: TransferSurface
+  get() = TransferSurface(this)
+
 /** Methods scoped to the `Tunnel` wire surface. */
 public val BridgethingGateway.tunnel: TunnelSurface
   get() = TunnelSurface(this)
@@ -3675,10 +3725,6 @@ public val BridgethingGateway.chrome: ChromeSurface
 /** Methods scoped to the `Time` wire surface. */
 public val BridgethingGateway.time: TimeSurface
   get() = TimeSurface(this)
-
-/** Methods scoped to the `Transfer` wire surface. */
-public val BridgethingGateway.transfer: TransferSurface
-  get() = TransferSurface(this)
 
 /** Methods scoped to the `Lyrics` wire surface. */
 public val BridgethingGateway.lyrics: LyricsSurface

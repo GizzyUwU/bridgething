@@ -46,6 +46,9 @@ public object BridgeToGatewayPlayerMsgSerializer :
 public object BridgeToGatewaySystemMsgSerializer :
   KSerializer<BridgeToGatewaySystemMsg> by AdjacentTaggedSerializer(BridgeToGatewaySystemMsg::class, discriminator = "event")
 
+public object BridgeToGatewayTransferMsgSerializer :
+  KSerializer<BridgeToGatewayTransferMsg> by AdjacentTaggedSerializer(BridgeToGatewayTransferMsg::class, discriminator = "event")
+
 public object BridgeToGatewayTunnelMsgSerializer :
   KSerializer<BridgeToGatewayTunnelMsg> by AdjacentTaggedSerializer(BridgeToGatewayTunnelMsg::class, discriminator = "event")
 

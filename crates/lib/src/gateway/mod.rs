@@ -121,6 +121,8 @@ pub enum BridgeToGatewayMsgData {
   #[from]
   System(BridgeToGatewaySystemMsg),
   #[from]
+  Transfer(BridgeToGatewayTransferMsg),
+  #[from]
   Tunnel(BridgeToGatewayTunnelMsg),
   #[from]
   Voice(BridgeToGatewayVoiceMsg),

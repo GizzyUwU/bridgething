@@ -218,26 +218,18 @@ impl BluetoothManager {
         } = bootstrap;
 
         tracing::debug!("initializing bluetooth manager");
-        let session = Session::new().await?;
-        let adapter = adapter::get_adapter(&session).await?;
-
-        tracing::debug!("attempting to power on adapter");
-        adapter.set_powered(true).await?;
+        let (session, adapter) = retry_bluez("bluetooth bring-up", Self::bring_up_adapter).await;
 
         tracing::info!("initialized bluetooth adapter {}", adapter.name());
 
-        tracing::debug!("configuring adapter");
-        adapter.set_pairable_timeout(0).await?;
-        adapter.set_pairable(true).await?;
-
-        adapter.set_discoverable_timeout(0).await?;
-        adapter.set_discoverable(true).await?;
         if let Err(err) = scan::apply_fast_inquiry_scan(&adapter) {
           tracing::warn!(?err, "failed to apply fast inquiry scan params");
         }
 
         #[cfg(debug_assertions)]
-        debug::query_adapter(&adapter).await?;
+        if let Err(err) = debug::query_adapter(&adapter).await {
+          tracing::warn!(?err, "adapter debug query failed");
+        }
 
         tracing::debug!("setting up bluetooth profile manager");
         let profile_man = Arc::new(ProfileManager::init(
@@ -249,17 +241,20 @@ impl BluetoothManager {
         ));
         let _ = profile_man_tx.send(Some(profile_man.clone()));
 
-        let _agent_handle = auth::build_agent(&session, profile_man.clone()).await?;
+        let _agent_handle = retry_bluez("agent registration", || {
+          auth::build_agent(&session, profile_man.clone())
+        })
+        .await;
 
         // start stream BEFORE device reconnection attempts
         let _adapter_event_handle = adapter::AdapterEventStream {
-          stream: Box::new(adapter.events().await?),
+          stream: Box::new(retry_bluez("adapter event stream", || adapter.events()).await),
           adapter: adapter.clone(),
         }
         .spawn(profile_man.clone());
 
         tracing::debug!("setting up bluetooth gateway transports");
-        let source = rfcomm::bluez_source(&session).await?;
+        let source = retry_bluez("rfcomm profile registration", || rfcomm::bluez_source(&session)).await;
         let gateway_runtime = self
           .gateway_man
           .start(gateway, source, network_bind, &deps, bluetooth_tx)
@@ -308,6 +303,21 @@ impl BluetoothManager {
     self.iap2.reconnect.kick(address).await;
     Ok(())
   }
+
+  async fn bring_up_adapter() -> BluetoothResult<(Session, bluer::Adapter)> {
+    let session = Session::new().await?;
+    let adapter = adapter::get_adapter(&session).await?;
+
+    tracing::debug!("attempting to power on adapter");
+    adapter.set_powered(true).await?;
+
+    tracing::debug!("configuring adapter");
+    adapter.set_pairable_timeout(0).await?;
+    adapter.set_pairable(true).await?;
+    adapter.set_discoverable_timeout(0).await?;
+    adapter.set_discoverable(true).await?;
+    Ok((session, adapter))
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -330,6 +340,25 @@ impl ProfileManAccess {
 
   pub fn try_get(&self) -> Option<ProfileMan> {
     self.rx.borrow().clone()
+  }
+}
+
+pub(crate) async fn retry_bluez<T, E, F, Fut>(what: &str, mut op: F) -> T
+where
+  E: std::fmt::Debug,
+  F: FnMut() -> Fut,
+  Fut: std::future::Future<Output = Result<T, E>>,
+{
+  let mut delay = Duration::from_millis(250);
+  loop {
+    match op().await {
+      Ok(value) => return value,
+      Err(err) => {
+        tracing::warn!(?err, "{what} failed; retrying in {}ms", delay.as_millis());
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(Duration::from_secs(30));
+      }
+    }
   }
 }
 
@@ -605,14 +634,6 @@ impl GatewayMan {
     req: R,
   ) -> Result<R::Response, RequestError<R::DomainError>> {
     self.request_with_priority(address, req, Priority::Normal).await
-  }
-
-  pub async fn request_bulk<R: WireRequest<Outbound = BridgeToGatewayMsgData, Inbound = GatewayToBridgeMsgData>>(
-    &self,
-    address: Option<Address>,
-    req: R,
-  ) -> Result<R::Response, RequestError<R::DomainError>> {
-    self.request_with_priority(address, req, Priority::Bulk).await
   }
 
   async fn request_with_priority<

@@ -99,6 +99,7 @@ public actor BridgethingCompanion {
     #if os(iOS)
         private let audioKeepAlive = BackgroundAudioKeepAlive()
     #endif
+    private let transferAcks = TransferAckWindow()
 
     public init(
         adapter: any Adapter,
@@ -454,6 +455,12 @@ public actor BridgethingCompanion {
     private func spawnDispatchers() {
         tasks.append(Task { [weak self] in await self?.runConnectAnnouncer() })
         tasks.append(Task { [weak self] in await self?.runKeepaliveResponder() })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            for await (_, ack) in gateway.transfer.ack {
+                await transferAcks.note(transferId: ack.transferId, received: ack.received)
+            }
+        })
         #if os(iOS)
             tasks.append(Task { [weak self] in
                 for await _ in NotificationCenter.default.notifications(
@@ -597,8 +604,10 @@ public actor BridgethingCompanion {
         }
     }
 
-    private static let assetFragmentBytes = 8 * 1024
+    private static let assetFragmentBytes = 4 * 1024
     private static let inlineBodyMaxBytes = 8 * 1024
+    private static let transferWindowBytes = 8 * 1024
+    private static let transferAckTimeoutSeconds: Double = 15
 
     private func handleAsset(handle: AssetRequestHandle, id: String, requestId: UUID) async {
         let bytes: AssetBytes?
@@ -626,17 +635,21 @@ public actor BridgethingCompanion {
             try await handle.respond(AssetGotReply(id: id, mime: payload.mime, body: .inline(data)))
             return
         }
-        try await handle.respond(AssetGotReply(
-            id: id,
-            mime: payload.mime,
-            body: .stream(TransferRef(id: requestId, totalSize: UInt32(data.count), sha256: nil))
-        ))
+        try await handle.respond(
+            AssetGotReply(
+                id: id,
+                mime: payload.mime,
+                body: .stream(TransferRef(id: requestId, totalSize: UInt32(data.count), sha256: nil))
+            ),
+            priority: .normal
+        )
         try await Self.sendFragments(
             surface: gateway.device(handle.deviceId).transfer,
             transferId: requestId,
             data: data,
             fragmentBytes: Self.assetFragmentBytes,
-            priority: .bulk
+            priority: .background,
+            acks: transferAcks
         )
     }
 
@@ -645,10 +658,24 @@ public actor BridgethingCompanion {
         transferId: UUID,
         data: Data,
         fragmentBytes: Int,
-        priority: Priority
+        priority: Priority,
+        acks: TransferAckWindow? = nil
     ) async throws {
         var offset = 0
         while offset < data.count {
+            if let acks {
+                while true {
+                    let acked = await acks.receivedBytes(transferId)
+                    if offset < Int(acked) + Self.transferWindowBytes { break }
+                    guard await acks.waitForProgress(
+                        transferId, beyond: acked, timeoutSeconds: Self.transferAckTimeoutSeconds
+                    ) else {
+                        await acks.finish(transferId)
+                        try? await surface.abandon(TransferAbandon(transferId: transferId, reason: "ack timeout"))
+                        throw TransferStalled()
+                    }
+                }
+            }
             let end = min(offset + fragmentBytes, data.count)
             try await surface.fragment(
                 TransferFragment(transferId: transferId, offset: UInt32(offset), bytes: data.subdata(in: offset ..< end)),
@@ -656,6 +683,7 @@ public actor BridgethingCompanion {
             )
             offset = end
         }
+        if let acks { await acks.finish(transferId) }
     }
 
     // MARK: - library dispatch

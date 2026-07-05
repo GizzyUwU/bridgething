@@ -46,7 +46,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
     }
 
     let outbound = gateway::NetFetchRequestMsg { request };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -122,7 +122,7 @@ impl ClientToBridgeNetMsgDispatch for NetHandler {
       protocols: open.protocols,
       headers: open.headers,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle

@@ -111,7 +111,6 @@ class SpotifyGlue(
         SpotifyClient.create(workerBase, psk, deviceId, store, observer).also {
             it.setWsTransport(KtorWsTransport())
             it.setHttpTransport(KtorHttpTransport())
-            appContext?.let { ctx -> it.setDeviceWaker(IntentDeviceWaker(ctx)) }
         }
     },
 ) : BridgethingGlue {
@@ -155,8 +154,11 @@ class SpotifyGlue(
     @Volatile private var lastSentQueueOrder: List<String> = emptyList()
     @Volatile private var lastSentThumbEdge = DEFAULT_THUMB_EDGE
     @Volatile private var lastHadItem = false
+    @Volatile private var lastKnownDeviceCount: Int? = null
+    @Volatile private var wakeOnEmptyCluster = false
 
     @Volatile private var sink: NowPlayingSink? = null
+    private val localWaker: DeviceWaker? = appContext?.let { IntentDeviceWaker(it) }
 
     // MARK: - lifecycle
 
@@ -166,6 +168,7 @@ class SpotifyGlue(
         resetQueueDedup()
 
         val client = clientFactory(tokenStore, ObserverBridge(this))
+        localWaker?.let { client.setDeviceWaker(it) }
         this.client = client
 
         authObserver?.invoke(GlueAuthState.Pending(null))
@@ -212,6 +215,11 @@ class SpotifyGlue(
 
     override suspend fun handlePeerConnected() {
         if (gateway == null) return
+        val fireWake = lastKnownDeviceCount?.let { it == 0 } ?: run {
+            wakeOnEmptyCluster = true
+            false
+        }
+        if (fireWake) localWaker?.wakeDevice()
         val pending = lastState?.takeIf { it.track != null } ?: return
         val fresh = client?.currentPositionMs()
         val state = if (fresh != null) pending.copy(positionMs = fresh) else pending
@@ -229,6 +237,14 @@ class SpotifyGlue(
         val hasItem = state.track != null
         lastHadItem = hasItem
         sink?.submitPlayer(name, makeSnapshot(state, heroEdge, liked, likeSupported), SPOTIFY_APP_BUNDLE, hasItem)
+    }
+
+    private fun onDevices(devices: List<SpDevice>) {
+        lastKnownDeviceCount = devices.size
+        if (wakeOnEmptyCluster) {
+            wakeOnEmptyCluster = false
+            if (devices.isEmpty()) localWaker?.wakeDevice()
+        }
     }
 
     private fun onQueue(queue: SpQueue) {
@@ -587,7 +603,7 @@ class SpotifyGlue(
         private val glue = WeakReference(glue)
         override fun onPlayer(state: SpPlayerState) { glue.get()?.onPlayer(state) }
         override fun onQueue(queue: SpQueue) { glue.get()?.onQueue(queue) }
-        override fun onDevices(devices: List<SpDevice>) {}
+        override fun onDevices(devices: List<SpDevice>) { glue.get()?.onDevices(devices) }
         override fun onAuth(state: SpAuthState) { glue.get()?.onAuth(state) }
         override fun onLibraryChanged(scope: SpLibraryScope) { glue.get()?.onLibraryChanged(scope) }
     }
@@ -760,7 +776,7 @@ class SpotifyGlue(
                 bmp
             }
             val out = java.io.ByteArrayOutputStream()
-            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
             out.toByteArray()
         }.getOrNull()
     }

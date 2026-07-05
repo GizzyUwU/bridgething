@@ -82,8 +82,11 @@ final class AssetLyricsDispatchTests: XCTestCase {
         XCTAssertEqual(ref.id, requestId, "stream ref id must be the request id")
         XCTAssertEqual(ref.totalSize, UInt32(payload.count))
 
-        // fragments follow on the bulk lane, offset-ordered and complete.
+        // fragments follow on the background lane, offset-ordered, complete, and
+        // never more than one window past the acked byte count.
         var assembled = Data()
+        var acked: UInt32 = 0
+        let windowBytes = 8 * 1024
         while assembled.count < payload.count {
             let frame = try await h.driver.waitOutbound(timeout: .seconds(3)) { msg in
                 if case let .transfer(.fragment(f)) = msg.data, f.transferId == requestId { return true }
@@ -91,7 +94,16 @@ final class AssetLyricsDispatchTests: XCTestCase {
             }
             guard case let .transfer(.fragment(f)) = frame.data else { continue }
             XCTAssertEqual(Int(f.offset), assembled.count, "fragments must arrive in offset order")
+            XCTAssertLessThan(
+                Int(f.offset), Int(acked) + windowBytes,
+                "sender must not run more than one window past the acked bytes"
+            )
             assembled.append(f.bytes)
+            acked = f.offset + UInt32(f.bytes.count)
+            try await h.driver.send(
+                .transfer(.ack(TransferAck(transferId: requestId, received: acked))),
+                meta: .event
+            )
         }
         XCTAssertEqual(assembled, payload)
         await h.companion.stop()

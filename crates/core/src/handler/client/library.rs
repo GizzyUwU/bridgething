@@ -133,7 +133,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -164,7 +164,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: req.limit.min(BROWSE_LIMIT_MAX),
       offset: req.offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -191,7 +191,7 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
     };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle
@@ -293,7 +293,7 @@ pub(super) async fn browse_request(
   let Some(node_id) = req.node_id.clone() else {
     let base = root_cache
       .get_or_fetch(player.root_browse_gen(), ROOT_BROWSE_TTL, || async {
-        gateway_man.request_bulk(None, req).await.map(|reply| reply.result)
+        gateway_man.request(None, req).await.map(|reply| reply.result)
       })
       .await?;
     return Ok(BrowseReply {
@@ -304,7 +304,7 @@ pub(super) async fn browse_request(
   let limit = req.limit;
   let result = content_cache
     .get_or_fetch(&node_id, offset, limit, player.root_browse_gen(), || async move {
-      gateway_man.request_bulk(None, req).await.map(|reply| reply.result)
+      gateway_man.request(None, req).await.map(|reply| reply.result)
     })
     .await?;
   Ok(BrowseReply { result })
@@ -381,7 +381,7 @@ pub(super) async fn favorites_contains_request(
       liked: vec![false; req.uris.len()],
     });
   }
-  gateway_man.request_bulk(None, req).await
+  gateway_man.request(None, req).await
 }
 
 #[cfg(test)]

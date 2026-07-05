@@ -29,6 +29,45 @@
   /// background retry keeps running so the link self-heals when the accessory is
   /// ready again (recreating an `EASession` races the previous one's async release,
   /// so a single fast burst is not enough on a mid-session drop).
+  /// Dedicated thread whose run loop carries all EA stream I/O. Keeping the
+  /// streams off the main run loop decouples link throughput and latency from
+  /// UI work on the main thread.
+  private final class EAIOThread {
+    private let thread: Thread
+    private let cfLoop: CFRunLoop
+
+    init() {
+      let ready = DispatchSemaphore(value: 0)
+      let box = UnsafeMutablePointer<CFRunLoop?>.allocate(capacity: 1)
+      box.initialize(to: nil)
+      thread = Thread {
+        box.pointee = CFRunLoopGetCurrent()
+        ready.signal()
+        RunLoop.current.add(NSMachPort(), forMode: .default)
+        while !Thread.current.isCancelled {
+          RunLoop.current.run(mode: .default, before: .distantFuture)
+        }
+      }
+      thread.name = "bridgething-ea-io"
+      thread.qualityOfService = .userInitiated
+      thread.start()
+      ready.wait()
+      cfLoop = box.pointee!
+      box.deinitialize(count: 1)
+      box.deallocate()
+    }
+
+    func perform(_ block: @escaping () -> Void) {
+      CFRunLoopPerformBlock(cfLoop, CFRunLoopMode.defaultMode.rawValue, block)
+      CFRunLoopWakeUp(cfLoop)
+    }
+
+    func stop() {
+      thread.cancel()
+      CFRunLoopWakeUp(cfLoop)
+    }
+  }
+
   public final class EAAccessoryAdapter: NSObject, Adapter, @unchecked Sendable {
     public nonisolated let events: AsyncStream<AdapterEvent>
     private let eventContinuation: AsyncStream<AdapterEvent>.Continuation
@@ -36,10 +75,10 @@
     private let protocolString: String
     private let maxOpenAttempts = 6
     private let slowRetryInterval = 5.0
+    private let ioThread = EAIOThread()
 
-    // The trailing state is only read or mutated from the main thread: public methods hop via
-    // MainActor.run and stream/notification callbacks fire on main because we scheduled them there.
     private var sessions: [String: SessionState] = [:]
+    private var linkedUp: Set<String> = []
     private var retryTasks: [String: Task<Void, Never>] = [:]
     private var linkFailedReported: Set<String> = []
     private var observers: [NSObjectProtocol] = []
@@ -100,9 +139,11 @@
         self.retryTasks.removeAll()
         self.linkFailedReported.removeAll()
         for (_, session) in self.sessions {
-          session.tearDown()
+          self.ioThread.perform { session.tearDown() }
         }
         self.sessions.removeAll()
+        self.linkedUp.removeAll()
+        self.ioThread.stop()
         self.started = false
         self.eventContinuation.finish()
       }
@@ -112,8 +153,9 @@
       let known = await MainActor.run { () -> Bool in
         self.retryTasks.removeValue(forKey: deviceId)?.cancel()
         self.linkFailedReported.remove(deviceId)
+        self.linkedUp.remove(deviceId)
         guard let session = self.sessions.removeValue(forKey: deviceId) else { return false }
-        session.tearDown()
+        self.ioThread.perform { session.tearDown() }
         self.eventContinuation.yield(.disconnected(deviceId: deviceId))
         return true
       }
@@ -124,7 +166,10 @@
       try await MainActor.run {
         self.retryTasks.removeValue(forKey: deviceId)?.cancel()
         self.linkFailedReported.remove(deviceId)
-        self.sessions.removeValue(forKey: deviceId)?.tearDown()
+        self.linkedUp.remove(deviceId)
+        if let session = self.sessions.removeValue(forKey: deviceId) {
+          self.ioThread.perform { session.tearDown() }
+        }
         guard let accessory = EAAccessoryManager.shared().connectedAccessories
           .first(where: { Self.deviceId(for: $0) == deviceId })
         else { throw AdapterError.unknownDevice(deviceId) }
@@ -133,14 +178,12 @@
     }
 
     public func send(deviceId: String, frame: Data) async throws {
-      let result: Result<Void, AdapterError> = await MainActor.run {
-        guard let session = self.sessions[deviceId], session.isLinkedUp else {
-          return .failure(.unknownDevice(deviceId))
-        }
-        session.enqueueWrite(frame)
-        return .success(())
+      let session: SessionState? = await MainActor.run {
+        guard self.linkedUp.contains(deviceId) else { return nil }
+        return self.sessions[deviceId]
       }
-      try result.get()
+      guard let session else { throw AdapterError.unknownDevice(deviceId) }
+      ioThread.perform { session.enqueueWrite(frame) }
     }
 
     // MARK: - main-thread internals
@@ -153,6 +196,7 @@
     fileprivate func linkUp(_ state: SessionState) {
       let id = state.deviceId
       guard sessions[id] === state else { return }
+      linkedUp.insert(id)
       retryTasks.removeValue(forKey: id)?.cancel()
       linkFailedReported.remove(id)
       eaLog.info("ea link up for \(id)")
@@ -164,7 +208,7 @@
       let id = state.deviceId
       eaLog.warning("ea open failed for \(id) (attempt \(state.attempt + 1)): \(reason)")
       if sessions[id] === state { sessions.removeValue(forKey: id) }
-      state.tearDown()
+      ioThread.perform { state.tearDown() }
       scheduleRetryOrFail(accessory: state.accessory, attempt: state.attempt, reason: reason)
     }
 
@@ -172,7 +216,8 @@
       let id = state.deviceId
       guard sessions[id] === state else { return }
       sessions.removeValue(forKey: id)
-      state.tearDown()
+      linkedUp.remove(id)
+      ioThread.perform { state.tearDown() }
       let stillAttached = EAAccessoryManager.shared().connectedAccessories
         .contains { Self.deviceId(for: $0) == id }
       if stillAttached {
@@ -188,8 +233,9 @@
     private func handleDisconnect(deviceId: String) {
       retryTasks.removeValue(forKey: deviceId)?.cancel()
       linkFailedReported.remove(deviceId)
+      linkedUp.remove(deviceId)
       if let session = sessions.removeValue(forKey: deviceId) {
-        session.tearDown()
+        ioThread.perform { session.tearDown() }
         eventContinuation.yield(.disconnected(deviceId: deviceId))
       }
     }
@@ -206,7 +252,9 @@
         )
         return
       }
-      sessions[id] = SessionState(accessory: accessory, session: session, owner: self, attempt: attempt)
+      let state = SessionState(accessory: accessory, session: session, owner: self, attempt: attempt)
+      sessions[id] = state
+      ioThread.perform { state.openStreams() }
     }
 
     private func scheduleRetryOrFail(accessory: EAAccessory, attempt: Int, reason: String) {
@@ -254,7 +302,7 @@
 
     private var inputOpen = false
     private var outputOpen = false
-    private(set) var isLinkedUp = false
+    private var isLinkedUp = false
     private var openFailed = false
 
     var deviceId: String {
@@ -268,14 +316,17 @@
       self.owner = owner
       self.attempt = attempt
       super.init()
+    }
+
+    func openStreams() {
       if let input = session.inputStream {
         input.delegate = self
-        input.schedule(in: .main, forMode: .common)
+        input.schedule(in: .current, forMode: .default)
         input.open()
       }
       if let output = session.outputStream {
         output.delegate = self
-        output.schedule(in: .main, forMode: .common)
+        output.schedule(in: .current, forMode: .default)
         output.open()
       }
     }
@@ -283,12 +334,12 @@
     func tearDown() {
       if let input = session.inputStream {
         input.close()
-        input.remove(from: .main, forMode: .common)
+        input.remove(from: .current, forMode: .default)
         input.delegate = nil
       }
       if let output = session.outputStream {
         output.close()
-        output.remove(from: .main, forMode: .common)
+        output.remove(from: .current, forMode: .default)
         output.delegate = nil
       }
     }
@@ -311,8 +362,13 @@
       }
       if queuedBytes > hardCapBytes {
         eaLog.warning("ea writer backlog \(queuedBytes) bytes over hard cap for \(deviceId); dropping stalled link")
-        owner?.linkDropped(self, reason: "writer backlog exceeded")
+        dropLink(reason: "writer backlog exceeded")
       }
+    }
+
+    private func dropLink(reason: String) {
+      let owner = owner
+      Task { @MainActor in owner?.linkDropped(self, reason: reason) }
     }
 
     private func drainOutput() {
@@ -335,7 +391,7 @@
         }
         if written < 0 {
           eaLog.warning("ea write error for \(deviceId): \(String(describing: out.streamError)); dropping link")
-          owner?.linkDropped(self, reason: "write error")
+          dropLink(reason: "write error")
           return
         }
         if written <= 0 { break }
@@ -351,7 +407,8 @@
         if aStream === session.outputStream { outputOpen = true }
         if inputOpen, outputOpen, !isLinkedUp {
           isLinkedUp = true
-          owner?.linkUp(self)
+          let owner = owner
+          Task { @MainActor in owner?.linkUp(self) }
         }
       case .hasBytesAvailable:
         guard let input = aStream as? InputStream else { return }
@@ -363,7 +420,7 @@
           }
           if n < 0 {
             eaLog.warning("ea read error for \(deviceId): \(String(describing: input.streamError)); dropping link")
-            owner?.linkDropped(self, reason: "read error")
+            dropLink(reason: "read error")
             return
           }
           if n <= 0 { break }
@@ -374,11 +431,12 @@
       case .endEncountered, .errorOccurred:
         if isLinkedUp {
           let reason = eventCode == .errorOccurred ? "stream error after link-up" : "stream closed after link-up"
-          owner?.linkDropped(self, reason: reason)
+          dropLink(reason: reason)
         } else if !openFailed {
           openFailed = true
           let reason = eventCode == .errorOccurred ? "stream error during open" : "stream closed during open"
-          owner?.linkOpenFailed(self, reason: reason)
+          let owner = owner
+          Task { @MainActor in owner?.linkOpenFailed(self, reason: reason) }
         }
       default:
         break

@@ -13,7 +13,11 @@
 //! chunker - Bulk frames yield to Normal at chunk boundaries inside
 //! the iap2 crate.
 
-use std::collections::HashMap;
+use std::{
+  collections::HashMap,
+  sync::{Arc, Mutex},
+  time::Instant,
+};
 
 use bluer::Address;
 use bridgething_iap2::session::{EaPriority, EaStreamSender};
@@ -69,12 +73,32 @@ pub struct StreamClosed {
   pub stream_id: u16,
 }
 
-/// Public-facing handle the iap2 manager hands its observe loop. The
-/// gateway task owns the receiving side and is the only consumer.
+/// Per-peer wall of last inbound EA bytes. Congestion discriminator for the application keepalive
+#[derive(Clone, Debug, Default)]
+pub struct EaActivity {
+  inner: Arc<Mutex<HashMap<Address, Instant>>>,
+}
+
+impl EaActivity {
+  fn stamp(&self, address: Address) {
+    self.inner.lock().unwrap().insert(address, Instant::now());
+  }
+
+  fn clear(&self, address: Address) {
+    self.inner.lock().unwrap().remove(&address);
+  }
+
+  pub fn last_inbound(&self, address: Address) -> Option<Instant> {
+    self.inner.lock().unwrap().get(&address).copied()
+  }
+}
+
+/// Public-facing handle the iap2 manager hands its observe loop
 #[derive(Clone, Debug)]
 pub struct Iap2EaGatewayHandle {
   open_tx: mpsc::Sender<StreamOpened>,
   closed_tx: mpsc::Sender<StreamClosed>,
+  activity: EaActivity,
 }
 
 impl Iap2EaGatewayHandle {
@@ -88,6 +112,10 @@ impl Iap2EaGatewayHandle {
     if let Err(err) = self.closed_tx.send(closed).await {
       tracing::warn!(?err, "iap2 ea gateway: close notification dropped");
     }
+  }
+
+  pub fn activity(&self) -> EaActivity {
+    self.activity.clone()
   }
 }
 
@@ -112,6 +140,7 @@ pub struct Iap2EaGateway {
   conn_close_rx: mpsc::Receiver<Key>,
   conns: HashMap<Key, StreamConn>,
   peer_owners: PeerOwners,
+  activity: EaActivity,
 }
 
 impl Iap2EaGateway {
@@ -125,7 +154,12 @@ impl Iap2EaGateway {
     let (open_tx, open_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
     let (closed_tx, closed_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
     let (conn_close_tx, conn_close_rx) = mpsc::channel(STREAM_INPUT_CAPACITY);
-    let handle = Iap2EaGatewayHandle { open_tx, closed_tx };
+    let activity = EaActivity::default();
+    let handle = Iap2EaGatewayHandle {
+      open_tx,
+      closed_tx,
+      activity: activity.clone(),
+    };
     let gateway = Self {
       meta,
       peers,
@@ -138,6 +172,7 @@ impl Iap2EaGateway {
       conn_close_rx,
       conns: HashMap::new(),
       peer_owners,
+      activity,
     };
     (gateway, handle)
   }
@@ -194,6 +229,7 @@ impl Iap2EaGateway {
       self.conn_close_tx.clone(),
       key,
       outbound.clone(),
+      self.activity.clone(),
     ));
     self.conns.insert(
       key,
@@ -259,6 +295,7 @@ impl Iap2EaGateway {
     tracing::info!(address = %key.0, stream_id = key.1, "iap2 ea gateway: stream torn down");
     let still_open_for_address = self.conns.keys().any(|(a, _)| *a == key.0);
     if !still_open_for_address {
+      self.activity.clear(key.0);
       self.peer_owners.unregister(key.0, GatewayType::Iap2Ea);
       let _ = self.peers.set_companion(key.0, PeerCompanionStatus::None).await;
     }
@@ -272,6 +309,7 @@ async fn reader_task(
   conn_close_tx: mpsc::Sender<Key>,
   key: Key,
   outbound: EaStreamSender,
+  activity: EaActivity,
 ) {
   let mut buf = BytesMut::new();
   let mut codec = BridgeEndec::default();
@@ -318,7 +356,10 @@ async fn reader_task(
     }
 
     match inbound_rx.recv().await {
-      Some(chunk) => buf.extend_from_slice(&chunk),
+      Some(chunk) => {
+        activity.stamp(address);
+        buf.extend_from_slice(&chunk);
+      }
       None => {
         tracing::debug!(%address, "iap2 ea gateway: inbound channel closed");
         let _ = conn_close_tx.send(key).await;

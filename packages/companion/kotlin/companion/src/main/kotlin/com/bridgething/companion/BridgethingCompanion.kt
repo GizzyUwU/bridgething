@@ -60,6 +60,7 @@ import com.bridgething.schema.NetworkInfo
 import com.bridgething.schema.NetworkKind
 import com.bridgething.schema.SurfaceAvailability
 import com.bridgething.schema.TimeInfo
+import com.bridgething.schema.TransferAbandon
 import com.bridgething.schema.TransferBody
 import com.bridgething.schema.TransferFragment
 import com.bridgething.schema.TransferRef
@@ -193,6 +194,7 @@ public class BridgethingCompanion(
 
     private val supervisor: CompletableJob = SupervisorJob()
     private val scope = CoroutineScope(supervisor + Dispatchers.Default + CoroutineName("bridgething-companion"))
+    private val transferAcks = TransferAckWindow()
 
     private val stateMutex = Mutex()
     private var capFlags: CompanionCapabilityFlags = capabilities
@@ -484,6 +486,11 @@ public class BridgethingCompanion(
         systemMediaSource.start()
         dispatchers.add(scope.launch { runConnectAnnouncer() })
         dispatchers.add(scope.launch { runKeepaliveResponder() })
+        dispatchers.add(
+            scope.launch {
+                gateway.transfer.ack.collect { (_, ack) -> transferAcks.note(ack.transferId, ack.received) }
+            },
+        )
         dispatchers.add(scope.launch { runPlayerDispatch() })
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })
@@ -637,8 +644,9 @@ public class BridgethingCompanion(
                 mime = payload.mime,
                 body = TransferBody.Stream(TransferRef(id = requestId, totalSize = data.size.toUInt(), sha256 = null)),
             ),
+            priority = Priority.Normal,
         )
-        sendFragments(handle.deviceId, requestId, data, ASSET_FRAGMENT_BYTES, Priority.Bulk)
+        sendFragments(handle.deviceId, requestId, data, ASSET_FRAGMENT_BYTES, Priority.Background, transferAcks)
     }
 
     internal suspend fun sendFragments(
@@ -647,9 +655,25 @@ public class BridgethingCompanion(
         data: ByteArray,
         fragmentBytes: Int,
         priority: Priority,
+        acks: TransferAckWindow? = null,
     ) {
         var offset = 0
         while (offset < data.size) {
+            if (acks != null) {
+                while (true) {
+                    val acked = acks.receivedBytes(transferId)
+                    if (offset < acked.toInt() + TRANSFER_WINDOW_BYTES) break
+                    if (!acks.waitForProgress(transferId, acked, TRANSFER_ACK_TIMEOUT_MS)) {
+                        acks.finish(transferId)
+                        runCatching {
+                            gateway.device(deviceId).transfer.abandon(
+                                TransferAbandon(transferId = transferId, reason = "ack timeout"),
+                            )
+                        }
+                        error("transfer stalled: fragment acks stopped")
+                    }
+                }
+            }
             val end = minOf(offset + fragmentBytes, data.size)
             gateway.device(deviceId).transfer.fragment(
                 TransferFragment(transferId = transferId, offset = offset.toUInt(), bytes = data.copyOfRange(offset, end)),
@@ -657,6 +681,7 @@ public class BridgethingCompanion(
             )
             offset = end
         }
+        acks?.finish(transferId)
     }
 
     private suspend fun runLyricsDispatch() {
@@ -855,7 +880,9 @@ public class BridgethingCompanion(
 
     private companion object {
         const val TAG = "bridgething.companion"
-        const val ASSET_FRAGMENT_BYTES = 8 * 1024
+        const val ASSET_FRAGMENT_BYTES = 4 * 1024
         const val INLINE_BODY_MAX_BYTES = 8 * 1024
+        const val TRANSFER_WINDOW_BYTES = 8 * 1024
+        const val TRANSFER_ACK_TIMEOUT_MS = 15_000L
     }
 }

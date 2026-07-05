@@ -638,6 +638,14 @@ impl PlayerState {
     self.iap2_playback.shuffle
   }
 
+  pub fn iap2_app_bundle(&self) -> Option<String> {
+    self.iap2_playback.app_bundle.clone().filter(|b| !b.is_empty())
+  }
+
+  pub fn iap2_playing(&self) -> Option<bool> {
+    self.iap2_playback.playing
+  }
+
   pub fn iap2_repeat_mode(&self) -> Option<RepeatMode> {
     self.iap2_playback.repeat
   }

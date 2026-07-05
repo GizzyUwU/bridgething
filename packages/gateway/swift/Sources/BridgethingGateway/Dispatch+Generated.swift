@@ -1712,6 +1712,57 @@ public struct SystemSurface: Sendable {
 
 }
 
+/// Cross-peer methods for the `Transfer` wire surface.
+public struct TransferSurface: Sendable {
+  public let gateway: BridgethingGateway
+
+  /// Cross-peer stream of `Transfer::Ack` messages.
+  public var ack: AsyncStream<(deviceId: String, msg: TransferAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .transfer(let outer) = message.data,
+             case .ack(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Transfer::Fragment` to every connected peer (broadcast).
+  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Transfer::Abandon` to every connected peer (broadcast).
+  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+}
+
 /// Cross-peer methods for the `Tunnel` wire surface.
 public struct TunnelSurface: Sendable {
   public let gateway: BridgethingGateway
@@ -2437,40 +2488,6 @@ public struct TimeSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .time(.snapshot(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-}
-
-/// Cross-peer methods for the `Transfer` wire surface.
-public struct TransferSurface: Sendable {
-  public let gateway: BridgethingGateway
-
-  /// Send `Transfer::Fragment` to every connected peer (broadcast).
-  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
-          try await gateway.send(deviceId: deviceId, msg, priority: priority)
-        }
-      }
-      try await group.waitForAll()
-    }
-  }
-
-  /// Send `Transfer::Abandon` to every connected peer (broadcast).
-  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
-    let ids = await gateway.connectedDeviceIds()
-    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
-      for deviceId in ids {
-        group.addTask {
-          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -4060,6 +4077,43 @@ public struct SystemSurfaceForDevice: Sendable {
 
 }
 
+/// Per-peer methods for the `Transfer` wire surface (deviceId is baked in).
+public struct TransferSurfaceForDevice: Sendable {
+  public let gateway: BridgethingGateway
+  public let deviceId: String
+
+  /// Stream of `Transfer::Ack` from this peer.
+  public var ack: AsyncStream<TransferAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .transfer(let outer) = message.data,
+             case .ack(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Send `Transfer::Fragment` to this peer.
+  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Transfer::Abandon` to this peer.
+  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+}
+
 /// Per-peer methods for the `Tunnel` wire surface (deviceId is baked in).
 public struct TunnelSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -4738,25 +4792,6 @@ public struct TimeSurfaceForDevice: Sendable {
 
 }
 
-/// Per-peer methods for the `Transfer` wire surface (deviceId is baked in).
-public struct TransferSurfaceForDevice: Sendable {
-  public let gateway: BridgethingGateway
-  public let deviceId: String
-
-  /// Send `Transfer::Fragment` to this peer.
-  public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-  /// Send `Transfer::Abandon` to this peer.
-  public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
-    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
-    try await gateway.send(deviceId: deviceId, msg, priority: priority)
-  }
-
-}
-
 /// Per-peer methods for the `Lyrics` wire surface (deviceId is baked in).
 public struct LyricsSurfaceForDevice: Sendable {
   public let gateway: BridgethingGateway
@@ -4806,6 +4841,8 @@ public struct BridgethingGatewayDevice: Sendable {
   public var player: PlayerSurfaceForDevice { PlayerSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `System` wire surface.
   public var system: SystemSurfaceForDevice { SystemSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
+  /// Per-peer methods for the `Transfer` wire surface.
+  public var transfer: TransferSurfaceForDevice { TransferSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Tunnel` wire surface.
   public var tunnel: TunnelSurfaceForDevice { TunnelSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Voice` wire surface.
@@ -4824,8 +4861,6 @@ public struct BridgethingGatewayDevice: Sendable {
   public var chrome: ChromeSurfaceForDevice { ChromeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Time` wire surface.
   public var time: TimeSurfaceForDevice { TimeSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
-  /// Per-peer methods for the `Transfer` wire surface.
-  public var transfer: TransferSurfaceForDevice { TransferSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
   /// Per-peer methods for the `Lyrics` wire surface.
   public var lyrics: LyricsSurfaceForDevice { LyricsSurfaceForDevice(gateway: gateway, deviceId: deviceId) }
 }
@@ -4849,6 +4884,8 @@ extension BridgethingGateway {
   public nonisolated var player: PlayerSurface { PlayerSurface(gateway: self) }
   /// Methods scoped to the `System` wire surface.
   public nonisolated var system: SystemSurface { SystemSurface(gateway: self) }
+  /// Methods scoped to the `Transfer` wire surface.
+  public nonisolated var transfer: TransferSurface { TransferSurface(gateway: self) }
   /// Methods scoped to the `Tunnel` wire surface.
   public nonisolated var tunnel: TunnelSurface { TunnelSurface(gateway: self) }
   /// Methods scoped to the `Voice` wire surface.
@@ -4867,8 +4904,6 @@ extension BridgethingGateway {
   public nonisolated var chrome: ChromeSurface { ChromeSurface(gateway: self) }
   /// Methods scoped to the `Time` wire surface.
   public nonisolated var time: TimeSurface { TimeSurface(gateway: self) }
-  /// Methods scoped to the `Transfer` wire surface.
-  public nonisolated var transfer: TransferSurface { TransferSurface(gateway: self) }
   /// Methods scoped to the `Lyrics` wire surface.
   public nonisolated var lyrics: LyricsSurface { LyricsSurface(gateway: self) }
   /// Returns a per-device proxy with `deviceId` baked into every method and stream.

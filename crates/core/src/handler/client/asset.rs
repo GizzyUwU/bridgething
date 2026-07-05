@@ -24,9 +24,11 @@ use crate::{
 };
 
 const PRELOAD_IDS_MAX: usize = 64;
-const PRELOAD_PARALLELISM: usize = 16;
+const PRELOAD_PARALLELISM: usize = 1;
+const ASSET_PULL_PARALLELISM: usize = 2;
 const IAP2_ART_PREFIX: &str = "iap2/art/";
 static PRELOAD_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(PRELOAD_PARALLELISM));
+static ASSET_PULL_GATE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(ASSET_PULL_PARALLELISM));
 
 #[derive(Debug)]
 pub struct AssetHandler {
@@ -136,6 +138,7 @@ pub(crate) async fn request_asset_body(
   bluetooth: &BluetoothMan,
   id: &str,
 ) -> Option<(Bytes, Option<String>)> {
+  let _permit = ASSET_PULL_GATE.acquire().await;
   let request_id = Uuid::now_v7();
   // bind before sending so fragments racing ahead of the terminal reply are not dropped
   sinks.bind_memory(request_id);

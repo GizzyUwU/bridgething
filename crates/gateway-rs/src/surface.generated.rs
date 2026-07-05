@@ -41,6 +41,10 @@ impl Gateway {
   pub fn system(&self) -> SystemSurface<'_> {
     SystemSurface(self)
   }
+  /// The `Transfer` surface.
+  pub fn transfer(&self) -> TransferSurface<'_> {
+    TransferSurface(self)
+  }
   /// The `Tunnel` surface.
   pub fn tunnel(&self) -> TunnelSurface<'_> {
     TunnelSurface(self)
@@ -72,10 +76,6 @@ impl Gateway {
   /// The `Time` surface.
   pub fn time(&self) -> TimeSurface<'_> {
     TimeSurface(self)
-  }
-  /// The `Transfer` surface.
-  pub fn transfer(&self) -> TransferSurface<'_> {
-    TransferSurface(self)
   }
 }
 
@@ -289,6 +289,30 @@ impl<'a> SystemSurface<'a> {
   }
 }
 
+/// Methods scoped to the `Transfer` wire surface.
+pub struct TransferSurface<'a>(&'a Gateway);
+
+impl<'a> TransferSurface<'a> {
+  pub async fn fragment(&self, payload: TransferFragment) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTransferMsgEvent::Fragment(payload)).await
+  }
+  pub async fn abandon(&self, payload: TransferAbandon) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTransferMsgEvent::Abandon(payload)).await
+  }
+  /// Stream of `Transfer` events.
+  pub fn events(&self) -> impl Stream<Item = BridgeToGatewayTransferMsgEvent> + 'static {
+    BroadcastStream::new(self.0.events()).filter_map(|msg| {
+      ready(match msg {
+        Ok(msg) => match msg.data {
+          BridgeToGatewayMsgData::Transfer(inner) => inner.into_event(),
+          _ => None,
+        },
+        Err(_) => None,
+      })
+    })
+  }
+}
+
 /// Methods scoped to the `Tunnel` wire surface.
 pub struct TunnelSurface<'a>(&'a Gateway);
 
@@ -430,17 +454,5 @@ pub struct TimeSurface<'a>(&'a Gateway);
 impl<'a> TimeSurface<'a> {
   pub async fn snapshot(&self, payload: TimeInfo) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeTimeMsgEvent::Snapshot(payload)).await
-  }
-}
-
-/// Methods scoped to the `Transfer` wire surface.
-pub struct TransferSurface<'a>(&'a Gateway);
-
-impl<'a> TransferSurface<'a> {
-  pub async fn fragment(&self, payload: TransferFragment) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeTransferMsgEvent::Fragment(payload)).await
-  }
-  pub async fn abandon(&self, payload: TransferAbandon) -> Result<(), SdkError> {
-    self.0.event(GatewayToBridgeTransferMsgEvent::Abandon(payload)).await
   }
 }

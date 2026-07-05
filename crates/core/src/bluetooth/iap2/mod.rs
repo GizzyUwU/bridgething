@@ -33,7 +33,7 @@ use bridgething_iap2::{
   session::{TelephonyCommand, WorkerMfiAccess},
 };
 use bridgething_mfi::MfiAuth;
-pub use ea::{Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
+pub use ea::{EaActivity, Iap2EaGateway, Iap2EaGatewayHandle, StreamClosed, StreamOpened};
 use futures::StreamExt;
 use tokio::{
   sync::{RwLock, mpsc, watch},
@@ -52,7 +52,7 @@ const IAP2_EVENTS_CAPACITY: usize = 64;
 #[cfg(feature = "test-tap")]
 const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
-const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
+pub(crate) const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
 const SPOTIFY_EA_PROTOCOL: &str = "com.spotify.wamp.2.msgpack.batched";
 const COMPANION_EA_PROTOCOL_ID: u8 = 1;
 const SPOTIFY_EA_PROTOCOL_ID: u8 = 2;
@@ -308,30 +308,34 @@ impl Iap2Manager {
       }
     };
 
-    let server_profile = Profile {
-      uuid: IAP2_ACCESSORY_UUID,
-      name: Some(IAP2_PROFILE_NAME.to_string()),
-      role: Some(Role::Server),
-      channel: Some(IAP2_RFCOMM_CHANNEL as u16),
-      require_authentication: Some(false),
-      require_authorization: Some(false),
-      auto_connect: Some(true),
-      service_record: Some(iap2_service_record()),
-      ..Default::default()
-    };
-    let server_handle = session.register_profile(server_profile).await?;
+    let server_handle = super::retry_bluez("iap2 server profile registration", || {
+      session.register_profile(Profile {
+        uuid: IAP2_ACCESSORY_UUID,
+        name: Some(IAP2_PROFILE_NAME.to_string()),
+        role: Some(Role::Server),
+        channel: Some(IAP2_RFCOMM_CHANNEL as u16),
+        require_authentication: Some(false),
+        require_authorization: Some(false),
+        auto_connect: Some(true),
+        service_record: Some(iap2_service_record()),
+        ..Default::default()
+      })
+    })
+    .await;
     tracing::info!(channel = IAP2_RFCOMM_CHANNEL, "registered iAP2 RFCOMM server profile");
 
-    let client_profile = Profile {
-      uuid: IAP2_DEVICE_UUID,
-      name: Some(IAP2_CLIENT_PROFILE_NAME.to_string()),
-      role: Some(Role::Client),
-      require_authentication: Some(false),
-      require_authorization: Some(false),
-      auto_connect: Some(true),
-      ..Default::default()
-    };
-    let client_handle = session.register_profile(client_profile).await?;
+    let client_handle = super::retry_bluez("iap2 client profile registration", || {
+      session.register_profile(Profile {
+        uuid: IAP2_DEVICE_UUID,
+        name: Some(IAP2_CLIENT_PROFILE_NAME.to_string()),
+        role: Some(Role::Client),
+        require_authentication: Some(false),
+        require_authorization: Some(false),
+        auto_connect: Some(true),
+        ..Default::default()
+      })
+    })
+    .await;
     tracing::info!("registered iAP2 RFCOMM client profile (accessory-initiated reconnect)");
 
     let identification = build_identification(meta);

@@ -81,6 +81,7 @@ class SpotifyGlueDispatchTest {
         override suspend fun currentPositionMs(): UInt? = currentPosition
         override fun setWsTransport(transport: uniffi.spotify.WsTransport) {}
         override fun setHttpTransport(transport: uniffi.spotify.HttpTransport) {}
+        override fun setDeviceWaker(waker: uniffi.spotify.DeviceWaker) {}
         override suspend fun pause() {}
         override suspend fun resume() {}
         override suspend fun skipNext() {}

@@ -70,6 +70,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var likedOverride: [String: Bool] = [:]
     private var artHeroEdge = defaultHeroEdge
     private var artThumbEdge = defaultThumbEdge
+    private var lastKnownDeviceCount: Int?
+    private var wakeOnEmptyCluster = false
 
     private var emitTask: Task<Void, Never>?
     private var emitContinuation: AsyncStream<EmitJob>.Continuation?
@@ -252,6 +254,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     public func handlePeerConnected() async {
         guard currentGateway() != nil else { return }
+        let fireWake = stateLock.withLock { () -> Bool in
+            if let count = lastKnownDeviceCount { return count == 0 }
+            wakeOnEmptyCluster = true
+            return false
+        }
+        if fireWake {
+            glueLog.info("connect cluster empty at peer connect; requesting spotify wake")
+            wakePhoneSpotify()
+        }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
         guard var pending = stateLock.withLock({ lastState }), pending.track != nil else { return }
@@ -294,6 +305,19 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let entries = Array(queue.next.prefix(queueMax).map { Self.queueItem(from: $0, maxEdge: thumb) })
         stateLock.withLock { lastQueueItems = entries }
         enqueue(.queue(entries: entries, thumbEdge: thumb))
+    }
+
+    fileprivate func onDevices(_ devices: [SpDevice]) {
+        let fireWake = stateLock.withLock { () -> Bool in
+            lastKnownDeviceCount = devices.count
+            guard wakeOnEmptyCluster else { return false }
+            wakeOnEmptyCluster = false
+            return devices.isEmpty
+        }
+        if fireWake {
+            glueLog.info("connect cluster empty at peer connect; requesting spotify wake")
+            wakePhoneSpotify()
+        }
     }
 
     fileprivate func onLibraryChanged(_ scope: SpLibraryScope) {
@@ -891,7 +915,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
             let out = NSMutableData()
             guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
-            CGImageDestinationAddImage(dest, thumb, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)
+            CGImageDestinationAddImage(dest, thumb, [kCGImageDestinationLossyCompressionQuality: 0.6] as CFDictionary)
             guard CGImageDestinationFinalize(dest) else { return nil }
             return out as Data
         #else
@@ -905,7 +929,7 @@ private final class ObserverBridge: Spotify.Observer, @unchecked Sendable {
     init(_ glue: SpotifyGlue) { self.glue = glue }
     func onPlayer(state: SpPlayerState) { glue?.onPlayer(state) }
     func onQueue(queue: SpQueue) { glue?.onQueue(queue) }
-    func onDevices(devices: [SpDevice]) {}
+    func onDevices(devices: [SpDevice]) { glue?.onDevices(devices) }
     func onAuth(state: SpAuthState) { glue?.onAuth(state) }
     func onLibraryChanged(scope: SpLibraryScope) { glue?.onLibraryChanged(scope) }
 }

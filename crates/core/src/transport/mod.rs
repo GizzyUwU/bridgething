@@ -35,7 +35,7 @@ use crate::{
   player::Player,
 };
 
-mod hid_bit {
+pub(crate) mod hid_bit {
   pub const PLAY_PAUSE: u8 = 0x01;
   pub const NEXT: u8 = 0x02;
   pub const PREV: u8 = 0x04;

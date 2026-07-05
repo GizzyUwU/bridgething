@@ -85,6 +85,7 @@ public enum WireSurfaceManifest {
     "system.otaBeginRejected",
     "system.otaError",
     "system.otaProgress",
+    "transfer.ack",
     "voice.dispatchFailed",
     "voice.dispatched",
     "voice.frame",

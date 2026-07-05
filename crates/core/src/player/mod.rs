@@ -27,6 +27,8 @@ pub struct PlayerSnapshot {
   pub iap2_shuffle: Option<bool>,
   pub iap2_repeat_mode: Option<RepeatMode>,
   pub iap2_set_elapsed_time_available: Option<bool>,
+  pub iap2_app_bundle: Option<String>,
+  pub iap2_playing: Option<bool>,
   pub current_artwork_id: Option<String>,
   pub root_browse_gen: u64,
   pub home_recents: Vec<QueueItem>,
@@ -129,6 +131,14 @@ impl Player {
     self.snapshot_rx.borrow().iap2_set_elapsed_time_available
   }
 
+  pub fn iap2_app_bundle(&self) -> Option<String> {
+    self.snapshot_rx.borrow().iap2_app_bundle.clone()
+  }
+
+  pub fn iap2_playing(&self) -> Option<bool> {
+    self.snapshot_rx.borrow().iap2_playing
+  }
+
   pub fn companion_playback_authoritative(&self) -> bool {
     self.snapshot_rx.borrow().companion_playback_authoritative
   }
@@ -151,6 +161,8 @@ fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {
     iap2_shuffle: state.iap2_shuffle(),
     iap2_repeat_mode: state.iap2_repeat_mode(),
     iap2_set_elapsed_time_available: state.iap2_set_elapsed_time_available(),
+    iap2_app_bundle: state.iap2_app_bundle(),
+    iap2_playing: state.iap2_playing(),
     current_artwork_id: state.current_artwork_id(),
     root_browse_gen: state.root_browse_gen(),
     home_recents: state.home_recents(),

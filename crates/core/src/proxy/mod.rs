@@ -110,7 +110,7 @@ async fn handle_session(
     host: request.host.clone(),
     port: request.port,
   };
-  let reply_code = match bluetooth.gateway_man.request_bulk(None, open).await {
+  let reply_code = match bluetooth.gateway_man.request(None, open).await {
     Ok(_) => SOCKS_REP_OK,
     Err(err) => {
       state.tunnel_routes.drop_id(tunnel_id);

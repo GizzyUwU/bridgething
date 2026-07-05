@@ -240,6 +240,9 @@ sealed class BridgeToGatewayMsgData {
 	@SerialName("system")
 	data class System(val data: BridgeToGatewaySystemMsg): BridgeToGatewayMsgData()
 	@Serializable
+	@SerialName("transfer")
+	data class Transfer(val data: BridgeToGatewayTransferMsg): BridgeToGatewayMsgData()
+	@Serializable
 	@SerialName("tunnel")
 	data class Tunnel(val data: BridgeToGatewayTunnelMsg): BridgeToGatewayMsgData()
 	@Serializable
@@ -2476,6 +2479,13 @@ data class TransferAbandon (
 	val reason: String
 )
 
+/// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
+@Serializable
+data class TransferAck (
+	@Serializable(with = MsgpackUuidSerializer::class) val transferId: UUID,
+	val received: UInt
+)
+
 /// One slice of a transfer's bytes. Variable-size and offset-addressed:
 /// fragments are sent in offset order on the transfer's priority lane,
 /// sized by the sender to its preemption budget. Receivers route by
@@ -3197,6 +3207,13 @@ sealed class BridgeToGatewaySystemMsg {
 	data class Keepalive(val data: KeepalivePing): BridgeToGatewaySystemMsg()
 }
 
+@Serializable(with = BridgeToGatewayTransferMsgSerializer::class)
+sealed class BridgeToGatewayTransferMsg {
+	@Serializable
+	@SerialName("ack")
+	data class Ack(val data: TransferAck): BridgeToGatewayTransferMsg()
+}
+
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
 sealed class BridgeToGatewayTunnelMsg {
 	@Serializable
@@ -3491,9 +3508,6 @@ sealed class GatewayToBridgePlayerMsg {
 	@Serializable
 	@SerialName("queueChanged")
 	data class QueueChanged(val data: QueueSnapshot): GatewayToBridgePlayerMsg()
-	/// Companion has a play intent but no live Connect device to target. Asks the daemon to silently wake
-	/// the phone's own Spotify over iAP2 so a device registers in the cluster. Fire-and-forget: the
-	/// companion detects the resulting device via the dealer and issues the play itself.
 	@Serializable
 	@SerialName("requestSpotifyWake")
 	object RequestSpotifyWake: GatewayToBridgePlayerMsg()

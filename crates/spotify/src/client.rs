@@ -1214,7 +1214,10 @@ mod tests {
   }
 
   fn active_cluster(id: &str) -> Cluster {
-    librespot_protocol::connect::Cluster { active_device_id: id.to_string(), ..Default::default() }
+    librespot_protocol::connect::Cluster {
+      active_device_id: id.to_string(),
+      ..Default::default()
+    }
   }
 
   fn test_client(observer: Arc<dyn Observer>) -> SpotifyClient {

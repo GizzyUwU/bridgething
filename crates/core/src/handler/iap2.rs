@@ -5,7 +5,11 @@
 //! `Iap2EventRouter::route` for each event. State mutation lives here,
 //! one variant per arm.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+  collections::HashMap,
+  sync::Arc,
+  time::{Duration, Instant},
+};
 
 use bluer::Address;
 use bridgething_iap2::{
@@ -25,7 +29,7 @@ use crate::{
   asset::Retention,
   bluetooth::{
     BluetoothMan,
-    iap2::{Iap2EaGatewayHandle, Iap2Event, Iap2ReconnectHandle, StreamClosed, StreamOpened},
+    iap2::{EaActivity, Iap2EaGatewayHandle, Iap2Event, Iap2ReconnectHandle, StreamClosed, StreamOpened},
   },
   state::State,
 };
@@ -112,7 +116,12 @@ impl Iap2EventRouter {
   }
 
   async fn start_ea_keepalive(&self, address: Address) {
-    let handle = spawn_ea_keepalive(self.bluetooth.clone(), self.state.clone(), address);
+    let handle = spawn_ea_keepalive(
+      self.bluetooth.clone(),
+      self.state.clone(),
+      self.ea_gateway.activity(),
+      address,
+    );
     if let Some(prev) = self.keepalive.lock().await.insert(address, handle) {
       prev.abort();
     }
@@ -304,7 +313,7 @@ const EA_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
 const EA_KEEPALIVE_RTT: Duration = Duration::from_secs(7);
 const EA_KEEPALIVE_MAX_MISSES: u32 = 3;
 
-fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, address: Address) -> JoinHandle<()> {
+fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, activity: EaActivity, address: Address) -> JoinHandle<()> {
   tokio::spawn(async move {
     let mut seq: u32 = 0;
     let mut armed = false;
@@ -314,6 +323,7 @@ fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, address: Address) -
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
       tick.tick().await;
+      let started = Instant::now();
       let result = bluetooth
         .gateway_man
         .request_with_timeout(Some(address), KeepalivePing { seq }, EA_KEEPALIVE_RTT)
@@ -321,12 +331,18 @@ fn spawn_ea_keepalive(bluetooth: BluetoothMan, state: State, address: Address) -
       seq = seq.wrapping_add(1);
       match result {
         Ok(_ack) => {
+          tracing::debug!(%address, rtt_ms = started.elapsed().as_millis() as u64, "ea keepalive rtt");
           armed = true;
           misses = 0;
           tripped = false;
         }
         Err(_) => {
-          if armed && !tripped {
+          if activity
+            .last_inbound(address)
+            .is_some_and(|at| at.elapsed() < EA_KEEPALIVE_INTERVAL)
+          {
+            tracing::debug!(%address, seq, "ea keepalive unanswered under active inbound traffic; not a miss");
+          } else if armed && !tripped {
             misses += 1;
             if misses >= EA_KEEPALIVE_MAX_MISSES {
               tripped = true;

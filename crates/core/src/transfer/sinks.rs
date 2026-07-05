@@ -91,38 +91,45 @@ impl TransferSinks {
     self.inner.bindings.lock().unwrap().remove(&id);
   }
 
-  pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) {
+  pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) -> bool {
     use mpsc::error::TrySendError;
 
     let mut bindings = self.inner.bindings.lock().unwrap();
     match bindings.get_mut(&id) {
       None => {
         tracing::trace!(%id, "fragment for unbound transfer; dropping");
+        false
       }
       Some(Binding::Memory(state)) => {
-        if !state.failed {
-          if offset as usize != state.buf.len() {
-            tracing::warn!(%id, expected = state.buf.len(), got = offset, "transfer fragment out of order");
-            state.failed = true;
-          } else if state.buf.len() + bytes.len() > MEMORY_SINK_CAP {
-            tracing::warn!(%id, "transfer exceeds memory sink cap");
-            state.failed = true;
-          } else {
-            state.buf.extend_from_slice(&bytes);
-          }
-        }
+        let consumed = if state.failed {
+          false
+        } else if offset as usize != state.buf.len() {
+          tracing::warn!(%id, expected = state.buf.len(), got = offset, "transfer fragment out of order");
+          state.failed = true;
+          false
+        } else if state.buf.len() + bytes.len() > MEMORY_SINK_CAP {
+          tracing::warn!(%id, "transfer exceeds memory sink cap");
+          state.failed = true;
+          false
+        } else {
+          state.buf.extend_from_slice(&bytes);
+          true
+        };
         drop(bindings);
         self.inner.progress.notify_waiters();
+        consumed
       }
       Some(Binding::Forward(tx)) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
-        Ok(()) => {}
+        Ok(()) => true,
         Err(TrySendError::Full(_)) => {
           tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
           bindings.remove(&id);
+          false
         }
         Err(TrySendError::Closed(_)) => {
           tracing::debug!(%id, "transfer consumer gone; unbinding");
           bindings.remove(&id);
+          false
         }
       },
     }

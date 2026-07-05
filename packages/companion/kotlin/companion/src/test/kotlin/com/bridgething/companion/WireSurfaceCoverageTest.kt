@@ -120,6 +120,8 @@ class WireSurfaceCoverageTest {
         "phone.mute", "phone.dtmf",
         // tunnel
         "tunnel.data", "tunnel.close",
+        // transfer
+        "transfer.ack",
         // system ota
         "system.otaProgress", "system.otaError", "system.otaBeginAck",
         "system.otaBeginRejected", "system.otaAssetRangeAbandon",

@@ -114,6 +114,7 @@ import type {
   SetVolume,
   SkipToIndex,
   TransferAbandon,
+  TransferAck,
   TransferFragment,
   Tts,
   TtsCancel,
@@ -2494,6 +2495,52 @@ export class SystemSurface {
   }
 }
 
+export class TransferSurface {
+  constructor(private readonly _gateway: BridgethingGateway) {}
+
+  /** Subscribe to `Transfer::Ack` across all peers. */
+  onAck(handler: (deviceId: string, msg: TransferAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'ack') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
+  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'transfer', data: { event: 'fragment', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
+  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'transfer', data: { event: 'abandon', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+}
+
 export class TunnelSurface {
   constructor(private readonly _gateway: BridgethingGateway) {}
 
@@ -3333,40 +3380,6 @@ export class TimeSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'time', data: { event: 'snapshot', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-}
-
-export class TransferSurface {
-  constructor(private readonly _gateway: BridgethingGateway) {}
-
-  /** Send `Transfer::Fragment` to every connected peer (broadcast). */
-  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'transfer', data: { event: 'fragment', data: payload } },
-        };
-        return this._gateway.send(deviceId, msg, options);
-      }),
-    );
-  }
-
-  /** Send `Transfer::Abandon` to every connected peer (broadcast). */
-  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
-    const ids = this._gateway.connectedDeviceIds;
-    await Promise.all(
-      ids.map(deviceId => {
-        const msg: GatewayToBridgeMsg = {
-          id: newUuid(),
-          meta: { kind: 'event' },
-          data: { type: 'transfer', data: { event: 'abandon', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -5423,6 +5436,46 @@ export class SystemSurfaceForDevice {
   }
 }
 
+export class TransferSurfaceForDevice {
+  constructor(
+    private readonly _gateway: BridgethingGateway,
+    public readonly deviceId: string,
+  ) {}
+
+  /** Subscribe to `Transfer::Ack` from this peer. */
+  onAck(handler: (msg: TransferAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'ack') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Send `Transfer::Fragment` to this peer. */
+  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'transfer', data: { event: 'fragment', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Transfer::Abandon` to this peer. */
+  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'transfer', data: { event: 'abandon', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+}
+
 export class TunnelSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -6258,33 +6311,6 @@ export class TimeSurfaceForDevice {
   }
 }
 
-export class TransferSurfaceForDevice {
-  constructor(
-    private readonly _gateway: BridgethingGateway,
-    public readonly deviceId: string,
-  ) {}
-
-  /** Send `Transfer::Fragment` to this peer. */
-  async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'transfer', data: { event: 'fragment', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-
-  /** Send `Transfer::Abandon` to this peer. */
-  async abandon(payload: TransferAbandon, options?: { priority?: Priority }): Promise<void> {
-    const msg: GatewayToBridgeMsg = {
-      id: newUuid(),
-      meta: { kind: 'event' },
-      data: { type: 'transfer', data: { event: 'abandon', data: payload } },
-    };
-    await this._gateway.send(this.deviceId, msg, options);
-  }
-}
-
 export class LyricsSurfaceForDevice {
   constructor(
     private readonly _gateway: BridgethingGateway,
@@ -6322,6 +6348,7 @@ export type BridgeMessageHandlers = {
   phone: PhoneInboundHandlers;
   player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
+  transfer: (deviceId: string, msg: TransferAck) => void;
   tunnel: TunnelInboundHandlers;
   voice: VoiceInboundHandlers;
   webapp: WebappInboundHandlers;
@@ -6339,6 +6366,7 @@ export type PartialBridgeMessageHandlers = {
   phone?: Partial<PhoneInboundHandlers>;
   player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
+  transfer?: (deviceId: string, msg: TransferAck) => void;
   tunnel?: Partial<TunnelInboundHandlers>;
   voice?: Partial<VoiceInboundHandlers>;
   webapp?: Partial<WebappInboundHandlers>;
@@ -6356,6 +6384,7 @@ export type BridgeMessageDeviceHandlers = {
   phone: PhoneDeviceInboundHandlers;
   player: PlayerDeviceInboundHandlers;
   system: SystemDeviceInboundHandlers;
+  transfer: (msg: TransferAck) => void;
   tunnel: TunnelDeviceInboundHandlers;
   voice: VoiceDeviceInboundHandlers;
   webapp: WebappDeviceInboundHandlers;
@@ -6373,6 +6402,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   phone?: Partial<PhoneDeviceInboundHandlers>;
   player?: Partial<PlayerDeviceInboundHandlers>;
   system?: Partial<SystemDeviceInboundHandlers>;
+  transfer?: (msg: TransferAck) => void;
   tunnel?: Partial<TunnelDeviceInboundHandlers>;
   voice?: Partial<VoiceDeviceInboundHandlers>;
   webapp?: Partial<WebappDeviceInboundHandlers>;
@@ -6406,6 +6436,8 @@ export interface GatewaySurfaces {
   readonly player: PlayerSurface;
   /** Methods scoped to the `System` wire surface. */
   readonly system: SystemSurface;
+  /** Methods scoped to the `Transfer` wire surface. */
+  readonly transfer: TransferSurface;
   /** Methods scoped to the `Tunnel` wire surface. */
   readonly tunnel: TunnelSurface;
   /** Methods scoped to the `Voice` wire surface. */
@@ -6424,8 +6456,6 @@ export interface GatewaySurfaces {
   readonly chrome: ChromeSurface;
   /** Methods scoped to the `Time` wire surface. */
   readonly time: TimeSurface;
-  /** Methods scoped to the `Transfer` wire surface. */
-  readonly transfer: TransferSurface;
   /** Methods scoped to the `Lyrics` wire surface. */
   readonly lyrics: LyricsSurface;
   /** Returns a per-device proxy with `deviceId` baked into every method and listener. */
@@ -6952,6 +6982,7 @@ type DeviceSurfaceCache = {
   phone?: PhoneSurfaceForDevice;
   player?: PlayerSurfaceForDevice;
   system?: SystemSurfaceForDevice;
+  transfer?: TransferSurfaceForDevice;
   tunnel?: TunnelSurfaceForDevice;
   voice?: VoiceSurfaceForDevice;
   webapp?: WebappSurfaceForDevice;
@@ -6961,7 +6992,6 @@ type DeviceSurfaceCache = {
   capabilities?: CapabilitiesSurfaceForDevice;
   chrome?: ChromeSurfaceForDevice;
   time?: TimeSurfaceForDevice;
-  transfer?: TransferSurfaceForDevice;
   lyrics?: LyricsSurfaceForDevice;
 };
 
@@ -6999,6 +7029,9 @@ export class BridgethingGatewayDevice {
   get system(): SystemSurfaceForDevice {
     return (this._surfaces.system ??= new SystemSurfaceForDevice(this._gateway, this.deviceId));
   }
+  get transfer(): TransferSurfaceForDevice {
+    return (this._surfaces.transfer ??= new TransferSurfaceForDevice(this._gateway, this.deviceId));
+  }
   get tunnel(): TunnelSurfaceForDevice {
     return (this._surfaces.tunnel ??= new TunnelSurfaceForDevice(this._gateway, this.deviceId));
   }
@@ -7026,9 +7059,6 @@ export class BridgethingGatewayDevice {
   get time(): TimeSurfaceForDevice {
     return (this._surfaces.time ??= new TimeSurfaceForDevice(this._gateway, this.deviceId));
   }
-  get transfer(): TransferSurfaceForDevice {
-    return (this._surfaces.transfer ??= new TransferSurfaceForDevice(this._gateway, this.deviceId));
-  }
   get lyrics(): LyricsSurfaceForDevice {
     return (this._surfaces.lyrics ??= new LyricsSurfaceForDevice(this._gateway, this.deviceId));
   }
@@ -7052,6 +7082,7 @@ type GatewaySurfaceCache = {
   phone?: PhoneSurface;
   player?: PlayerSurface;
   system?: SystemSurface;
+  transfer?: TransferSurface;
   tunnel?: TunnelSurface;
   voice?: VoiceSurface;
   webapp?: WebappSurface;
@@ -7061,7 +7092,6 @@ type GatewaySurfaceCache = {
   capabilities?: CapabilitiesSurface;
   chrome?: ChromeSurface;
   time?: TimeSurface;
-  transfer?: TransferSurface;
   lyrics?: LyricsSurface;
 };
 
@@ -7152,6 +7182,14 @@ export function applyDispatch(): void {
       return (bucket.system ??= new SystemSurface(this));
     },
   });
+  Object.defineProperty(BridgethingGateway.prototype, 'transfer', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingGateway): TransferSurface {
+      const bucket = bucketFor(this);
+      return (bucket.transfer ??= new TransferSurface(this));
+    },
+  });
   Object.defineProperty(BridgethingGateway.prototype, 'tunnel', {
     configurable: true,
     enumerable: true,
@@ -7222,14 +7260,6 @@ export function applyDispatch(): void {
     get(this: BridgethingGateway): TimeSurface {
       const bucket = bucketFor(this);
       return (bucket.time ??= new TimeSurface(this));
-    },
-  });
-  Object.defineProperty(BridgethingGateway.prototype, 'transfer', {
-    configurable: true,
-    enumerable: true,
-    get(this: BridgethingGateway): TransferSurface {
-      const bucket = bucketFor(this);
-      return (bucket.transfer ??= new TransferSurface(this));
     },
   });
   Object.defineProperty(BridgethingGateway.prototype, 'lyrics', {
@@ -7764,6 +7794,15 @@ function outerSubscribeGateway(
             return;
           }
         }
+      }
+      case 'transfer': {
+        const handler = handlers.transfer;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for transfer');
+          return;
+        }
+        handler(event.deviceId, data.data.data);
+        return;
       }
       case 'tunnel': {
         const innerHandlers = handlers.tunnel;
@@ -8458,6 +8497,15 @@ function outerSubscribeDevice(
             return;
           }
         }
+      }
+      case 'transfer': {
+        const handler = handlers.transfer;
+        if (!handler) {
+          if (!partial) g.logger.warn('subscribe: no handler for transfer');
+          return;
+        }
+        handler(data.data.data);
+        return;
       }
       case 'tunnel': {
         const innerHandlers = handlers.tunnel;

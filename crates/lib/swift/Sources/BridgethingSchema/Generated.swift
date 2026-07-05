@@ -357,6 +357,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 	case phone(BridgeToGatewayPhoneMsg)
 	case player(BridgeToGatewayPlayerMsg)
 	case system(BridgeToGatewaySystemMsg)
+	case transfer(BridgeToGatewayTransferMsg)
 	case tunnel(BridgeToGatewayTunnelMsg)
 	case voice(BridgeToGatewayVoiceMsg)
 	case webapp(BridgeToGatewayWebappMsg)
@@ -379,6 +380,7 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			phone,
 			player,
 			system,
+			transfer,
 			tunnel,
 			voice,
 			webapp,
@@ -449,6 +451,11 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			case .system:
 				if let content = try? container.decode(BridgeToGatewaySystemMsg.self, forKey: .data) {
 					self = .system(content)
+					return
+				}
+			case .transfer:
+				if let content = try? container.decode(BridgeToGatewayTransferMsg.self, forKey: .data) {
+					self = .transfer(content)
 					return
 				}
 			case .tunnel:
@@ -522,6 +529,9 @@ public enum BridgeToGatewayMsgData: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .system(let content):
 			try container.encode(CodingKeys.system, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .transfer(let content):
+			try container.encode(CodingKeys.transfer, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .tunnel(let content):
 			try container.encode(CodingKeys.tunnel, forKey: .type)
@@ -3928,6 +3938,17 @@ public struct TransferAbandon: Codable, Sendable {
 	}
 }
 
+/// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
+public struct TransferAck: Codable, Sendable {
+	@MsgpackUuid public var transferId: UUID
+	public let received: UInt32
+
+	public init(transferId: UUID, received: UInt32) {
+		self.transferId = transferId
+		self.received = received
+	}
+}
+
 /// One slice of a transfer's bytes. Variable-size and offset-addressed:
 /// fragments are sent in offset order on the transfer's priority lane,
 /// sized by the sender to its preemption budget. Receivers route by
@@ -5575,6 +5596,41 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 	}
 }
 
+public enum BridgeToGatewayTransferMsg: Codable, Sendable {
+	case ack(TransferAck)
+
+	enum CodingKeys: String, CodingKey, Codable {
+		case ack
+	}
+
+	private enum ContainerCodingKeys: String, CodingKey {
+		case event, data
+	}
+
+	public init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: ContainerCodingKeys.self)
+		if let type = try? container.decode(CodingKeys.self, forKey: .event) {
+			switch type {
+			case .ack:
+				if let content = try? container.decode(TransferAck.self, forKey: .data) {
+					self = .ack(content)
+					return
+				}
+			}
+		}
+		throw DecodingError.typeMismatch(BridgeToGatewayTransferMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayTransferMsg"))
+	}
+
+	public func encode(to encoder: Encoder) throws {
+		var container = encoder.container(keyedBy: ContainerCodingKeys.self)
+		switch self {
+		case .ack(let content):
+			try container.encode(CodingKeys.ack, forKey: .event)
+			try container.encode(content, forKey: .data)
+		}
+	}
+}
+
 public enum BridgeToGatewayTunnelMsg: Codable, Sendable {
 	case open(TunnelOpen)
 	case data(TunnelData)
@@ -6641,9 +6697,6 @@ public enum GatewayToBridgePhoneMsg: Codable, Sendable {
 public enum GatewayToBridgePlayerMsg: Codable, Sendable {
 	case snapshot(PlayerState)
 	case queueChanged(QueueSnapshot)
-	/// Companion has a play intent but no live Connect device to target. Asks the daemon to silently wake
-	/// the phone's own Spotify over iAP2 so a device registers in the cluster. Fire-and-forget: the
-	/// companion detects the resulting device via the dealer and issues the play itself.
 	case requestSpotifyWake
 
 	enum CodingKeys: String, CodingKey, Codable {

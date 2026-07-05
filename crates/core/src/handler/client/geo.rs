@@ -70,7 +70,7 @@ impl ClientToBridgeGeoMsgDispatch for GeoHandler {
       return self.respond_error::<GeoGetOnce>(GeoError::Unavailable).await;
     }
     let outbound = gateway::GeoGetOnce { accuracy };
-    match self.handle.bluetooth.gateway_man.request_bulk(None, outbound).await {
+    match self.handle.bluetooth.gateway_man.request(None, outbound).await {
       Ok(reply) => {
         self
           .handle

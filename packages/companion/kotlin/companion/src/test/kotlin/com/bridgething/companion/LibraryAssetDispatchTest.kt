@@ -8,6 +8,10 @@ import com.bridgething.schema.BridgeToGatewayAssetMsg
 import com.bridgething.schema.BridgeToGatewayLibraryMsg
 import com.bridgething.schema.BridgeToGatewayLyricsMsg
 import com.bridgething.schema.BridgeToGatewayMsgData
+import com.bridgething.schema.BridgeToGatewayTransferMsg
+import com.bridgething.schema.GatewayToBridgeTransferMsg
+import com.bridgething.schema.MsgMeta
+import com.bridgething.schema.TransferAck
 import com.bridgething.schema.TransferBody
 import com.bridgething.schema.FavoritesPage
 import com.bridgething.schema.GatewayToBridgeAssetMsg
@@ -88,6 +92,42 @@ class LibraryAssetDispatchTest {
         val notFound = asset.data as GatewayToBridgeAssetMsg.NotFound
         assertEquals("art:missing", notFound.data.id)
 
+        companion.stop()
+    }
+
+    @Test
+    fun `asset above inline cap streams windowed fragments`() = runBlocking {
+        val payload = ByteArray(40 * 1024) { (it % 251).toByte() }
+        val glue = FakeGlue(onAsset = { AssetBytes(bytes = payload, mime = "image/jpeg") })
+        val (companion, driver) = boot(this, glue)
+
+        val requestId = UUID.randomUUID()
+        val resp = driver.request(BridgeToGatewayMsgData.Asset(BridgeToGatewayAssetMsg.Request(AssetRequest(id = "art:big", requestId = requestId))))
+        val got = (resp.data as GatewayToBridgeMsgData.Asset).data as GatewayToBridgeAssetMsg.Got
+        val ref = (got.data.body as TransferBody.Stream).data
+        assertEquals(requestId, ref.id)
+        assertEquals(payload.size.toUInt(), ref.totalSize)
+
+        // fragments arrive offset-ordered, complete, and never more than one window past the acked bytes
+        val assembled = java.io.ByteArrayOutputStream()
+        var acked = 0u
+        val windowBytes = 8 * 1024
+        while (assembled.size() < payload.size) {
+            val frame = driver.waitOutbound { msg ->
+                val fragment = (msg.data as? GatewayToBridgeMsgData.Transfer)?.data as? GatewayToBridgeTransferMsg.Fragment
+                fragment?.data?.transferId == requestId
+            }
+            val fragment = ((frame.data as GatewayToBridgeMsgData.Transfer).data as GatewayToBridgeTransferMsg.Fragment).data
+            assertEquals(assembled.size(), fragment.offset.toInt())
+            assertTrue(fragment.offset.toInt() < acked.toInt() + windowBytes)
+            assembled.write(fragment.bytes)
+            acked = fragment.offset + fragment.bytes.size.toUInt()
+            driver.send(
+                BridgeToGatewayMsgData.Transfer(BridgeToGatewayTransferMsg.Ack(TransferAck(transferId = requestId, received = acked))),
+                meta = MsgMeta.Event,
+            )
+        }
+        assertTrue(payload.contentEquals(assembled.toByteArray()))
         companion.stop()
     }
 

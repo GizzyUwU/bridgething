@@ -141,6 +141,7 @@ export type BridgeToGatewayMsgData =
   | { type: 'phone'; data: BridgeToGatewayPhoneMsg }
   | { type: 'player'; data: BridgeToGatewayPlayerMsg }
   | { type: 'system'; data: BridgeToGatewaySystemMsg }
+  | { type: 'transfer'; data: BridgeToGatewayTransferMsg }
   | { type: 'tunnel'; data: BridgeToGatewayTunnelMsg }
   | { type: 'voice'; data: BridgeToGatewayVoiceMsg }
   | { type: 'webapp'; data: BridgeToGatewayWebappMsg }
@@ -212,6 +213,8 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'logsSubscribeReply'; data: LogsSubscribeReply }
   | { event: 'logEntry'; data: LogEntry }
   | { event: 'keepalive'; data: KeepalivePing };
+
+export type BridgeToGatewayTransferMsg = { event: 'ack'; data: TransferAck };
 
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
@@ -825,6 +828,11 @@ export type TrackIdentity = {
  * disk state is kept for resumable transfers and discarded otherwise.
  */
 export type TransferAbandon = { transferId: string; reason: string };
+
+/**
+ * Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
+ */
+export type TransferAck = { transferId: string; received: number };
 
 /**
  * Standard embedding for a byte payload that may or may not warrant a
