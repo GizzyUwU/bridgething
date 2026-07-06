@@ -66,6 +66,10 @@ apk: spotify-android
 ipa: spotify-ios
   bash mobile/scripts/build-ipa.sh
 
+# Build a signed app-store ipa for TestFlight. Requires macos + a configured asc profile.
+testflight: spotify-ios
+  bash mobile/scripts/build-testflight.sh
+
 goldens:
   UPDATE_GOLDEN=1 cargo test -p libbridgething --test golden golden_vectors_match_fixture_file
 

@@ -21,6 +21,8 @@ DerivedData
 *.ipa
 *.xcuserstate
 **/.xcode.env.local
+ExportOptions-appstore.plist
+build-testflight.sh
 
 # Android/IntelliJ
 #

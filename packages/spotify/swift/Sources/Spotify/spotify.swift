@@ -3126,10 +3126,11 @@ public struct Track: Equatable, Hashable {
     public var imageId: String
     public var isEpisode: Bool
     public var saved: Bool
+    public var queued: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(uri: String, uid: String, name: String, artists: [Artist], album: Album, durationMs: UInt32, imageId: String, isEpisode: Bool, saved: Bool) {
+    public init(uri: String, uid: String, name: String, artists: [Artist], album: Album, durationMs: UInt32, imageId: String, isEpisode: Bool, saved: Bool, queued: Bool) {
         self.uri = uri
         self.uid = uid
         self.name = name
@@ -3139,6 +3140,7 @@ public struct Track: Equatable, Hashable {
         self.imageId = imageId
         self.isEpisode = isEpisode
         self.saved = saved
+        self.queued = queued
     }
 
     
@@ -3165,7 +3167,8 @@ public struct FfiConverterTypeTrack: FfiConverterRustBuffer {
                 durationMs: FfiConverterUInt32.read(from: &buf), 
                 imageId: FfiConverterString.read(from: &buf), 
                 isEpisode: FfiConverterBool.read(from: &buf), 
-                saved: FfiConverterBool.read(from: &buf)
+                saved: FfiConverterBool.read(from: &buf), 
+                queued: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -3179,6 +3182,7 @@ public struct FfiConverterTypeTrack: FfiConverterRustBuffer {
         FfiConverterString.write(value.imageId, into: &buf)
         FfiConverterBool.write(value.isEpisode, into: &buf)
         FfiConverterBool.write(value.saved, into: &buf)
+        FfiConverterBool.write(value.queued, into: &buf)
     }
 }
 

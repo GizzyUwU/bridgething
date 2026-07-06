@@ -1917,12 +1917,6 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 //
 
 
-/**
- * Platform seam for waking the phone's own Spotify when a play intent lands with no live Connect target.
- * iOS asks the daemon to send an iAP2 RequestAppLaunch; Android fires a local media-button intent. Called
- * fire-and-forget - the client waits for the woken device to register in the cluster, it does not block on
- * this returning.
- */
 public interface DeviceWaker {
     
     fun `wakeDevice`()
@@ -1930,12 +1924,6 @@ public interface DeviceWaker {
     companion object
 }
 
-/**
- * Platform seam for waking the phone's own Spotify when a play intent lands with no live Connect target.
- * iOS asks the daemon to send an iAP2 RequestAppLaunch; Android fires a local media-button intent. Called
- * fire-and-forget - the client waits for the woken device to register in the cluster, it does not block on
- * this returning.
- */
 open class DeviceWakerImpl: Disposable, AutoCloseable, DeviceWaker
 {
 
@@ -5023,6 +5011,8 @@ data class Track (
     var `isEpisode`: kotlin.Boolean
     , 
     var `saved`: kotlin.Boolean
+    , 
+    var `queued`: kotlin.Boolean
     
 ){
     
@@ -5048,6 +5038,7 @@ public object FfiConverterTypeTrack: FfiConverterRustBuffer<Track> {
             FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -5060,7 +5051,8 @@ public object FfiConverterTypeTrack: FfiConverterRustBuffer<Track> {
             FfiConverterUInt.allocationSize(value.`durationMs`) +
             FfiConverterString.allocationSize(value.`imageId`) +
             FfiConverterBoolean.allocationSize(value.`isEpisode`) +
-            FfiConverterBoolean.allocationSize(value.`saved`)
+            FfiConverterBoolean.allocationSize(value.`saved`) +
+            FfiConverterBoolean.allocationSize(value.`queued`)
     )
 
     override fun write(value: Track, buf: ByteBuffer) {
@@ -5073,6 +5065,7 @@ public object FfiConverterTypeTrack: FfiConverterRustBuffer<Track> {
             FfiConverterString.write(value.`imageId`, buf)
             FfiConverterBoolean.write(value.`isEpisode`, buf)
             FfiConverterBoolean.write(value.`saved`, buf)
+            FfiConverterBoolean.write(value.`queued`, buf)
     }
 }
 
