@@ -401,6 +401,7 @@ mod tests {
       artwork_id: Some(format!("art-{uri}")),
       duration_ms: Some(1000),
       persistent_id: None,
+      queued: false,
     }
   }
 

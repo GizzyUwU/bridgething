@@ -111,6 +111,10 @@ impl Player {
     self.snapshot_rx.borrow().state_reply.clone()
   }
 
+  pub fn position_ms(&self) -> u32 {
+    self.snapshot_rx.borrow().state_reply.state.playback.position_ms
+  }
+
   pub fn queue_reply(&self) -> PlayerQueueReply {
     self.snapshot_rx.borrow().queue_reply.clone()
   }

@@ -35,6 +35,8 @@ use crate::{
   player::Player,
 };
 
+const PREV_RESTART_THRESHOLD_MS: u32 = 3000;
+
 pub(crate) mod hid_bit {
   pub const PLAY_PAUSE: u8 = 0x01;
   pub const NEXT: u8 = 0x02;
@@ -88,7 +90,11 @@ impl TransportController {
       .await;
   }
 
-  pub async fn prev(&self) {
+  pub async fn prev(&self, allow_seeking: bool) {
+    if allow_seeking && self.companion_owns_playback() && self.player.position_ms() > PREV_RESTART_THRESHOLD_MS {
+      self.seek_to(0).await;
+      return;
+    }
     self
       .dispatch_player("prev", BridgeToGatewayPlayerMsgCommand::SkipPrev, hid_bit::PREV)
       .await;

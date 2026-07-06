@@ -313,6 +313,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "react-native-nitro-modules@0.35.5": "patches/react-native-nitro-modules@0.35.5.patch",
+  },
   "overrides": {
     "react": "19.2.3",
     "react-dom": "19.2.3",

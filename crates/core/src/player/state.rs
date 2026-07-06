@@ -783,6 +783,7 @@ fn build_queue_item(track: &Track, merged: &MediaItemUpdate, art_id: Option<Stri
     artwork_id: art_id,
     duration_ms: merged.duration_ms,
     persistent_id: Some(track.id.clone()),
+    queued: false,
   }
 }
 
@@ -1140,6 +1141,7 @@ mod tests {
       artwork_id: art.map(str::to_string),
       duration_ms,
       persistent_id: None,
+      queued: false,
     }
   }
 

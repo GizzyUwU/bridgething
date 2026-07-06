@@ -974,6 +974,10 @@ export type QueueItem = {
   artworkId: string | null;
   durationMs: number | null;
   persistentId: string | null;
+  /**
+   * true when the user explicitly queued this item (vs it coming from the playing context).
+   */
+  queued: boolean;
 };
 
 /**

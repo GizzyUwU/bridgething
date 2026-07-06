@@ -376,7 +376,7 @@ export type ClientToBridgePlayerMsg =
   | { event: 'pause' }
   | { event: 'resume' }
   | { event: 'skipNext' }
-  | { event: 'skipPrev' }
+  | { event: 'skipPrev'; data: SkipPrev }
   | { event: 'skipToIndex'; data: SkipToIndex }
   | { event: 'seekTo'; data: SeekTo }
   | { event: 'setShuffle'; data: SetShuffle }
@@ -667,6 +667,14 @@ export type SetShuffle = { on: boolean };
 export type SetSpeed = { speed: number };
 
 export type SetVolume = { level: number };
+
+export type SkipPrev = {
+  /**
+   * when true, restart the current track if it is progressed past the restart threshold; otherwise always
+   * move to the previous track.
+   */
+  allowSeeking: boolean;
+};
 
 export type SkipToIndex = { index: number };
 

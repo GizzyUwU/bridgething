@@ -342,6 +342,12 @@ impl DealerWriter {
       .await
   }
 
+  pub async fn dj_signal(&self, target: &str) -> Result<(u16, String)> {
+    self
+      .player_command(target, json!({"endpoint": "signal", "signal_id": "jump"}))
+      .await
+  }
+
   pub async fn transfer(&self, target: &str) -> Result<(u16, String)> {
     let url = format!(
       "{SPCLIENT}/connect-state/v1/connect/transfer/from/{}/to/{}",

@@ -525,8 +525,8 @@ impl<'a> PlayerSurface<'a> {
   pub async fn skip_next(&self) -> Result<(), SdkError> {
     self.0.command(ClientToBridgePlayerMsgCommand::SkipNext).await
   }
-  pub async fn skip_prev(&self) -> Result<(), SdkError> {
-    self.0.command(ClientToBridgePlayerMsgCommand::SkipPrev).await
+  pub async fn skip_prev(&self, payload: SkipPrev) -> Result<(), SdkError> {
+    self.0.command(ClientToBridgePlayerMsgCommand::SkipPrev(payload)).await
   }
   pub async fn skip_to_index(&self, payload: SkipToIndex) -> Result<(), SdkError> {
     self

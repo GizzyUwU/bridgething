@@ -2211,7 +2211,9 @@ data class QueueItem (
 	val albumUri: String? = null,
 	val artworkId: String? = null,
 	val durationMs: UInt? = null,
-	val persistentId: String? = null
+	val persistentId: String? = null,
+	/// true when the user explicitly queued this item (vs it coming from the playing context).
+	val queued: Boolean
 )
 
 /// Full player snapshot the daemon broadcasts to webapps. Initial value

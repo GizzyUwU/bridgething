@@ -2,7 +2,7 @@ use libbridgething::{
   PlayerError,
   client::{
     BridgeToClientPlayerMsg, ClientToBridgePlayerMsgDispatch, PlayUri, PlayerErrorReply, PlayerQueueGet,
-    PlayerStateGet, QueueUri, SeekTo, SetCrossfade, SetRepeat, SetShuffle, SetSpeed, SkipToIndex,
+    PlayerStateGet, QueueUri, SeekTo, SetCrossfade, SetRepeat, SetShuffle, SetSpeed, SkipPrev, SkipToIndex,
   },
   gateway::{self, BridgeToGatewayPlayerMsgCommand},
 };
@@ -78,8 +78,8 @@ impl ClientToBridgePlayerMsgDispatch for PlayerHandler {
     Ok(())
   }
 
-  async fn skip_prev(&self) -> HandlerResult {
-    self.handle.transport.prev().await;
+  async fn skip_prev(&self, params: SkipPrev) -> HandlerResult {
+    self.handle.transport.prev(params.allow_seeking).await;
     Ok(())
   }
 

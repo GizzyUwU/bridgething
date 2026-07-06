@@ -35,6 +35,7 @@ pub struct Track {
   pub image_id: String,
   pub is_episode: bool,
   pub saved: bool,
+  pub queued: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
@@ -228,6 +229,7 @@ pub fn track_from_provided(pt: &ProvidedTrack) -> Track {
     image_id: image_from_meta(md),
     is_episode,
     saved: md.get("collection.in_collection").map(|s| s == "true").unwrap_or(false),
+    queued: pt.provider == "queue",
   }
 }
 

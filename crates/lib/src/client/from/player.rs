@@ -39,6 +39,13 @@ pub struct SkipToIndex {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+pub struct SkipPrev {
+  pub allow_seeking: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "client.ts")]
 pub struct SetShuffle {
   pub on: bool,
 }
@@ -104,7 +111,7 @@ pub enum ClientToBridgePlayerMsg {
   #[bridge_command]
   SkipNext,
   #[bridge_command]
-  SkipPrev,
+  SkipPrev(SkipPrev),
   #[bridge_command]
   SkipToIndex(SkipToIndex),
   #[bridge_command]

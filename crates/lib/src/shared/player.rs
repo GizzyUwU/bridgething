@@ -267,6 +267,7 @@ pub struct QueueItem {
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,
   pub persistent_id: Option<String>,
+  pub queued: bool,
 }
 
 /// What the current track is playing from: the playlist / album / show /

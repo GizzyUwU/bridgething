@@ -37,6 +37,7 @@ const NODE_ARTISTS: &str = "artists";
 const NODE_PODCASTS: &str = "podcasts";
 const PREVIEW: u32 = 14;
 const LIBRARY_CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(750);
+const DJ_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 
 #[uniffi::export(callback_interface)]
 pub trait Observer: Send + Sync {
@@ -407,6 +408,35 @@ impl SpotifyClient {
       has_more: offset + count < total,
     })
   }
+
+  async fn play_dj(&self) -> Result<()> {
+    let writer = self.writer().await?;
+    if self.current_context_uri().await.as_deref() == Some(DJ_URI) {
+      writer.dj_signal(&self.target().await?).await?;
+      return Ok(());
+    }
+    let cmd = json!({
+        "endpoint": "play",
+        "context": {
+          "uri": DJ_URI,
+          "entity_uri": DJ_URI,
+          "url": format!("hm://lexicon-session-provider/context-resolve/v2/session?contextUri={DJ_URI}"),
+          "metadata": {},
+        },
+        "play_origin": {"feature_identifier": "harmony", "feature_version": "9.1.52.1394", "referrer_identifier": "home"},
+        "prepare_play_options": {"license": "premium"},
+        "play_options": {"reason": "interactive", "operation": "replace", "trigger": "immediately"},
+    });
+    writer.play(&self.target_or_wake().await?, cmd).await?;
+    Ok(())
+  }
+
+  async fn current_context_uri(&self) -> Option<String> {
+    let guard = self.shared.cluster.lock().await;
+    let cluster = guard.as_ref()?;
+    let uri = &cluster.player_state.context_uri;
+    (!uri.is_empty()).then(|| uri.clone())
+  }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -600,6 +630,9 @@ impl SpotifyClient {
   }
 
   pub async fn play(&self, uri: &str, skip_to_uri: Option<String>) -> Result<()> {
+    if uri == DJ_URI {
+      return self.play_dj().await;
+    }
     let writer = self.writer().await?;
     let target = self.target_or_wake().await?;
     let (context, skip) = if uri.starts_with("spotify:track:") && skip_to_uri.is_none() {

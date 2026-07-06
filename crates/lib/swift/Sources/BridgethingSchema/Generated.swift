@@ -3489,8 +3489,10 @@ public struct QueueItem: Codable, Sendable {
 	public let artworkId: String?
 	public let durationMs: UInt32?
 	public let persistentId: String?
+	/// true when the user explicitly queued this item (vs it coming from the playing context).
+	public let queued: Bool
 
-	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?) {
+	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool) {
 		self.uri = uri
 		self.title = title
 		self.artist = artist
@@ -3500,6 +3502,7 @@ public struct QueueItem: Codable, Sendable {
 		self.artworkId = artworkId
 		self.durationMs = durationMs
 		self.persistentId = persistentId
+		self.queued = queued
 	}
 }
 

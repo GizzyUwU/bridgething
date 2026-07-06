@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use libbridgething::{
-  Album, Artist, BrowseEntry, BrowseResult, ItemKind, ItemRef, LibraryItem, MediaItem, Playback, PlaybackOptions,
-  PlaybackRestrictions, PlaybackState, PlayerOptions as WirePlayerOptions, PlayerState as WirePlayerState, QueueItem,
-  QueuePosition, RepeatMode, Track,
+  Album, Artist, BrowseEntry, BrowseResult, ItemKind, ItemRef, LibraryItem, MediaItem, PlayContext, Playback,
+  PlaybackOptions, PlaybackRestrictions, PlaybackState, PlayerOptions as WirePlayerOptions,
+  PlayerState as WirePlayerState, QueueItem, RepeatMode, Track,
   client::{
     BridgeToClientPlayerMsg, ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg,
     ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, Earcon as ClientEarcon, FavoritesSet as ClientFavoritesSet,
-    PhoneCallAction, PlayUri as ClientPlayUri, PlayerQueueReply, PlayerStateReply, QueueUri as ClientQueueUri,
-    SeekTo as ClientSeekTo, SetRepeat as ClientSetRepeat, SetShuffle as ClientSetShuffle, SetSpeed as ClientSetSpeed,
-    SkipToIndex as ClientSkipToIndex,
+    PhoneCallAction, PlayUri as ClientPlayUri, PlayerQueueReply, PlayerStateReply, SeekTo as ClientSeekTo,
+    SetRepeat as ClientSetRepeat, SetShuffle as ClientSetShuffle, SetSpeed as ClientSetSpeed,
+    SkipPrev as ClientSkipPrev, SkipToIndex as ClientSkipToIndex,
   },
   stock::{StockPreset, StockSetPreset},
 };
@@ -647,7 +647,7 @@ fn queue_item_to_stock(item: QueueItem) -> StockQueueTrack {
     name: item.title.unwrap_or_default(),
     artists,
     image_uri: item.artwork_id.unwrap_or_default(),
-    provider: "context".to_string(),
+    provider: if item.queued { "queue" } else { "context" }.to_string(),
   }
 }
 
@@ -784,20 +784,31 @@ impl RecvMsgData {
     };
 
     match data {
-      StockInterAppRecv::PlayUri { uri, .. } => {
-        RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context: None }))
+      StockInterAppRecv::PlayUri { uri, skip_to_uri, .. } => {
+        let play = match skip_to_uri {
+          Some(track) => ClientPlayUri {
+            uri: track,
+            context: Some(PlayContext {
+              context_uri: uri,
+              position: None,
+            }),
+          },
+          None => ClientPlayUri { uri, context: None },
+        };
+        RecvMsgData::Player(ClientToBridgePlayerMsg::Play(play))
       }
       StockInterAppRecv::PlayPodcastTrailer { uri } => {
         RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context: None }))
       }
-      StockInterAppRecv::QueueUri { uri } => RecvMsgData::Player(ClientToBridgePlayerMsg::Queue(ClientQueueUri {
-        uri,
-        position: QueuePosition::Append,
-      })),
+      StockInterAppRecv::QueueUri { uri } => {
+        RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyQueueUri { uri })
+      }
       StockInterAppRecv::Pause {} => RecvMsgData::Player(ClientToBridgePlayerMsg::Pause),
       StockInterAppRecv::Resume {} => RecvMsgData::Player(ClientToBridgePlayerMsg::Resume),
       StockInterAppRecv::SkipNext {} => RecvMsgData::Player(ClientToBridgePlayerMsg::SkipNext),
-      StockInterAppRecv::SkipPrev { allow_seeking: _ } => RecvMsgData::Player(ClientToBridgePlayerMsg::SkipPrev),
+      StockInterAppRecv::SkipPrev { allow_seeking } => {
+        RecvMsgData::Player(ClientToBridgePlayerMsg::SkipPrev(ClientSkipPrev { allow_seeking }))
+      }
       StockInterAppRecv::SkipToIndex { index } => {
         RecvMsgData::Player(ClientToBridgePlayerMsg::SkipToIndex(ClientSkipToIndex {
           index: u32::try_from(index).unwrap_or(u32::MAX),
@@ -954,7 +965,7 @@ mod test {
     client::{
       ClientLegacyStockCommand, ClientToBridgeAudioMsgCommand, ClientToBridgeLibraryMsg, ClientToBridgeMsg,
       ClientToBridgeMsgData, ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, FavoritesSet, PhoneCallAction,
-      PlayUri as ClientPlayUri, SeekTo, SetRepeat, SetShuffle, SkipToIndex,
+      PlayUri as ClientPlayUri, SeekTo, SetRepeat, SetShuffle, SkipPrev, SkipToIndex,
     },
     wire::MsgMeta,
   };
@@ -1139,7 +1150,7 @@ mod test {
 
   #[test]
   fn de_recv_skip_prev() {
-    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"skipPrev"}}}"#;
+    let json = r#"{"id":"0193ace5-1876-7b2c-8d7b-f63a20d6f316","meta":{"kind":"command"},"data":{"type":"player","data":{"event":"skipPrev","data":{"allowSeeking":true}}}}"#;
     let de: PossibleRecvMsg = serde_json::from_str(json).expect("failed to deserialize json");
     println!("{:?}", de);
 
@@ -1148,7 +1159,7 @@ mod test {
       PossibleRecvMsg::Modern(ClientToBridgeMsg {
         id: Uuid::parse_str("0193ace5-1876-7b2c-8d7b-f63a20d6f316").unwrap(),
         meta: MsgMeta::Command,
-        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SkipPrev)
+        data: ClientToBridgeMsgData::Player(ClientToBridgePlayerMsg::SkipPrev(SkipPrev { allow_seeking: true }))
       })
     );
   }
@@ -1236,6 +1247,44 @@ mod test {
     };
     assert_eq!(uri, "spotify:track:abc");
     assert!(context.is_none());
+  }
+
+  #[test]
+  fn translate_play_uri_with_skip_to_plays_track_in_context() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 3,
+      data: StockInterAppRecv::PlayUri {
+        uri: "spotify:playlist:xyz".into(),
+        feature_identifier: "test".into(),
+        interaction_id: None,
+        skip_to_uri: Some("spotify:track:abc".into()),
+        skip_to_uid: None,
+      },
+      user_action: true,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::Player(ClientToBridgePlayerMsg::Play(ClientPlayUri { uri, context })) = translated else {
+      panic!("expected Player::Play, got {translated:?}");
+    };
+    assert_eq!(uri, "spotify:track:abc");
+    let context = context.expect("expected a play context");
+    assert_eq!(context.context_uri, "spotify:playlist:xyz");
+  }
+
+  #[test]
+  fn translate_queue_uri_to_legacy_stock() {
+    let recv = PossibleRecvMsg::StockInterApp {
+      msg_id: 7,
+      data: StockInterAppRecv::QueueUri {
+        uri: "spotify:track:abc".into(),
+      },
+      user_action: true,
+    };
+    let translated = RecvMsgData::from_stock_inter_app_possible_recv(recv);
+    let RecvMsgData::LegacyStock(ClientLegacyStockCommand::SpotifyQueueUri { uri }) = translated else {
+      panic!("expected LegacyStock::SpotifyQueueUri, got {translated:?}");
+    };
+    assert_eq!(uri, "spotify:track:abc");
   }
 
   #[test]

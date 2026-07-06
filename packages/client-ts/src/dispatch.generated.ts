@@ -117,6 +117,7 @@ import type {
   SetShuffle,
   SetSpeed,
   SetVolume,
+  SkipPrev,
   SkipToIndex,
   StorageResponse,
   TimeSnapshot,
@@ -2254,11 +2255,11 @@ export class PlayerSurface {
   }
 
   /** Send `Player::SkipPrev` to the daemon. */
-  async skipPrev(): Promise<void> {
+  async skipPrev(payload: SkipPrev): Promise<void> {
     const msg: ClientToBridgeMsg = {
       id: newUuid(),
       meta: { kind: 'command' },
-      data: { type: 'player', data: { event: 'skipPrev' } },
+      data: { type: 'player', data: { event: 'skipPrev', data: payload } },
     };
     await this._client.send(msg);
   }

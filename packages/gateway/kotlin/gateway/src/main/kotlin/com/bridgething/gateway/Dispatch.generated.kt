@@ -4209,3 +4209,4 @@ public class LyricsRequestHandle internal constructor(
     gateway.send(deviceId, msg)
   }
 }
+

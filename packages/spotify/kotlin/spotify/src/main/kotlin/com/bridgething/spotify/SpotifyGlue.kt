@@ -563,7 +563,7 @@ class SpotifyGlue(
 
     private fun forwardSlideRunway(last: List<String>, new: List<String>): Int? {
         if (last.isEmpty()) return null
-        for (k in last.indices) {
+        for (k in 1 until last.size) {
             val suffix = last.subList(k, last.size)
             if (new.size >= suffix.size && new.subList(0, suffix.size) == suffix) return suffix.size
         }
@@ -687,6 +687,7 @@ class SpotifyGlue(
             artworkId = artAssetId(bestHex(t), edge),
             durationMs = t.durationMs,
             persistentId = null,
+            queued = t.queued,
         )
 
         fun makeUpdate(state: SpPlayerState, heroEdge: Int, liked: Boolean?, likeSupported: Boolean?): NowPlayingUpdate {

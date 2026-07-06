@@ -628,7 +628,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private static func forwardSlideRunway(from last: [String], to new: [String]) -> Int? {
         guard !last.isEmpty else { return nil }
-        for k in 0 ..< last.count {
+        for k in 1 ..< last.count {
             let suffix = Array(last[k...])
             if new.count >= suffix.count, Array(new.prefix(suffix.count)) == suffix {
                 return suffix.count
@@ -829,7 +829,8 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             albumUri: t.album.uri.isEmpty ? nil : t.album.uri,
             artworkId: artAssetId(bestHex(t), edge: maxEdge),
             durationMs: t.durationMs,
-            persistentId: nil
+            persistentId: nil,
+            queued: t.queued
         )
     }
 
