@@ -1165,11 +1165,6 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func resync() async 
     
-    /**
-     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
-     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
-     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
-     */
     func rootBrowse(sections: UInt32?, preview: UInt32?) async throws  -> [Shelf]
     
     func search(query: String, limit: UInt32) async throws  -> SearchResults
@@ -1555,11 +1550,6 @@ open func resync()async   {
         )
 }
     
-    /**
-     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
-     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
-     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
-     */
 open func rootBrowse(sections: UInt32?, preview: UInt32?)async throws  -> [Shelf]  {
     return
         try  await uniffiRustCallAsync(
@@ -4693,7 +4683,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24425) {
+    if (uniffi_spotify_checksum_method_spotifyclient_root_browse() != 51801) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_search() != 12958) {

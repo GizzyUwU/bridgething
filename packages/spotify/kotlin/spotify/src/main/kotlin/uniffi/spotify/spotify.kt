@@ -1253,7 +1253,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24425) {
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_root_browse() != 51801) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_search() != 12958) {
@@ -2826,11 +2826,6 @@ public interface SpotifyClientInterface {
     
     suspend fun `resync`()
     
-    /**
-     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
-     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
-     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
-     */
     suspend fun `rootBrowse`(`sections`: kotlin.UInt?, `preview`: kotlin.UInt?): List<Shelf>
     
     suspend fun `search`(`query`: kotlin.String, `limit`: kotlin.UInt): SearchResults
@@ -3319,11 +3314,6 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     }
 
     
-    /**
-     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
-     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
-     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
-     */
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `rootBrowse`(`sections`: kotlin.UInt?, `preview`: kotlin.UInt?) : List<Shelf> {
