@@ -25,6 +25,14 @@ final class OtaManifestTests: XCTestCase {
     XCTAssertEqual(urls.daemonBinary.absoluteString, "https://ota.bridgething.com/daemon/stable/0.8.4/bridgething")
     XCTAssertEqual(urls.imageSwu.absoluteString, "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.swu")
     XCTAssertEqual(urls.imageZck.absoluteString, "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.zck")
+
+    let hub = OtaArtifactURLs.builtinWebapp(
+      rootURL: URL(string: "https://ota.bridgething.com")!,
+      channel: "stable",
+      name: "hub",
+      version: "0.1.0"
+    )
+    XCTAssertEqual(hub.absoluteString, "https://ota.bridgething.com/webapps/stable/hub/0.1.0/hub.zip")
   }
 
   func testManifestDecode() throws {
@@ -40,7 +48,7 @@ final class OtaManifestTests: XCTestCase {
         }
       },
       "releases": {
-        "0.8.4+image.2026.05.0": {"version": "0.8.4+image.2026.05.0", "channel": "stable", "deprecated": false},
+        "0.8.4+image.2026.05.0": {"version": "0.8.4+image.2026.05.0", "channel": "stable", "deprecated": false, "builtin_webapps": {"hub": "0.1.0", "stock": "8.9.2"}},
         "0.8.3+image.2026.04.0": {"version": "0.8.3+image.2026.04.0", "channel": "stable", "yanked": "bad build", "deprecated": false}
       }
     }
@@ -50,5 +58,8 @@ final class OtaManifestTests: XCTestCase {
     XCTAssertEqual(manifest.channels["stable"]?.releases.count, 2)
     XCTAssertNil(manifest.releases["0.8.4+image.2026.05.0"]?.yanked)
     XCTAssertEqual(manifest.releases["0.8.3+image.2026.04.0"]?.yanked, "bad build")
+    XCTAssertEqual(manifest.releases["0.8.4+image.2026.05.0"]?.builtinWebapps, ["hub": "0.1.0", "stock": "8.9.2"])
+    // a release entry with no builtin_webapps decodes as empty (backward compatible).
+    XCTAssertEqual(manifest.releases["0.8.3+image.2026.04.0"]?.builtinWebapps, [:])
   }
 }

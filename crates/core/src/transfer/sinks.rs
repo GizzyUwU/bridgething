@@ -26,6 +26,7 @@ use uuid::Uuid;
 pub const MEMORY_SINK_CAP: usize = 256 * 1024;
 const FORWARD_CONSUMER_CAPACITY: usize = 16;
 const FORWARD_INGEST_CAPACITY: usize = 16;
+const FORWARD_ACK_INTERVAL: u32 = 16 * 1024;
 
 #[derive(Debug)]
 pub enum TransferEvent {
@@ -42,7 +43,10 @@ struct MemoryState {
 #[derive(Debug)]
 enum Binding {
   Memory(MemoryState),
-  Forward(mpsc::Sender<TransferEvent>),
+  Forward {
+    tx: mpsc::Sender<TransferEvent>,
+    last_acked: u32,
+  },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -74,7 +78,7 @@ impl TransferSinks {
       .bindings
       .lock()
       .unwrap()
-      .insert(id, Binding::Forward(ingest_tx));
+      .insert(id, Binding::Forward { tx: ingest_tx, last_acked: 0 });
     let inner = self.inner.clone();
     tokio::spawn(async move {
       while let Some(event) = ingest_rx.recv().await {
@@ -91,14 +95,15 @@ impl TransferSinks {
     self.inner.bindings.lock().unwrap().remove(&id);
   }
 
-  pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) -> bool {
+  pub fn fragment(&self, id: Uuid, offset: u32, bytes: Bytes) -> Option<u32> {
     use mpsc::error::TrySendError;
 
+    let received = offset.saturating_add(bytes.len() as u32);
     let mut bindings = self.inner.bindings.lock().unwrap();
     match bindings.get_mut(&id) {
       None => {
         tracing::trace!(%id, "fragment for unbound transfer; dropping");
-        false
+        None
       }
       Some(Binding::Memory(state)) => {
         let consumed = if state.failed {
@@ -117,19 +122,26 @@ impl TransferSinks {
         };
         drop(bindings);
         self.inner.progress.notify_waiters();
-        consumed
+        consumed.then_some(received)
       }
-      Some(Binding::Forward(tx)) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
-        Ok(()) => true,
+      Some(Binding::Forward { tx, last_acked }) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
+        Ok(()) => {
+          if received.saturating_sub(*last_acked) >= FORWARD_ACK_INTERVAL {
+            *last_acked = received;
+            Some(received)
+          } else {
+            None
+          }
+        }
         Err(TrySendError::Full(_)) => {
           tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
           bindings.remove(&id);
-          false
+          None
         }
         Err(TrySendError::Closed(_)) => {
           tracing::debug!(%id, "transfer consumer gone; unbinding");
           bindings.remove(&id);
-          false
+          None
         }
       },
     }
@@ -145,8 +157,8 @@ impl TransferSinks {
         drop(bindings);
         self.inner.progress.notify_waiters();
       }
-      Some(Binding::Forward(_)) => {
-        let Some(Binding::Forward(tx)) = bindings.remove(&id) else {
+      Some(Binding::Forward { .. }) => {
+        let Some(Binding::Forward { tx, .. }) = bindings.remove(&id) else {
           return;
         };
         let _ = tx.try_send(TransferEvent::Abandon { reason });
@@ -184,7 +196,7 @@ impl TransferSinks {
               return Some(state.buf.freeze());
             }
             Some(Binding::Memory(_)) => {}
-            Some(Binding::Forward(_)) | None => return None,
+            Some(Binding::Forward { .. }) | None => return None,
           }
         }
         notified.await;

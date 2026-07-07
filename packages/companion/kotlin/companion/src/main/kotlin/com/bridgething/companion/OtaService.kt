@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -168,6 +169,7 @@ public class OtaService(
     private val inFlight = mutableSetOf<String>()
     private val autoPushNextAt = mutableMapOf<String, Long>()
     private val autoPushFailures = mutableMapOf<String, Int>()
+    private var pollWake: CompletableDeferred<Unit>? = null
 
     private val eventsFlow = MutableSharedFlow<OtaPollEvent>(
         extraBufferCapacity = 64,
@@ -197,10 +199,15 @@ public class OtaService(
             }
             metaJob = scope.launch {
                 gateway.events.collect { event ->
-                    if (event !is GatewayEvent.Message) return@collect
-                    val data = event.message.data
-                    if (data is BridgeToGatewayMsgData.Version) {
-                        recordMeta(event.deviceId, data.data)
+                    when (event) {
+                        is GatewayEvent.Connected -> wakePoll()
+                        is GatewayEvent.Message -> {
+                            val data = event.message.data
+                            if (data is BridgeToGatewayMsgData.Version) {
+                                recordMeta(event.deviceId, data.data)
+                            }
+                        }
+                        else -> {}
                     }
                 }
             }
@@ -419,7 +426,12 @@ public class OtaService(
             imageVariant = meta.imageVariant,
         )
         if (meta.appVersion != composite.daemon) {
-            runDaemonAuto(deviceId, composite.daemon, urls.daemonBinary, config, gateway)
+            runBandaidBatchAuto(
+                deviceId,
+                listOf(BandaidPiece(OtaKind.Daemon, urls.daemonBinary, "daemon-$channel-${composite.daemon}", composite.daemon)),
+                config,
+                gateway,
+            )
             return
         }
         if (meta.imageVersion != composite.image) {
@@ -431,13 +443,36 @@ public class OtaService(
         while (scope.isActive) {
             val gw = mutex.withLock { attachedGateway }
             if (gw != null) poll(config, gw)
-            delay(config.intervalSeconds.coerceAtLeast(60L) * 1000L)
+            sleepUntilNextWake(config)
         }
     }
 
+    private suspend fun sleepUntilNextWake(config: OtaPollConfig) {
+        val wake = CompletableDeferred<Unit>()
+        mutex.withLock { pollWake = wake }
+        val now = System.currentTimeMillis()
+        var deadline = now + config.intervalSeconds.coerceAtLeast(60L) * 1000L
+        val soonest = mutex.withLock { autoPushNextAt.values.minOrNull() }
+        if (soonest != null && soonest < deadline) {
+            deadline = maxOf(soonest, now + MIN_RESUME_DELAY_MS)
+        }
+        val sleepMs = (deadline - now).coerceAtLeast(0L)
+        withTimeoutOrNull(sleepMs) { wake.await() }
+        mutex.withLock { pollWake = null }
+    }
+
+    private suspend fun wakePoll() {
+        mutex.withLock { pollWake }?.complete(Unit)
+    }
+
     private suspend fun recordMeta(deviceId: String, meta: BridgeThingMeta) {
-        deviceMetaMutex.withLock { deviceMeta[deviceId] = meta }
+        val isNew = deviceMetaMutex.withLock {
+            val fresh = deviceMeta[deviceId] == null
+            deviceMeta[deviceId] = meta
+            fresh
+        }
         metaChangedFlow.emit(deviceId to meta)
+        if (isNew) wakePoll()
     }
 
     private suspend fun recordNickname(deviceId: String, nickname: String?) {
@@ -467,14 +502,13 @@ public class OtaService(
             eventsFlow.emit(OtaPollEvent.ManifestPollFailed(reason = "channel.latest '${channel.latest}' is not a composite version"))
             return
         }
-        manifest.releases[channel.latest]?.let { release ->
-            if (release.yanked != null || release.deprecated) return
-        }
+        val release = manifest.releases[channel.latest]
+        if (release != null && (release.yanked != null || release.deprecated)) return
 
         // snapshot devices so the iteration below doesn't hold the meta lock across download work.
         val snapshot = deviceMetaMutex.withLock { deviceMeta.toMap() }
         for ((deviceId, meta) in snapshot) {
-            reconcileDevice(deviceId, meta, composite, config, gateway)
+            reconcileDevice(deviceId, meta, composite, release, config, gateway)
         }
     }
 
@@ -482,6 +516,7 @@ public class OtaService(
         deviceId: String,
         meta: BridgeThingMeta,
         latest: OtaCompositeVersion,
+        release: OtaManifestRelease?,
         config: OtaPollConfig,
         gateway: BridgethingGateway,
     ) {
@@ -505,6 +540,7 @@ public class OtaService(
             imageVariant = meta.imageVariant,
         )
 
+        val batch = mutableListOf<BandaidPiece>()
         if (meta.appVersion != latest.daemon) {
             eventsFlow.emit(
                 OtaPollEvent.UpdateAvailable(
@@ -514,13 +550,28 @@ public class OtaService(
                     toVersion = latest.daemon,
                 )
             )
+            batch.add(BandaidPiece(OtaKind.Daemon, urls.daemonBinary, "daemon-${config.channel}-${latest.daemon}", latest.daemon))
+        }
+        for (drift in builtinWebappDrift(deviceId, release, config, gateway)) {
+            eventsFlow.emit(
+                OtaPollEvent.UpdateAvailable(
+                    deviceId = deviceId,
+                    kind = OtaKind.BuiltinWebapp,
+                    fromVersion = drift.fromVersion,
+                    toVersion = drift.piece.version,
+                )
+            )
+            batch.add(drift.piece)
+        }
+
+        if (batch.isNotEmpty()) {
             if (config.autoPush && autoPushReady(deviceId)) {
-                runDaemonAuto(deviceId, latest.daemon, urls.daemonBinary, config, gateway)
+                runBandaidBatchAuto(deviceId, batch, config, gateway)
             }
-            // daemon push restarts the gateway link; the next poll cycle handles the image check.
             return
         }
 
+        // bandaid is current; reconcile the image (its slot carries the matching daemon + webapps).
         if (meta.imageVersion != latest.image) {
             eventsFlow.emit(
                 OtaPollEvent.UpdateAvailable(
@@ -535,6 +586,40 @@ public class OtaService(
             }
         }
     }
+
+    private data class BandaidPiece(val kind: OtaKind, val url: String, val filename: String, val version: String)
+
+    private data class WebappDrift(val piece: BandaidPiece, val fromVersion: String)
+
+    private suspend fun builtinWebappDrift(
+        deviceId: String,
+        release: OtaManifestRelease?,
+        config: OtaPollConfig,
+        gateway: BridgethingGateway,
+    ): List<WebappDrift> {
+        if (release == null || release.builtinWebapps.isEmpty()) return emptyList()
+        val installed = installedWebapps(deviceId, gateway)
+        val out = mutableListOf<WebappDrift>()
+        for ((slug, id) in BUILTIN_WEBAPPS) {
+            val available = release.builtinWebapps[slug] ?: continue
+            val current = installed[id] ?: continue
+            if (current == available) continue
+            val url = OtaArtifactUrls.builtinWebapp(config.rootUrl, config.channel, slug, available)
+            out.add(
+                WebappDrift(
+                    piece = BandaidPiece(OtaKind.BuiltinWebapp, url, "webapp-${config.channel}-$slug-$available", available),
+                    fromVersion = current,
+                )
+            )
+        }
+        return out
+    }
+
+    private suspend fun installedWebapps(deviceId: String, gateway: BridgethingGateway): Map<UUID, String> =
+        when (val r = gateway.webapp.list(deviceId)) {
+            is RequestResult.Ok -> r.response.webapps.associate { it.id to it.version }
+            else -> emptyMap()
+        }
 
     private suspend fun tryBeginInFlight(deviceId: String): Boolean = mutex.withLock {
         if (deviceId in inFlight) false else { inFlight.add(deviceId); true }
@@ -558,43 +643,56 @@ public class OtaService(
         }
     }
 
-    private suspend fun runDaemonAuto(
+    private suspend fun runBandaidBatchAuto(
         deviceId: String,
-        targetVersion: String,
-        binaryUrl: String,
+        pieces: List<BandaidPiece>,
         config: OtaPollConfig,
         gateway: BridgethingGateway,
     ) {
+        if (pieces.isEmpty()) return
         if (!tryBeginInFlight(deviceId)) return
         try {
             val cacheDir = effectiveCacheDir(config)
-            val cached = try {
-                downloadIfNeeded(binaryUrl, cacheDir, "daemon-${config.channel}-$targetVersion")
-            } catch (e: Throwable) {
-                eventsFlow.emit(
-                    OtaPollEvent.Failed(
-                        deviceId = deviceId,
-                        kind = OtaKind.Daemon,
-                        reason = "daemon download failed: ${e.message ?: e.toString()}",
+            val artifacts = mutableListOf<Pair<OtaKind, File>>()
+            for (piece in pieces) {
+                val cached = try {
+                    downloadIfNeeded(piece.url, cacheDir, piece.filename)
+                } catch (e: Throwable) {
+                    eventsFlow.emit(
+                        OtaPollEvent.Failed(
+                            deviceId = deviceId,
+                            kind = piece.kind,
+                            reason = "bandaid download failed: ${e.message ?: e.toString()}",
+                        )
                     )
-                )
-                return
+                    noteAutoPushResult(deviceId, failed = true)
+                    return
+                }
+                artifacts.add(piece.kind to cached)
             }
+            val labelKind = if (pieces.any { it.kind == OtaKind.Daemon }) OtaKind.Daemon else OtaKind.BuiltinWebapp
             var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
             val terminal = applyBandaidBatch(
                 gateway = gateway,
                 deviceId = deviceId,
-                artifacts = listOf(OtaKind.Daemon to cached),
+                artifacts = artifacts,
                 emit = { snapshot ->
                     last = snapshot
                     eventsFlow.tryEmit(
-                        OtaPollEvent.Progress(deviceId = deviceId, kind = OtaKind.Daemon, snapshot = snapshot)
+                        OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, snapshot = snapshot)
                     )
                 },
             )
             val finalSnap = terminal.takeUnless { it is OtaPhaseSnapshot.Idle } ?: last
-            emitTerminal(deviceId, OtaKind.Daemon, targetVersion, finalSnap)
-            noteAutoPushResult(deviceId, failed = finalSnap is OtaPhaseSnapshot.Failed)
+            if (finalSnap is OtaPhaseSnapshot.Failed) {
+                eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = labelKind, reason = finalSnap.reason))
+                noteAutoPushResult(deviceId, failed = true)
+            } else {
+                for (piece in pieces) {
+                    eventsFlow.emit(OtaPollEvent.Updated(deviceId = deviceId, kind = piece.kind, version = piece.version))
+                }
+                noteAutoPushResult(deviceId, failed = false)
+            }
         } finally {
             endInFlight(deviceId)
         }
@@ -1032,11 +1130,17 @@ public class OtaService(
         val INLINE_RANGE_MAX_BYTES: UInt = 16u * 1024u
 
         const val OTA_FRAGMENT_BYTES = 4 * 1024
-        const val OTA_WINDOW_BYTES = 8 * 1024L
+        const val OTA_WINDOW_BYTES = 32 * 1024L
         const val OTA_ACK_TIMEOUT_MS = 15_000L
 
         const val AUTO_PUSH_BACKOFF_BASE_MS = 30_000L
         const val AUTO_PUSH_BACKOFF_MAX_MS = 15L * 60L * 1000L
+        const val MIN_RESUME_DELAY_MS = 5_000L
+
+        val BUILTIN_WEBAPPS: List<Pair<String, UUID>> = listOf(
+            "hub" to UUID.fromString("019693c0-5c6a-71f0-a89d-7e2a4d9c0a01"),
+            "stock" to UUID.fromString("b12be731-416c-4cf7-8a91-3d2f19a45e21"),
+        )
 
         val defaultJson: Json = Json {
             ignoreUnknownKeys = true

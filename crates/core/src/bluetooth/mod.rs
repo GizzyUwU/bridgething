@@ -568,6 +568,10 @@ impl GatewayMan {
     self.broadcast_event_with_priority(event, Priority::Bulk).await;
   }
 
+  pub async fn broadcast_event_background<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E) {
+    self.broadcast_event_with_priority(event, Priority::Background).await;
+  }
+
   async fn broadcast_event_with_priority<E: WireEvent<BridgeToGatewayMsgData>>(&self, event: E, priority: Priority) {
     self
       .send_all(

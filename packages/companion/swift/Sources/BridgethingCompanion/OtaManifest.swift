@@ -1,8 +1,5 @@
 import Foundation
 
-/// Subset of the thinglabs discover-manifest schema needed to pick an
-/// OTA release. We only decode the fields the poll loop reads; the
-/// site-side validator owns the full schema.
 public struct OtaDiscoverManifest: Decodable, Sendable, Equatable {
     public let manifestVersion: Int
     public let updatedAt: String
@@ -38,12 +35,26 @@ public struct OtaManifestRelease: Decodable, Sendable, Equatable {
     public let channel: String
     public let yanked: String?
     public let deprecated: Bool
+    public let builtinWebapps: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case channel
+        case yanked
+        case deprecated
+        case builtinWebapps = "builtin_webapps"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        channel = try container.decode(String.self, forKey: .channel)
+        yanked = try container.decodeIfPresent(String.self, forKey: .yanked)
+        deprecated = try container.decode(Bool.self, forKey: .deprecated)
+        builtinWebapps = try container.decodeIfPresent([String: String].self, forKey: .builtinWebapps) ?? [:]
+    }
 }
 
-/// Composite version parsed out of a channel's `latest`. The bridgething
-/// release pipeline uses `<daemon>+image.<image>` (daemon as semver,
-/// image as CalVer) so the companion can independently compare each
-/// component to the running device's announced versions.
 public struct OtaCompositeVersion: Sendable, Equatable {
     public let daemon: String
     public let image: String
@@ -65,10 +76,6 @@ public struct OtaCompositeVersion: Sendable, Equatable {
     }
 }
 
-/// Per-artifact URLs derived from the OTA root + channel + per-component
-/// version + image variant, matching the on-disk R2 layout. The daemon
-/// binary is the only daemon-kind artifact; images carry both .swu (full)
-/// and .zck (delta source the daemon's range proxy reads from).
 public struct OtaArtifactURLs: Sendable, Equatable {
     public let daemonBinary: URL
     public let imageSwu: URL
@@ -97,5 +104,14 @@ public struct OtaArtifactURLs: Sendable, Equatable {
             .appendingPathComponent(channel)
             .appendingPathComponent(imageVersion)
             .appendingPathComponent("\(imageName).zck")
+    }
+
+    public static func builtinWebapp(rootURL: URL, channel: String, name: String, version: String) -> URL {
+        rootURL
+            .appendingPathComponent("webapps")
+            .appendingPathComponent(channel)
+            .appendingPathComponent(name)
+            .appendingPathComponent(version)
+            .appendingPathComponent("\(name).zip")
     }
 }

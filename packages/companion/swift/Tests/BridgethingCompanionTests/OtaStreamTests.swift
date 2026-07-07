@@ -17,7 +17,7 @@ final class OtaStreamTests: XCTestCase {
     }
 
     private static let fragmentBytes = 4 * 1024
-    private static let windowBytes = 8 * 1024
+    private static let windowBytes = 32 * 1024
 
     private func boot() async throws -> Harness {
         let adapter = InMemoryAdapter()
@@ -90,15 +90,16 @@ final class OtaStreamTests: XCTestCase {
 
         let transferId = try await answerBegin(h.driver)
 
-        // phase A: without an ack, the sender must stall within one window (two 4KB fragments).
-        let f0 = try await nextFragment(h.driver, transferId)
-        XCTAssertEqual(Int(f0.offset), 0)
-        XCTAssertLessThanOrEqual(f0.bytes.count, Self.fragmentBytes, "ota fragments must be <= 4KB (small frames)")
-        let f1 = try await nextFragment(h.driver, transferId)
-        XCTAssertEqual(Int(f1.offset), Self.fragmentBytes)
-        XCTAssertLessThanOrEqual(f1.bytes.count, Self.fragmentBytes)
-
-        // offset 8192 is NOT < acked(0) + window(8192), so a third fragment must not arrive.
+        // phase A: without an ack, the sender fills exactly one window then stalls. offset >= window is
+        // NOT < acked(0) + window, so the fragment at the window boundary must not arrive.
+        var assembled = Data()
+        let inWindow = Self.windowBytes / Self.fragmentBytes
+        for i in 0 ..< inWindow {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(Int(f.offset), i * Self.fragmentBytes, "fragments must arrive in offset order")
+            XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes, "ota fragments must be <= 4KB (small frames)")
+            assembled.append(f.bytes)
+        }
         do {
             _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
             XCTFail("sender ran past the ack window without an ack")
@@ -107,9 +108,6 @@ final class OtaStreamTests: XCTestCase {
         }
 
         // phase B: acking unblocks; the stream runs to completion staying within one window of acked.
-        var assembled = Data()
-        assembled.append(f0.bytes)
-        assembled.append(f1.bytes)
         var acked = UInt32(assembled.count)
         try await ack(h.driver, transferId, acked)
 

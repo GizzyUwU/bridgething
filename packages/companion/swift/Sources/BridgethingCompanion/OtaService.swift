@@ -128,14 +128,28 @@ public actor OtaService {
     private var inFlight: Set<String> = []
     private var autoPushNextAt: [String: Date] = [:]
     private var autoPushFailures: [String: Int] = [:]
+    private var pollSleep: Task<Void, Never>?
 
     nonisolated let transferAcks = TransferAckWindow()
 
     private static let otaFragmentBytes: UInt64 = 4 * 1024
-    private static let otaWindowBytes: UInt64 = 8 * 1024
+    private static let otaWindowBytes: UInt64 = 32 * 1024
     private static let otaAckTimeoutSeconds: Double = 15
     private static let autoPushBackoffBase: TimeInterval = 30
     private static let autoPushBackoffMax: TimeInterval = 15 * 60
+    private static let minResumeDelay: TimeInterval = 5
+
+    private static let builtinWebapps: [(slug: String, id: UUID)] = [
+        ("hub", UUID(uuidString: "019693c0-5c6a-71f0-a89d-7e2a4d9c0a01")!),
+        ("stock", UUID(uuidString: "b12be731-416c-4cf7-8a91-3d2f19a45e21")!),
+    ]
+
+    private struct BandaidPiece {
+        let kind: OtaKind
+        let url: URL
+        let filename: String
+        let version: String
+    }
 
     private let eventContinuation: AsyncStream<OtaPollEvent>.Continuation
     private let metaChangedContinuation: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>.Continuation
@@ -164,11 +178,17 @@ public actor OtaService {
         metaTask?.cancel()
         metaTask = Task { [weak self] in
             for await event in gateway.events {
-                guard case let .message(deviceId, msg) = event,
-                      case let .version(meta) = msg.data
-                else { continue }
                 guard let self else { return }
-                await recordMeta(deviceId: deviceId, meta: meta)
+                switch event {
+                case .connected:
+                    await self.wakePoll()
+                case let .message(deviceId, msg):
+                    if case let .version(meta) = msg.data {
+                        await self.recordMeta(deviceId: deviceId, meta: meta)
+                    }
+                default:
+                    break
+                }
             }
         }
         nicknameTask?.cancel()
@@ -221,9 +241,6 @@ public actor OtaService {
         progress.finish()
     }
 
-    /// Push a new daemon binary to the bandaid. Stages it then activates the
-    /// (single-piece) batch, which atomically swaps `.current` and restarts
-    /// bridgething.service once. No range proxy traffic for this kind.
     public func pushDaemon(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -240,9 +257,6 @@ public actor OtaService {
         progress.finish()
     }
 
-    /// Push a builtin-webapp bundle (hub or stock) to the bandaid. Same
-    /// stage-then-activate path as the daemon; the bundle's manifest id must
-    /// be a reserved builtin or the daemon rejects the stage.
     public func pushBuiltinWebapp(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -431,9 +445,15 @@ public actor OtaService {
             imageVariant: meta.imageVariant
         )
         if meta.appVersion != composite.daemon {
-            await runDaemonAuto(
-                deviceId: deviceId, targetVersion: composite.daemon,
-                binaryURL: urls.daemonBinary, config: config, gateway: gateway
+            await runBandaidBatchAuto(
+                deviceId: deviceId,
+                pieces: [BandaidPiece(
+                    kind: .daemon,
+                    url: urls.daemonBinary,
+                    filename: "daemon-\(channel)-\(composite.daemon)",
+                    version: composite.daemon
+                )],
+                config: config, gateway: gateway
             )
             return
         }
@@ -450,14 +470,32 @@ public actor OtaService {
             if let gateway = attachedGateway {
                 await poll(config: config, gateway: gateway)
             }
-            let nanos = UInt64(max(config.intervalSeconds, 60) * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: nanos)
+            await sleepUntilNextWake(config: config)
         }
     }
 
+    private func sleepUntilNextWake(config: OtaPollConfig) async {
+        let now = Date()
+        var deadline = now.addingTimeInterval(max(config.intervalSeconds, 60))
+        if let soonest = autoPushNextAt.values.min(), soonest < deadline {
+            deadline = max(soonest, now.addingTimeInterval(Self.minResumeDelay))
+        }
+        let seconds = max(deadline.timeIntervalSince(now), 0)
+        let task = Task { _ = try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        pollSleep = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        pollSleep = nil
+    }
+
+    func wakePoll() {
+        pollSleep?.cancel()
+    }
+
     private func recordMeta(deviceId: String, meta: BridgeThingMeta) {
+        let isNew = deviceMeta[deviceId] == nil
         deviceMeta[deviceId] = meta
         metaChangedContinuation.yield((deviceId: deviceId, meta: meta))
+        if isNew { wakePoll() }
     }
 
     private func recordNickname(deviceId: String, nickname: String?) {
@@ -513,9 +551,8 @@ public actor OtaService {
             ))
             return
         }
-        if let release = manifest.releases[channel.latest] {
-            if release.yanked != nil || release.deprecated { return }
-        }
+        let release = manifest.releases[channel.latest]
+        if let release, release.yanked != nil || release.deprecated { return }
 
         let snapshot = deviceMeta
         for (deviceId, meta) in snapshot {
@@ -523,6 +560,7 @@ public actor OtaService {
                 deviceId: deviceId,
                 meta: meta,
                 latest: composite,
+                release: release,
                 config: config,
                 gateway: gateway
             )
@@ -533,6 +571,7 @@ public actor OtaService {
         deviceId: String,
         meta: BridgeThingMeta,
         latest: OtaCompositeVersion,
+        release: OtaManifestRelease?,
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
@@ -554,6 +593,7 @@ public actor OtaService {
             imageVariant: meta.imageVariant
         )
 
+        var batch: [BandaidPiece] = []
         if meta.appVersion != latest.daemon {
             eventContinuation.yield(.updateAvailable(
                 deviceId: deviceId,
@@ -561,18 +601,31 @@ public actor OtaService {
                 fromVersion: meta.appVersion,
                 toVersion: latest.daemon
             ))
+            batch.append(BandaidPiece(
+                kind: .daemon,
+                url: urls.daemonBinary,
+                filename: "daemon-\(config.channel)-\(latest.daemon)",
+                version: latest.daemon
+            ))
+        }
+        for drift in await builtinWebappDrift(deviceId: deviceId, release: release, config: config, gateway: gateway) {
+            eventContinuation.yield(.updateAvailable(
+                deviceId: deviceId,
+                kind: .builtinWebapp,
+                fromVersion: drift.fromVersion,
+                toVersion: drift.piece.version
+            ))
+            batch.append(drift.piece)
+        }
+
+        if !batch.isEmpty {
             if config.autoPush, autoPushReady(deviceId) {
-                await runDaemonAuto(
-                    deviceId: deviceId,
-                    targetVersion: latest.daemon,
-                    binaryURL: urls.daemonBinary,
-                    config: config,
-                    gateway: gateway
-                )
+                await runBandaidBatchAuto(deviceId: deviceId, pieces: batch, config: config, gateway: gateway)
             }
             return
         }
 
+        // bandaid is current; reconcile the image (its slot carries the matching daemon + webapps).
         if meta.imageVersion != latest.image {
             eventContinuation.yield(.updateAvailable(
                 deviceId: deviceId,
@@ -591,6 +644,53 @@ public actor OtaService {
                 )
             }
         }
+    }
+
+    private struct WebappDrift {
+        let piece: BandaidPiece
+        let fromVersion: String
+    }
+
+    private func builtinWebappDrift(
+        deviceId: String,
+        release: OtaManifestRelease?,
+        config: OtaPollConfig,
+        gateway: BridgethingGateway
+    ) async -> [WebappDrift] {
+        guard let release, !release.builtinWebapps.isEmpty else { return [] }
+        let installed = await installedWebapps(deviceId: deviceId, gateway: gateway)
+        var out: [WebappDrift] = []
+        for builtin in Self.builtinWebapps {
+            guard let available = release.builtinWebapps[builtin.slug],
+                  let current = installed[builtin.id],
+                  current != available
+            else { continue }
+            let url = OtaArtifactURLs.builtinWebapp(
+                rootURL: config.rootURL,
+                channel: config.channel,
+                name: builtin.slug,
+                version: available
+            )
+            out.append(WebappDrift(
+                piece: BandaidPiece(
+                    kind: .builtinWebapp,
+                    url: url,
+                    filename: "webapp-\(config.channel)-\(builtin.slug)-\(available)",
+                    version: available
+                ),
+                fromVersion: current
+            ))
+        }
+        return out
+    }
+
+    private func installedWebapps(deviceId: String, gateway: BridgethingGateway) async -> [UUID: String] {
+        guard let result = try? await gateway.webapp.list(deviceId: deviceId),
+              case let .ok(list) = result
+        else { return [:] }
+        var map: [UUID: String] = [:]
+        for webapp in list.webapps { map[webapp.id] = webapp.version }
+        return map
     }
 
     private func tryBeginInFlight(_ deviceId: String) -> Bool {
@@ -616,42 +716,45 @@ public actor OtaService {
         }
     }
 
-    private func runDaemonAuto(
+    private func runBandaidBatchAuto(
         deviceId: String,
-        targetVersion: String,
-        binaryURL: URL,
+        pieces: [BandaidPiece],
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
+        guard !pieces.isEmpty else { return }
         guard tryBeginInFlight(deviceId) else { return }
         defer { inFlight.remove(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
-        let cached: URL
-        do {
-            cached = try await downloadIfNeeded(
-                url: binaryURL,
-                into: cacheDir,
-                filename: "daemon-\(config.channel)-\(targetVersion)"
-            )
-        } catch {
-            eventContinuation.yield(.failed(
-                deviceId: deviceId,
-                kind: .daemon,
-                reason: "daemon download failed: \(error.localizedDescription)"
-            ))
-            return
+        var artifacts: [(kind: OtaKind, path: URL)] = []
+        for piece in pieces {
+            do {
+                let cached = try await downloadIfNeeded(url: piece.url, into: cacheDir, filename: piece.filename)
+                artifacts.append((kind: piece.kind, path: cached))
+            } catch {
+                eventContinuation.yield(.failed(
+                    deviceId: deviceId,
+                    kind: piece.kind,
+                    reason: "bandaid download failed: \(error.localizedDescription)"
+                ))
+                noteAutoPushResult(deviceId, failed: true)
+                return
+            }
         }
+        let labelKind: OtaKind = pieces.contains { $0.kind == .daemon } ? .daemon : .builtinWebapp
         let (stream, continuation) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
-        let forwarder = forwardProgress(stream: stream, deviceId: deviceId, kind: .daemon)
-        await pushDaemon(
-            gateway: gateway,
-            deviceId: deviceId,
-            binaryPath: cached,
-            progress: continuation
-        )
+        let forwarder = forwardProgress(stream: stream, deviceId: deviceId, kind: labelKind)
+        await pushBandaidBatch(gateway: gateway, deviceId: deviceId, artifacts: artifacts, progress: continuation)
         let terminal = await forwarder.value
-        emitTerminal(deviceId: deviceId, kind: .daemon, version: targetVersion, terminal: terminal)
-        if case .failed = terminal { noteAutoPushResult(deviceId, failed: true) } else { noteAutoPushResult(deviceId, failed: false) }
+        if case let .failed(reason) = terminal {
+            eventContinuation.yield(.failed(deviceId: deviceId, kind: labelKind, reason: reason))
+            noteAutoPushResult(deviceId, failed: true)
+        } else {
+            for piece in pieces {
+                eventContinuation.yield(.updated(deviceId: deviceId, kind: piece.kind, version: piece.version))
+            }
+            noteAutoPushResult(deviceId, failed: false)
+        }
     }
 
     private func runImageAuto(

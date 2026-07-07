@@ -144,6 +144,7 @@ impl OtaOrchestrator {
       cmd_rx,
       state: OtaState::Idle,
       last_streaming_emit_at: None,
+      last_streaming_percent: None,
       staged: Vec::new(),
       staged_peer: None,
     };
@@ -226,6 +227,7 @@ struct OtaActor {
   cmd_rx: mpsc::Receiver<Command>,
   state: OtaState,
   last_streaming_emit_at: Option<Instant>,
+  last_streaming_percent: Option<u8>,
   staged: Vec<StagedPiece>,
   staged_peer: Option<Address>,
 }
@@ -359,14 +361,10 @@ impl OtaActor {
       .await;
     match result {
       Ok(resume_from_offset) => {
-        emit_progress(
-          &self.events_tx,
-          OtaPhase::Streaming,
-          phase_percent(resume_from_offset, expected_size),
-          None,
-        )
-        .await;
+        let resume_percent = phase_percent(resume_from_offset, expected_size);
+        emit_progress(&self.events_tx, OtaPhase::Streaming, resume_percent, None).await;
         self.last_streaming_emit_at = Some(Instant::now());
+        self.last_streaming_percent = Some(resume_percent);
         let update_id = req.update_id.clone();
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
@@ -425,24 +423,22 @@ impl OtaActor {
       .await;
     match outcome {
       Ok(ChunkOutcome::Continue { received }) => {
-        let should_emit = self
+        let percent = phase_percent(received, expected_size);
+        let changed = self.last_streaming_percent != Some(percent);
+        let floor_ok = self
           .last_streaming_emit_at
           .is_none_or(|t| t.elapsed() >= STREAMING_PROGRESS_MIN_INTERVAL);
-        if should_emit {
-          emit_progress(
-            &self.events_tx,
-            OtaPhase::Streaming,
-            phase_percent(received, expected_size),
-            None,
-          )
-          .await;
+        if changed && floor_ok {
+          emit_progress(&self.events_tx, OtaPhase::Streaming, percent, None).await;
           self.last_streaming_emit_at = Some(Instant::now());
+          self.last_streaming_percent = Some(percent);
         }
       }
       Ok(ChunkOutcome::Completed { path, .. }) => {
         emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
         emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
         self.last_streaming_emit_at = None;
+        self.last_streaming_percent = None;
         self.sinks.unbind(transfer_id);
         self.spawn_write(kind, current_id, peer, path).await;
       }

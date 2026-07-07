@@ -475,7 +475,10 @@ fn spawn_ota_event_forwarder(
         BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(_) => None,
         BridgeToGatewaySystemMsgEvent::LogEntry(_) => None,
       };
-      bluetooth.gateway_man.broadcast(event).await;
+      match event {
+        BridgeToGatewaySystemMsgEvent::OtaProgress(_) => bluetooth.gateway_man.broadcast_event_background(event).await,
+        _ => bluetooth.gateway_man.broadcast(event).await,
+      }
       if let Some(mirror) = client_mirror {
         let _ = client_man.broadcast_event(mirror).await;
       }

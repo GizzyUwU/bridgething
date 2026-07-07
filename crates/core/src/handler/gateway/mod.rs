@@ -195,13 +195,14 @@ impl GatewayHandler {
       }
       GatewayToBridgeMsgData::Transfer(transfer_msg) => match transfer_msg {
         GatewayToBridgeTransferMsg::Fragment(f) => {
-          let received = f.offset.saturating_add(f.bytes.len() as u32);
           let transfer_id = f.transfer_id;
-          let consumed = self
+          let ack_received = self
             .state
             .transfer_sinks
             .fragment(f.transfer_id, f.offset, f.bytes.into());
-          if consumed && let Some(address) = handle.address {
+          if let Some(received) = ack_received
+            && let Some(address) = handle.address
+          {
             let ack = BridgeToGatewayTransferMsgEvent::Ack(TransferAck { transfer_id, received });
             let bluetooth = handle.bluetooth.clone();
             tokio::spawn(async move { bluetooth.gateway_man.send_event(address, ack).await });

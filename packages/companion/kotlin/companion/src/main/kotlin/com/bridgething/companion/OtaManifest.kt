@@ -30,14 +30,9 @@ public data class OtaManifestRelease(
     val channel: String,
     val yanked: String? = null,
     val deprecated: Boolean = false,
+    @SerialName("builtin_webapps") val builtinWebapps: Map<String, String> = emptyMap(),
 )
 
-/**
- * Composite version parsed out of a channel's `latest`. The bridgething
- * release pipeline uses `<daemon>+image.<image>` (daemon as semver,
- * image as CalVer) so the companion compares each component
- * independently to the device's announced versions.
- */
 public data class OtaCompositeVersion(
     val daemon: String,
     val image: String,
@@ -56,10 +51,6 @@ public data class OtaCompositeVersion(
     }
 }
 
-/**
- * Per-artifact URLs derived from the OTA root + channel + per-component
- * version + image variant. Matches the on-disk R2 layout.
- */
 public data class OtaArtifactUrls(
     val daemonBinary: String,
     val imageSwu: String,
@@ -80,6 +71,11 @@ public data class OtaArtifactUrls(
                 imageSwu = "$root/images/$channel/$imageVersion/$imageName.swu",
                 imageZck = "$root/images/$channel/$imageVersion/$imageName.zck",
             )
+        }
+
+        public fun builtinWebapp(rootUrl: String, channel: String, name: String, version: String): String {
+            val root = rootUrl.trimEnd('/')
+            return "$root/webapps/$channel/$name/$version/$name.zip"
         }
     }
 }
