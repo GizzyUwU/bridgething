@@ -472,8 +472,6 @@ fn spawn_ota_event_forwarder(
         BridgeToGatewaySystemMsgEvent::OtaProgress(p) => Some(BridgeToClientSystemMsgEvent::OtaProgress(*p)),
         BridgeToGatewaySystemMsgEvent::OtaError(e) => Some(BridgeToClientSystemMsgEvent::OtaError(e.clone())),
         BridgeToGatewaySystemMsgEvent::DeviceNicknameChanged(_) => None,
-        // log entries are sent addressed to the subscribing peer from the log-tap sink,
-        // never broadcast through this forwarder; arm exists only for exhaustiveness.
         BridgeToGatewaySystemMsgEvent::LogEntry(_) => None,
       };
       bluetooth.gateway_man.broadcast(event).await;

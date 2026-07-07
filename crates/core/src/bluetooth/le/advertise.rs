@@ -121,6 +121,30 @@ impl LeAdvertisement {
       adapter_path,
     })
   }
+
+  pub async fn unregister(self) {
+    let conn = self.conn.clone();
+    let path = self.path.clone();
+    let adapter_path = self.adapter_path.clone();
+    std::mem::forget(self);
+    teardown(conn, path, adapter_path).await;
+  }
+}
+
+async fn teardown(conn: Connection, path: OwnedObjectPath, adapter_path: OwnedObjectPath) {
+  if let Ok(proxy) = LEAdvertisingManagerProxy::builder(&conn)
+    .destination("org.bluez")
+    .and_then(|b| b.path(&adapter_path))
+    .map(|b| b.build())
+    && let Ok(p) = proxy.await
+    && let Err(err) = p.unregister_advertisement(&path.as_ref()).await
+  {
+    tracing::trace!(
+      ?err,
+      "LE advertisement unregister failed (BlueZ may already have released it)"
+    );
+  }
+  let _ = conn.object_server().remove::<LeAdvertisementImpl, _>(&path).await;
 }
 
 impl Drop for LeAdvertisement {
@@ -128,21 +152,7 @@ impl Drop for LeAdvertisement {
     let conn = self.conn.clone();
     let path = self.path.clone();
     let adapter_path = self.adapter_path.clone();
-    tokio::spawn(async move {
-      if let Ok(proxy) = LEAdvertisingManagerProxy::builder(&conn)
-        .destination("org.bluez")
-        .and_then(|b| b.path(&adapter_path))
-        .map(|b| b.build())
-        && let Ok(p) = proxy.await
-        && let Err(err) = p.unregister_advertisement(&path.as_ref()).await
-      {
-        tracing::trace!(
-          ?err,
-          "LE advertisement unregister failed (BlueZ may already have released it)"
-        );
-      }
-      let _ = conn.object_server().remove::<LeAdvertisementImpl, _>(&path).await;
-    });
+    tokio::spawn(teardown(conn, path, adapter_path));
   }
 }
 

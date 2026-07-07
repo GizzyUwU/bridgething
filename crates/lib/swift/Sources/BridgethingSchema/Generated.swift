@@ -1600,11 +1600,18 @@ public struct LibraryBrowseRequest: Codable, Sendable {
 	public let nodeId: String?
 	public let limit: UInt32
 	public let offset: UInt32
+	/// Root only: cap on the number of folders returned. `None` returns every folder.
+	public let sections: UInt32?
+	/// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
+	/// hydration entirely and returns a cheap index of node ids, titles, and totals.
+	public let preview: UInt32?
 
-	public init(nodeId: String?, limit: UInt32, offset: UInt32) {
+	public init(nodeId: String?, limit: UInt32, offset: UInt32, sections: UInt32?, preview: UInt32?) {
 		self.nodeId = nodeId
 		self.limit = limit
 		self.offset = offset
+		self.sections = sections
+		self.preview = preview
 	}
 }
 
@@ -3412,6 +3419,9 @@ public enum PlaybackState: String, Codable, Sendable {
 public struct Playback: Codable, Sendable {
 	public let state: PlaybackState
 	public let positionMs: UInt32
+	/// how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
+	/// forward while `state == Playing` so a cached resend never reads as a backward seek
+	public let positionAgeMs: UInt32?
 	public let shuffle: Bool
 	public let shuffleMode: ShuffleMode?
 	public let `repeat`: RepeatMode
@@ -3422,9 +3432,10 @@ public struct Playback: Codable, Sendable {
 	public let queueListAvail: Bool?
 	public let appleMusicRadioAd: Bool?
 
-	public init(state: PlaybackState, positionMs: UInt32, shuffle: Bool, shuffleMode: ShuffleMode?, repeat: RepeatMode, queueIndex: UInt32?, queueCount: UInt32?, queueChapterIndex: UInt32?, setElapsedTimeAvailable: Bool?, queueListAvail: Bool?, appleMusicRadioAd: Bool?) {
+	public init(state: PlaybackState, positionMs: UInt32, positionAgeMs: UInt32?, shuffle: Bool, shuffleMode: ShuffleMode?, repeat: RepeatMode, queueIndex: UInt32?, queueCount: UInt32?, queueChapterIndex: UInt32?, setElapsedTimeAvailable: Bool?, queueListAvail: Bool?, appleMusicRadioAd: Bool?) {
 		self.state = state
 		self.positionMs = positionMs
+		self.positionAgeMs = positionAgeMs
 		self.shuffle = shuffle
 		self.shuffleMode = shuffleMode
 		self.repeat = `repeat`
@@ -3490,9 +3501,9 @@ public struct QueueItem: Codable, Sendable {
 	public let durationMs: UInt32?
 	public let persistentId: String?
 	/// true when the user explicitly queued this item (vs it coming from the playing context).
-	public let queued: Bool
+	public let queued: Bool?
 
-	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool) {
+	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool?) {
 		self.uri = uri
 		self.title = title
 		self.artist = artist

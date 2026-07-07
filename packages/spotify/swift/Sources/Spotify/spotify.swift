@@ -1165,7 +1165,12 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func resync() async 
     
-    func rootBrowse() async throws  -> [Shelf]
+    /**
+     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
+     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
+     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
+     */
+    func rootBrowse(sections: UInt32?, preview: UInt32?) async throws  -> [Shelf]
     
     func search(query: String, limit: UInt32) async throws  -> SearchResults
     
@@ -1550,13 +1555,18 @@ open func resync()async   {
         )
 }
     
-open func rootBrowse()async throws  -> [Shelf]  {
+    /**
+     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
+     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
+     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
+     */
+open func rootBrowse(sections: UInt32?, preview: UInt32?)async throws  -> [Shelf]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_spotify_fn_method_spotifyclient_root_browse(
-                    self.uniffiCloneHandle()
-                    
+                    self.uniffiCloneHandle(),
+                    FfiConverterOptionUInt32.lower(sections),FfiConverterOptionUInt32.lower(preview)
                 )
             },
             pollFunc: ffi_spotify_rust_future_poll_rust_buffer,
@@ -3062,13 +3072,15 @@ public struct Shelf: Equatable, Hashable {
     public var id: String
     public var title: String
     public var items: [BrowseItem]
+    public var total: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, items: [BrowseItem]) {
+    public init(id: String, title: String, items: [BrowseItem], total: UInt32) {
         self.id = id
         self.title = title
         self.items = items
+        self.total = total
     }
 
     
@@ -3089,7 +3101,8 @@ public struct FfiConverterTypeShelf: FfiConverterRustBuffer {
             try Shelf(
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
-                items: FfiConverterSequenceTypeBrowseItem.read(from: &buf)
+                items: FfiConverterSequenceTypeBrowseItem.read(from: &buf), 
+                total: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -3097,6 +3110,7 @@ public struct FfiConverterTypeShelf: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterSequenceTypeBrowseItem.write(value.items, into: &buf)
+        FfiConverterUInt32.write(value.total, into: &buf)
     }
 }
 
@@ -4679,7 +4693,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24967) {
+    if (uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24425) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_search() != 12958) {

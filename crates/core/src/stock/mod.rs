@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use libbridgething::{
-  BridgeThingMeta, PhoneCallStatus,
+  BridgeThingMeta, PhoneCallService, PhoneCallStatus,
   client::{
     AmbientLightUpdate, BridgeToClientAssetMsg, BridgeToClientAudioMsg, BridgeToClientHardwareMsg, BridgeToClientMsg,
     BridgeToClientMsgData, BridgeToClientPhoneMsg, BridgeToClientSystemMsg, VolumeChanged,
@@ -93,7 +93,14 @@ pub enum StockSendMsg {
   Unsupported,
 }
 
-pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>) -> StockSendMsg {
+#[derive(Debug, Default)]
+pub struct StockCallSlot(std::sync::Mutex<Option<String>>);
+
+pub fn server_event_to_stock(
+  msg: BridgeToClientMsg,
+  stock_msg_id: Option<usize>,
+  call_slot: &StockCallSlot,
+) -> StockSendMsg {
   match msg.data {
     BridgeToClientMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
     BridgeToClientMsgData::Store(data) => StockSendMsg::Storage(data.into()),
@@ -128,7 +135,7 @@ pub fn server_event_to_stock(msg: BridgeToClientMsg, stock_msg_id: Option<usize>
         StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
       }
     },
-    BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data),
+    BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data, call_slot),
     BridgeToClientMsgData::Audio(data) => audio_event_to_stock(data, stock_msg_id),
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
@@ -166,7 +173,7 @@ fn audio_event_to_stock(event: BridgeToClientAudioMsg, stock_msg_id: Option<usiz
   }
 }
 
-fn phone_event_to_stock(msg: BridgeToClientPhoneMsg) -> StockSendMsg {
+fn phone_event_to_stock(msg: BridgeToClientPhoneMsg, call_slot: &StockCallSlot) -> StockSendMsg {
   let call = match msg {
     BridgeToClientPhoneMsg::CallStarted(c) | BridgeToClientPhoneMsg::CallUpdated(c) => c,
     BridgeToClientPhoneMsg::CallEnded(ended) => libbridgething::PhoneCall {
@@ -186,13 +193,46 @@ fn phone_event_to_stock(msg: BridgeToClientPhoneMsg) -> StockSendMsg {
     | BridgeToClientPhoneMsg::StateReply(_)
     | BridgeToClientPhoneMsg::ErrorReply(_) => return StockSendMsg::Unsupported,
   };
+
+  let mut slot = call_slot.0.lock().expect("stock call slot poisoned");
+  if call.status == PhoneCallStatus::Disconnected {
+    if slot.as_deref().is_some_and(|shown| shown != call.call_id) {
+      return StockSendMsg::Unsupported;
+    }
+    *slot = None;
+  } else {
+    *slot = Some(call.call_id.clone());
+  }
+  drop(slot);
+
+  let remote_id = if call.service == Some(PhoneCallService::Unknown) {
+    call.display_name.clone()
+  } else {
+    call.remote_id
+  };
   StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
-    remote_id: call.remote_id,
+    remote_id: format_nanp(&remote_id),
     display_name: call.display_name,
     status: call.status.into(),
     call_dir: call.direction.into(),
     call_id: call.call_id,
   })
+}
+
+fn format_nanp(raw: &str) -> String {
+  if !raw
+    .chars()
+    .all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '(' | ')' | ' ' | '.'))
+  {
+    return raw.to_string();
+  }
+  let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
+  let national = match digits.len() {
+    11 if digits.starts_with('1') => &digits[1..],
+    10 => &digits[..],
+    _ => return raw.to_string(),
+  };
+  format!("({}) {}-{}", &national[..3], &national[3..6], &national[6..])
 }
 
 impl From<BridgeToClientSystemMsg> for StockSendMsg {
@@ -233,6 +273,148 @@ impl From<BridgeToClientSystemMsg> for StockSendMsg {
       | BridgeToClientSystemMsg::DeviceNickname(_)
       | BridgeToClientSystemMsg::DeviceNicknameChanged(_) => StockSendMsg::Unsupported,
     }
+  }
+}
+
+#[cfg(test)]
+mod test {
+  use libbridgething::{
+    PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus, client::BridgeToClientPhoneMsg,
+  };
+
+  use super::{StockCallSlot, StockPhoneCallSend, StockSendMsg, format_nanp, phone_event_to_stock};
+
+  fn call(
+    call_id: &str,
+    remote_id: &str,
+    display_name: &str,
+    status: PhoneCallStatus,
+    service: Option<PhoneCallService>,
+  ) -> PhoneCall {
+    PhoneCall {
+      call_id: call_id.into(),
+      remote_id: remote_id.into(),
+      display_name: display_name.into(),
+      status,
+      direction: PhoneCallDirection::Incoming,
+      started_at_unix_s: None,
+      label: None,
+      address_book_id: None,
+      service,
+      is_conferenced: None,
+      conference_group: None,
+    }
+  }
+
+  fn remote_id_of(msg: StockSendMsg) -> String {
+    match msg {
+      StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo { remote_id, .. }) => remote_id,
+      other => panic!("expected phone_call_info, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn unknown_service_surfaces_display_name_instead_of_opaque_handle() {
+    let slot = StockCallSlot::default();
+    let uuid_handle = "3f8a1c2d-9b4e-4a7f-8c1d-2e6b9f0a1c34";
+
+    let named = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call(
+        "c1",
+        uuid_handle,
+        "WhatsApp",
+        PhoneCallStatus::Ringing,
+        Some(PhoneCallService::Unknown),
+      )),
+      &slot,
+    );
+    assert_eq!(remote_id_of(named), "WhatsApp");
+
+    let nameless = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call(
+        "c1",
+        uuid_handle,
+        "",
+        PhoneCallStatus::Ringing,
+        Some(PhoneCallService::Unknown),
+      )),
+      &slot,
+    );
+    assert_eq!(remote_id_of(nameless), "", "no name means empty number, never the uuid");
+  }
+
+  #[test]
+  fn telephony_and_unreported_service_keep_the_number() {
+    let slot = StockCallSlot::default();
+    for service in [Some(PhoneCallService::Telephony), None] {
+      let msg = phone_event_to_stock(
+        BridgeToClientPhoneMsg::CallUpdated(call("c1", "+14081234567", "John", PhoneCallStatus::Active, service)),
+        &slot,
+      );
+      assert_eq!(remote_id_of(msg), "(408) 123-4567");
+    }
+  }
+
+  #[test]
+  fn late_disconnect_for_another_call_never_reaches_stock() {
+    let slot = StockCallSlot::default();
+    let shown = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call(
+        "c2",
+        "9154717063",
+        "",
+        PhoneCallStatus::Ringing,
+        Some(PhoneCallService::Telephony),
+      )),
+      &slot,
+    );
+    assert!(matches!(shown, StockSendMsg::PhoneCall(_)));
+
+    let stale = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call("c1", "", "", PhoneCallStatus::Disconnected, None)),
+      &slot,
+    );
+    assert_eq!(
+      stale,
+      StockSendMsg::Unsupported,
+      "mismatched disconnect must not clobber the shown call"
+    );
+
+    let matching = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call("c2", "", "", PhoneCallStatus::Disconnected, None)),
+      &slot,
+    );
+    assert!(
+      matches!(matching, StockSendMsg::PhoneCall(_)),
+      "the shown call's own disconnect passes"
+    );
+  }
+
+  #[test]
+  fn disconnect_with_nothing_shown_passes_through() {
+    let slot = StockCallSlot::default();
+    let msg = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallUpdated(call("c1", "", "", PhoneCallStatus::Disconnected, None)),
+      &slot,
+    );
+    assert!(matches!(msg, StockSendMsg::PhoneCall(_)));
+  }
+
+  #[test]
+  fn format_nanp_covers_expected_shapes() {
+    assert_eq!(format_nanp("+14081234567"), "(408) 123-4567");
+    assert_eq!(format_nanp("14081234567"), "(408) 123-4567");
+    assert_eq!(format_nanp("4081234567"), "(408) 123-4567");
+    assert_eq!(format_nanp("9154717063"), "(915) 471-7063");
+    assert_eq!(format_nanp("+442071234567"), "+442071234567");
+    assert_eq!(format_nanp("123"), "123");
+    assert_eq!(format_nanp(""), "");
+    assert_eq!(
+      format_nanp("3f8a1c2d-9b4e-4a7f-8c1d-2e6b9f0a1c34"),
+      "3f8a1c2d-9b4e-4a7f-8c1d-2e6b9f0a1c34"
+    );
+    // an opaque handle containing exactly ten digits is still not a phone number
+    assert_eq!(format_nanp("a1b2c3d4e5-f6a7-8b9c-0d"), "a1b2c3d4e5-f6a7-8b9c-0d");
   }
 }
 

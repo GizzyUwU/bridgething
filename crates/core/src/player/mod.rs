@@ -31,7 +31,6 @@ pub struct PlayerSnapshot {
   pub iap2_playing: Option<bool>,
   pub current_artwork_id: Option<String>,
   pub root_browse_gen: u64,
-  pub home_recents: Vec<QueueItem>,
   pub companion_playback_authoritative: bool,
 }
 
@@ -103,10 +102,6 @@ impl Player {
     self.snapshot_rx.borrow().root_browse_gen
   }
 
-  pub fn home_recents(&self) -> Vec<QueueItem> {
-    self.snapshot_rx.borrow().home_recents.clone()
-  }
-
   pub fn state_reply(&self) -> PlayerStateReply {
     self.snapshot_rx.borrow().state_reply.clone()
   }
@@ -169,7 +164,6 @@ fn snapshot_of(state: &PlayerState) -> PlayerSnapshot {
     iap2_playing: state.iap2_playing(),
     current_artwork_id: state.current_artwork_id(),
     root_browse_gen: state.root_browse_gen(),
-    home_recents: state.home_recents(),
     companion_playback_authoritative: state.companion_playback_authoritative(),
   }
 }
@@ -199,7 +193,6 @@ async fn run_actor(
   loop {
     let force;
     let kind;
-    let mut outgoing_position_ms = 0;
     tokio::select! {
       cmd = cmd_rx.recv() => {
         let Some(cmd) = cmd else {
@@ -208,7 +201,6 @@ async fn run_actor(
         };
         kind = ProcessedKind::for_command(&cmd);
         let cmd_force = forces_broadcast(&cmd);
-        outgoing_position_ms = state.current_position_ms();
         match cmd {
           PlayerCommand::SendState => {}
           PlayerCommand::ApplyNowPlaying(update) => state.apply_now_playing(update),
@@ -246,7 +238,7 @@ async fn run_actor(
 
     let mut snapshot = snapshot_of(&state);
     if let Some(outgoing) = rolled_off(&prev_current, &snapshot.queue_reply.current) {
-      state.note_rolled_off(outgoing, outgoing_position_ms);
+      state.note_rolled_off(outgoing);
       snapshot = snapshot_of(&state);
     }
     prev_current = snapshot.queue_reply.current.clone();
@@ -288,6 +280,9 @@ impl BroadcastSig {
   fn of(snapshot: &PlayerSnapshot) -> Self {
     let mut state = snapshot.state_reply.clone();
     state.state.playback.position_ms = 0;
+    if let Some(track) = state.state.track.as_mut() {
+      track.liked = None;
+    }
     BroadcastSig {
       state,
       queue: snapshot.queue_reply.clone(),
@@ -405,6 +400,20 @@ mod tests {
       state.apply_now_playing(u.clone());
     }
     snapshot_of(&state)
+  }
+
+  #[test]
+  fn saved_only_flip_does_not_change_the_signature() {
+    let base = snap_after(&[titled("iap2:track:a", "Song A")]);
+    let mut liked = titled("iap2:track:a", "Song A");
+    if let Some(m) = liked.media_item.as_mut() {
+      m.liked = Some(true);
+    }
+    let after = snap_after(&[titled("iap2:track:a", "Song A"), liked]);
+    assert!(
+      BroadcastSig::of(&base) == BroadcastSig::of(&after),
+      "a like alone must not un-gate a positioned broadcast"
+    );
   }
 
   #[test]

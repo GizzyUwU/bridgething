@@ -164,10 +164,15 @@ pub enum PossibleSendMsg {
 }
 
 impl PossibleSendMsg {
-  pub fn from_send_msg(msg: BridgeToClientMsg, mode: &ClientMode, stock_msg_id: Option<usize>) -> Self {
+  pub fn from_send_msg(
+    msg: BridgeToClientMsg,
+    mode: &ClientMode,
+    stock_msg_id: Option<usize>,
+    call_slot: &crate::stock::StockCallSlot,
+  ) -> Self {
     match mode {
       ClientMode::Modern => Self::Modern(msg),
-      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id)),
+      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id, call_slot)),
     }
   }
 

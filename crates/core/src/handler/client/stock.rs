@@ -27,6 +27,7 @@ use crate::{
 const DJ_PLAYLIST_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 const STOCK_BROWSE_LIMIT_MAX: u32 = 100;
 const STOCK_THUMBNAIL_EDGE: u32 = 96;
+const STOCK_HOME_SECTIONS: u32 = 10;
 
 #[derive(Debug)]
 pub struct LegacyStockHandler {
@@ -170,6 +171,8 @@ impl LegacyStockHandler {
         node_id: None,
         limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
         offset: 0,
+        sections: Some(STOCK_HOME_SECTIONS),
+        preview: None,
       };
       match super::library::browse_request(
         &self.handle.bluetooth.gateway_man,
@@ -211,6 +214,8 @@ impl LegacyStockHandler {
       node_id,
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset,
+      sections: None,
+      preview: None,
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
@@ -528,6 +533,8 @@ impl LegacyStockHandler {
       node_id: None,
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset: 0,
+      sections: Some(STOCK_HOME_SECTIONS),
+      preview: None,
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
@@ -565,6 +572,8 @@ impl LegacyStockHandler {
       node_id: Some(id.clone()),
       limit: limit.min(STOCK_BROWSE_LIMIT_MAX),
       offset,
+      sections: None,
+      preview: None,
     };
     match super::library::browse_request(
       &self.handle.bluetooth.gateway_man,
@@ -642,7 +651,7 @@ impl LegacyStockHandler {
   }
 
   async fn forward_play(&self, uri: String) -> HandlerResult {
-    if !self.has_gateway() {
+    if crate::player::is_synthetic_uri(&uri) || !self.has_gateway() {
       return self.ack().await;
     }
     self

@@ -19,6 +19,8 @@ import com.bridgething.schema.PlaybackState
 import com.bridgething.schema.BrowseEntry
 import com.bridgething.schema.CompanionAuthorityScope
 import com.bridgething.glue.GlueAuthState
+import com.bridgething.spotify.ConnectivityWatcher
+import com.bridgething.spotify.NoOpConnectivityWatcher
 import com.bridgething.spotify.SpotifyGlue
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +29,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.time.Duration.Companion.seconds
@@ -74,10 +78,11 @@ class SpotifyGlueDispatchTest {
         var favoritesContainsCalls = 0
         @Volatile var lastPlay: Pair<String, String?>? = null
         @Volatile var currentPosition: UInt? = null
+        @Volatile var resyncCalls = 0
 
         override suspend fun connect() { observer?.let { onConnect?.invoke(it) } }
         override suspend fun disconnect() {}
-        override suspend fun resync() {}
+        override suspend fun resync() { resyncCalls++ }
         override suspend fun currentPositionMs(): UInt? = currentPosition
         override fun setWsTransport(transport: uniffi.spotify.WsTransport) {}
         override fun setHttpTransport(transport: uniffi.spotify.HttpTransport) {}
@@ -105,7 +110,11 @@ class SpotifyGlueDispatchTest {
         override suspend fun transfer(deviceId: String) {}
         override suspend fun play(uri: String, skipToUri: String?) { lastPlay = uri to skipToUri }
         override suspend fun product(): SpProductState = productState
-        override suspend fun rootBrowse(): List<SpShelf> = root
+        @Volatile var lastRootBrowse: Pair<UInt?, UInt?>? = null
+        override suspend fun rootBrowse(sections: UInt?, preview: UInt?): List<SpShelf> {
+            lastRootBrowse = sections to preview
+            return root
+        }
         override suspend fun browse(nodeId: String, limit: UInt, offset: UInt): SpBrowsePage = page
         override suspend fun search(query: String, limit: UInt): SpSearchResults = searchResults
         override suspend fun resolveContext(uri: String): SpBrowseItem = item("spotify:playlist:1", "Ctx")
@@ -117,6 +126,13 @@ class SpotifyGlueDispatchTest {
         override suspend fun completeDeviceFlow(flow: SpDeviceFlow) {}
     }
 
+    private class FakeConnectivityWatcher : ConnectivityWatcher {
+        private var callback: ((Boolean) -> Unit)? = null
+        override fun start(onAvailability: (Boolean) -> Unit) { callback = onAvailability }
+        override fun stop() { callback = null }
+        fun emit(available: Boolean) { callback?.invoke(available) }
+    }
+
     private class Harness(
         val companion: BridgethingCompanion,
         val driver: WireDriver,
@@ -125,13 +141,19 @@ class SpotifyGlueDispatchTest {
         val observer: () -> SpObserver?,
     )
 
-    private suspend fun boot(scope: CoroutineScope, fake: FakeClient, authSink: ((GlueAuthState) -> Unit)? = null): Harness {
+    private suspend fun boot(
+        scope: CoroutineScope,
+        fake: FakeClient,
+        connectivity: ConnectivityWatcher = NoOpConnectivityWatcher,
+        authSink: ((GlueAuthState) -> Unit)? = null,
+    ): Harness {
         val glue = SpotifyGlue(
             workerBase = "https://example/auth",
             psk = "psk",
             deviceId = "dev",
             tokenStore = FakeTokenStore("rt"),
             cacheDir = null,
+            connectivity = connectivity,
             clientFactory = { _, obs -> fake.observer = obs; fake },
         )
         if (authSink != null) glue.setAuthObserver(authSink)
@@ -159,8 +181,8 @@ class SpotifyGlueDispatchTest {
     fun `browse root maps shelves to folders`() = runBlocking {
         val fake = FakeClient()
         fake.root = listOf(
-            SpShelf(id = "playlists", title = "Playlists", items = listOf(item("spotify:playlist:1", "Mix", hasChildren = true))),
-            SpShelf(id = "albums", title = "Albums", items = listOf(item("spotify:album:1", "Album"))),
+            SpShelf(id = "playlists", title = "Playlists", items = listOf(item("spotify:playlist:1", "Mix", hasChildren = true)), total = 12u),
+            SpShelf(id = "albums", title = "Albums", items = listOf(item("spotify:album:1", "Album")), total = 3u),
         )
         val h = boot(this, fake)
         val resp = h.driver.request(
@@ -172,6 +194,21 @@ class SpotifyGlueDispatchTest {
         assertEquals("playlists", folder.nodeId)
         assertEquals("Playlists", folder.title)
         assertEquals(1, folder.previewChildren?.size)
+        assertEquals(12u, folder.total, "folder total is the shelf's real total, not the preview count")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `browse root forwards sections and preview caps`() = runBlocking {
+        val fake = FakeClient()
+        fake.root = listOf(SpShelf(id = "playlists", title = "Playlists", items = emptyList(), total = 12u))
+        val h = boot(this, fake)
+        h.driver.request(
+            BridgeToGatewayMsgData.Library(
+                BridgeToGatewayLibraryMsg.Browse(LibraryBrowseRequest(nodeId = null, limit = 20u, offset = 0u, sections = 10u, preview = 0u)),
+            ),
+        )
+        assertEquals(10u to 0u, fake.lastRootBrowse)
         h.companion.stop()
     }
 
@@ -258,6 +295,27 @@ class SpotifyGlueDispatchTest {
     }
 
     @Test
+    fun `peer reconnect without a fresh position stamps the cached age`() = runBlocking {
+        val fake = FakeClient() // currentPosition stays null, so the cached replay cannot be freshened
+        val h = boot(this, fake)
+        h.observer()!!.onPlayer(state(npTrack("spotify:track:1", "Song")))
+        val first = h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.Snapshot
+        }
+        val fresh = ((first.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
+        assertNull(fresh.playback.positionAgeMs, "a live dealer emit carries no age")
+
+        h.glue.handlePeerConnected()
+        val replay = h.driver.waitOutbound(20.seconds) {
+            val d = (it.data as? GatewayToBridgeMsgData.Player)?.data as? GatewayToBridgePlayerMsg.Snapshot
+            d?.data?.playback?.positionAgeMs != null
+        }
+        val ps = ((replay.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
+        assertNotNull(ps.playback.positionAgeMs, "a cached replay that could not be freshened stamps its age")
+        h.companion.stop()
+    }
+
+    @Test
     fun `android claims authority even when casting off-phone`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
@@ -302,6 +360,40 @@ class SpotifyGlueDispatchTest {
         val snap = ((q.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.QueueChanged).data
         assertEquals(listOf("spotify:track:2"), snap.order)
         assertEquals("Next", snap.items.first().title)
+        h.companion.stop()
+    }
+
+    @Test
+    fun `peer reconnect re-syncs the held queue even with no now-playing track`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        // seed a held queue with no player push, so the cached now-playing track is null.
+        h.observer()!!.onQueue(SpQueue(previous = emptyList(), current = null, next = listOf(npTrack("spotify:track:2", "Next"))))
+        h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.QueueChanged
+        }
+
+        h.glue.handlePeerConnected()
+        val resent = h.driver.waitOutbound(20.seconds) {
+            (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.QueueChanged
+        }
+        val snap = ((resent.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.QueueChanged).data
+        assertEquals(listOf("spotify:track:2"), snap.order, "reconnect must re-sync the held queue even with no now-playing track")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `connectivity restored edge invokes resync exactly once`() = runBlocking {
+        val fake = FakeClient()
+        val conn = FakeConnectivityWatcher()
+        val h = boot(this, fake, connectivity = conn)
+        conn.emit(true) // initial already-available callback must not resync
+        conn.emit(false)
+        conn.emit(true) // lost -> available edge resyncs once
+
+        withTimeout(5.seconds) { while (fake.resyncCalls == 0) delay(10) }
+        delay(50)
+        assertEquals(1, fake.resyncCalls, "only the connectivity-restored edge should resync, not the initial callback")
         h.companion.stop()
     }
 
@@ -436,7 +528,7 @@ class SpotifyGlueDispatchTest {
             uri = uri, uid = "", name = name,
             artists = listOf(SpArtist(uri = "spotify:artist:1", name = "Artist")),
             album = SpAlbum(uri = "spotify:album:1", name = "Album", imageId = "ab67616d00001e02deadbeef"),
-            durationMs = 1000u, imageId = "ab67616d00001e02deadbeef", isEpisode = false, saved = saved,
+            durationMs = 1000u, imageId = "ab67616d00001e02deadbeef", isEpisode = false, saved = saved, queued = false,
         )
 
         fun state(t: SpTrack, remote: Boolean = false) = SpPlayerState(

@@ -143,10 +143,10 @@ async fn main() -> Result<(), Boxed> {
         Arc::new(PrintObserver),
       );
       client.connect().await?;
-      let shelves = client.root_browse().await?;
+      let shelves = client.root_browse(None, None).await?;
       println!("root: {} shelves", shelves.len());
       for s in &shelves {
-        println!("  [{}] {:?}  {} items", s.id, s.title, s.items.len());
+        println!("  [{}] {:?}  {} items of {}", s.id, s.title, s.items.len(), s.total);
       }
       client.disconnect().await;
     }

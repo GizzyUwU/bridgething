@@ -888,7 +888,12 @@ data class LibraryBrowseRequest (
 	/// Drilldown node id from a prior `BrowseFolder`. `None` means "root".
 	val nodeId: String? = null,
 	val limit: UInt,
-	val offset: UInt
+	val offset: UInt,
+	/// Root only: cap on the number of folders returned. `None` returns every folder.
+	val sections: UInt? = null,
+	/// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
+	/// hydration entirely and returns a cheap index of node ids, titles, and totals.
+	val preview: UInt? = null
 )
 
 /// Which slice of the user's library changed, so a consumer can scope a
@@ -2160,6 +2165,9 @@ enum class PlaybackState(val string: String) {
 data class Playback (
 	val state: PlaybackState,
 	val positionMs: UInt,
+	/// how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
+	/// forward while `state == Playing` so a cached resend never reads as a backward seek
+	val positionAgeMs: UInt? = null,
 	val shuffle: Boolean,
 	val shuffleMode: ShuffleMode? = null,
 	val repeat: RepeatMode,
@@ -2213,7 +2221,7 @@ data class QueueItem (
 	val durationMs: UInt? = null,
 	val persistentId: String? = null,
 	/// true when the user explicitly queued this item (vs it coming from the playing context).
-	val queued: Boolean
+	val queued: Boolean? = null
 )
 
 /// Full player snapshot the daemon broadcasts to webapps. Initial value

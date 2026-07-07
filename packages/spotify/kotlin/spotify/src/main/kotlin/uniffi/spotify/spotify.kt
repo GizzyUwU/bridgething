@@ -1005,7 +1005,7 @@ external fun uniffi_spotify_fn_method_spotifyclient_resume(`ptr`: Long,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_resync(`ptr`: Long,
 ): Long
-external fun uniffi_spotify_fn_method_spotifyclient_root_browse(`ptr`: Long,
+external fun uniffi_spotify_fn_method_spotifyclient_root_browse(`ptr`: Long,`sections`: RustBuffer.ByValue,`preview`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_search(`ptr`: Long,`query`: RustBuffer.ByValue,`limit`: Int,
 ): Long
@@ -1253,7 +1253,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24967) {
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_root_browse() != 24425) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_search() != 12958) {
@@ -2826,7 +2826,12 @@ public interface SpotifyClientInterface {
     
     suspend fun `resync`()
     
-    suspend fun `rootBrowse`(): List<Shelf>
+    /**
+     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
+     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
+     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
+     */
+    suspend fun `rootBrowse`(`sections`: kotlin.UInt?, `preview`: kotlin.UInt?): List<Shelf>
     
     suspend fun `search`(`query`: kotlin.String, `limit`: kotlin.UInt): SearchResults
     
@@ -3314,14 +3319,19 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
     }
 
     
+    /**
+     * `sections` caps the total folder count; `preview` caps preview items per folder, where 0
+     * skips hydration entirely and yields a cheap index (node ids + titles + totals only).
+     * Recently Played is not a root shelf; it stays reachable by browsing `recently-played`.
+     */
     @Throws(Exception::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `rootBrowse`() : List<Shelf> {
+    override suspend fun `rootBrowse`(`sections`: kotlin.UInt?, `preview`: kotlin.UInt?) : List<Shelf> {
         return uniffiRustCallAsync(
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_root_browse(
                 uniffiHandle,
-                
+                FfiConverterOptionalUInt.lower(`sections`),FfiConverterOptionalUInt.lower(`preview`),
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -4956,6 +4966,8 @@ data class Shelf (
     var `title`: kotlin.String
     , 
     var `items`: List<BrowseItem>
+    , 
+    var `total`: kotlin.UInt
     
 ){
     
@@ -4975,19 +4987,22 @@ public object FfiConverterTypeShelf: FfiConverterRustBuffer<Shelf> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceTypeBrowseItem.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
     override fun allocationSize(value: Shelf) = (
             FfiConverterString.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`title`) +
-            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`items`)
+            FfiConverterSequenceTypeBrowseItem.allocationSize(value.`items`) +
+            FfiConverterUInt.allocationSize(value.`total`)
     )
 
     override fun write(value: Shelf, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
             FfiConverterString.write(value.`title`, buf)
             FfiConverterSequenceTypeBrowseItem.write(value.`items`, buf)
+            FfiConverterUInt.write(value.`total`, buf)
     }
 }
 

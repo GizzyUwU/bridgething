@@ -50,12 +50,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private let deviceId: String
     private let tokenStore: any Spotify.TokenStore
     private let clientFactory: SpotifyClientFactory
+    private let connectivityFactory: ConnectivityMonitorFactory
     private let urlSession: URLSession
 
     private var client: (any SpotifyClientProviding)?
     private var gateway: BridgethingGateway?
     private var connectTask: Task<Void, Never>?
     private var foregroundTask: Task<Void, Never>?
+    private var connectivityTask: Task<Void, Never>?
+    private var connectivityMonitor: (any ConnectivityMonitoring)?
 
     private let stateLock = NSLock()
     private var heldScopes: Set<CompanionAuthorityScope> = []
@@ -66,6 +69,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var lastSentThumbEdge = defaultThumbEdge
     private var lastQueueItems: [QueueItem] = []
     private var lastState: SpPlayerState?
+    private var lastStateAt: Date?
     private var lastEmittedRemoteVolume: Float?
     private var likedOverride: [String: Bool] = [:]
     private var artHeroEdge = defaultHeroEdge
@@ -99,12 +103,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         deviceId: String,
         tokenStore: any Spotify.TokenStore,
         clientFactory: SpotifyClientFactory? = nil,
+        connectivityFactory: ConnectivityMonitorFactory? = nil,
         urlSession: URLSession = SpotifyGlue.defaultImageSession
     ) {
         self.workerBase = workerBase
         self.psk = psk
         self.deviceId = deviceId
         self.tokenStore = tokenStore
+        self.connectivityFactory = connectivityFactory ?? { makeDefaultConnectivityMonitor() }
         self.urlSession = urlSession
         self.clientFactory = clientFactory ?? { store, observer in
             let client = SpotifyClient.create(base: workerBase, psk: psk, deviceId: deviceId, store: store, observer: observer)
@@ -169,6 +175,15 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
                 }
             }
         #endif
+        let monitor = connectivityFactory()
+        stateLock.withLock { connectivityMonitor = monitor }
+        connectivityTask = Task { [weak client] in
+            var previous: ConnectivityStatus?
+            for await status in monitor.statuses() {
+                if previous == .unsatisfied, status == .satisfied { await client?.resync() }
+                previous = status
+            }
+        }
     }
 
     public func detach() async {
@@ -180,6 +195,14 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         connectTask = nil
         foregroundTask?.cancel()
         foregroundTask = nil
+        connectivityTask?.cancel()
+        connectivityTask = nil
+        let monitor = stateLock.withLock { () -> (any ConnectivityMonitoring)? in
+            let m = connectivityMonitor
+            connectivityMonitor = nil
+            return m
+        }
+        monitor?.cancel()
         if let client { await client.disconnect() }
         await releaseAllAuthority()
         let npObs = stateLock.withLock { nowPlayingObserver }
@@ -189,6 +212,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         stateLock.withLock {
             nowPlayingObserver = nil
             lastState = nil
+            lastStateAt = nil
             likedOverride.removeAll()
         }
         client = nil
@@ -265,9 +289,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
-        guard var pending = stateLock.withLock({ lastState }), pending.track != nil else { return }
-        if let fresh = await client?.currentPositionMs() { pending.positionMs = fresh }
-        enqueue(.player(snapshot: makeSnapshot(from: pending), hasItem: true, onRemote: pending.onRemoteSpeaker))
+        if var pending = stateLock.withLock({ lastState }), pending.track != nil {
+            var ageMs: UInt32?
+            if let fresh = await client?.currentPositionMs() {
+                pending.positionMs = fresh
+            } else {
+                ageMs = cachedPositionAgeMs()
+            }
+            enqueue(.player(
+                snapshot: makeSnapshot(from: pending, positionAgeMs: ageMs), hasItem: true, onRemote: pending.onRemoteSpeaker
+            ))
+        }
         let queue = stateLock.withLock { lastQueueItems }
         if !queue.isEmpty {
             enqueue(.queue(entries: queue, thumbEdge: artEdges().thumb))
@@ -293,7 +325,10 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
             update: Self.makeUpdate(from: state, heroEdge: heroEdge, liked: liked, likeSupported: likeSupported),
             artworkUrl: state.track.flatMap { Self.rawArtworkURL(Self.bestHex($0)) }
         ))
-        stateLock.withLock { lastState = state }
+        stateLock.withLock {
+            lastState = state
+            lastStateAt = Date()
+        }
         let snapshot = makeSnapshot(from: state, heroEdge: heroEdge, liked: liked, likeSupported: likeSupported)
         let hasItem = state.track != nil
         let onRemote = state.onRemoteSpeaker
@@ -445,7 +480,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let result: BrowseResult
         switch req.nodeId {
         case nil, "", "root":
-            let shelves = try await client.rootBrowse()
+            let shelves = try await client.rootBrowse(sections: req.sections, preview: req.preview)
             result = BrowseResult(
                 entries: shelves.map { .folder(Self.folder($0, edge: edge)) },
                 total: UInt32(shelves.count), hasMore: false
@@ -553,12 +588,20 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     // MARK: - outbound snapshot / queue
 
-    private func makeSnapshot(from state: SpPlayerState) -> BridgethingSchema.PlayerState {
-        let (liked, supported) = likeFields(for: state.track)
-        return makeSnapshot(from: state, heroEdge: artEdges().hero, liked: liked, likeSupported: supported)
+    private func cachedPositionAgeMs() -> UInt32? {
+        stateLock.withLock { lastStateAt }.map { UInt32(clamping: Int(Date().timeIntervalSince($0) * 1000)) }
     }
 
-    private func makeSnapshot(from state: SpPlayerState, heroEdge: Int, liked: Bool?, likeSupported: Bool?) -> BridgethingSchema.PlayerState {
+    private func makeSnapshot(from state: SpPlayerState, positionAgeMs: UInt32? = nil) -> BridgethingSchema.PlayerState {
+        let (liked, supported) = likeFields(for: state.track)
+        return makeSnapshot(
+            from: state, heroEdge: artEdges().hero, liked: liked, likeSupported: supported, positionAgeMs: positionAgeMs
+        )
+    }
+
+    private func makeSnapshot(
+        from state: SpPlayerState, heroEdge: Int, liked: Bool?, likeSupported: Bool?, positionAgeMs: UInt32? = nil
+    ) -> BridgethingSchema.PlayerState {
         let track: MediaItem? = state.track.map { t in
             MediaItem(
                 uri: t.uri,
@@ -584,6 +627,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let playback = Playback(
             state: state.isPaused ? .paused : .playing,
             positionMs: state.positionMs,
+            positionAgeMs: positionAgeMs,
             shuffle: state.shuffle,
             shuffleMode: state.shuffle ? .songs : .off,
             repeat: Self.mapRepeat(state.repeat),
@@ -657,7 +701,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private func reemitSnapshotIfCurrent(uri: String) async {
         let pending = stateLock.withLock { lastState }
         guard let pending, pending.track?.uri == uri, let gateway = currentGateway() else { return }
-        try? await gateway.player.snapshot(makeSnapshot(from: pending))
+        try? await gateway.player.snapshot(makeSnapshot(from: pending, positionAgeMs: cachedPositionAgeMs()))
     }
 
     // MARK: - authority
@@ -815,7 +859,7 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         let children = s.items.compactMap { libraryItem($0, edge: edge).map { BrowseEntry.item($0) } }
         return BrowseFolder(
             nodeId: s.id, title: s.title, subtitle: nil, artworkId: nil,
-            total: UInt32(s.items.count), previewChildren: children
+            total: s.total, previewChildren: children.isEmpty ? nil : children
         )
     }
 

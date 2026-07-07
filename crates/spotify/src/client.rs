@@ -36,6 +36,8 @@ const NODE_ALBUMS: &str = "albums";
 const NODE_ARTISTS: &str = "artists";
 const NODE_PODCASTS: &str = "podcasts";
 const PREVIEW: u32 = 14;
+const RECENTS_CACHE_TTL: Duration = Duration::from_secs(60);
+const HYDRATE_CACHE_CAP: usize = 4096;
 const LIBRARY_CHANGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(750);
 const DJ_URI: &str = "spotify:playlist:37i9dQZF1EYkqdzj48dyYq";
 
@@ -74,7 +76,44 @@ pub struct SpotifyClient {
   shared: Arc<Shared>,
   username: Mutex<Option<String>>,
   liked: Arc<Mutex<Option<Vec<String>>>>,
+  browse_cache: Arc<Mutex<BrowseCache>>,
   loop_handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+#[derive(Default)]
+struct BrowseCache {
+  rootlist: Option<Vec<String>>,
+  collections: HashMap<String, Vec<String>>,
+  recents: Option<(tokio::time::Instant, Vec<String>)>,
+  hydrated: HashMap<String, (u64, BrowseItem)>,
+  counter: u64,
+}
+
+impl BrowseCache {
+  fn note_saved_changed(&mut self) {
+    self.collections.clear();
+  }
+
+  fn note_playlists_changed(&mut self) {
+    self.rootlist = None;
+    // playlist hydrations carry mutable name/cover; catalog metadata (tracks/albums/...) is immutable
+    self
+      .hydrated
+      .retain(|uri, _| !uri.starts_with("spotify:playlist:") && !uri.ends_with(":collection"));
+  }
+
+  fn hydrated_get(&self, uri: &str) -> Option<BrowseItem> {
+    self.hydrated.get(uri).map(|(_, item)| item.clone())
+  }
+
+  fn hydrated_put(&mut self, uri: String, item: BrowseItem) {
+    self.counter += 1;
+    self.hydrated.insert(uri, (self.counter, item));
+    if self.hydrated.len() > HYDRATE_CACHE_CAP {
+      let floor = self.counter.saturating_sub(HYDRATE_CACHE_CAP as u64);
+      self.hydrated.retain(|_, (at, _)| *at > floor);
+    }
+  }
 }
 
 impl SpotifyClient {
@@ -98,6 +137,7 @@ impl SpotifyClient {
       }),
       username: Mutex::new(None),
       liked: Arc::new(Mutex::new(None)),
+      browse_cache: Arc::new(Mutex::new(BrowseCache::default())),
       loop_handle: Mutex::new(None),
     }
   }
@@ -109,6 +149,7 @@ impl SpotifyClient {
       self.observer.clone(),
       self.shared.clone(),
       self.liked.clone(),
+      self.browse_cache.clone(),
       self.dealer.device_id().to_string(),
     ))
   }
@@ -205,45 +246,88 @@ impl SpotifyClient {
   }
 
   async fn recents_uris(&self) -> Result<Vec<String>> {
+    if let Some((at, cached)) = self.browse_cache.lock().await.recents.clone()
+      && at.elapsed() < RECENTS_CACHE_TTL
+    {
+      return Ok(cached);
+    }
     let user = self.username().await?;
     let rp = self.spc.recently_played(&user, 50).await?;
     let mut seen = std::collections::HashSet::new();
-    Ok(
-      rp.items
-        .iter()
-        .map(|e| e.track_uri.clone())
-        .filter(|u| u.starts_with("spotify:track:") && seen.insert(u.clone()))
-        .collect(),
-    )
+    let uris: Vec<String> = rp
+      .items
+      .iter()
+      .map(|e| e.track_uri.clone())
+      .filter(|u| u.starts_with("spotify:track:") && seen.insert(u.clone()))
+      .collect();
+    self.browse_cache.lock().await.recents = Some((tokio::time::Instant::now(), uris.clone()));
+    Ok(uris)
   }
 
   async fn playlist_uris(&self) -> Result<Vec<String>> {
+    if let Some(cached) = self.browse_cache.lock().await.rootlist.clone() {
+      return Ok(cached);
+    }
     let user = self.username().await?;
     let rl = self.spc.rootlist(&user).await?;
-    Ok(
-      rl.contents
-        .items
-        .iter()
-        .map(|i| i.uri().to_string())
-        .filter(|u| u.starts_with("spotify:playlist:"))
-        .collect(),
-    )
+    let uris: Vec<String> = rl
+      .contents
+      .items
+      .iter()
+      .map(|i| i.uri().to_string())
+      .filter(|u| u.starts_with("spotify:playlist:"))
+      .collect();
+    self.browse_cache.lock().await.rootlist = Some(uris.clone());
+    Ok(uris)
   }
 
   async fn collection_uris(&self, set: &str, kind: Option<&str>) -> Result<Vec<String>> {
+    let key = format!("{set}:{}", kind.unwrap_or(""));
+    if let Some(cached) = self.browse_cache.lock().await.collections.get(&key).cloned() {
+      return Ok(cached);
+    }
     let user = self.username().await?;
     let mut items = self.spc.collection_paging(&user, set, 500).await?;
     items.sort_by(|a, b| b.added_at.cmp(&a.added_at));
-    Ok(
-      items
-        .into_iter()
-        .map(|i| i.uri)
-        .filter(|u| kind.is_none_or(|k| u.split(':').nth(1) == Some(k)))
-        .collect(),
-    )
+    let uris: Vec<String> = items
+      .into_iter()
+      .map(|i| i.uri)
+      .filter(|u| kind.is_none_or(|k| u.split(':').nth(1) == Some(k)))
+      .collect();
+    self.browse_cache.lock().await.collections.insert(key, uris.clone());
+    Ok(uris)
   }
 
   async fn hydrate_map(&self, uris: &[String]) -> HashMap<String, BrowseItem> {
+    let mut out = HashMap::new();
+    let missing: Vec<String> = {
+      let cache = self.browse_cache.lock().await;
+      uris
+        .iter()
+        .filter(|u| {
+          if let Some(item) = cache.hydrated_get(u) {
+            out.insert((*u).clone(), item);
+            false
+          } else {
+            true
+          }
+        })
+        .cloned()
+        .collect()
+    };
+    if missing.is_empty() {
+      return out;
+    }
+    let fetched = self.hydrate_map_uncached(&missing).await;
+    let mut cache = self.browse_cache.lock().await;
+    for (u, item) in fetched {
+      cache.hydrated_put(u.clone(), item.clone());
+      out.insert(u, item);
+    }
+    out
+  }
+
+  async fn hydrate_map_uncached(&self, uris: &[String]) -> HashMap<String, BrowseItem> {
     let mut by_kind: HashMap<&str, Vec<String>> = HashMap::new();
     let mut playlists: Vec<String> = Vec::new();
     for u in uris {
@@ -560,6 +644,7 @@ impl SpotifyClient {
     *self.shared.writer.lock().await = None;
     *self.shared.cluster.lock().await = None;
     *self.shared.last_active.lock().await = None;
+    *self.browse_cache.lock().await = BrowseCache::default();
   }
 
   pub async fn current_position_ms(&self) -> Option<u32> {
@@ -702,28 +787,26 @@ impl SpotifyClient {
     })
   }
 
-  pub async fn root_browse(&self) -> Result<Vec<Shelf>> {
+  pub async fn root_browse(&self, sections: Option<u32>, preview: Option<u32>) -> Result<Vec<Shelf>> {
+    let preview = preview.unwrap_or(PREVIEW).min(PREVIEW) as usize;
     let user = self.username().await.ok();
-    let (home, recents, playlists, albums, artists, shows) = tokio::join!(
+    let (home, playlists, albums, artists, shows) = tokio::join!(
       self.spc.get_home("en"),
-      self.recents_uris(),
       self.playlist_uris(),
       self.collection_uris("collection", Some("album")),
       self.collection_uris("artist", None),
       self.collection_uris("show", None),
     );
-    let take = |v: &[String]| v.iter().take(PREVIEW as usize).cloned().collect::<Vec<_>>();
-    let recents_p = take(&recents.unwrap_or_default());
-    let albums_p = take(&albums.unwrap_or_default());
-    let artists_p = take(&artists.unwrap_or_default());
-    let shows_p = take(&shows.unwrap_or_default());
-    let mut playlists_p: Vec<String> = Vec::new();
+    let albums = albums.unwrap_or_default();
+    let artists = artists.unwrap_or_default();
+    let shows = shows.unwrap_or_default();
+    let mut playlists_all: Vec<String> = Vec::new();
     if let Some(u) = &user {
-      playlists_p.push(format!("spotify:user:{u}:collection"));
+      playlists_all.push(format!("spotify:user:{u}:collection"));
     }
-    playlists_p.extend(take(&playlists.unwrap_or_default()));
+    playlists_all.extend(playlists.unwrap_or_default());
 
-    let casita_rows: Vec<(String, String, Vec<String>)> = match home {
+    let casita_rows: Vec<(String, String, Vec<String>, usize)> = match home {
       Ok(h) => h
         .body
         .sections
@@ -733,53 +816,74 @@ impl SpotifyClient {
           if uris.is_empty() || title.is_empty() {
             return None;
           }
-          Some((
-            s.id.uri.clone(),
-            title,
-            uris.into_iter().take(PREVIEW as usize).collect(),
-          ))
+          let total = uris.len();
+          Some((s.id.uri.clone(), title, uris.into_iter().take(preview).collect(), total))
         })
         .collect(),
       Err(_) => Vec::new(),
     };
 
-    let mut union: Vec<String> = Vec::new();
-    for v in [&recents_p, &albums_p, &artists_p, &shows_p, &playlists_p] {
-      union.extend(v.iter().cloned());
+    let take = |v: &[String]| v.iter().take(preview).cloned().collect::<Vec<_>>();
+    let mut rows: Vec<(String, String, Vec<String>, usize)> = vec![
+      (
+        NODE_PLAYLISTS.into(),
+        "Playlists".into(),
+        take(&playlists_all),
+        playlists_all.len(),
+      ),
+      (NODE_ALBUMS.into(), "Albums".into(), take(&albums), albums.len()),
+      (NODE_ARTISTS.into(), "Artists".into(), take(&artists), artists.len()),
+      (NODE_PODCASTS.into(), "Podcasts".into(), take(&shows), shows.len()),
+    ];
+    rows.extend(casita_rows);
+    rows.retain(|(_, _, _, total)| *total > 0);
+    if let Some(cap) = sections {
+      rows.truncate(cap as usize);
     }
-    for (_, _, uris) in &casita_rows {
+
+    if preview == 0 {
+      return Ok(
+        rows
+          .into_iter()
+          .map(|(id, title, _, total)| Shelf {
+            id,
+            title,
+            items: Vec::new(),
+            total: total as u32,
+          })
+          .collect(),
+      );
+    }
+
+    let mut union: Vec<String> = Vec::new();
+    for (_, _, uris, _) in &rows {
       union.extend(uris.iter().cloned());
     }
     let mut seen = std::collections::HashSet::new();
     union.retain(|u| seen.insert(u.clone()));
     let map = self.hydrate_map(&union).await;
 
-    let build = |uris: &[String]| -> Vec<BrowseItem> {
-      uris
-        .iter()
-        .filter_map(|u| map.get(u).cloned())
-        .filter(|i| !i.title.is_empty())
-        .collect()
-    };
-    let mut shelves: Vec<Shelf> = Vec::new();
-    let mut push = |id: &str, title: &str, items: Vec<BrowseItem>| {
-      if !items.is_empty() {
-        shelves.push(Shelf {
-          id: id.to_string(),
-          title: title.to_string(),
-          items,
-        });
-      }
-    };
-    push(NODE_RECENTS, "Recently Played", build(&recents_p));
-    for (id, title, uris) in &casita_rows {
-      push(id, title, build(uris));
-    }
-    push(NODE_PLAYLISTS, "Playlists", build(&playlists_p));
-    push(NODE_ALBUMS, "Albums", build(&albums_p));
-    push(NODE_ARTISTS, "Artists", build(&artists_p));
-    push(NODE_PODCASTS, "Podcasts", build(&shows_p));
-    Ok(shelves)
+    Ok(
+      rows
+        .into_iter()
+        .filter_map(|(id, title, uris, total)| {
+          let items: Vec<BrowseItem> = uris
+            .iter()
+            .filter_map(|u| map.get(u).cloned())
+            .filter(|i| !i.title.is_empty())
+            .collect();
+          if items.is_empty() {
+            return None;
+          }
+          Some(Shelf {
+            id,
+            title,
+            items,
+            total: total as u32,
+          })
+        })
+        .collect(),
+    )
   }
 
   pub async fn browse(&self, node_id: &str, limit: u32, offset: u32) -> Result<BrowsePage> {
@@ -846,6 +950,8 @@ impl SpotifyClient {
         cache.insert(0, uri.to_string());
       }
     }
+    drop(guard);
+    self.browse_cache.lock().await.note_saved_changed();
     Ok(())
   }
 
@@ -956,6 +1062,7 @@ async fn events_loop(
   observer: Arc<dyn Observer>,
   shared: Arc<Shared>,
   liked: Arc<Mutex<Option<Vec<String>>>>,
+  browse_cache: Arc<Mutex<BrowseCache>>,
   me: String,
 ) {
   loop {
@@ -967,6 +1074,7 @@ async fn events_loop(
             devices = cluster.device.len(),
             "dealer connected"
           );
+          *browse_cache.lock().await = BrowseCache::default();
           *shared.writer.lock().await = Some(writer);
           let mut emitter = Emitter {
             spc: &spc,
@@ -1005,9 +1113,13 @@ async fn events_loop(
                     match scope {
                       LibraryScope::Saved => {
                         *liked.lock().await = None;
+                        browse_cache.lock().await.note_saved_changed();
                         pending_saved = true;
                       }
-                      LibraryScope::Playlists => pending_playlists = true,
+                      LibraryScope::Playlists => {
+                        browse_cache.lock().await.note_playlists_changed();
+                        pending_playlists = true;
+                      }
                     }
                     debounce.as_mut().reset(tokio::time::Instant::now() + LIBRARY_CHANGE_DEBOUNCE);
                   }

@@ -70,6 +70,7 @@ const SUBTITLE_MAX: u16 = 256;
 const MESSAGE_MAX: u16 = 1024;
 
 const PENDING_QUEUE_CAP: usize = 64;
+const ATTRIBUTE_FETCH_ATTEMPTS: u32 = 3;
 const ATTRIBUTE_AUTH_PROBE_INTERVAL: Duration = Duration::from_secs(60);
 const ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD: u32 = 3;
 pub const ATTRIBUTE_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -151,12 +152,23 @@ impl Ancs {
   }
 
   pub async fn pump(&mut self) -> bool {
-    let Some(item) = self.pending.pop_front() else {
+    let Some(mut item) = self.pending.pop_front() else {
       return true;
     };
     let cmd = build_get_attributes(item.uid);
     if let Err(err) = self.control_point.write_ext(&cmd, &write_request()).await {
-      tracing::warn!(uid = item.uid, ?err, "ANCS GNA write failed; dropping");
+      item.attempts += 1;
+      if item.attempts < ATTRIBUTE_FETCH_ATTEMPTS {
+        tracing::debug!(
+          uid = item.uid,
+          attempts = item.attempts,
+          ?err,
+          "ANCS GNA write failed; will retry"
+        );
+        self.pending.push_front(item);
+      } else {
+        tracing::warn!(uid = item.uid, ?err, "ANCS GNA write failed; dropping after retries");
+      }
       return false;
     }
     if self.consecutive_timeouts >= ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
@@ -200,6 +212,7 @@ impl Ancs {
       event_id,
       flags,
       category,
+      attempts: 0,
     });
   }
 
@@ -228,17 +241,24 @@ impl Ancs {
   }
 
   pub fn on_fetch_timeout(&mut self) -> bool {
-    let Some(p) = self.in_flight.take() else {
+    let Some(mut p) = self.in_flight.take() else {
       return false;
     };
     self.consecutive_timeouts = self.consecutive_timeouts.saturating_add(1);
     self.ds_buffer.clear();
+    let uid = p.uid;
+    p.attempts += 1;
+    if p.attempts < ATTRIBUTE_FETCH_ATTEMPTS {
+      self.pending.push_front(p);
+    } else {
+      tracing::debug!(uid, "ANCS attribute fetch dropped after retries");
+    }
     if self.consecutive_timeouts == ATTRIBUTE_AUTH_GUIDANCE_THRESHOLD {
       tracing::warn!("ANCS notifications arriving but iOS is dropping or rejecting content reads");
       true
     } else {
       tracing::debug!(
-        uid = p.uid,
+        uid,
         consecutive_timeouts = self.consecutive_timeouts,
         "ANCS attribute fetch timed out"
       );
@@ -286,6 +306,7 @@ struct PendingNotification {
   event_id: u8,
   flags: u8,
   category: u8,
+  attempts: u32,
 }
 
 fn build_get_attributes(uid: u32) -> Vec<u8> {

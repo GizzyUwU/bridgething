@@ -811,6 +811,11 @@ export type PlayContext = { contextUri: string; position: number | null };
 export type Playback = {
   state: PlaybackState;
   positionMs: number;
+  /**
+   * how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
+   * forward while `state == Playing` so a cached resend never reads as a backward seek
+   */
+  positionAgeMs?: number | null;
   shuffle: boolean;
   shuffleMode: ShuffleMode | null;
   repeat: RepeatMode;

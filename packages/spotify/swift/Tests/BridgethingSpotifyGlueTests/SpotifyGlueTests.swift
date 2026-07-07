@@ -42,10 +42,13 @@ final class SpotifyGlueTests: XCTestCase {
         var currentPosition: UInt32?
         var volume: Double = 50
         var volumeSets: [Double] = []
+        private let resyncLock = NSLock()
+        private var resyncCount = 0
+        var resyncCalls: Int { resyncLock.withLock { resyncCount } }
 
         func connect() async throws {}
         func disconnect() async {}
-        func resync() async {}
+        func resync() async { resyncLock.withLock { resyncCount += 1 } }
         func currentPositionMs() async -> UInt32? { currentPosition }
         func pause() async throws {}
         func resume() async throws {}
@@ -67,7 +70,11 @@ final class SpotifyGlueTests: XCTestCase {
         }
         func activeDeviceVolumePercent() async -> Double? { volume }
         func product() async throws -> Spotify.ProductState { productState }
-        func rootBrowse() async throws -> [Spotify.Shelf] { root }
+        var lastRootBrowse: (sections: UInt32?, preview: UInt32?)?
+        func rootBrowse(sections: UInt32?, preview: UInt32?) async throws -> [Spotify.Shelf] {
+            lastRootBrowse = (sections, preview)
+            return root
+        }
         func browse(nodeId _: String, limit _: UInt32, offset _: UInt32) async throws -> Spotify.BrowsePage { page }
         func search(query _: String, limit _: UInt32) async throws -> Spotify.SearchResults { searchResults }
         func resolveContext(uri _: String) async throws -> Spotify.BrowseItem { item("spotify:playlist:1", "Ctx") }
@@ -76,13 +83,44 @@ final class SpotifyGlueTests: XCTestCase {
         func favoritesList(limit _: UInt32, offset _: UInt32) async throws -> Spotify.BrowsePage { page }
     }
 
-    private func boot(_ fake: FakeClient, paired: Bool = true) async throws -> Harness {
+    final class FakeConnectivity: ConnectivityMonitoring, @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: AsyncStream<ConnectivityStatus>.Continuation?
+        private var buffered: [ConnectivityStatus] = []
+
+        func statuses() -> AsyncStream<ConnectivityStatus> {
+            AsyncStream { cont in
+                lock.withLock {
+                    continuation = cont
+                    for status in buffered { cont.yield(status) }
+                    buffered.removeAll()
+                }
+            }
+        }
+
+        func cancel() { lock.withLock { continuation?.finish(); continuation = nil } }
+
+        func push(_ status: ConnectivityStatus) {
+            lock.withLock {
+                if let continuation { continuation.yield(status) } else { buffered.append(status) }
+            }
+        }
+    }
+
+    private func boot(_ fake: FakeClient, paired: Bool = true, connectivity: (any ConnectivityMonitoring)? = nil) async throws -> Harness {
+        let connectivityFactory: ConnectivityMonitorFactory?
+        if let connectivity {
+            connectivityFactory = { connectivity }
+        } else {
+            connectivityFactory = nil
+        }
         let glue = SpotifyGlue(
             workerBase: "https://example/auth",
             psk: "psk",
             deviceId: "dev",
             tokenStore: FakeTokenStore(refresh: paired ? "rt" : nil),
-            clientFactory: { _, observer in fake.observer = observer; return fake }
+            clientFactory: { _, observer in fake.observer = observer; return fake },
+            connectivityFactory: connectivityFactory
         )
         let adapter = InMemoryAdapter()
         let companion = BridgethingCompanion(
@@ -111,18 +149,33 @@ final class SpotifyGlueTests: XCTestCase {
     func testBrowseRootMapsShelvesToFolders() async throws {
         let fake = FakeClient()
         fake.root = [
-            Spotify.Shelf(id: "playlists", title: "Playlists", items: [item("spotify:playlist:1", "Mix", hasChildren: true)]),
-            Spotify.Shelf(id: "albums", title: "Albums", items: [item("spotify:album:1", "Album")]),
+            Spotify.Shelf(id: "playlists", title: "Playlists", items: [item("spotify:playlist:1", "Mix", hasChildren: true)], total: 12),
+            Spotify.Shelf(id: "albums", title: "Albums", items: [item("spotify:album:1", "Album")], total: 3),
         ]
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
-        let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0))), timeout: .seconds(5))
+        let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0, sections: nil, preview: nil))), timeout: .seconds(5))
         guard case let .library(.browseReply(reply)) = resp.data else { return XCTFail("expected browseReply, got \(resp.data)") }
         XCTAssertEqual(reply.result.entries.count, 2)
         guard case let .folder(folder) = reply.result.entries.first else { return XCTFail("expected folder") }
         XCTAssertEqual(folder.nodeId, "playlists")
         XCTAssertEqual(folder.title, "Playlists")
         XCTAssertEqual(folder.previewChildren?.count, 1)
+        XCTAssertEqual(folder.total, 12, "folder total is the shelf's real total, not the preview count")
+    }
+
+    func testBrowseRootForwardsSectionsAndPreviewCaps() async throws {
+        let fake = FakeClient()
+        fake.root = [Spotify.Shelf(id: "playlists", title: "Playlists", items: [], total: 12)]
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        let resp = try await h.driver.request(
+            .library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0, sections: 10, preview: 0))),
+            timeout: .seconds(5)
+        )
+        guard case .library(.browseReply) = resp.data else { return XCTFail("expected browseReply") }
+        XCTAssertEqual(fake.lastRootBrowse?.sections, 10)
+        XCTAssertEqual(fake.lastRootBrowse?.preview, 0)
     }
 
     func testBrowseDrillInMapsItemsByKind() async throws {
@@ -133,7 +186,7 @@ final class SpotifyGlueTests: XCTestCase {
         )
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
-        let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: "albums", limit: 20, offset: 0))), timeout: .seconds(5))
+        let resp = try await h.driver.request(.library(.browse(LibraryBrowseRequest(nodeId: "albums", limit: 20, offset: 0, sections: nil, preview: nil))), timeout: .seconds(5))
         guard case let .library(.browseReply(reply)) = resp.data else { return XCTFail("expected browseReply") }
         XCTAssertEqual(reply.result.entries.count, 2)
         guard case let .item(.track(t)) = reply.result.entries.first else { return XCTFail("expected a track item") }
@@ -194,6 +247,42 @@ final class SpotifyGlueTests: XCTestCase {
         }
         guard case let .player(.snapshot(ps)) = replay.data else { return XCTFail("expected replay snapshot") }
         XCTAssertEqual(ps.playback.positionMs, 90_000, "peer-connect replay must refresh the stale cached position")
+    }
+
+    func testPeerReconnectWithoutFreshPositionStampsAge() async throws {
+        let fake = FakeClient() // currentPosition stays nil, so the cached replay cannot be freshened
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
+        let first = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
+        guard case let .player(.snapshot(fresh)) = first.data else { return XCTFail("expected snapshot") }
+        XCTAssertNil(fresh.playback.positionAgeMs, "a live dealer emit carries no age")
+
+        await h.glue.handlePeerConnected()
+        let replay = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .player(.snapshot(ps)) = $0.data, ps.playback.positionAgeMs != nil { return true }
+            return false
+        }
+        guard case let .player(.snapshot(ps)) = replay.data else { return XCTFail("expected replay snapshot") }
+        XCTAssertNotNil(ps.playback.positionAgeMs, "a cached replay that could not be freshened stamps its age")
+    }
+
+    func testLikedReemitStampsPositionAge() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        fake.observer?.onPlayer(state: state(npTrack("spotify:track:1", "Song")))
+        _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.snapshot) = $0.data { return true }; return false }
+
+        try await h.driver.send(
+            .library(.favoritesSet(FavoritesSet(item: ItemRef(uri: "spotify:track:1", kind: .track, persistentId: nil), liked: true)))
+        )
+        let reemit = try await h.driver.waitOutbound(timeout: .seconds(20)) {
+            if case let .player(.snapshot(ps)) = $0.data, ps.playback.positionAgeMs != nil { return true }
+            return false
+        }
+        guard case let .player(.snapshot(ps)) = reemit.data else { return XCTFail("expected re-emit") }
+        XCTAssertNotNil(ps.playback.positionAgeMs, "a liked-change re-emit of the cached snapshot stamps its age")
     }
 
     func testRemoteConnectPlaybackClaimsAuthorityAndVolume() async throws {
@@ -265,6 +354,34 @@ final class SpotifyGlueTests: XCTestCase {
         guard case let .player(.queueChanged(snap)) = q.data else { return XCTFail("expected queueChanged") }
         XCTAssertEqual(snap.order, ["spotify:track:2"])
         XCTAssertEqual(snap.items.first?.title, "Next")
+    }
+
+    func testPeerReconnectResendsHeldQueueWithNoNowPlayingTrack() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        // seed a held queue with no player push, so the cached now-playing track is nil.
+        fake.observer?.onQueue(queue: Spotify.Queue(previous: [], current: nil, next: [npTrack("spotify:track:2", "Next")]))
+        _ = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.queueChanged) = $0.data { return true }; return false }
+
+        await h.glue.handlePeerConnected()
+        let resent = try await h.driver.waitOutbound(timeout: .seconds(20)) { if case .player(.queueChanged) = $0.data { return true }; return false }
+        guard case let .player(.queueChanged(snap)) = resent.data else { return XCTFail("expected re-sent queueChanged") }
+        XCTAssertEqual(snap.order, ["spotify:track:2"], "reconnect must re-sync the held queue even with no now-playing track")
+    }
+
+    func testConnectivityRestoredTriggersResyncExactlyOnce() async throws {
+        let fake = FakeClient()
+        let conn = FakeConnectivity()
+        let h = try await boot(fake, connectivity: conn)
+        addTeardownBlock { await h.companion.stop() }
+        conn.push(.satisfied) // initial path report must not resync
+        conn.push(.unsatisfied)
+        conn.push(.satisfied) // unsatisfied -> satisfied edge resyncs once
+
+        let deadline = Date().addingTimeInterval(5)
+        while fake.resyncCalls < 1, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(fake.resyncCalls, 1, "only the connectivity-restored edge should resync, not the initial report")
     }
 
     func testLibraryChangeRelaysToGateway() async throws {
@@ -404,7 +521,7 @@ private func npTrack(_ uri: String, _ name: String, saved: Bool = false) -> Spot
         uri: uri, uid: "", name: name,
         artists: [Spotify.Artist(uri: "spotify:artist:1", name: "Artist")],
         album: Spotify.Album(uri: "spotify:album:1", name: "Album", imageId: "ab67616d00001e02deadbeef"),
-        durationMs: 1000, imageId: "ab67616d00001e02deadbeef", isEpisode: false, saved: saved
+        durationMs: 1000, imageId: "ab67616d00001e02deadbeef", isEpisode: false, saved: saved, queued: false
     )
 }
 

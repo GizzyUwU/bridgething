@@ -59,7 +59,7 @@ final class CompanionDispatchTests: XCTestCase {
         let h = try await boot(glue: FakeGlue(behaviors: behaviors))
 
         let resp = try await h.driver.request(
-            .library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0))),
+            .library(.browse(LibraryBrowseRequest(nodeId: nil, limit: 20, offset: 0, sections: nil, preview: nil))),
             timeout: .seconds(3)
         )
         guard case let .library(.browseReply(reply)) = resp.data else {

@@ -47,6 +47,9 @@ const TRANSIENT_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const TRANSIENT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 const ANCS_REPROBE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const LE_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+const ACL_DOWN_HEARTBEAT: Duration = Duration::from_secs(60);
+const ADV_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const ADV_REASSERT_AFTER: Duration = Duration::from_secs(90);
 const GATT_SERVICE_INTERFACE: &str = "org.bluez.GattService1";
 
 #[derive(Debug)]
@@ -140,26 +143,28 @@ impl LeBootstrap {
     };
     let dispatcher = LeDispatcher {
       adapter: Arc::new(adapter),
+      adapter_dbus_path,
       bus,
       audio,
-      rx: self.rx,
       session: None,
       auth_reporter: AuthStateReporter::new(bluetooth),
-      _advertisement: advertisement,
+      advertisement,
+      acl_down_since: None,
       _pair_trigger: pair_trigger,
     };
-    tokio::spawn(dispatcher.run())
+    tokio::spawn(dispatcher.run(self.rx))
   }
 }
 
 struct LeDispatcher {
   adapter: Arc<Adapter>,
+  adapter_dbus_path: String,
   bus: WireEventBus,
   audio: AudioManager,
-  rx: mpsc::Receiver<LeCommand>,
   session: Option<ActiveSession>,
   auth_reporter: AuthStateReporter,
-  _advertisement: Option<LeAdvertisement>,
+  advertisement: Option<LeAdvertisement>,
+  acl_down_since: Option<time::Instant>,
   _pair_trigger: Option<PairTrigger>,
 }
 
@@ -171,13 +176,43 @@ struct ActiveSession {
 }
 
 impl LeDispatcher {
-  async fn run(mut self) {
-    while let Some(cmd) = self.rx.recv().await {
-      match cmd {
-        LeCommand::Attach { address } => self.handle_attach(address).await,
-        LeCommand::Detach { address } => self.handle_detach(address).await,
-        LeCommand::Invoke { uid, action } => self.handle_invoke(uid, action).await,
+  async fn run(mut self, mut rx: mpsc::Receiver<LeCommand>) {
+    let mut adv_check = time::interval(ADV_CHECK_INTERVAL);
+    adv_check.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+    loop {
+      tokio::select! {
+        cmd = rx.recv() => match cmd {
+          Some(LeCommand::Attach { address }) => self.handle_attach(address).await,
+          Some(LeCommand::Detach { address }) => self.handle_detach(address).await,
+          Some(LeCommand::Invoke { uid, action }) => self.handle_invoke(uid, action).await,
+          None => return,
+        },
+        _ = adv_check.tick() => self.reassert_advertisement_if_stalled().await,
       }
+    }
+  }
+
+  async fn reassert_advertisement_if_stalled(&mut self) {
+    let Some(session) = &self.session else {
+      self.acl_down_since = None;
+      return;
+    };
+    if le_acl_up(&self.adapter, session.address) {
+      self.acl_down_since = None;
+      return;
+    }
+    let down_since = *self.acl_down_since.get_or_insert_with(time::Instant::now);
+    if down_since.elapsed() < ADV_REASSERT_AFTER {
+      return;
+    }
+    self.acl_down_since = None;
+    tracing::info!(address = %session.address, "LE ACL down with a phone attached; re-registering advertisement");
+    if let Some(old) = self.advertisement.take() {
+      old.unregister().await;
+    }
+    match LeAdvertisement::register(&self.adapter_dbus_path, PAIR_TRIGGER_SERVICE).await {
+      Ok(handle) => self.advertisement = Some(handle),
+      Err(err) => tracing::warn!(?err, "LE advertisement re-register failed; will retry"),
     }
   }
 
@@ -266,7 +301,7 @@ impl LeSession {
 
     let mut backoff = TRANSIENT_BACKOFF_INITIAL;
     let mut absent_logged = false;
-    let mut down_logged = false;
+    let mut acl_watch = AclWatch::default();
 
     loop {
       if cancel.is_cancelled() {
@@ -282,7 +317,7 @@ impl LeSession {
         &mut invoke_rx,
         &cancel,
         &mut absent_logged,
-        &mut down_logged,
+        &mut acl_watch,
         &mut backoff,
       )
       .await;
@@ -381,6 +416,40 @@ fn le_acl_up(adapter: &Adapter, address: Address) -> bool {
   })
 }
 
+#[derive(Default)]
+struct AclWatch {
+  down: Option<(time::Instant, time::Instant)>,
+}
+
+impl AclWatch {
+  fn note_down(&mut self, address: Address) {
+    let now = time::Instant::now();
+    match &mut self.down {
+      None => {
+        tracing::warn!(%address, "LE ACL down; polling for iOS to reconnect");
+        self.down = Some((now, now));
+      }
+      Some((since, last_log)) => {
+        if now.duration_since(*last_log) >= ACL_DOWN_HEARTBEAT {
+          tracing::info!(%address, outage_s = now.duration_since(*since).as_secs(), "LE ACL still down");
+          *last_log = now;
+        }
+      }
+    }
+  }
+
+  fn note_up(&mut self, address: Address, services_resolved: bool) {
+    if let Some((since, _)) = self.down.take() {
+      tracing::info!(
+        %address,
+        outage_s = since.elapsed().as_secs(),
+        services_resolved,
+        "LE ACL restored; discovering"
+      );
+    }
+  }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn attempt(
   conn: &Connection,
@@ -392,22 +461,16 @@ async fn attempt(
   invoke_rx: &mut mpsc::Receiver<(u32, u8)>,
   cancel: &CancellationToken,
   absent_logged: &mut bool,
-  down_logged: &mut bool,
+  acl_watch: &mut AclWatch,
   backoff: &mut Duration,
 ) -> Result<LoopExit, bluer::Error> {
   if !le_acl_up(adapter, address) {
-    if !*down_logged {
-      tracing::debug!(%address, "LE ACL down; polling for iOS to connect");
-      *down_logged = true;
-    }
+    acl_watch.note_down(address);
     return Ok(LoopExit::ConnectionLost);
   }
   let device = adapter.device(address)?;
-  if *down_logged {
-    let services_resolved = device.is_services_resolved().await.unwrap_or(false);
-    tracing::debug!(%address, services_resolved, "LE ACL up; discovering");
-    *down_logged = false;
-  }
+  let services_resolved = device.is_services_resolved().await.unwrap_or(false);
+  acl_watch.note_up(address, services_resolved);
 
   let services = match enumerate_services(conn, &device, adapter.name(), address).await {
     Ok(services) => services,

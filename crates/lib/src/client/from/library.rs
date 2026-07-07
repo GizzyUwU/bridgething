@@ -21,6 +21,13 @@ pub struct LibraryBrowse {
   pub node_id: Option<String>,
   pub limit: u32,
   pub offset: u32,
+  /// Root only: cap on the number of folders returned. `None` returns every folder.
+  #[serde(default)]
+  pub sections: Option<u32>,
+  /// Root only: preview children per folder. `None` is the gateway default; `0` skips preview
+  /// hydration entirely and returns a cheap index of node ids, titles, and totals.
+  #[serde(default)]
+  pub preview: Option<u32>,
 }
 
 #[serde_with::skip_serializing_none]

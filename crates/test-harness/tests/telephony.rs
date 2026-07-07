@@ -71,7 +71,8 @@ async fn iap2_incoming_call_reaches_stock_with_pascal_case_fields() {
   assert_eq!(info["status"].as_str(), Some("Ringing"));
   assert_eq!(info["call_dir"].as_str(), Some("Incoming"));
   assert_eq!(info["display_name"].as_str(), Some("Test Caller"));
-  assert_eq!(info["remote_id"].as_str(), Some("+15555550100"));
+  assert_eq!(info["remote_id"].as_str(), Some("(555) 555-0100"));
+  assert_eq!(info["service"].as_str(), Some("Unknown"));
   assert_eq!(info["call_id"].as_str(), Some("call-1"));
 }
 

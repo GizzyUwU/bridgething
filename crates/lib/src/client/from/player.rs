@@ -40,6 +40,7 @@ pub struct SkipToIndex {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct SkipPrev {
+  /// when true, restart the current track if it is progressed past the restart threshold; otherwise always move to the previous track.
   pub allow_seeking: bool,
 }
 

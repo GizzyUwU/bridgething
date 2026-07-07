@@ -9,6 +9,7 @@ import com.margelo.nitro.bridgething.session.HybridBridgethingSession
 import com.bridgething.applemusic.AppleMusicGlue
 import com.bridgething.companion.HostInfo
 import com.bridgething.lyrics.LrclibResolver
+import com.bridgething.spotify.AndroidConnectivityWatcher
 import com.bridgething.spotify.SpotifyGlue
 import com.bridgething.tidal.TidalGlue
 import uniffi.spotify.TokenStore as SpTokenStore
@@ -80,6 +81,7 @@ public object BridgethingApp {
             tokenStore = store,
             cacheDir = cacheDir,
             appContext = appContext,
+            connectivity = AndroidConnectivityWatcher(appContext),
         )
 }
 

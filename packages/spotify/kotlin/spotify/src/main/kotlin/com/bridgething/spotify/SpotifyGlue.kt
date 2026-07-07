@@ -106,6 +106,7 @@ class SpotifyGlue(
     private val tokenStore: SpTokenStore,
     cacheDir: java.io.File? = null,
     appContext: android.content.Context? = null,
+    private val connectivity: ConnectivityWatcher = NoOpConnectivityWatcher,
     private val clientFactory: SpotifyClientFactory = { store, observer ->
         initLogging(LogcatLogSink(), if (BuildConfig.DEBUG) "spotify=trace" else "spotify=info")
         SpotifyClient.create(workerBase, psk, deviceId, store, observer).also {
@@ -150,12 +151,14 @@ class SpotifyGlue(
     @Volatile private var heroEdge = DEFAULT_HERO_EDGE
     @Volatile private var thumbEdge = DEFAULT_THUMB_EDGE
     @Volatile private var lastState: SpPlayerState? = null
+    @Volatile private var lastStateAtMs: Long? = null
     @Volatile private var lastQueueItems: List<QueueItem> = emptyList()
     @Volatile private var lastSentQueueOrder: List<String> = emptyList()
     @Volatile private var lastSentThumbEdge = DEFAULT_THUMB_EDGE
     @Volatile private var lastHadItem = false
     @Volatile private var lastKnownDeviceCount: Int? = null
     @Volatile private var wakeOnEmptyCluster = false
+    @Volatile private var lastConnectivityAvailable: Boolean? = null
 
     @Volatile private var sink: NowPlayingSink? = null
     private val localWaker: DeviceWaker? = appContext?.let { IntentDeviceWaker(it) }
@@ -177,11 +180,20 @@ class SpotifyGlue(
                 authObserver?.invoke(GlueAuthState.Failed("sign-in error: ${it.message}"))
             }
         }
+
+        lastConnectivityAvailable = null
+        connectivity.start { available ->
+            val restored = lastConnectivityAvailable == false && available
+            lastConnectivityAvailable = available
+            if (restored) scope.launch { runCatching { client.resync() } }
+        }
     }
 
     override suspend fun detach() {
         authObserver = null
         serviceHealthObserver = null
+        connectivity.stop()
+        lastConnectivityAvailable = null
         connectJob?.cancel()
         connectJob = null
         runCatching { client?.disconnect() }
@@ -192,6 +204,7 @@ class SpotifyGlue(
         resetQueueDedup()
         stateLock.withLock { likedOverride.clear() }
         lastState = null
+        lastStateAtMs = null
         lastQueueItems = emptyList()
         client = null
         gateway = null
@@ -220,10 +233,16 @@ class SpotifyGlue(
             false
         }
         if (fireWake) localWaker?.wakeDevice()
-        val pending = lastState?.takeIf { it.track != null } ?: return
-        val fresh = client?.currentPositionMs()
-        val state = if (fresh != null) pending.copy(positionMs = fresh) else pending
-        sink?.submitPlayer(name, makeSnapshot(state), SPOTIFY_APP_BUNDLE, hasItem = true)
+        resetQueueDedup()
+        val pending = lastState?.takeIf { it.track != null }
+        if (pending != null) {
+            val fresh = client?.currentPositionMs()
+            val state = if (fresh != null) pending.copy(positionMs = fresh) else pending
+            val ageMs = if (fresh != null) null else cachedPositionAgeMs()
+            sink?.submitPlayer(name, makeSnapshot(state, positionAgeMs = ageMs), SPOTIFY_APP_BUNDLE, hasItem = true)
+        }
+        val queue = lastQueueItems
+        if (queue.isNotEmpty()) sendQueueChangedIfNeeded(queue, thumbEdge)
     }
 
     // MARK: - dealer firehose
@@ -234,6 +253,7 @@ class SpotifyGlue(
         val update = makeUpdate(state, heroEdge, liked, likeSupported)
         nowPlayingObserver?.invoke(GlueNowPlaying(update = update, artworkUrl = state.track?.let { rawArtworkUrl(bestHex(it)) }))
         lastState = state
+        lastStateAtMs = monotonicNowMs()
         val hasItem = state.track != null
         lastHadItem = hasItem
         sink?.submitPlayer(name, makeSnapshot(state, heroEdge, liked, likeSupported), SPOTIFY_APP_BUNDLE, hasItem)
@@ -378,7 +398,7 @@ class SpotifyGlue(
         val edge = heroEdge
         val result = when (req.nodeId) {
             null, "", "root" -> {
-                val shelves = client.rootBrowse()
+                val shelves = client.rootBrowse(req.sections, req.preview)
                 BrowseResult(
                     entries = shelves.map { BrowseEntry.Folder(folder(it, edge)) },
                     total = shelves.size.toUInt(), hasMore = false,
@@ -492,12 +512,25 @@ class SpotifyGlue(
 
     // MARK: - outbound snapshot / queue
 
-    private fun makeSnapshot(state: SpPlayerState): WirePlayerState {
+    private fun monotonicNowMs(): Long = System.nanoTime() / 1_000_000
+
+    // how stale the cached lastState position already is; stamped onto re-sends of cached
+    // snapshots so the daemon re-anchors them onto live time instead of reading a rewind
+    private fun cachedPositionAgeMs(): UInt? =
+        lastStateAtMs?.let { (monotonicNowMs() - it).coerceAtLeast(0L).toUInt() }
+
+    private fun makeSnapshot(state: SpPlayerState, positionAgeMs: UInt? = null): WirePlayerState {
         val (liked, supported) = likeFields(state.track)
-        return makeSnapshot(state, heroEdge, liked, supported)
+        return makeSnapshot(state, heroEdge, liked, supported, positionAgeMs)
     }
 
-    private fun makeSnapshot(state: SpPlayerState, heroEdge: Int, liked: Boolean?, likeSupported: Boolean?): WirePlayerState {
+    private fun makeSnapshot(
+        state: SpPlayerState,
+        heroEdge: Int,
+        liked: Boolean?,
+        likeSupported: Boolean?,
+        positionAgeMs: UInt? = null,
+    ): WirePlayerState {
         val track: MediaItem? = state.track?.let { t ->
             MediaItem(
                 uri = t.uri,
@@ -523,6 +556,7 @@ class SpotifyGlue(
         val playback = Playback(
             state = if (state.isPaused) PlaybackState.Paused else PlaybackState.Playing,
             positionMs = state.positionMs,
+            positionAgeMs = positionAgeMs,
             shuffle = state.shuffle,
             shuffleMode = if (state.shuffle) ShuffleMode.Songs else ShuffleMode.Off,
             repeat = mapRepeat(state.repeat),
@@ -595,7 +629,12 @@ class SpotifyGlue(
         if (gateway == null) return
         val pending = lastState ?: return
         if (pending.track?.uri != uri) return
-        sink?.submitPlayer(name, makeSnapshot(pending), SPOTIFY_APP_BUNDLE, hasItem = pending.track != null)
+        sink?.submitPlayer(
+            name,
+            makeSnapshot(pending, positionAgeMs = cachedPositionAgeMs()),
+            SPOTIFY_APP_BUNDLE,
+            hasItem = pending.track != null,
+        )
     }
 
     /** adapts the FFI Observer callbacks to the glue (weak, so the rust handle never pins it). */
@@ -673,7 +712,7 @@ class SpotifyGlue(
             val children = s.items.mapNotNull { libraryItem(it, edge)?.let { li -> BrowseEntry.Item(li) } }
             return BrowseFolder(
                 nodeId = s.id, title = s.title, subtitle = null, artworkId = null,
-                total = s.items.size.toUInt(), previewChildren = children,
+                total = s.total, previewChildren = children.ifEmpty { null },
             )
         }
 

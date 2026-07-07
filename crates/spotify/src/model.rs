@@ -108,6 +108,7 @@ pub struct Shelf {
   pub id: String,
   pub title: String,
   pub items: Vec<BrowseItem>,
+  pub total: u32,
 }
 
 #[derive(Debug, Clone, Default, uniffi::Record)]

@@ -21,7 +21,7 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
     func activeDeviceVolumePercent() async -> Double?
 
     func product() async throws -> ProductState
-    func rootBrowse() async throws -> [Shelf]
+    func rootBrowse(sections: UInt32?, preview: UInt32?) async throws -> [Shelf]
     func browse(nodeId: String, limit: UInt32, offset: UInt32) async throws -> BrowsePage
     func search(query: String, limit: UInt32) async throws -> SearchResults
     func resolveContext(uri: String) async throws -> Spotify.BrowseItem

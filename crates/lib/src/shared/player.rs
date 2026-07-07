@@ -187,6 +187,7 @@ pub enum PlaybackState {
 pub struct Playback {
   pub state: PlaybackState,
   pub position_ms: u32,
+  pub position_age_ms: Option<u32>,
   pub shuffle: bool,
   pub shuffle_mode: Option<ShuffleMode>,
   pub repeat: RepeatMode,
@@ -267,7 +268,12 @@ pub struct QueueItem {
   pub artwork_id: Option<String>,
   pub duration_ms: Option<u32>,
   pub persistent_id: Option<String>,
+  #[serde(default, deserialize_with = "bool_absent_or_null_is_false")]
   pub queued: bool,
+}
+
+fn bool_absent_or_null_is_false<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+  Ok(Option::<bool>::deserialize(d)?.unwrap_or_default())
 }
 
 /// What the current track is playing from: the playlist / album / show /
@@ -345,4 +351,41 @@ pub enum PlayerError {
   NoGateway,
   /// `skipToIndex` referenced a queue index that doesn't exist.
   NotInQueue { index: u32 },
+}
+
+#[cfg(test)]
+mod tests {
+  use super::QueueItem;
+
+  #[test]
+  fn queue_item_without_queued_field_decodes() {
+    // phones ship on their own cadence; an additive wire field must decode when absent
+    let legacy = rmp_serde::to_vec_named(&serde_json::json!({
+      "uri": "spotify:track:abc",
+      "title": "Song",
+    }))
+    .expect("encode legacy map");
+    let item: QueueItem = rmp_serde::from_slice(&legacy).expect("decode without queued");
+    assert!(!item.queued);
+  }
+
+  #[test]
+  fn queue_item_with_null_queued_decodes() {
+    // the kotlin msgpack encoder emits explicit nil for a defaulted nullable field
+    let nulled = rmp_serde::to_vec_named(&serde_json::json!({
+      "uri": "spotify:track:abc",
+      "queued": null,
+    }))
+    .expect("encode nulled map");
+    let item: QueueItem = rmp_serde::from_slice(&nulled).expect("decode with null queued");
+    assert!(!item.queued);
+
+    let set = rmp_serde::to_vec_named(&serde_json::json!({
+      "uri": "spotify:track:abc",
+      "queued": true,
+    }))
+    .expect("encode set map");
+    let item: QueueItem = rmp_serde::from_slice(&set).expect("decode with queued set");
+    assert!(item.queued);
+  }
 }

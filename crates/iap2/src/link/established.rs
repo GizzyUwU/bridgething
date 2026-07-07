@@ -23,6 +23,8 @@ use crate::{
   frame::{ControlBits, LINK_FRAME_OVERHEAD, LinkCodec, LinkPacket, Lsp},
 };
 
+const RETRANSMIT_STALL_MARKER: u8 = 3;
+
 #[derive(Debug, Clone, Copy)]
 struct LinkParams {
   max_outgoing: u8,
@@ -270,7 +272,11 @@ impl EstablishedState {
     let wire = front.wire.clone();
     let seq = front.seq;
     let retry = front.retry_count;
-    tracing::debug!("iap2 retransmitting seq {} (attempt {})", seq, retry);
+    if retry >= RETRANSMIT_STALL_MARKER {
+      tracing::warn!(seq, attempt = retry, "iap2 link wedge suspected (retransmit stall)");
+    } else {
+      tracing::debug!("iap2 retransmitting seq {} (attempt {})", seq, retry);
+    }
     writer.write_all(&wire).await?;
     writer.flush().await?;
     Ok(false)

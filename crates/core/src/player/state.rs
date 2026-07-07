@@ -18,7 +18,6 @@ const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const POSITION_RESYNC_TOLERANCE_MS: usize = 2000;
 const RECENTLY_PLAYED_CAP: usize = 25;
-const RECENTLY_PLAYED_MIN_MS: usize = 30_000;
 
 #[derive(Debug, Clone)]
 pub struct PlayerState {
@@ -45,7 +44,6 @@ pub struct PlayerState {
 
   companion_queue: Vec<QueueItem>,
   recently_played: Vec<QueueItem>,
-  home_recents: Vec<QueueItem>,
   root_browse_gen: u64,
 
   present_ids: HashSet<String>,
@@ -96,7 +94,6 @@ impl PlayerState {
 
       companion_queue: Vec::new(),
       recently_played: Vec::new(),
-      home_recents: Vec::new(),
       root_browse_gen: 0,
 
       present_ids: HashSet::new(),
@@ -212,19 +209,14 @@ impl PlayerState {
     self.companion_queue = rebuilt;
   }
 
-  pub(crate) fn note_rolled_off(&mut self, outgoing: QueueItem, played_ms: usize) {
+  pub(crate) fn note_rolled_off(&mut self, outgoing: QueueItem) {
+    if is_synthetic_uri(&outgoing.uri) {
+      return;
+    }
     if self.recently_played.first().map(|q| &q.uri) != Some(&outgoing.uri) {
-      self.recently_played.insert(0, outgoing.clone());
+      self.recently_played.insert(0, outgoing);
       self.recently_played.truncate(RECENTLY_PLAYED_CAP);
     }
-    if played_ms >= RECENTLY_PLAYED_MIN_MS && self.home_recents.first().map(|q| &q.uri) != Some(&outgoing.uri) {
-      self.home_recents.insert(0, outgoing);
-      self.home_recents.truncate(RECENTLY_PLAYED_CAP);
-    }
-  }
-
-  pub(crate) fn home_recents(&self) -> Vec<QueueItem> {
-    self.home_recents.clone()
   }
 
   pub(crate) fn root_browse_gen(&self) -> u64 {
@@ -236,9 +228,9 @@ impl PlayerState {
   }
 
   pub(crate) fn reset_companion(&mut self) {
-    self.companion_queue.clear();
+    // the held queue survives a companion blip; replies() stops sourcing it while authority is
+    // down, and the next queueChanged full-replaces it, so a reconnect resumes with no blank gap
     self.recently_played.clear();
-    self.home_recents.clear();
     self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
     self.companion_metadata = MediaItemUpdate::default();
     self.companion_playback = PlaybackUpdate::default();
@@ -285,9 +277,19 @@ impl PlayerState {
       None => MediaItemUpdate::default(),
     };
 
+    let mut position_ms = playback.position_ms;
+    if matches!(playback.state, PlaybackState::Playing)
+      && let Some(age) = playback.position_age_ms.filter(|age| *age > 0)
+    {
+      position_ms = position_ms.saturating_add(age);
+      if let Some(duration) = self.companion_metadata.duration_ms.filter(|d| *d > 0) {
+        position_ms = position_ms.min(duration);
+      }
+    }
+
     self.companion_playback = PlaybackUpdate {
       playing: Some(matches!(playback.state, PlaybackState::Playing)),
-      position_ms: Some(playback.position_ms),
+      position_ms: Some(position_ms),
       shuffle: Some(playback.shuffle),
       shuffle_mode: playback.shuffle_mode,
       repeat: Some(playback.repeat),
@@ -614,7 +616,13 @@ impl PlayerState {
           && self.position_anchor.is_some()
           && position.abs_diff(current) <= POSITION_RESYNC_TOLERANCE_MS;
 
-        if riding && position < current {
+        let frozen_duplicate = same_track
+          && self.playing
+          && self.position_anchor.is_some()
+          && position == self.position_ms
+          && position < current;
+
+        if (riding && position < current) || frozen_duplicate {
           // stale backward tick; ignore
         } else {
           if !riding {
@@ -678,6 +686,7 @@ impl PlayerState {
         PlaybackState::Paused
       },
       position_ms: u32::try_from(self.current_position_ms()).unwrap_or(u32::MAX),
+      position_age_ms: None,
       shuffle: self.options.shuffle,
       shuffle_mode: merged_play.shuffle_mode,
       repeat: self.options.repeat,
@@ -1400,6 +1409,74 @@ mod tests {
   }
 
   #[test]
+  fn frozen_duplicate_position_resend_does_not_rewind() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.apply_now_playing(playing_track("iap2:track:a", 277));
+    state.take_position_resync();
+
+    state.age_clocks(Duration::from_secs(40));
+    let extrapolated = state.replies().0.state.playback.position_ms;
+    assert!(extrapolated >= 40_000, "playhead extrapolated while playing");
+
+    // the phone re-sends the exact stale base position (wake/resume, duplicate cluster emit)
+    state.apply_now_playing(position_tick(277));
+    assert!(
+      !state.take_position_resync(),
+      "a frozen duplicate is not a seek and must not resync"
+    );
+    let after = state.replies().0.state.playback.position_ms;
+    assert!(
+      after >= extrapolated,
+      "playhead never rewinds on a frozen duplicate: {after} < {extrapolated}"
+    );
+  }
+
+  #[test]
+  fn aged_companion_position_extrapolates_instead_of_rewinding() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:x", "X", true, 40_000));
+    state.take_position_resync();
+    state.age_clocks(Duration::from_secs(40));
+    let live = state.replies().0.state.playback.position_ms;
+    assert!(live >= 80_000, "playhead extrapolated while playing: {live}");
+
+    // wake resend: the phone re-sends its cached 40s-old position but stamps how old it is
+    let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 40_000);
+    stale.playback.position_age_ms = Some(40_000);
+    state.apply_companion_snapshot(stale);
+    assert!(
+      !state.take_position_resync(),
+      "an age-anchored resend lands on live time and is not a seek"
+    );
+    let after = state.replies().0.state.playback.position_ms;
+    assert!(
+      after >= live.saturating_sub(POSITION_RESYNC_TOLERANCE_MS as u32),
+      "playhead never rewinds on an aged resend: {after} < {live}"
+    );
+  }
+
+  #[test]
+  fn aged_position_clamps_to_duration() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+
+    // helper tracks carry duration_ms = 200_000; an absurd age must not run past the end
+    let mut stale = companion_snapshot_pos("spotify:track:x", "X", true, 190_000);
+    stale.playback.position_age_ms = Some(600_000);
+    state.apply_companion_snapshot(stale);
+    let position = state.replies().0.state.playback.position_ms;
+    assert!(position <= 200_000, "aged position clamps to duration: {position}");
+  }
+
+  #[test]
   fn backward_position_jitter_while_riding_is_ignored() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_now_playing(playing_track("iap2:track:a", 1_000));
@@ -1476,45 +1553,87 @@ mod tests {
   }
 
   #[test]
-  fn rolled_off_feeds_queue_previous_always_and_home_recents_only_on_full_listens() {
+  fn rolled_off_feeds_queue_previous_without_bumping_home_gen() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     let a = qitem("spotify:track:a", "A", "X", None, None);
     let b = qitem("spotify:track:b", "B", "X", None, None);
 
-    state.note_rolled_off(a.clone(), 5_000);
+    state.note_rolled_off(a.clone());
     // queue "previous" keeps every roll-off (navigation history).
     assert_eq!(state.recently_played, vec![a.clone()]);
-    // a sub-30s skip is not a listen, so it never reaches the home shelf...
-    assert!(state.home_recents().is_empty(), "a sub-30s skip is not a home listen");
-    // ...and a roll-off never invalidates the cached home (the overlay handles freshness).
     assert_eq!(state.root_browse_gen(), 0, "a roll-off never bumps the home cache gen");
 
-    state.note_rolled_off(b.clone(), 45_000);
-    assert_eq!(state.recently_played, vec![b.clone(), a], "most-recent-first");
-    assert_eq!(state.home_recents(), vec![b], ">=30s play lands on the home shelf");
-    assert_eq!(state.root_browse_gen(), 0, "still no gen bump for a full listen");
+    state.note_rolled_off(b.clone());
+    assert_eq!(state.recently_played, vec![b, a], "most-recent-first");
+    assert_eq!(state.root_browse_gen(), 0, "still no gen bump");
   }
 
   #[test]
-  fn reset_companion_clears_queue_and_recents_and_bumps_home_gen() {
+  fn reset_companion_clears_recents_and_bumps_home_gen_but_retains_queue() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
-    state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None), 45_000);
+    state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None));
     let before = state.root_browse_gen();
-    assert_eq!(state.home_recents().len(), 1);
 
     state.reset_companion();
-    assert!(state.companion_queue.is_empty());
+    assert!(
+      !state.companion_queue.is_empty(),
+      "the held queue survives a companion blip"
+    );
     assert!(state.recently_played.is_empty());
-    assert!(state.home_recents().is_empty());
     assert_eq!(state.root_browse_gen(), before + 1);
+  }
+
+  #[test]
+  fn queue_survives_companion_blip_and_serves_suffix_on_reconnect() {
+    let auth = AuthorityRegistry::new();
+    let mut state = PlayerState::new(auth.clone());
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(companion_snapshot("spotify:track:x", "X", None, true));
+    state.apply_companion_queue(qsnap(vec![
+      qitem("spotify:track:y", "Y", "A", None, None),
+      qitem("spotify:track:z", "Z", "A", None, None),
+    ]));
+    assert_eq!(state.replies().1.items.len(), 2);
+
+    // companion lost: authority drops and the peer hook resets, mirroring peer.rs companion_lost
+    auth.drop_all();
+    state.reset_companion();
+    assert!(
+      state.replies().1.items.is_empty(),
+      "no companion authority means no companion queue view"
+    );
+
+    // reconnect: the phone advanced one track before its queue re-send lands
+    auth.claim(CompanionAuthorityScope::NowPlayingMetadata);
+    auth.claim(CompanionAuthorityScope::NowPlayingPlayback);
+    auth.set_companion_app_bundle(Some("com.spotify.client".into()));
+    state.apply_companion_snapshot(companion_snapshot("spotify:track:y", "Y", None, true));
+    let items = state.replies().1.items;
+    assert_eq!(items.len(), 1, "the retained queue serves the derived suffix");
+    assert_eq!(items[0].uri, "spotify:track:z");
+  }
+
+  #[test]
+  fn iap2_rolled_off_stays_out_of_recents() {
+    let mut state = PlayerState::new(AuthorityRegistry::new());
+    state.note_rolled_off(qitem("iap2:track:x", "Foreign", "App", None, None));
+    assert!(
+      state.recently_played.is_empty(),
+      "synthetic uris never enter the previous ring"
+    );
+
+    state.note_rolled_off(qitem("spotify:track:a", "A", "X", None, None));
+    assert_eq!(state.recently_played.len(), 1);
   }
 
   #[test]
   fn note_library_changed_bumps_home_gen_without_clearing_queue() {
     let mut state = PlayerState::new(AuthorityRegistry::new());
     state.apply_companion_queue(qsnap(vec![qitem("spotify:track:a", "A", "X", None, None)]));
-    state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None), 45_000);
+    state.note_rolled_off(qitem("spotify:track:b", "B", "X", None, None));
     let before = state.root_browse_gen();
 
     state.note_library_changed();
@@ -1527,7 +1646,11 @@ mod tests {
       !state.companion_queue.is_empty(),
       "a library change must not disturb the live queue"
     );
-    assert_eq!(state.home_recents().len(), 1, "a library change must not clear recents");
+    assert_eq!(
+      state.recently_played.len(),
+      1,
+      "a library change must not clear recents"
+    );
   }
 
   #[test]

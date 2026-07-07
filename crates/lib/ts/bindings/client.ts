@@ -508,7 +508,20 @@ export type KVGet = { key: string };
  */
 export type KVPut = { key: string; value: string };
 
-export type LibraryBrowse = { nodeId: string | null; limit: number; offset: number };
+export type LibraryBrowse = {
+  nodeId: string | null;
+  limit: number;
+  offset: number;
+  /**
+   * Root only: cap on the number of folders returned. `None` returns every folder.
+   */
+  sections?: number | null;
+  /**
+   * Root only: preview children per folder. `None` is the gateway default; `0` skips preview
+   * hydration entirely and returns a cheap index of node ids, titles, and totals.
+   */
+  preview?: number | null;
+};
 
 export type LibraryBrowseReply = { result: BrowseResult };
 
@@ -670,8 +683,7 @@ export type SetVolume = { level: number };
 
 export type SkipPrev = {
   /**
-   * when true, restart the current track if it is progressed past the restart threshold; otherwise always
-   * move to the previous track.
+   * when true, restart the current track if it is progressed past the restart threshold; otherwise always move to the previous track.
    */
   allowSeeking: boolean;
 };

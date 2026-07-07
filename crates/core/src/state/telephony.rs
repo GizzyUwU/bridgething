@@ -72,87 +72,14 @@ impl TelephonyManager {
   }
 
   pub async fn apply_iap2_call_state(&self, update: Iap2CallStateUpdate) -> Result<(), TelephonyError> {
-    let mut inner = self.inner.write().await;
-    let call_id = match update.call_uuid.clone() {
-      Some(id) => id,
-      None if inner.calls.len() == 1 => inner.calls.keys().next().cloned().expect("len checked"),
-      None => {
-        tracing::debug!(
-          ?update,
-          "iap2 call-state update without CallUUID and no single active call"
-        );
-        return Ok(());
-      }
+    let events = {
+      let mut inner = self.inner.write().await;
+      plan_iap2_call_state(&mut inner, update)
     };
-    let entry = inner.calls.entry(call_id.clone()).or_insert_with(|| PhoneCall {
-      call_id: call_id.clone(),
-      remote_id: String::new(),
-      display_name: String::new(),
-      status: PhoneCallStatus::Disconnected,
-      direction: PhoneCallDirection::Incoming,
-      started_at_unix_s: None,
-      label: None,
-      address_book_id: None,
-      service: None,
-      is_conferenced: None,
-      conference_group: None,
-    });
-    let prior_status = entry.status.clone();
-    if let Some(remote_id) = update.remote_id {
-      entry.remote_id = remote_id;
+    for event in events {
+      self.broadcast(event).await?;
     }
-    if let Some(display_name) = update.display_name {
-      entry.display_name = display_name;
-    }
-    if let Some(status) = update.status {
-      entry.status = decode_status(status);
-    }
-    if let Some(direction) = update.direction {
-      entry.direction = decode_direction(direction);
-    }
-    if let Some(label) = update.label {
-      entry.label = Some(label);
-    }
-    if let Some(address_book_id) = update.address_book_id {
-      entry.address_book_id = Some(address_book_id);
-    }
-    if let Some(service) = update.service {
-      entry.service = Some(decode_service(service));
-    }
-    if let Some(is_conferenced) = update.is_conferenced {
-      entry.is_conferenced = Some(is_conferenced);
-    }
-    if let Some(conference_group) = update.conference_group {
-      entry.conference_group = Some(conference_group);
-    }
-    if let Some(start_ts) = update.start_timestamp_unix_s {
-      entry.started_at_unix_s = u32::try_from(start_ts).ok();
-    }
-    let snapshot = entry.clone();
-
-    if update.status.map(decode_status) == Some(PhoneCallStatus::Disconnected) {
-      inner.calls.remove(&call_id);
-      let was_announced = inner.announced.remove(&call_id);
-      drop(inner);
-      if !was_announced {
-        return Ok(());
-      }
-      let reason = iap2_end_reason(update.disconnect_reason, prior_status, snapshot.direction);
-      return self
-        .broadcast(BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason }))
-        .await;
-    }
-
-    if inner.announced.contains(&call_id) {
-      drop(inner);
-      return self.broadcast(BridgeToClientPhoneMsg::CallUpdated(snapshot)).await;
-    }
-    if snapshot.status == PhoneCallStatus::Disconnected {
-      return Ok(());
-    }
-    inner.announced.insert(call_id);
-    drop(inner);
-    self.broadcast(BridgeToClientPhoneMsg::CallStarted(snapshot)).await
+    Ok(())
   }
 
   pub async fn apply_companion_snapshot(&self, state: PhoneState) -> Result<(), TelephonyError> {
@@ -349,6 +276,130 @@ fn iap2_end_reason(
   }
 }
 
+fn plan_iap2_call_state(inner: &mut Inner, update: Iap2CallStateUpdate) -> Vec<BridgeToClientPhoneMsg> {
+  let call_id = match update.call_uuid.clone() {
+    Some(id) => id,
+    None if inner.calls.len() == 1 => {
+      let existing = inner.calls.values().next().expect("len checked");
+      if untagged_is_state_advance(&update, existing) {
+        existing.call_id.clone()
+      } else {
+        tracing::warn!(
+          ?update,
+          "dropping untagged iap2 call-state update that does not advance the single active call"
+        );
+        return Vec::new();
+      }
+    }
+    None => {
+      tracing::warn!(
+        ?update,
+        "dropping untagged iap2 call-state update with no unambiguous target call"
+      );
+      return Vec::new();
+    }
+  };
+  let entry = inner.calls.entry(call_id.clone()).or_insert_with(|| PhoneCall {
+    call_id: call_id.clone(),
+    remote_id: String::new(),
+    display_name: String::new(),
+    status: PhoneCallStatus::Disconnected,
+    direction: PhoneCallDirection::Incoming,
+    started_at_unix_s: None,
+    label: None,
+    address_book_id: None,
+    service: None,
+    is_conferenced: None,
+    conference_group: None,
+  });
+  let prior_status = entry.status.clone();
+  if let Some(remote_id) = update.remote_id {
+    entry.remote_id = remote_id;
+  }
+  if let Some(display_name) = update.display_name {
+    entry.display_name = display_name;
+  }
+  if let Some(status) = update.status {
+    entry.status = decode_status(status);
+  }
+  if let Some(direction) = update.direction {
+    entry.direction = decode_direction(direction);
+  }
+  if let Some(label) = update.label {
+    entry.label = Some(label);
+  }
+  if let Some(address_book_id) = update.address_book_id {
+    entry.address_book_id = Some(address_book_id);
+  }
+  if let Some(service) = update.service {
+    entry.service = Some(decode_service(service));
+  }
+  if let Some(is_conferenced) = update.is_conferenced {
+    entry.is_conferenced = Some(is_conferenced);
+  }
+  if let Some(conference_group) = update.conference_group {
+    entry.conference_group = Some(conference_group);
+  }
+  if let Some(start_ts) = update.start_timestamp_unix_s {
+    entry.started_at_unix_s = u32::try_from(start_ts).ok();
+  }
+  let snapshot = entry.clone();
+
+  if update.status.map(decode_status) == Some(PhoneCallStatus::Disconnected) {
+    inner.calls.remove(&call_id);
+    let was_announced = inner.announced.remove(&call_id);
+    if !was_announced {
+      return Vec::new();
+    }
+    let survivor = inner
+      .calls
+      .values()
+      .filter(|c| inner.announced.contains(&c.call_id))
+      .max_by_key(|c| survivor_priority(&c.status))
+      .cloned();
+    let reason = iap2_end_reason(update.disconnect_reason, prior_status, snapshot.direction);
+    let mut events = vec![BridgeToClientPhoneMsg::CallEnded(PhoneCallEnded { call_id, reason })];
+    if let Some(survivor) = survivor {
+      events.push(BridgeToClientPhoneMsg::CallUpdated(survivor));
+    }
+    return events;
+  }
+
+  if inner.announced.contains(&call_id) {
+    return vec![BridgeToClientPhoneMsg::CallUpdated(snapshot)];
+  }
+  if snapshot.status == PhoneCallStatus::Disconnected {
+    return Vec::new();
+  }
+  inner.announced.insert(call_id);
+  vec![BridgeToClientPhoneMsg::CallStarted(snapshot)]
+}
+
+fn survivor_priority(status: &PhoneCallStatus) -> u8 {
+  match status {
+    PhoneCallStatus::Ringing => 3,
+    PhoneCallStatus::Active => 2,
+    PhoneCallStatus::Held => 1,
+    _ => 0,
+  }
+}
+
+fn untagged_is_state_advance(update: &Iap2CallStateUpdate, existing: &PhoneCall) -> bool {
+  if let Some(remote_id) = update.remote_id.as_deref() {
+    if !remote_id.is_empty() && !existing.remote_id.is_empty() && remote_id != existing.remote_id {
+      return false;
+    }
+  }
+  if let Some(status) = update.status.map(decode_status) {
+    let is_initiation = matches!(status, PhoneCallStatus::Sending | PhoneCallStatus::Ringing);
+    let existing_is_initiation = matches!(existing.status, PhoneCallStatus::Sending | PhoneCallStatus::Ringing);
+    if is_initiation && !existing_is_initiation {
+      return false;
+    }
+  }
+  true
+}
+
 fn decode_status(byte: u8) -> PhoneCallStatus {
   match byte {
     1 => PhoneCallStatus::Sending,
@@ -404,5 +455,105 @@ fn encode_dtmf_tone(tone: DtmfTone) -> u8 {
     DtmfTone::D9 => 9,
     DtmfTone::Star => 10,
     DtmfTone::Hash => 11,
+  }
+}
+
+#[cfg(test)]
+mod test {
+  use super::*;
+
+  const STATUS_SENDING: u8 = 1;
+  const STATUS_RINGING: u8 = 2;
+  const STATUS_ACTIVE: u8 = 4;
+  const STATUS_DISCONNECTED: u8 = 0;
+  const DIRECTION_INCOMING: u8 = 1;
+
+  fn update(call_uuid: Option<&str>, remote_id: Option<&str>, status: u8) -> Iap2CallStateUpdate {
+    Iap2CallStateUpdate {
+      call_uuid: call_uuid.map(str::to_string),
+      remote_id: remote_id.map(str::to_string),
+      status: Some(status),
+      direction: Some(DIRECTION_INCOMING),
+      ..Default::default()
+    }
+  }
+
+  fn call_id_of(event: &BridgeToClientPhoneMsg) -> &str {
+    match event {
+      BridgeToClientPhoneMsg::CallStarted(c) | BridgeToClientPhoneMsg::CallUpdated(c) => &c.call_id,
+      BridgeToClientPhoneMsg::CallEnded(e) => &e.call_id,
+      _ => panic!("unexpected phone event {event:?}"),
+    }
+  }
+
+  #[test]
+  fn back_to_back_disconnect_reconciles_to_surviving_call() {
+    let mut inner = Inner::default();
+
+    let started_1 = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_ACTIVE));
+    assert!(matches!(started_1.as_slice(), [BridgeToClientPhoneMsg::CallStarted(c)] if c.call_id == "c1"));
+
+    let started_2 = plan_iap2_call_state(&mut inner, update(Some("c2"), Some("9154717063"), STATUS_RINGING));
+    assert!(matches!(started_2.as_slice(), [BridgeToClientPhoneMsg::CallStarted(c)] if c.call_id == "c2"));
+
+    let ended = plan_iap2_call_state(&mut inner, update(Some("c1"), None, STATUS_DISCONNECTED));
+    assert_eq!(
+      ended.len(),
+      2,
+      "expected CallEnded followed by reconciliation CallUpdated"
+    );
+    assert!(matches!(&ended[0], BridgeToClientPhoneMsg::CallEnded(e) if e.call_id == "c1"));
+    assert!(
+      matches!(&ended[1], BridgeToClientPhoneMsg::CallUpdated(c) if c.call_id == "c2" && c.status == PhoneCallStatus::Ringing),
+      "sequence must end on the surviving call, not the disconnect: {ended:?}"
+    );
+    assert_eq!(call_id_of(&ended[1]), "c2");
+    assert_eq!(inner.calls.len(), 1);
+  }
+
+  #[test]
+  fn lone_disconnect_has_no_reconciliation() {
+    let mut inner = Inner::default();
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_ACTIVE));
+    let ended = plan_iap2_call_state(&mut inner, update(Some("c1"), None, STATUS_DISCONNECTED));
+    assert!(matches!(ended.as_slice(), [BridgeToClientPhoneMsg::CallEnded(e)] if e.call_id == "c1"));
+    assert!(inner.calls.is_empty());
+  }
+
+  #[test]
+  fn untagged_update_with_multiple_calls_is_dropped() {
+    let mut inner = Inner::default();
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_ACTIVE));
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c2"), Some("9154717063"), STATUS_RINGING));
+    let dropped = plan_iap2_call_state(&mut inner, update(None, None, STATUS_ACTIVE));
+    assert!(dropped.is_empty());
+    assert_eq!(inner.calls.len(), 2);
+  }
+
+  #[test]
+  fn untagged_fresh_call_against_progressed_single_is_dropped() {
+    let mut inner = Inner::default();
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_ACTIVE));
+    let dropped = plan_iap2_call_state(&mut inner, update(None, Some("9154717063"), STATUS_RINGING));
+    assert!(dropped.is_empty());
+    assert_eq!(inner.calls.len(), 1);
+    assert_eq!(inner.calls["c1"].status, PhoneCallStatus::Active);
+  }
+
+  #[test]
+  fn untagged_advance_of_single_call_applies() {
+    let mut inner = Inner::default();
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_RINGING));
+    let advanced = plan_iap2_call_state(&mut inner, update(None, None, STATUS_ACTIVE));
+    assert!(matches!(advanced.as_slice(), [BridgeToClientPhoneMsg::CallUpdated(c)] if c.call_id == "c1"));
+    assert_eq!(inner.calls["c1"].status, PhoneCallStatus::Active);
+  }
+
+  #[test]
+  fn untagged_sending_against_ringing_single_still_advances() {
+    let mut inner = Inner::default();
+    let _ = plan_iap2_call_state(&mut inner, update(Some("c1"), Some("+16024186908"), STATUS_RINGING));
+    let advanced = plan_iap2_call_state(&mut inner, update(None, None, STATUS_SENDING));
+    assert!(matches!(advanced.as_slice(), [BridgeToClientPhoneMsg::CallUpdated(_)]));
   }
 }

@@ -1,7 +1,7 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use libbridgething::{
-  Album, Artist, BrowseEntry, BrowseResult, LibraryError, LibraryItem, QueueItem, RECENTS_NODE_ID, Track,
+  BrowseResult, LibraryError,
   client::{
     BridgeToClientMsgData, ClientToBridgeLibraryMsgDispatch, FavoritesSet as ClientFavoritesSet,
     FavoritesSetMany as ClientFavoritesSetMany, FavoritesToggle as ClientFavoritesToggle, LibraryBrowse,
@@ -84,7 +84,13 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
   type Output = HandlerResult;
 
   async fn browse(&self, params: LibraryBrowse) -> HandlerResult {
-    let LibraryBrowse { node_id, limit, offset } = params;
+    let LibraryBrowse {
+      node_id,
+      limit,
+      offset,
+      sections,
+      preview,
+    } = params;
     if !self.has_gateway() {
       return self.respond_error::<LibraryBrowse>(LibraryError::NoGateway).await;
     }
@@ -92,6 +98,8 @@ impl ClientToBridgeLibraryMsgDispatch for LibraryHandler {
       node_id,
       limit: limit.min(BROWSE_LIMIT_MAX),
       offset,
+      sections,
+      preview,
     };
     match browse_request(
       &self.handle.bluetooth.gateway_man,
@@ -291,14 +299,13 @@ pub(super) async fn browse_request(
     });
   }
   let Some(node_id) = req.node_id.clone() else {
-    let base = root_cache
-      .get_or_fetch(player.root_browse_gen(), ROOT_BROWSE_TTL, || async {
+    let shape = (req.sections, req.preview);
+    let result = root_cache
+      .get_or_fetch(shape, player.root_browse_gen(), ROOT_BROWSE_TTL, || async {
         gateway_man.request(None, req).await.map(|reply| reply.result)
       })
       .await?;
-    return Ok(BrowseReply {
-      result: overlay_home_recents(base, &player.home_recents()),
-    });
+    return Ok(BrowseReply { result });
   };
   let offset = req.offset;
   let limit = req.limit;
@@ -308,68 +315,6 @@ pub(super) async fn browse_request(
     })
     .await?;
   Ok(BrowseReply { result })
-}
-
-fn overlay_home_recents(mut base: BrowseResult, home_recents: &[QueueItem]) -> BrowseResult {
-  if home_recents.is_empty() {
-    return base;
-  }
-  let Some(folder) = base.entries.iter_mut().find_map(|entry| match entry {
-    BrowseEntry::Folder(folder) if folder.node_id == RECENTS_NODE_ID => Some(folder),
-    _ => None,
-  }) else {
-    return base;
-  };
-  let existing = folder.preview_children.take().unwrap_or_default();
-  let cap = existing.len().max(home_recents.len());
-  let mut seen: HashSet<String> = HashSet::new();
-  let mut children: Vec<BrowseEntry> = Vec::with_capacity(cap);
-  for item in home_recents {
-    if seen.insert(item.uri.clone()) {
-      children.push(BrowseEntry::Item(LibraryItem::Track(queue_item_to_track(item))));
-    }
-  }
-  for entry in existing {
-    let keep = match track_uri(&entry) {
-      Some(uri) => seen.insert(uri.to_string()),
-      None => true,
-    };
-    if keep {
-      children.push(entry);
-    }
-  }
-  children.truncate(cap);
-  folder.preview_children = Some(children);
-  base
-}
-
-fn track_uri(entry: &BrowseEntry) -> Option<&str> {
-  match entry {
-    BrowseEntry::Item(LibraryItem::Track(track)) => Some(track.id.as_str()),
-    _ => None,
-  }
-}
-
-fn queue_item_to_track(item: &QueueItem) -> Track {
-  let artist = Artist {
-    id: item.artist_uri.clone().unwrap_or_default(),
-    name: item.artist.clone().unwrap_or_default(),
-    artwork_id: None,
-  };
-  Track {
-    id: item.uri.clone(),
-    name: item.title.clone().unwrap_or_default(),
-    album: Album {
-      id: item.album_uri.clone().unwrap_or_default(),
-      name: item.album.clone().unwrap_or_default(),
-      artwork_id: None,
-    },
-    artist: artist.clone(),
-    artists: vec![artist],
-    duration_ms: item.duration_ms.unwrap_or(0),
-    image_id: item.artwork_id.clone().unwrap_or_default(),
-    saved: false,
-  }
 }
 
 pub(super) async fn favorites_contains_request(
@@ -382,95 +327,4 @@ pub(super) async fn favorites_contains_request(
     });
   }
   gateway_man.request(None, req).await
-}
-
-#[cfg(test)]
-mod tests {
-  use libbridgething::BrowseFolder;
-
-  use super::*;
-
-  fn qi(uri: &str) -> QueueItem {
-    QueueItem {
-      uri: uri.into(),
-      title: Some(format!("title-{uri}")),
-      artist: Some("Artist".into()),
-      artist_uri: None,
-      album: None,
-      album_uri: None,
-      artwork_id: Some(format!("art-{uri}")),
-      duration_ms: Some(1000),
-      persistent_id: None,
-      queued: false,
-    }
-  }
-
-  fn track_entry(id: &str) -> BrowseEntry {
-    BrowseEntry::Item(LibraryItem::Track(Track {
-      id: id.into(),
-      name: format!("name-{id}"),
-      ..Track::default()
-    }))
-  }
-
-  fn recents_base(children: Vec<BrowseEntry>) -> BrowseResult {
-    BrowseResult {
-      entries: vec![BrowseEntry::Folder(BrowseFolder {
-        node_id: RECENTS_NODE_ID.into(),
-        title: "Recently Played".into(),
-        subtitle: None,
-        artwork_id: None,
-        total: Some(children.len() as u32),
-        preview_children: Some(children),
-      })],
-      total: None,
-      has_more: false,
-    }
-  }
-
-  fn shelf_uris(result: &BrowseResult) -> Vec<String> {
-    let BrowseEntry::Folder(folder) = &result.entries[0] else {
-      panic!("expected a folder")
-    };
-    folder
-      .preview_children
-      .as_ref()
-      .unwrap()
-      .iter()
-      .filter_map(track_uri)
-      .map(str::to_string)
-      .collect()
-  }
-
-  #[test]
-  fn empty_home_recents_leaves_base_untouched() {
-    let base = recents_base(vec![track_entry("a"), track_entry("b")]);
-    assert_eq!(overlay_home_recents(base.clone(), &[]), base);
-  }
-
-  #[test]
-  fn no_recents_folder_is_a_noop() {
-    let base = BrowseResult {
-      entries: vec![BrowseEntry::Folder(BrowseFolder {
-        node_id: "playlists".into(),
-        title: "Playlists".into(),
-        subtitle: None,
-        artwork_id: None,
-        total: None,
-        preview_children: Some(vec![track_entry("p")]),
-      })],
-      total: None,
-      has_more: false,
-    };
-    assert_eq!(overlay_home_recents(base.clone(), &[qi("x")]), base);
-  }
-
-  #[test]
-  fn live_listens_front_the_shelf_deduped_and_capped() {
-    let base = recents_base(vec![track_entry("a"), track_entry("b"), track_entry("c")]);
-    // daemon just listened to z then a; a is already on the cached shelf, so it dedups to one entry.
-    let out = overlay_home_recents(base, &[qi("z"), qi("a")]);
-    // live listens lead (most-recent first), cached shelf backfills, capped to the original size.
-    assert_eq!(shelf_uris(&out), vec!["z", "a", "b"]);
-  }
 }

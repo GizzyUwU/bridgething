@@ -22,7 +22,7 @@ use super::{WSError, WSResult, connection::Connection};
 use crate::{
   handler::client::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
   state::State,
-  stock::StockSendMsg,
+  stock::{StockCallSlot, StockSendMsg},
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -48,6 +48,7 @@ impl TappedFrame {
 struct ClientData {
   tx: SendTx,
   mode: ClientMode,
+  stock_call: StockCallSlot,
 
   _handle: JoinHandle<()>,
   cancel_token: CancellationToken,
@@ -161,7 +162,7 @@ impl ClientManager {
     tracing::trace!("sending message to {to} with data {:?}", data);
 
     let msg = BridgeToClientMsg { id, data, meta };
-    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode, stock_msg_id);
+    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode, stock_msg_id, &client.stock_call);
 
     Ok(client.tx.send(msg).await?)
   }
@@ -182,7 +183,7 @@ impl ClientManager {
     let mut errors: Vec<WSError> = Vec::new();
     let mut closed: Vec<SocketAddr> = Vec::new();
     for c in self.connections.iter() {
-      let out = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None);
+      let out = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None, &c.stock_call);
       if let Err(err) = c.tx.try_send(out) {
         if matches!(err, TrySendError::Closed(_)) {
           closed.push(*c.key());
@@ -330,6 +331,7 @@ impl ClientManager {
     let data = ClientData {
       tx,
       mode,
+      stock_call: StockCallSlot::default(),
 
       _handle: Connection::spawn(
         address,
