@@ -271,6 +271,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
 
   spawn_ota_event_forwarder(bluetooth.clone(), state.client_man.clone(), ota_events_rx);
   spawn_nickname_observer(state.meta.subscribe(), bluetooth.clone(), state.bus.clone());
+  spawn_next_art_warmer(state.clone(), bluetooth.clone());
 
   let transport = TransportController::new(
     state.authority.clone(),
@@ -513,6 +514,32 @@ fn spawn_nickname_observer(
         tracing::debug!(count = errs.len(), "nickname-change client broadcast non-fatal errors");
       }
 
+      if rx.changed().await.is_err() {
+        break;
+      }
+    }
+  });
+}
+
+fn spawn_next_art_warmer(state: State, bluetooth: bluetooth::BluetoothMan) {
+  let mut rx = state.player.snapshot_watch();
+  tokio::spawn(async move {
+    let mut last: Option<String> = None;
+    loop {
+      let head_art = rx
+        .borrow_and_update()
+        .queue_reply
+        .items
+        .first()
+        .and_then(|item| item.artwork_id.clone())
+        .filter(|id| !id.is_empty());
+      if let Some(id) = head_art
+        && last.as_deref() != Some(id.as_str())
+        && state.gateway_info().is_some()
+      {
+        last = Some(id.clone());
+        handler::client::asset::preload_assets(state.clone(), bluetooth.clone(), vec![id]).await;
+      }
       if rx.changed().await.is_err() {
         break;
       }

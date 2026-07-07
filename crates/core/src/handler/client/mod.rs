@@ -1,4 +1,4 @@
-mod asset;
+pub(crate) mod asset;
 mod audio;
 mod bluetooth;
 mod capabilities;

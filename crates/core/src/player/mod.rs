@@ -146,7 +146,6 @@ impl Player {
     self.cmd_tx.send(cmd).await.map_err(|_| PlayerError::ActorDropped)
   }
 
-  #[cfg(feature = "test-tap")]
   pub fn snapshot_watch(&self) -> watch::Receiver<PlayerSnapshot> {
     self.snapshot_rx.clone()
   }

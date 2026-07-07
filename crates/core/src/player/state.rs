@@ -18,6 +18,7 @@ const TRANSPORT_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const SEEK_INTENT_WINDOW: Duration = Duration::from_millis(1500);
 const POSITION_RESYNC_TOLERANCE_MS: usize = 2000;
 const RECENTLY_PLAYED_CAP: usize = 25;
+const OPTIMISTIC_MATCH_DEPTH: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct PlayerState {
@@ -149,6 +150,68 @@ impl PlayerState {
       Some(comp) => !comp.eq_ignore_ascii_case(iap2),
       None => false,
     }
+  }
+
+  fn iap2_bundle_matches_companion(&self) -> bool {
+    let Some(iap2) = self.iap2_playback.app_bundle.as_deref().filter(|b| !b.is_empty()) else {
+      return false;
+    };
+    self
+      .authority
+      .companion_app_bundle()
+      .is_some_and(|comp| comp.eq_ignore_ascii_case(iap2))
+  }
+
+  fn try_optimistic_advance(&mut self) {
+    if !self.companion_owned || !self.iap2_bundle_matches_companion() {
+      return;
+    }
+    let Some(title) = self.iap2_metadata.title.clone().filter(|t| !t.trim().is_empty()) else {
+      return;
+    };
+    let artist = self.iap2_metadata.artist.clone();
+    if let Some(track) = self.effective_track()
+      && norm_eq(&track.name, &title)
+      && artists_agree(artist.as_deref(), Some(&track.artist.name))
+    {
+      return;
+    }
+    let promoted = {
+      let current_id = self.track.as_ref().map(|t| t.id.as_str());
+      let upcoming = match current_id.and_then(|id| {
+        self
+          .companion_queue
+          .iter()
+          .position(|q| (!q.uri.is_empty() && q.uri == id) || q.persistent_id.as_deref() == Some(id))
+      }) {
+        Some(pos) => &self.companion_queue[pos + 1..],
+        None => &self.companion_queue[..],
+      };
+      upcoming
+        .iter()
+        .take(OPTIMISTIC_MATCH_DEPTH)
+        .find(|item| iap2_track_matches_item(&title, artist.as_deref(), item))
+        .cloned()
+    };
+    let Some(item) = promoted else {
+      return;
+    };
+    tracing::info!(uri = %item.uri, %title, "optimistic advance: iap2 track change matches the held queue");
+    self.companion_metadata = MediaItemUpdate {
+      persistent_id: Some(item.uri),
+      title: item.title,
+      artist: item.artist,
+      artist_uri: item.artist_uri,
+      album: item.album,
+      album_uri: item.album_uri,
+      artwork_id: item.artwork_id,
+      duration_ms: item.duration_ms,
+      ..MediaItemUpdate::default()
+    };
+    // vacate the companion time half so the merge fallthrough lets iap2 drive until the dealer confirms
+    self.companion_playback.playing = None;
+    self.companion_playback.position_ms = None;
+    self.companion_playback_at = None;
   }
 
   pub(crate) fn set_transport_intent(&mut self, playing: bool) {
@@ -348,6 +411,7 @@ impl PlayerState {
     }
 
     let edge = self.note_ownership();
+    self.try_optimistic_advance();
     let merged_meta = self.merged_metadata();
     let mut merged_play = self.merged_playback();
     if self.companion_owned && !edge {
@@ -779,6 +843,24 @@ fn derive_next(upcoming: Vec<QueueItem>, current: Option<&QueueItem>) -> Vec<Que
 
 fn queue_items_match(a: &QueueItem, b: &QueueItem) -> bool {
   (!a.uri.is_empty() && a.uri == b.uri) || (a.persistent_id.is_some() && a.persistent_id == b.persistent_id)
+}
+
+fn norm_eq(a: &str, b: &str) -> bool {
+  a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+fn artists_agree(a: Option<&str>, b: Option<&str>) -> bool {
+  match (
+    a.map(str::trim).filter(|s| !s.is_empty()),
+    b.map(str::trim).filter(|s| !s.is_empty()),
+  ) {
+    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+    _ => true,
+  }
+}
+
+fn iap2_track_matches_item(title: &str, artist: Option<&str>, item: &QueueItem) -> bool {
+  item.title.as_deref().is_some_and(|t| norm_eq(t, title)) && artists_agree(artist, item.artist.as_deref())
 }
 
 fn build_queue_item(track: &Track, merged: &MediaItemUpdate, art_id: Option<String>) -> QueueItem {
@@ -2065,5 +2147,257 @@ mod tests {
       state.playing,
       "a sustained mismatch cancels the intent and accepts the source play state"
     );
+  }
+
+  fn queued_state(auth: &AuthorityRegistry) -> PlayerState {
+    let mut state = spotify_owned_state(auth);
+    state.apply_companion_queue(qsnap(vec![
+      qitem(
+        "spotify:track:b",
+        "Track B",
+        "Artist B",
+        Some("spotify/img/248/b"),
+        Some(201_000),
+      ),
+      qitem(
+        "spotify:track:c",
+        "Track C",
+        "Artist C",
+        Some("spotify/img/248/c"),
+        Some(202_000),
+      ),
+      qitem(
+        "spotify:track:d",
+        "Track D",
+        "Artist D",
+        Some("spotify/img/248/d"),
+        Some(203_000),
+      ),
+    ]));
+    state
+  }
+
+  fn upcoming_uris(state: &PlayerState) -> Vec<String> {
+    state.replies().1.items.into_iter().map(|q| q.uri).collect()
+  }
+
+  #[test]
+  fn optimistic_advance_promotes_the_predicted_next_track() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+    state.age_clocks(Duration::from_secs(5));
+    state.take_position_resync();
+
+    // ios reports a track change in fragments: pid first, no title yet, nothing to match against
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:b".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        app_bundle: Some("com.spotify.client".into()),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("spotify:track:x"),
+      "no promotion before the title lands"
+    );
+
+    // the title fragment confirms the queue head is what is now audible
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        title: Some("Track B".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: None,
+    });
+    let m = media(&state);
+    assert_eq!(m.uri.as_deref(), Some("spotify:track:b"), "promoted card carries the real uri");
+    assert_eq!(
+      m.artwork_id.as_deref(),
+      Some("spotify/img/248/b"),
+      "promoted card reuses the held queue art"
+    );
+    assert_eq!(m.duration_ms, Some(201_000));
+    assert!(
+      state.take_position_resync(),
+      "a promoted track change is a hard broadcast"
+    );
+    assert!(state.playing, "play state rides iap2 once the companion time half is vacated");
+    let pos = view_position(&state);
+    assert!(pos <= 2_000, "iap2 drives time for the promoted track from track start: {pos}");
+    assert_eq!(
+      upcoming_uris(&state),
+      vec!["spotify:track:c", "spotify:track:d"],
+      "the promoted track leaves the derived upcoming"
+    );
+  }
+
+  #[test]
+  fn optimistic_advance_noops_when_the_dealer_already_advanced() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    // the dealer wins the race: its snapshot advances to the queue head first
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:b", "Track B", true, 4_000));
+    state.take_position_resync();
+
+    state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
+    assert!(
+      !state.take_position_resync(),
+      "an already-current track change must not re-broadcast"
+    );
+    assert!(
+      state.companion_playback.position_ms.is_some(),
+      "the companion time half stays authoritative"
+    );
+    let pos = view_position(&state);
+    assert!(pos >= 4_000, "the playhead must not reset to track start: {pos}");
+    // matching against the head now would look one song into the future
+    assert_eq!(
+      upcoming_uris(&state),
+      vec!["spotify:track:c", "spotify:track:d"],
+      "no promotion past the already-current track"
+    );
+  }
+
+  #[test]
+  fn optimistic_advance_absorbs_a_missed_advance() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(iap2_app("iap2:track:c", "Track C", "com.spotify.client", true));
+    assert_eq!(
+      media(&state).uri.as_deref(),
+      Some("spotify:track:c"),
+      "a missed boundary still lands on the right queue item"
+    );
+    assert_eq!(upcoming_uris(&state), vec!["spotify:track:d"]);
+  }
+
+  #[test]
+  fn optimistic_advance_chains_across_a_multi_song_outage() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
+    state.apply_now_playing(iap2_app("iap2:track:c", "Track C", "com.spotify.client", true));
+    assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:c"));
+    assert_eq!(upcoming_uris(&state), vec!["spotify:track:d"]);
+  }
+
+  #[test]
+  fn optimistic_advance_ignores_an_off_queue_jump() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(iap2_app(
+      "iap2:track:z",
+      "Something Else Entirely",
+      "com.spotify.client",
+      true,
+    ));
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("spotify:track:x"),
+      "an off-queue jump stages and waits for the dealer"
+    );
+    assert_eq!(state.replies().1.items.len(), 3, "the held queue is untouched");
+  }
+
+  #[test]
+  fn optimistic_advance_requires_artist_agreement_when_both_carry_one() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(NowPlayingUpdate {
+      media_item: Some(MediaItemUpdate {
+        persistent_id: Some("iap2:track:cover".into()),
+        title: Some("Track B".into()),
+        artist: Some("A Cover Band".into()),
+        ..MediaItemUpdate::default()
+      }),
+      playback: Some(PlaybackUpdate {
+        playing: Some(true),
+        app_bundle: Some("com.spotify.client".into()),
+        ..PlaybackUpdate::default()
+      }),
+    });
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("spotify:track:x"),
+      "a title collision with a different artist must not promote"
+    );
+  }
+
+  #[test]
+  fn optimistic_advance_never_promotes_for_a_foreign_bundle() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(iap2_app("iap2:track:vid", "Track B", "com.google.ios.youtube", true));
+    assert_eq!(
+      state.companion_metadata.persistent_id.as_deref(),
+      Some("spotify:track:x"),
+      "the companion buffer holds the last real snapshot untouched"
+    );
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("iap2:track:vid"),
+      "the view is the iap2 hard cut, not a promotion"
+    );
+  }
+
+  #[test]
+  fn optimistic_advance_requires_an_explicit_bundle_match() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    // a track change with no foreground-bundle attribution stages; the prediction alone is not enough
+    state.apply_now_playing(iap2_track("iap2:track:b", "Track B"));
+    assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:x"));
+  }
+
+  #[test]
+  fn optimistic_advance_does_not_double_promote_duplicate_queue_titles() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    state.apply_companion_queue(qsnap(vec![
+      qitem("spotify:track:b", "Track B", "Artist B", None, None),
+      qitem("spotify:track:b2", "Track B", "Artist B", None, None),
+      qitem("spotify:track:c", "Track C", "Artist C", None, None),
+    ]));
+
+    state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
+    assert_eq!(
+      media(&state).uri.as_deref(),
+      Some("spotify:track:b"),
+      "the first duplicate promotes"
+    );
+
+    // iap2 chatter re-carrying the same title hits the already-current check, never a second promotion
+    state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
+    assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
+    assert_eq!(upcoming_uris(&state), vec!["spotify:track:b2", "spotify:track:c"]);
+  }
+
+  #[test]
+  fn dealer_snapshot_corrects_a_wrong_promotion() {
+    let auth = AuthorityRegistry::new();
+    let mut state = queued_state(&auth);
+
+    state.apply_now_playing(iap2_app("iap2:track:b", "Track B", "com.spotify.client", true));
+    assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
+
+    // the phone was actually elsewhere: the authoritative snapshot replaces the promoted card wholesale
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:elsewhere", "Elsewhere", true, 30_000));
+    state.apply_companion_queue(qsnap(vec![qitem("spotify:track:w", "W", "Artist W", None, None)]));
+    assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:elsewhere"));
+    let pos = view_position(&state);
+    assert!(pos >= 30_000, "the corrected playhead is the dealer's: {pos}");
+    assert_eq!(upcoming_uris(&state), vec!["spotify:track:w"]);
   }
 }
