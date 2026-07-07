@@ -33,6 +33,20 @@
   <uses-permission android:name="android.permission.MANAGE_ONGOING_CALLS" />
 
   <application>
+    <!--
+        Light-path call observation. PHONE_STATE is only reliably delivered to a
+        manifest-declared receiver on Android 14+ (runtime-registered receivers miss it,
+        esp. when backgrounded). Gated by the host holding READ_PHONE_STATE; the incoming
+        number rides EXTRA_INCOMING_NUMBER when READ_CALL_LOG is held.
+      -->
+    <receiver
+      android:name="com.bridgething.companion.PhoneStateReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.PHONE_STATE" />
+      </intent-filter>
+    </receiver>
+
     <service
       android:name="com.bridgething.companion.BridgethingInCallService"
       android:permission="android.permission.BIND_INCALL_SERVICE"

@@ -30,10 +30,6 @@ public class AndroidPhoneBackend(
     private val telecom: TelecomManager?
         get() = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
 
-    // Runs whenever the app is NOT the default dialer; emits into PhoneBridgeRegistry.events,
-    // gated so it goes silent the moment the InCallService binds.
-    private val watcher = PhoneStateWatcher(context).also { it.start() }
-
     public override val events: Flow<PhoneOutEvent> = PhoneBridgeRegistry.events
 
     private fun service(): BridgethingInCallService? = PhoneBridgeRegistry.service
@@ -89,7 +85,7 @@ public class AndroidPhoneBackend(
     }
 
     public override suspend fun stateGet(): PhoneState =
-        service()?.currentState() ?: watcher.currentState()
+        service()?.currentState() ?: PhoneStateTracker.currentState()
 
     // MARK: - dialer-less control via TelecomManager (ANSWER_PHONE_CALLS)
 

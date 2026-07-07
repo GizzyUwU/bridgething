@@ -3,7 +3,6 @@ package com.bridgething.companion
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.telephony.TelephonyManager
 import android.util.Log
 import com.bridgething.schema.CallEndReason
@@ -17,22 +16,20 @@ import com.bridgething.schema.PhoneState
 import java.util.UUID
 
 /**
- * Light-path telephony source for hosts that are NOT the default dialer. Tracks call
- * state from the `PHONE_STATE` broadcast (RINGING -> OFFHOOK -> IDLE) and lifts the live
- * incoming number out of `EXTRA_INCOMING_NUMBER` (populated only while `READ_CALL_LOG` is
- * held). Synthesizes the same per-call [PhoneOutEvent]s the [BridgethingInCallService]
- * emits, so the wire surface is identical either way.
+ * Light-path telephony state machine for hosts that are NOT the default dialer. Fed by the
+ * manifest-declared [PhoneStateReceiver] (runtime-registered receivers do not reliably get
+ * `PHONE_STATE` on Android 14+; manifest receivers do - the same shape caller-ID apps use).
+ * Lifts the live incoming number out of `EXTRA_INCOMING_NUMBER`, populated only while
+ * `READ_CALL_LOG` is held. Emits the same per-call [PhoneOutEvent]s the InCallService does.
  *
- * Defers entirely to the InCallService when the default-dialer role IS held: emission is
- * gated on `PhoneBridgeRegistry.service == null`, so the two sources never double up.
+ * Defers to the InCallService when the default-dialer / MANAGE_ONGOING_CALLS role IS held:
+ * emission is gated on `PhoneBridgeRegistry.service == null`, so the two sources never double up.
  *
- * The broadcast is phone-wide, not per-call, so this tracks a single active call and
- * cannot see hold/swap/merge or a second call-waiting leg - that fidelity is the opt-in
- * dialer role's job. Outgoing calls placed on the phone carry no number in the broadcast.
+ * Broadcast state is phone-wide, so this tracks a single active call (no hold/swap/merge or
+ * call-waiting - that fidelity is the opt-in dialer/companion role). Outgoing calls carry no
+ * number in the broadcast.
  */
-public class PhoneStateWatcher(
-    private val context: Context,
-) {
+public object PhoneStateTracker {
     private data class Tracked(
         val id: String,
         val remoteId: String,
@@ -44,39 +41,13 @@ public class PhoneStateWatcher(
 
     @Volatile
     private var current: Tracked? = null
-    private var registered = false
-
-    private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(ctx: Context?, intent: Intent?) {
-            if (intent?.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
-            val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
-            @Suppress("DEPRECATION")
-            val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
-            handle(state, number)
-        }
-    }
-
-    public fun start() {
-        if (registered) return
-        // Runtime-registered (not manifest): the companion's foreground service keeps this
-        // receiver live, and it dodges the API 26+ manifest-broadcast restrictions.
-        context.registerReceiver(receiver, IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED))
-        registered = true
-        Log.i(TAG, "phone-state watcher registered")
-    }
-
-    public fun stop() {
-        if (!registered) return
-        runCatching { context.unregisterReceiver(receiver) }
-        registered = false
-    }
 
     /** Snapshot for `stateGet()` when the InCallService is not bound. */
     public fun currentState(): PhoneState =
         PhoneState(activeCalls = current?.let { listOf(toWire(it)) } ?: emptyList())
 
-    private fun handle(state: String, number: String) {
-        // The dialer role, if held, makes the InCallService authoritative; stay quiet.
+    internal fun handle(state: String, number: String) {
+        // The dialer / companion role, if held, makes the InCallService authoritative; stay quiet.
         if (PhoneBridgeRegistry.service != null) return
 
         when (state) {
@@ -94,7 +65,6 @@ public class PhoneStateWatcher(
                     Log.i(TAG, "incoming ringing ${call.id} (num=${number.isNotEmpty()})")
                     emit(PhoneOutEvent.CallStarted(toWire(call)))
                 } else if (current?.remoteId.isNullOrEmpty() && number.isNotEmpty()) {
-                    // number resolved a beat after the first RINGING; backfill it.
                     current = current?.copy(remoteId = number)
                     current?.let { emit(PhoneOutEvent.CallUpdated(toWire(it))) }
                 }
@@ -103,8 +73,8 @@ public class PhoneStateWatcher(
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 val existing = current
                 if (existing == null) {
-                    // OFFHOOK with no prior RINGING = an outgoing call dialed on the phone.
-                    // The broadcast carries no number for outgoing legs.
+                    // OFFHOOK with no prior RINGING = an outgoing call dialed on the phone;
+                    // the broadcast carries no number for outgoing legs.
                     val call = Tracked(
                         id = UUID.randomUUID().toString(),
                         remoteId = "",
@@ -179,7 +149,21 @@ public class PhoneStateWatcher(
 
     private fun nowUnixS(): Long = System.currentTimeMillis() / 1000L
 
-    private companion object {
-        const val TAG = "bridgething.phone"
+    private const val TAG = "bridgething.phone"
+}
+
+/**
+ * Manifest-declared `PHONE_STATE` receiver. Runtime-registered receivers do not reliably
+ * receive this broadcast on Android 14+, so it lives in the manifest (merged into the host
+ * app). Requires the host to hold `READ_PHONE_STATE` for delivery and `READ_CALL_LOG` for the
+ * incoming number. Feeds [PhoneStateTracker].
+ */
+public class PhoneStateReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context?, intent: Intent?) {
+        if (intent?.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
+        val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
+        @Suppress("DEPRECATION")
+        val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
+        PhoneStateTracker.handle(state, number)
     }
 }
