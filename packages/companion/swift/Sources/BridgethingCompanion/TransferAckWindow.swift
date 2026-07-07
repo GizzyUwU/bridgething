@@ -36,8 +36,12 @@ actor TransferAckWindow {
             guard !Task.isCancelled else { return }
             await self?.expire(transferId: transferId, waiterId: waiterId)
         }
-        let progressed = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            waiters[transferId, default: []].append((waiterId, continuation))
+        let progressed = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                waiters[transferId, default: []].append((waiterId, continuation))
+            }
+        } onCancel: {
+            Task { [weak self] in await self?.expire(transferId: transferId, waiterId: waiterId) }
         }
         timeout.cancel()
         return progressed

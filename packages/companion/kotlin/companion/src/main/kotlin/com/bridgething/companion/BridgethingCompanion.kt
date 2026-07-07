@@ -172,6 +172,7 @@ public class BridgethingCompanion(
 ) {
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
+    private val transferAcks = ota.transferAcks
     public val catalog: CatalogService = CatalogService(
         installer = ota,
         store = FileCatalogStore(
@@ -194,7 +195,6 @@ public class BridgethingCompanion(
 
     private val supervisor: CompletableJob = SupervisorJob()
     private val scope = CoroutineScope(supervisor + Dispatchers.Default + CoroutineName("bridgething-companion"))
-    private val transferAcks = TransferAckWindow()
 
     private val stateMutex = Mutex()
     private var capFlags: CompanionCapabilityFlags = capabilities

@@ -144,8 +144,6 @@ export function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  // autoPush defaults OFF when a config is first created so picking a channel
-  // (or any background check) never silently opts the user into auto-install.
   const writePollConfig = async (
     partial: Partial<BridgethingOtaPollConfig>,
   ) => {
@@ -155,7 +153,10 @@ export function SettingsScreen({ navigation }: Props) {
         partial.intervalSeconds ??
         pollConfig?.intervalSeconds ??
         DEFAULT_OTA_POLL_CONFIG.intervalSeconds,
-      autoPush: partial.autoPush ?? pollConfig?.autoPush ?? false,
+      autoPush:
+        partial.autoPush ??
+        pollConfig?.autoPush ??
+        DEFAULT_OTA_POLL_CONFIG.autoPush,
       rootUrl: partial.rootUrl ?? pollConfig?.rootUrl,
     };
     await updateOtaPollConfig(next);
@@ -349,7 +350,7 @@ export function SettingsScreen({ navigation }: Props) {
                 </Text>
               </View>
               <Switch
-                value={pollConfig?.autoPush ?? false}
+                value={pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush}
                 onValueChange={autoPush => writePollConfig({ autoPush })}
               />
             </View>

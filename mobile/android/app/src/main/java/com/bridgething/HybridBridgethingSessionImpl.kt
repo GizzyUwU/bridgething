@@ -723,7 +723,7 @@ public class HybridBridgethingSessionImpl(
         return BridgethingOtaPollConfig(
             channel = prefs.getString("ota.channel", "stable") ?: "stable",
             intervalSeconds = prefs.getLong("ota.intervalSeconds", 21600L).toDouble(),
-            autoPush = prefs.getBoolean("ota.autoPush", false),
+            autoPush = prefs.getBoolean("ota.autoPush", true),
             rootUrl = if (root.isNullOrEmpty()) null else root,
         )
     }

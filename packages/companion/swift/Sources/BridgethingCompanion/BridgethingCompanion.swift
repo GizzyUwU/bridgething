@@ -99,7 +99,8 @@ public actor BridgethingCompanion {
     #if os(iOS)
         private let audioKeepAlive = BackgroundAudioKeepAlive()
     #endif
-    private let transferAcks = TransferAckWindow()
+    // one ack ledger shared by the asset lane and ota, owned by ota; the collector below feeds it.
+    private var transferAcks: TransferAckWindow { ota.transferAcks }
 
     public init(
         adapter: any Adapter,

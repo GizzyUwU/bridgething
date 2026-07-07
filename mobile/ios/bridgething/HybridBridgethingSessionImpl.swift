@@ -728,7 +728,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         return BridgethingOtaPollConfig(
             channel: defaults.string(forKey: PrefKey.otaChannel) ?? "stable",
             intervalSeconds: defaults.double(forKey: PrefKey.otaInterval),
-            autoPush: defaults.bool(forKey: PrefKey.otaAutoPush),
+            autoPush: defaults.object(forKey: PrefKey.otaAutoPush) == nil ? true : defaults.bool(forKey: PrefKey.otaAutoPush),
             rootUrl: (root?.isEmpty == false) ? root : nil
         )
     }

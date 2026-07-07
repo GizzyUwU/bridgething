@@ -126,6 +126,16 @@ public actor OtaService {
     private var pollConfig: OtaPollConfig?
     private var deviceMeta: [String: BridgeThingMeta] = [:]
     private var inFlight: Set<String> = []
+    private var autoPushNextAt: [String: Date] = [:]
+    private var autoPushFailures: [String: Int] = [:]
+
+    nonisolated let transferAcks = TransferAckWindow()
+
+    private static let otaFragmentBytes: UInt64 = 4 * 1024
+    private static let otaWindowBytes: UInt64 = 8 * 1024
+    private static let otaAckTimeoutSeconds: Double = 15
+    private static let autoPushBackoffBase: TimeInterval = 30
+    private static let autoPushBackoffMax: TimeInterval = 15 * 60
 
     private let eventContinuation: AsyncStream<OtaPollEvent>.Continuation
     private let metaChangedContinuation: AsyncStream<(deviceId: String, meta: BridgeThingMeta)>.Continuation
@@ -551,7 +561,7 @@ public actor OtaService {
                 fromVersion: meta.appVersion,
                 toVersion: latest.daemon
             ))
-            if config.autoPush {
+            if config.autoPush, autoPushReady(deviceId) {
                 await runDaemonAuto(
                     deviceId: deviceId,
                     targetVersion: latest.daemon,
@@ -570,7 +580,7 @@ public actor OtaService {
                 fromVersion: meta.imageVersion,
                 toVersion: latest.image
             ))
-            if config.autoPush {
+            if config.autoPush, autoPushReady(deviceId) {
                 await runImageAuto(
                     deviceId: deviceId,
                     targetVersion: latest.image,
@@ -583,6 +593,29 @@ public actor OtaService {
         }
     }
 
+    private func tryBeginInFlight(_ deviceId: String) -> Bool {
+        if inFlight.contains(deviceId) { return false }
+        inFlight.insert(deviceId)
+        return true
+    }
+
+    private func autoPushReady(_ deviceId: String) -> Bool {
+        guard let next = autoPushNextAt[deviceId] else { return true }
+        return Date() >= next
+    }
+
+    private func noteAutoPushResult(_ deviceId: String, failed: Bool) {
+        if failed {
+            let n = (autoPushFailures[deviceId] ?? 0) + 1
+            autoPushFailures[deviceId] = n
+            let delay = min(Self.autoPushBackoffBase * pow(2, Double(min(n - 1, 5))), Self.autoPushBackoffMax)
+            autoPushNextAt[deviceId] = Date().addingTimeInterval(delay)
+        } else {
+            autoPushFailures[deviceId] = nil
+            autoPushNextAt[deviceId] = nil
+        }
+    }
+
     private func runDaemonAuto(
         deviceId: String,
         targetVersion: String,
@@ -590,7 +623,7 @@ public actor OtaService {
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
-        inFlight.insert(deviceId)
+        guard tryBeginInFlight(deviceId) else { return }
         defer { inFlight.remove(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
         let cached: URL
@@ -618,6 +651,7 @@ public actor OtaService {
         )
         let terminal = await forwarder.value
         emitTerminal(deviceId: deviceId, kind: .daemon, version: targetVersion, terminal: terminal)
+        if case .failed = terminal { noteAutoPushResult(deviceId, failed: true) } else { noteAutoPushResult(deviceId, failed: false) }
     }
 
     private func runImageAuto(
@@ -628,7 +662,7 @@ public actor OtaService {
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
-        inFlight.insert(deviceId)
+        guard tryBeginInFlight(deviceId) else { return }
         defer { inFlight.remove(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
         let swuLocal: URL
@@ -664,6 +698,7 @@ public actor OtaService {
         )
         let terminal = await forwarder.value
         emitTerminal(deviceId: deviceId, kind: .image, version: targetVersion, terminal: terminal)
+        if case .failed = terminal { noteAutoPushResult(deviceId, failed: true) } else { noteAutoPushResult(deviceId, failed: false) }
     }
 
     private func emitTerminal(
@@ -851,17 +886,10 @@ public actor OtaService {
     // MARK: - push-side driver
 
     private enum DriveMode {
-        /// Image: stream, then await `Reboot` (the device power-cycles).
         case full
-        /// Bandaid (daemon / builtin-webapp): stream, then await `Writing`/100,
-        /// which means the piece is staged but not yet live. The batch goes
-        /// live on a later `OtaActivate`.
         case stage
     }
 
-    /// Stream one artifact and await its terminal. Returns the terminal
-    /// snapshot plus the artifact's sha256 (the `update_id`), which the
-    /// caller passes to `OtaActivate.expected` for a bandaid batch.
     private func driveOta(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -917,29 +945,44 @@ public actor OtaService {
 
         progress.yield(.streaming(percent: percent(UInt64(resumeFromOffset), totalSize)))
 
-        // subscribe before streaming so the terminal event cannot be missed.
         let terminalTask = awaitTerminal(gateway: gateway, mode: mode, progress: progress)
 
-        do {
-            try await streamArtifact(
-                gateway: gateway,
-                deviceId: deviceId,
-                transferId: transferId,
-                artifactPath: artifactPath,
-                startOffset: UInt64(resumeFromOffset),
-                totalSize: totalSize
-            )
-        } catch {
-            terminalTask.cancel()
-            return (.failed(reason: "chunk stream failed: \(error.localizedDescription)"), sha256)
+        let terminal: OtaPhaseSnapshot = await withTaskGroup(of: OtaPhaseSnapshot?.self) { group in
+            group.addTask { await terminalTask.value }
+            group.addTask {
+                do {
+                    try await self.streamArtifact(
+                        gateway: gateway,
+                        deviceId: deviceId,
+                        transferId: transferId,
+                        artifactPath: artifactPath,
+                        startOffset: UInt64(resumeFromOffset),
+                        totalSize: totalSize
+                    )
+                    return nil
+                } catch is CancellationError {
+                    return nil
+                } catch {
+                    return .failed(reason: "chunk stream failed: \(error.localizedDescription)")
+                }
+            }
+            var resolved: OtaPhaseSnapshot?
+            for await r in group where r != nil {
+                resolved = r
+                break
+            }
+            group.cancelAll()
+            return resolved ?? .failed(reason: "ota ended without a terminal")
         }
-
-        return (await terminalTask.value, sha256)
+        terminalTask.cancel()
+        if case .failed = terminal {
+            try? await gateway.device(deviceId).transfer.abandon(
+                TransferAbandon(transferId: transferId, reason: "attempt ended")
+            )
+        }
+        return (terminal, sha256)
     }
 
-    /// Stage each artifact on the bandaid, then activate the whole batch with
-    /// a single `OtaActivate` (one service restart). Returns the terminal
-    /// snapshot; does not finish `progress` (the public wrappers do).
     private func applyBandaidBatch(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -965,8 +1008,6 @@ public actor OtaService {
         return await commitBandaid(gateway: gateway, deviceId: deviceId, expected: stagedIds, progress: progress)
     }
 
-    /// Send `OtaActivate` and await the single `Reboot`. Subscribes before
-    /// sending so the terminal cannot be missed.
     private func commitBandaid(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -1050,8 +1091,6 @@ public actor OtaService {
         }
     }
 
-    // background lane: an in-flight art pull or now-playing delta preempts the
-    // artifact stream between fragments.
     private func streamArtifact(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -1060,15 +1099,26 @@ public actor OtaService {
         startOffset: UInt64,
         totalSize: UInt64
     ) async throws {
-        let chunkSize = 64 * 1024
         let fh = try FileHandle(forReadingFrom: artifactPath)
-        defer { try? fh.close() }
+        defer {
+            try? fh.close()
+            Task { await transferAcks.finish(transferId) }
+        }
         if startOffset > 0 {
             try fh.seek(toOffset: startOffset)
         }
         var offset = startOffset
         while offset < totalSize {
-            let want = Int(min(UInt64(chunkSize), totalSize - offset))
+            try Task.checkCancellation()
+            // hold no more than otaWindowBytes unacked so a cancelled attempt leaves nothing in flight.
+            while true {
+                let acked = UInt64(await transferAcks.receivedBytes(transferId))
+                if offset < acked + Self.otaWindowBytes { break }
+                if !(await transferAcks.waitForProgress(transferId, beyond: UInt32(acked), timeoutSeconds: Self.otaAckTimeoutSeconds)) {
+                    throw TransferStalled()
+                }
+            }
+            let want = Int(min(Self.otaFragmentBytes, totalSize - offset))
             let data = try fh.read(upToCount: want) ?? Data()
             if data.isEmpty {
                 throw OtaServiceError.unexpectedEof(at: offset, total: totalSize)
