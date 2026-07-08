@@ -9,14 +9,20 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Successful reply to `AssetGet`: the requested bytes.
 pub struct AssetGot {
+  /// Echoes the `AssetGet.request_id` this reply resolves.
   #[ts(type = "string")]
   pub request_id: Uuid,
+  /// Echoes the requested asset id.
   pub id: String,
+  /// Raw asset bytes, already reassembled if the companion sent them as a
+  /// chunked BT transfer.
   #[debug(skip)]
   #[serde_as(as = "serde_with::Bytes")]
   #[ts(type = "Uint8Array")]
   pub bytes: Vec<u8>,
+  /// Best-effort content type; `None` when the source didn't provide one.
   pub mime: Option<String>,
 }
 
@@ -24,9 +30,13 @@ pub struct AssetGot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Domain-error reply to `AssetGet`: neither the cache nor a connected
+/// companion has an asset for this id.
 pub struct AssetNotFound {
+  /// Echoes the `AssetGet.request_id` this reply resolves.
   #[ts(type = "string")]
   pub request_id: Uuid,
+  /// Echoes the requested asset id.
   pub id: String,
 }
 
@@ -34,6 +44,8 @@ pub struct AssetNotFound {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// An asset became fetchable in the cache; a subsequent `AssetGet` for this
+/// id will resolve without a companion round trip.
 pub struct AssetReady {
   pub id: String,
 }
@@ -42,6 +54,8 @@ pub struct AssetReady {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// An asset was evicted from the cache; webapps should drop any cached
+/// Blob URL for it and refetch on next use.
 pub struct AssetCleared {
   pub id: String,
 }

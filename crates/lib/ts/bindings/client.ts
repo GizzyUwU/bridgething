@@ -67,33 +67,106 @@ import type { MsgMeta, WireError } from './wire';
  */
 export type AmbientLightUpdate = { ambientLevel: number };
 
+/**
+ * An asset was evicted from the cache; webapps should drop any cached
+ * Blob URL for it and refetch on next use.
+ */
 export type AssetCleared = { id: string };
 
 /**
  * Webapp request: read an asset by id. Bridge replies with `Got` on hit
  * or `NotFound` (domain) when neither cache nor companion has it.
  */
-export type AssetGet = { id: string; requestId: string };
+export type AssetGet = {
+  /**
+   * Opaque asset id, e.g. `iap2/art/<persistent-hex>/<n>` for iAP2 art or a
+   * companion-defined shape like `spotify/img/<id>`.
+   */
+  id: string;
+  /**
+   * Correlates the `Got` or `NotFound` reply back to this request.
+   */
+  requestId: string;
+};
 
-export type AssetGot = { requestId: string; id: string; bytes: Uint8Array; mime: string | null };
+/**
+ * Successful reply to `AssetGet`: the requested bytes.
+ */
+export type AssetGot = {
+  /**
+   * Echoes the `AssetGet.request_id` this reply resolves.
+   */
+  requestId: string;
+  /**
+   * Echoes the requested asset id.
+   */
+  id: string;
+  /**
+   * Raw asset bytes, already reassembled if the companion sent them as a
+   * chunked BT transfer.
+   */
+  bytes: Uint8Array;
+  /**
+   * Best-effort content type; `None` when the source didn't provide one.
+   */
+  mime: string | null;
+};
 
-export type AssetNotFound = { requestId: string; id: string };
+/**
+ * Domain-error reply to `AssetGet`: neither the cache nor a connected
+ * companion has an asset for this id.
+ */
+export type AssetNotFound = {
+  /**
+   * Echoes the `AssetGet.request_id` this reply resolves.
+   */
+  requestId: string;
+  /**
+   * Echoes the requested asset id.
+   */
+  id: string;
+};
 
 /**
  * Webapp hint to warm the asset cache for a set of ids so subsequent
  * `Get` calls hit cache. Fire-and-forget; webapps observe completion
  * via `Asset.Ready` events.
  */
-export type AssetPreload = { ids: Array<string> };
+export type AssetPreload = {
+  /**
+   * Ids to prefetch, capped at 64 per call. Ids already cached and ids
+   * under the `iap2/art/` prefix are skipped, since iAP2 art only ever
+   * arrives via a push from the phone, not a pull request.
+   */
+  ids: Array<string>;
+};
 
+/**
+ * An asset became fetchable in the cache; a subsequent `AssetGet` for this
+ * id will resolve without a companion round trip.
+ */
 export type AssetReady = { id: string };
 
+/**
+ * Describes the device's own bluetooth adapter. `interface` is the
+ * host-side interface name (e.g. `hci0`).
+ */
 export type BluetoothInterface = { mac: string; name: string; interface: string };
 
+/**
+ * Outcome of an in-flight pairing attempt initiated by a peer device.
+ */
 export type BluetoothPairingResult = { success: boolean };
 
+/**
+ * A pairing PIN a peer device is displaying, for a webapp to show as
+ * on-screen confirmation.
+ */
 export type BluetoothPin = { mac: string; name: string; pin: string };
 
+/**
+ * Whether a companion phone is currently connected over bluetooth.
+ */
 export type BluetoothStatus = { connected: boolean };
 
 /**
@@ -111,11 +184,19 @@ export type BridgeToClientAssetMsg =
   | { event: 'ready'; data: AssetReady }
   | { event: 'cleared'; data: AssetCleared };
 
+/**
+ * Daemon -> webapp audio events: TTS lifecycle notifications and
+ * volume/mute changes.
+ */
 export type BridgeToClientAudioMsg =
   | { event: 'ttsStarted'; data: TtsStarted }
   | { event: 'ttsEnded'; data: TtsEnded }
   | { event: 'volumeChanged'; data: VolumeChanged };
 
+/**
+ * Daemon -> webapp bluetooth surface: connection status/events,
+ * in-flight pairing feedback, and the reply to `bluetooth.list`.
+ */
 export type BridgeToClientBluetoothMsg =
   | { event: 'status'; data: BluetoothStatus }
   | { event: 'connectedDevice'; data: ConnectedDevice }
@@ -134,22 +215,42 @@ export type BridgeToClientCapabilitiesMsg =
   | { event: 'update'; data: CapabilitiesSnapshot }
   | { event: 'snapshot'; data: CapabilitiesSnapshot };
 
+/**
+ * Daemon -> webapp config replies and events. `Get` / `List` reply to
+ * the matching requests. `Changed` broadcasts whenever the gateway
+ * writes or deletes a value for the active webapp.
+ */
 export type BridgeToClientConfigMsg =
   | { event: 'get'; data: ConfigGetReply }
   | { event: 'list'; data: ConfigListReply }
   | { event: 'changed'; data: ConfigChanged };
 
+/**
+ * Daemon -> webapp location surface: the `Position` stream a watch
+ * produces, plus replies to `geo.watch` and `geo.getOnce`.
+ */
 export type BridgeToClientGeoMsg =
   | { event: 'position'; data: Position }
   | { event: 'watchReply'; data: GeoWatchReply }
   | { event: 'getOnceReply'; data: GeoGetOnceReply }
   | { event: 'errorReply'; data: GeoErrorReply };
 
+/**
+ * Daemon -> webapp hardware surface: ambient-light and backlight
+ * change events, plus the reply to `hardware.stateGet`.
+ */
 export type BridgeToClientHardwareMsg =
   | { event: 'ambientLightUpdate'; data: AmbientLightUpdate }
   | { event: 'brightnessChanged'; data: BrightnessState }
   | { event: 'stateReply'; data: HardwareStateReply };
 
+/**
+ * Daemon -> webapp replies and events for the library surface. `BrowseReply`, `SearchReply`,
+ * `RecommendationsReply`, `FavoritesListReply`, and `FavoritesContainsReply` answer the
+ * matching `ClientToBridgeLibraryMsg` request; `LibraryErrorReply` replaces the reply on
+ * failure. `FavoriteChanged` is a live event broadcast to every connected webapp whenever a
+ * favorite's status changes.
+ */
 export type BridgeToClientLibraryMsg =
   | { event: 'browseReply'; data: LibraryBrowseReply }
   | { event: 'searchReply'; data: LibrarySearchReply }
@@ -191,6 +292,11 @@ export type BridgeToClientMsgData =
   | { type: 'ack' }
   | { type: 'done' };
 
+/**
+ * Daemon -> webapp network surface: replies to `fetch` and `ws.open`,
+ * WebSocket frame/close/error events, and the `Stream*` event trio
+ * driven by `net.stream.open`.
+ */
 export type BridgeToClientNetMsg =
   | { event: 'fetchReply'; data: NetFetchReply }
   | { event: 'fetchErrorReply'; data: NetFetchErrorReply }
@@ -204,13 +310,30 @@ export type BridgeToClientNetMsg =
   | { event: 'streamEnd'; data: StreamEnd }
   | { event: 'streamError'; data: StreamError };
 
+/**
+ * Daemon -> webapp notification mirror. `Posted` fires for a new
+ * notification, `Updated` when an existing one's content changes, and
+ * `Removed` when it is dismissed, acted on, or cleared remotely.
+ */
 export type BridgeToClientNotificationsMsg =
   | { event: 'posted'; data: Notification }
   | { event: 'updated'; data: Notification }
   | { event: 'removed'; data: NotificationRemoved };
 
+/**
+ * Daemon -> webapp peer surface: a full snapshot of every known peer
+ * (paired, iAP2, and companion-gateway state), re-sent whenever any
+ * peer changes. There is no per-webapp request; a fresh snapshot
+ * arrives on connect and after every change.
+ */
 export type BridgeToClientPeerMsg = { event: 'snapshot'; data: PeerSnapshotMap };
 
+/**
+ * Daemon -> webapp telephony surface. `CallStarted`/`CallUpdated`/
+ * `CallEnded`/`CommunicationsChanged` are unsolicited broadcasts driven by
+ * the connected companion's telephony state; `StateReply`/`ErrorReply`
+ * answer webapp-issued requests and commands.
+ */
 export type BridgeToClientPhoneMsg =
   | { event: 'callStarted'; data: PhoneCall }
   | { event: 'callUpdated'; data: PhoneCall }
@@ -234,8 +357,21 @@ export type BridgeToClientPlayerMsg =
   | { event: 'queueReply'; data: PlayerQueueReply }
   | { event: 'errorReply'; data: PlayerErrorReply };
 
+/**
+ * Daemon -> webapp KV storage replies. `Response` answers all three
+ * `client.store` requests (`Get` / `Put` / `Delete`).
+ */
 export type BridgeToClientStoreMsg = { event: 'response'; data: StorageResponse };
 
+/**
+ * Daemon -> webapp system events and replies. `Version` replies to
+ * `VersionRequest` with the daemon's `BridgeThingMeta`. `DiagnosticsReply`,
+ * `LogsTailReply`, `LogsSubscribeReply`, and `DeviceNickname` are replies
+ * to their matching requests. `LogEntry` streams matching lines to a live
+ * `LogsSubscribe` subscription. `OtaProgress` / `OtaError` report OTA
+ * orchestrator state. `DeviceNicknameChanged` broadcasts whenever the
+ * nickname mutates, including from another surface.
+ */
 export type BridgeToClientSystemMsg =
   | { event: 'version'; data: BridgeThingMeta }
   | { event: 'diagnosticsReply'; data: DiagnosticsReply }
@@ -247,14 +383,29 @@ export type BridgeToClientSystemMsg =
   | { event: 'deviceNickname'; data: DeviceNicknameReply }
   | { event: 'deviceNicknameChanged'; data: DeviceNicknameReply };
 
+/**
+ * Daemon -> webapp wall-clock surface: an initial snapshot at
+ * announce, `Changed` events on tz/locale/clock updates, and the
+ * reply to `time.get`.
+ */
 export type BridgeToClientTimeMsg =
   | { event: 'changed'; data: TimeSnapshot }
   | { event: 'snapshot'; data: TimeSnapshot };
 
+/**
+ * Daemon -> webapp voice/NLU surface: mic state-change events and the
+ * reply to `voice.stateGet`.
+ */
 export type BridgeToClientVoiceMsg =
   | { event: 'stateChanged'; data: VoiceState }
   | { event: 'stateReply'; data: VoiceStateReply };
 
+/**
+ * Daemon -> webapp replies and events for the webapp-management surface. `ListReply`,
+ * `CurrentReply`, `ActiveReply`, and `IconReply` answer the matching `ClientToBridgeWebappMsg`
+ * request; `WebappError` replaces the reply on failure. `WebappInstalled` is a live event
+ * broadcast to every connected webapp whenever an installed-webapp transfer completes.
+ */
 export type BridgeToClientWebappMsg =
   | { event: 'listReply'; data: WebappListReply }
   | { event: 'currentReply'; data: WebappCurrentReply }
@@ -265,13 +416,24 @@ export type BridgeToClientWebappMsg =
   | { event: 'webappInstalled'; data: WebappInfo }
   | { event: 'webappUninstalled'; data: WebappUninstalled };
 
+/**
+ * Wrapper carrying one `Capabilities` snapshot; reply to `CapabilitiesGet`
+ * and payload of the `Update` broadcast event.
+ */
 export type CapabilitiesSnapshot = { capabilities: Capabilities };
 
 /**
- * Webapp-side asset operations.
+ * Webapp-side asset operations: `get` fetches bytes by id, `preload` warms
+ * the cache ahead of time so a later `get` resolves instantly.
  */
 export type ClientToBridgeAssetMsg = { event: 'get'; data: AssetGet } | { event: 'preload'; data: AssetPreload };
 
+/**
+ * Webapp -> daemon audio control surface: volume/mute, TTS playback, and
+ * earcons. All fire-and-forget; `setVolume`/`setMute` broadcast a
+ * `VolumeChanged` event, and TTS lifecycle is reported via
+ * `TtsStarted`/`TtsEnded`.
+ */
 export type ClientToBridgeAudioMsg =
   | { event: 'volumeUp' }
   | { event: 'volumeDown' }
@@ -283,6 +445,12 @@ export type ClientToBridgeAudioMsg =
   | { event: 'ttsCancelAll' }
   | { event: 'earcon'; data: Earcon };
 
+/**
+ * Webapp -> daemon bluetooth surface: adapter alias, discoverable
+ * state, and paired-device management. The device is the peripheral
+ * during pairing (it never scans for new devices); `connect` only
+ * re-establishes a link to an already-paired device.
+ */
 export type ClientToBridgeBluetoothMsg =
   | { event: 'list' }
   | { event: 'connect'; data: ConnectBluetooth }
@@ -291,20 +459,52 @@ export type ClientToBridgeBluetoothMsg =
   | { event: 'forget'; data: ForgetBluetooth }
   | { event: 'setAlias'; data: SetBluetoothAlias };
 
+/**
+ * Webapp -> daemon capabilities surface. `Get` is the one-shot pull;
+ * most webapps instead listen for `BridgeToClientCapabilitiesMsg::Update`.
+ */
 export type ClientToBridgeCapabilitiesMsg = { event: 'get' };
 
+/**
+ * Webapp -> daemon read-only config surface (`client.config`). Config
+ * values are user-tunable settings the gateway pushes down for the
+ * active webapp; webapps cannot write here. `Get` reads a single key,
+ * `List` reads every set key. The daemon also broadcasts
+ * `BridgeToClientConfigMsg::Changed` whenever the gateway writes a
+ * value, so most webapps don't need to poll `Get`.
+ */
 export type ClientToBridgeConfigMsg = { event: 'get'; data: ConfigGet } | { event: 'list' };
 
+/**
+ * Webapp -> daemon location surface: `watch`/`unwatch` register and
+ * release a standing subscription, `getOnce` fetches a single fix.
+ * Every fix originates from the connected phone; the device has no
+ * GPS of its own.
+ */
 export type ClientToBridgeGeoMsg =
   | { event: 'watch'; data: GeoWatch }
   | { event: 'unwatch'; data: GeoUnwatch }
   | { event: 'getOnce'; data: GeoGetOnce };
 
+/**
+ * Webapp -> daemon hardware surface: display backlight control. Wheel
+ * / button / touch input never crosses this wire; the kiosk delivers
+ * those directly to the active webapp as chromium keypresses.
+ */
 export type ClientToBridgeHardwareMsg =
   | { event: 'displaySetMode'; data: DisplaySetMode }
   | { event: 'displaySetLevel'; data: DisplaySetLevel }
   | { event: 'stateGet' };
 
+/**
+ * Webapp -> daemon library surface: browse/search/recommend across the connected gateway's
+ * library, and read or mutate favorites. `Browse`, `Search`, `Recommendations`,
+ * `FavoritesList`, and `FavoritesContains` are request/reply and fail with
+ * `LibraryErrorReply` when no gateway is connected. `FavoritesToggle`, `FavoritesSet`, and
+ * `FavoritesSetMany` are fire-and-forget commands with no completion reply; if no gateway is
+ * connected they are silently dropped, and on success their effect surfaces later as a
+ * `FavoriteChanged` event.
+ */
 export type ClientToBridgeLibraryMsg =
   | { event: 'browse'; data: LibraryBrowse }
   | { event: 'search'; data: LibrarySearch }
@@ -343,6 +543,11 @@ export type ClientToBridgeMsgData =
   | { type: 'webapp'; data: ClientToBridgeWebappMsg }
   | { type: 'forward'; data: ForwardMessage };
 
+/**
+ * Webapp -> daemon network surface: HTTP fetch, WebSocket, and byte
+ * streams, all proxied through the connected companion. The device
+ * has no network connectivity of its own.
+ */
 export type ClientToBridgeNetMsg =
   | { event: 'fetch'; data: NetFetch }
   | { event: 'wsOpen'; data: NetWsOpen }
@@ -351,10 +556,22 @@ export type ClientToBridgeNetMsg =
   | { event: 'streamOpen'; data: NetStreamOpen }
   | { event: 'streamCancel'; data: NetStreamCancel };
 
+/**
+ * Webapp -> daemon notification action surface. Fire-and-forget; invokes
+ * the notification's positive or negative ANCS-style action slot on the
+ * connected companion. Prefer `positiveAction`/`negativeAction` on the
+ * `Notification` to decide whether a slot exists before invoking it.
+ */
 export type ClientToBridgeNotificationsMsg =
   | { event: 'invokePositive'; data: NotificationInvoke }
   | { event: 'invokeNegative'; data: NotificationInvoke };
 
+/**
+ * Webapp -> daemon call-control surface. Commands are fire-and-forget and
+ * route to the connected companion's telephony backend (iAP2 call CSMs on
+ * iOS, gateway telephony on Android); outcomes surface asynchronously via
+ * `BridgeToClientPhoneMsg` events.
+ */
 export type ClientToBridgePhoneMsg =
   | { event: 'answer'; data: PhoneCallAction }
   | { event: 'accept'; data: PhoneAcceptAction }
@@ -370,6 +587,11 @@ export type ClientToBridgePhoneMsg =
   | { event: 'dtmf'; data: PhoneDtmfAction }
   | { event: 'stateGet' };
 
+/**
+ * Webapp -> daemon player control surface. Commands are fire-and-forget;
+ * the daemon routes each to whichever gateway owns playback. The two
+ * requests fetch a one-shot snapshot.
+ */
 export type ClientToBridgePlayerMsg =
   | { event: 'play'; data: PlayUri }
   | { event: 'queue'; data: QueueUri }
@@ -386,11 +608,25 @@ export type ClientToBridgePlayerMsg =
   | { event: 'stateGet' }
   | { event: 'queueGet' };
 
+/**
+ * Webapp -> daemon KV storage surface (`client.store`). Storage is
+ * scoped per webapp: keys set by one webapp are invisible to others.
+ * `Get` / `Put` / `Delete` each reply with the resulting `StorageResponse`.
+ */
 export type ClientToBridgeStoreMsg =
   | { event: 'get'; data: KVGet }
   | { event: 'put'; data: KVPut }
   | { event: 'delete'; data: KVDelete };
 
+/**
+ * Webapp -> daemon system control surface. `VersionRequest` fetches the
+ * daemon's `BridgeThingMeta` identity block; `DiagnosticsGet` fetches a
+ * one-shot health snapshot; `LogsTail` pulls a batch of recent log
+ * entries; `LogsSubscribe` / `LogsUnsubscribe` open and close a live log
+ * stream; `Reboot` / `PowerOff` restart or shut down the device;
+ * `FactoryReset` wipes daemon state (config, store, paired devices) and
+ * reboots; `DeviceGetNickname` reads the current device nickname.
+ */
 export type ClientToBridgeSystemMsg =
   | { event: 'versionRequest' }
   | { event: 'diagnosticsGet' }
@@ -402,8 +638,18 @@ export type ClientToBridgeSystemMsg =
   | { event: 'factoryReset' }
   | { event: 'deviceGetNickname' };
 
+/**
+ * Webapp -> daemon wall-clock surface. The device has no
+ * battery-backed RTC, so time authority lives with the connected
+ * companion (or with iOS over iAP2's DeviceTimeUpdate).
+ */
 export type ClientToBridgeTimeMsg = { event: 'get' };
 
+/**
+ * Webapp -> daemon voice/NLU surface: mic mute control and manual
+ * capture triggering. May be unavailable on builds without the mic
+ * hardware or the NLU pipeline enabled.
+ */
 export type ClientToBridgeVoiceMsg =
   | { event: 'cancel' }
   | { event: 'pushToTalk' }
@@ -411,6 +657,11 @@ export type ClientToBridgeVoiceMsg =
   | { event: 'unmuteMic'; data: MicUnmute }
   | { event: 'stateGet' };
 
+/**
+ * Webapp -> daemon webapp-management surface: enumerate installed webapps, inspect which one
+ * is active, switch the kiosk to a different webapp, and fetch icon bytes. All four verbs are
+ * request/reply.
+ */
 export type ClientToBridgeWebappMsg =
   | { event: 'list' }
   | { event: 'current' }
@@ -424,14 +675,38 @@ export type ClientToBridgeWebappMsg =
  */
 export type ConfigChanged = { key: string; value: string | null };
 
+/**
+ * Webapp request: read one config value for the currently active webapp,
+ * as most recently set by the gateway. This surface is read-only; only
+ * the gateway can write config.
+ */
 export type ConfigGet = { key: string };
 
-export type ConfigGetReply = { key: string; value: string | null };
+/**
+ * Reply to `ConfigGet`.
+ */
+export type ConfigGetReply = {
+  key: string;
+  /**
+   * `None` when the gateway has never set this key, as opposed to an empty string.
+   */
+  value: string | null;
+};
 
+/**
+ * Reply to `ConfigList`.
+ */
 export type ConfigListReply = { entries: Array<ConfigEntry> };
 
+/**
+ * Payload for `bluetooth.connect`: connect to an already-paired
+ * device by MAC.
+ */
 export type ConnectBluetooth = { mac: string };
 
+/**
+ * The bluetooth device currently connected to the daemon.
+ */
 export type ConnectedDevice = { name: string; mac: string };
 
 /**
@@ -442,20 +717,50 @@ export type ConnectedDevice = { name: string; mac: string };
  */
 export type DeviceNicknameReply = { nickname: string | null };
 
+/**
+ * Reply to `DiagnosticsGet`.
+ */
 export type DiagnosticsReply = { diagnostics: Diagnostics };
 
 /**
  * Set the manual backlight level. Ignored unless `mode == Manual`;
  * callers should pair with `setMode({ Manual })` when forcing a level.
  */
-export type DisplaySetLevel = { level: number };
+export type DisplaySetLevel = {
+  /**
+   * Backlight level in `[0.0, 1.0]`.
+   */
+  level: number;
+};
 
+/**
+ * Payload for `hardware.displaySetMode`: switch backlight control
+ * between daemon-driven (`Auto`, following the ALS) and webapp-driven
+ * (`Manual`, via `displaySetLevel`).
+ */
 export type DisplaySetMode = { mode: BrightnessMode };
 
-export type Earcon = { name: string };
+/**
+ * Payload for `earcon`.
+ */
+export type Earcon = {
+  /**
+   * Earcon name; must be one of `AudioCapabilities.earcons`.
+   */
+  name: string;
+};
 
+/**
+ * Event: a library item's favorited status changed. Fired for changes made through this
+ * client's own `favoritesToggle`/`favoritesSet`/`favoritesSetMany` calls as well as changes
+ * made natively on the connected phone (e.g. in the Spotify or Apple Music app).
+ */
 export type FavoriteChanged = { uri: string; liked: boolean };
 
+/**
+ * Payload for the `favoritesSet` command: set `item`'s favorited state explicitly. Fire-and-
+ * forget; the result surfaces as a `FavoriteChanged` event.
+ */
 export type FavoritesSet = { item: ItemRef; liked: boolean };
 
 /**
@@ -464,14 +769,32 @@ export type FavoritesSet = { item: ItemRef; liked: boolean };
  */
 export type FavoritesSetMany = { entries: Array<FavoritesSet> };
 
+/**
+ * Payload for the `favoritesToggle` command: flip `item`'s favorited state (liked becomes
+ * unliked and vice versa). Fire-and-forget; the result surfaces as a `FavoriteChanged` event.
+ */
 export type FavoritesToggle = { item: ItemRef };
 
+/**
+ * Payload for `bluetooth.forget`: unpair a device and drop it from
+ * the daemon's known-device set.
+ */
 export type ForgetBluetooth = { mac: string };
 
+/**
+ * Error response to a failed `geo.watch` or `geo.getOnce` request.
+ */
 export type GeoErrorReply = { error: GeoError };
 
+/**
+ * Payload for `geo.getOnce`: fetch a single phone-sourced position
+ * fix without registering a standing watch.
+ */
 export type GeoGetOnce = { accuracy: GeoAccuracy };
 
+/**
+ * Response to `geo.getOnce`.
+ */
 export type GeoGetOnceReply = { position: Position };
 
 /**
@@ -481,7 +804,20 @@ export type GeoGetOnceReply = { position: Position };
  */
 export type GeoUnwatch = { token: string };
 
-export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
+/**
+ * Payload for `geo.watch`: register a standing subscription for
+ * phone-sourced position fixes. The daemon aggregates every active
+ * watcher's `accuracy` and `min_interval_ms` and forwards the most
+ * demanding combination to the companion.
+ */
+export type GeoWatch = {
+  accuracy: GeoAccuracy;
+  /**
+   * Minimum time between fixes, in milliseconds. The daemon uses the
+   * smallest value across all active watchers.
+   */
+  minIntervalMs: number;
+};
 
 /**
  * Watch handle. Webapps pass the token back as
@@ -491,6 +827,9 @@ export type GeoWatch = { accuracy: GeoAccuracy; minIntervalMs: number };
  */
 export type GeoWatchReply = { token: string };
 
+/**
+ * Response to `hardware.stateGet`.
+ */
 export type HardwareStateReply = { state: HardwareState };
 
 /**
@@ -508,8 +847,20 @@ export type KVGet = { key: string };
  */
 export type KVPut = { key: string; value: string };
 
+/**
+ * Payload for the `browse` request: page through a folder in the library tree, or the root
+ * menu when `node_id` is `None`. Root-level results are cached by the daemon for up to 5
+ * minutes, so a fresh call immediately after a library change on the gateway side may still
+ * return the previous shelf layout.
+ */
 export type LibraryBrowse = {
+  /**
+   * Folder to descend into, from a prior result's `BrowseFolder::node_id`. `None` browses the root.
+   */
   nodeId: string | null;
+  /**
+   * Requested page size; the daemon clamps this to 100 regardless of the value sent.
+   */
   limit: number;
   offset: number;
   /**
@@ -531,11 +882,31 @@ export type LibraryErrorReply = { error: LibraryError };
  * Batch "is each of these favorited?" lookup. Reply `liked` is
  * index-aligned with the request `uris`, capped at 50 per call.
  */
-export type LibraryFavoritesContains = { uris: Array<string> };
+export type LibraryFavoritesContains = {
+  /**
+   * Uris to check; the daemon truncates this to the first 50 regardless of the count sent.
+   */
+  uris: Array<string>;
+};
 
-export type LibraryFavoritesContainsReply = { liked: Array<boolean> };
+export type LibraryFavoritesContainsReply = {
+  /**
+   * Index-aligned with the request's `uris`.
+   */
+  liked: Array<boolean>;
+};
 
-export type LibraryFavoritesList = { limit: number; offset: number };
+/**
+ * Payload for the `favoritesList` request: page through the user's saved/liked library items,
+ * mixed across kinds.
+ */
+export type LibraryFavoritesList = {
+  /**
+   * Requested page size; the daemon clamps this to 100 regardless of the value sent.
+   */
+  limit: number;
+  offset: number;
+};
 
 export type LibraryFavoritesListReply = { page: FavoritesPage };
 
@@ -543,11 +914,39 @@ export type LibraryFavoritesListReply = { page: FavoritesPage };
  * Recommendations seeded by up to 5 items. Spotify hard-caps at 5
  * combined seeds across tracks/artists/genres.
  */
-export type LibraryRecommendations = { seeds: Array<ItemRef>; kind: ItemKind | null; limit: number; offset: number };
+export type LibraryRecommendations = {
+  /**
+   * Seed items; the daemon truncates this to the first 5 regardless of the count sent.
+   */
+  seeds: Array<ItemRef>;
+  /**
+   * Restrict results to this item kind. `None` lets the gateway choose based on the seeds.
+   */
+  kind: ItemKind | null;
+  /**
+   * Requested page size; the daemon clamps this to 100 regardless of the value sent.
+   */
+  limit: number;
+  offset: number;
+};
 
 export type LibraryRecommendationsReply = { result: RecommendationsResult };
 
-export type LibrarySearch = { query: string; kinds: Array<ItemKind> | null; limit: number; offset: number };
+/**
+ * Payload for the `search` request: free-text search across the connected gateway's library.
+ */
+export type LibrarySearch = {
+  query: string;
+  /**
+   * Restrict results to these item kinds. `None` searches every kind.
+   */
+  kinds: Array<ItemKind> | null;
+  /**
+   * Requested page size; the daemon clamps this to 100 regardless of the value sent.
+   */
+  limit: number;
+  offset: number;
+};
 
 export type LibrarySearchReply = { result: SearchResult };
 
@@ -557,58 +956,197 @@ export type LibrarySearchReply = { result: SearchResult };
  * to release. Subscriptions are scoped to the WS connection - the
  * daemon auto-releases on disconnect.
  */
-export type LogsSubscribe = { source: LogSource; levels: Array<LogLevel>; filter: string | null };
+export type LogsSubscribe = {
+  /**
+   * Reserved for selecting the log source; the daemon serves its own tracing stream regardless.
+   */
+  source: LogSource;
+  /**
+   * Allow-list of levels to include; an empty vector matches every level.
+   */
+  levels: Array<LogLevel>;
+  /**
+   * Case-sensitive substring match against `target` or `message`; `None` disables filtering.
+   */
+  filter: string | null;
+};
 
-export type LogsSubscribeReply = { token: string };
+/**
+ * Reply to `LogsSubscribe`.
+ */
+export type LogsSubscribeReply = {
+  /**
+   * Opaque handle; pass to `LogsUnsubscribe` to release the subscription.
+   */
+  token: string;
+};
 
 /**
  * Pull a one-shot batch of recent log entries. The source, levels, and
  * filter narrow the returned entries.
  */
-export type LogsTail = { source: LogSource; levels: Array<LogLevel>; filter: string | null; maxLines: number };
+export type LogsTail = {
+  /**
+   * Reserved for selecting the log source; the daemon serves its own tracing stream regardless.
+   */
+  source: LogSource;
+  /**
+   * Allow-list of levels to include; an empty vector matches every level.
+   */
+  levels: Array<LogLevel>;
+  /**
+   * Case-sensitive substring match against `target` or `message`; `None` disables filtering.
+   */
+  filter: string | null;
+  /**
+   * Caps how many of the most recent matching entries return, in chronological order.
+   */
+  maxLines: number;
+};
 
-export type LogsTailReply = { entries: Array<LogEntry> };
+/**
+ * Reply to `LogsTail`.
+ */
+export type LogsTailReply = {
+  /**
+   * Matching entries in chronological order (oldest first).
+   */
+  entries: Array<LogEntry>;
+};
 
+/**
+ * Release a log stream opened by `LogsSubscribe`. Fire-and-forget: unknown
+ * or malformed tokens are silently ignored rather than surfacing an error.
+ */
 export type LogsUnsubscribe = { token: string };
 
-export type MicMute = { preserve: boolean };
+/**
+ * Payload for `voice.muteMic`.
+ */
+export type MicMute = {
+  /**
+   * When true and a capture session is already in progress, let it
+   * keep running instead of cutting it short.
+   */
+  preserve: boolean;
+};
 
-export type MicUnmute = { preserve: boolean };
+/**
+ * Payload for `voice.unmuteMic`.
+ */
+export type MicUnmute = {
+  /**
+   * Accepted for symmetry with `MicMute`; the daemon ignores it on
+   * unmute.
+   */
+  preserve: boolean;
+};
 
+/**
+ * Payload for `net.fetch`: a single proxied HTTP request/response
+ * round-trip through the connected companion's network stack.
+ */
 export type NetFetch = { request: NetFetchRequest };
 
+/**
+ * Error response to `net.fetch`.
+ */
 export type NetFetchErrorReply = { error: NetError };
 
+/**
+ * Response to `net.fetch`.
+ */
 export type NetFetchReply = { response: NetFetchResponse };
 
+/**
+ * Payload for `net.stream.cancel`. Ignored by the daemon if
+ * `stream_id` isn't owned by the calling webapp.
+ */
 export type NetStreamCancel = { streamId: string };
 
+/**
+ * Payload for `net.stream.open`: like `fetch` but delivers the
+ * response body incrementally as `StreamChunk` events instead of one
+ * frame. `stream_id` is assigned by the webapp.
+ */
 export type NetStreamOpen = { streamId: string; request: NetFetchRequest };
 
+/**
+ * Payload for `net.ws.close`. Ignored by the daemon if `connection_id`
+ * isn't owned by the calling webapp.
+ */
 export type NetWsClose = { connectionId: string; code: number | null; reason: string | null };
 
+/**
+ * The WebSocket closed, locally or by the remote end.
+ */
 export type NetWsClosed = { connectionId: string; code: number; reason: string };
 
+/**
+ * Asynchronous WebSocket failure after `net.ws.open` already
+ * succeeded.
+ */
 export type NetWsErrorEvent = { connectionId: string; error: WsError };
 
+/**
+ * Error response to `net.ws.open`.
+ */
 export type NetWsErrorReply = { error: WsError };
 
+/**
+ * One inbound frame on an open WebSocket.
+ */
 export type NetWsMessage = { connectionId: string; frame: WsFrame };
 
+/**
+ * Payload for `net.ws.open`: establish a WebSocket routed through the
+ * companion. `connection_id` is assigned by the webapp up front so
+ * inbound frame/close/error routing is wired before the companion's
+ * ack arrives.
+ */
 export type NetWsOpen = {
   connectionId: string;
   url: string;
+  /**
+   * Subprotocols offered to the server, in preference order.
+   */
   protocols: Array<string> | null;
   headers: Array<HttpHeader> | null;
 };
 
-export type NetWsOpenReply = { acceptedProtocol: string | null };
+/**
+ * Response to `net.ws.open`.
+ */
+export type NetWsOpenReply = {
+  /**
+   * The subprotocol the server selected, when `NetWsOpen.protocols`
+   * offered a list.
+   */
+  acceptedProtocol: string | null;
+};
 
+/**
+ * Payload for `net.ws.send`.
+ */
 export type NetWsSend = { connectionId: string; frame: WsFrame };
 
-export type NotificationInvoke = { id: string };
+/**
+ * Payload for `invokePositive` and `invokeNegative`.
+ */
+export type NotificationInvoke = {
+  /**
+   * Notification id to act on, from `Notification.id`.
+   */
+  id: string;
+};
 
-export type NotificationRemoved = { id: string; reason: DismissReason };
+export type NotificationRemoved = {
+  /**
+   * Id of the notification that was removed, from `Notification.id`.
+   */
+  id: string;
+  reason: DismissReason;
+};
 
 /**
  * Map of MAC string to `Device`.
@@ -626,72 +1164,274 @@ export type PeerSnapshotMap = { [key in string]: Peer };
  * first. Webapps gate on `CommunicationsState.hold_and_accept_available`
  * or `end_and_accept_available` before sending the non-default action.
  */
-export type PhoneAcceptAction = { callId: string; action: AcceptCallAction };
+export type PhoneAcceptAction = {
+  /**
+   * Target call, as surfaced on `PhoneCall.call_id`.
+   */
+  callId: string;
+  action: AcceptCallAction;
+};
 
-export type PhoneCallAction = { callId: string };
+/**
+ * Payload for `answer`, `decline`, `end`, `hold`, and `unhold`: the call to act on.
+ */
+export type PhoneCallAction = {
+  /**
+   * Target call, as surfaced on `PhoneCall.call_id`.
+   */
+  callId: string;
+};
 
-export type PhoneCallEnded = { callId: string; reason: CallEndReason };
+export type PhoneCallEnded = {
+  /**
+   * Echoes `PhoneCall.call_id` for the call that just ended.
+   */
+  callId: string;
+  reason: CallEndReason;
+};
 
+/**
+ * Broadcast whenever `CommunicationsState` changes: signal, registration,
+ * or which call-control verbs are currently legal.
+ */
 export type PhoneCommunicationsReply = { state: CommunicationsState };
 
-export type PhoneDtmfAction = { callId: string | null; tone: DtmfTone };
+/**
+ * Payload for `dtmf`: play a tone on an active call.
+ */
+export type PhoneDtmfAction = {
+  /**
+   * Call to send the tone on; `None` targets the active call.
+   */
+  callId: string | null;
+  tone: DtmfTone;
+};
 
 /**
  * Explicit-action variant of `End`. `End` (default) ends the named
  * call; `EndAll` ends every active call (multi-call / conference).
  */
-export type PhoneEndAction = { callId: string; action: EndCallAction };
+export type PhoneEndAction = {
+  /**
+   * Target call, as surfaced on `PhoneCall.call_id`.
+   */
+  callId: string;
+  action: EndCallAction;
+};
 
+/**
+ * Response when a phone command could not be carried out.
+ */
 export type PhoneErrorReply = { error: PhoneError };
 
+/**
+ * Payload for `initiate`: place an outbound call.
+ */
 export type PhoneInitiateAction = {
+  /**
+   * What kind of outbound call to place.
+   */
   kind: InitiateCallType;
+  /**
+   * Destination address (e.g. phone number) for `Destination` calls; ignored for `Voicemail`/`Redial`.
+   */
   destinationId: string | null;
+  /**
+   * Call bearer to use; `None` lets the companion pick its default.
+   */
   service: PhoneCallService | null;
+  /**
+   * Contact id to associate with the call, when known.
+   */
   addressBookId: string | null;
 };
 
-export type PhoneMuteAction = { mute: boolean };
+/**
+ * Payload for `mute`: mic-mute state for the active call.
+ */
+export type PhoneMuteAction = {
+  /**
+   * `true` mutes the mic, `false` unmutes.
+   */
+  mute: boolean;
+};
 
+/**
+ * Response to `stateGet`.
+ */
 export type PhoneStateReply = { state: PhoneState };
 
-export type PlayUri = { uri: string; context: PlayContext | null };
+/**
+ * Payload for the `play` command.
+ */
+export type PlayUri = {
+  /**
+   * Resource to play, e.g. `spotify:track:...`; any uri scheme a connected gateway claims.
+   */
+  uri: string;
+  /**
+   * Optional album/playlist/show to play `uri` within, so next/prev follow that list.
+   */
+  context: PlayContext | null;
+};
 
 export type PlayerErrorReply = { error: PlayerError };
 
-export type PlayerQueueReply = { current: QueueItem | null; items: Array<QueueItem>; previous: Array<QueueItem> };
+/**
+ * Response to `queueGet`, also carried by the `QueueChanged` event.
+ */
+export type PlayerQueueReply = {
+  /**
+   * The now-playing track, when one is loaded.
+   */
+  current: QueueItem | null;
+  /**
+   * Upcoming tracks in queue order.
+   */
+  items: Array<QueueItem>;
+  /**
+   * Recently-played history.
+   */
+  previous: Array<QueueItem>;
+};
 
-export type PlayerStateReply = { state: PlayerState; activeApp: CurrentlyActiveApplication | null };
+/**
+ * Response to `stateGet`, also carried by the `Snapshot` event.
+ */
+export type PlayerStateReply = {
+  state: PlayerState;
+  /**
+   * The app currently driving playback, when known (iOS surfaces this over iAP2).
+   */
+  activeApp: CurrentlyActiveApplication | null;
+};
 
-export type QueueUri = { uri: string; position: QueuePosition };
+/**
+ * Payload for the `queue` command.
+ */
+export type QueueUri = {
+  /**
+   * Resource to enqueue.
+   */
+  uri: string;
+  /**
+   * Where in the queue it lands (append / next / explicit index).
+   */
+  position: QueuePosition;
+};
 
-export type SeekTo = { positionMs: number };
+/**
+ * Payload for `seekTo`: jump to an absolute playhead position.
+ */
+export type SeekTo = {
+  /**
+   * Target playhead in milliseconds from track start.
+   */
+  positionMs: number;
+};
 
+/**
+ * Payload for `bluetooth.setAlias`: rename the device's own adapter
+ * as seen by peers during discovery and pairing.
+ */
 export type SetBluetoothAlias = { name: string };
 
-export type SetCrossfade = { durationMs: number | null };
+/**
+ * Payload for `setCrossfade`.
+ */
+export type SetCrossfade = {
+  /**
+   * Crossfade duration in milliseconds; `None` turns crossfade off.
+   */
+  durationMs: number | null;
+};
 
-export type SetMute = { muted: boolean };
+/**
+ * Payload for `setMute`.
+ */
+export type SetMute = {
+  /**
+   * `true` mutes output, `false` unmutes.
+   */
+  muted: boolean;
+};
 
-export type SetRepeat = { mode: RepeatMode };
+/**
+ * Payload for `setRepeat`.
+ */
+export type SetRepeat = {
+  /**
+   * Desired repeat mode (off / all / one).
+   */
+  mode: RepeatMode;
+};
 
-export type SetShuffle = { on: boolean };
+/**
+ * Payload for `setShuffle`.
+ */
+export type SetShuffle = {
+  /**
+   * Desired shuffle state.
+   */
+  on: boolean;
+};
 
-export type SetSpeed = { speed: number };
+/**
+ * Payload for `setSpeed`. Honored only by gateways that support rate control.
+ */
+export type SetSpeed = {
+  /**
+   * Playback rate; 1.0 is normal speed.
+   */
+  speed: number;
+};
 
-export type SetVolume = { level: number };
+/**
+ * Payload for `setVolume`.
+ */
+export type SetVolume = {
+  /**
+   * Absolute output level, `0.0` (silent) to `1.0` (max).
+   */
+  level: number;
+};
 
+/**
+ * Payload for `skipPrev`: go to the previous track, or restart the current one.
+ */
 export type SkipPrev = {
   /**
-   * when true, restart the current track if it is progressed past the restart threshold; otherwise always move to the previous track.
+   * When true, restart the current track if it is progressed past the restart threshold; otherwise always move to the previous track.
    */
   allowSeeking: boolean;
 };
 
-export type SkipToIndex = { index: number };
+/**
+ * Payload for `skipToIndex`: jump to a specific row in the current queue.
+ */
+export type SkipToIndex = {
+  /**
+   * 0-based index into the queue.
+   */
+  index: number;
+};
 
-export type StorageResponse = { key: string; value: string | null };
+/**
+ * Reply to `KVGet`, `KVPut`, and `KVDelete` alike; the request that
+ * produced it distinguishes which operation happened.
+ */
+export type StorageResponse = {
+  key: string;
+  /**
+   * `None` on a `Get` miss or after a `Delete`; `Put` always echoes back `Some` of what it just wrote.
+   */
+  value: string | null;
+};
 
+/**
+ * Wraps `TimeInfo` for the wire; used as both the `time.get` reply and
+ * the `Changed` event payload.
+ */
 export type TimeSnapshot = { time: TimeInfo };
 
 /**
@@ -702,34 +1442,131 @@ export type TimeSnapshot = { time: TimeInfo };
  */
 export type Tts = { id: string; text: string; voice: string | null };
 
-export type TtsCancel = { id: string };
+/**
+ * Payload for `ttsCancel`.
+ */
+export type TtsCancel = {
+  /**
+   * Id of the in-flight `Tts` request to cancel, as passed to `Tts.id`.
+   */
+  id: string;
+};
 
-export type TtsEnded = { id: string; completed: boolean };
+/**
+ * Fired when a `Tts` request stops playing, whether it finished or was cut short.
+ */
+export type TtsEnded = {
+  /**
+   * Echoes `Tts.id`.
+   */
+  id: string;
+  /**
+   * `true` if playback finished naturally; `false` if cancelled or interrupted.
+   */
+  completed: boolean;
+};
 
-export type TtsStarted = { id: string };
+/**
+ * Fired when a `Tts` request begins audibly playing.
+ */
+export type TtsStarted = {
+  /**
+   * Echoes `Tts.id`.
+   */
+  id: string;
+};
 
-export type VoiceState = { muted: boolean; capturing: boolean };
+/**
+ * Current mic state.
+ */
+export type VoiceState = {
+  muted: boolean;
+  /**
+   * True while a capture session is actively recording.
+   */
+  capturing: boolean;
+};
 
+/**
+ * Response to `voice.stateGet`.
+ */
 export type VoiceStateReply = { state: VoiceState };
 
-export type VolumeChanged = { level: number; muted: boolean };
+/**
+ * Current output level and mute state, broadcast after any change
+ * regardless of whether this webapp issued the command.
+ */
+export type VolumeChanged = {
+  /**
+   * Absolute output level, `0.0` (silent) to `1.0` (max).
+   */
+  level: number;
+  muted: boolean;
+};
 
-export type WebappActivate = { id: string };
+/**
+ * Payload for the `activate` request: switch the kiosk to the given webapp. The kiosk runs
+ * exactly one webapp at a time, so the daemon navigates it away from whatever was previously
+ * active.
+ */
+export type WebappActivate = {
+  /**
+   * Id of an installed webapp, from `webapp.list`.
+   */
+  id: string;
+};
 
+/**
+ * Broadcast when the active webapp changes; carries the new active webapp's name.
+ */
 export type WebappActiveChanged = { name: string };
 
-export type WebappActiveReply = { id: string | null; name: string | null };
+export type WebappActiveReply = {
+  /**
+   * Id of the webapp that was just activated.
+   */
+  id: string | null;
+  name: string | null;
+};
 
-export type WebappCurrentReply = { id: string | null; name: string | null };
+export type WebappCurrentReply = {
+  /**
+   * `None` when no webapp is currently active in the kiosk.
+   */
+  id: string | null;
+  name: string | null;
+};
 
 /**
  * Fetch the icon bytes for an installed webapp. Returns the raw bytes
  * declared by the manifest's `icon` field.
  */
-export type WebappIcon = { id: string };
+export type WebappIcon = {
+  /**
+   * Id of an installed webapp, from `webapp.list`.
+   */
+  id: string;
+};
 
-export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
+/**
+ * Reply to the `icon` request: the raw icon bytes declared by the webapp's manifest.
+ */
+export type WebappIconReply = {
+  bytes: Uint8Array;
+  /**
+   * MIME type declared by the manifest's icon; `None` if the manifest didn't declare one.
+   */
+  mime: string | null;
+};
 
-export type WebappListReply = { webapps: Array<WebappInfo> };
+export type WebappListReply = {
+  /**
+   * Excludes `Launcher`-role bundles used as alternate home screens.
+   */
+  webapps: Array<WebappInfo>;
+};
 
+/**
+ * Broadcast when an installed webapp is removed; carries the removed webapp's name.
+ */
 export type WebappUninstalled = { name: string };

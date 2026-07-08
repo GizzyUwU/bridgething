@@ -16,6 +16,7 @@ pub struct AmbientLightUpdate {
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Response to `hardware.stateGet`.
 pub struct HardwareStateReply {
   pub state: HardwareState,
 }
@@ -25,6 +26,8 @@ pub struct HardwareStateReply {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
+/// Daemon -> webapp hardware surface: ambient-light and backlight
+/// change events, plus the reply to `hardware.stateGet`.
 pub enum BridgeToClientHardwareMsg {
   #[bridge_event]
   AmbientLightUpdate(AmbientLightUpdate),

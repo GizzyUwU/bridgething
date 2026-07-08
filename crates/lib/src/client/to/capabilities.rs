@@ -4,6 +4,8 @@ use ts_rs::TS;
 
 use crate::Capabilities;
 
+/// Wrapper carrying one `Capabilities` snapshot; reply to `CapabilitiesGet`
+/// and payload of the `Update` broadcast event.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]

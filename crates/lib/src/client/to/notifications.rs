@@ -8,10 +8,14 @@ use crate::{DismissReason, Notification};
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct NotificationRemoved {
+  /// Id of the notification that was removed, from `Notification.id`.
   pub id: String,
   pub reason: DismissReason,
 }
 
+/// Daemon -> webapp notification mirror. `Posted` fires for a new
+/// notification, `Updated` when an existing one's content changes, and
+/// `Removed` when it is dismissed, acted on, or cleared remotely.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

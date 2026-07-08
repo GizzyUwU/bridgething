@@ -1,3 +1,14 @@
-import { defineBridgethingConfig } from '@bridgething/webapp-shared/vite';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 
-export default defineBridgethingConfig();
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  build: {
+    target: 'es2022',
+    sourcemap: true,
+  },
+  server: {
+    host: true,
+  },
+});

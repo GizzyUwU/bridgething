@@ -5,8 +5,17 @@
 //! `@bridgething/client` preinstalled.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { v7 as uuidv7 } from 'uuid';
 
@@ -60,14 +69,32 @@ type Substitutions = {
   webappUuid: string;
 };
 
+const BINARY_EXT = new Set([
+  '.ttf',
+  '.otf',
+  '.woff',
+  '.woff2',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.ico',
+  '.wasm',
+]);
+
 function copyTemplate(src: string, dest: string, subs: Substitutions): void {
   for (const entry of readdirSync(src)) {
     const srcPath = join(src, entry);
-    const destPath = join(dest, entry === '_gitignore' ? '.gitignore' : entry);
+    const renamed = entry === '_gitignore' ? '.gitignore' : entry === '_claude' ? '.claude' : entry;
+    const destPath = join(dest, renamed);
     const stat = statSync(srcPath);
     if (stat.isDirectory()) {
       mkdirSync(destPath, { recursive: true });
       copyTemplate(srcPath, destPath, subs);
+    } else if (BINARY_EXT.has(extname(entry).toLowerCase())) {
+      copyFileSync(srcPath, destPath);
     } else {
       const raw = readFileSync(srcPath, 'utf8');
       const substituted = raw
@@ -75,6 +102,30 @@ function copyTemplate(src: string, dest: string, subs: Substitutions): void {
         .replace(/__WEBAPP_UUID__/g, subs.webappUuid);
       writeFileSync(destPath, substituted);
     }
+  }
+}
+
+function copyDir(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src)) {
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    if (statSync(srcPath).isDirectory()) copyDir(srcPath, destPath);
+    else copyFileSync(srcPath, destPath);
+  }
+}
+
+function linkAgentAliases(target: string): void {
+  try {
+    symlinkSync('CLAUDE.md', join(target, 'AGENTS.md'));
+  } catch {
+    copyFileSync(join(target, 'CLAUDE.md'), join(target, 'AGENTS.md'));
+  }
+  mkdirSync(join(target, '.agents'), { recursive: true });
+  try {
+    symlinkSync(join('..', '.claude', 'skills'), join(target, '.agents', 'skills'), 'dir');
+  } catch {
+    copyDir(join(target, '.claude', 'skills'), join(target, '.agents', 'skills'));
   }
 }
 
@@ -103,6 +154,9 @@ function main(): void {
   copyTemplate(TEMPLATE_DIR, target, { projectName, webappUuid });
   console.log('  ✓ template copied');
 
+  linkAgentAliases(target);
+  console.log('  ✓ agent guides linked (CLAUDE.md, AGENTS.md, /bridgething skill)');
+
   if (args.git) {
     if (run('git', ['init', '--quiet'], target)) {
       console.log('  ✓ git initialized');
@@ -125,12 +179,18 @@ Done! Next steps:
 
   cd ${args.target}
 ${args.install ? '' : '  bun install\n'}  bun run dev          # local dev server (http://localhost:5173/)
-  bun run build        # production bundle into dist/
-  bun run push <ip>    # rsync dist/ to /var/bridgething/webapps/${projectName}/ on the device
 
-The starter App connects to ws://127.0.0.1:8891/ in production (the
-on-device daemon), and to ws://<device-ip>:8891/ in dev when you set
-VITE_BRIDGETHING_URL.
+Open this folder with your coding agent (Claude Code, Codex, opencode, ...).
+It reads CLAUDE.md / AGENTS.md and the /bridgething skill in .claude/skills
+(mirrored at .agents/skills), which goes deep on the client API, running and
+driving the app, and installing and sharing it.
+
+  bun run build        # production bundle into dist/
+  bun run push <addr>  # build + install onto a connected Car Thing (default bridgething.local)
+  bun run share        # build first, then zip dist/ to hand to friends
+
+The starter App connects to ws://127.0.0.1:8891/ on the device, and to
+ws://<device-ip>:8891/ in dev when you set VITE_BRIDGETHING_URL.
 `);
 }
 

@@ -17,8 +17,14 @@ use crate::GeoAccuracy;
   error = crate::client::GeoErrorReply,
   error_variant = ErrorReply,
 )]
+/// Payload for `geo.watch`: register a standing subscription for
+/// phone-sourced position fixes. The daemon aggregates every active
+/// watcher's `accuracy` and `min_interval_ms` and forwards the most
+/// demanding combination to the companion.
 pub struct GeoWatch {
   pub accuracy: GeoAccuracy,
+  /// Minimum time between fixes, in milliseconds. The daemon uses the
+  /// smallest value across all active watchers.
   pub min_interval_ms: u32,
 }
 
@@ -44,6 +50,8 @@ pub struct GeoUnwatch {
   error = crate::client::GeoErrorReply,
   error_variant = ErrorReply,
 )]
+/// Payload for `geo.getOnce`: fetch a single phone-sourced position
+/// fix without registering a standing watch.
 pub struct GeoGetOnce {
   pub accuracy: GeoAccuracy,
 }
@@ -53,6 +61,10 @@ pub struct GeoGetOnce {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
+/// Webapp -> daemon location surface: `watch`/`unwatch` register and
+/// release a standing subscription, `getOnce` fetches a single fix.
+/// Every fix originates from the connected phone; the device has no
+/// GPS of its own.
 pub enum ClientToBridgeGeoMsg {
   #[bridge_request]
   Watch(GeoWatch),

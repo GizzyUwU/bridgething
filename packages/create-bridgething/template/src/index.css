@@ -1,1 +1,52 @@
-@import "@bridgething/webapp-shared/styles.css";
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("./fonts/Outfit-Variable.ttf") format("truetype-variations");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("./fonts/Inter-Variable.ttf") format("truetype-variations");
+}
+
+@theme {
+  --color-bt-charcoal: #1b1f23;
+  --color-bt-off-white: #efefef;
+  --color-bt-blue: #00a8e8;
+  --color-bt-soft-gray: #a7adb5;
+
+  --font-display: "Outfit", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html,
+  body {
+    width: 800px;
+    height: 480px;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    font-family: var(--font-sans);
+    background: var(--color-bt-charcoal);
+    color: var(--color-bt-off-white);
+  }
+}
+
+@utility bt-wordmark {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}

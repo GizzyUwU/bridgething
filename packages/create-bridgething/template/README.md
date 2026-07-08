@@ -5,6 +5,11 @@ A bridgething webapp scaffolded with `create-bridgething`.
 Stack: React 19 + Vite + Tailwind v4 + TypeScript strict, with
 [`@bridgething/client`](https://github.com/JoeyEamigh/bridgething) preinstalled.
 
+## Building with an agent
+
+Open this folder with your coding agent (Claude Code, Codex, opencode, ...). It
+reads `CLAUDE.md` / `AGENTS.md` and the `/bridgething` skill.
+
 ## Develop
 
 ```bash
@@ -23,17 +28,27 @@ VITE_BRIDGETHING_URL=ws://<device-ip>:8891/ bun run dev
 ## Push to a device
 
 ```bash
-bun run build
-bun run push <device-ip>
+bun run push
 ```
 
-`push` rsyncs `dist/` into `/var/bridgething/webapps/__PROJECT_NAME__/`
-on the Car Thing.
+`push` builds `dist/`, rsyncs it into `/var/bridgething/webapps/<manifest-id>/`
+on the Car Thing, and switches the kiosk to your app. Pass an IP address to target
+something other than `bridgething.local` over USB.
+
+## Share
+
+```bash
+bun run build
+bun run share
+```
+
+`share` writes `<name>-<version>.zip` from `dist/`. Anyone with a bridgething Car
+Thing installs it from the app.
 
 ## Layout
 
-- `src/App.tsx` - starter UI: subscribes to `client.player.onPlayerState`,
+- `src/App.tsx` - starter UI: subscribes to `client.player.onSnapshot`,
   fetches artwork via `client.asset.get`, exposes transport controls.
-- `src/index.css` - `@import "tailwindcss";` (Tailwind v4 CSS-first).
+- `src/index.css` - `@import "tailwindcss";`.
 - `vite.config.ts` - vite + tailwind plugin, `es2022` target.
 - `index.html` - 800x480 viewport, no overscroll, no tap highlight.

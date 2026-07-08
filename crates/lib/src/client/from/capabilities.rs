@@ -20,6 +20,8 @@ pub struct CapabilitiesGet;
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
+/// Webapp -> daemon capabilities surface. `Get` is the one-shot pull;
+/// most webapps instead listen for `BridgeToClientCapabilitiesMsg::Update`.
 pub enum ClientToBridgeCapabilitiesMsg {
   #[bridge_request]
   Get,

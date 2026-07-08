@@ -17,6 +17,7 @@
 //! Kotlin and Swift emitters target the gateway protocol only (they're
 //! for native mobile apps).
 
+pub mod docs;
 pub mod inventory;
 pub mod kotlin;
 pub mod manifest;
@@ -26,6 +27,7 @@ pub mod swift;
 pub mod typescript;
 pub mod typescript_client;
 
+pub use docs::emit_docs_json;
 pub use inventory::{Protocol, inventory};
 pub use kotlin::emit_kotlin;
 pub use manifest::{emit_kotlin_manifest, emit_swift_manifest};

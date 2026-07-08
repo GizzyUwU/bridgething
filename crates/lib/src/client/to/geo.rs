@@ -18,6 +18,7 @@ pub struct GeoWatchReply {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Response to `geo.getOnce`.
 pub struct GeoGetOnceReply {
   pub position: Position,
 }
@@ -25,6 +26,7 @@ pub struct GeoGetOnceReply {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Error response to a failed `geo.watch` or `geo.getOnce` request.
 pub struct GeoErrorReply {
   pub error: GeoError,
 }
@@ -34,6 +36,8 @@ pub struct GeoErrorReply {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
+/// Daemon -> webapp location surface: the `Position` stream a watch
+/// produces, plus replies to `geo.watch` and `geo.getOnce`.
 pub enum BridgeToClientGeoMsg {
   #[bridge_event]
   Position(Position),

@@ -17,6 +17,7 @@ const KOTLIN_PACKAGE: &str = "com.bridgething.schema";
 const LIB_SRC: &str = "crates/lib/src";
 const RUST_CLIENT_OUTPUT: &str = "crates/client-rs/src/surface.generated.rs";
 const RUST_GATEWAY_OUTPUT: &str = "crates/gateway-rs/src/surface.generated.rs";
+const DOCS_OUTPUT: &str = "crates/lib/docs/surfaces.json";
 
 fn workspace_root() -> PathBuf {
   Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -37,13 +38,15 @@ fn main() -> Result<()> {
     "kotlin" => gen_kotlin()?,
     "rust" => gen_rust()?,
     "manifest" => gen_manifests()?,
+    "docs" => gen_docs()?,
     "all" => {
       gen_typescript()?;
       gen_swift()?;
       gen_kotlin()?;
       gen_rust()?;
+      gen_docs()?;
     }
-    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, rust, manifest, all"),
+    other => bail!("unknown target {other:?}; expected one of: ts, swift, kotlin, rust, manifest, docs, all"),
   }
   Ok(())
 }
@@ -59,6 +62,18 @@ fn gen_manifests() -> Result<()> {
   dispatch::emit_swift_manifest(&plan).context("emit swift wire-surface manifest")?;
   dispatch::emit_kotlin_manifest(&plan).context("emit kotlin wire-surface manifest")?;
   println!("    emitted Swift + Kotlin WireSurfaceManifest");
+  Ok(())
+}
+
+/// Emit the client SDK reference IR (`crates/lib/docs/surfaces.json`)
+/// that bridgething.com renders at `/docs`. Client protocol only - the
+/// webapp-facing surface. Committed and refreshed by `just codegen`.
+fn gen_docs() -> Result<()> {
+  println!("==> docs");
+  let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
+  let plan = dispatch::build_plan_for(&inv, dispatch::Protocol::Client).context("dispatch plan")?;
+  dispatch::emit_docs_json(&plan, &inv, DOCS_OUTPUT).context("emit docs json")?;
+  println!("    emitted {DOCS_OUTPUT}");
   Ok(())
 }
 

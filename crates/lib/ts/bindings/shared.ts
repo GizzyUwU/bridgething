@@ -6,7 +6,17 @@
  */
 export type AcceptCallAction = 'accept' | 'endAndAccept';
 
-export type Album = { id: string; name: string; artwork_id: string | null };
+/**
+ * An album reference.
+ */
+export type Album = {
+  id: string;
+  name: string;
+  /**
+   * Opaque artwork asset id (`asset.get`), when known.
+   */
+  artwork_id: string | null;
+};
 
 /**
  * Daemon-observed state of the ANCS GATT-client session against the
@@ -30,7 +40,17 @@ export type AncsAuthState = 'unknown' | 'probing' | 'authorized' | 'unauthorized
  */
 export type ArtProfile = { heroPx: number; thumbPx: number };
 
-export type Artist = { id: string; name: string; artwork_id: string | null };
+/**
+ * An artist reference.
+ */
+export type Artist = {
+  id: string;
+  name: string;
+  /**
+   * Opaque artwork asset id (`asset.get`), when known.
+   */
+  artwork_id: string | null;
+};
 
 export type AssetRetention =
   | { type: 'lru' }
@@ -223,7 +243,16 @@ export type ConfigField =
   | { type: 'enum'; data: EnumField }
   | { type: 'secret'; data: StringField };
 
-export type CurrentlyActiveApplication = { id: string; name: string };
+/**
+ * The foreground app driving playback, surfaced on iOS over iAP2.
+ */
+export type CurrentlyActiveApplication = {
+  /**
+   * Bundle identifier, e.g. `com.spotify.client`.
+   */
+  id: string;
+  name: string;
+};
 
 export type Device = { name: string; type: DeviceType; mac: string; default: boolean };
 
@@ -337,6 +366,10 @@ export type HttpHeader = { name: string; value: string };
 
 export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 
+/**
+ * An image delivered either as an opaque asset id (fetch via `asset.get`)
+ * or as inline bytes.
+ */
 export type Image = { type: 'id'; data: string } | { type: 'bytes'; data: Uint8Array };
 
 /**
@@ -811,11 +844,7 @@ export type PlayContext = { contextUri: string; position: number | null };
 export type Playback = {
   state: PlaybackState;
   positionMs: number;
-  /**
-   * how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
-   * forward while `state == Playing` so a cached resend never reads as a backward seek
-   */
-  positionAgeMs?: number | null;
+  positionAgeMs: number | null;
   shuffle: boolean;
   shuffleMode: ShuffleMode | null;
   repeat: RepeatMode;
@@ -834,10 +863,20 @@ export type Playback = {
  */
 export type PlaybackContext = { uri: string; name: string | null };
 
+/**
+ * Repeat and shuffle toggle state.
+ */
 export type PlaybackOptions = { repeat: RepeatMode; shuffle: boolean };
 
+/**
+ * A resolved queue: the current track flanked by upcoming and previous tracks.
+ */
 export type PlaybackQueue = { next: Array<Track>; current: Track; previous: Array<Track> };
 
+/**
+ * Which player controls the current source supports; webapps disable the
+ * UI for any capability that is `false`.
+ */
 export type PlaybackRestrictions = {
   can_repeat_context: boolean;
   can_repeat_track: boolean;
@@ -979,9 +1018,6 @@ export type QueueItem = {
   artworkId: string | null;
   durationMs: number | null;
   persistentId: string | null;
-  /**
-   * true when the user explicitly queued this item (vs it coming from the playing context).
-   */
   queued: boolean;
 };
 
@@ -1146,14 +1182,30 @@ export type TimeInfo = {
   dstOffsetMinutes: number | null;
 };
 
+/**
+ * A track with resolved album/artist metadata, used by library search
+ * and browse results. For live now-playing state see `MediaItem`.
+ */
 export type Track = {
   id: string;
   name: string;
   album: Album;
+  /**
+   * Primary credited artist.
+   */
   artist: Artist;
+  /**
+   * All credited artists, in order.
+   */
   artists: Array<Artist>;
   duration_ms: number;
+  /**
+   * Opaque artwork asset id; pass to `asset.get` for the bytes.
+   */
   image_id: string;
+  /**
+   * Whether the track is saved in the user's library.
+   */
   saved: boolean;
 };
 

@@ -14,14 +14,20 @@ pub const THUMBNAIL_SIZE: usize = 96;
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// A track with resolved album/artist metadata, used by library search
+/// and browse results. For live now-playing state see `MediaItem`.
 pub struct Track {
   pub id: String,
   pub name: String,
   pub album: Album,
+  /// Primary credited artist.
   pub artist: Artist,
+  /// All credited artists, in order.
   pub artists: Vec<Artist>,
   pub duration_ms: u32,
+  /// Opaque artwork asset id; pass to `asset.get` for the bytes.
   pub image_id: String,
+  /// Whether the track is saved in the user's library.
   pub saved: bool,
 }
 
@@ -31,6 +37,8 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
+/// An image delivered either as an opaque asset id (fetch via `asset.get`)
+/// or as inline bytes.
 pub enum Image {
   Id(String),
   Bytes(
@@ -44,9 +52,11 @@ pub enum Image {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// An album reference.
 pub struct Album {
   pub id: String,
   pub name: String,
+  /// Opaque artwork asset id (`asset.get`), when known.
   pub artwork_id: Option<String>,
 }
 
@@ -64,9 +74,11 @@ impl From<String> for Album {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// An artist reference.
 pub struct Artist {
   pub id: String,
   pub name: String,
+  /// Opaque artwork asset id (`asset.get`), when known.
   pub artwork_id: Option<String>,
 }
 
@@ -83,7 +95,9 @@ impl From<String> for Artist {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// The foreground app driving playback, surfaced on iOS over iAP2.
 pub struct CurrentlyActiveApplication {
+  /// Bundle identifier, e.g. `com.spotify.client`.
   pub id: String,
   pub name: String,
 }
@@ -92,6 +106,7 @@ pub struct CurrentlyActiveApplication {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// Repeat and shuffle toggle state.
 pub struct PlaybackOptions {
   pub repeat: RepeatMode,
   pub shuffle: bool,
@@ -100,6 +115,8 @@ pub struct PlaybackOptions {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// Which player controls the current source supports; webapps disable the
+/// UI for any capability that is `false`.
 pub struct PlaybackRestrictions {
   pub can_repeat_context: bool,
   pub can_repeat_track: bool,
@@ -151,6 +168,7 @@ impl Default for PlaybackRestrictions {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "shared.ts")]
+/// A resolved queue: the current track flanked by upcoming and previous tracks.
 pub struct PlaybackQueue {
   pub next: Vec<Track>,
   pub current: Track,

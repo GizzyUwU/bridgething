@@ -123,6 +123,10 @@ pub struct WireVariant {
   /// `meta.kind` per variant inside an inner enum that mixes events
   /// with commands. `None` for outer wire enums (no per-variant tag).
   pub tag: Option<VariantTag>,
+  /// `///` doc on the variant, joined by newline. ts-rs drops these
+  /// from the generated `.d.ts`, but the docs emitter reads them from
+  /// source here so per-method prose survives.
+  pub docs: Option<String>,
 }
 
 /// Per-variant tag inferred from `#[bridge_event]` / `#[bridge_command]`
@@ -190,6 +194,36 @@ pub struct EnumDef {
   /// inner enums, `"encoding"` for `ForwardMessage`, `"type"` for the
   /// outer wire enums). Defaults to `"type"` if the enum isn't tagged.
   pub tag_field: String,
+  /// Adjacent-tagged content field name (serde `content = "..."`), when
+  /// the enum carries payloads. Lets the docs emitter render an accurate
+  /// TS discriminated union.
+  pub content_field: Option<String>,
+  /// `///` doc on the enum container. For a surface's inner enum this
+  /// is the human description of the whole surface.
+  pub docs: Option<String>,
+}
+
+/// A named DTO struct (payload, reply, or a `shared/` type) captured so
+/// the docs emitter can expand a method's payload shape field-by-field.
+/// Not consumed by any language emitter - docs only.
+#[derive(Debug, Clone)]
+pub struct StructDef {
+  pub docs: Option<String>,
+  pub fields: Vec<FieldDef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldDef {
+  /// camelCase wire name (matches the JSON/`.d.ts` field).
+  pub name: String,
+  /// Rendered TS-facing type string (e.g. `Track[]`, `string`).
+  pub ty: String,
+  /// True when the Rust type is `Option<T>` (optional on the wire).
+  pub optional: bool,
+  /// Base named type this field references, for cross-linking and
+  /// transitive type collection. `None` for scalars/bytes.
+  pub type_ref: Option<String>,
+  pub docs: Option<String>,
 }
 
 /// Markers attached to one named type, with the wire direction each
@@ -210,6 +244,9 @@ impl MarkerSet {
 pub struct Inventory {
   pub wire_enums: HashMap<String, EnumDef>,
   pub enums: HashMap<String, EnumDef>,
+  /// Named DTO structs by name. Docs-only; the language emitters lean on
+  /// ts-rs/typeshare for the actual type bindings.
+  pub structs: HashMap<String, StructDef>,
   pub markers: HashMap<String, MarkerSet>,
   pub typed_requests: Vec<TypedRequest>,
   /// camelCase names of every struct field whose Rust type is `Uuid`.
@@ -240,6 +277,7 @@ pub struct TypedRequest {
 pub fn inventory(lib_src: &str) -> Result<Inventory> {
   let mut wire_enums = HashMap::new();
   let mut enums = HashMap::new();
+  let mut structs: HashMap<String, StructDef> = HashMap::new();
   let mut markers: HashMap<String, MarkerSet> = HashMap::new();
   let mut typed_requests: Vec<TypedRequest> = Vec::new();
   let mut uuid_field_names: BTreeSet<String> = BTreeSet::new();
@@ -265,6 +303,7 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
       &parsed.items,
       &mut wire_enums,
       &mut enums,
+      &mut structs,
       &mut markers,
       &mut typed_requests,
       &mut uuid_field_names,
@@ -274,6 +313,7 @@ pub fn inventory(lib_src: &str) -> Result<Inventory> {
   Ok(Inventory {
     wire_enums,
     enums,
+    structs,
     markers,
     typed_requests,
     uuid_field_names,
@@ -284,6 +324,7 @@ fn walk_items(
   items: &[Item],
   wire_enums: &mut HashMap<String, EnumDef>,
   enums: &mut HashMap<String, EnumDef>,
+  structs: &mut HashMap<String, StructDef>,
   markers: &mut HashMap<String, MarkerSet>,
   typed_requests: &mut Vec<TypedRequest>,
   uuid_field_names: &mut BTreeSet<String>,
@@ -329,10 +370,19 @@ fn walk_items(
           typed_requests.push(req);
         }
         collect_uuid_field_names(s, uuid_field_names);
+        structs.insert(name.clone(), collect_struct(s));
       }
       Item::Mod(m) => {
         if let Some((_, sub_items)) = &m.content {
-          walk_items(sub_items, wire_enums, enums, markers, typed_requests, uuid_field_names);
+          walk_items(
+            sub_items,
+            wire_enums,
+            enums,
+            structs,
+            markers,
+            typed_requests,
+            uuid_field_names,
+          );
         }
       }
       _ => {}
@@ -513,6 +563,7 @@ fn collect_enum(en: &ItemEnum) -> EnumDef {
       payload: variant_single_payload(&v.fields),
       is_struct: matches!(v.fields, Fields::Named(_)),
       tag: variant_tag(&v.attrs),
+      docs: doc_string(&v.attrs),
     })
     .collect();
   let tag_field = serde_tag_field(&en.attrs).unwrap_or_else(|| "type".to_string());
@@ -520,6 +571,123 @@ fn collect_enum(en: &ItemEnum) -> EnumDef {
     name: en.ident.to_string(),
     variants,
     tag_field,
+    content_field: serde_content_field(&en.attrs),
+    docs: doc_string(&en.attrs),
+  }
+}
+
+fn collect_struct(s: &ItemStruct) -> StructDef {
+  let fields = match &s.fields {
+    Fields::Named(named) => named
+      .named
+      .iter()
+      .filter_map(|f| {
+        let ident = f.ident.as_ref()?;
+        let (ty, optional, type_ref) = render_ts_type(&f.ty);
+        Some(FieldDef {
+          name: snake_to_camel(&ident.to_string()),
+          ty,
+          optional,
+          type_ref,
+          docs: doc_string(&f.attrs),
+        })
+      })
+      .collect(),
+    _ => Vec::new(),
+  };
+  StructDef {
+    docs: doc_string(&s.attrs),
+    fields,
+  }
+}
+
+/// Join a Rust item's `///` doc lines (each a `#[doc = "..."]` attribute)
+/// into one string. Strips the single leading space rustdoc inserts,
+/// preserves paragraph breaks, and returns `None` when there is no doc.
+fn doc_string(attrs: &[Attribute]) -> Option<String> {
+  let mut lines: Vec<String> = Vec::new();
+  for attr in attrs {
+    if !attr.path().is_ident("doc") {
+      continue;
+    }
+    if let Meta::NameValue(nv) = &attr.meta
+      && let syn::Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Str(s), ..
+      }) = &nv.value
+    {
+      lines.push(s.value().strip_prefix(' ').map(str::to_string).unwrap_or_else(|| s.value()));
+    }
+  }
+  let joined = lines.join("\n").trim().to_string();
+  (!joined.is_empty()).then_some(joined)
+}
+
+/// Render a Rust field type to a TS-facing string plus the base named
+/// type it references (for cross-linking and transitive collection).
+/// Returns `(display, is_optional, type_ref)`. `Option<T>` sets the
+/// optional flag and unwraps to `T`.
+fn render_ts_type(ty: &Type) -> (String, bool, Option<String>) {
+  let Type::Path(p) = ty else {
+    return (quote::ToTokens::to_token_stream(ty).to_string(), false, None);
+  };
+  let Some(seg) = p.path.segments.last() else {
+    return ("unknown".to_string(), false, None);
+  };
+  let name = seg.ident.to_string();
+  match name.as_str() {
+    "Option" => {
+      if let Some(inner) = first_generic(seg) {
+        let (t, _, r) = render_ts_type(inner);
+        (t, true, r)
+      } else {
+        ("unknown".to_string(), true, None)
+      }
+    }
+    "Box" => first_generic(seg).map(render_ts_type).unwrap_or(("unknown".to_string(), false, None)),
+    "Vec" => match first_generic(seg) {
+      Some(inner) if is_u8(inner) => ("number[]".to_string(), false, None),
+      Some(inner) => {
+        let (t, _, r) = render_ts_type(inner);
+        (format!("{t}[]"), false, r)
+      }
+      None => ("unknown[]".to_string(), false, None),
+    },
+    "HashMap" | "BTreeMap" => {
+      let mut args = match &seg.arguments {
+        PathArguments::AngleBracketed(a) => a.args.iter().filter_map(|a| match a {
+          GenericArgument::Type(t) => Some(t),
+          _ => None,
+        }),
+        _ => return ("Record<string, unknown>".to_string(), false, None),
+      };
+      let key = args.next().map(|t| render_ts_type(t).0).unwrap_or_else(|| "string".to_string());
+      let val = args.next().map(render_ts_type);
+      let val_display = val.as_ref().map(|v| v.0.clone()).unwrap_or_else(|| "unknown".to_string());
+      let val_ref = val.and_then(|v| v.2);
+      (format!("Record<{key}, {val_display}>"), false, val_ref)
+    }
+    "String" | "str" => ("string".to_string(), false, None),
+    "Uuid" => ("string".to_string(), false, None),
+    "bool" => ("boolean".to_string(), false, None),
+    "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize" | "f32" | "f64" => {
+      ("number".to_string(), false, None)
+    }
+    "Value" => ("unknown".to_string(), false, None),
+    other => (other.to_string(), false, Some(other.to_string())),
+  }
+}
+
+fn is_u8(ty: &Type) -> bool {
+  matches!(ty, Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == "u8"))
+}
+
+fn first_generic(seg: &syn::PathSegment) -> Option<&Type> {
+  if let PathArguments::AngleBracketed(args) = &seg.arguments
+    && let Some(GenericArgument::Type(inner)) = args.args.first()
+  {
+    Some(inner)
+  } else {
+    None
   }
 }
 
@@ -543,6 +711,14 @@ fn variant_tag(attrs: &[Attribute]) -> Option<VariantTag> {
 }
 
 fn serde_tag_field(attrs: &[syn::Attribute]) -> Option<String> {
+  serde_str_meta(attrs, "tag")
+}
+
+fn serde_content_field(attrs: &[syn::Attribute]) -> Option<String> {
+  serde_str_meta(attrs, "content")
+}
+
+fn serde_str_meta(attrs: &[syn::Attribute], key: &str) -> Option<String> {
   for attr in attrs {
     if !attr.path().is_ident("serde") {
       continue;
@@ -552,7 +728,7 @@ fn serde_tag_field(attrs: &[syn::Attribute]) -> Option<String> {
     };
     for meta in nested {
       if let Meta::NameValue(nv) = meta
-        && nv.path.is_ident("tag")
+        && nv.path.is_ident(key)
         && let syn::Expr::Lit(lit) = nv.value
         && let syn::Lit::Str(s) = lit.lit
       {

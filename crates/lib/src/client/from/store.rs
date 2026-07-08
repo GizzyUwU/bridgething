@@ -53,6 +53,9 @@ pub struct KVDelete {
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
+/// Webapp -> daemon KV storage surface (`client.store`). Storage is
+/// scoped per webapp: keys set by one webapp are invisible to others.
+/// `Get` / `Put` / `Delete` each reply with the resulting `StorageResponse`.
 pub enum ClientToBridgeStoreMsg {
   #[bridge_request]
   Get(KVGet),

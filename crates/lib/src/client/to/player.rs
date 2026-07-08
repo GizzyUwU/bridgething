@@ -8,8 +8,10 @@ use crate::{CurrentlyActiveApplication, NowPlayingUpdate, PlayerError, PlayerSta
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Response to `stateGet`, also carried by the `Snapshot` event.
 pub struct PlayerStateReply {
   pub state: PlayerState,
+  /// The app currently driving playback, when known (iOS surfaces this over iAP2).
   pub active_app: Option<CurrentlyActiveApplication>,
 }
 
@@ -17,9 +19,13 @@ pub struct PlayerStateReply {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Response to `queueGet`, also carried by the `QueueChanged` event.
 pub struct PlayerQueueReply {
+  /// The now-playing track, when one is loaded.
   pub current: Option<QueueItem>,
+  /// Upcoming tracks in queue order.
   pub items: Vec<QueueItem>,
+  /// Recently-played history.
   pub previous: Vec<QueueItem>,
 }
 

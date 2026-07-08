@@ -581,6 +581,8 @@ dependencies = [
  "anyhow",
  "quote",
  "regex",
+ "serde",
+ "serde_json",
  "syn",
  "walkdir",
 ]

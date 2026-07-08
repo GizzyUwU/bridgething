@@ -7,7 +7,9 @@ use crate::{AcceptCallAction, DtmfTone, EndCallAction, InitiateCallType, PhoneCa
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
+/// Payload for `answer`, `decline`, `end`, `hold`, and `unhold`: the call to act on.
 pub struct PhoneCallAction {
+  /// Target call, as surfaced on `PhoneCall.call_id`.
   pub call_id: String,
 }
 
@@ -19,6 +21,7 @@ pub struct PhoneCallAction {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PhoneAcceptAction {
+  /// Target call, as surfaced on `PhoneCall.call_id`.
   pub call_id: String,
   pub action: AcceptCallAction,
 }
@@ -29,35 +32,46 @@ pub struct PhoneAcceptAction {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PhoneEndAction {
+  /// Target call, as surfaced on `PhoneCall.call_id`.
   pub call_id: String,
   pub action: EndCallAction,
 }
 
+/// Payload for `initiate`: place an outbound call.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PhoneInitiateAction {
+  /// What kind of outbound call to place.
   pub kind: InitiateCallType,
+  /// Destination address (e.g. phone number) for `Destination` calls; ignored for `Voicemail`/`Redial`.
   pub destination_id: Option<String>,
+  /// Call bearer to use; `None` lets the companion pick its default.
   pub service: Option<PhoneCallService>,
+  /// Contact id to associate with the call, when known.
   pub address_book_id: Option<String>,
 }
 
+/// Payload for `mute`: mic-mute state for the active call.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PhoneMuteAction {
+  /// `true` mutes the mic, `false` unmutes.
   pub mute: bool,
 }
 
+/// Payload for `dtmf`: play a tone on an active call.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 pub struct PhoneDtmfAction {
+  /// Call to send the tone on; `None` targets the active call.
   pub call_id: Option<String>,
   pub tone: DtmfTone,
 }
 
+/// Webapp asks for the current `PhoneState` snapshot.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = ClientToBridge,
@@ -68,6 +82,10 @@ pub struct PhoneDtmfAction {
 )]
 pub struct PhoneStateGet;
 
+/// Webapp -> daemon call-control surface. Commands are fire-and-forget and
+/// route to the connected companion's telephony backend (iAP2 call CSMs on
+/// iOS, gateway telephony on Android); outcomes surface asynchronously via
+/// `BridgeToClientPhoneMsg` events.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, BridgeEnum, BridgeDispatch)]
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]

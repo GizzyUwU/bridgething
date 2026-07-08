@@ -17,6 +17,10 @@ pub struct PeerSnapshotMap(pub HashMap<String, Peer>);
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::BridgeToClientMsgData)]
+/// Daemon -> webapp peer surface: a full snapshot of every known peer
+/// (paired, iAP2, and companion-gateway state), re-sent whenever any
+/// peer changes. There is no per-webapp request; a fresh snapshot
+/// arrives on connect and after every change.
 pub enum BridgeToClientPeerMsg {
   #[bridge_event]
   Snapshot(PeerSnapshotMap),

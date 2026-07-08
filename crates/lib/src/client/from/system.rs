@@ -17,6 +17,9 @@ use crate::{LogLevel, LogSource};
 )]
 pub struct RequestVersion;
 
+/// Marker request: webapp asks for a one-shot `Diagnostics` snapshot
+/// (disk/memory usage, uptime, SoC temp, load average, versions).
+/// Pairs with `BridgeToClientSystemMsg::DiagnosticsReply`.
 #[derive(Debug, Clone, Copy, Default, WireRequest)]
 #[wire_request(
   direction = ClientToBridge,
@@ -41,9 +44,13 @@ pub struct DiagnosticsGet;
   response_variant = LogsTailReply,
 )]
 pub struct LogsTail {
+  /// Reserved for selecting the log source; the daemon serves its own tracing stream regardless.
   pub source: LogSource,
+  /// Allow-list of levels to include; an empty vector matches every level.
   pub levels: Vec<LogLevel>,
+  /// Case-sensitive substring match against `target` or `message`; `None` disables filtering.
   pub filter: Option<String>,
+  /// Caps how many of the most recent matching entries return, in chronological order.
   pub max_lines: u32,
 }
 
@@ -63,11 +70,16 @@ pub struct LogsTail {
   response_variant = LogsSubscribeReply,
 )]
 pub struct LogsSubscribe {
+  /// Reserved for selecting the log source; the daemon serves its own tracing stream regardless.
   pub source: LogSource,
+  /// Allow-list of levels to include; an empty vector matches every level.
   pub levels: Vec<LogLevel>,
+  /// Case-sensitive substring match against `target` or `message`; `None` disables filtering.
   pub filter: Option<String>,
 }
 
+/// Release a log stream opened by `LogsSubscribe`. Fire-and-forget: unknown
+/// or malformed tokens are silently ignored rather than surfacing an error.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
@@ -93,6 +105,13 @@ pub struct DeviceGetNickname;
 #[serde(tag = "event", content = "data", rename_all = "camelCase")]
 #[ts(export, export_to = "client.ts")]
 #[bridge_enum(into = crate::client::ClientToBridgeMsgData)]
+/// Webapp -> daemon system control surface. `VersionRequest` fetches the
+/// daemon's `BridgeThingMeta` identity block; `DiagnosticsGet` fetches a
+/// one-shot health snapshot; `LogsTail` pulls a batch of recent log
+/// entries; `LogsSubscribe` / `LogsUnsubscribe` open and close a live log
+/// stream; `Reboot` / `PowerOff` restart or shut down the device;
+/// `FactoryReset` wipes daemon state (config, store, paired devices) and
+/// reboots; `DeviceGetNickname` reads the current device nickname.
 pub enum ClientToBridgeSystemMsg {
   #[bridge_request]
   VersionRequest,

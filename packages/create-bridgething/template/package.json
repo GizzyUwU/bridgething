@@ -7,11 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "push": "bun scripts/push.ts"
+    "push": "bun scripts/push.ts",
+    "share": "bun scripts/share.ts"
   },
   "dependencies": {
     "@bridgething/client": "^0.1.0",
-    "@bridgething/webapp-shared": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -21,6 +21,7 @@
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "fflate": "^0.8.2",
     "tailwindcss": "^4.1.16",
     "typescript": "^6.0.3",
     "vite": "^7.1.13"
