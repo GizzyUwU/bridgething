@@ -8,6 +8,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "publish:packages": "bun scripts/publish-packages.ts",
     "example:node-dev": "cd packages/examples/node-dev && bun run dev",
     "mobile": "cd mobile && bun run"
   },

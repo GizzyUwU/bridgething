@@ -1,8 +1,24 @@
 {
   "name": "create-bridgething",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "type": "module",
   "description": "Scaffold a new bridgething webapp (React + Vite + Tailwind v4)",
+  "license": "MIT",
+  "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
+  "homepage": "https://bridgething.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeyEamigh/bridgething.git",
+    "directory": "packages/create-bridgething"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeyEamigh/bridgething/issues"
+  },
+  "keywords": ["bridgething", "spotify", "car-thing", "superbird", "create", "scaffold"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "bin": {
     "create-bridgething": "./dist/index.mjs"
   },
