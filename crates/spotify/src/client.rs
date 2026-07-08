@@ -966,11 +966,14 @@ impl SpotifyClient {
   }
 }
 
+const LIKED_SONGS_ART_REF: &str = "builtin:liked-songs";
+
 fn liked_songs_item(uri: &str) -> BrowseItem {
   BrowseItem {
     uri: uri.to_string(),
     title: "Liked Songs".to_string(),
     subtitle: "Playlist".to_string(),
+    image_id: LIKED_SONGS_ART_REF.to_string(),
     playable: true,
     has_children: true,
     ..Default::default()

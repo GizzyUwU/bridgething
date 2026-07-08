@@ -27,6 +27,8 @@ private typealias SpLibraryScope = Spotify.LibraryScope
 
 private let scdnImagePrefix = "https://i.scdn.co/image/"
 private let assetIdPrefix = "spotify/img/"
+private let builtinRefPrefix = "builtin:"
+private let builtinAssetIdPrefix = "builtin/img/"
 private let defaultHeroEdge = 248
 private let defaultThumbEdge = 96
 private let queueMax = 50
@@ -793,6 +795,9 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
 
     private static func artAssetId(_ ref: String, edge: Int) -> String? {
         guard !ref.isEmpty else { return nil }
+        if ref.hasPrefix(builtinRefPrefix) {
+            return builtinAssetIdPrefix + ref.dropFirst(builtinRefPrefix.count)
+        }
         return imageAssetId(ref.hasPrefix("http") ? ref : "\(scdnImagePrefix)\(ref)", maxEdge: edge)
     }
 

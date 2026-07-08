@@ -89,6 +89,8 @@ import uniffi.spotify.TokenStore as SpTokenStore
 
 private const val ASSET_ID_PREFIX = "spotify/img/"
 private const val SCDN_IMAGE_PREFIX = "https://i.scdn.co/image/"
+private const val BUILTIN_REF_PREFIX = "builtin:"
+private const val BUILTIN_ASSET_ID_PREFIX = "builtin/img/"
 private const val DEFAULT_HERO_EDGE = 248
 private const val DEFAULT_THUMB_EDGE = 96
 private const val QUEUE_MAX = 50
@@ -663,6 +665,7 @@ class SpotifyGlue(
 
         fun artAssetId(ref: String, edge: Int): String? =
             if (ref.isEmpty()) null
+            else if (ref.startsWith(BUILTIN_REF_PREFIX)) "$BUILTIN_ASSET_ID_PREFIX${ref.removePrefix(BUILTIN_REF_PREFIX)}"
             else imageAssetId(if (ref.startsWith("http")) ref else "$SCDN_IMAGE_PREFIX$ref", edge)
 
         fun rawArtworkUrl(ref: String): String? =

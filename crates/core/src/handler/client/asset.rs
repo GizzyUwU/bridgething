@@ -15,7 +15,7 @@ use uuid::Uuid;
 use super::{HandlerResult, MsgHandle};
 use crate::{
   asset::{
-    CachedAsset, Retention,
+    CachedAsset, Retention, builtin,
     wait::{ASSET_STREAM_TIMEOUT, ASSET_WAIT_TIMEOUT, FetchOutcome, wait_for_asset},
   },
   bluetooth::BluetoothMan,
@@ -97,6 +97,10 @@ pub(crate) async fn resolve_asset(state: &State, bluetooth: &BluetoothMan, id: &
       tracing::warn!(?err, %id, "asset cache get failed");
       return FetchOutcome::NotFound;
     }
+  }
+
+  if let Some(asset) = builtin::lookup(id) {
+    return FetchOutcome::Got(asset);
   }
 
   if id.starts_with(IAP2_ART_PREFIX) {
@@ -217,7 +221,7 @@ pub(crate) async fn preload_assets(state: State, bluetooth: BluetoothMan, ids: V
     return;
   }
   for id in ids.into_iter().take(PRELOAD_IDS_MAX) {
-    if id.starts_with(IAP2_ART_PREFIX) {
+    if id.starts_with(IAP2_ART_PREFIX) || id.starts_with(builtin::BUILTIN_ART_PREFIX) {
       continue;
     }
     if matches!(state.assets.get(&id).await, Ok(Some(_))) {

@@ -28,6 +28,7 @@
 //! `subscribe()` for `Ready` / `Cleared` notifications.
 
 mod actor;
+pub mod builtin;
 pub mod storage;
 pub mod wait;
 
