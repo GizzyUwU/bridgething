@@ -14,8 +14,8 @@ use anyhow::{Context, Result, anyhow};
 use libbridgething::{
   OtaKind, Priority, WebappInfo,
   gateway::{
-    BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayWebappMsg, GatewayToBridgeMsg, OtaBegin,
-    OtaBeginAck, OtaBeginRejected, TransferRef,
+    BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayTransferMsg, BridgeToGatewayWebappMsg,
+    GatewayToBridgeMsg, OtaBegin, OtaBeginAck, OtaBeginRejected, TransferRef,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
@@ -25,7 +25,7 @@ use tokio::io::AsyncReadExt;
 use crate::{
   chaos::ChaosConfig,
   conn::{Connection, OutboundFrame},
-  transfer::stream_file_fragments,
+  transfer::{AckRegistry, stream_file_fragments},
 };
 
 pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundle: PathBuf) -> Result<()> {
@@ -66,17 +66,29 @@ pub async fn run_install(url: &str, chaos: ChaosConfig, chunk_size: usize, bundl
     );
   }
 
-  stream_file_fragments(
-    &conn.outbound_tx,
-    transfer_id,
-    &bundle,
-    resume_from_offset as u64,
-    total_len,
-    chunk_size,
-    Priority::Background,
-  )
-  .await?;
-  watch_for_outcome(&mut conn).await
+  let registry = AckRegistry::default();
+  let window = registry.register(transfer_id, resume_from_offset as u64);
+  let out = conn.outbound_tx.clone();
+  let bundle_path = bundle.clone();
+  let stream = tokio::spawn(async move {
+    if let Err(err) = stream_file_fragments(
+      &out,
+      transfer_id,
+      &bundle_path,
+      resume_from_offset as u64,
+      total_len,
+      chunk_size,
+      Priority::Background,
+      &window,
+    )
+    .await
+    {
+      tracing::error!(?err, "install stream failed");
+    }
+  });
+  let result = watch_for_outcome(&mut conn, &registry).await;
+  stream.abort();
+  result
 }
 
 async fn hash_file(path: &Path) -> Result<String> {
@@ -148,7 +160,7 @@ async fn send_begin(
   }
 }
 
-async fn watch_for_outcome(conn: &mut Connection) -> Result<()> {
+async fn watch_for_outcome(conn: &mut Connection, registry: &AckRegistry) -> Result<()> {
   let deadline = Instant::now() + Duration::from_secs(60);
   loop {
     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -162,6 +174,9 @@ async fn watch_for_outcome(conn: &mut Connection) -> Result<()> {
       Err(_) => return Err(anyhow!("install completion timed out after upload")),
     };
     match msg.data {
+      BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(ack)) => {
+        registry.note(ack.transfer_id, ack.received as u64);
+      }
       BridgeToGatewayMsgData::Webapp(BridgeToGatewayWebappMsg::WebappInstalled(info)) => {
         log_installed(&info);
         return Ok(());

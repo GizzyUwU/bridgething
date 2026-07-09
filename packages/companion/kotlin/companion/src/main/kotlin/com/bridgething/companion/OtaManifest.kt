@@ -3,10 +3,6 @@ package com.bridgething.companion
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Subset of the thinglabs discover-manifest schema the poll loop reads
- * when picking an OTA release. The site-side validator owns the full schema.
- */
 @Serializable
 public data class OtaDiscoverManifest(
     @SerialName("manifest_version") val manifestVersion: Int,
@@ -25,12 +21,29 @@ public data class OtaManifestChannel(
 )
 
 @Serializable
+public data class OtaArtifactDigest(
+    val size: Long,
+    val sha256: String,
+)
+
+/** per-artifact digests for a release, keyed to the artifacts the companion fetches by convention. */
+@Serializable
+public data class OtaReleaseArtifacts(
+    val daemon: OtaArtifactDigest? = null,
+    @SerialName("image_swu") val imageSwu: OtaArtifactDigest? = null,
+    @SerialName("image_zck") val imageZck: OtaArtifactDigest? = null,
+    @SerialName("image_boot_zck") val imageBootZck: OtaArtifactDigest? = null,
+    val webapps: Map<String, OtaArtifactDigest> = emptyMap(),
+)
+
+@Serializable
 public data class OtaManifestRelease(
     val version: String,
     val channel: String,
     val yanked: String? = null,
     val deprecated: Boolean = false,
     @SerialName("builtin_webapps") val builtinWebapps: Map<String, String> = emptyMap(),
+    val artifacts: OtaReleaseArtifacts? = null,
 )
 
 public data class OtaCompositeVersion(
@@ -55,6 +68,7 @@ public data class OtaArtifactUrls(
     val daemonBinary: String,
     val imageSwu: String,
     val imageZck: String,
+    val imageBootZck: String,
 ) {
     public companion object {
         public fun build(
@@ -70,6 +84,7 @@ public data class OtaArtifactUrls(
                 daemonBinary = "$root/daemon/$channel/$daemonVersion/bridgething",
                 imageSwu = "$root/images/$channel/$imageVersion/$imageName.swu",
                 imageZck = "$root/images/$channel/$imageVersion/$imageName.zck",
+                imageBootZck = "$root/images/$channel/$imageVersion/$imageName-boot.zck",
             )
         }
 

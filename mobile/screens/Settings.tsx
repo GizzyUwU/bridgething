@@ -18,8 +18,10 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  MessageCircle,
   MoonStar,
   MoreHorizontal,
+  Pencil,
   Phone,
   Plus,
   RadioTower,
@@ -29,13 +31,12 @@ import {
   UserRound,
   Wifi,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   AppState,
   Linking,
   Platform,
-  ScrollView,
   Switch,
   Text,
   ToastAndroid,
@@ -48,21 +49,22 @@ import {
   RESULTS,
   type PermissionStatus,
 } from 'react-native-permissions';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionMenu, type MenuAction } from '../components/ActionMenu';
 import { Button } from '../components/Button';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
+import { OtaCard } from '../components/OtaCard';
 import { PendingAuth } from '../components/PendingAuth';
 import { Pill } from '../components/Pill';
 import { Press } from '../components/Press';
 import { RenameSheet } from '../components/RenameSheet';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { Segmented } from '../components/Segmented';
-import { type OtaDeviceStatus, useOta } from '../lib/ota';
+import { installLatestOta, useOta } from '../lib/ota';
 import {
   connectedPeers,
   forgetKnownDevice,
@@ -82,6 +84,7 @@ import { DEFAULT_OTA_POLL_CONFIG } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
 
 const REPO_URL = 'https://github.com/JoeyEamigh/bridgething';
+const DISCORD_URL = 'https://tl.mt/d';
 const CHANNELS = ['stable', 'dev'] as const;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
@@ -173,13 +176,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   const installLatest = async (deviceId: string) => {
     try {
-      const manifest = await session.fetchOtaManifest(null);
-      const latest = manifest.channels.find(
-        c => c.slug === selectedChannel,
-      )?.latest;
-      if (latest) {
-        await session.applyOtaUpdate(deviceId, selectedChannel, latest, null);
-      }
+      await installLatestOta(deviceId, selectedChannel);
     } catch (err) {
       Alert.alert(
         'install failed',
@@ -233,297 +230,301 @@ export function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView contentContainerClassName="px-5 pb-12 pt-2">
-        <ScreenHeader title="settings" />
-        <ServiceHealthBanner />
+    <ScrollScreen>
+      <ScreenHeader title="settings" />
+      <ServiceHealthBanner />
 
-        <View className="mb-7">
-          <SectionHeader title="account" />
-          <ListGroup>
+      <View className="mb-7">
+        <SectionHeader title="account" />
+        <ListGroup>
+          <ListRow
+            icon={UserRound}
+            iconTint="primary"
+            title={provider?.displayName ?? 'no provider'}
+            subtitle={provider ? 'signed in' : 'not signed in'}
+            trailing={
+              provider ? (
+                <Pill tone="success" dot={false}>
+                  active
+                </Pill>
+              ) : null
+            }
+          />
+          {provider ? (
             <ListRow
-              icon={UserRound}
-              iconTint="primary"
-              title={provider?.displayName ?? 'no provider'}
-              subtitle={provider ? 'signed in' : 'not signed in'}
-              trailing={
-                provider ? (
-                  <Pill tone="success" dot={false}>
-                    active
-                  </Pill>
-                ) : null
+              icon={LogOut}
+              iconTint="destructive"
+              title={signOutBusy ? 'signing out…' : 'sign out'}
+              destructive
+              onPress={signOut}
+              loading={signOutBusy}
+            />
+          ) : (
+            providers
+              .filter(p => p.available)
+              .map(p => (
+                <ListRow
+                  key={p.id}
+                  icon={LogIn}
+                  iconTint="primary"
+                  title={`sign in to ${p.displayName}`}
+                  chevron
+                  onPress={() => signIn(p.id)}
+                  loading={signInBusy === p.id}
+                />
+              ))
+          )}
+        </ListGroup>
+        {!provider &&
+        (authState.kind === 'pending' || authState.kind === 'failed') ? (
+          <View className="mt-3">
+            <PendingAuth
+              state={authState}
+              onCancel={authState.kind === 'pending' ? cancelAuth : undefined}
+              onRetry={
+                authState.kind === 'failed' && signInBusy === null
+                  ? () => {
+                      const first = providers.find(p => p.available);
+                      if (first) signIn(first.id);
+                    }
+                  : undefined
               }
             />
-            {provider ? (
-              <ListRow
-                icon={LogOut}
-                iconTint="destructive"
-                title={signOutBusy ? 'signing out…' : 'sign out'}
-                destructive
-                onPress={signOut}
-                loading={signOutBusy}
+          </View>
+        ) : null}
+      </View>
+
+      <View className="mb-7">
+        <SectionHeader title="devices" />
+        {known.length === 0 ? (
+          <SectionEmpty>connect a Car Thing to see its details</SectionEmpty>
+        ) : (
+          <ListGroup>
+            {known.map(device => (
+              <DeviceRow
+                key={device.id}
+                device={device}
+                meta={metaByDevice[device.id]}
               />
-            ) : (
-              providers
-                .filter(p => p.available)
-                .map(p => (
-                  <ListRow
-                    key={p.id}
-                    icon={LogIn}
-                    iconTint="primary"
-                    title={`sign in to ${p.displayName}`}
-                    chevron
-                    onPress={() => signIn(p.id)}
-                    loading={signInBusy === p.id}
-                  />
-                ))
-            )}
+            ))}
           </ListGroup>
-          {!provider &&
-          (authState.kind === 'pending' || authState.kind === 'failed') ? (
-            <View className="mt-3">
-              <PendingAuth
-                state={authState}
-                onCancel={authState.kind === 'pending' ? cancelAuth : undefined}
-                onRetry={
-                  authState.kind === 'failed' && signInBusy === null
-                    ? () => {
-                        const first = providers.find(p => p.available);
-                        if (first) signIn(first.id);
-                      }
-                    : undefined
+        )}
+        <View className="mt-3">
+          <Button
+            onPress={addDevice}
+            loading={addDeviceBusy}
+            icon={Plus}
+            variant="tonal"
+            size="md"
+          >
+            add device
+          </Button>
+        </View>
+      </View>
+
+      <View className="mb-7">
+        <SectionHeader
+          title="updates"
+          hint="applies to every connected Car Thing"
+        />
+        <View className="rounded-2xl border border-border bg-surface p-4">
+          <Text className="mb-2 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            channel
+          </Text>
+          <Segmented
+            options={CHANNELS}
+            value={selectedChannel}
+            onChange={c => writePollConfig({ channel: c })}
+          />
+          <View className="mt-4 flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text className="text-[14px] font-semibold text-foreground">
+                install updates automatically
+              </Text>
+              <Text className="mt-0.5 text-[12px] text-muted-foreground">
+                flip off if you want to confirm each one
+              </Text>
+            </View>
+            <Switch
+              value={pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush}
+              onValueChange={autoPush => writePollConfig({ autoPush })}
+            />
+          </View>
+        </View>
+
+        <View className="mt-3">
+          <Button
+            onPress={checkForUpdate}
+            loading={pollBusy}
+            variant="tonal"
+            icon={RefreshCw}
+          >
+            check for updates now
+          </Button>
+        </View>
+
+        {livePeers.map(peer => (
+          <OtaCard
+            key={peer.id}
+            name={peerDisplayName(peer, ledger, metaByDevice[peer.id])}
+            status={otaByDevice[peer.id]}
+            onInstall={() => installLatest(peer.id)}
+            onPickVersion={() =>
+              navigation.navigate('OtaVersions', {
+                deviceId: peer.id,
+                channel: selectedChannel,
+              })
+            }
+          />
+        ))}
+      </View>
+
+      <View className="mb-7">
+        <Press
+          onPress={() => setAdvancedOpen(v => !v)}
+          scaleTo={0.99}
+          fade={false}
+          className="mb-2 flex-row items-center gap-2 px-2 py-1"
+        >
+          {advancedOpen ? (
+            <ChevronDown size={16} color="hsl(215 14% 50%)" strokeWidth={2.4} />
+          ) : (
+            <ChevronRight
+              size={16}
+              color="hsl(215 14% 50%)"
+              strokeWidth={2.4}
+            />
+          )}
+          <Text className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            advanced
+          </Text>
+        </Press>
+        <View style={{ display: advancedOpen ? 'flex' : 'none' }}>
+          <Text className="mb-2 px-2 text-[12px] leading-[18px] text-muted-foreground">
+            capabilities your phone offers to webapps on the Car Thing. most
+            users should leave these alone.
+          </Text>
+          <ListGroup>
+            <GeoFlagRow
+              value={flags.geo}
+              onChange={geo => writeFlags({ ...flags, geo })}
+            />
+            {Platform.OS === 'android' && flags.geo ? (
+              <BackgroundLocationRow />
+            ) : null}
+            {Platform.OS === 'ios' ? (
+              <FlagRow
+                icon={Bell}
+                iconTint={flags.notifications ? 'primary' : 'default'}
+                title="iPhone notifications"
+                subtitle="forward iPhone notifications to the Car Thing"
+                value={flags.notifications}
+                onChange={notifications =>
+                  writeFlags({ ...flags, notifications })
                 }
               />
-            </View>
-          ) : null}
-        </View>
-
-        <View className="mb-7">
-          <SectionHeader title="devices" />
-          {known.length === 0 ? (
-            <SectionEmpty>connect a Car Thing to see its details</SectionEmpty>
-          ) : (
-            <ListGroup>
-              {known.map(device => (
-                <DeviceRow
-                  key={device.id}
-                  device={device}
-                  meta={metaByDevice[device.id]}
-                />
-              ))}
-            </ListGroup>
-          )}
-          <View className="mt-3">
-            <Button
-              onPress={addDevice}
-              loading={addDeviceBusy}
-              icon={Plus}
-              variant="tonal"
-              size="md"
-            >
-              add device
-            </Button>
-          </View>
-        </View>
-
-        <View className="mb-7">
-          <SectionHeader
-            title="updates"
-            hint="applies to every connected Car Thing"
-          />
-          <View className="rounded-2xl border border-border bg-surface p-4">
-            <Text className="mb-2 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-              channel
-            </Text>
-            <Segmented
-              options={CHANNELS}
-              value={selectedChannel}
-              onChange={c => writePollConfig({ channel: c })}
-            />
-            <View className="mt-4 flex-row items-center justify-between">
-              <View className="flex-1 pr-3">
-                <Text className="text-[14px] font-semibold text-foreground">
-                  install updates automatically
-                </Text>
-                <Text className="mt-0.5 text-[12px] text-muted-foreground">
-                  flip off if you want to confirm each one
-                </Text>
-              </View>
-              <Switch
-                value={pollConfig?.autoPush ?? DEFAULT_OTA_POLL_CONFIG.autoPush}
-                onValueChange={autoPush => writePollConfig({ autoPush })}
-              />
-            </View>
-          </View>
-
-          <View className="mt-3">
-            <Button
-              onPress={checkForUpdate}
-              loading={pollBusy}
-              variant="tonal"
-              icon={RefreshCw}
-            >
-              check for updates now
-            </Button>
-          </View>
-
-          {livePeers.map(peer => (
-            <OtaDeviceCard
-              key={peer.id}
-              name={peerDisplayName(peer, ledger, metaByDevice[peer.id])}
-              status={otaByDevice[peer.id]}
-              onInstall={() => installLatest(peer.id)}
-              onPickVersion={() =>
-                navigation.navigate('OtaVersions', {
-                  deviceId: peer.id,
-                  channel: selectedChannel,
-                })
-              }
-            />
-          ))}
-        </View>
-
-        <View className="mb-7">
-          <Press
-            onPress={() => setAdvancedOpen(v => !v)}
-            scaleTo={0.99}
-            fade={false}
-            className="mb-2 flex-row items-center gap-2 px-2 py-1"
-          >
-            {advancedOpen ? (
-              <ChevronDown
-                size={16}
-                color="hsl(215 14% 50%)"
-                strokeWidth={2.4}
-              />
-            ) : (
-              <ChevronRight
-                size={16}
-                color="hsl(215 14% 50%)"
-                strokeWidth={2.4}
-              />
-            )}
-            <Text className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-              advanced
-            </Text>
-          </Press>
-          {advancedOpen ? (
-            <View>
-              <Text className="mb-2 px-2 text-[12px] leading-[18px] text-muted-foreground">
-                capabilities your phone offers to webapps on the Car Thing. most
-                users should leave these alone.
-              </Text>
-              <ListGroup>
-                <GeoFlagRow
-                  value={flags.geo}
-                  onChange={geo => writeFlags({ ...flags, geo })}
-                />
-                {Platform.OS === 'android' && flags.geo ? (
-                  <BackgroundLocationRow />
-                ) : null}
-                {Platform.OS === 'ios' ? (
-                  <FlagRow
-                    icon={Bell}
-                    title="iPhone notifications"
-                    subtitle="forward iPhone notifications to the Car Thing"
-                    value={flags.notifications}
-                    onChange={notifications =>
-                      writeFlags({ ...flags, notifications })
-                    }
-                  />
-                ) : null}
-                {Platform.OS === 'android' ? (
-                  <NotificationListenerRow
-                    value={flags.notifications}
-                    onChange={notifications =>
-                      writeFlags({ ...flags, notifications })
-                    }
-                  />
-                ) : null}
-                {Platform.OS === 'android' ? <DefaultDialerRow /> : null}
-                {Platform.OS === 'android' ? <BatteryOptimizationRow /> : null}
-                <FlagRow
-                  icon={Globe}
-                  title="HTTP proxy"
-                  subtitle="phone-relayed HTTP for webapps"
-                  value={flags.netFetch}
-                  onChange={netFetch => writeFlags({ ...flags, netFetch })}
-                />
-                <FlagRow
-                  icon={Wifi}
-                  title="WebSocket proxy"
-                  subtitle="phone-relayed websockets for webapps"
-                  value={flags.netWs}
-                  onChange={netWs => writeFlags({ ...flags, netWs })}
-                />
-                <FlagRow
-                  icon={Speaker}
-                  title="phone speaker"
-                  subtitle="let the Car Thing play sound through this phone"
-                  value={flags.audioTts}
-                  onChange={audioTts => writeFlags({ ...flags, audioTts })}
-                />
-              </ListGroup>
-            </View>
-          ) : null}
-        </View>
-
-        <View className="mb-7">
-          <SectionHeader title="diagnostics" />
-          <ListGroup>
-            <ListRow
-              icon={Activity}
-              iconTint="default"
-              title="debug inspector"
-              subtitle="now-playing merge, wire frames, companion state"
-              chevron
-              onPress={() => navigation.navigate('Debug')}
-            />
-            <ListRow
-              icon={TerminalSquare}
-              iconTint="default"
-              title="live log stream"
-              subtitle="device logs over Bluetooth (slows connection while active)"
-              chevron
-              onPress={() => navigation.navigate('Logs')}
-            />
-          </ListGroup>
-        </View>
-
-        <View className="mb-2">
-          <SectionHeader title="about" />
-          <ListGroup>
-            <ListRow
-              icon={LifeBuoy}
-              iconTint="primary"
-              title={`${host?.appName ?? 'bridgething'} companion`}
-              subtitle={
-                host
-                  ? `v${host.appVersion} · ${host.osName} ${host.osVersion}`
-                  : 'loading…'
-              }
-            />
-            {host ? (
-              <ListRow
-                icon={RadioTower}
-                iconTint="default"
-                title="protocol"
-                subtitle={`lib ${host.libVersion} · wire ${host.libbridgethingVersion}`}
-                value={host.adapterVersion}
+            ) : null}
+            {Platform.OS === 'android' ? (
+              <NotificationListenerRow
+                value={flags.notifications}
+                onChange={notifications =>
+                  writeFlags({ ...flags, notifications })
+                }
               />
             ) : null}
-            <ListRow
-              icon={Code}
-              iconTint="default"
-              title="source"
-              subtitle={REPO_URL.replace('https://', '')}
-              chevron
-              onPress={() => Linking.openURL(REPO_URL)}
+            {Platform.OS === 'android' ? <DefaultDialerRow /> : null}
+            {Platform.OS === 'android' ? <BatteryOptimizationRow /> : null}
+            <FlagRow
+              icon={Globe}
+              iconTint={flags.netFetch ? 'primary' : 'default'}
+              title="HTTP proxy"
+              subtitle="phone-relayed HTTP for webapps"
+              value={flags.netFetch}
+              onChange={netFetch => writeFlags({ ...flags, netFetch })}
+            />
+            <FlagRow
+              icon={Wifi}
+              iconTint={flags.netWs ? 'primary' : 'default'}
+              title="WebSocket proxy"
+              subtitle="phone-relayed websockets for webapps"
+              value={flags.netWs}
+              onChange={netWs => writeFlags({ ...flags, netWs })}
+            />
+            <FlagRow
+              icon={Speaker}
+              iconTint={flags.audioTts ? 'primary' : 'default'}
+              title="phone speaker"
+              subtitle="let the Car Thing play sound through this phone"
+              value={flags.audioTts}
+              onChange={audioTts => writeFlags({ ...flags, audioTts })}
             />
           </ListGroup>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+
+      <View className="mb-7">
+        <SectionHeader title="diagnostics" />
+        <ListGroup>
+          <ListRow
+            icon={Activity}
+            iconTint="primary"
+            title="debug inspector"
+            subtitle="now-playing merge, wire frames, companion state"
+            chevron
+            onPress={() => navigation.navigate('Debug')}
+          />
+          <ListRow
+            icon={TerminalSquare}
+            iconTint="primary"
+            title="live log stream"
+            subtitle="device logs over Bluetooth (slows connection while active)"
+            chevron
+            onPress={() => navigation.navigate('Logs')}
+          />
+        </ListGroup>
+      </View>
+
+      <View className="mb-2">
+        <SectionHeader title="about" />
+        <ListGroup>
+          <ListRow
+            icon={LifeBuoy}
+            iconTint="primary"
+            title={`${host?.appName ?? 'bridgething'} companion`}
+            subtitle={
+              host
+                ? `v${host.appVersion} · ${host.osName} ${host.osVersion}`
+                : 'loading…'
+            }
+          />
+          {host ? (
+            <ListRow
+              icon={RadioTower}
+              iconTint="primary"
+              title="protocol"
+              subtitle={`lib ${host.libVersion} · wire ${host.libbridgethingVersion}`}
+              value={host.adapterVersion}
+            />
+          ) : null}
+          <ListRow
+            icon={Code}
+            iconTint="primary"
+            title="source"
+            subtitle={REPO_URL.replace('https://', '')}
+            chevron
+            onPress={() => Linking.openURL(REPO_URL)}
+          />
+          <ListRow
+            icon={MessageCircle}
+            iconTint="primary"
+            title="community discord"
+            subtitle="tl.mt/d"
+            chevron
+            onPress={() => Linking.openURL(DISCORD_URL)}
+          />
+        </ListGroup>
+      </View>
+    </ScrollScreen>
   );
 }
 
@@ -535,22 +536,13 @@ function DeviceRow({
   meta?: BridgethingDeviceMeta;
 }) {
   const [renameOpen, setRenameOpen] = useState(false);
-  const [deviceNameOpen, setDeviceNameOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = device.peer?.status === 'connected';
   const linkFailed = device.peer?.status === 'linkFailed';
   const title = device.nickname ?? meta?.nickname ?? device.displayName;
 
-  const menuActions: MenuAction[] = [
-    { label: 'rename', onPress: () => setRenameOpen(true) },
-  ];
-  if (connected) {
-    menuActions.push({
-      label: 'set device name',
-      onPress: () => setDeviceNameOpen(true),
-    });
-  }
-  if (!connected && !linkFailed) {
+  const menuActions: MenuAction[] = [];
+  if (!connected) {
     menuActions.push({
       label: 'forget this device',
       destructive: true,
@@ -558,24 +550,27 @@ function DeviceRow({
     });
   }
 
-  const submitDeviceName = (value: string | null) => {
+  const submitRename = (value: string | null) => {
     void setDeviceName(device.id, value).catch((err: unknown) => {
       Alert.alert(
-        'device name not saved',
+        'rename failed',
         err instanceof Error ? err.message : String(err),
       );
     });
+    updateNickname(device.id, null);
   };
 
-  const subtitle = connected
+  const serial = meta?.serialNumber ?? device.serialNumber ?? null;
+  const statusText = connected
     ? meta
-      ? `${meta.modelName} · ${meta.osName}`
+      ? 'connected'
       : 'reading device info…'
     : linkFailed
       ? 'attached, but the link did not open'
       : device.lastConnectedAt > 0
         ? `last connected ${relativeTime(device.lastConnectedAt)}`
         : 'not connected';
+  const subtitle = serial ? `${serial} · ${statusText}` : statusText;
 
   return (
     <>
@@ -588,20 +583,11 @@ function DeviceRow({
       <RenameSheet
         visible={renameOpen}
         title="rename your Car Thing"
-        message="this nickname only shows up here on your phone."
-        initialValue={device.nickname ?? ''}
-        placeholder={device.peer?.name ?? device.displayName}
-        onSubmit={value => updateNickname(device.id, value)}
-        onClose={() => setRenameOpen(false)}
-      />
-      <RenameSheet
-        visible={deviceNameOpen}
-        title="name your Car Thing"
-        message="this name lives on the device and shows on its screen."
+        message="this renames the device and shows on its screen."
         initialValue={meta?.nickname ?? ''}
-        placeholder={meta?.modelName ?? 'Car Thing'}
-        onSubmit={submitDeviceName}
-        onClose={() => setDeviceNameOpen(false)}
+        placeholder={meta?.nickname ?? device.peer?.name ?? device.displayName}
+        onSubmit={submitRename}
+        onClose={() => setRenameOpen(false)}
       />
       <ListRow
         icon={Cable}
@@ -610,85 +596,36 @@ function DeviceRow({
         subtitle={subtitle}
         value={
           connected && meta
-            ? `${meta.daemonVersion}+${meta.imageVersion}`
+            ? `v${meta.daemonVersion}+${meta.imageVersion}`
             : undefined
         }
         trailing={
-          <MoreHorizontal
-            size={18}
-            color="hsl(215 14% 60%)"
-            strokeWidth={2.2}
-          />
+          connected ? (
+            <Pencil size={16} color="hsl(215 14% 60%)" strokeWidth={2.4} />
+          ) : (
+            <MoreHorizontal
+              size={18}
+              color="hsl(215 14% 60%)"
+              strokeWidth={2.2}
+            />
+          )
         }
-        onPress={() => setMenuOpen(true)}
+        onPress={() => (connected ? setRenameOpen(true) : setMenuOpen(true))}
       />
     </>
   );
 }
 
-function OtaDeviceCard({
-  name,
-  status,
-  onInstall,
-  onPickVersion,
-}: {
-  name: string;
-  status?: OtaDeviceStatus;
-  onInstall: () => void;
-  onPickVersion: () => void;
-}) {
-  const available = status?.availableTo ?? null;
-  const installing = status?.installing ?? false;
-
-  return (
-    <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
-      <Text className="text-[14px] font-semibold text-foreground">{name}</Text>
-      {installing ? (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
-          {status?.phase ?? 'installing'} · {status?.percent ?? 0}%
-        </Text>
-      ) : available ? (
-        <View className="mt-2">
-          <Text className="mb-2 text-[12px] text-muted-foreground">
-            update available: {available}
-          </Text>
-          <Button onPress={onInstall} size="md">
-            install update
-          </Button>
-        </View>
-      ) : status?.phase === 'completed' ? (
-        <Text className="mt-1 text-[12px] text-muted-foreground">
-          rebooting to complete installation...
-        </Text>
-      ) : null}
-      {status?.error ? (
-        <Text className="mt-2 text-[12px] text-destructive">
-          {status.error}
-        </Text>
-      ) : null}
-      <Press
-        onPress={onPickVersion}
-        scaleTo={0.99}
-        fade={false}
-        className="mt-3 flex-row items-center gap-1 py-1"
-      >
-        <Text className="text-[13px] font-semibold text-primary">
-          choose a specific version
-        </Text>
-        <ChevronRight size={14} color="hsl(215 14% 50%)" strokeWidth={2.4} />
-      </Press>
-    </View>
-  );
-}
-
 function FlagRow({
   icon,
+  iconTint = 'default',
   title,
   subtitle,
   value,
   onChange,
 }: {
   icon: import('lucide-react-native').LucideIcon;
+  iconTint?: React.ComponentProps<typeof ListRow>['iconTint'];
   title: string;
   subtitle?: string;
   value: boolean;
@@ -697,7 +634,7 @@ function FlagRow({
   return (
     <ListRow
       icon={icon}
-      iconTint="default"
+      iconTint={iconTint}
       title={title}
       subtitle={subtitle}
       trailing={<Switch value={value} onValueChange={onChange} />}
@@ -764,7 +701,9 @@ function GeoFlagRow({
   return (
     <ListRow
       icon={MapPin}
-      iconTint={denied ? 'destructive' : 'default'}
+      iconTint={
+        denied ? 'destructive' : value && granted ? 'primary' : 'default'
+      }
       title="location"
       subtitle={subtitle}
       onPress={blocked ? () => Linking.openSettings() : undefined}
@@ -792,7 +731,6 @@ function BackgroundLocationRow() {
     refresh();
   }, [refresh]);
 
-  // recheck on foreground; user may have changed the permission in system settings
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -810,7 +748,6 @@ function BackgroundLocationRow() {
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // revoking only the bg variant downgrades to while-using; drop fine+coarse for a full revoke
       Alert.alert(
         'restart bridgething?',
         'to revoke location, android needs to kill + restart the app. revoke now?',
@@ -887,7 +824,7 @@ function BackgroundLocationRow() {
   return (
     <ListRow
       icon={MoonStar}
-      iconTint={blocked ? 'destructive' : 'default'}
+      iconTint={blocked ? 'destructive' : granted ? 'primary' : 'default'}
       title="background location"
       subtitle={subtitle}
       onPress={blocked ? () => Linking.openSettings() : undefined}
@@ -921,7 +858,6 @@ function NotificationListenerRow({
     refresh();
   }, [refresh]);
 
-  // recheck on foreground; user may have toggled access in system settings
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
@@ -954,7 +890,6 @@ function NotificationListenerRow({
 
   const handleToggle = async (next: boolean) => {
     if (!next) {
-      // no programmatic revoke for NotificationListenerService
       Alert.alert(
         'revoke in settings',
         'android only lets you revoke notification access from system settings. open it?',
@@ -987,7 +922,7 @@ function NotificationListenerRow({
   return (
     <ListRow
       icon={Bell}
-      iconTint="default"
+      iconTint={value && granted ? 'primary' : 'default'}
       title="notification access"
       subtitle={subtitle}
       onPress={!granted ? () => openSettings('grant') : undefined}
@@ -1059,7 +994,7 @@ function DefaultDialerRow() {
   return (
     <ListRow
       icon={Phone}
-      iconTint="default"
+      iconTint={granted ? 'primary' : 'default'}
       title="phone calls"
       subtitle={subtitle}
       onPress={!granted ? request : undefined}
@@ -1131,7 +1066,7 @@ function BatteryOptimizationRow() {
   return (
     <ListRow
       icon={BatteryCharging}
-      iconTint="default"
+      iconTint={exempt ? 'primary' : 'default'}
       title="background connection"
       subtitle={subtitle}
       onPress={!exempt ? request : undefined}

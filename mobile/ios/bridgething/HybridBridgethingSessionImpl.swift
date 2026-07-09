@@ -723,7 +723,9 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     }
 
     private static func loadOtaPollConfig() -> BridgethingOtaPollConfig? {
-        guard defaults.bool(forKey: PrefKey.otaConfigured) else { return nil }
+        guard defaults.bool(forKey: PrefKey.otaConfigured) else {
+            return BridgethingOtaPollConfig(channel: "stable", intervalSeconds: 3600, autoPush: true, rootUrl: nil)
+        }
         let root = defaults.string(forKey: PrefKey.otaRootUrl)
         return BridgethingOtaPollConfig(
             channel: defaults.string(forKey: PrefKey.otaChannel) ?? "stable",
@@ -1345,82 +1347,92 @@ private func toRNCatalogEvent(_ event: CatalogEvent) -> BridgethingCatalogEvent 
     }
 }
 
+private func rnOtaEvent(
+    kind: BridgethingOtaEventKind,
+    updatedAt: String? = nil, reason: String? = nil, deviceId: String? = nil,
+    otaKind: BridgethingOtaKind? = nil, fromVersion: String? = nil, toVersion: String? = nil,
+    phase: BridgethingOtaPhase? = nil, percent: Double? = nil,
+    deviceChannel: String? = nil, configuredChannel: String? = nil,
+    stageAsset: String? = nil, stageReceived: Double? = nil, stageTotal: Double? = nil,
+    stageRatePerSec: Double? = nil, stageEtaSeconds: Double? = nil
+) -> BridgethingOtaEvent {
+    BridgethingOtaEvent(
+        kind: kind, updatedAt: updatedAt, reason: reason, deviceId: deviceId, otaKind: otaKind,
+        fromVersion: fromVersion, toVersion: toVersion, phase: phase, percent: percent,
+        deviceChannel: deviceChannel, configuredChannel: configuredChannel,
+        stageAsset: stageAsset, stageReceived: stageReceived, stageTotal: stageTotal,
+        stageRatePerSec: stageRatePerSec, stageEtaSeconds: stageEtaSeconds
+    )
+}
+
+private func bytePercent(_ n: UInt64, _ d: UInt64) -> Double {
+    d == 0 ? 0 : min(100, Double(n) * 100 / Double(d))
+}
+
 private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
     switch event {
     case let .manifestPolled(updatedAt):
-        return BridgethingOtaEvent(
-            kind: .manifestpolled,
-            updatedAt: updatedAt,
-            reason: nil, deviceId: nil, otaKind: nil,
-            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
-            deviceChannel: nil, configuredChannel: nil
-        )
+        return rnOtaEvent(kind: .manifestpolled, updatedAt: updatedAt)
     case let .manifestPollFailed(reason):
-        return BridgethingOtaEvent(
-            kind: .manifestpollfailed,
-            updatedAt: nil, reason: reason, deviceId: nil, otaKind: nil,
-            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
-            deviceChannel: nil, configuredChannel: nil
-        )
+        return rnOtaEvent(kind: .manifestpollfailed, reason: reason)
     case let .channelMismatch(deviceId, deviceChannel, configuredChannel):
-        return BridgethingOtaEvent(
+        return rnOtaEvent(
             kind: .channelmismatch,
-            updatedAt: nil,
             reason: "device on \(deviceChannel), companion configured for \(configuredChannel)",
-            deviceId: deviceId, otaKind: nil,
-            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
-            deviceChannel: deviceChannel, configuredChannel: configuredChannel
+            deviceId: deviceId, deviceChannel: deviceChannel, configuredChannel: configuredChannel
         )
     case let .updateAvailable(deviceId, kind, fromVersion, toVersion):
-        return BridgethingOtaEvent(
-            kind: .updateavailable,
-            updatedAt: nil, reason: nil, deviceId: deviceId,
-            otaKind: kind == .image ? .image : .daemon,
-            fromVersion: fromVersion, toVersion: toVersion,
-            phase: nil, percent: nil,
-            deviceChannel: nil, configuredChannel: nil
+        return rnOtaEvent(
+            kind: .updateavailable, deviceId: deviceId,
+            otaKind: kind == .image ? .image : .daemon, fromVersion: fromVersion, toVersion: toVersion
         )
     case let .progress(deviceId, kind, snapshot):
-        let (phase, percent, reason): (BridgethingOtaPhase, Double, String?) = {
-            switch snapshot {
-            case .idle: return (.idle, 0, nil)
-            case let .streaming(p): return (.streaming, Double(p), nil)
-            case let .applying(phase: ph, percent: p):
-                let mapped: BridgethingOtaPhase = switch ph {
-                case .streaming: .streaming
-                case .verifying: .verifying
-                case .writing: .writing
-                case .confirming: .confirming
-                case .reboot: .reboot
-                }
-                return (mapped, Double(p), nil)
-            case .staged: return (.writing, 100, nil)
-            case .completed: return (.completed, 100, nil)
-            case let .failed(r): return (.failed, 0, r)
+        let otaKind: BridgethingOtaKind = kind == .image ? .image : .daemon
+        switch snapshot {
+        case .idle:
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .idle, percent: 0)
+        case let .downloading(asset, received, total, rate):
+            return rnOtaEvent(
+                kind: .progress, deviceId: deviceId, otaKind: otaKind,
+                phase: .downloading, percent: bytePercent(received, total),
+                stageAsset: asset, stageReceived: Double(received), stageTotal: Double(total),
+                stageRatePerSec: rate
+            )
+        case let .streaming(sent, total, rate, eta):
+            return rnOtaEvent(
+                kind: .progress, deviceId: deviceId, otaKind: otaKind,
+                phase: .streaming, percent: bytePercent(sent, total),
+                stageReceived: Double(sent), stageTotal: Double(total),
+                stageRatePerSec: rate, stageEtaSeconds: eta
+            )
+        case let .rangePull(asset, served, rate):
+            return rnOtaEvent(
+                kind: .progress, deviceId: deviceId, otaKind: otaKind,
+                phase: .rangepull, stageAsset: asset, stageReceived: Double(served), stageRatePerSec: rate
+            )
+        case let .applying(phase: ph, percent: p):
+            let mapped: BridgethingOtaPhase = switch ph {
+            case .streaming: .streaming
+            case .verifying: .verifying
+            case .writing: .writing
+            case .confirming: .confirming
+            case .reboot: .reboot
             }
-        }()
-        return BridgethingOtaEvent(
-            kind: .progress,
-            updatedAt: nil, reason: reason, deviceId: deviceId,
-            otaKind: kind == .image ? .image : .daemon,
-            fromVersion: nil, toVersion: nil, phase: phase, percent: percent,
-            deviceChannel: nil, configuredChannel: nil
-        )
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: mapped, percent: Double(p))
+        case .staged:
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .writing, percent: 100)
+        case .completed:
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .completed, percent: 100)
+        case let .failed(r):
+            return rnOtaEvent(kind: .progress, reason: r, deviceId: deviceId, otaKind: otaKind, phase: .failed, percent: 0)
+        }
     case let .updated(deviceId, kind, version):
-        return BridgethingOtaEvent(
-            kind: .updated,
-            updatedAt: nil, reason: nil, deviceId: deviceId,
-            otaKind: kind == .image ? .image : .daemon,
-            fromVersion: nil, toVersion: version, phase: nil, percent: nil,
-            deviceChannel: nil, configuredChannel: nil
+        return rnOtaEvent(
+            kind: .updated, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon, toVersion: version
         )
     case let .failed(deviceId, kind, reason):
-        return BridgethingOtaEvent(
-            kind: .failed,
-            updatedAt: nil, reason: reason, deviceId: deviceId,
-            otaKind: kind == .image ? .image : .daemon,
-            fromVersion: nil, toVersion: nil, phase: nil, percent: nil,
-            deviceChannel: nil, configuredChannel: nil
+        return rnOtaEvent(
+            kind: .failed, reason: reason, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon
         )
     }
 }

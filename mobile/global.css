@@ -43,6 +43,7 @@
     --success: 152 60% 38%;
     --success-foreground: 0 0% 100%;
     --success-soft: 152 60% 95%;
+    --success-soft-foreground: 152 65% 22%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 30 30% 12%;
@@ -88,6 +89,7 @@
     --success: 152 60% 50%;
     --success-foreground: 210 14% 8%;
     --success-soft: 152 50% 14%;
+    --success-soft-foreground: 152 55% 78%;
 
     --warning: 38 92% 60%;
     --warning-foreground: 30 30% 12%;

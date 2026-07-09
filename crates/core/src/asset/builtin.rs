@@ -10,8 +10,10 @@ use super::CachedAsset;
 
 pub const BUILTIN_ART_PREFIX: &str = "builtin/img/";
 
-static LIKED_SONGS_WEBP: &[u8] =
-  include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/builtin/liked-songs.webp"));
+static LIKED_SONGS_WEBP: &[u8] = include_bytes!(concat!(
+  env!("CARGO_MANIFEST_DIR"),
+  "/resources/builtin/liked-songs.webp"
+));
 
 pub fn lookup(id: &str) -> Option<CachedAsset> {
   let key = id.strip_prefix(BUILTIN_ART_PREFIX)?;

@@ -224,6 +224,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let (ota, _ota_handle) = OtaOrchestrator::spawn(
     transfers.clone(),
     ota_events_tx,
+    bluetooth.gateway_man.clone(),
     OtaTerminators {
       reboot: std::sync::Arc::new(trigger_reboot),
       restart_self: std::sync::Arc::new(trigger_restart_self),

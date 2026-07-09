@@ -35,3 +35,22 @@ your built bundle with `manifest.json` at its root.
 Bump `version` in `public/manifest.json` before sharing an update, so people can
 tell builds apart. Never touch `manifest.json`'s `id` - it is the webapp's
 identity and the install path on the device.
+
+## Keep the device on the latest bridgething
+
+```bash
+bun run update   # updates the connected Car Thing's daemon + image
+```
+
+`update` runs `@bridgething/updater`: it connects over the same gateway `push`
+uses, reads the release manifest, and brings the device to the latest `stable`
+release.
+
+Multiple devices? Target one explicitly:
+
+```bash
+bun run update -- --host ws://bridgething-<serial>.local:8892/
+```
+
+Other flags: `-- --channel <name>` to track a non-stable channel,
+`-- --daemon-only` to skip the image OTA.

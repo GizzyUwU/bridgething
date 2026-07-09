@@ -25,6 +25,7 @@ final class OtaManifestTests: XCTestCase {
     XCTAssertEqual(urls.daemonBinary.absoluteString, "https://ota.bridgething.com/daemon/stable/0.8.4/bridgething")
     XCTAssertEqual(urls.imageSwu.absoluteString, "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.swu")
     XCTAssertEqual(urls.imageZck.absoluteString, "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.zck")
+    XCTAssertEqual(urls.imageBootZck.absoluteString, "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image-boot.zck")
 
     let hub = OtaArtifactURLs.builtinWebapp(
       rootURL: URL(string: "https://ota.bridgething.com")!,

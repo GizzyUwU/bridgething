@@ -32,6 +32,10 @@ class OtaManifestTest {
         assertEquals("https://ota.bridgething.com/daemon/stable/0.8.4/bridgething", urls.daemonBinary)
         assertEquals("https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.swu", urls.imageSwu)
         assertEquals("https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image.zck", urls.imageZck)
+        assertEquals(
+            "https://ota.bridgething.com/images/stable/2026.05.0/bridgething-prod-image-boot.zck",
+            urls.imageBootZck,
+        )
 
         assertEquals(
             "https://ota.bridgething.com/webapps/stable/hub/0.1.0/hub.zip",

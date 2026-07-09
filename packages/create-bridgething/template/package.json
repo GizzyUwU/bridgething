@@ -8,10 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "push": "bun scripts/push.ts",
-    "share": "bun scripts/share.ts"
+    "share": "bun scripts/share.ts",
+    "update": "bunx @bridgething/updater"
   },
   "dependencies": {
-    "@bridgething/client": "^0.1.2",
+    "@bridgething/client": "^0.1.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

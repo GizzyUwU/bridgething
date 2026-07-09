@@ -188,6 +188,7 @@ driving the app, and installing and sharing it.
   bun run build        # production bundle into dist/
   bun run push <addr>  # build + install onto a connected Car Thing (default bridgething.local)
   bun run share        # build first, then zip dist/ to hand to friends
+  bun run update       # bring the connected Car Thing to the latest bridgething release
 
 The starter App connects to ws://127.0.0.1:8891/ on the device, and to
 ws://<device-ip>:8891/ in dev when you set VITE_BRIDGETHING_URL.

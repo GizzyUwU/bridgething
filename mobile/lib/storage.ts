@@ -22,7 +22,7 @@ export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
 
 export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
   channel: 'stable',
-  intervalSeconds: 21600,
+  intervalSeconds: 3600,
   autoPush: true,
 };
 
@@ -39,6 +39,7 @@ export type DeviceLedgerEntry = {
   lastName: string;
   nickname: string | null;
   lastConnectedAt: number;
+  serialNumber: string | null;
 };
 
 type Ledger = Record<string, DeviceLedgerEntry>;
@@ -72,6 +73,7 @@ export function recordDeviceSeen(
     lastName: name,
     nickname: ledger[id]?.nickname ?? null,
     lastConnectedAt: atMs,
+    serialNumber: ledger[id]?.serialNumber ?? null,
   };
   writeLedger(ledger);
   return ledger;
@@ -86,6 +88,22 @@ export function setDeviceNickname(id: string, nickname: string | null): Ledger {
     lastName: prior?.lastName ?? '',
     nickname: trimmed && trimmed.length > 0 ? trimmed : null,
     lastConnectedAt: prior?.lastConnectedAt ?? 0,
+    serialNumber: prior?.serialNumber ?? null,
+  };
+  writeLedger(ledger);
+  return ledger;
+}
+
+export function recordDeviceSerial(id: string, serialNumber: string): Ledger {
+  const ledger = readLedger();
+  const prior = ledger[id];
+  if (prior?.serialNumber === serialNumber) return ledger;
+  ledger[id] = {
+    id,
+    lastName: prior?.lastName ?? '',
+    nickname: prior?.nickname ?? null,
+    lastConnectedAt: prior?.lastConnectedAt ?? 0,
+    serialNumber,
   };
   writeLedger(ledger);
   return ledger;

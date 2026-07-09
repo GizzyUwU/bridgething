@@ -17,9 +17,10 @@ use axum::{
   http::{HeaderMap, HeaderValue, Response, StatusCode, header},
   routing::get,
 };
+use bluer::Address;
 use libbridgething::{
   RangePart, RangeSpec,
-  gateway::{OtaAssetRange, OtaAssetRangeReply, TransferBody},
+  gateway::{BridgeToGatewayTransferMsgEvent, OtaAssetRange, OtaAssetRangeReply, TransferAck, TransferBody},
   wire::RequestError,
 };
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
@@ -31,9 +32,33 @@ use uuid::Uuid;
 
 use super::{BeginRangeError, RangeProxy};
 use crate::{
-  bluetooth::BluetoothMan,
-  transfer::sinks::{TransferEvent, TransferSinks},
+  bluetooth::{BluetoothMan, GatewayMan},
+  transfer::sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
 };
+
+async fn maybe_ack_range(
+  gateway_man: &GatewayMan,
+  peer: Option<Address>,
+  request_id: Uuid,
+  produced: u64,
+  last_acked: &mut u32,
+) {
+  let received = produced as u32;
+  if received.saturating_sub(*last_acked) >= FORWARD_ACK_INTERVAL {
+    *last_acked = received;
+    if let Some(addr) = peer {
+      gateway_man
+        .send_event(
+          addr,
+          BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
+            transfer_id: request_id,
+            received,
+          }),
+        )
+        .await;
+    }
+  }
+}
 
 /// Multipart/byteranges separator. RFC 7233 §4.1 requires a unique boundary string
 const MULTIPART_BOUNDARY: &str = "bridgething-ota-range-boundary";
@@ -142,11 +167,14 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
     }
   };
 
-  build_response(state.proxy, request_id, reply, body_rx)
+  let gateway_man = state.bluetooth.gateway_man.clone();
+  build_response(state.proxy, gateway_man, begin.peer, request_id, reply, body_rx)
 }
 
 fn build_response(
   proxy: RangeProxy,
+  gateway_man: GatewayMan,
+  peer: Option<Address>,
   request_id: Uuid,
   reply: OtaAssetRangeReply,
   body_rx: mpsc::Receiver<TransferEvent>,
@@ -187,9 +215,24 @@ fn build_response(
         return error_response(StatusCode::BAD_GATEWAY, "stream length does not match declared parts");
       }
       if parts.len() == 1 {
-        Body::from_stream(body_stream_single_part(expected, body_rx, proxy, request_id))
+        Body::from_stream(body_stream_single_part(
+          expected,
+          body_rx,
+          proxy,
+          gateway_man,
+          peer,
+          request_id,
+        ))
       } else {
-        Body::from_stream(body_stream_multipart(parts.clone(), total, body_rx, proxy, request_id))
+        Body::from_stream(body_stream_multipart(
+          parts.clone(),
+          total,
+          body_rx,
+          proxy,
+          gateway_man,
+          peer,
+          request_id,
+        ))
       }
     }
   };
@@ -260,11 +303,14 @@ fn body_stream_single_part(
   total: u64,
   body_rx: mpsc::Receiver<TransferEvent>,
   proxy: RangeProxy,
+  gateway_man: GatewayMan,
+  peer: Option<Address>,
   request_id: Uuid,
 ) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
   let cleanup = OnDropEnd::new(proxy, request_id);
   async_stream::try_stream! {
     let mut produced: u64 = 0;
+    let mut last_acked: u32 = 0;
     let mut rx = body_rx;
     while produced < total {
       let bytes = next_fragment(&mut rx, produced).await?;
@@ -273,6 +319,7 @@ fn body_stream_single_part(
         unreachable!();
       }
       produced += bytes.len() as u64;
+      maybe_ack_range(&gateway_man, peer, request_id, produced, &mut last_acked).await;
       yield bytes;
     }
     drop(cleanup);
@@ -284,12 +331,15 @@ fn body_stream_multipart(
   total_size: u32,
   body_rx: mpsc::Receiver<TransferEvent>,
   proxy: RangeProxy,
+  gateway_man: GatewayMan,
+  peer: Option<Address>,
   request_id: Uuid,
 ) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
   let cleanup = OnDropEnd::new(proxy, request_id);
   async_stream::try_stream! {
     let mut rx = body_rx;
     let mut produced: u64 = 0;
+    let mut last_acked: u32 = 0;
     // fragments are stream-relative over the concatenated parts and may span part boundaries
     let mut leftover = Bytes::new();
     for part in parts.iter() {
@@ -308,6 +358,7 @@ fn body_stream_multipart(
         let piece = leftover.split_to(take);
         produced += take as u64;
         remaining -= take as u64;
+        maybe_ack_range(&gateway_man, peer, request_id, produced, &mut last_acked).await;
         yield piece;
       }
     }

@@ -136,7 +136,9 @@ export type BridgethingOtaKind = 'image' | 'daemon' | 'builtinWebapp';
 
 export type BridgethingOtaPhase =
   | 'idle'
+  | 'downloading'
   | 'streaming'
+  | 'rangePull'
   | 'verifying'
   | 'writing'
   | 'confirming'
@@ -165,6 +167,11 @@ export type BridgethingOtaEvent = {
   percent?: number;
   deviceChannel?: string;
   configuredChannel?: string;
+  stageAsset?: string;
+  stageReceived?: number;
+  stageTotal?: number;
+  stageRatePerSec?: number;
+  stageEtaSeconds?: number;
 };
 
 export type BridgethingOtaRelease = {

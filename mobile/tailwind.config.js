@@ -42,6 +42,7 @@ module.exports = {
           DEFAULT: 'hsl(var(--success))',
           foreground: 'hsl(var(--success-foreground))',
           soft: 'hsl(var(--success-soft))',
+          'soft-foreground': 'hsl(var(--success-soft-foreground))',
         },
         warning: {
           DEFAULT: 'hsl(var(--warning))',

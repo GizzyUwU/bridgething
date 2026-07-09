@@ -56,7 +56,10 @@ use std::{
 use bluer::Address;
 use libbridgething::{
   OtaError, OtaErrorCode, OtaKind, OtaPhase, OtaProgress, PeerCompanionStatus, WebappError, WebappInfo,
-  gateway::{BridgeToGatewaySystemMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected},
+  gateway::{
+    BridgeToGatewaySystemMsgEvent, BridgeToGatewayTransferMsgEvent, OtaBegin, OtaBeginAck, OtaBeginRejected,
+    TransferAck,
+  },
 };
 pub use range_proxy::RangeProxy;
 use staging::StagedPiece;
@@ -67,10 +70,11 @@ use tokio::{
 
 use crate::{
   asset::AssetCache,
+  bluetooth::GatewayMan,
   peer::PeerTracker,
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
-    sinks::{TransferEvent, TransferSinks},
+    sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
   },
 };
 
@@ -123,6 +127,7 @@ impl OtaOrchestrator {
   pub fn spawn(
     transfers: ChunkedTransfer,
     events_tx: OtaEventTx,
+    gateway_man: GatewayMan,
     terminators: OtaTerminators,
     range_proxy: RangeProxy,
     peers: PeerTracker,
@@ -134,6 +139,7 @@ impl OtaOrchestrator {
     let actor = OtaActor {
       transfers,
       events_tx,
+      gateway_man,
       terminators,
       range_proxy,
       peers,
@@ -145,6 +151,7 @@ impl OtaOrchestrator {
       state: OtaState::Idle,
       last_streaming_emit_at: None,
       last_streaming_percent: None,
+      last_drain_ack: 0,
       staged: Vec::new(),
       staged_peer: None,
     };
@@ -217,6 +224,7 @@ const STREAMING_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
 struct OtaActor {
   transfers: ChunkedTransfer,
   events_tx: OtaEventTx,
+  gateway_man: GatewayMan,
   terminators: OtaTerminators,
   range_proxy: RangeProxy,
   peers: PeerTracker,
@@ -228,6 +236,7 @@ struct OtaActor {
   state: OtaState,
   last_streaming_emit_at: Option<Instant>,
   last_streaming_percent: Option<u8>,
+  last_drain_ack: u32,
   staged: Vec<StagedPiece>,
   staged_peer: Option<Address>,
 }
@@ -365,11 +374,11 @@ impl OtaActor {
         emit_progress(&self.events_tx, OtaPhase::Streaming, resume_percent, None).await;
         self.last_streaming_emit_at = Some(Instant::now());
         self.last_streaming_percent = Some(resume_percent);
+        self.last_drain_ack = resume_from_offset as u32;
         let update_id = req.update_id.clone();
         if matches!(kind, OtaKind::Image) {
           self.range_proxy.activate(update_id.clone(), peer).await;
         }
-        // bind after transfers.begin succeeds; the companion only streams once it has the ack.
         let stream_rx = self.sinks.bind_forward(req.transfer.id);
         self.state = OtaState::Streaming {
           kind,
@@ -388,6 +397,26 @@ impl OtaActor {
           reason: format!("transfer begin failed: {err}"),
         }));
       }
+    }
+  }
+
+  async fn drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u64) {
+    let received = received as u32;
+    if received.saturating_sub(self.last_drain_ack) >= FORWARD_ACK_INTERVAL {
+      self.force_drain_ack(peer, transfer_id, received).await;
+    }
+  }
+
+  async fn force_drain_ack(&mut self, peer: Option<Address>, transfer_id: uuid::Uuid, received: u32) {
+    self.last_drain_ack = received;
+    if let Some(address) = peer {
+      self
+        .gateway_man
+        .send_event(
+          address,
+          BridgeToGatewayTransferMsgEvent::Ack(TransferAck { transfer_id, received }),
+        )
+        .await;
     }
   }
 
@@ -423,6 +452,7 @@ impl OtaActor {
       .await;
     match outcome {
       Ok(ChunkOutcome::Continue { received }) => {
+        self.drain_ack(peer, transfer_id, received).await;
         let percent = phase_percent(received, expected_size);
         let changed = self.last_streaming_percent != Some(percent);
         let floor_ok = self
@@ -435,6 +465,7 @@ impl OtaActor {
         }
       }
       Ok(ChunkOutcome::Completed { path, .. }) => {
+        self.force_drain_ack(peer, transfer_id, expected_size as u32).await;
         emit_progress(&self.events_tx, OtaPhase::Streaming, 100, None).await;
         emit_progress(&self.events_tx, OtaPhase::Verifying, 100, None).await;
         self.last_streaming_emit_at = None;
@@ -813,7 +844,7 @@ mod tests {
 
   use libbridgething::{
     WebappRole, WebappSource,
-    gateway::{OtaBegin, TransferRef},
+    gateway::{BridgeToGatewayMsgData, BridgeToGatewayTransferMsg, OtaBegin, TransferRef},
   };
   use sha2::{Digest, Sha256};
   use tokio::time::{Duration, timeout};
@@ -850,6 +881,17 @@ mod tests {
     (bytes, sha, size)
   }
 
+  fn sized_fixture(n: usize) -> (Vec<u8>, String, u32) {
+    let bytes: Vec<u8> = (0..n).map(|i| (i * 31 + 7) as u8).collect();
+    let sha = {
+      let mut h = Sha256::new();
+      h.update(&bytes);
+      hex::encode(h.finalize())
+    };
+    let size = bytes.len() as u32;
+    (bytes, sha, size)
+  }
+
   fn temp_root() -> PathBuf {
     let p = std::env::temp_dir().join(format!("bridgething-ota-test-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&p).unwrap();
@@ -868,6 +910,7 @@ mod tests {
     restart_self_calls: Arc<AtomicUsize>,
     installed_apply_calls: Arc<AtomicUsize>,
     installed_apply_ok: Arc<AtomicBool>,
+    captured_acks: Arc<std::sync::Mutex<Vec<TransferAck>>>,
     _root: PathBuf,
   }
 
@@ -910,9 +953,20 @@ mod tests {
     let sinks = TransferSinks::default();
     let asset_db = crate::db::open(None).await.unwrap();
     let (assets, _asset_handle) = AssetCache::init(asset_db, root.join("assets")).await.unwrap().spawn();
+    let (gateway_man, mut gw_rx) = crate::bluetooth::GatewayMan::capturing();
+    let captured_acks: Arc<std::sync::Mutex<Vec<TransferAck>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let acks_sink = captured_acks.clone();
+    tokio::spawn(async move {
+      while let Some(out) = gw_rx.recv().await {
+        if let BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(ack)) = &out.msg.data {
+          acks_sink.lock().unwrap().push(ack.clone());
+        }
+      }
+    });
     let (ota, _ota_handle) = OtaOrchestrator::spawn(
       transfers,
       events_tx,
+      gateway_man,
       terminators,
       range_proxy::noop_proxy(),
       peers,
@@ -928,6 +982,7 @@ mod tests {
       restart_self_calls,
       installed_apply_calls,
       installed_apply_ok,
+      captured_acks,
       _root: root,
     }
   }
@@ -984,6 +1039,78 @@ mod tests {
     .await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(h.reboot_calls.load(Ordering::SeqCst), 1);
+  }
+
+  // a well-behaved windowed sender streams a multi-interval transfer without the daemon abandoning
+  // on transient buffer pressure, and drain-acks are throttled to FORWARD_ACK_INTERVAL boundaries
+  // (emitted from the disk-write path, not per-fragment on enqueue) with a forced ack on completion.
+  #[tokio::test]
+  async fn drain_acks_throttle_and_stream_is_not_abandoned() {
+    let h = boot().await;
+    let (bytes, sha, size) = sized_fixture(40 * 1024);
+    let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+        },
+        Some(peer),
+      )
+      .await
+      .expect("begin ok");
+
+    let frag = 4096usize;
+    let mut off = 0usize;
+    while off < bytes.len() {
+      let end = (off + frag).min(bytes.len());
+      h.sinks
+        .fragment(tid_for(&sha), off as u32, Bytes::copy_from_slice(&bytes[off..end]));
+      off = end;
+      // let the actor drain each fragment so ingest buffers never fill; a windowed sender paces here.
+      tokio::task::yield_now().await;
+    }
+
+    // the forced final drain-ack lands at streaming completion (received == size), before the write.
+    let acks = timeout(Duration::from_secs(5), async {
+      loop {
+        {
+          let acks = h.captured_acks.lock().unwrap();
+          if acks.last().is_some_and(|a| a.received == size) {
+            return acks.clone();
+          }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+      }
+    })
+    .await
+    .expect("stream completed and emitted a final drain-ack at received == size");
+
+    // 40 KiB in 4 KiB fragments = 10 fragments but only ~3 acks (16 KiB, 32 KiB, forced 40 KiB): the
+    // final ack landing at `size` proves the stream reached Completed rather than being abandoned.
+    assert!(
+      acks.len() <= 4,
+      "drain-acks not throttled: {} acks for 10 fragments",
+      acks.len()
+    );
+    assert_eq!(acks.last().unwrap().received, size);
+    let mut prev = 0u32;
+    for a in &acks {
+      assert!(a.received > prev, "acks must be monotonically increasing");
+      if a.received != size {
+        assert!(
+          a.received - prev >= FORWARD_ACK_INTERVAL,
+          "intermediate acks must respect FORWARD_ACK_INTERVAL"
+        );
+      }
+      prev = a.received;
+    }
   }
 
   #[tokio::test]

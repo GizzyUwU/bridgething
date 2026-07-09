@@ -2215,7 +2215,11 @@ mod tests {
       playback: None,
     });
     let m = media(&state);
-    assert_eq!(m.uri.as_deref(), Some("spotify:track:b"), "promoted card carries the real uri");
+    assert_eq!(
+      m.uri.as_deref(),
+      Some("spotify:track:b"),
+      "promoted card carries the real uri"
+    );
     assert_eq!(
       m.artwork_id.as_deref(),
       Some("spotify/img/248/b"),
@@ -2226,9 +2230,15 @@ mod tests {
       state.take_position_resync(),
       "a promoted track change is a hard broadcast"
     );
-    assert!(state.playing, "play state rides iap2 once the companion time half is vacated");
+    assert!(
+      state.playing,
+      "play state rides iap2 once the companion time half is vacated"
+    );
     let pos = view_position(&state);
-    assert!(pos <= 2_000, "iap2 drives time for the promoted track from track start: {pos}");
+    assert!(
+      pos <= 2_000,
+      "iap2 drives time for the promoted track from track start: {pos}"
+    );
     assert_eq!(
       upcoming_uris(&state),
       vec!["spotify:track:c", "spotify:track:d"],
@@ -2393,7 +2403,12 @@ mod tests {
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:b"));
 
     // the phone was actually elsewhere: the authoritative snapshot replaces the promoted card wholesale
-    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:elsewhere", "Elsewhere", true, 30_000));
+    state.apply_companion_snapshot(companion_snapshot_pos(
+      "spotify:track:elsewhere",
+      "Elsewhere",
+      true,
+      30_000,
+    ));
     state.apply_companion_queue(qsnap(vec![qitem("spotify:track:w", "W", "Artist W", None, None)]));
     assert_eq!(media(&state).uri.as_deref(), Some("spotify:track:elsewhere"));
     let pos = view_position(&state);

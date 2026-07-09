@@ -14,6 +14,7 @@
 //! mobile companion will eventually serve, the host serves first.
 
 use std::{
+  collections::HashMap,
   path::{Path, PathBuf},
   sync::Arc,
   time::{Duration, Instant},
@@ -23,9 +24,9 @@ use anyhow::{Context, Result, anyhow};
 use libbridgething::{
   OtaKind, OtaPhase, Priority,
   gateway::{
-    BridgeToGatewayMsg, BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData,
-    GatewayToBridgeSystemMsg, OtaAssetRange, OtaAssetRangeRejected, OtaAssetRangeReply, OtaBegin, TransferBody,
-    TransferRef,
+    BridgeToGatewayMsg, BridgeToGatewayMsgData, BridgeToGatewaySystemMsg, BridgeToGatewayTransferMsg,
+    GatewayToBridgeMsg, GatewayToBridgeMsgData, GatewayToBridgeSystemMsg, OtaAssetRange, OtaAssetRangeRejected,
+    OtaAssetRangeReply, OtaBegin, TransferBody, TransferRef,
   },
   wire::{MsgMeta, RequestError, ResponseMeta, WireRequest},
 };
@@ -35,12 +36,10 @@ use tokio::io::AsyncReadExt;
 use crate::{
   chaos::ChaosConfig,
   conn::{Connection, OutboundFrame},
-  transfer::{stream_file_fragments, stream_range_fragments},
+  transfer::{AckRegistry, stream_file_fragments, stream_range_fragments},
 };
 
-/// 64 KiB matches the daemon's ChunkedTransfer write granularity.
 const RANGE_CHUNK_BYTES: usize = 64 * 1024;
-/// Range results at or under this ride inline in the reply.
 const RANGE_INLINE_MAX_BYTES: u32 = 16 * 1024;
 
 pub async fn run_push_update(
@@ -50,7 +49,7 @@ pub async fn run_push_update(
   kind: OtaKind,
   artifact: PathBuf,
   update_url_base: Option<String>,
-  zck: Option<PathBuf>,
+  zcks: HashMap<String, PathBuf>,
 ) -> Result<()> {
   let metadata = tokio::fs::metadata(&artifact)
     .await
@@ -60,11 +59,11 @@ pub async fn run_push_update(
   let sha256 = hash_file(&artifact).await?;
   tracing::info!(path = %artifact.display(), ?kind, size, sha256 = %sha256, "loaded artifact");
 
-  if let Some(z) = zck.as_deref() {
-    let meta = tokio::fs::metadata(z)
+  for (asset, path) in &zcks {
+    let meta = tokio::fs::metadata(path)
       .await
-      .with_context(|| format!("stat .zck {}", z.display()))?;
-    tracing::info!(path = %z.display(), size = meta.len(), "loaded .zck for range serving");
+      .with_context(|| format!("stat .zck {}", path.display()))?;
+    tracing::info!(%asset, path = %path.display(), size = meta.len(), "loaded .zck for range serving");
   }
 
   let mut conn = Connection::open(url, chaos).await?;
@@ -96,17 +95,30 @@ pub async fn run_push_update(
     );
   }
 
-  stream_file_fragments(
-    &conn.outbound_tx,
-    transfer_id,
-    &artifact,
-    resume_from_offset as u64,
-    total_len,
-    chunk_size,
-    Priority::Background,
-  )
-  .await?;
-  watch_progress(&mut conn, zck.map(Arc::new)).await
+  let registry = AckRegistry::default();
+  let push_window = registry.register(transfer_id, resume_from_offset as u64);
+  let out = conn.outbound_tx.clone();
+  let artifact_path = artifact.clone();
+  let stream = tokio::spawn(async move {
+    if let Err(err) = stream_file_fragments(
+      &out,
+      transfer_id,
+      &artifact_path,
+      resume_from_offset as u64,
+      total_len,
+      chunk_size,
+      Priority::Background,
+      &push_window,
+    )
+    .await
+    {
+      tracing::error!(?err, "push stream failed");
+    }
+  });
+
+  let result = run_event_loop(&mut conn, registry, Arc::new(zcks), chunk_size).await;
+  stream.abort();
+  result
 }
 
 async fn hash_file(path: &Path) -> Result<String> {
@@ -159,11 +171,17 @@ async fn send_begin(
   }
 }
 
-async fn watch_progress(conn: &mut Connection, zck: Option<Arc<PathBuf>>) -> Result<()> {
+async fn run_event_loop(
+  conn: &mut Connection,
+  registry: AckRegistry,
+  zcks: Arc<HashMap<String, PathBuf>>,
+  chunk_size: usize,
+) -> Result<()> {
   loop {
     match tokio::time::timeout(Duration::from_secs(300), conn.inbound_rx.recv()).await {
       Ok(Some(msg)) => {
-        if let Some(action) = handle_inbound(msg, conn.outbound_tx.clone(), zck.clone()).await? {
+        if let Some(action) = handle_inbound(msg, conn.outbound_tx.clone(), &registry, zcks.clone(), chunk_size).await?
+        {
           return action;
         }
       }
@@ -176,15 +194,18 @@ async fn watch_progress(conn: &mut Connection, zck: Option<Arc<PathBuf>>) -> Res
   }
 }
 
-/// Returns `Some(action)` when the loop should stop (Ok = clean exit,
-/// Err = ota failure), or `None` to keep watching.
 async fn handle_inbound(
   msg: BridgeToGatewayMsg,
   out: tokio::sync::mpsc::Sender<OutboundFrame>,
-  zck: Option<Arc<PathBuf>>,
+  registry: &AckRegistry,
+  zcks: Arc<HashMap<String, PathBuf>>,
+  chunk_size: usize,
 ) -> Result<Option<Result<()>>> {
   let request_id = msg.id;
   match msg.data {
+    BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(ack)) => {
+      registry.note(ack.transfer_id, ack.received as u64);
+    }
     BridgeToGatewayMsgData::System(BridgeToGatewaySystemMsg::OtaProgress(p)) => {
       tracing::info!(phase = ?p.phase, percent = p.percent, eta_ms = ?p.eta_ms, "progress");
       if matches!(p.phase, OtaPhase::Reboot) {
@@ -197,11 +218,13 @@ async fn handle_inbound(
       return Ok(Some(Err(anyhow!("ota failed: {:?} {}", e.code, e.msg))));
     }
     BridgeToGatewayMsgData::System(BridgeToGatewaySystemMsg::OtaAssetRange(req)) => {
-      let zck_path = zck.clone();
+      let zcks = zcks.clone();
+      let registry = registry.clone();
       tokio::spawn(async move {
-        if let Err(err) = serve_range_request(request_id, req, out, zck_path).await {
+        if let Err(err) = serve_range_request(request_id, req, out, &registry, zcks, chunk_size).await {
           tracing::warn!(?err, "OtaAssetRange handler failed");
         }
+        registry.deregister(request_id);
       });
     }
     other => tracing::trace!(?other, "inbound (non-ota)"),
@@ -213,16 +236,24 @@ async fn serve_range_request(
   request_id: uuid::Uuid,
   req: OtaAssetRange,
   out: tokio::sync::mpsc::Sender<OutboundFrame>,
-  zck: Option<Arc<PathBuf>>,
+  registry: &AckRegistry,
+  zcks: Arc<HashMap<String, PathBuf>>,
+  chunk_size: usize,
 ) -> Result<()> {
-  let zck_path = match zck.as_deref() {
+  let zck_path = match zcks.get(&req.asset) {
     Some(p) => p.clone(),
     None => {
       tracing::warn!(
         update_id = %req.update_id,
-        "OtaAssetRange received but --zck was not supplied; rejecting",
+        asset = %req.asset,
+        "OtaAssetRange for an asset with no configured .zck; rejecting",
       );
-      respond_rejected(&out, request_id, "host-gateway has no .zck cached".into()).await?;
+      respond_rejected(
+        &out,
+        request_id,
+        format!("host-gateway has no .zck for asset {}", req.asset),
+      )
+      .await?;
       return Ok(());
     }
   };
@@ -297,13 +328,15 @@ async fn serve_range_request(
   )
   .await?;
 
+  let window = registry.register(request_id, 0);
   stream_range_fragments(
     &out,
     request_id,
     &zck_path,
     &ranges,
-    RANGE_CHUNK_BYTES,
+    chunk_size.min(RANGE_CHUNK_BYTES),
     Priority::Background,
+    &window,
   )
   .await?;
   Ok(())

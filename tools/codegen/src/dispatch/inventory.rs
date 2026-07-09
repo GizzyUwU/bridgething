@@ -615,7 +615,12 @@ fn doc_string(attrs: &[Attribute]) -> Option<String> {
         lit: syn::Lit::Str(s), ..
       }) = &nv.value
     {
-      lines.push(s.value().strip_prefix(' ').map(str::to_string).unwrap_or_else(|| s.value()));
+      lines.push(
+        s.value()
+          .strip_prefix(' ')
+          .map(str::to_string)
+          .unwrap_or_else(|| s.value()),
+      );
     }
   }
   let joined = lines.join("\n").trim().to_string();
@@ -643,7 +648,9 @@ fn render_ts_type(ty: &Type) -> (String, bool, Option<String>) {
         ("unknown".to_string(), true, None)
       }
     }
-    "Box" => first_generic(seg).map(render_ts_type).unwrap_or(("unknown".to_string(), false, None)),
+    "Box" => first_generic(seg)
+      .map(render_ts_type)
+      .unwrap_or(("unknown".to_string(), false, None)),
     "Vec" => match first_generic(seg) {
       Some(inner) if is_u8(inner) => ("number[]".to_string(), false, None),
       Some(inner) => {
@@ -660,9 +667,15 @@ fn render_ts_type(ty: &Type) -> (String, bool, Option<String>) {
         }),
         _ => return ("Record<string, unknown>".to_string(), false, None),
       };
-      let key = args.next().map(|t| render_ts_type(t).0).unwrap_or_else(|| "string".to_string());
+      let key = args
+        .next()
+        .map(|t| render_ts_type(t).0)
+        .unwrap_or_else(|| "string".to_string());
       let val = args.next().map(render_ts_type);
-      let val_display = val.as_ref().map(|v| v.0.clone()).unwrap_or_else(|| "unknown".to_string());
+      let val_display = val
+        .as_ref()
+        .map(|v| v.0.clone())
+        .unwrap_or_else(|| "unknown".to_string());
       let val_ref = val.and_then(|v| v.2);
       (format!("Record<{key}, {val_display}>"), false, val_ref)
     }

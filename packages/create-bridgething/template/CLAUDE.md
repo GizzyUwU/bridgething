@@ -77,6 +77,8 @@ files for a specific method or type.
   of seeing the screen and pressing the buttons.
 - `bun run build` - production bundle into `dist/`.
 - `bun run push` - build + install onto a connected Car Thing (see `/bridgething`).
+- `bun run update` - update the connected device to the latest bridgething release
+  (device firmware, not your webapp; see `/bridgething`).
 
 ## Do not
 

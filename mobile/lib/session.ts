@@ -17,6 +17,8 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { startDiagnostics } from './diagnostics';
 import { startOta } from './ota';
+import { requestBluetoothConnect } from './permissions';
+import { refreshWebapps, startWebapps } from './webapps';
 import {
   DEFAULT_CAPABILITY_FLAGS,
   DEFAULT_OTA_POLL_CONFIG,
@@ -24,6 +26,7 @@ import {
   forgetDevice as persistForget,
   getLedger,
   recordDeviceSeen,
+  recordDeviceSerial,
   setDeviceNickname,
 } from './storage';
 
@@ -118,6 +121,9 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
       case 'deviceMetaChanged':
         set(s => ({
           deviceMeta: { ...s.deviceMeta, [event.deviceId]: event.meta },
+          ledger: event.meta.serialNumber
+            ? recordDeviceSerial(event.deviceId, event.meta.serialNumber)
+            : s.ledger,
         }));
         return;
       case 'webappsChanged':
@@ -132,6 +138,11 @@ export const useSessionStore = create<SessionState>((set, _get) => ({
     for (const peer of snapshot.peers) {
       if (peer.status === 'connected') {
         ledger = recordDeviceSeen(peer.id, peer.name, now);
+      }
+    }
+    for (const entry of snapshot.deviceMeta) {
+      if (entry.meta.serialNumber) {
+        ledger = recordDeviceSerial(entry.deviceId, entry.meta.serialNumber);
       }
     }
     set({
@@ -162,10 +173,6 @@ export async function bootstrapSession(): Promise<void> {
 
   if (!wired) {
     session.subscribe(event => store.apply(event));
-    // Native gates peer/connection callbacks on our activity being foreground,
-    // so a peer that connects while a system dialog is up (CDM picker, BT
-    // pairing) never reaches JS live. Re-pull the native snapshot whenever we
-    // come back to the foreground to catch anything missed.
     AppState.addEventListener('change', state => {
       if (state === 'active') void reconcileSnapshot();
     });
@@ -178,6 +185,11 @@ export async function bootstrapSession(): Promise<void> {
   await reconcileSnapshot();
   await startDiagnostics();
   startOta();
+  startWebapps();
+  // seed peers already connected before the subscription was wired
+  for (const peer of useSessionStore.getState().peers) {
+    if (peer.status === 'connected') void refreshWebapps(peer.id);
+  }
 }
 
 export async function reconcileSnapshot(): Promise<void> {
@@ -235,6 +247,75 @@ export async function presentPairWithGuidance(): Promise<boolean> {
   return picked != null;
 }
 
+export type PairOutcome =
+  | { kind: 'connected' }
+  | { kind: 'cancelled' }
+  | { kind: 'permissionDenied' }
+  | { kind: 'timeout' }
+  | { kind: 'notificationsFailed'; message?: string }
+  | { kind: 'error'; message: string };
+
+export async function runPairFlow(): Promise<PairOutcome> {
+  try {
+    if (Platform.OS === 'android') {
+      const bt = await requestBluetoothConnect();
+      if (bt !== 'granted') return { kind: 'permissionDenied' };
+      const picked = await getSession().presentPairPicker();
+      if (picked == null) return { kind: 'cancelled' };
+      return (await waitForPeer(45000))
+        ? { kind: 'connected' }
+        : { kind: 'timeout' };
+    }
+    if (!(await presentPairWithGuidance())) return { kind: 'cancelled' };
+    if (!(await waitForPeer(20000))) return { kind: 'timeout' };
+    const ancs = await getSession().enableAncsNotifications();
+    if (ancs.kind === 'failed') {
+      return {
+        kind: 'notificationsFailed',
+        message: ancs.message ?? undefined,
+      };
+    }
+    return { kind: 'connected' };
+  } catch (err) {
+    return {
+      kind: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export function alertPairOutcome(outcome: PairOutcome): void {
+  switch (outcome.kind) {
+    case 'permissionDenied':
+      Alert.alert(
+        'bluetooth permission needed',
+        'bridgething needs Bluetooth access to connect to your Car Thing. enable it in settings, then try pairing again.',
+      );
+      return;
+    case 'timeout':
+      Alert.alert(
+        Platform.OS === 'android' ? 'still connecting' : 'could not connect',
+        Platform.OS === 'android'
+          ? 'if a Bluetooth pairing prompt appeared, tap Pair to continue. make sure your Car Thing is on and nearby - it can take a few seconds.'
+          : 'pairing finished but your Car Thing did not connect. make sure it is powered on and nearby, then try again.',
+      );
+      return;
+    case 'notificationsFailed':
+      Alert.alert(
+        'notifications setup failed',
+        outcome.message ??
+          'pairing worked, but enabling notifications did not.',
+      );
+      return;
+    case 'error':
+      Alert.alert('pairing failed', outcome.message);
+      return;
+    case 'connected':
+    case 'cancelled':
+      return;
+  }
+}
+
 export function waitForPeer(timeoutMs: number): Promise<boolean> {
   const isConnected = () =>
     useSessionStore.getState().peers.some(p => p.status === 'connected');
@@ -248,9 +329,6 @@ export function waitForPeer(timeoutMs: number): Promise<boolean> {
       resolve(ok);
     };
     const timer = setTimeout(() => done(false), timeoutMs);
-    // Watch the store, not the raw event: the peer can land via the live
-    // peerConnected event OR via a foreground-resume reconcile, and either
-    // should satisfy the wait.
     unsub = useSessionStore.subscribe(state => {
       if (state.peers.some(p => p.status === 'connected')) done(true);
     });
@@ -276,6 +354,7 @@ export type KnownDevice = {
   displayName: string;
   nickname: string | null;
   lastConnectedAt: number;
+  serialNumber: string | null;
   peer: BridgethingSessionPeer | null;
 };
 
@@ -290,6 +369,7 @@ export function knownDevices(
       displayName: entry.nickname ?? entry.lastName,
       nickname: entry.nickname,
       lastConnectedAt: entry.lastConnectedAt,
+      serialNumber: entry.serialNumber,
       peer: null,
     });
   }
@@ -300,6 +380,7 @@ export function knownDevices(
       displayName: prior?.nickname ?? peer.name,
       nickname: prior?.nickname ?? null,
       lastConnectedAt: prior?.lastConnectedAt ?? 0,
+      serialNumber: prior?.serialNumber ?? null,
       peer,
     });
   }

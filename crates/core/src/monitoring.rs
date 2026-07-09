@@ -3,7 +3,7 @@ use std::{
   io,
   path::{Path, PathBuf},
   sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicU64, Ordering},
     mpsc,
   },
@@ -19,6 +19,8 @@ const TRACE_FILE_CAP_BYTES: u64 = 32 * 1024 * 1024;
 const TRACE_ROTATED_KEEP: usize = 3;
 const TRACE_SYNC_INTERVAL: Duration = Duration::from_secs(2);
 const TRACE_CHANNEL_CAP: usize = 65_536;
+
+static CONSOLE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 pub fn init_logger(tap: crate::state::LogTapLayer) {
   use tracing::metadata::LevelFilter;
@@ -40,7 +42,7 @@ pub fn init_logger(tap: crate::state::LogTapLayer) {
 
   // directives for release builds
   #[cfg(not(debug_assertions))]
-  let default_directive = Directive::from(LevelFilter::INFO);
+  let default_directive = Directive::from(LevelFilter::WARN);
 
   #[cfg(not(debug_assertions))]
   let filter_directives = if let Ok(filter) = std::env::var("RUST_LOG") {
@@ -64,10 +66,14 @@ pub fn init_logger(tap: crate::state::LogTapLayer) {
       .with_filter(make_filter(&file_directives))
   });
 
+  let (console_writer, console_guard) = tracing_appender::non_blocking(std::io::stderr());
+  let _ = CONSOLE_GUARD.set(console_guard);
+
   tracing_subscriber::registry()
     .with(
       fmt::layer()
         .with_span_events(FmtSpan::CLOSE)
+        .with_writer(console_writer)
         .with_filter(make_filter(&filter_directives)),
     )
     .with(tap.with_filter(make_filter(&filter_directives)))

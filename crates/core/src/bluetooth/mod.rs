@@ -452,7 +452,7 @@ fn fail_pending_on_disconnect(pending: &PendingRequests, addr: Address, no_peers
   });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GatewayMan {
   outbound_tx: GatewaySendTx,
   peer_owners: PeerOwners,
@@ -488,6 +488,12 @@ impl GatewayMan {
       pending,
     };
     (me, GatewayBootstrap { outbound_rx })
+  }
+
+  #[cfg(test)]
+  pub(crate) fn capturing() -> (Self, GatewaySendRx) {
+    let (me, bootstrap) = Self::allocate();
+    (me, bootstrap.outbound_rx)
   }
 
   async fn start(

@@ -2,21 +2,14 @@ import type { CatalogListing } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Link as LinkIcon, Plus, RefreshCw, Trash2 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, Alert, Image, Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
 import { ListGroup } from '../components/ListGroup';
 import { Press } from '../components/Press';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { getSession, peerDisplayName, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
@@ -137,100 +130,86 @@ export function StoreScreen({ route }: Props) {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView
-        contentContainerClassName="px-5 pb-12 pt-2"
-        keyboardShouldPersistTaps="handled"
-      >
-        <ScreenHeader
-          title="app store"
-          subtitle={
-            peer
-              ? `browse and install webapps onto ${peerDisplayName(peer, ledger)}.`
-              : 'browse and install webapps onto your Car Thing.'
-          }
-        />
+    <ScrollScreen>
+      <ScreenHeader
+        title="app store"
+        subtitle={
+          peer
+            ? `browse and install webapps onto ${peerDisplayName(peer, ledger)}.`
+            : 'browse and install webapps onto your Car Thing.'
+        }
+      />
 
-        <View className="mb-3 flex-row items-center justify-between">
-          <SectionHeader title="available apps" />
-          <Press onPress={refreshCatalog} scaleTo={0.9} disabled={loading}>
-            <View className="flex-row items-center gap-1.5 px-1 py-1">
-              {loading ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <RefreshCw
-                  size={15}
-                  color="hsl(215 14% 45%)"
-                  strokeWidth={2.4}
-                />
-              )}
-              <Text className="text-[13px] font-semibold text-muted-foreground">
-                refresh
-              </Text>
-            </View>
-          </Press>
-        </View>
-
-        {loading && listings.length === 0 ? (
-          <View className="items-center py-8">
-            <ActivityIndicator />
+      <View className="mb-3 flex-row items-center justify-between">
+        <SectionHeader title="available apps" />
+        <Press onPress={refreshCatalog} scaleTo={0.9} disabled={loading}>
+          <View className="flex-row items-center gap-1.5 px-1 py-1">
+            {loading ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <RefreshCw size={15} color="hsl(215 14% 45%)" strokeWidth={2.4} />
+            )}
+            <Text className="text-[13px] font-semibold text-muted-foreground">
+              refresh
+            </Text>
           </View>
-        ) : listings.length === 0 ? (
-          <SectionEmpty>no apps available from your sources yet</SectionEmpty>
+        </Press>
+      </View>
+
+      {loading && listings.length === 0 ? (
+        <View className="items-center py-8">
+          <ActivityIndicator />
+        </View>
+      ) : listings.length === 0 ? (
+        <SectionEmpty>no apps available from your sources yet</SectionEmpty>
+      ) : (
+        <ListGroup>
+          {listings.map(listing => (
+            <AppRow
+              key={listing.app.id}
+              listing={listing}
+              busy={busyId === listing.app.id}
+              onInstall={() => install(listing)}
+            />
+          ))}
+        </ListGroup>
+      )}
+
+      <View className="mt-10">
+        <SectionHeader title="sources" />
+        {sources.length === 0 ? (
+          <SectionEmpty>no catalog sources subscribed</SectionEmpty>
         ) : (
           <ListGroup>
-            {listings.map(listing => (
-              <AppRow
-                key={listing.app.id}
-                listing={listing}
-                busy={busyId === listing.app.id}
-                onInstall={() => install(listing)}
-              />
+            {sources.map(src => (
+              <View key={src} className="flex-row items-center gap-3 px-4 py-3">
+                <Text
+                  className="flex-1 text-[13px] text-foreground"
+                  numberOfLines={1}
+                >
+                  {src}
+                </Text>
+                <Press onPress={() => removeSource(src)} scaleTo={0.9}>
+                  <Trash2 size={18} color="hsl(0 70% 55%)" strokeWidth={2.2} />
+                </Press>
+              </View>
             ))}
           </ListGroup>
         )}
-
-        <View className="mt-10">
-          <SectionHeader title="sources" />
-          {sources.length === 0 ? (
-            <SectionEmpty>no catalog sources subscribed</SectionEmpty>
-          ) : (
-            <ListGroup>
-              {sources.map(src => (
-                <View
-                  key={src}
-                  className="flex-row items-center gap-3 px-4 py-3"
-                >
-                  <Text
-                    className="flex-1 text-[13px] text-foreground"
-                    numberOfLines={1}
-                  >
-                    {src}
-                  </Text>
-                  <Press onPress={() => removeSource(src)} scaleTo={0.9}>
-                    <Trash2
-                      size={18}
-                      color="hsl(0 70% 55%)"
-                      strokeWidth={2.2}
-                    />
-                  </Press>
-                </View>
-              ))}
-            </ListGroup>
-          )}
-          <View className="mt-3">
-            <Field
-              label="add a source"
-              icon={LinkIcon}
-              value={newSource}
-              onChangeText={setNewSource}
-              clearable
-              placeholder="https://example.com/catalog.json"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-          </View>
+        <View className="mt-3">
+          <Field
+            label="add a source"
+            icon={LinkIcon}
+            value={newSource}
+            onChangeText={setNewSource}
+            clearable
+            placeholder="https://example.com/catalog.json"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+        </View>
+        <View className="mt-3">
           <Button
             onPress={addSource}
             disabled={newSource.trim().length === 0}
@@ -240,8 +219,8 @@ export function StoreScreen({ route }: Props) {
             add source
           </Button>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </ScrollScreen>
   );
 }
 

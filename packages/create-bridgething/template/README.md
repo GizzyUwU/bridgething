@@ -45,6 +45,15 @@ bun run share
 `share` writes `<name>-<version>.zip` from `dist/`. Anyone with a bridgething Car
 Thing installs it from the app.
 
+## Update the device
+
+```bash
+bun run update
+```
+
+`update` runs [`@bridgething/updater`](https://www.npmjs.com/package/@bridgething/updater)
+to bring the connected Car Thing to the latest bridgething release. Multiple devices: `bun run update -- --host ws://bridgething-<serial>.local:8892/`.
+
 ## Layout
 
 - `src/App.tsx` - starter UI: subscribes to `client.player.onSnapshot`,

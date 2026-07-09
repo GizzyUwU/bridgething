@@ -16,6 +16,11 @@ export type OtaDeviceStatus = {
   availableTo: string | null;
   installing: boolean;
   error: string | null;
+  stageAsset: string | null;
+  stageReceived: number | null;
+  stageTotal: number | null;
+  stageRatePerSec: number | null;
+  stageEtaSeconds: number | null;
 };
 
 const idleStatus: OtaDeviceStatus = {
@@ -26,7 +31,20 @@ const idleStatus: OtaDeviceStatus = {
   availableTo: null,
   installing: false,
   error: null,
+  stageAsset: null,
+  stageReceived: null,
+  stageTotal: null,
+  stageRatePerSec: null,
+  stageEtaSeconds: null,
 };
+
+const clearedStage = {
+  stageAsset: null,
+  stageReceived: null,
+  stageTotal: null,
+  stageRatePerSec: null,
+  stageEtaSeconds: null,
+} as const;
 
 type OtaState = {
   lastPolledAt: string | null;
@@ -88,6 +106,11 @@ export const useOtaStore = create<OtaState>(set => ({
             percent: event.percent ?? 0,
             installing: true,
             error: null,
+            stageAsset: event.stageAsset ?? null,
+            stageReceived: event.stageReceived ?? null,
+            stageTotal: event.stageTotal ?? null,
+            stageRatePerSec: event.stageRatePerSec ?? null,
+            stageEtaSeconds: event.stageEtaSeconds ?? null,
           }),
         }));
         return;
@@ -100,6 +123,7 @@ export const useOtaStore = create<OtaState>(set => ({
             installing: false,
             availableFrom: null,
             availableTo: null,
+            ...clearedStage,
           }),
         }));
         return;
@@ -110,6 +134,7 @@ export const useOtaStore = create<OtaState>(set => ({
             phase: 'failed',
             installing: false,
             error: event.reason ?? 'update failed',
+            ...clearedStage,
           }),
         }));
         return;
@@ -126,8 +151,6 @@ export const useOtaStore = create<OtaState>(set => ({
 
 let wired = false;
 
-/** Subscribe the OTA store to the native event stream once. Idempotent across
- *  hot reloads. Called from bootstrapSession after the session starts. */
 export function startOta(): void {
   if (wired) return;
   getSession().subscribe(event => {
@@ -138,4 +161,16 @@ export function startOta(): void {
 
 export function useOta<T>(selector: (state: OtaState) => T): T {
   return useOtaStore(useShallow(selector));
+}
+
+export async function installLatestOta(
+  deviceId: string,
+  channel: string,
+): Promise<void> {
+  const session = getSession();
+  const manifest = await session.fetchOtaManifest(null);
+  const latest = manifest.channels.find(c => c.slug === channel)?.latest;
+  if (latest) {
+    await session.applyOtaUpdate(deviceId, channel, latest, null);
+  }
 }

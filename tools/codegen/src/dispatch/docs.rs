@@ -156,7 +156,10 @@ pub fn emit_docs_json(plan: &Plan, inv: &Inventory, out_path: &str) -> Result<()
     }
   };
 
-  let surface_docs: Vec<SurfaceDoc> = surfaces(plan).iter().map(|s| build_surface(s, inv, &mut refs)).collect();
+  let surface_docs: Vec<SurfaceDoc> = surfaces(plan)
+    .iter()
+    .map(|s| build_surface(s, inv, &mut refs))
+    .collect();
 
   // Transitively expand every referenced named type into a closed
   // dictionary. A worklist BFS keyed on a visited set; scalars and

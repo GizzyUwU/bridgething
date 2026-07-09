@@ -15,7 +15,8 @@ npm create bridgething@latest my-app
 ```
 
 The generated project includes `bun run push` to deploy the built webapp to a
-connected Car Thing and `bun run share` to share it with the community.
+connected Car Thing, `bun run share` to share it with the community, and
+`bun run update` to bring the connected device to the latest bridgething release.
 
 - Full docs: <https://bridgething.com/docs>
 - Source: <https://github.com/JoeyEamigh/bridgething>

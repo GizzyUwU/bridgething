@@ -26,7 +26,7 @@ use uuid::Uuid;
 pub const MEMORY_SINK_CAP: usize = 256 * 1024;
 const FORWARD_CONSUMER_CAPACITY: usize = 16;
 const FORWARD_INGEST_CAPACITY: usize = 16;
-const FORWARD_ACK_INTERVAL: u32 = 16 * 1024;
+pub(crate) const FORWARD_ACK_INTERVAL: u32 = 16 * 1024;
 
 #[derive(Debug)]
 pub enum TransferEvent {
@@ -43,10 +43,7 @@ struct MemoryState {
 #[derive(Debug)]
 enum Binding {
   Memory(MemoryState),
-  Forward {
-    tx: mpsc::Sender<TransferEvent>,
-    last_acked: u32,
-  },
+  Forward { tx: mpsc::Sender<TransferEvent> },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -78,7 +75,7 @@ impl TransferSinks {
       .bindings
       .lock()
       .unwrap()
-      .insert(id, Binding::Forward { tx: ingest_tx, last_acked: 0 });
+      .insert(id, Binding::Forward { tx: ingest_tx });
     let inner = self.inner.clone();
     tokio::spawn(async move {
       while let Some(event) = ingest_rx.recv().await {
@@ -124,15 +121,8 @@ impl TransferSinks {
         self.inner.progress.notify_waiters();
         consumed.then_some(received)
       }
-      Some(Binding::Forward { tx, last_acked }) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
-        Ok(()) => {
-          if received.saturating_sub(*last_acked) >= FORWARD_ACK_INTERVAL {
-            *last_acked = received;
-            Some(received)
-          } else {
-            None
-          }
-        }
+      Some(Binding::Forward { tx }) => match tx.try_send(TransferEvent::Fragment { offset, bytes }) {
+        Ok(()) => None,
         Err(TrySendError::Full(_)) => {
           tracing::warn!(%id, "forward consumer fell behind the ingest buffer; abandoning transfer");
           bindings.remove(&id);

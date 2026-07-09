@@ -184,4 +184,249 @@ final class OtaStreamTests: XCTestCase {
         }
         await h.companion.stop()
     }
+
+    private func writeFilledZck(_ bytes: Int, fill: UInt8) throws -> URL {
+        let payload = Data(repeating: fill, count: bytes)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("zck-\(UUID()).bin")
+        try payload.write(to: url)
+        return url
+    }
+
+    /// A range request routes by `req.asset`: the boot asset is served from the boot zck, the system
+    /// asset from the system zck, and an unregistered asset is rejected.
+    func testRangeRequestRoutesByAsset() async throws {
+        let h = try await boot()
+        let systemZck = try writeFilledZck(256, fill: 0xAA)
+        let bootZck = try writeFilledZck(256, fill: 0xBB)
+        defer {
+            try? FileManager.default.removeItem(at: systemZck)
+            try? FileManager.default.removeItem(at: bootZck)
+        }
+        await h.companion.ota.setLocalZcks([
+            OtaService.systemZckAsset: systemZck,
+            OtaService.bootZckAsset: bootZck,
+        ])
+
+        func requestRange(asset: String) async throws -> GatewayToBridgeMsg {
+            try await h.driver.request(.system(.otaAssetRange(OtaAssetRange(
+                updateId: "u1",
+                asset: asset,
+                ranges: [RangeSpec(start: 0, length: 256)]
+            ))))
+        }
+
+        let bootReply = try await requestRange(asset: OtaService.bootZckAsset)
+        guard case let .system(.otaAssetRangeReply(reply)) = bootReply.data, case let .inline(body) = reply.body else {
+            return XCTFail("expected inline range reply for boot asset, got \(bootReply.data)")
+        }
+        XCTAssertEqual(Array(body), Array(repeating: UInt8(0xBB), count: 256), "boot asset must be served from the boot zck")
+
+        let systemReply = try await requestRange(asset: OtaService.systemZckAsset)
+        guard case let .system(.otaAssetRangeReply(sysReply)) = systemReply.data, case let .inline(sysBody) = sysReply.body else {
+            return XCTFail("expected inline range reply for system asset, got \(systemReply.data)")
+        }
+        XCTAssertEqual(Array(sysBody), Array(repeating: UInt8(0xAA), count: 256), "system asset must be served from the system zck")
+
+        let unknownReply = try await requestRange(asset: "does-not-exist.zck")
+        guard case let .system(.otaAssetRangeRejected(rej)) = unknownReply.data else {
+            return XCTFail("expected rejection for unknown asset, got \(unknownReply.data)")
+        }
+        XCTAssertTrue(rej.reason.contains("does-not-exist.zck"), "rejection must name the missing asset")
+
+        await h.companion.stop()
+    }
+
+    func testOtaResumeFromNonZeroOffsetStreamsRemainder() async throws {
+        let h = try await boot()
+        let payloadSize = 160 * 1024
+        let resumeOffset: UInt32 = 64 * 1024
+        let artifact = try writeTempArtifact(payloadSize)
+        defer { try? FileManager.default.removeItem(at: artifact) }
+
+        let (progress, progressCont) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
+        let pushTask = Task {
+            await h.companion.ota.pushDaemon(
+                gateway: h.companion.gateway,
+                deviceId: h.driver.deviceId,
+                binaryPath: artifact,
+                progress: progressCont
+            )
+        }
+
+        // the daemon already holds resumeOffset bytes and reports it as the resume point.
+        let transferId = try await answerBegin(h.driver, resumeFromOffset: resumeOffset)
+
+        // regression: the first resume fragment must actually be sent. daemon acks are absolute file
+        // offsets, so before the ack-window baseline was seeded to resumeOffset the sender gated the
+        // absolute offset against acked(0)+window, deadlocked, and emitted zero fragments.
+        let first = try await nextFragment(h.driver, transferId)
+        XCTAssertEqual(first.offset, resumeOffset, "first fragment must resume at the daemon's offset, not 0")
+        var expected = first.offset + UInt32(first.bytes.count)
+        try await ack(h.driver, transferId, expected)
+
+        while Int(expected) < payloadSize {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(f.offset, expected, "resume fragments must arrive contiguous in offset order")
+            XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes)
+            expected = f.offset + UInt32(f.bytes.count)
+            try await ack(h.driver, transferId, expected)
+        }
+        XCTAssertEqual(Int(expected), payloadSize, "the whole remainder past resumeOffset must stream")
+
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, etaMs: nil))), meta: .event)
+        _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
+            if case .system(.otaActivate) = m.data { return true }
+            return false
+        }
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+
+        var terminal: OtaPhaseSnapshot?
+        for await snap in progress { terminal = snap }
+        await pushTask.value
+        guard case .completed = terminal else {
+            return XCTFail("expected completed terminal, got \(String(describing: terminal))")
+        }
+        await h.companion.stop()
+    }
+
+    // MARK: - apply-version precedence (image-change subsumes the daemon bandaid)
+
+    private func otaCacheDir() -> URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return base.appendingPathComponent("bridgething-ota", isDirectory: true)
+    }
+
+    @discardableResult
+    private func seedArtifact(_ dir: URL, _ name: String, bytes: Int) throws -> URL {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        try Data((0 ..< bytes).map { UInt8($0 % 251) }).write(to: url)
+        return url
+    }
+
+    private func makeMeta(appVersion: String, imageVersion: String, channel: String, variant: String = "prod") -> BridgeThingMeta {
+        BridgeThingMeta(
+            bridgethingVersion: appVersion, libbridgethingVersion: appVersion, appName: "bridgething",
+            nickname: nil, appVersion: appVersion, osName: "linux", osVersion: "1", osDescription: "",
+            btMac: "", serialNumber: "", fccId: "", icId: "", modelName: "Car Thing", channel: channel,
+            imageVariant: variant, imageVersion: imageVersion, imageBuildId: "", imageBuildDate: "",
+            imageDistro: "", imageMachine: "", discord: "", credits: ""
+        )
+    }
+
+    private func injectMeta(_ h: Harness, _ meta: BridgeThingMeta) async throws {
+        try await h.driver.send(.version(meta), meta: .event)
+        for _ in 0 ..< 100 {
+            if await h.companion.ota.meta(deviceId: h.driver.deviceId) != nil { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("device meta was never recorded by the ota service")
+    }
+
+    private func nextOtaBegin(_ driver: WireDriver, timeout: Duration = .seconds(3)) async throws -> (id: UUID, begin: OtaBegin) {
+        let msg = try await driver.waitOutbound(timeout: timeout) { m in
+            if case .system(.otaBegin) = m.data { return true }
+            return false
+        }
+        guard case let .system(.otaBegin(begin)) = msg.data else { throw WireDriverError.decodeFailed }
+        return (msg.id, begin)
+    }
+
+    /// When the target composite bumps BOTH the image and the daemon, applyVersion must run the image OTA
+    /// only. The image slot carries its own matching daemon (adopted on boot), so the standalone daemon
+    /// bandaid must never be pushed: the first (and only) OtaBegin is `.image`, never `.daemon`.
+    func testApplyVersionImageChangeRunsImageOnly() async throws {
+        let h = try await boot()
+        let channel = "stable"
+        let dir = otaCacheDir()
+        let swu = try seedArtifact(dir, "image-\(channel)-2026.05.0.swu", bytes: 2048)
+        let zck = try seedArtifact(dir, "image-\(channel)-2026.05.0.zck", bytes: 256)
+        let bootZck = try seedArtifact(dir, "image-\(channel)-2026.05.0-boot.zck", bytes: 256)
+        // seed the daemon artifact too so it is a live cache hit: proving the code path, not a missing
+        // download, is what keeps the daemon bandaid from being pushed.
+        let daemon = try seedArtifact(dir, "daemon-\(channel)-0.8.4", bytes: 512)
+        defer { for u in [swu, zck, bootZck, daemon] { try? FileManager.default.removeItem(at: u) } }
+
+        try await injectMeta(h, makeMeta(appVersion: "0.8.3", imageVersion: "2026.04.0", channel: channel))
+
+        let applyTask = Task {
+            await h.companion.ota.applyVersion(
+                deviceId: h.driver.deviceId, channel: channel,
+                version: "0.8.4+image.2026.05.0", rootURL: URL(string: "https://ota.invalid")!
+            )
+        }
+
+        let (beginId, begin) = try await nextOtaBegin(h.driver)
+        XCTAssertEqual(begin.kind, .image, "an image change must run the image OTA, not the daemon bandaid")
+
+        // drive the image OTA to its reboot terminal. exchanging a fragment first guarantees the terminal
+        // subscription is live before we drive the reboot phase, so applyVersion returns promptly.
+        try await h.driver.send(
+            .system(.otaBeginAck(OtaBeginAck(resumeFromOffset: 0))),
+            meta: .response(ResponseMeta(requestId: beginId))
+        )
+        try await drainFragments(h.driver, begin.transfer.id, total: Int(begin.transfer.totalSize))
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        await applyTask.value
+
+        for frame in await h.driver.outboundFrames() {
+            if case let .system(.otaBegin(b)) = frame.data {
+                XCTAssertNotEqual(b.kind, .daemon, "no standalone daemon bandaid push while the image is changing")
+            }
+        }
+        await h.companion.stop()
+    }
+
+    /// When only the daemon differs (image already matches the target), applyVersion still runs the daemon
+    /// bandaid: the first OtaBegin is `.daemon` and no image OTA is started.
+    func testApplyVersionDaemonOnlyRunsBandaid() async throws {
+        let h = try await boot()
+        let channel = "stable"
+        let dir = otaCacheDir()
+        let daemon = try seedArtifact(dir, "daemon-\(channel)-0.8.4", bytes: 512)
+        defer { try? FileManager.default.removeItem(at: daemon) }
+
+        try await injectMeta(h, makeMeta(appVersion: "0.8.3", imageVersion: "2026.05.0", channel: channel))
+
+        let applyTask = Task {
+            await h.companion.ota.applyVersion(
+                deviceId: h.driver.deviceId, channel: channel,
+                version: "0.8.4+image.2026.05.0", rootURL: URL(string: "https://ota.invalid")!
+            )
+        }
+
+        let (beginId, begin) = try await nextOtaBegin(h.driver)
+        XCTAssertEqual(begin.kind, .daemon, "a daemon-only delta must run the daemon bandaid")
+
+        // stage the daemon piece, then commit (activate) and reboot so applyVersion returns cleanly.
+        try await h.driver.send(
+            .system(.otaBeginAck(OtaBeginAck(resumeFromOffset: 0))),
+            meta: .response(ResponseMeta(requestId: beginId))
+        )
+        try await drainFragments(h.driver, begin.transfer.id, total: Int(begin.transfer.totalSize))
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, etaMs: nil))), meta: .event)
+        _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
+            if case .system(.otaActivate) = m.data { return true }
+            return false
+        }
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        await applyTask.value
+
+        for frame in await h.driver.outboundFrames() {
+            if case let .system(.otaBegin(b)) = frame.data {
+                XCTAssertNotEqual(b.kind, .image, "a daemon-only delta must not start an image OTA")
+            }
+        }
+        await h.companion.stop()
+    }
+
+    private func drainFragments(_ driver: WireDriver, _ transferId: UUID, total: Int) async throws {
+        var sent = 0
+        while sent < total {
+            let f = try await nextFragment(driver, transferId)
+            sent = Int(f.offset) + f.bytes.count
+            try await ack(driver, transferId, UInt32(sent))
+        }
+    }
 }

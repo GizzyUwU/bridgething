@@ -8,14 +8,7 @@ import {
   MapPin,
 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import {
-  Alert,
-  Platform,
-  ScrollView,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -34,14 +27,13 @@ import {
   locationStatus,
   openAppSettings,
   type PermissionState,
-  requestBluetoothConnect,
   requestLocation,
 } from '../lib/permissions';
 import {
+  alertPairOutcome,
   getSession,
-  presentPairWithGuidance,
+  runPairFlow,
   useSession,
-  waitForPeer,
 } from '../lib/session';
 import { setSetupCompleted } from '../lib/storage';
 import type { RootStackParamList } from '../navigation';
@@ -54,11 +46,9 @@ export function SetupScreen({ navigation, route }: Props) {
   const session = getSession();
   const { width } = useWindowDimensions();
 
-  const initialStep =
-    route.params?.step ?? (route.params?.startAt === 'pair' ? 1 : 0);
+  const initialStep = route.params?.step ?? 0;
   const [step, setStep] = useState(initialStep);
 
-  // mirror progress into route params so it survives a remount, off the render path
   useEffect(() => {
     navigation.setParams({ step });
   }, [step, navigation]);
@@ -85,7 +75,6 @@ export function SetupScreen({ navigation, route }: Props) {
     };
   }, [session]);
 
-  // Auto-advance to step 2 the moment tokens land for the first time
   useEffect(() => {
     if (authState.kind === 'idle') setBusyProviderId(null);
     if (authState.kind === 'authenticated' && step === 0) {
@@ -128,54 +117,7 @@ export function SetupScreen({ navigation, route }: Props) {
     if (pairBusy) return;
     setPairBusy(true);
     try {
-      if (Platform.OS === 'android') {
-        // CDM finds + pairs the Car Thing for us, but the RFCOMM link and its
-        // connectedDevice foreground service need BLUETOOTH_CONNECT granted
-        // first - without it presentPairPicker's service start crashes.
-        const bt = await requestBluetoothConnect();
-        if (bt !== 'granted') {
-          Alert.alert(
-            'bluetooth permission needed',
-            'bridgething needs Bluetooth access to connect to your Car Thing. enable it in settings, then try pairing again.',
-          );
-          return;
-        }
-        const picked = await session.presentPairPicker();
-        if (!picked) return;
-        // selecting the device kicks off bonding (a system prompt) then the
-        // RFCOMM link; hold here - with the page in its "pairing" state - until
-        // the peer actually connects.
-        const connected = await waitForPeer(45000);
-        if (!connected) {
-          Alert.alert(
-            'still connecting',
-            'if a Bluetooth pairing prompt appeared, tap Pair to continue. make sure your Car Thing is on and nearby - it can take a few seconds.',
-          );
-        }
-        return;
-      }
-      if (!(await presentPairWithGuidance())) return;
-      const connected = await waitForPeer(20000);
-      if (!connected) {
-        Alert.alert(
-          'could not connect',
-          'pairing finished but your Car Thing did not connect. make sure it is powered on and nearby, then try again.',
-        );
-        return;
-      }
-      const result = await session.enableAncsNotifications();
-      if (result.kind === 'failed') {
-        Alert.alert(
-          'notifications setup failed',
-          result.message ??
-            'pairing worked, but enabling notifications did not.',
-        );
-      }
-    } catch (err) {
-      Alert.alert(
-        'pairing failed',
-        err instanceof Error ? err.message : String(err),
-      );
+      alertPairOutcome(await runPairFlow());
     } finally {
       setPairBusy(false);
     }

@@ -18,7 +18,8 @@ Three jobs. Read the reference file for the one in front of you:
   the physical controls (locally, then over CDP on the device):
   [reference/develop.md](reference/develop.md)
 - **Install and share** - build, push onto a connected Car Thing, package a zip
-  anyone can install: [reference/ship.md](reference/ship.md)
+  anyone can install, and keep the device on the latest bridgething release:
+  [reference/ship.md](reference/ship.md)
 
 The device shape, the control-to-event mapping, and the hard constraints live in
 CLAUDE.md, which is always loaded. This skill is the how-to on top of it.

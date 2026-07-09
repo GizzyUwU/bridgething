@@ -1,12 +1,7 @@
 import { Text, View } from 'react-native';
 
 import { Button } from './Button';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from './ui/alert-dialog';
+import { Sheet } from './Sheet';
 
 export type MenuAction = {
   label: string;
@@ -26,34 +21,33 @@ export function ActionMenu({
   onClose: () => void;
 }) {
   return (
-    <AlertDialog open={visible} onOpenChange={open => !open && onClose()}>
-      <AlertDialogContent>
-        {title ? (
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Text style={{ letterSpacing: -0.4 }}>{title}</Text>
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-        ) : null}
-        <View className="gap-2">
-          {actions.map(action => (
-            <Button
-              key={action.label}
-              variant={action.destructive ? 'destructive' : 'tonal'}
-              size="md"
-              onPress={() => {
-                onClose();
-                action.onPress();
-              }}
-            >
-              {action.label}
-            </Button>
-          ))}
-          <Button variant="ghost" size="md" onPress={onClose}>
-            cancel
+    <Sheet visible={visible} onClose={onClose}>
+      {title ? (
+        <Text
+          className="text-[19px] font-bold text-foreground"
+          style={{ letterSpacing: -0.4 }}
+        >
+          {title}
+        </Text>
+      ) : null}
+      <View className="gap-2.5">
+        {actions.map(action => (
+          <Button
+            key={action.label}
+            variant={action.destructive ? 'destructive' : 'tonal'}
+            size="lg"
+            onPress={() => {
+              onClose();
+              action.onPress();
+            }}
+          >
+            {action.label}
           </Button>
-        </View>
-      </AlertDialogContent>
-    </AlertDialog>
+        ))}
+        <Button variant="ghost" size="lg" onPress={onClose}>
+          cancel
+        </Button>
+      </View>
+    </Sheet>
   );
 }

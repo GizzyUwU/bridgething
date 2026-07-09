@@ -1,7 +1,6 @@
 import {
   type BridgethingConfigEntry,
   type BridgethingConfigField,
-  type BridgethingWebappInfo,
 } from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -23,21 +22,21 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
 import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
+import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { WebappIcon } from '../components/WebappIcon';
 import { getSession, peerDisplayName, useSession } from '../lib/session';
+import { refreshWebapps, useWebapps } from '../lib/webapps';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WebappDetail'>;
@@ -49,17 +48,19 @@ export function WebappDetailScreen({ navigation, route }: Props) {
   const peer = useSession(s => s.peers.find(p => p.id === deviceId) ?? null);
   const ledger = useSession(s => s.ledger);
 
-  const [info, setInfo] = useState<BridgethingWebappInfo | null>(null);
+  const { list } = useWebapps(deviceId);
+  const info = list.find(w => w.id === id) ?? null;
   const [entries, setEntries] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<'switch' | 'uninstall' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (list.length === 0) void refreshWebapps(deviceId);
+  }, [deviceId, list.length]);
+
+  const loadConfig = useCallback(async () => {
     setLoadError(null);
     try {
-      const list = await session.listWebapps(deviceId);
-      const match = list.find(w => w.id === id) ?? null;
-      setInfo(match);
       const config = await session.listWebappConfig(deviceId, id);
       setEntries(toMap(config));
     } catch (err) {
@@ -68,8 +69,8 @@ export function WebappDetailScreen({ navigation, route }: Props) {
   }, [deviceId, id, session]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadConfig();
+  }, [loadConfig]);
 
   const writeField = async (key: string, value: string) => {
     try {
@@ -137,10 +138,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
 
   if (!info) {
     return (
-      <SafeAreaView
-        edges={['bottom']}
-        className="flex-1 items-center justify-center bg-background"
-      >
+      <View className="flex-1 items-center justify-center bg-background">
         {loadError ? (
           <View className="px-6">
             <Text className="text-center text-[14px] text-destructive">
@@ -150,139 +148,134 @@ export function WebappDetailScreen({ navigation, route }: Props) {
         ) : (
           <ActivityIndicator size="small" color="hsl(199 100% 44%)" />
         )}
-      </SafeAreaView>
+      </View>
     );
   }
 
   const builtin = info.source === 'builtin';
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView
-        contentContainerClassName="px-5 pb-12 pt-3"
-        keyboardShouldPersistTaps="handled"
+    <ScrollScreen contentContainerStyle={{ paddingTop: 12 }}>
+      <View
+        className="mb-6 flex-row items-center gap-4 rounded-2xl border border-border bg-surface p-4"
+        style={{
+          shadowColor: '#000',
+          shadowOpacity: 0.06,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+        }}
       >
-        <View
-          className="mb-6 flex-row items-center gap-4 rounded-2xl border border-border bg-surface p-4"
-          style={{
-            shadowColor: '#000',
-            shadowOpacity: 0.06,
-            shadowRadius: 14,
-            shadowOffset: { width: 0, height: 6 },
-          }}
-        >
-          <WebappIcon
-            deviceId={deviceId}
-            id={info.id}
-            iconAvailable={info.iconAvailable}
-            name={info.name}
-            size={64}
-            radiusClass="rounded-2xl"
-            fallbackTextClass="text-[24px] font-extrabold text-foreground"
-          />
-          <View className="flex-1">
-            <Text
-              className="text-[20px] font-extrabold leading-[24px] text-foreground"
-              numberOfLines={2}
-              style={{ letterSpacing: -0.4 }}
-            >
-              {info.name}
-            </Text>
-            <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
-              v{info.version}
-            </Text>
-            <View className="mt-2 flex-row flex-wrap gap-1.5">
-              {builtin ? (
-                <Pill tone="neutral">built-in</Pill>
-              ) : (
-                <Pill tone="primary">installed</Pill>
-              )}
-              {peer ? (
-                <Pill tone="neutral" dot={false}>
-                  {peerDisplayName(peer, ledger)}
-                </Pill>
-              ) : null}
-            </View>
+        <WebappIcon
+          deviceId={deviceId}
+          id={info.id}
+          iconAvailable={info.iconAvailable}
+          name={info.name}
+          size={64}
+          radiusClass="rounded-2xl"
+          fallbackTextClass="text-[24px] font-extrabold text-foreground"
+        />
+        <View className="flex-1">
+          <Text
+            className="text-[20px] font-extrabold leading-[24px] text-foreground"
+            numberOfLines={2}
+            style={{ letterSpacing: -0.4 }}
+          >
+            {info.name}
+          </Text>
+          <Text className="mt-0.5 font-mono text-[12px] text-muted-foreground">
+            v{info.version}
+          </Text>
+          <View className="mt-2 flex-row flex-wrap gap-1.5">
+            {builtin ? (
+              <Pill tone="neutral">built-in</Pill>
+            ) : (
+              <Pill tone="primary">installed</Pill>
+            )}
+            {peer ? (
+              <Pill tone="neutral" dot={false}>
+                {peerDisplayName(peer, ledger)}
+              </Pill>
+            ) : null}
           </View>
         </View>
+      </View>
 
-        {info.description ? (
-          <Text className="mb-6 px-1 text-[14px] leading-[20px] text-muted-foreground">
-            {info.description}
-          </Text>
-        ) : null}
+      {info.description ? (
+        <Text className="mb-6 px-1 text-[14px] leading-[20px] text-muted-foreground">
+          {info.description}
+        </Text>
+      ) : null}
 
-        <View className="mb-8 flex-row gap-2">
+      <View className="mb-8 flex-row gap-2">
+        <View className="flex-1">
+          <Button
+            onPress={switchActive}
+            loading={busy === 'switch'}
+            variant="primary"
+            icon={Play}
+          >
+            switch to this
+          </Button>
+        </View>
+        {!builtin ? (
           <View className="flex-1">
             <Button
-              onPress={switchActive}
-              loading={busy === 'switch'}
-              variant="primary"
-              icon={Play}
+              onPress={uninstall}
+              loading={busy === 'uninstall'}
+              variant="destructive"
+              icon={Trash2}
             >
-              switch to this
+              uninstall
             </Button>
           </View>
-          {!builtin ? (
-            <View className="flex-1">
-              <Button
-                onPress={uninstall}
-                loading={busy === 'uninstall'}
-                variant="destructive"
-                icon={Trash2}
-              >
-                uninstall
-              </Button>
-            </View>
-          ) : null}
-        </View>
-
-        {info.config.length > 0 ? (
-          <View className="mb-8">
-            <SectionHeader title="settings" hint="changes save on commit" />
-            <View className="gap-3">
-              {info.config.map(field => (
-                <ConfigEditor
-                  key={field.key}
-                  field={field}
-                  value={entries[field.key] ?? field.defaultValue ?? ''}
-                  onCommit={value => writeField(field.key, value)}
-                  onReset={() => resetField(field.key)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : (
-          <View className="mb-8">
-            <SectionHeader title="settings" />
-            <SectionEmpty>this app has no user-tunable settings</SectionEmpty>
-          </View>
-        )}
-
-        {info.permissions.length > 0 ? (
-          <View>
-            <SectionHeader
-              title="what this webapp can do"
-              hint="granted automatically; capabilities your phone offers are in Settings → Advanced"
-            />
-            <ListGroup>
-              {info.permissions.map(p => {
-                const meta = humanizePermission(p);
-                return (
-                  <ListRow
-                    key={p}
-                    icon={meta.icon}
-                    iconTint="default"
-                    title={meta.title}
-                    subtitle={meta.subtitle}
-                  />
-                );
-              })}
-            </ListGroup>
-          </View>
         ) : null}
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+
+      {info.config.length > 0 ? (
+        <View className="mb-8">
+          <SectionHeader title="settings" hint="changes save on commit" />
+          <View className="gap-3">
+            {info.config.map(field => (
+              <ConfigEditor
+                key={field.key}
+                field={field}
+                value={entries[field.key] ?? field.defaultValue ?? ''}
+                onCommit={value => writeField(field.key, value)}
+                onReset={() => resetField(field.key)}
+              />
+            ))}
+          </View>
+        </View>
+      ) : (
+        <View className="mb-8">
+          <SectionHeader title="settings" />
+          <SectionEmpty>this app has no user-tunable settings</SectionEmpty>
+        </View>
+      )}
+
+      {info.permissions.length > 0 ? (
+        <View>
+          <SectionHeader
+            title="what this webapp can do"
+            hint="granted automatically; capabilities your phone offers are in Settings → Advanced"
+          />
+          <ListGroup>
+            {info.permissions.map(p => {
+              const meta = humanizePermission(p);
+              return (
+                <ListRow
+                  key={p}
+                  icon={meta.icon}
+                  iconTint="default"
+                  title={meta.title}
+                  subtitle={meta.subtitle}
+                />
+              );
+            })}
+          </ListGroup>
+        </View>
+      ) : null}
+    </ScrollScreen>
   );
 }
 

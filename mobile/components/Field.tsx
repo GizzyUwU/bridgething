@@ -1,16 +1,14 @@
 import type { LucideIcon } from 'lucide-react-native';
 import { X } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, Text, type TextInputProps, View } from 'react-native';
+import {
+  Pressable,
+  Text,
+  TextInput,
+  type TextInputProps,
+  View,
+} from 'react-native';
 
-import { Input } from './ui/input';
-
-/**
- * Labelled, framed text input. Composes RNR's `<Input>` (the styled
- * TextInput primitive) with an optional leading icon, clear button,
- * and label-above-field layout. Defaults to medium height; use
- * `multiline` for multi-line entries (paste long URLs etc.).
- */
 export function Field({
   label,
   hint,
@@ -51,7 +49,7 @@ export function Field({
         {Icon ? (
           <Icon size={18} color="hsl(215 14% 50%)" strokeWidth={2.1} />
         ) : null}
-        <Input
+        <TextInput
           {...rest}
           value={value}
           onChangeText={onChangeText}
@@ -68,7 +66,7 @@ export function Field({
             rest.onEndEditing?.(e);
           }}
           placeholderTextColor="hsl(215 14% 55%)"
-          className="h-auto flex-1 border-0 bg-transparent py-3.5 px-0 text-[15px] text-foreground"
+          className="flex-1 py-3.5 text-[15px] text-foreground"
         />
         {clearable && value.length > 0 ? (
           <Pressable onPress={() => onChangeText('')} hitSlop={10}>

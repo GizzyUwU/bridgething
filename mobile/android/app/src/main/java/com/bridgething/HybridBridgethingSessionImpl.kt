@@ -718,11 +718,18 @@ public class HybridBridgethingSessionImpl(
     }
 
     private fun loadOtaPollConfig(): BridgethingOtaPollConfig? {
-        if (!prefs.getBoolean("ota.configured", false)) return null
+        if (!prefs.getBoolean("ota.configured", false)) {
+            return BridgethingOtaPollConfig(
+                channel = "stable",
+                intervalSeconds = 3600.0,
+                autoPush = true,
+                rootUrl = null,
+            )
+        }
         val root = prefs.getString("ota.rootUrl", null)
         return BridgethingOtaPollConfig(
             channel = prefs.getString("ota.channel", "stable") ?: "stable",
-            intervalSeconds = prefs.getLong("ota.intervalSeconds", 21600L).toDouble(),
+            intervalSeconds = prefs.getLong("ota.intervalSeconds", 3600L).toDouble(),
             autoPush = prefs.getBoolean("ota.autoPush", true),
             rootUrl = if (root.isNullOrEmpty()) null else root,
         )
@@ -1134,14 +1141,7 @@ public class HybridBridgethingSessionImpl(
             deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind),
             fromVersion = ev.fromVersion, toVersion = ev.toVersion,
         )
-        is OtaPollEvent.Progress -> {
-            val (phase, percent) = unwrapSnapshot(ev.snapshot)
-            makeOtaEvent(
-                kind = BridgethingOtaEventKind.PROGRESS,
-                deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind),
-                phase = phase, percent = percent?.toDouble(),
-            )
-        }
+        is OtaPollEvent.Progress -> snapshotToEvent(ev.deviceId, toRnOtaKind(ev.kind), ev.snapshot)
         is OtaPollEvent.Updated -> makeOtaEvent(
             kind = BridgethingOtaEventKind.UPDATED,
             deviceId = ev.deviceId, otaKind = toRnOtaKind(ev.kind), toVersion = ev.version,
@@ -1152,9 +1152,35 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
-    private fun unwrapSnapshot(snapshot: OtaPhaseSnapshot): Pair<BridgethingOtaPhase?, Int?> = when (snapshot) {
-        OtaPhaseSnapshot.Idle -> Pair(BridgethingOtaPhase.IDLE, null)
-        is OtaPhaseSnapshot.Streaming -> Pair(BridgethingOtaPhase.STREAMING, snapshot.percent)
+    private fun bytePercent(n: Long, d: Long): Double =
+        if (d <= 0L) 0.0 else minOf(100.0, n.toDouble() * 100 / d.toDouble())
+
+    private fun snapshotToEvent(
+        deviceId: String,
+        otaKind: BridgethingOtaKind,
+        snapshot: OtaPhaseSnapshot,
+    ): BridgethingOtaEvent = when (snapshot) {
+        OtaPhaseSnapshot.Idle -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.IDLE, percent = 0.0,
+        )
+        is OtaPhaseSnapshot.Downloading -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.DOWNLOADING, percent = bytePercent(snapshot.received, snapshot.total),
+            stageAsset = snapshot.asset, stageReceived = snapshot.received.toDouble(),
+            stageTotal = snapshot.total.toDouble(), stageRatePerSec = snapshot.ratePerSec,
+        )
+        is OtaPhaseSnapshot.Streaming -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.STREAMING, percent = bytePercent(snapshot.sent, snapshot.total),
+            stageReceived = snapshot.sent.toDouble(), stageTotal = snapshot.total.toDouble(),
+            stageRatePerSec = snapshot.ratePerSec, stageEtaSeconds = snapshot.etaSeconds,
+        )
+        is OtaPhaseSnapshot.RangePull -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.RANGEPULL, stageAsset = snapshot.asset,
+            stageReceived = snapshot.served.toDouble(), stageRatePerSec = snapshot.ratePerSec,
+        )
         is OtaPhaseSnapshot.Applying -> {
             val rnPhase = when (snapshot.phase) {
                 OtaPhase.Streaming -> BridgethingOtaPhase.STREAMING
@@ -1163,11 +1189,23 @@ public class HybridBridgethingSessionImpl(
                 OtaPhase.Confirming -> BridgethingOtaPhase.CONFIRMING
                 OtaPhase.Reboot -> BridgethingOtaPhase.REBOOT
             }
-            Pair(rnPhase, snapshot.percent)
+            makeOtaEvent(
+                kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+                phase = rnPhase, percent = snapshot.percent.toDouble(),
+            )
         }
-        OtaPhaseSnapshot.Staged -> Pair(BridgethingOtaPhase.WRITING, 100)
-        OtaPhaseSnapshot.Completed -> Pair(BridgethingOtaPhase.COMPLETED, null)
-        is OtaPhaseSnapshot.Failed -> Pair(BridgethingOtaPhase.FAILED, null)
+        OtaPhaseSnapshot.Staged -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.WRITING, percent = 100.0,
+        )
+        OtaPhaseSnapshot.Completed -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, deviceId = deviceId, otaKind = otaKind,
+            phase = BridgethingOtaPhase.COMPLETED, percent = 100.0,
+        )
+        is OtaPhaseSnapshot.Failed -> makeOtaEvent(
+            kind = BridgethingOtaEventKind.PROGRESS, reason = snapshot.reason, deviceId = deviceId,
+            otaKind = otaKind, phase = BridgethingOtaPhase.FAILED, percent = 0.0,
+        )
     }
 
     private fun toRnOtaKind(kind: OtaKind): BridgethingOtaKind = when (kind) {
@@ -1190,6 +1228,11 @@ public class HybridBridgethingSessionImpl(
         percent: Double? = null,
         deviceChannel: String? = null,
         configuredChannel: String? = null,
+        stageAsset: String? = null,
+        stageReceived: Double? = null,
+        stageTotal: Double? = null,
+        stageRatePerSec: Double? = null,
+        stageEtaSeconds: Double? = null,
     ): BridgethingOtaEvent = BridgethingOtaEvent(
         kind = kind,
         updatedAt = updatedAt,
@@ -1202,6 +1245,11 @@ public class HybridBridgethingSessionImpl(
         percent = percent,
         deviceChannel = deviceChannel,
         configuredChannel = configuredChannel,
+        stageAsset = stageAsset,
+        stageReceived = stageReceived,
+        stageTotal = stageTotal,
+        stageRatePerSec = stageRatePerSec,
+        stageEtaSeconds = stageEtaSeconds,
     )
 
     private val catalogJson = Json { ignoreUnknownKeys = true; explicitNulls = false }

@@ -13,7 +13,7 @@ const toneStyles: Record<
     bg: 'bg-success-soft',
     border: 'border-success/30',
     dot: 'bg-success',
-    text: 'text-success-foreground',
+    text: 'text-success-soft-foreground',
   },
   info: {
     bg: 'bg-secondary',
@@ -29,10 +29,6 @@ const toneStyles: Record<
   },
 };
 
-/**
- * Top-of-screen "is everything good?" strip. The whole row is tappable
- * when an action is provided; otherwise it's a passive indicator.
- */
 export function StatusStrip({
   tone,
   title,

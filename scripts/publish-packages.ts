@@ -12,6 +12,9 @@ type Pkg = { name: string; dir: string; scoped: boolean };
 
 const PACKAGES: Pkg[] = [
   { name: '@bridgething/lib', dir: 'crates/lib', scoped: true },
+  { name: '@bridgething/gateway', dir: 'packages/gateway/typescript', scoped: true },
+  { name: '@bridgething/adapter-network', dir: 'packages/adapter-network', scoped: true },
+  { name: '@bridgething/updater', dir: 'packages/updater', scoped: true },
   { name: '@bridgething/client', dir: 'packages/client-ts', scoped: true },
   { name: 'create-bridgething', dir: 'packages/create-bridgething', scoped: false },
 ];
@@ -61,7 +64,9 @@ function patchLockfile(version: string): void {
   if (!existsSync(full)) return;
   let src = readFileSync(full, 'utf8');
   for (const p of PACKAGES) {
-    const re = new RegExp(`("${reEscape(p.dir)}":\\s*\\{\\s*"name":\\s*"${reEscape(p.name)}",\\s*"version":\\s*")[^"]+(")`);
+    const re = new RegExp(
+      `("${reEscape(p.dir)}":\\s*\\{\\s*"name":\\s*"${reEscape(p.name)}",\\s*"version":\\s*")[^"]+(")`,
+    );
     src = src.replace(re, `$1${version}$2`);
   }
   writeFileSync(full, src);
@@ -104,7 +109,7 @@ console.log(`  template dep ${TEMPLATE_DEP}: ${prevDep ?? '(none)'} -> ^${versio
 patchLockfile(version);
 console.log('  bun.lock: workspace members synced');
 
-const filters = PACKAGES.flatMap((p) => ['--filter', p.name]);
+const filters = PACKAGES.flatMap(p => ['--filter', p.name]);
 await run('bunx', ['turbo', 'run', 'build', ...filters], ROOT);
 
 // two-step per https://github.com/oven-sh/bun (bun publish can't read .npmrc auth since oct 2025):
@@ -119,9 +124,9 @@ for (const p of PACKAGES) {
   const tarball = packOut
     .trim()
     .split('\n')
-    .map((l) => l.trim())
+    .map(l => l.trim())
     .reverse()
-    .find((l) => l.endsWith('.tgz'));
+    .find(l => l.endsWith('.tgz'));
   if (!tarball) {
     console.error(`could not find packed tarball name for ${p.name}`);
     process.exit(1);
@@ -141,6 +146,6 @@ for (const p of PACKAGES) {
 
 console.log(
   doPublish
-    ? `\npublished ${PACKAGES.map((p) => p.name).join(', ')} at ${version}`
-    : `\ndry run complete. re-run with --publish to publish ${PACKAGES.map((p) => p.name).join(', ')} at ${version}`,
+    ? `\npublished ${PACKAGES.map(p => p.name).join(', ')} at ${version}`
+    : `\ndry run complete. re-run with --publish to publish ${PACKAGES.map(p => p.name).join(', ')} at ${version}`,
 );

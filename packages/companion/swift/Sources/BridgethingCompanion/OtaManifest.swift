@@ -30,12 +30,43 @@ public struct OtaManifestChannel: Decodable, Sendable, Equatable {
     }
 }
 
+public struct OtaArtifactDigest: Decodable, Sendable, Equatable {
+    public let size: UInt64
+    public let sha256: String
+}
+
+public struct OtaReleaseArtifacts: Decodable, Sendable, Equatable {
+    public let daemon: OtaArtifactDigest?
+    public let imageSwu: OtaArtifactDigest?
+    public let imageZck: OtaArtifactDigest?
+    public let imageBootZck: OtaArtifactDigest?
+    public let webapps: [String: OtaArtifactDigest]
+
+    private enum CodingKeys: String, CodingKey {
+        case daemon
+        case imageSwu = "image_swu"
+        case imageZck = "image_zck"
+        case imageBootZck = "image_boot_zck"
+        case webapps
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        daemon = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .daemon)
+        imageSwu = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageSwu)
+        imageZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageZck)
+        imageBootZck = try container.decodeIfPresent(OtaArtifactDigest.self, forKey: .imageBootZck)
+        webapps = try container.decodeIfPresent([String: OtaArtifactDigest].self, forKey: .webapps) ?? [:]
+    }
+}
+
 public struct OtaManifestRelease: Decodable, Sendable, Equatable {
     public let version: String
     public let channel: String
     public let yanked: String?
     public let deprecated: Bool
     public let builtinWebapps: [String: String]
+    public let artifacts: OtaReleaseArtifacts?
 
     private enum CodingKeys: String, CodingKey {
         case version
@@ -43,6 +74,7 @@ public struct OtaManifestRelease: Decodable, Sendable, Equatable {
         case yanked
         case deprecated
         case builtinWebapps = "builtin_webapps"
+        case artifacts
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +84,7 @@ public struct OtaManifestRelease: Decodable, Sendable, Equatable {
         yanked = try container.decodeIfPresent(String.self, forKey: .yanked)
         deprecated = try container.decode(Bool.self, forKey: .deprecated)
         builtinWebapps = try container.decodeIfPresent([String: String].self, forKey: .builtinWebapps) ?? [:]
+        artifacts = try container.decodeIfPresent(OtaReleaseArtifacts.self, forKey: .artifacts)
     }
 }
 
@@ -80,6 +113,7 @@ public struct OtaArtifactURLs: Sendable, Equatable {
     public let daemonBinary: URL
     public let imageSwu: URL
     public let imageZck: URL
+    public let imageBootZck: URL
 
     public init(
         rootURL: URL,
@@ -104,6 +138,11 @@ public struct OtaArtifactURLs: Sendable, Equatable {
             .appendingPathComponent(channel)
             .appendingPathComponent(imageVersion)
             .appendingPathComponent("\(imageName).zck")
+        imageBootZck = rootURL
+            .appendingPathComponent("images")
+            .appendingPathComponent(channel)
+            .appendingPathComponent(imageVersion)
+            .appendingPathComponent("\(imageName)-boot.zck")
     }
 
     public static func builtinWebapp(rootURL: URL, channel: String, name: String, version: String) -> URL {

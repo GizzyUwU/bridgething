@@ -52,50 +52,85 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-/**
- * Snapshot of the current OTA flow visible to the host app's UI.
- */
 public sealed class OtaPhaseSnapshot {
     public object Idle : OtaPhaseSnapshot()
-    public data class Streaming(val percent: Int) : OtaPhaseSnapshot()
+
+    public data class Downloading(
+        val asset: String,
+        val received: Long,
+        val total: Long,
+        val ratePerSec: Double?,
+    ) : OtaPhaseSnapshot()
+
+    public data class Streaming(
+        val sent: Long,
+        val total: Long,
+        val ratePerSec: Double?,
+        val etaSeconds: Double?,
+    ) : OtaPhaseSnapshot()
+
+    public data class RangePull(
+        val asset: String,
+        val served: Long,
+        val ratePerSec: Double?,
+    ) : OtaPhaseSnapshot()
+
     public data class Applying(val phase: OtaPhase, val percent: Int) : OtaPhaseSnapshot()
 
-    /**
-     * A bandaid piece (daemon / builtin-webapp) is validated and staged on
-     * the device but not yet live. The batch goes live on `OtaActivate`.
-     */
     public object Staged : OtaPhaseSnapshot()
     public object Completed : OtaPhaseSnapshot()
     public data class Failed(val reason: String) : OtaPhaseSnapshot()
 }
 
-/** Terminal outcome of a third-party webapp install (`OtaKind.InstalledWebapp`). */
+internal class RateTracker(private val windowMs: Long = 4_000L) {
+    private data class Sample(val bytes: Long, val atMs: Long)
+
+    private val samples = mutableListOf<Sample>()
+    private val lock = Any()
+
+    fun record(bytes: Long) {
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            samples.add(Sample(bytes, now))
+            val cutoff = now - windowMs
+            while (samples.size > 2 && samples.first().atMs < cutoff) {
+                samples.removeAt(0)
+            }
+        }
+    }
+
+    /** bytes/sec over the trailing window, or null until there is a spread to measure. */
+    fun ratePerSec(): Double? = synchronized(lock) {
+        val first = samples.firstOrNull() ?: return@synchronized null
+        val last = samples.lastOrNull() ?: return@synchronized null
+        val dtMs = last.atMs - first.atMs
+        if (dtMs <= 50L || last.bytes < first.bytes) return@synchronized null
+        (last.bytes - first.bytes).toDouble() / (dtMs / 1000.0)
+    }
+
+    fun etaSeconds(remaining: Long): Double? {
+        val rate = ratePerSec() ?: return null
+        if (rate <= 0.0) return null
+        return remaining / rate
+    }
+}
+
+private class DigestMismatchException(asset: String, field: String) :
+    IOException("$asset $field does not match the manifest; refusing to install")
+
 public sealed class WebappInstallResult {
     public data class Installed(val info: WebappInfo) : WebappInstallResult()
     public data class Failed(val reason: String) : WebappInstallResult()
 }
 
-/**
- * Configuration for the manifest poll loop.
- *
- * Set to opt the device into auto-updates against `ota.bridgething.com`
- * (or a self-hosted equivalent). When unset the service stays in passive
- * mode (range serving + manual push only).
- */
 public data class OtaPollConfig(
     val rootUrl: String = "https://ota.bridgething.com",
     val channel: String,
-    val intervalSeconds: Long = 6 * 60 * 60L,
+    val intervalSeconds: Long = 60 * 60L,
     val cacheDirectory: File? = null,
     val autoPush: Boolean = true,
 )
 
-/**
- * High-level event from the manifest poll loop. The host app drives UI
- * off these (channel-switch prompts, "downloading update" toast,
- * progress bar). In-flight per-chunk progress comes through as
- * [Progress] carrying an [OtaPhaseSnapshot].
- */
 public sealed class OtaPollEvent {
     public data class ManifestPolled(val updatedAt: String) : OtaPollEvent()
     public data class ManifestPollFailed(val reason: String) : OtaPollEvent()
@@ -127,26 +162,6 @@ public sealed class OtaPollEvent {
     ) : OtaPollEvent()
 }
 
-/**
- * OTA service for the bridgething companion.
- *
- * Three jobs in one class:
- *
- * 1. Serve inbound `OtaAssetRange` requests from a configured local
- *    `.zck` (the daemon's range proxy reads delta bytes through this
- *    when applying an image OTA).
- * 2. Drive a manual `pushDaemon` or `pushUpdate` against a target
- *    device when the host app supplies a local artifact path.
- * 3. When [setPollConfig] is provided, periodically fetch the discover
- *    manifest at `<rootUrl>/manifest.json`, compare to each connected
- *    device's announced [BridgeThingMeta], and auto-push daemon + image
- *    deltas. Cross-channel deltas surface as `ChannelMismatch` instead
- *    of pushing.
- *
- * The host app subscribes to [events] to drive its UI; in-flight
- * progress comes through as [OtaPollEvent.Progress] carrying an
- * [OtaPhaseSnapshot].
- */
 public class OtaService(
     private val httpClient: OkHttpClient = OkHttpClient(),
     private val json: Json = defaultJson,
@@ -157,7 +172,7 @@ public class OtaService(
     private val mutex = Mutex()
     private val deviceMetaMutex = Mutex()
 
-    private var localZck: File? = null
+    private val localZcks = mutableMapOf<String, File>()
     private var rangeServerJob: Job? = null
     private var metaJob: Job? = null
     private var nicknameJob: Job? = null
@@ -169,7 +184,13 @@ public class OtaService(
     private val inFlight = mutableSetOf<String>()
     private val autoPushNextAt = mutableMapOf<String, Long>()
     private val autoPushFailures = mutableMapOf<String, Int>()
+    private val linkOpenAt = mutableMapOf<String, Long>()
     private var pollWake: CompletableDeferred<Unit>? = null
+
+    private var imageProgress: (suspend (OtaPhaseSnapshot) -> Unit)? = null
+    private var imageProgressDeviceId: String? = null
+    private val rangeServed = mutableMapOf<String, Long>()
+    private val rangeTrackers = mutableMapOf<String, RateTracker>()
 
     private val eventsFlow = MutableSharedFlow<OtaPollEvent>(
         extraBufferCapacity = 64,
@@ -200,7 +221,12 @@ public class OtaService(
             metaJob = scope.launch {
                 gateway.events.collect { event ->
                     when (event) {
-                        is GatewayEvent.Connected -> wakePoll()
+                        is GatewayEvent.Connected -> {
+                            noteLinkOpen(event.device.id)
+                            wakePoll()
+                        }
+                        is GatewayEvent.Disconnected -> noteLinkClosed(event.deviceId)
+                        is GatewayEvent.LinkFailed -> noteLinkClosed(event.device.id)
                         is GatewayEvent.Message -> {
                             val data = event.message.data
                             if (data is BridgeToGatewayMsgData.Version) {
@@ -230,20 +256,21 @@ public class OtaService(
         deviceMetaMutex.withLock { deviceMeta.clear() }
     }
 
-    public fun setLocalZck(file: File?) {
-        localZck = file
+    public fun setLocalZcks(map: Map<String, File>) {
+        localZcks.clear()
+        localZcks.putAll(map)
     }
 
-    public fun currentLocalZck(): File? = localZck
+    public fun currentLocalZcks(): Map<String, File> = localZcks.toMap()
 
     public suspend fun pushUpdate(
         gateway: BridgethingGateway,
         deviceId: String,
         swuPath: File,
-        zckPath: File,
+        zcks: Map<String, File>,
         updateUrlBase: String? = null,
     ): Flow<OtaPhaseSnapshot> {
-        setLocalZck(zckPath)
+        setLocalZcks(zcks)
         return runOtaFlow { collector ->
             val (terminal, _) = driveOta(
                 gateway = gateway,
@@ -360,6 +387,7 @@ public class OtaService(
                 artifactPath = bundlePath,
                 startOffset = resumeFrom.toLong(),
                 totalSize = totalSize,
+                emit = null,
             )
         } catch (e: Throwable) {
             stopJobs()
@@ -425,17 +453,27 @@ public class OtaService(
             imageVersion = composite.image,
             imageVariant = meta.imageVariant,
         )
+        val artifacts = runCatching { discoverManifest(rootUrl) }.getOrNull()?.releases?.get(version)?.artifacts
+        if (meta.imageVersion != composite.image) {
+            runImageAuto(deviceId, composite.image, urls.imageSwu, urls.imageZck, urls.imageBootZck, artifacts, config, gateway)
+            return
+        }
         if (meta.appVersion != composite.daemon) {
             runBandaidBatchAuto(
                 deviceId,
-                listOf(BandaidPiece(OtaKind.Daemon, urls.daemonBinary, "daemon-$channel-${composite.daemon}", composite.daemon)),
+                listOf(
+                    BandaidPiece(
+                        kind = OtaKind.Daemon,
+                        url = urls.daemonBinary,
+                        filename = "daemon-$channel-${composite.daemon}",
+                        version = composite.daemon,
+                        assetLabel = "daemon",
+                        expected = artifacts?.daemon,
+                    ),
+                ),
                 config,
                 gateway,
             )
-            return
-        }
-        if (meta.imageVersion != composite.image) {
-            runImageAuto(deviceId, composite.image, urls.imageSwu, urls.imageZck, config, gateway)
         }
     }
 
@@ -456,6 +494,11 @@ public class OtaService(
         if (soonest != null && soonest < deadline) {
             deadline = maxOf(soonest, now + MIN_RESUME_DELAY_MS)
         }
+        val openedAts = mutex.withLock { linkOpenAt.values.toList() }
+        for (openedAt in openedAts) {
+            val ready = openedAt + LINK_STABILITY_MS
+            if (ready > now && ready < deadline) deadline = ready
+        }
         val sleepMs = (deadline - now).coerceAtLeast(0L)
         withTimeoutOrNull(sleepMs) { wake.await() }
         mutex.withLock { pollWake = null }
@@ -463,6 +506,19 @@ public class OtaService(
 
     private suspend fun wakePoll() {
         mutex.withLock { pollWake }?.complete(Unit)
+    }
+
+    private suspend fun noteLinkOpen(deviceId: String) = mutex.withLock {
+        linkOpenAt[deviceId] = System.currentTimeMillis()
+    }
+
+    private suspend fun noteLinkClosed(deviceId: String) = mutex.withLock {
+        linkOpenAt.remove(deviceId)
+    }
+
+    private suspend fun linkStable(deviceId: String): Boolean = mutex.withLock {
+        val openedAt = linkOpenAt[deviceId] ?: return@withLock false
+        System.currentTimeMillis() - openedAt >= LINK_STABILITY_MS
     }
 
     private suspend fun recordMeta(deviceId: String, meta: BridgeThingMeta) {
@@ -505,7 +561,6 @@ public class OtaService(
         val release = manifest.releases[channel.latest]
         if (release != null && (release.yanked != null || release.deprecated)) return
 
-        // snapshot devices so the iteration below doesn't hold the meta lock across download work.
         val snapshot = deviceMetaMutex.withLock { deviceMeta.toMap() }
         for ((deviceId, meta) in snapshot) {
             reconcileDevice(deviceId, meta, composite, release, config, gateway)
@@ -540,6 +595,21 @@ public class OtaService(
             imageVariant = meta.imageVariant,
         )
 
+        if (meta.imageVersion != latest.image) {
+            eventsFlow.emit(
+                OtaPollEvent.UpdateAvailable(
+                    deviceId = deviceId,
+                    kind = OtaKind.Image,
+                    fromVersion = meta.imageVersion,
+                    toVersion = latest.image,
+                )
+            )
+            if (config.autoPush && autoPushReady(deviceId)) {
+                runImageAuto(deviceId, latest.image, urls.imageSwu, urls.imageZck, urls.imageBootZck, release?.artifacts, config, gateway)
+            }
+            return
+        }
+
         val batch = mutableListOf<BandaidPiece>()
         if (meta.appVersion != latest.daemon) {
             eventsFlow.emit(
@@ -550,7 +620,16 @@ public class OtaService(
                     toVersion = latest.daemon,
                 )
             )
-            batch.add(BandaidPiece(OtaKind.Daemon, urls.daemonBinary, "daemon-${config.channel}-${latest.daemon}", latest.daemon))
+            batch.add(
+                BandaidPiece(
+                    kind = OtaKind.Daemon,
+                    url = urls.daemonBinary,
+                    filename = "daemon-${config.channel}-${latest.daemon}",
+                    version = latest.daemon,
+                    assetLabel = "daemon",
+                    expected = release?.artifacts?.daemon,
+                ),
+            )
         }
         for (drift in builtinWebappDrift(deviceId, release, config, gateway)) {
             eventsFlow.emit(
@@ -564,30 +643,19 @@ public class OtaService(
             batch.add(drift.piece)
         }
 
-        if (batch.isNotEmpty()) {
-            if (config.autoPush && autoPushReady(deviceId)) {
-                runBandaidBatchAuto(deviceId, batch, config, gateway)
-            }
-            return
-        }
-
-        // bandaid is current; reconcile the image (its slot carries the matching daemon + webapps).
-        if (meta.imageVersion != latest.image) {
-            eventsFlow.emit(
-                OtaPollEvent.UpdateAvailable(
-                    deviceId = deviceId,
-                    kind = OtaKind.Image,
-                    fromVersion = meta.imageVersion,
-                    toVersion = latest.image,
-                )
-            )
-            if (config.autoPush && autoPushReady(deviceId)) {
-                runImageAuto(deviceId, latest.image, urls.imageSwu, urls.imageZck, config, gateway)
-            }
+        if (batch.isNotEmpty() && config.autoPush && autoPushReady(deviceId)) {
+            runBandaidBatchAuto(deviceId, batch, config, gateway)
         }
     }
 
-    private data class BandaidPiece(val kind: OtaKind, val url: String, val filename: String, val version: String)
+    private data class BandaidPiece(
+        val kind: OtaKind,
+        val url: String,
+        val filename: String,
+        val version: String,
+        val assetLabel: String,
+        val expected: OtaArtifactDigest?,
+    )
 
     private data class WebappDrift(val piece: BandaidPiece, val fromVersion: String)
 
@@ -607,7 +675,14 @@ public class OtaService(
             val url = OtaArtifactUrls.builtinWebapp(config.rootUrl, config.channel, slug, available)
             out.add(
                 WebappDrift(
-                    piece = BandaidPiece(OtaKind.BuiltinWebapp, url, "webapp-${config.channel}-$slug-$available", available),
+                    piece = BandaidPiece(
+                        kind = OtaKind.BuiltinWebapp,
+                        url = url,
+                        filename = "webapp-${config.channel}-$slug-$available",
+                        version = available,
+                        assetLabel = "webapp: $slug",
+                        expected = release.artifacts?.webapps?.get(slug),
+                    ),
                     fromVersion = current,
                 )
             )
@@ -627,8 +702,9 @@ public class OtaService(
 
     private suspend fun endInFlight(deviceId: String) = mutex.withLock { inFlight.remove(deviceId) }
 
-    private suspend fun autoPushReady(deviceId: String): Boolean = mutex.withLock {
-        System.currentTimeMillis() >= (autoPushNextAt[deviceId] ?: 0L)
+    private suspend fun autoPushReady(deviceId: String): Boolean {
+        if (!linkStable(deviceId)) return false
+        return mutex.withLock { System.currentTimeMillis() >= (autoPushNextAt[deviceId] ?: 0L) }
     }
 
     private suspend fun noteAutoPushResult(deviceId: String, failed: Boolean) = mutex.withLock {
@@ -653,36 +729,26 @@ public class OtaService(
         if (!tryBeginInFlight(deviceId)) return
         try {
             val cacheDir = effectiveCacheDir(config)
+            val labelKind = if (pieces.any { it.kind == OtaKind.Daemon }) OtaKind.Daemon else OtaKind.BuiltinWebapp
+            var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
+            val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
+                last = snapshot
+                eventsFlow.tryEmit(OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, snapshot = snapshot))
+            }
             val artifacts = mutableListOf<Pair<OtaKind, File>>()
             for (piece in pieces) {
                 val cached = try {
-                    downloadIfNeeded(piece.url, cacheDir, piece.filename)
+                    downloadIfNeeded(piece.url, cacheDir, piece.filename, piece.assetLabel, piece.expected, emit)
                 } catch (e: Throwable) {
-                    eventsFlow.emit(
-                        OtaPollEvent.Failed(
-                            deviceId = deviceId,
-                            kind = piece.kind,
-                            reason = "bandaid download failed: ${e.message ?: e.toString()}",
-                        )
-                    )
+                    val reason = "bandaid download failed: ${e.message ?: e.toString()}"
+                    emit(OtaPhaseSnapshot.Failed(reason = reason))
+                    eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = piece.kind, reason = reason))
                     noteAutoPushResult(deviceId, failed = true)
                     return
                 }
                 artifacts.add(piece.kind to cached)
             }
-            val labelKind = if (pieces.any { it.kind == OtaKind.Daemon }) OtaKind.Daemon else OtaKind.BuiltinWebapp
-            var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
-            val terminal = applyBandaidBatch(
-                gateway = gateway,
-                deviceId = deviceId,
-                artifacts = artifacts,
-                emit = { snapshot ->
-                    last = snapshot
-                    eventsFlow.tryEmit(
-                        OtaPollEvent.Progress(deviceId = deviceId, kind = labelKind, snapshot = snapshot)
-                    )
-                },
-            )
+            val terminal = applyBandaidBatch(gateway = gateway, deviceId = deviceId, artifacts = artifacts, emit = emit)
             val finalSnap = terminal.takeUnless { it is OtaPhaseSnapshot.Idle } ?: last
             if (finalSnap is OtaPhaseSnapshot.Failed) {
                 eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = labelKind, reason = finalSnap.reason))
@@ -703,29 +769,43 @@ public class OtaService(
         targetVersion: String,
         swuUrl: String,
         zckUrl: String,
+        bootZckUrl: String,
+        artifacts: OtaReleaseArtifacts?,
         config: OtaPollConfig,
         gateway: BridgethingGateway,
     ) {
         if (!tryBeginInFlight(deviceId)) return
         try {
             val cacheDir = effectiveCacheDir(config)
+            var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
+            val emit: suspend (OtaPhaseSnapshot) -> Unit = { snapshot ->
+                last = snapshot
+                eventsFlow.tryEmit(OtaPollEvent.Progress(deviceId = deviceId, kind = OtaKind.Image, snapshot = snapshot))
+            }
             val swuLocal: File
             val zckLocal: File
+            val bootZckLocal: File
             try {
-                swuLocal = downloadIfNeeded(swuUrl, cacheDir, "image-${config.channel}-$targetVersion.swu")
-                zckLocal = downloadIfNeeded(zckUrl, cacheDir, "image-${config.channel}-$targetVersion.zck")
-            } catch (e: Throwable) {
-                eventsFlow.emit(
-                    OtaPollEvent.Failed(
-                        deviceId = deviceId,
-                        kind = OtaKind.Image,
-                        reason = "image download failed: ${e.message ?: e.toString()}",
-                    )
+                swuLocal = downloadIfNeeded(
+                    swuUrl, cacheDir, "image-${config.channel}-$targetVersion.swu",
+                    "update.swu", artifacts?.imageSwu, emit,
                 )
+                zckLocal = downloadIfNeeded(
+                    zckUrl, cacheDir, "image-${config.channel}-$targetVersion.zck",
+                    SYSTEM_ZCK_ASSET, artifacts?.imageZck, emit,
+                )
+                bootZckLocal = downloadIfNeeded(
+                    bootZckUrl, cacheDir, "image-${config.channel}-$targetVersion-boot.zck",
+                    BOOT_ZCK_ASSET, artifacts?.imageBootZck, emit,
+                )
+            } catch (e: Throwable) {
+                val reason = "image download failed: ${e.message ?: e.toString()}"
+                emit(OtaPhaseSnapshot.Failed(reason = reason))
+                eventsFlow.emit(OtaPollEvent.Failed(deviceId = deviceId, kind = OtaKind.Image, reason = reason))
+                noteAutoPushResult(deviceId, failed = true)
                 return
             }
-            setLocalZck(zckLocal)
-            var last: OtaPhaseSnapshot = OtaPhaseSnapshot.Idle
+            setLocalZcks(mapOf(SYSTEM_ZCK_ASSET to zckLocal, BOOT_ZCK_ASSET to bootZckLocal))
             val (terminal, _) = driveOta(
                 gateway = gateway,
                 deviceId = deviceId,
@@ -733,12 +813,7 @@ public class OtaService(
                 artifactPath = swuLocal,
                 updateUrlBase = config.rootUrl,
                 mode = DriveMode.Full,
-                emit = { snapshot ->
-                    last = snapshot
-                    eventsFlow.tryEmit(
-                        OtaPollEvent.Progress(deviceId = deviceId, kind = OtaKind.Image, snapshot = snapshot)
-                    )
-                },
+                emit = emit,
             )
             val finalSnap = terminal.takeUnless { it is OtaPhaseSnapshot.Idle } ?: last
             emitTerminal(deviceId, OtaKind.Image, targetVersion, finalSnap)
@@ -778,19 +853,59 @@ public class OtaService(
         }
     }
 
-    private suspend fun downloadIfNeeded(url: String, dir: File, filename: String): File = withContext(Dispatchers.IO) {
+    private suspend fun downloadIfNeeded(
+        url: String,
+        dir: File,
+        filename: String,
+        asset: String,
+        expected: OtaArtifactDigest?,
+        emit: (suspend (OtaPhaseSnapshot) -> Unit)?,
+    ): File = withContext(Dispatchers.IO) {
         if (!dir.exists()) dir.mkdirs()
-        val target = File(dir, filename)
-        if (target.exists() && target.length() > 0L) return@withContext target
-        val req = Request.Builder().url(url).build()
-        httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("artifact fetch returned HTTP ${resp.code}")
-            val body = resp.body ?: throw IOException("artifact fetch returned empty body")
-            target.outputStream().use { out ->
-                body.byteStream().use { input -> input.copyTo(out) }
-            }
+        val cacheName = expected?.let { "$filename-${it.sha256}" } ?: filename
+        val target = File(dir, cacheName)
+        if (target.exists()) {
+            val size = target.length()
+            val reusable = if (expected != null) size == expected.size else size > 0L
+            if (reusable) return@withContext target
+            target.delete()
         }
-        target
+
+        val tracker = RateTracker()
+        emit?.invoke(OtaPhaseSnapshot.Downloading(asset = asset, received = 0L, total = expected?.size ?: 0L, ratePerSec = null))
+        val tmp = File(dir, "$cacheName.download")
+        try {
+            val req = Request.Builder().url(url).build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("artifact fetch returned HTTP ${resp.code}")
+                val body = resp.body ?: throw IOException("artifact fetch returned empty body")
+                val total = body.contentLength().coerceAtLeast(0L)
+                body.byteStream().use { input ->
+                    tmp.outputStream().use { out ->
+                        val buffer = ByteArray(64 * 1024)
+                        var received = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            out.write(buffer, 0, read)
+                            received += read
+                            tracker.record(received)
+                            emit?.invoke(OtaPhaseSnapshot.Downloading(asset, received, total, tracker.ratePerSec()))
+                        }
+                    }
+                }
+            }
+            if (expected != null) {
+                if (tmp.length() != expected.size) throw DigestMismatchException(asset, "size")
+                if (hashFile(tmp) != expected.sha256) throw DigestMismatchException(asset, "sha256")
+            }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) throw IOException("failed to move downloaded artifact into cache")
+            target
+        } catch (e: Throwable) {
+            tmp.delete()
+            throw e
+        }
     }
 
     private suspend fun handleRangeRequest(
@@ -798,9 +913,11 @@ public class OtaService(
         handle: OtaAssetRangeHandle,
         req: OtaAssetRange,
     ) {
-        val zck = localZck
+        val zck = localZcks[req.asset]
         if (zck == null) {
-            runCatching { handle.respondErr(OtaAssetRangeRejected(reason = "companion has no .zck cached")) }
+            runCatching {
+                handle.respondErr(OtaAssetRangeRejected(reason = "companion has no cached .zck for asset ${req.asset}"))
+            }
             return
         }
         val length = try { zck.length() } catch (e: Throwable) {
@@ -845,6 +962,7 @@ public class OtaService(
                 runCatching {
                     handle.respond(OtaAssetRangeReply(totalSize = totalSize, parts = parts, body = TransferBody.Inline(body)))
                 }
+                noteRangeServed(handle.deviceId, req.asset, streamLen)
                 return
             }
 
@@ -886,28 +1004,34 @@ public class OtaService(
                     streamOffset += read.toUInt()
                 }
             }
+            noteRangeServed(handle.deviceId, req.asset, streamLen)
         } finally {
             runCatching { raf.close() }
         }
     }
 
-    private enum class DriveMode {
-        /** Image: stream, then await `Reboot` (the device power-cycles). */
-        Full,
+    private suspend fun noteRangeServed(deviceId: String, asset: String, bytes: UInt) {
+        var progress: (suspend (OtaPhaseSnapshot) -> Unit)? = null
+        var served = 0L
+        var rate: Double? = null
+        mutex.withLock {
+            if (imageProgressDeviceId != deviceId) return@withLock
+            val p = imageProgress ?: return@withLock
+            served = (rangeServed[asset] ?: 0L) + bytes.toLong()
+            rangeServed[asset] = served
+            val tracker = rangeTrackers.getOrPut(asset) { RateTracker() }
+            tracker.record(served)
+            rate = tracker.ratePerSec()
+            progress = p
+        }
+        progress?.invoke(OtaPhaseSnapshot.RangePull(asset = asset, served = served, ratePerSec = rate))
+    }
 
-        /**
-         * Bandaid (daemon / builtin-webapp): stream, then await `Writing`/100,
-         * which means the piece is staged but not yet live. The batch goes
-         * live on a later `OtaActivate`.
-         */
+    private enum class DriveMode {
+        Full,
         Stage,
     }
 
-    /**
-     * Stream one artifact and await its terminal. Returns the terminal
-     * snapshot plus the artifact's sha256 (the `update_id`), which the caller
-     * passes to `OtaActivate.expected` for a bandaid batch.
-     */
     private suspend fun driveOta(
         gateway: BridgethingGateway,
         deviceId: String,
@@ -952,58 +1076,78 @@ public class OtaService(
             return OtaPhaseSnapshot.Failed(reason = "OtaBegin send failed: ${e.message ?: e.toString()}") to sha
         }
 
-        emit(OtaPhaseSnapshot.Streaming(percent = percent(resumeFrom.toLong(), totalSize)))
+        if (kind == OtaKind.Image) setImageProgress(deviceId, emit)
+        return try {
+            emit(OtaPhaseSnapshot.Streaming(sent = resumeFrom.toLong(), total = totalSize, ratePerSec = null, etaSeconds = null))
 
-        val success: OtaPhaseSnapshot = if (mode == DriveMode.Full) OtaPhaseSnapshot.Completed else OtaPhaseSnapshot.Staged
-        val terminal = CompletableDeferred<OtaPhaseSnapshot>()
-        val progressJob = scope.launch {
-            gateway.device(deviceId).system.otaProgress.collect { p ->
-                emit(OtaPhaseSnapshot.Applying(phase = p.phase, percent = p.percent.toInt()))
-                val done = when (mode) {
-                    DriveMode.Full -> p.phase == OtaPhase.Reboot
-                    DriveMode.Stage -> p.phase == OtaPhase.Writing && p.percent.toInt() >= 100
-                }
-                if (done && terminal.isActive) terminal.complete(success)
-            }
-        }
-        val errorJob = scope.launch {
-            gateway.device(deviceId).system.otaError.collect { e ->
-                if (terminal.isActive) {
-                    terminal.complete(OtaPhaseSnapshot.Failed(reason = "[${e.code}] ${e.msg}"))
+            val success: OtaPhaseSnapshot = if (mode == DriveMode.Full) OtaPhaseSnapshot.Completed else OtaPhaseSnapshot.Staged
+            val terminal = CompletableDeferred<OtaPhaseSnapshot>()
+            val progressJob = scope.launch {
+                gateway.device(deviceId).system.otaProgress.collect { p ->
+                    emit(OtaPhaseSnapshot.Applying(phase = p.phase, percent = p.percent.toInt()))
+                    val done = when (mode) {
+                        DriveMode.Full -> p.phase == OtaPhase.Reboot
+                        DriveMode.Stage -> p.phase == OtaPhase.Writing && p.percent.toInt() >= 100
+                    }
+                    if (done && terminal.isActive) terminal.complete(success)
                 }
             }
-        }
-
-        val streamJob = scope.launch {
-            try {
-                streamArtifact(
-                    gateway = gateway,
-                    deviceId = deviceId,
-                    transferId = transferId,
-                    artifactPath = artifactPath,
-                    startOffset = resumeFrom.toLong(),
-                    totalSize = totalSize,
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                if (terminal.isActive) {
-                    terminal.complete(OtaPhaseSnapshot.Failed(reason = "chunk stream failed: ${e.message ?: e.toString()}"))
+            val errorJob = scope.launch {
+                gateway.device(deviceId).system.otaError.collect { e ->
+                    if (terminal.isActive) {
+                        terminal.complete(OtaPhaseSnapshot.Failed(reason = "[${e.code}] ${e.msg}"))
+                    }
                 }
             }
-        }
 
-        val result = try { terminal.await() } finally {
-            streamJob.cancelAndJoin()
-            progressJob.cancelAndJoin()
-            errorJob.cancelAndJoin()
-        }
-        if (result is OtaPhaseSnapshot.Failed) {
-            runCatching {
-                gateway.device(deviceId).transfer.abandon(TransferAbandon(transferId = transferId, reason = "attempt ended"))
+            val streamJob = scope.launch {
+                try {
+                    streamArtifact(
+                        gateway = gateway,
+                        deviceId = deviceId,
+                        transferId = transferId,
+                        artifactPath = artifactPath,
+                        startOffset = resumeFrom.toLong(),
+                        totalSize = totalSize,
+                        emit = emit,
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (terminal.isActive) {
+                        terminal.complete(OtaPhaseSnapshot.Failed(reason = "chunk stream failed: ${e.message ?: e.toString()}"))
+                    }
+                }
             }
+
+            val result = try { terminal.await() } finally {
+                streamJob.cancelAndJoin()
+                progressJob.cancelAndJoin()
+                errorJob.cancelAndJoin()
+            }
+            if (result is OtaPhaseSnapshot.Failed) {
+                runCatching {
+                    gateway.device(deviceId).transfer.abandon(TransferAbandon(transferId = transferId, reason = "attempt ended"))
+                }
+            }
+            result to sha
+        } finally {
+            if (kind == OtaKind.Image) clearImageProgress()
         }
-        return result to sha
+    }
+
+    private suspend fun setImageProgress(deviceId: String, emit: suspend (OtaPhaseSnapshot) -> Unit) = mutex.withLock {
+        imageProgressDeviceId = deviceId
+        imageProgress = emit
+        rangeServed.clear()
+        rangeTrackers.clear()
+    }
+
+    private suspend fun clearImageProgress() = mutex.withLock {
+        imageProgress = null
+        imageProgressDeviceId = null
+        rangeServed.clear()
+        rangeTrackers.clear()
     }
 
     private suspend fun applyBandaidBatch(
@@ -1066,15 +1210,36 @@ public class OtaService(
         artifactPath: File,
         startOffset: Long,
         totalSize: Long,
+        emit: (suspend (OtaPhaseSnapshot) -> Unit)?,
     ) = withContext(Dispatchers.IO) {
+        val tracker = RateTracker()
+        var lastEmitMs = 0L
+        suspend fun emitStreaming(sentRaw: Long) {
+            val sent = sentRaw.coerceAtMost(totalSize)
+            tracker.record(sent)
+            val now = System.currentTimeMillis()
+            if (now - lastEmitMs < 250L && sent < totalSize) return
+            lastEmitMs = now
+            val remaining = (totalSize - sent).coerceAtLeast(0L)
+            emit?.invoke(
+                OtaPhaseSnapshot.Streaming(
+                    sent = sent, total = totalSize,
+                    ratePerSec = tracker.ratePerSec(), etaSeconds = tracker.etaSeconds(remaining),
+                ),
+            )
+        }
         try {
             RandomAccessFile(artifactPath, "r").use { raf ->
-                if (startOffset > 0L) raf.seek(startOffset)
+                if (startOffset > 0L) {
+                    raf.seek(startOffset)
+                    transferAcks.note(transferId, startOffset.toUInt())
+                }
                 var offset = startOffset
                 while (offset < totalSize) {
                     // hold no more than OTA_WINDOW_BYTES unacked so a cancelled attempt leaves nothing in flight.
                     while (true) {
                         val acked = transferAcks.receivedBytes(transferId).toLong()
+                        emitStreaming(acked)
                         if (offset < acked + OTA_WINDOW_BYTES) break
                         if (!transferAcks.waitForProgress(transferId, acked.toUInt(), OTA_ACK_TIMEOUT_MS)) {
                             throw IOException("transfer stalled: fragment acks stopped at $offset/$totalSize")
@@ -1092,6 +1257,7 @@ public class OtaService(
                     offset += read
                 }
             }
+            emitStreaming(totalSize)
         } finally {
             transferAcks.finish(transferId)
         }
@@ -1110,16 +1276,10 @@ public class OtaService(
         md.digest().joinToString("") { String.format("%02x", it) }
     }
 
-    private fun percent(n: Long, d: Long): Int {
-        if (d <= 0L) return 100
-        val p = (n * 100L) / d
-        return p.coerceIn(0L, 100L).toInt()
-    }
-
     private inline fun runOtaFlow(
         crossinline block: suspend (suspend (OtaPhaseSnapshot) -> Unit) -> Unit,
-    ): Flow<OtaPhaseSnapshot> = kotlinx.coroutines.flow.flow {
-        block { snapshot -> emit(snapshot) }
+    ): Flow<OtaPhaseSnapshot> = kotlinx.coroutines.flow.channelFlow {
+        block { snapshot -> send(snapshot) }
     }
 
     public fun close() {
@@ -1127,15 +1287,20 @@ public class OtaService(
     }
 
     private companion object {
+        const val SYSTEM_ZCK_ASSET = "system.img.zck"
+        const val BOOT_ZCK_ASSET = "boot.vfat.zck"
+
         val INLINE_RANGE_MAX_BYTES: UInt = 16u * 1024u
 
         const val OTA_FRAGMENT_BYTES = 4 * 1024
         const val OTA_WINDOW_BYTES = 32 * 1024L
         const val OTA_ACK_TIMEOUT_MS = 15_000L
 
-        const val AUTO_PUSH_BACKOFF_BASE_MS = 30_000L
+        const val AUTO_PUSH_BACKOFF_BASE_MS = 120_000L
         const val AUTO_PUSH_BACKOFF_MAX_MS = 15L * 60L * 1000L
         const val MIN_RESUME_DELAY_MS = 5_000L
+
+        const val LINK_STABILITY_MS = 120_000L
 
         val BUILTIN_WEBAPPS: List<Pair<String, UUID>> = listOf(
             "hub" to UUID.fromString("019693c0-5c6a-71f0-a89d-7e2a4d9c0a01"),

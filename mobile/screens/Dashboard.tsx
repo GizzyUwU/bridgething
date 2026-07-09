@@ -1,5 +1,4 @@
 import {
-  type BridgethingActiveWebapp,
   type BridgethingSessionPeer,
   type BridgethingWebappInfo,
 } from '@bridgething/session-react-native';
@@ -11,26 +10,32 @@ import {
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
+import { Alert, Text, View } from 'react-native';
 
 import { HeroPulse } from '../components/HeroPulse';
+import { OtaCard, otaHasActivity } from '../components/OtaCard';
 import { Press } from '../components/Press';
 import { RenameSheet } from '../components/RenameSheet';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionHeader } from '../components/SectionHeader';
 import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
 import { StatusStrip } from '../components/StatusStrip';
 import { WebappIcon } from '../components/WebappIcon';
 import { Button } from '../components/Button';
 import {
+  alertPairOutcome,
   connectedPeers,
   getSession,
   peerDisplayName,
+  runPairFlow,
+  setDeviceName,
   updateNickname,
   useSession,
 } from '../lib/session';
+import { installLatestOta, useOta } from '../lib/ota';
+import { refreshWebapps, useWebapps } from '../lib/webapps';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
@@ -46,51 +51,67 @@ export function DashboardScreen({ navigation }: Props) {
   const signedIn = provider != null;
 
   const status = describeStatus({ signedIn, hasPeer });
+  const [pairBusy, setPairBusy] = useState(false);
+
+  const runStatusAction = async (action: 'signIn' | 'pair') => {
+    if (action === 'signIn') {
+      navigation.navigate('Settings');
+      return;
+    }
+    if (pairBusy) return;
+    setPairBusy(true);
+    try {
+      alertPairOutcome(await runPairFlow());
+    } finally {
+      setPairBusy(false);
+    }
+  };
+
+  const action = status.action;
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
-      <ScrollView contentContainerClassName="px-5 pb-12 pt-2">
-        <ScreenHeader
-          title="your bridge"
-          subtitle="bridgething is running on this phone."
+    <ScrollScreen>
+      <ScreenHeader
+        title="your bridge"
+        subtitle="bridgething is running on this phone."
+      />
+      <ServiceHealthBanner />
+
+      <View className="mb-5">
+        <StatusStrip
+          tone={status.tone}
+          title={status.title}
+          subtitle={
+            pairBusy && action === 'pair' ? 'pairing…' : status.subtitle
+          }
+          onPress={action ? () => void runStatusAction(action) : undefined}
         />
-        <ServiceHealthBanner />
+      </View>
 
-        <View className="mb-5">
-          <StatusStrip
-            tone={status.tone}
-            title={status.title}
-            subtitle={status.subtitle}
-            onPress={
-              status.action
-                ? () => navigation.navigate('Setup', { startAt: status.action })
-                : undefined
-            }
-          />
-        </View>
-
-        {peers.length === 0 ? <NoDeviceHero /> : null}
-        {linkFailed.map(peer => (
-          <LinkFailedCard key={peer.id} peer={peer} />
-        ))}
-        {live.map(peer => (
-          <DeviceSection
-            key={peer.id}
-            peer={peer}
-            nickname={ledger[peer.id]?.nickname ?? undefined}
-            onAddApp={() =>
-              navigation.navigate('WebappBrowse', { deviceId: peer.id })
-            }
-            onTapApp={appId =>
-              navigation.navigate('WebappDetail', {
-                deviceId: peer.id,
-                id: appId,
-              })
-            }
-          />
-        ))}
-      </ScrollView>
-    </SafeAreaView>
+      {peers.length === 0 ? <NoDeviceHero /> : null}
+      {linkFailed.map(peer => (
+        <LinkFailedCard key={peer.id} peer={peer} />
+      ))}
+      {live.map(peer => (
+        <DeviceSection
+          key={peer.id}
+          peer={peer}
+          nickname={ledger[peer.id]?.nickname ?? undefined}
+          onAddApp={() =>
+            navigation.navigate('WebappBrowse', { deviceId: peer.id })
+          }
+          onTapApp={appId =>
+            navigation.navigate('WebappDetail', {
+              deviceId: peer.id,
+              id: appId,
+            })
+          }
+          onPickOtaVersion={channel =>
+            navigation.navigate('OtaVersions', { deviceId: peer.id, channel })
+          }
+        />
+      ))}
+    </ScrollScreen>
   );
 }
 
@@ -112,7 +133,7 @@ function describeStatus({
     return {
       tone: 'warn',
       title: 'sign in to your music',
-      subtitle: 'tap to finish setup',
+      subtitle: 'tap to sign in',
       action: 'signIn',
     };
   }
@@ -204,50 +225,24 @@ function DeviceSection({
   nickname,
   onAddApp,
   onTapApp,
+  onPickOtaVersion,
 }: {
   peer: BridgethingSessionPeer;
   nickname: string | undefined;
   onAddApp: () => void;
   onTapApp: (appId: string) => void;
+  onPickOtaVersion: (channel: string) => void;
 }) {
-  const session = getSession();
   const ledger = useSession(s => s.ledger);
   const meta = useSession(s => s.deviceMeta[peer.id]);
-  const [webapps, setWebapps] = useState<BridgethingWebappInfo[]>([]);
-  const [active, setActive] = useState<BridgethingActiveWebapp | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    setRefreshError(null);
-    try {
-      const [list, current] = await Promise.all([
-        session.listWebapps(peer.id),
-        session.currentWebapp(peer.id),
-      ]);
-      setWebapps(list);
-      setActive(current);
-    } catch (err) {
-      setRefreshError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRefreshing(false);
-    }
-  }, [peer.id, session]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  // Refresh on webapps-changed events scoped to this device.
-  useEffect(() => {
-    const off = session.subscribe(event => {
-      if (event.type === 'webappsChanged' && event.deviceId === peer.id) {
-        refresh();
-      }
-    });
-    return off;
-  }, [peer.id, refresh, session]);
+  const channel = useSession(s => s.otaPollConfig?.channel ?? 'stable');
+  const ota = useOta(s => s.byDevice[peer.id]);
+  const {
+    list: webapps,
+    active,
+    loading: refreshing,
+    error: refreshError,
+  } = useWebapps(peer.id);
 
   const [renameOpen, setRenameOpen] = useState(false);
 
@@ -256,10 +251,18 @@ function DeviceSection({
       <RenameSheet
         visible={renameOpen}
         title="rename your Car Thing"
-        message="this nickname only shows up here on your phone."
-        initialValue={nickname ?? ''}
+        message="this renames the device and shows on its screen."
+        initialValue={meta?.nickname ?? nickname ?? ''}
         placeholder={peer.name}
-        onSubmit={value => updateNickname(peer.id, value)}
+        onSubmit={value => {
+          void setDeviceName(peer.id, value).catch((err: unknown) => {
+            Alert.alert(
+              'rename failed',
+              err instanceof Error ? err.message : String(err),
+            );
+          });
+          updateNickname(peer.id, null);
+        }}
         onClose={() => setRenameOpen(false)}
       />
       <View
@@ -304,10 +307,28 @@ function DeviceSection({
         </Press>
       </View>
 
+      {otaHasActivity(ota) ? (
+        <View className="mb-4 -mt-1">
+          <OtaCard
+            name="software update"
+            status={ota}
+            onInstall={() => {
+              void installLatestOta(peer.id, channel).catch((err: unknown) => {
+                Alert.alert(
+                  'install failed',
+                  err instanceof Error ? err.message : String(err),
+                );
+              });
+            }}
+            onPickVersion={() => onPickOtaVersion(channel)}
+          />
+        </View>
+      ) : null}
+
       <SectionHeader
         title="installed apps"
         action={refreshing ? '' : 'refresh'}
-        onActionPress={refresh}
+        onActionPress={() => refreshWebapps(peer.id)}
       />
       {refreshError ? (
         <View className="mb-3 rounded-2xl border border-destructive/30 bg-destructive-soft px-4 py-3">
@@ -392,11 +413,13 @@ function AppTile({
         >
           {webapp.name}
         </Text>
-        {active ? (
-          <Text className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-primary">
-            active
-          </Text>
-        ) : null}
+        <Text
+          numberOfLines={1}
+          className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-primary"
+          style={{ opacity: active ? 1 : 0 }}
+        >
+          active
+        </Text>
       </View>
     </Press>
   );
@@ -414,6 +437,13 @@ function AddTile({ onPress }: { onPress: () => void }) {
         </View>
         <Text className="mt-2.5 text-center text-[12px] font-semibold leading-[15px] text-muted-foreground">
           add app
+        </Text>
+        <Text
+          numberOfLines={1}
+          className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-primary"
+          style={{ opacity: 0 }}
+        >
+          active
         </Text>
       </View>
     </Press>

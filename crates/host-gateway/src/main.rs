@@ -70,12 +70,15 @@ enum Command {
     /// cache miss; daemon does not fetch).
     #[arg(long)]
     update_url_base: Option<String>,
-    /// Optional .zck delta to serve byte ranges from when the daemon's
-    /// range proxy issues `OtaAssetRange` requests. When unset, range
-    /// requests are rejected - the OTA only completes if the .swu
-    /// carries enough data to install without delta fetches.
+    /// Optional rootfs .zck delta source, served for `OtaAssetRange`
+    /// requests whose asset is `system.img.zck`. When unset, those range
+    /// requests are rejected.
     #[arg(long)]
     zck: Option<PathBuf>,
+    /// Optional boot-partition .zck delta source, served for
+    /// `OtaAssetRange` requests whose asset is `boot.vfat.zck`.
+    #[arg(long)]
+    boot_zck: Option<PathBuf>,
   },
   /// Open `OtaBegin` for a daemon-kind update and stream a fresh aarch64 daemon binary.
   /// Daemon reaches `Writing` then `Reboot`. No range proxy traffic.
@@ -127,9 +130,16 @@ async fn main() -> anyhow::Result<()> {
       swu,
       update_url_base,
       zck,
+      boot_zck,
     } => {
       let swu_path = resolve_path(cli.fixture.as_deref(), &swu);
-      let zck_path = zck.map(|z| resolve_path(cli.fixture.as_deref(), &z));
+      let mut zcks = std::collections::HashMap::new();
+      if let Some(z) = zck {
+        zcks.insert("system.img.zck".to_string(), resolve_path(cli.fixture.as_deref(), &z));
+      }
+      if let Some(b) = boot_zck {
+        zcks.insert("boot.vfat.zck".to_string(), resolve_path(cli.fixture.as_deref(), &b));
+      }
       ota::run_push_update(
         &cli.url,
         chaos,
@@ -137,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
         OtaKind::Image,
         swu_path,
         update_url_base,
-        zck_path,
+        zcks,
       )
       .await
     }
@@ -150,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
         OtaKind::Daemon,
         binary_path,
         None,
-        None,
+        std::collections::HashMap::new(),
       )
       .await
     }
@@ -163,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
         OtaKind::BuiltinWebapp,
         bundle_path,
         None,
-        None,
+        std::collections::HashMap::new(),
       )
       .await
     }

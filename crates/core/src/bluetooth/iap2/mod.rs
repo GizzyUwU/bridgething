@@ -53,9 +53,7 @@ const IAP2_EVENTS_CAPACITY: usize = 64;
 const IAP2_OUTBOUND_TAP_CAPACITY: usize = 256;
 const COMPANION_BUNDLE_ID: &str = "com.bridgething.gateway";
 pub(crate) const SPOTIFY_BUNDLE_ID: &str = "com.spotify.client";
-const SPOTIFY_EA_PROTOCOL: &str = "com.spotify.wamp.2.msgpack.batched";
 const COMPANION_EA_PROTOCOL_ID: u8 = 1;
-const SPOTIFY_EA_PROTOCOL_ID: u8 = 2;
 
 const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
@@ -667,20 +665,12 @@ fn build_identification(meta: &SuperbirdMeta) -> IdentificationConfig {
     firmware_version: format!("v{}", env!("CARGO_PKG_VERSION")),
     bt_mac,
   });
-  config.supported_external_accessory_protocols = vec![
-    EaProtocol {
-      id: COMPANION_EA_PROTOCOL_ID,
-      name: COMPANION_BUNDLE_ID.to_string(),
-      match_action: EaProtocolMatchAction::NoAlertAction,
-      native_transport_component_identifier: None,
-    },
-    EaProtocol {
-      id: SPOTIFY_EA_PROTOCOL_ID,
-      name: SPOTIFY_EA_PROTOCOL.to_string(),
-      match_action: EaProtocolMatchAction::NoAlertAction,
-      native_transport_component_identifier: None,
-    },
-  ];
+  config.supported_external_accessory_protocols = vec![EaProtocol {
+    id: COMPANION_EA_PROTOCOL_ID,
+    name: COMPANION_BUNDLE_ID.to_string(),
+    match_action: EaProtocolMatchAction::NoAlertAction,
+    native_transport_component_identifier: None,
+  }];
   config
 }
 

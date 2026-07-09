@@ -9,60 +9,65 @@ import Foundation
     import FoundationNetworking
 #endif
 
-/// Snapshot of the current OTA flow visible to the host app's UI.
 public enum OtaPhaseSnapshot: Sendable, Equatable {
-    /// No OTA in flight.
     case idle
-    /// Companion is streaming `.swu` chunks to the daemon.
-    case streaming(percent: Int)
-    /// Daemon-side phases (verifying / writing / confirming / reboot).
+    case downloading(asset: String, received: UInt64, total: UInt64, ratePerSec: Double?)
+    case streaming(sent: UInt64, total: UInt64, ratePerSec: Double?, etaSeconds: Double?)
+    case rangePull(asset: String, served: UInt64, ratePerSec: Double?)
     case applying(phase: OtaPhase, percent: Int)
-    /// A bandaid piece (daemon / builtin-webapp) is validated and staged on
-    /// the device but not yet live. The batch goes live on `OtaActivate`.
     case staged
-    /// Update finished cleanly. Device has rebooted.
     case completed
-    /// Update failed.
     case failed(reason: String)
 }
 
-/// Terminal outcome of a third-party webapp install (`OtaKind.installedWebapp`).
+final class RateTracker: @unchecked Sendable {
+    private struct Sample { let bytes: UInt64; let at: Date }
+    private var samples: [Sample] = []
+    private let window: TimeInterval
+    private let lock = NSLock()
+
+    init(window: TimeInterval = 4.0) { self.window = window }
+
+    func record(_ bytes: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date()
+        samples.append(Sample(bytes: bytes, at: now))
+        let cutoff = now.addingTimeInterval(-window)
+        while samples.count > 2, let first = samples.first, first.at < cutoff {
+            samples.removeFirst()
+        }
+    }
+
+    func ratePerSec() -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard let first = samples.first, let last = samples.last else { return nil }
+        let dt = last.at.timeIntervalSince(first.at)
+        guard dt > 0.05, last.bytes >= first.bytes else { return nil }
+        return Double(last.bytes - first.bytes) / dt
+    }
+
+    func etaSeconds(remaining: UInt64) -> Double? {
+        guard let rate = ratePerSec(), rate > 0 else { return nil }
+        return Double(remaining) / rate
+    }
+}
+
 public enum WebappInstallResult: Sendable {
     case installed(WebappInfo)
     case failed(reason: String)
 }
 
-/// Configuration for the manifest poll loop. The host app supplies one
-/// of these to opt the device into auto-updates against
-/// `ota.bridgething.com` (or a self-hosted equivalent). When unset the
-/// service stays in passive mode (range serving + manual push only).
 public struct OtaPollConfig: Sendable, Equatable {
-    /// Root URL the manifest and artifacts live under. Default
-    /// `https://ota.bridgething.com`. Override only for self-hosting
-    /// or local development.
     public var rootURL: URL
-    /// Channel the host app's user has selected (`stable` or `dev`).
-    /// Cross-channel updates are gated behind a UI prompt because the
-    /// zcks won't line up; the poll loop emits `channelMismatch`
-    /// instead of auto-pushing when this disagrees with what the
-    /// device announces in `BridgeThingMeta.channel`.
     public var channel: String
-    /// Seconds between polls. Default 21600 (6 hours). Polling is
-    /// best-effort; missed wakeups (background-throttled) just defer.
     public var intervalSeconds: TimeInterval
-    /// Where to cache fetched artifacts. Defaults to
-    /// `Library/Caches/bridgething-ota` on iOS / macOS. Pass an
-    /// override only when the host app wants its own cache lifecycle.
     public var cacheDirectory: URL?
-    /// When true, a detected version delta auto-pushes. When false the
-    /// poll loop only emits `updateAvailable` and the host app drives
-    /// the push manually via `pushDaemon` / `pushUpdate`. Default true.
     public var autoPush: Bool
 
     public init(
         rootURL: URL = URL(string: "https://ota.bridgething.com")!,
         channel: String,
-        intervalSeconds: TimeInterval = 21600,
+        intervalSeconds: TimeInterval = 3600,
         cacheDirectory: URL? = nil,
         autoPush: Bool = true
     ) {
@@ -74,49 +79,18 @@ public struct OtaPollConfig: Sendable, Equatable {
     }
 }
 
-/// High-level event from the manifest poll loop. The host app drives
-/// UI off these (channel-switch prompts, "downloading update" toast,
-/// progress bar). In-flight per-chunk progress comes through as
-/// `progress(...)` carrying an `OtaPhaseSnapshot`.
 public enum OtaPollEvent: Sendable, Equatable {
-    /// Manifest fetch + parse succeeded; carries the manifest's own
-    /// `updated_at` for staleness UIs.
     case manifestPolled(updatedAt: String)
-    /// Manifest fetch or parse failed. The next interval tick retries.
     case manifestPollFailed(reason: String)
-    /// The device's announced `BridgeThingMeta.channel` does not match
-    /// the host app's configured channel. Auto-push is suppressed; the
-    /// host should prompt the user to reflash if they want to switch.
     case channelMismatch(deviceId: String, deviceChannel: String, configuredChannel: String)
-    /// New version detected. Emitted whether or not `autoPush` is on.
     case updateAvailable(deviceId: String, kind: OtaKind, fromVersion: String, toVersion: String)
-    /// Per-chunk / per-phase progress for an in-flight update.
     case progress(deviceId: String, kind: OtaKind, snapshot: OtaPhaseSnapshot)
-    /// Update finished. For daemon kind, the daemon process restarted
-    /// and the gateway link briefly drops + reconnects; for image kind,
-    /// the device power-cycled.
     case updated(deviceId: String, kind: OtaKind, version: String)
-    /// Update failed (download, push, or daemon-side).
     case failed(deviceId: String, kind: OtaKind, reason: String)
 }
 
-/// OTA service for the bridgething companion. Three jobs in one actor:
-///
-/// 1. Serve inbound `OtaAssetRange` requests from a configured local
-///    `.zck` (the daemon's range proxy reads delta bytes through this
-///    when applying an image OTA).
-/// 2. Drive a manual `pushDaemon` or `pushUpdate` against a target
-///    device when the host app supplies a local artifact path.
-/// 3. When `setPollConfig(...)` is provided, periodically fetch the
-///    discover manifest at `<rootURL>/manifest.json`, compare to each
-///    connected device's announced `BridgeThingMeta`, and auto-push
-///    daemon + image deltas. Cross-channel deltas surface as
-///    `channelMismatch` instead of pushing.
-///
-/// The host app subscribes to `events` to drive its UI; in-flight
-/// progress comes through as `progress(...)` carrying `OtaPhaseSnapshot`.
 public actor OtaService {
-    private var localZck: URL?
+    private var localZcks: [String: URL] = [:]
     private var rangeServerTask: Task<Void, Never>?
     private var metaTask: Task<Void, Never>?
     private var nicknameTask: Task<Void, Never>?
@@ -128,16 +102,26 @@ public actor OtaService {
     private var inFlight: Set<String> = []
     private var autoPushNextAt: [String: Date] = [:]
     private var autoPushFailures: [String: Int] = [:]
+    private var linkOpenAt: [String: Date] = [:]
     private var pollSleep: Task<Void, Never>?
 
+    private var imageProgress: AsyncStream<OtaPhaseSnapshot>.Continuation?
+    private var imageProgressDeviceId: String?
+    private var rangeServed: [String: UInt64] = [:]
+    private var rangeTrackers: [String: RateTracker] = [:]
+
     nonisolated let transferAcks = TransferAckWindow()
+
+    static let systemZckAsset = "system.img.zck"
+    static let bootZckAsset = "boot.vfat.zck"
 
     private static let otaFragmentBytes: UInt64 = 4 * 1024
     private static let otaWindowBytes: UInt64 = 32 * 1024
     private static let otaAckTimeoutSeconds: Double = 15
-    private static let autoPushBackoffBase: TimeInterval = 30
+    private static let autoPushBackoffBase: TimeInterval = 120
     private static let autoPushBackoffMax: TimeInterval = 15 * 60
     private static let minResumeDelay: TimeInterval = 5
+    private static let linkStabilitySeconds: TimeInterval = 120
 
     private static let builtinWebapps: [(slug: String, id: UUID)] = [
         ("hub", UUID(uuidString: "019693c0-5c6a-71f0-a89d-7e2a4d9c0a01")!),
@@ -149,6 +133,8 @@ public actor OtaService {
         let url: URL
         let filename: String
         let version: String
+        let assetLabel: String
+        let expected: OtaArtifactDigest?
     }
 
     private let eventContinuation: AsyncStream<OtaPollEvent>.Continuation
@@ -180,8 +166,13 @@ public actor OtaService {
             for await event in gateway.events {
                 guard let self else { return }
                 switch event {
-                case .connected:
+                case let .connected(device):
+                    await self.noteLinkOpen(deviceId: device.id)
                     await self.wakePoll()
+                case let .disconnected(deviceId):
+                    await self.noteLinkClosed(deviceId: deviceId)
+                case let .linkFailed(device, _):
+                    await self.noteLinkClosed(deviceId: device.id)
                 case let .message(deviceId, msg):
                     if case let .version(meta) = msg.data {
                         await self.recordMeta(deviceId: deviceId, meta: meta)
@@ -213,21 +204,21 @@ public actor OtaService {
         deviceMeta.removeAll()
     }
 
-    public func setLocalZck(_ url: URL?) {
-        localZck = url
+    public func setLocalZcks(_ map: [String: URL]) {
+        localZcks = map
     }
 
-    public func currentLocalZck() -> URL? { localZck }
+    public func currentLocalZcks() -> [String: URL] { localZcks }
 
     public func pushUpdate(
         gateway: BridgethingGateway,
         deviceId: String,
         swuPath: URL,
-        zckPath: URL,
+        zcks: [String: URL],
         updateUrlBase: String? = nil,
         progress: AsyncStream<OtaPhaseSnapshot>.Continuation
     ) async {
-        setLocalZck(zckPath)
+        setLocalZcks(zcks)
         let (result, _) = await driveOta(
             gateway: gateway,
             deviceId: deviceId,
@@ -383,7 +374,8 @@ public actor OtaService {
                 transferId: transferId,
                 artifactPath: bundlePath,
                 startOffset: UInt64(resumeFromOffset),
-                totalSize: totalSize
+                totalSize: totalSize,
+                progress: nil
             )
         } catch {
             terminalTask.cancel()
@@ -444,6 +436,15 @@ public actor OtaService {
             daemonVersion: composite.daemon, imageVersion: composite.image,
             imageVariant: meta.imageVariant
         )
+        let artifacts = (try? await discoverManifest(rootURL: rootURL))?.releases[version]?.artifacts
+        if meta.imageVersion != composite.image {
+            await runImageAuto(
+                deviceId: deviceId, targetVersion: composite.image,
+                swuURL: urls.imageSwu, zckURL: urls.imageZck, bootZckURL: urls.imageBootZck,
+                artifacts: artifacts, config: config, gateway: gateway
+            )
+            return
+        }
         if meta.appVersion != composite.daemon {
             await runBandaidBatchAuto(
                 deviceId: deviceId,
@@ -451,16 +452,11 @@ public actor OtaService {
                     kind: .daemon,
                     url: urls.daemonBinary,
                     filename: "daemon-\(channel)-\(composite.daemon)",
-                    version: composite.daemon
+                    version: composite.daemon,
+                    assetLabel: "daemon",
+                    expected: artifacts?.daemon
                 )],
                 config: config, gateway: gateway
-            )
-            return
-        }
-        if meta.imageVersion != composite.image {
-            await runImageAuto(
-                deviceId: deviceId, targetVersion: composite.image,
-                swuURL: urls.imageSwu, zckURL: urls.imageZck, config: config, gateway: gateway
             )
         }
     }
@@ -480,6 +476,10 @@ public actor OtaService {
         if let soonest = autoPushNextAt.values.min(), soonest < deadline {
             deadline = max(soonest, now.addingTimeInterval(Self.minResumeDelay))
         }
+        for openedAt in linkOpenAt.values {
+            let ready = openedAt.addingTimeInterval(Self.linkStabilitySeconds)
+            if ready > now, ready < deadline { deadline = ready }
+        }
         let seconds = max(deadline.timeIntervalSince(now), 0)
         let task = Task { _ = try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         pollSleep = task
@@ -489,6 +489,19 @@ public actor OtaService {
 
     func wakePoll() {
         pollSleep?.cancel()
+    }
+
+    private func noteLinkOpen(deviceId: String) {
+        linkOpenAt[deviceId] = Date()
+    }
+
+    private func noteLinkClosed(deviceId: String) {
+        linkOpenAt[deviceId] = nil
+    }
+
+    private func linkStable(_ deviceId: String) -> Bool {
+        guard let openedAt = linkOpenAt[deviceId] else { return false }
+        return Date().timeIntervalSince(openedAt) >= Self.linkStabilitySeconds
     }
 
     private func recordMeta(deviceId: String, meta: BridgeThingMeta) {
@@ -593,39 +606,6 @@ public actor OtaService {
             imageVariant: meta.imageVariant
         )
 
-        var batch: [BandaidPiece] = []
-        if meta.appVersion != latest.daemon {
-            eventContinuation.yield(.updateAvailable(
-                deviceId: deviceId,
-                kind: .daemon,
-                fromVersion: meta.appVersion,
-                toVersion: latest.daemon
-            ))
-            batch.append(BandaidPiece(
-                kind: .daemon,
-                url: urls.daemonBinary,
-                filename: "daemon-\(config.channel)-\(latest.daemon)",
-                version: latest.daemon
-            ))
-        }
-        for drift in await builtinWebappDrift(deviceId: deviceId, release: release, config: config, gateway: gateway) {
-            eventContinuation.yield(.updateAvailable(
-                deviceId: deviceId,
-                kind: .builtinWebapp,
-                fromVersion: drift.fromVersion,
-                toVersion: drift.piece.version
-            ))
-            batch.append(drift.piece)
-        }
-
-        if !batch.isEmpty {
-            if config.autoPush, autoPushReady(deviceId) {
-                await runBandaidBatchAuto(deviceId: deviceId, pieces: batch, config: config, gateway: gateway)
-            }
-            return
-        }
-
-        // bandaid is current; reconcile the image (its slot carries the matching daemon + webapps).
         if meta.imageVersion != latest.image {
             eventContinuation.yield(.updateAvailable(
                 deviceId: deviceId,
@@ -639,10 +619,44 @@ public actor OtaService {
                     targetVersion: latest.image,
                     swuURL: urls.imageSwu,
                     zckURL: urls.imageZck,
+                    bootZckURL: urls.imageBootZck,
+                    artifacts: release?.artifacts,
                     config: config,
                     gateway: gateway
                 )
             }
+            return
+        }
+
+        var batch: [BandaidPiece] = []
+        if meta.appVersion != latest.daemon {
+            eventContinuation.yield(.updateAvailable(
+                deviceId: deviceId,
+                kind: .daemon,
+                fromVersion: meta.appVersion,
+                toVersion: latest.daemon
+            ))
+            batch.append(BandaidPiece(
+                kind: .daemon,
+                url: urls.daemonBinary,
+                filename: "daemon-\(config.channel)-\(latest.daemon)",
+                version: latest.daemon,
+                assetLabel: "daemon",
+                expected: release?.artifacts?.daemon
+            ))
+        }
+        for drift in await builtinWebappDrift(deviceId: deviceId, release: release, config: config, gateway: gateway) {
+            eventContinuation.yield(.updateAvailable(
+                deviceId: deviceId,
+                kind: .builtinWebapp,
+                fromVersion: drift.fromVersion,
+                toVersion: drift.piece.version
+            ))
+            batch.append(drift.piece)
+        }
+
+        if !batch.isEmpty, config.autoPush, autoPushReady(deviceId) {
+            await runBandaidBatchAuto(deviceId: deviceId, pieces: batch, config: config, gateway: gateway)
         }
     }
 
@@ -676,7 +690,9 @@ public actor OtaService {
                     kind: .builtinWebapp,
                     url: url,
                     filename: "webapp-\(config.channel)-\(builtin.slug)-\(available)",
-                    version: available
+                    version: available,
+                    assetLabel: "webapp: \(builtin.slug)",
+                    expected: release.artifacts?.webapps[builtin.slug]
                 ),
                 fromVersion: current
             ))
@@ -700,6 +716,7 @@ public actor OtaService {
     }
 
     private func autoPushReady(_ deviceId: String) -> Bool {
+        guard linkStable(deviceId) else { return false }
         guard let next = autoPushNextAt[deviceId] else { return true }
         return Date() >= next
     }
@@ -726,24 +743,27 @@ public actor OtaService {
         guard tryBeginInFlight(deviceId) else { return }
         defer { inFlight.remove(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
+        let labelKind: OtaKind = pieces.contains { $0.kind == .daemon } ? .daemon : .builtinWebapp
+        let (stream, continuation) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
+        let forwarder = forwardProgress(stream: stream, deviceId: deviceId, kind: labelKind)
         var artifacts: [(kind: OtaKind, path: URL)] = []
         for piece in pieces {
             do {
-                let cached = try await downloadIfNeeded(url: piece.url, into: cacheDir, filename: piece.filename)
+                let cached = try await downloadIfNeeded(
+                    url: piece.url, into: cacheDir, filename: piece.filename,
+                    asset: piece.assetLabel, expected: piece.expected, progress: continuation
+                )
                 artifacts.append((kind: piece.kind, path: cached))
             } catch {
-                eventContinuation.yield(.failed(
-                    deviceId: deviceId,
-                    kind: piece.kind,
-                    reason: "bandaid download failed: \(error.localizedDescription)"
-                ))
+                let reason = "bandaid download failed: \(error.localizedDescription)"
+                continuation.yield(.failed(reason: reason))
+                continuation.finish()
+                _ = await forwarder.value
+                eventContinuation.yield(.failed(deviceId: deviceId, kind: piece.kind, reason: reason))
                 noteAutoPushResult(deviceId, failed: true)
                 return
             }
         }
-        let labelKind: OtaKind = pieces.contains { $0.kind == .daemon } ? .daemon : .builtinWebapp
-        let (stream, continuation) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
-        let forwarder = forwardProgress(stream: stream, deviceId: deviceId, kind: labelKind)
         await pushBandaidBatch(gateway: gateway, deviceId: deviceId, artifacts: artifacts, progress: continuation)
         let terminal = await forwarder.value
         if case let .failed(reason) = terminal {
@@ -762,40 +782,46 @@ public actor OtaService {
         targetVersion: String,
         swuURL: URL,
         zckURL: URL,
+        bootZckURL: URL,
+        artifacts: OtaReleaseArtifacts?,
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
         guard tryBeginInFlight(deviceId) else { return }
         defer { inFlight.remove(deviceId) }
         let cacheDir = effectiveCacheDir(config: config)
-        let swuLocal: URL
-        let zckLocal: URL
-        do {
-            swuLocal = try await downloadIfNeeded(
-                url: swuURL,
-                into: cacheDir,
-                filename: "image-\(config.channel)-\(targetVersion).swu"
-            )
-            zckLocal = try await downloadIfNeeded(
-                url: zckURL,
-                into: cacheDir,
-                filename: "image-\(config.channel)-\(targetVersion).zck"
-            )
-        } catch {
-            eventContinuation.yield(.failed(
-                deviceId: deviceId,
-                kind: .image,
-                reason: "image download failed: \(error.localizedDescription)"
-            ))
-            return
-        }
         let (stream, continuation) = AsyncStream.makeStream(of: OtaPhaseSnapshot.self)
         let forwarder = forwardProgress(stream: stream, deviceId: deviceId, kind: .image)
+        let swuLocal: URL
+        let zckLocal: URL
+        let bootZckLocal: URL
+        do {
+            swuLocal = try await downloadIfNeeded(
+                url: swuURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion).swu",
+                asset: "update.swu", expected: artifacts?.imageSwu, progress: continuation
+            )
+            zckLocal = try await downloadIfNeeded(
+                url: zckURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion).zck",
+                asset: Self.systemZckAsset, expected: artifacts?.imageZck, progress: continuation
+            )
+            bootZckLocal = try await downloadIfNeeded(
+                url: bootZckURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion)-boot.zck",
+                asset: Self.bootZckAsset, expected: artifacts?.imageBootZck, progress: continuation
+            )
+        } catch {
+            let reason = "image download failed: \(error.localizedDescription)"
+            continuation.yield(.failed(reason: reason))
+            continuation.finish()
+            _ = await forwarder.value
+            eventContinuation.yield(.failed(deviceId: deviceId, kind: .image, reason: reason))
+            noteAutoPushResult(deviceId, failed: true)
+            return
+        }
         await pushUpdate(
             gateway: gateway,
             deviceId: deviceId,
             swuPath: swuLocal,
-            zckPath: zckLocal,
+            zcks: [Self.systemZckAsset: zckLocal, Self.bootZckAsset: bootZckLocal],
             updateUrlBase: config.rootURL.absoluteString,
             progress: continuation
         )
@@ -815,7 +841,7 @@ public actor OtaService {
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         case let .failed(reason):
             eventContinuation.yield(.failed(deviceId: deviceId, kind: kind, reason: reason))
-        case .idle, .streaming, .applying, .staged:
+        case .idle, .downloading, .streaming, .rangePull, .applying, .staged:
             eventContinuation.yield(.updated(deviceId: deviceId, kind: kind, version: version))
         }
     }
@@ -855,17 +881,60 @@ public actor OtaService {
         return try decoder.decode(OtaDiscoverManifest.self, from: data)
     }
 
-    private func downloadIfNeeded(url: URL, into directory: URL, filename: String) async throws -> URL {
+    private func downloadIfNeeded(
+        url: URL,
+        into directory: URL,
+        filename: String,
+        asset: String,
+        expected: OtaArtifactDigest?,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation?
+    ) async throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let target = directory.appendingPathComponent(filename)
-        let attrs = try? FileManager.default.attributesOfItem(atPath: target.path)
-        if let size = attrs?[.size] as? NSNumber, size.intValue > 0 {
-            return target
+        let cacheName = expected.map { "\(filename)-\($0.sha256)" } ?? filename
+        let target = directory.appendingPathComponent(cacheName)
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: target.path),
+           let size = (attrs[.size] as? NSNumber)?.uint64Value {
+            if let expected {
+                if size == expected.size { return target }
+            } else if size > 0 {
+                return target
+            }
+            try? FileManager.default.removeItem(at: target)
         }
-        let (tmp, response) = try await URLSession.shared.download(from: url)
+
+        let tracker = RateTracker()
+        progress?.yield(.downloading(asset: asset, received: 0, total: expected?.size ?? 0, ratePerSec: nil))
+        let tmp: URL
+        let response: URLResponse
+        #if canImport(FoundationNetworking)
+            (tmp, response) = try await URLSession.shared.download(from: url)
+        #else
+            let delegate = DownloadProgressDelegate { received, total in
+                tracker.record(UInt64(max(received, 0)))
+                progress?.yield(.downloading(
+                    asset: asset,
+                    received: UInt64(max(received, 0)),
+                    total: UInt64(max(total, 0)),
+                    ratePerSec: tracker.ratePerSec()
+                ))
+            }
+            (tmp, response) = try await URLSession.shared.download(for: URLRequest(url: url), delegate: delegate)
+        #endif
         if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
             try? FileManager.default.removeItem(at: tmp)
             throw OtaServiceError.artifactHttpStatus(http.statusCode)
+        }
+        if let expected {
+            let size = (try FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber)?.uint64Value ?? 0
+            guard size == expected.size else {
+                try? FileManager.default.removeItem(at: tmp)
+                throw OtaServiceError.digestMismatch(asset: asset, field: "size")
+            }
+            let sha = try await hashFile(tmp)
+            guard sha == expected.sha256 else {
+                try? FileManager.default.removeItem(at: tmp)
+                throw OtaServiceError.digestMismatch(asset: asset, field: "sha256")
+            }
         }
         if FileManager.default.fileExists(atPath: target.path) {
             try FileManager.default.removeItem(at: target)
@@ -881,9 +950,9 @@ public actor OtaService {
         handle: OtaAssetRangeHandle,
         req: OtaAssetRange
     ) async {
-        guard let zck = localZck else {
+        guard let zck = localZcks[req.asset] else {
             try? await handle.respondErr(OtaAssetRangeRejected(
-                reason: "companion has no .zck cached"
+                reason: "companion has no cached .zck for asset \(req.asset)"
             ))
             return
         }
@@ -941,6 +1010,7 @@ public actor OtaService {
                 }
             }
             try? await handle.respond(OtaAssetRangeReply(totalSize: totalSize, parts: parts, body: .inline(body)))
+            noteRangeServed(deviceId: handle.deviceId, asset: req.asset, bytes: streamLen)
             return
         }
 
@@ -984,6 +1054,17 @@ public actor OtaService {
                 streamOffset += UInt32(data.count)
             }
         }
+        noteRangeServed(deviceId: handle.deviceId, asset: req.asset, bytes: streamLen)
+    }
+
+    private func noteRangeServed(deviceId: String, asset: String, bytes: UInt32) {
+        guard imageProgressDeviceId == deviceId, let progress = imageProgress else { return }
+        let served = (rangeServed[asset] ?? 0) + UInt64(bytes)
+        rangeServed[asset] = served
+        let tracker = rangeTrackers[asset] ?? RateTracker()
+        tracker.record(served)
+        rangeTrackers[asset] = tracker
+        progress.yield(.rangePull(asset: asset, served: served, ratePerSec: tracker.ratePerSec()))
     }
 
     // MARK: - push-side driver
@@ -1046,7 +1127,22 @@ public actor OtaService {
             return (.failed(reason: "OtaBegin protocol error: \(err)"), sha256)
         }
 
-        progress.yield(.streaming(percent: percent(UInt64(resumeFromOffset), totalSize)))
+        if kind == .image {
+            imageProgress = progress
+            imageProgressDeviceId = deviceId
+            rangeServed = [:]
+            rangeTrackers = [:]
+        }
+        defer {
+            if kind == .image {
+                imageProgress = nil
+                imageProgressDeviceId = nil
+                rangeServed = [:]
+                rangeTrackers = [:]
+            }
+        }
+
+        progress.yield(.streaming(sent: UInt64(resumeFromOffset), total: totalSize, ratePerSec: nil, etaSeconds: nil))
 
         let terminalTask = awaitTerminal(gateway: gateway, mode: mode, progress: progress)
 
@@ -1060,7 +1156,8 @@ public actor OtaService {
                         transferId: transferId,
                         artifactPath: artifactPath,
                         startOffset: UInt64(resumeFromOffset),
-                        totalSize: totalSize
+                        totalSize: totalSize,
+                        progress: progress
                     )
                     return nil
                 } catch is CancellationError {
@@ -1200,15 +1297,31 @@ public actor OtaService {
         transferId: UUID,
         artifactPath: URL,
         startOffset: UInt64,
-        totalSize: UInt64
+        totalSize: UInt64,
+        progress: AsyncStream<OtaPhaseSnapshot>.Continuation?
     ) async throws {
         let fh = try FileHandle(forReadingFrom: artifactPath)
         defer {
             try? fh.close()
             Task { await transferAcks.finish(transferId) }
         }
+        let tracker = RateTracker()
+        var lastEmit = Date.distantPast
+        func emitStreaming(_ sent: UInt64) {
+            let sent = min(sent, totalSize)
+            tracker.record(sent)
+            let now = Date()
+            guard now.timeIntervalSince(lastEmit) >= 0.25 || sent >= totalSize else { return }
+            lastEmit = now
+            let remaining = totalSize > sent ? totalSize - sent : 0
+            progress?.yield(.streaming(
+                sent: sent, total: totalSize,
+                ratePerSec: tracker.ratePerSec(), etaSeconds: tracker.etaSeconds(remaining: remaining)
+            ))
+        }
         if startOffset > 0 {
             try fh.seek(toOffset: startOffset)
+            await transferAcks.note(transferId: transferId, received: UInt32(startOffset))
         }
         var offset = startOffset
         while offset < totalSize {
@@ -1216,6 +1329,7 @@ public actor OtaService {
             // hold no more than otaWindowBytes unacked so a cancelled attempt leaves nothing in flight.
             while true {
                 let acked = UInt64(await transferAcks.receivedBytes(transferId))
+                emitStreaming(acked)
                 if offset < acked + Self.otaWindowBytes { break }
                 if !(await transferAcks.waitForProgress(transferId, beyond: UInt32(acked), timeoutSeconds: Self.otaAckTimeoutSeconds)) {
                     throw TransferStalled()
@@ -1232,6 +1346,7 @@ public actor OtaService {
             )
             offset += UInt64(data.count)
         }
+        emitStreaming(totalSize)
     }
 
     private func hashFile(_ url: URL) async throws -> String {
@@ -1250,11 +1365,6 @@ public actor OtaService {
         #endif
     }
 
-    private func percent(_ n: UInt64, _ d: UInt64) -> Int {
-        if d == 0 { return 100 }
-        let p = n.multipliedReportingOverflow(by: 100).0 / d
-        return Int(min(UInt64(100), p))
-    }
 }
 
 private enum OtaServiceError: Error, CustomStringConvertible, LocalizedError {
@@ -1262,6 +1372,7 @@ private enum OtaServiceError: Error, CustomStringConvertible, LocalizedError {
     case cryptoUnavailable
     case manifestHttpStatus(Int)
     case artifactHttpStatus(Int)
+    case digestMismatch(asset: String, field: String)
 
     var description: String {
         switch self {
@@ -1269,8 +1380,27 @@ private enum OtaServiceError: Error, CustomStringConvertible, LocalizedError {
         case .cryptoUnavailable: "CryptoKit unavailable on this platform"
         case let .manifestHttpStatus(code): "manifest fetch returned HTTP \(code)"
         case let .artifactHttpStatus(code): "artifact fetch returned HTTP \(code)"
+        case let .digestMismatch(asset, field): "\(asset) \(field) does not match the manifest; refusing to install"
         }
     }
 
     var errorDescription: String? { description }
 }
+
+#if !canImport(FoundationNetworking)
+    private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+        private let onProgress: @Sendable (Int64, Int64) -> Void
+        init(onProgress: @escaping @Sendable (Int64, Int64) -> Void) { self.onProgress = onProgress }
+        func urlSession(
+            _: URLSession,
+            downloadTask _: URLSessionDownloadTask,
+            didWriteData _: Int64,
+            totalBytesWritten: Int64,
+            totalBytesExpectedToWrite: Int64
+        ) {
+            onProgress(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+
+        func urlSession(_: URLSession, downloadTask _: URLSessionDownloadTask, didFinishDownloadingTo _: URL) {}
+    }
+#endif
