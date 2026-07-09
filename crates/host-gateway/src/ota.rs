@@ -207,7 +207,14 @@ async fn handle_inbound(
       registry.note(ack.transfer_id, ack.received as u64);
     }
     BridgeToGatewayMsgData::System(BridgeToGatewaySystemMsg::OtaProgress(p)) => {
-      tracing::info!(phase = ?p.phase, percent = p.percent, eta_ms = ?p.eta_ms, "progress");
+      tracing::info!(
+        phase = ?p.phase,
+        percent = p.percent,
+        dwl_percent = p.dwl_percent,
+        dwl_bytes = p.dwl_bytes,
+        eta_ms = ?p.eta_ms,
+        "progress"
+      );
       if matches!(p.phase, OtaPhase::Reboot) {
         tracing::info!("daemon entering reboot - exiting");
         return Ok(Some(Ok(())));

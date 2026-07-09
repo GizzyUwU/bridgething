@@ -9,11 +9,11 @@ use std::path::Path;
 use libbridgething::OtaPhase;
 use tokio::{sync::watch, time::Duration};
 
-use super::Error;
+use super::{Error, ProgressTick};
 
 pub async fn install_swu<F>(swu_path: &Path, progress: &F, cancel_rx: &mut watch::Receiver<bool>) -> Result<(), Error>
 where
-  F: Fn(OtaPhase, u8, Option<u32>) + Send + Sync,
+  F: Fn(ProgressTick) + Send + Sync,
 {
   let metadata = tokio::fs::metadata(swu_path).await?;
   tracing::info!(path = %swu_path.display(), bytes = metadata.len(), "swupdate stub: would install .swu");
@@ -24,8 +24,15 @@ where
       return Err(Error::Cancelled);
     }
     let percent = tick * 10;
-    let eta_ms = Some((10 - tick) as u32 * 100);
-    progress(OtaPhase::Writing, percent, eta_ms);
+    progress(ProgressTick {
+      phase: OtaPhase::Writing,
+      percent,
+      step: 1,
+      nsteps: 1,
+      dwl_percent: 0,
+      dwl_bytes: 0,
+      eta_ms: Some((10 - tick) as u32 * 100),
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
   }
 

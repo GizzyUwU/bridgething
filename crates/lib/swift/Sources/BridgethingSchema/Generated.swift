@@ -4,9 +4,11 @@
 
 import Foundation
 
+/// An album reference.
 public struct Album: Codable, Sendable {
 	public let id: String
 	public let name: String
+	/// Opaque artwork asset id (`asset.get`), when known.
 	public let artwork_id: String?
 
 	public init(id: String, name: String, artwork_id: String?) {
@@ -30,9 +32,11 @@ public struct ArtProfile: Codable, Sendable {
 	}
 }
 
+/// An artist reference.
 public struct Artist: Codable, Sendable {
 	public let id: String
 	public let name: String
+	/// Opaque artwork asset id (`asset.get`), when known.
 	public let artwork_id: String?
 
 	public init(id: String, name: String, artwork_id: String?) {
@@ -3017,16 +3021,25 @@ public enum OtaPhase: String, Codable, Sendable {
 }
 
 /// Per-phase progress tick. `percent` is 0-100 within the current
-/// phase, not the overall flow. `eta_ms` is best-effort remaining time
-/// for the phase when the orchestrator can compute it.
+/// libswupdate step, which resets at each step boundary, so it is not a
+/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
+/// time for the phase when the orchestrator can compute it.
 public struct OtaProgress: Codable, Sendable {
 	public let phase: OtaPhase
 	public let percent: UInt8
+	public let step: UInt8
+	public let nsteps: UInt8
+	public let dwlPercent: UInt8
+	public let dwlBytes: UInt32
 	public let etaMs: UInt32?
 
-	public init(phase: OtaPhase, percent: UInt8, etaMs: UInt32?) {
+	public init(phase: OtaPhase, percent: UInt8, step: UInt8, nsteps: UInt8, dwlPercent: UInt8, dwlBytes: UInt32, etaMs: UInt32?) {
 		self.phase = phase
 		self.percent = percent
+		self.step = step
+		self.nsteps = nsteps
+		self.dwlPercent = dwlPercent
+		self.dwlBytes = dwlBytes
 		self.etaMs = etaMs
 	}
 }
@@ -3419,8 +3432,6 @@ public enum PlaybackState: String, Codable, Sendable {
 public struct Playback: Codable, Sendable {
 	public let state: PlaybackState
 	public let positionMs: UInt32
-	/// how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
-	/// forward while `state == Playing` so a cached resend never reads as a backward seek
 	public let positionAgeMs: UInt32?
 	public let shuffle: Bool
 	public let shuffleMode: ShuffleMode?
@@ -3461,6 +3472,7 @@ public struct PlaybackContext: Codable, Sendable {
 	}
 }
 
+/// Repeat and shuffle toggle state.
 public struct PlaybackOptions: Codable, Sendable {
 	public let `repeat`: RepeatMode
 	public let shuffle: Bool
@@ -3500,7 +3512,6 @@ public struct QueueItem: Codable, Sendable {
 	public let artworkId: String?
 	public let durationMs: UInt32?
 	public let persistentId: String?
-	/// true when the user explicitly queued this item (vs it coming from the playing context).
 	public let queued: Bool?
 
 	public init(uri: String, title: String?, artist: String?, artistUri: String?, album: String?, albumUri: String?, artworkId: String?, durationMs: UInt32?, persistentId: String?, queued: Bool?) {
@@ -3917,14 +3928,20 @@ public struct TimeInfo: Codable, Sendable {
 	}
 }
 
+/// A track with resolved album/artist metadata, used by library search
+/// and browse results. For live now-playing state see `MediaItem`.
 public struct Track: Codable, Sendable {
 	public let id: String
 	public let name: String
 	public let album: Album
+	/// Primary credited artist.
 	public let artist: Artist
+	/// All credited artists, in order.
 	public let artists: [Artist]
 	public let duration_ms: UInt32
+	/// Opaque artwork asset id; pass to `asset.get` for the bytes.
 	public let image_id: String
+	/// Whether the track is saved in the user's library.
 	public let saved: Bool
 
 	public init(id: String, name: String, album: Album, artist: Artist, artists: [Artist], duration_ms: UInt32, image_id: String, saved: Bool) {
@@ -7223,6 +7240,8 @@ public enum HardwareError: String, Codable, Sendable {
 	case modeMismatch
 }
 
+/// An image delivered either as an opaque asset id (fetch via `asset.get`)
+/// or as inline bytes.
 public enum Image: Codable, Sendable {
 	case id(String)
 	case bytes(Data)

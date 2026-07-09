@@ -19,7 +19,8 @@ build:
   bun run build
 
 fmt:
-  cargo +nightly fmt
+  cargo +nightly fmt --all
+  bun run format
 
 gateway:
   bun run build -- --filter=@bridgething/gateway
@@ -29,6 +30,7 @@ gateway:
 
 typescript:
   cargo run -q -p bridgething-codegen -- ts
+  bun run format
 
 swift:
   cargo run -q -p bridgething-codegen -- swift
@@ -38,9 +40,11 @@ kotlin:
 
 rust:
   cargo run -q -p bridgething-codegen -- rust
+  cargo +nightly fmt --all
 
 codegen:
   cargo run -q -p bridgething-codegen -- all
+  just fmt
 
 spotify-codegen:
   swift build --package-path tools/spotify-codegen
@@ -117,6 +121,10 @@ ssh *args:
 # Tail bridgething.service journal.
 logs:
   ssh {{ssh_args}} root@{{device_host}} journalctl -fu bridgething.service
+
+# set the device's bridgething instance to trace
+trace-dropin:
+  ssh {{ssh_args}} root@{{device_host}} 'mkdir -p /etc/systemd/system/bridgething.service.d && echo -e "[Service]\nEnvironment=RUST_LOG=bridgething=trace,bridgething::ws::connection::send=debug,bridgething::net=debug,libbridgething=trace,bridgething_iap2=trace,bridgething_mfi=trace" > /etc/systemd/system/bridgething.service.d/zz-trace.conf && systemctl daemon-reload && systemctl restart bridgething.service'
 
 # Tunnel chromium's CDP socket from the device's 127.0.0.1:9222 to the host.
 cdp port="9222":

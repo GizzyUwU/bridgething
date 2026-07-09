@@ -25,7 +25,6 @@ use crate::chaos::ChaosConfig;
 
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// Outbound message handed to the connection writer.
 #[derive(Debug, Clone)]
 pub struct OutboundFrame {
   pub msg: GatewayToBridgeMsg,
@@ -81,9 +80,6 @@ impl Connection {
     })
   }
 
-  /// Sends a placeholder `GatewayCapabilities::Announce` after open. The
-  /// daemon's capabilities handler upserts the peer into the PeerTracker
-  /// from the embedded `GatewayInfo`.
   pub async fn announce_version(&self) -> Result<()> {
     let caps = GatewayCapabilities {
       gateway: GatewayInfo {
@@ -174,6 +170,10 @@ async fn writer_task(
       tracing::error!(?err, "failed to encode outbound frame - skipping");
       continue;
     }
+    if let Some(rate) = chaos.throttle_bytes_per_sec {
+      let secs = buf.len() as f64 / rate.max(1) as f64;
+      tokio::time::sleep(Duration::from_secs_f64(secs)).await;
+    }
     if let Err(err) = sink.send(WsMessage::Binary(buf.freeze())).await {
       tracing::warn!(?err, "ws write error - exiting writer");
       break;
@@ -194,7 +194,6 @@ pub async fn run_connect(url: &str, chaos: ChaosConfig) -> Result<()> {
         return Ok(());
       }
     }
-    // soft idle so the loop doesn't spin if the daemon goes silent
     tokio::time::sleep(Duration::from_millis(1)).await;
   }
 }

@@ -12,6 +12,8 @@ import com.bridgething.schema.OtaAssetRange
 import com.bridgething.schema.OtaBegin
 import com.bridgething.schema.OtaBeginAck
 import com.bridgething.schema.OtaKind
+import com.bridgething.schema.OtaPhase
+import com.bridgething.schema.OtaProgress
 import com.bridgething.schema.RangeSpec
 import com.bridgething.schema.ResponseMeta
 import com.bridgething.schema.TransferAck
@@ -32,7 +34,7 @@ import java.util.UUID
 
 /** regression coverage for the OTA resume path: a non-zero resume offset must still stream. */
 class OtaStreamTest {
-    private val fragmentBytes = 4 * 1024
+    private val fragmentBytes = 16 * 1024
 
     private suspend fun boot(scope: CoroutineScope): Pair<BridgethingCompanion, WireDriver> {
         val adapter = FakeAdapter()
@@ -102,6 +104,71 @@ class OtaStreamTest {
 
         systemZck.delete()
         bootZck.delete()
+        companion.stop()
+    }
+
+    /**
+     * The delta range-serve path is ack-windowed like the push path: without acks it fills exactly one
+     * window then blocks, and acking lets the remainder stream while staying within one window of acked.
+     * Regression for the old naked loop that flooded Background fragments and dropped the link.
+     */
+    @Test
+    fun `range stream windows against acks`() = runBlocking {
+        val (companion, driver) = boot(this)
+        val size = 256 * 1024
+        val chunk = 16 * 1024
+        val window = 64 * 1024
+        val zck = writeTempArtifact(size)
+        companion.ota.setLocalZcks(mapOf("system.img.zck" to zck))
+
+        val reply = driver.request(
+            BridgeToGatewayMsgData.System(
+                BridgeToGatewaySystemMsg.OtaAssetRange(
+                    OtaAssetRange(updateId = "u1", asset = "system.img.zck", ranges = listOf(RangeSpec(start = 0u, length = size.toUInt()))),
+                ),
+            ),
+        )
+        val replyData = (reply.data as GatewayToBridgeMsgData.System).data
+        assertTrue(replyData is GatewayToBridgeSystemMsg.OtaAssetRangeReply, "expected a range reply, got $replyData")
+        val body = (replyData as GatewayToBridgeSystemMsg.OtaAssetRangeReply).data.body
+        assertTrue(body is TransferBody.Stream, "a range larger than the inline cap must stream")
+        val transferId = (body as TransferBody.Stream).data.id
+
+        suspend fun nextFragment() =
+            ((driver.waitOutbound { msg ->
+                val f = (msg.data as? GatewayToBridgeMsgData.Transfer)?.data as? GatewayToBridgeTransferMsg.Fragment
+                f?.data?.transferId == transferId
+            }.data as GatewayToBridgeMsgData.Transfer).data as GatewayToBridgeTransferMsg.Fragment).data
+
+        suspend fun ack(received: Int) = driver.send(
+            BridgeToGatewayMsgData.Transfer(BridgeToGatewayTransferMsg.Ack(TransferAck(transferId = transferId, received = received.toUInt()))),
+            meta = MsgMeta.Event,
+        )
+
+        // phase A: without an ack the range sender fills exactly one window then stalls.
+        var assembled = 0
+        val inWindow = window / chunk
+        for (i in 0 until inWindow) {
+            val f = nextFragment()
+            assertEquals(i * chunk, f.offset.toInt(), "range fragments must arrive in offset order")
+            assembled += f.bytes.size
+        }
+        val past = runCatching { withTimeout(600) { nextFragment() } }
+        assertTrue(past.isFailure, "range sender ran past the ack window without an ack")
+
+        // phase B: acking unblocks; the remainder streams staying within one window of acked.
+        var acked = assembled
+        ack(acked)
+        while (assembled < size) {
+            val f = nextFragment()
+            assertEquals(assembled, f.offset.toInt(), "range fragments must arrive contiguous in offset order")
+            assertTrue(f.offset.toInt() < acked + window, "range sender must stay within one window of acked")
+            assembled += f.bytes.size
+            acked = f.offset.toInt() + f.bytes.size
+            ack(acked)
+        }
+        assertEquals(size, assembled)
+        zck.delete()
         companion.stop()
     }
 

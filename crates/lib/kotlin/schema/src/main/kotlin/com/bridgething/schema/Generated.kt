@@ -8,10 +8,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import java.util.UUID
 
+/// An album reference.
 @Serializable
 data class Album (
 	val id: String,
 	val name: String,
+	/// Opaque artwork asset id (`asset.get`), when known.
 	val artwork_id: String? = null
 )
 
@@ -25,10 +27,12 @@ data class ArtProfile (
 	val thumbPx: UInt
 )
 
+/// An artist reference.
 @Serializable
 data class Artist (
 	val id: String,
 	val name: String,
+	/// Opaque artwork asset id (`asset.get`), when known.
 	val artwork_id: String? = null
 )
 
@@ -1866,12 +1870,17 @@ enum class OtaPhase(val string: String) {
 }
 
 /// Per-phase progress tick. `percent` is 0-100 within the current
-/// phase, not the overall flow. `eta_ms` is best-effort remaining time
-/// for the phase when the orchestrator can compute it.
+/// libswupdate step, which resets at each step boundary, so it is not a
+/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
+/// time for the phase when the orchestrator can compute it.
 @Serializable
 data class OtaProgress (
 	val phase: OtaPhase,
 	val percent: UByte,
+	val step: UByte,
+	val nsteps: UByte,
+	val dwlPercent: UByte,
+	val dwlBytes: UInt,
 	val etaMs: UInt? = null
 )
 
@@ -2165,8 +2174,6 @@ enum class PlaybackState(val string: String) {
 data class Playback (
 	val state: PlaybackState,
 	val positionMs: UInt,
-	/// how stale `position_ms` already was when this snapshot was sent; receivers extrapolate
-	/// forward while `state == Playing` so a cached resend never reads as a backward seek
 	val positionAgeMs: UInt? = null,
 	val shuffle: Boolean,
 	val shuffleMode: ShuffleMode? = null,
@@ -2188,6 +2195,7 @@ data class PlaybackContext (
 	val name: String? = null
 )
 
+/// Repeat and shuffle toggle state.
 @Serializable
 data class PlaybackOptions (
 	val repeat: RepeatMode,
@@ -2220,7 +2228,6 @@ data class QueueItem (
 	val artworkId: String? = null,
 	val durationMs: UInt? = null,
 	val persistentId: String? = null,
-	/// true when the user explicitly queued this item (vs it coming from the playing context).
 	val queued: Boolean? = null
 )
 
@@ -2468,15 +2475,21 @@ data class TimeInfo (
 	val dstOffsetMinutes: Byte? = null
 )
 
+/// A track with resolved album/artist metadata, used by library search
+/// and browse results. For live now-playing state see `MediaItem`.
 @Serializable
 data class Track (
 	val id: String,
 	val name: String,
 	val album: Album,
+	/// Primary credited artist.
 	val artist: Artist,
+	/// All credited artists, in order.
 	val artists: List<Artist>,
 	val duration_ms: UInt,
+	/// Opaque artwork asset id; pass to `asset.get` for the bytes.
 	val image_id: String,
+	/// Whether the track is saved in the user's library.
 	val saved: Boolean
 )
 
@@ -3661,6 +3674,8 @@ enum class HardwareError(val string: String) {
 	ModeMismatch("modeMismatch"),
 }
 
+/// An image delivered either as an opaque asset id (fetch via `asset.get`)
+/// or as inline bytes.
 @Serializable(with = ImageSerializer::class)
 sealed class Image {
 	@Serializable

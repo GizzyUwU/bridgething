@@ -138,7 +138,6 @@ export type BridgethingOtaPhase =
   | 'idle'
   | 'downloading'
   | 'streaming'
-  | 'rangePull'
   | 'verifying'
   | 'writing'
   | 'confirming'
@@ -151,9 +150,23 @@ export type BridgethingOtaEventKind =
   | 'manifestPollFailed'
   | 'channelMismatch'
   | 'updateAvailable'
+  | 'planned'
   | 'progress'
   | 'updated'
   | 'failed';
+
+// one leg of the whole update: a companion-side R2 download, a BT stream to the
+// device, the on-device write, or the reboot. `bytes` is the payload size for
+// download/stream legs and the write payload proxy for apply; 0 when the leg has
+// no meaningful byte count (reboot). the RN store turns these into time weights.
+export type BridgethingOtaStepKind = 'download' | 'stream' | 'apply' | 'reboot';
+
+export type BridgethingOtaStep = {
+  id: number;
+  kind: BridgethingOtaStepKind;
+  label: string;
+  bytes: number;
+};
 
 export type BridgethingOtaEvent = {
   kind: BridgethingOtaEventKind;
@@ -163,8 +176,19 @@ export type BridgethingOtaEvent = {
   otaKind?: BridgethingOtaKind;
   fromVersion?: string;
   toVersion?: string;
+  // the composite release an updateAvailable/planned run targets, broken out.
+  releaseVersion?: string;
+  daemonVersion?: string;
+  imageVersion?: string;
+  // full ordered leg list, present on `planned` so the store can weight the run.
+  steps?: BridgethingOtaStep[];
+  // which leg a `progress` event belongs to, indexing into the plan's steps.
+  stepId?: number;
   phase?: BridgethingOtaPhase;
   percent?: number;
+  // during the apply leg: how far swupdate is through pulling zck deltas over BT (0-100).
+  // 100 (or absent) means the pull is done and the eMMC write is underway.
+  dwlPercent?: number;
   deviceChannel?: string;
   configuredChannel?: string;
   stageAsset?: string;

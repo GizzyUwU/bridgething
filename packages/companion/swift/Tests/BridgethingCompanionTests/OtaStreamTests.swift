@@ -16,8 +16,8 @@ final class OtaStreamTests: XCTestCase {
         let driver: WireDriver
     }
 
-    private static let fragmentBytes = 4 * 1024
-    private static let windowBytes = 32 * 1024
+    private static let fragmentBytes = 16 * 1024
+    private static let windowBytes = 64 * 1024
 
     private func boot() async throws -> Harness {
         let adapter = InMemoryAdapter()
@@ -74,7 +74,8 @@ final class OtaStreamTests: XCTestCase {
 
     func testOtaPushWindowsAndUsesSmallFragments() async throws {
         let h = try await boot()
-        let payloadSize = 40 * 1024
+        // must exceed the ack window or phase A's expected stall never happens
+        let payloadSize = 96 * 1024
         let artifact = try writeTempArtifact(payloadSize)
         defer { try? FileManager.default.removeItem(at: artifact) }
 
@@ -97,7 +98,7 @@ final class OtaStreamTests: XCTestCase {
         for i in 0 ..< inWindow {
             let f = try await nextFragment(h.driver, transferId)
             XCTAssertEqual(Int(f.offset), i * Self.fragmentBytes, "fragments must arrive in offset order")
-            XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes, "ota fragments must be <= 4KB (small frames)")
+            XCTAssertLessThanOrEqual(f.bytes.count, Self.fragmentBytes, "ota fragments must stay within one frame")
             assembled.append(f.bytes)
         }
         do {
@@ -123,12 +124,12 @@ final class OtaStreamTests: XCTestCase {
         XCTAssertEqual(assembled.count, payloadSize)
 
         // drive the stage -> activate -> reboot terminal so pushDaemon returns cleanly.
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
             if case .system(.otaActivate) = m.data { return true }
             return false
         }
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
 
         var terminal: OtaPhaseSnapshot?
         for await snap in progress { terminal = snap }
@@ -236,6 +237,58 @@ final class OtaStreamTests: XCTestCase {
         await h.companion.stop()
     }
 
+    /// The delta range-serve path is ack-windowed like the push path: without acks it fills exactly one
+    /// window then blocks, and acking lets the remainder stream while staying within one window of acked.
+    /// Regression for the old naked loop that flooded `.background` fragments and dropped the link.
+    func testRangeStreamWindowsAgainstAcks() async throws {
+        let h = try await boot()
+        let size = 256 * 1024
+        let chunk = 16 * 1024
+        let window = 64 * 1024
+        let zck = try writeTempArtifact(size)
+        defer { try? FileManager.default.removeItem(at: zck) }
+        await h.companion.ota.setLocalZcks([OtaService.systemZckAsset: zck])
+
+        // a range larger than the 16KB inline cap comes back as a fragment stream.
+        let reply = try await h.driver.request(.system(.otaAssetRange(OtaAssetRange(
+            updateId: "u1", asset: OtaService.systemZckAsset, ranges: [RangeSpec(start: 0, length: UInt32(size))]
+        ))))
+        guard case let .system(.otaAssetRangeReply(r)) = reply.data, case let .stream(ref) = r.body else {
+            return XCTFail("expected a streamed range reply, got \(reply.data)")
+        }
+        let transferId = ref.id
+
+        // phase A: without an ack the range sender fills exactly one window then stalls.
+        var assembled = Data()
+        let inWindow = window / chunk
+        for i in 0 ..< inWindow {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(Int(f.offset), i * chunk, "range fragments must arrive in offset order")
+            assembled.append(f.bytes)
+        }
+        do {
+            _ = try await nextFragment(h.driver, transferId, timeout: .milliseconds(600))
+            XCTFail("range sender ran past the ack window without an ack")
+        } catch is WireDriverError {
+            // expected: window full, sender blocked on the ack.
+        }
+
+        // phase B: acking unblocks; the remainder streams staying within one window of acked.
+        var acked = UInt32(assembled.count)
+        try await ack(h.driver, transferId, acked)
+        while assembled.count < size {
+            let f = try await nextFragment(h.driver, transferId)
+            XCTAssertEqual(Int(f.offset), assembled.count, "range fragments must arrive contiguous in offset order")
+            XCTAssertLessThan(Int(f.offset), Int(acked) + window, "range sender must stay within one window of acked")
+            assembled.append(f.bytes)
+            acked = f.offset + UInt32(f.bytes.count)
+            try await ack(h.driver, transferId, acked)
+        }
+        XCTAssertEqual(assembled.count, size)
+        XCTAssertEqual(Array(assembled), (0 ..< size).map { UInt8($0 % 251) }, "streamed range bytes must match the zck")
+        await h.companion.stop()
+    }
+
     func testOtaResumeFromNonZeroOffsetStreamsRemainder() async throws {
         let h = try await boot()
         let payloadSize = 160 * 1024
@@ -273,12 +326,12 @@ final class OtaStreamTests: XCTestCase {
         }
         XCTAssertEqual(Int(expected), payloadSize, "the whole remainder past resumeOffset must stream")
 
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
             if case .system(.otaActivate) = m.data { return true }
             return false
         }
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
 
         var terminal: OtaPhaseSnapshot?
         for await snap in progress { terminal = snap }
@@ -367,7 +420,7 @@ final class OtaStreamTests: XCTestCase {
             meta: .response(ResponseMeta(requestId: beginId))
         )
         try await drainFragments(h.driver, begin.transfer.id, total: Int(begin.transfer.totalSize))
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         await applyTask.value
 
         for frame in await h.driver.outboundFrames() {
@@ -405,12 +458,12 @@ final class OtaStreamTests: XCTestCase {
             meta: .response(ResponseMeta(requestId: beginId))
         )
         try await drainFragments(h.driver, begin.transfer.id, total: Int(begin.transfer.totalSize))
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .writing, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         _ = try await h.driver.waitOutbound(timeout: .seconds(3)) { m in
             if case .system(.otaActivate) = m.data { return true }
             return false
         }
-        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, etaMs: nil))), meta: .event)
+        try await h.driver.send(.system(.otaProgress(OtaProgress(phase: .reboot, percent: 100, step: 0, nsteps: 0, dwlPercent: 0, dwlBytes: 0, etaMs: nil))), meta: .event)
         await applyTask.value
 
         for frame in await h.driver.outboundFrames() {

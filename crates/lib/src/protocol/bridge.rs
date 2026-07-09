@@ -107,7 +107,7 @@ impl Decoder for BridgeEndec {
 
       let state = self.state.get_or_insert_default();
 
-      if state.packet == 0 {
+      if !state.header_parsed {
         if src.len() < HEADER_LEN {
           tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
           state.packet += 1;
@@ -153,6 +153,7 @@ impl Decoder for BridgeEndec {
         // src[6..8] reserved
         state.length = length as u64;
         state.total_length = HEADER_LEN + length;
+        state.header_parsed = true;
         tracing::trace!(target: "libbridgething::protocol::bridge::decoder", "message length {}, compression {:?}, encoding {:?}, priority {:?}", state.length, state.compression, state.encoding, state.priority);
       }
 
@@ -325,6 +326,49 @@ mod tests {
     assert_eq!(codec.decode(&mut buf).unwrap().expect("first").msg.id, a.id);
     assert_eq!(codec.decode(&mut buf).unwrap().expect("second").msg.id, b.id);
     assert!(codec.decode(&mut buf).unwrap().is_none());
+  }
+
+  // regression: a header straddling two reads must not be treated as a parsed
+  // zero-length frame. the old packet-count gating consumed 16 bytes as a bogus
+  // empty frame and desynced the stream, silently losing one real frame per
+  // unlucky read boundary on byte-stream transports (the EA-link corruption).
+  #[test]
+  fn header_split_across_reads_decodes() {
+    let msg = sample("art/split");
+    let bytes = frame_bytes(&msg);
+    for split in 1..HEADER_LEN {
+      let mut codec = BridgeEndec::default();
+      let mut buf = BytesMut::new();
+      buf.extend_from_slice(&bytes[..split]);
+      assert!(
+        codec.decode(&mut buf).unwrap().is_none(),
+        "split {split}: partial header must yield no frame"
+      );
+      buf.extend_from_slice(&bytes[split..]);
+      let frame = codec
+        .decode(&mut buf)
+        .unwrap_or_else(|e| panic!("split {split}: decode errored: {e:?}"))
+        .unwrap_or_else(|| panic!("split {split}: frame lost"));
+      assert_eq!(frame.msg.id, msg.id, "split {split}");
+      assert!(buf.is_empty(), "split {split}: no residue");
+    }
+  }
+
+  #[test]
+  fn byte_at_a_time_stream_decodes() {
+    let mut codec = BridgeEndec::default();
+    let (a, b) = (sample("art/one"), sample("art/two"));
+    let mut stream = frame_bytes(&a);
+    stream.extend_from_slice(&frame_bytes(&b));
+    let mut buf = BytesMut::new();
+    let mut decoded = Vec::new();
+    for byte in stream {
+      buf.extend_from_slice(&[byte]);
+      while let Some(frame) = codec.decode(&mut buf).unwrap() {
+        decoded.push(frame.msg.id);
+      }
+    }
+    assert_eq!(decoded, vec![a.id, b.id]);
   }
 
   #[test]

@@ -1,5 +1,5 @@
 {
-  "version": "0.1.2",
+  "version": "0.1.6",
   "surfaces": [
     {
       "name": "asset",
@@ -3500,7 +3500,7 @@
     },
     "OtaProgress": {
       "kind": "struct",
-      "description": "Per-phase progress tick. `percent` is 0-100 within the current\nphase, not the overall flow. `eta_ms` is best-effort remaining time\nfor the phase when the orchestrator can compute it.",
+      "description": "Per-phase progress tick. `percent` is 0-100 within the current\nlibswupdate step, which resets at each step boundary, so it is not a\nmonotonic overall metric on its own. `eta_ms` is best-effort remaining\ntime for the phase when the orchestrator can compute it.",
       "fields": [
         {
           "name": "phase",
@@ -3509,6 +3509,22 @@
         },
         {
           "name": "percent",
+          "type": "number"
+        },
+        {
+          "name": "step",
+          "type": "number"
+        },
+        {
+          "name": "nsteps",
+          "type": "number"
+        },
+        {
+          "name": "dwlPercent",
+          "type": "number"
+        },
+        {
+          "name": "dwlBytes",
           "type": "number"
         },
         {

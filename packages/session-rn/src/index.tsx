@@ -55,6 +55,8 @@ export type {
   BridgethingOtaPhase,
   BridgethingOtaPollConfig,
   BridgethingOtaRelease,
+  BridgethingOtaStep,
+  BridgethingOtaStepKind,
   BridgethingPeerLinkStatus,
   BridgethingProviderInfo,
   BridgethingRepeatMode,

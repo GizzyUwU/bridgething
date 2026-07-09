@@ -136,6 +136,7 @@ impl OtaOrchestrator {
     assets: AssetCache,
   ) -> (Self, JoinHandle<()>) {
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
+    let peer_watch = peers.watch_snapshot();
     let actor = OtaActor {
       transfers,
       events_tx,
@@ -143,6 +144,7 @@ impl OtaOrchestrator {
       terminators,
       range_proxy,
       peers,
+      peer_watch,
       installed_apply,
       sinks,
       assets,
@@ -228,6 +230,7 @@ struct OtaActor {
   terminators: OtaTerminators,
   range_proxy: RangeProxy,
   peers: PeerTracker,
+  peer_watch: watch::Receiver<crate::peer::PeerSnapshot>,
   installed_apply: InstalledWebappApply,
   sinks: TransferSinks,
   assets: AssetCache,
@@ -249,10 +252,16 @@ impl OtaActor {
       enum Step {
         Cmd(Option<Command>),
         Stream(Option<TransferEvent>),
+        PeerLost,
       }
       let step = {
         let cmd_rx = &mut self.cmd_rx;
         let state = &mut self.state;
+        let peer_watch = &mut self.peer_watch;
+        let streaming_peer = match state {
+          OtaState::Streaming { peer: Some(addr), .. } => Some(*addr),
+          _ => None,
+        };
         tokio::select! {
           cmd = cmd_rx.recv() => Step::Cmd(cmd),
           ev = async {
@@ -261,6 +270,25 @@ impl OtaActor {
               _ => std::future::pending().await,
             }
           } => Step::Stream(ev),
+          _ = async {
+            match streaming_peer {
+              Some(addr) => loop {
+                if peer_watch.changed().await.is_err() {
+                  std::future::pending::<()>().await;
+                }
+                let connected = peer_watch
+                  .borrow()
+                  .peers
+                  .get(&addr)
+                  .map(|p| matches!(p.companion, PeerCompanionStatus::Connected(_)))
+                  .unwrap_or(false);
+                if !connected {
+                  return;
+                }
+              },
+              None => std::future::pending().await,
+            }
+          } => Step::PeerLost,
         }
       };
       match step {
@@ -282,6 +310,17 @@ impl OtaActor {
           self.range_proxy.deactivate().await;
         }
         Step::Stream(Some(ev)) => self.handle_stream_event(ev).await,
+        Step::PeerLost => {
+          if let OtaState::Streaming {
+            update_id, transfer_id, ..
+          } = &self.state
+          {
+            tracing::warn!(%update_id, "pinned peer disconnected mid-stream; partial retained for resume");
+            self.sinks.unbind(*transfer_id);
+            self.state = OtaState::Idle;
+            self.range_proxy.deactivate().await;
+          }
+        }
       }
     }
     tracing::info!("ota orchestrator exiting");
@@ -574,8 +613,9 @@ impl OtaActor {
         }
 
         let terminator = self.terminators.reboot.clone();
+        let tally = self.range_proxy.tally();
         tokio::spawn(async move {
-          let outcome = run_image_write(&events_tx, &payload, cancel_rx).await;
+          let outcome = run_image_write(&events_tx, &payload, tally, cancel_rx).await;
           let _ = tokio::fs::remove_file(&payload).await;
           match outcome {
             Ok(()) => {
@@ -720,6 +760,7 @@ pub(crate) struct WriteError {
 async fn run_image_write(
   events_tx: &OtaEventTx,
   swu_path: &std::path::Path,
+  tally: Arc<range_proxy::RangeTally>,
   mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), WriteError> {
   if check_cancel(&mut cancel_rx) {
@@ -741,10 +782,15 @@ async fn run_image_write(
 
   let progress_emitter = {
     let tx = events_tx.clone();
-    move |phase: OtaPhase, percent: u8, eta_ms: Option<u32>| {
+    move |mut tick: swupdate::ProgressTick| {
+      let (served, expected) = tally.snapshot();
+      if expected > 0 {
+        tick.dwl_bytes = served.min(u32::MAX as u64) as u32;
+        tick.dwl_percent = ((served.saturating_mul(100) / expected).min(100)) as u8;
+      }
       let tx = tx.clone();
       tokio::spawn(async move {
-        emit_progress(&tx, phase, percent, eta_ms).await;
+        emit_progress_tick(&tx, tick).await;
       });
     }
   };
@@ -816,7 +862,25 @@ async fn emit_progress(events_tx: &OtaEventTx, phase: OtaPhase, percent: u8, eta
     .send(BridgeToGatewaySystemMsgEvent::OtaProgress(OtaProgress {
       phase,
       percent,
+      step: 0,
+      nsteps: 0,
+      dwl_percent: 0,
+      dwl_bytes: 0,
       eta_ms,
+    }))
+    .await;
+}
+
+async fn emit_progress_tick(events_tx: &OtaEventTx, tick: swupdate::ProgressTick) {
+  let _ = events_tx
+    .send(BridgeToGatewaySystemMsgEvent::OtaProgress(OtaProgress {
+      phase: tick.phase,
+      percent: tick.percent,
+      step: tick.step,
+      nsteps: tick.nsteps,
+      dwl_percent: tick.dwl_percent,
+      dwl_bytes: tick.dwl_bytes,
+      eta_ms: tick.eta_ms,
     }))
     .await;
 }
@@ -915,6 +979,10 @@ mod tests {
   }
 
   async fn boot() -> Harness {
+    boot_with_peers(PeerTracker::noop()).await
+  }
+
+  async fn boot_with_peers(peers: PeerTracker) -> Harness {
     let root = temp_root();
     let pending = ChunkedTransfer::init(root.clone()).await.unwrap();
     let (transfers, _xfer_handle) = pending.spawn();
@@ -949,7 +1017,6 @@ mod tests {
         }
       })
     });
-    let peers = PeerTracker::noop();
     let sinks = TransferSinks::default();
     let asset_db = crate::db::open(None).await.unwrap();
     let (assets, _asset_handle) = AssetCache::init(asset_db, root.join("assets")).await.unwrap().spawn();
@@ -1347,6 +1414,80 @@ mod tests {
       .await
       .expect("begin after abandon");
     assert_eq!(ack.resume_from_offset, 0);
+  }
+
+  // regression: a pinned peer dying mid-stream must release the pin (partial
+  // retained), or every later begin from a different identity is rejected
+  // until a daemon restart.
+  #[tokio::test]
+  async fn pinned_peer_disconnect_mid_stream_releases_for_resume() {
+    use libbridgething::{Device, DeviceType, GatewayInfo, Peer};
+
+    let (peers, snapshot_tx) = PeerTracker::scripted();
+    let h = boot_with_peers(peers).await;
+    let (bytes, sha, size) = fixture_bytes();
+    let peer_a: Address = "AA:BB:CC:DD:EE:01".parse().unwrap();
+    let peer_b: Address = "AA:BB:CC:DD:EE:02".parse().unwrap();
+
+    let connected_peer = |addr: Address| {
+      let mut p = Peer::new(Device {
+        name: "test-phone".into(),
+        device_type: DeviceType::default(),
+        mac: addr.to_string(),
+        default: false,
+      });
+      p.companion = PeerCompanionStatus::Connected(GatewayInfo::default());
+      p
+    };
+    let mut snap = crate::peer::PeerSnapshot::default();
+    snap.peers.insert(peer_a, connected_peer(peer_a));
+    snapshot_tx.send(snap).unwrap();
+
+    h.ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha.clone()),
+          },
+        },
+        Some(peer_a),
+      )
+      .await
+      .expect("first begin ok");
+    h.sinks.fragment(tid_for(&sha), 0, Bytes::from(bytes[..10].to_vec()));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // network gateways remove the peer entirely on disconnect
+    snapshot_tx.send(crate::peer::PeerSnapshot::default()).unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut snap = crate::peer::PeerSnapshot::default();
+    snap.peers.insert(peer_b, connected_peer(peer_b));
+    snapshot_tx.send(snap).unwrap();
+
+    let ack = h
+      .ota
+      .begin(
+        OtaBegin {
+          kind: OtaKind::Image,
+          update_id: sha.clone(),
+          update_url_base: None,
+          transfer: TransferRef {
+            id: tid_for(&sha),
+            total_size: size,
+            sha256: Some(sha),
+          },
+        },
+        Some(peer_b),
+      )
+      .await
+      .expect("begin from a new companion after the pinned one died");
+    assert_eq!(ack.resume_from_offset, 10, "partial survives the peer loss");
   }
 
   #[tokio::test]

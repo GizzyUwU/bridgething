@@ -31,6 +31,7 @@ struct EndecState {
   priority: Priority,
   length: u64,
 
+  header_parsed: bool,
   total_length: usize,
   packet: usize,
   message_start: Instant,
@@ -45,6 +46,7 @@ impl Default for EndecState {
       priority: Priority::Normal,
       length: 0,
 
+      header_parsed: false,
       total_length: 0,
       packet: 0,
       message_start: Instant::now(),
@@ -109,9 +111,6 @@ pub enum EndecError {
 }
 
 impl EndecError {
-  /// True for errors that affect a single message and leave the byte
-  /// stream in sync. Callers may log + continue rather than dropping
-  /// the connection.
   pub fn is_recoverable(&self) -> bool {
     matches!(self, EndecError::TypedDecode { .. })
   }

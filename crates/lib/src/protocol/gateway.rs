@@ -30,7 +30,7 @@ impl Decoder for GatewayEndec {
 
     let state = self.state.get_or_insert_default();
 
-    if state.packet == 0 {
+    if !state.header_parsed {
       if src.len() < HEADER_LEN {
         tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "not enough bytes for header (need {}, have {})", HEADER_LEN, src.len());
         state.packet += 1;
@@ -59,6 +59,7 @@ impl Decoder for GatewayEndec {
       // src[6..8] reserved
       state.length = u64::from_be_bytes(src[8..16].try_into().unwrap());
       state.total_length = HEADER_LEN + state.length as usize;
+      state.header_parsed = true;
       tracing::trace!(target: "libbridgething::protocol::gateway::decoder", "message length {}, compression {:?}, encoding {:?}, priority {:?}", state.length, state.compression, state.encoding, state.priority);
     }
 
@@ -151,5 +152,63 @@ impl Encoder<PrioritizedFrame<GatewayToBridgeMsg>> for GatewayEndec {
     dst.extend_from_slice(&packed);
     tracing::trace!(target: "libbridgething::protocol::gateway::encode", "message encoded successfully");
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{
+    gateway::{BridgeToGatewayMsgData, BridgeToGatewayTransferMsg, TransferAck},
+    wire::MsgMeta,
+  };
+
+  fn sample() -> BridgeToGatewayMsg {
+    BridgeToGatewayMsg {
+      id: uuid::Uuid::now_v7(),
+      meta: MsgMeta::Event,
+      data: BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(TransferAck {
+        transfer_id: uuid::Uuid::now_v7(),
+        received: 4096,
+      })),
+    }
+  }
+
+  fn frame_bytes(msg: &BridgeToGatewayMsg) -> Vec<u8> {
+    let body = rmp_serde::to_vec_named(msg).unwrap();
+    let mut out = BytesMut::new();
+    out.put_u16(MAGIC);
+    out.put_u8(VERSION);
+    out.put_u8(COMPRESSION_NONE);
+    out.put_u8(ENCODING_MSGPACK);
+    out.put_u8(Priority::Normal.as_byte());
+    out.put_bytes(0, 2);
+    out.put_u64(body.len() as u64);
+    out.extend_from_slice(&body);
+    out.to_vec()
+  }
+
+  // regression: a header straddling two reads must not be treated as a parsed
+  // zero-length frame (the packet-count gating bug that desynced byte streams).
+  #[test]
+  fn header_split_across_reads_decodes() {
+    let msg = sample();
+    let bytes = frame_bytes(&msg);
+    for split in 1..HEADER_LEN {
+      let mut codec = GatewayEndec::default();
+      let mut buf = BytesMut::new();
+      buf.extend_from_slice(&bytes[..split]);
+      assert!(
+        codec.decode(&mut buf).unwrap().is_none(),
+        "split {split}: partial header must yield no frame"
+      );
+      buf.extend_from_slice(&bytes[split..]);
+      let frame = codec
+        .decode(&mut buf)
+        .unwrap_or_else(|e| panic!("split {split}: decode errored: {e:?}"))
+        .unwrap_or_else(|| panic!("split {split}: frame lost"));
+      assert_eq!(frame.msg.id, msg.id, "split {split}");
+      assert!(buf.is_empty(), "split {split}: no residue");
+    }
   }
 }

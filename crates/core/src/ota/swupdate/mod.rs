@@ -16,10 +16,18 @@ use std::path::Path;
 use libbridgething::OtaPhase;
 use tokio::sync::watch;
 
-/// `software_set` + `running_mode` selector libswupdate hands to the
-/// sw-description parser. The .swu's parser uses these to scope into
-/// `software.<set>.<mode>.images` and pick exactly one install set.
-/// For bridgething: `set = "stable"`, `mode = "slot_a" | "slot_b"`.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
+pub struct ProgressTick {
+  pub phase: OtaPhase,
+  pub percent: u8,
+  pub step: u8,
+  pub nsteps: u8,
+  pub dwl_percent: u8,
+  pub dwl_bytes: u32,
+  pub eta_ms: Option<u32>,
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // explicitly allowed dead_code so dev builds won't warn
 pub struct Selector {
@@ -47,7 +55,7 @@ pub async fn install_swu<F>(
   cancel_rx: &mut watch::Receiver<bool>,
 ) -> Result<(), Error>
 where
-  F: Fn(OtaPhase, u8, Option<u32>) + Send + Sync,
+  F: Fn(ProgressTick) + Send + Sync,
 {
   #[cfg(feature = "swupdate")]
   {

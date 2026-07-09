@@ -607,7 +607,7 @@ public actor BridgethingCompanion {
 
     private static let assetFragmentBytes = 4 * 1024
     private static let inlineBodyMaxBytes = 8 * 1024
-    private static let transferWindowBytes = 8 * 1024
+    private static let transferWindowBytes = 64 * 1024
     private static let transferAckTimeoutSeconds: Double = 15
 
     private func handleAsset(handle: AssetRequestHandle, id: String, requestId: UUID) async {

@@ -753,10 +753,19 @@ export type OtaPhase = 'streaming' | 'verifying' | 'writing' | 'confirming' | 'r
 
 /**
  * Per-phase progress tick. `percent` is 0-100 within the current
- * phase, not the overall flow. `eta_ms` is best-effort remaining time
- * for the phase when the orchestrator can compute it.
+ * libswupdate step, which resets at each step boundary, so it is not a
+ * monotonic overall metric on its own. `eta_ms` is best-effort remaining
+ * time for the phase when the orchestrator can compute it.
  */
-export type OtaProgress = { phase: OtaPhase; percent: number; etaMs: number | null };
+export type OtaProgress = {
+  phase: OtaPhase;
+  percent: number;
+  step: number;
+  nsteps: number;
+  dwlPercent: number;
+  dwlBytes: number;
+  etaMs: number | null;
+};
 
 export type Peer = {
   device: Device;

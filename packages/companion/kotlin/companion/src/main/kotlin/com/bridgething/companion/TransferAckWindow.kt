@@ -1,5 +1,6 @@
 package com.bridgething.companion
 
+import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -34,4 +35,15 @@ internal class TransferAckWindow {
             version.first { receivedBytes(transferId) > prior }
             true
         } ?: false
+
+    suspend fun awaitWindow(transferId: UUID, offset: Long, windowBytes: Long, timeoutMs: Long) {
+        while (true) {
+            val acked = receivedBytes(transferId).toLong()
+            if (offset < acked + windowBytes) return
+            if (!waitForProgress(transferId, acked.toUInt(), timeoutMs)) {
+                finish(transferId)
+                throw IOException("transfer stalled: fragment acks stopped at $offset")
+            }
+        }
+    }
 }

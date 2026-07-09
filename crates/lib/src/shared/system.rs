@@ -117,8 +117,9 @@ pub enum OtaPhase {
 }
 
 /// Per-phase progress tick. `percent` is 0-100 within the current
-/// phase, not the overall flow. `eta_ms` is best-effort remaining time
-/// for the phase when the orchestrator can compute it.
+/// libswupdate step, which resets at each step boundary, so it is not a
+/// monotonic overall metric on its own. `eta_ms` is best-effort remaining
+/// time for the phase when the orchestrator can compute it.
 #[typeshare]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -127,6 +128,10 @@ pub enum OtaPhase {
 pub struct OtaProgress {
   pub phase: OtaPhase,
   pub percent: u8,
+  pub step: u8,
+  pub nsteps: u8,
+  pub dwl_percent: u8,
+  pub dwl_bytes: u32,
   pub eta_ms: Option<u32>,
 }
 

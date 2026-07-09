@@ -27,9 +27,10 @@ use tokio::{
   task,
 };
 
-use super::{Error, Selector};
+use super::{Error, ProgressTick, Selector};
 const CHUNK_SIZE: usize = 64 * 1024;
 const PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(100);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const SWUPDATE_CTRL_SOCKET: &str = "/tmp/sockinstctrl";
 const SWUPDATE_PROGRESS_SOCKET: &str = "/tmp/swupdateprog";
 
@@ -56,7 +57,7 @@ pub async fn install_swu<F>(
   cancel_rx: &mut watch::Receiver<bool>,
 ) -> Result<(), Error>
 where
-  F: Fn(OtaPhase, u8, Option<u32>) + Send + Sync,
+  F: Fn(ProgressTick) + Send + Sync,
 {
   ensure_socket_paths();
   let (prog_tx, mut prog_rx) = mpsc::channel::<sys::progress_msg>(32);
@@ -68,15 +69,21 @@ where
 
   let mut send_handle = Some(send_handle);
   let mut send_done = false;
-  let mut last_emit: Option<(OtaPhase, u8, Instant)> = None;
+  let mut last_emit: Option<(ProgressKey, Instant)> = None;
+  let mut last_tick: Option<ProgressTick> = None;
+  let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+  heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+  heartbeat.tick().await;
 
   loop {
     tokio::select! {
       Some(msg) = prog_rx.recv() => {
-        let (phase, percent, eta) = translate(&msg);
+        let tick = translate(&msg);
+        last_tick = Some(tick);
+        heartbeat.reset();
         let terminal = matches!(msg.status, sys::RECOVERY_STATUS_SUCCESS | sys::RECOVERY_STATUS_FAILURE);
-        if should_emit(&mut last_emit, phase, percent, terminal) {
-          progress(phase, percent, eta);
+        if should_emit(&mut last_emit, &tick, terminal) {
+          progress(tick);
         }
         match msg.status {
           sys::RECOVERY_STATUS_SUCCESS => {
@@ -90,6 +97,18 @@ where
           }
           _ => {}
         }
+      }
+      _ = heartbeat.tick() => {
+        let beat = last_tick.unwrap_or(ProgressTick {
+          phase: OtaPhase::Writing,
+          percent: 0,
+          step: 0,
+          nsteps: 0,
+          dwl_percent: 0,
+          dwl_bytes: 0,
+          eta_ms: None,
+        });
+        progress(beat);
       }
       res = wait_send(&mut send_handle), if send_handle.is_some() => {
         send_done = true;
@@ -106,10 +125,6 @@ where
         }
       }
       else => {
-        // No more progress messages and the install task already finished.
-        // libswupdate sometimes closes the progress socket without a final
-        // SUCCESS in the message stream we picked up; treat as success only
-        // if the send side completed cleanly.
         if send_done {
           tracing::warn!("progress socket closed after install bytes streamed; assuming success");
           return Ok(());
@@ -127,12 +142,26 @@ async fn wait_send(
   h.await
 }
 
-fn should_emit(last: &mut Option<(OtaPhase, u8, Instant)>, phase: OtaPhase, percent: u8, terminal: bool) -> bool {
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ProgressKey {
+  phase: OtaPhase,
+  percent: u8,
+  step: u8,
+  dwl_percent: u8,
+}
+
+fn should_emit(last: &mut Option<(ProgressKey, Instant)>, tick: &ProgressTick, terminal: bool) -> bool {
   let now = Instant::now();
+  let key = ProgressKey {
+    phase: tick.phase,
+    percent: tick.percent,
+    step: tick.step,
+    dwl_percent: tick.dwl_percent,
+  };
   let (phase_changed, dup, intervaled) = match last {
-    Some((p, pct, t)) => (
-      *p != phase,
-      *p == phase && *pct == percent,
+    Some((prev, t)) => (
+      prev.phase != key.phase,
+      *prev == key,
       now.duration_since(*t) < PROGRESS_MIN_INTERVAL,
     ),
     None => (true, false, false),
@@ -140,7 +169,7 @@ fn should_emit(last: &mut Option<(OtaPhase, u8, Instant)>, phase: OtaPhase, perc
   if !terminal && !phase_changed && (dup || intervaled) {
     return false;
   }
-  *last = Some((phase, percent, now));
+  *last = Some((key, now));
   true
 }
 
@@ -236,16 +265,20 @@ fn progress_reader(tx: mpsc::Sender<sys::progress_msg>) {
   }
 }
 
-fn translate(msg: &sys::progress_msg) -> (OtaPhase, u8, Option<u32>) {
-  let percent = (msg.cur_percent.min(100)) as u8;
-  (OtaPhase::Writing, percent, None)
+fn translate(msg: &sys::progress_msg) -> ProgressTick {
+  ProgressTick {
+    phase: OtaPhase::Writing,
+    percent: msg.cur_percent.min(100) as u8,
+    step: msg.cur_step.min(u8::MAX as c_uint) as u8,
+    nsteps: msg.nsteps.min(u8::MAX as c_uint) as u8,
+    dwl_percent: msg.dwl_percent.min(100) as u8,
+    dwl_bytes: (msg.dwl_bytes as u64).min(u32::MAX as u64) as u32,
+    eta_ms: None,
+  }
 }
 
 fn info_str(msg: &sys::progress_msg) -> String {
   let bytes = &msg.info[..msg.infolen.min(msg.info.len() as c_uint) as usize];
-  // libswupdate's info buffer is a NUL-terminated C string; trim at the
-  // first 0 byte so we don't include trailing garbage from the fixed-size
-  // array.
   let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
   String::from_utf8_lossy(&bytes[..end].iter().map(|&b| b as u8).collect::<Vec<u8>>()).into_owned()
 }

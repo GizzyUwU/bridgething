@@ -50,6 +50,8 @@ public data class OtaCompositeVersion(
     val daemon: String,
     val image: String,
 ) {
+    val composite: String get() = "$daemon+image.$image"
+
     public companion object {
         public fun parse(raw: String): OtaCompositeVersion? {
             val plus = raw.indexOf('+').takeIf { it >= 0 } ?: return null

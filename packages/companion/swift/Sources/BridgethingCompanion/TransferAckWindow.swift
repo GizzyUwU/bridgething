@@ -28,6 +28,22 @@ actor TransferAckWindow {
         }
     }
 
+    func awaitWindow(
+        _ transferId: UUID,
+        offset: UInt32,
+        windowBytes: UInt32,
+        timeoutSeconds: Double
+    ) async throws {
+        while true {
+            let acked = received[transferId] ?? 0
+            if UInt64(offset) < UInt64(acked) + UInt64(windowBytes) { return }
+            guard await waitForProgress(transferId, beyond: acked, timeoutSeconds: timeoutSeconds) else {
+                finish(transferId)
+                throw TransferStalled()
+            }
+        }
+    }
+
     func waitForProgress(_ transferId: UUID, beyond prior: UInt32, timeoutSeconds: Double) async -> Bool {
         if (received[transferId] ?? 0) > prior { return true }
         let waiterId = UUID()

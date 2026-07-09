@@ -171,8 +171,8 @@ impl Lsp {
   pub fn accessory_default() -> Self {
     Self {
       version: 1,
-      max_outgoing: 5,
-      max_len: 2048,
+      max_outgoing: 32,
+      max_len: 4096,
       retransmission_timeout_ms: 6000,
       ack_timeout_ms: 3000,
       max_retransmissions: 30,

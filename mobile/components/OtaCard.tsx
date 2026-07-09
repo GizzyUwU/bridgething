@@ -20,22 +20,21 @@ function formatEta(seconds: number): string {
   return r ? `${m}m ${r}s` : `${m}m`;
 }
 
+function isPullingDeltas(status: OtaDeviceStatus): boolean {
+  return status.dwlPercent != null && status.dwlPercent < 100;
+}
+
 function phaseLabel(status: OtaDeviceStatus): string {
+  const leg = status.stepLabel;
   switch (status.phase) {
     case 'downloading':
-      return status.stageAsset
-        ? `downloading ${status.stageAsset}`
-        : 'downloading update';
+      return leg ? `downloading ${leg}` : 'downloading update';
     case 'streaming':
-      return 'sending to device';
-    case 'rangePull':
-      return status.stageAsset
-        ? `pulling delta (${status.stageAsset})`
-        : 'pulling delta';
+      return leg ? `${leg} to device` : 'sending to device';
     case 'verifying':
       return 'verifying';
     case 'writing':
-      return 'writing to device';
+      return isPullingDeltas(status) ? 'pulling deltas' : 'writing to device';
     case 'confirming':
       return 'confirming';
     case 'reboot':
@@ -47,6 +46,20 @@ function phaseLabel(status: OtaDeviceStatus): string {
     default:
       return 'preparing update';
   }
+}
+
+function phaseHint(status: OtaDeviceStatus): string | null {
+  if (status.phase === 'writing' && !isPullingDeltas(status)) {
+    return 'this can take several minutes';
+  }
+  return null;
+}
+
+function releaseLabel(status: OtaDeviceStatus): string | null {
+  if (status.availableDaemon && status.availableImage) {
+    return `daemon ${status.availableDaemon} · image ${status.availableImage}`;
+  }
+  return status.availableRelease;
 }
 
 function stageDetail(status: OtaDeviceStatus): string | null {
@@ -68,46 +81,45 @@ function stageDetail(status: OtaDeviceStatus): string | null {
 }
 
 function UpdateProgress({ status }: { status: OtaDeviceStatus }) {
-  const detail = stageDetail(status);
-  const pct = Math.max(0, Math.min(100, status.percent));
-  // range-pull has no fixed total, so show an indeterminate-ish full bar rather than a stuck 0%.
-  const barPct = status.phase === 'rangePull' ? 100 : pct;
+  const detail = stageDetail(status) ?? phaseHint(status);
+  const pct = Math.max(0, Math.min(100, status.overallPercent));
+  const stepHint =
+    status.stepCount > 0
+      ? `step ${status.stepIndex + 1}/${status.stepCount}`
+      : null;
   return (
     <View className="mt-2">
       <View className="flex-row items-baseline justify-between">
         <Text className="text-[13px] font-semibold text-foreground">
           {phaseLabel(status)}
         </Text>
-        {status.phase !== 'rangePull' ? (
-          <Text className="text-[12px] text-muted-foreground">
-            {Math.round(pct)}%
-          </Text>
-        ) : null}
+        <Text className="text-[12px] text-muted-foreground">
+          {Math.round(pct)}%
+        </Text>
       </View>
       <View className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
         <View
           className="h-full rounded-full bg-primary"
-          style={{
-            width: `${barPct}%`,
-            opacity: status.phase === 'rangePull' ? 0.5 : 1,
-          }}
+          style={{ width: `${pct}%` }}
         />
       </View>
-      {detail ? (
-        <Text className="mt-1 text-[11px] text-muted-foreground">{detail}</Text>
-      ) : null}
+      <View className="mt-1 flex-row items-baseline justify-between">
+        <Text className="text-[11px] text-muted-foreground">
+          {detail ?? ''}
+        </Text>
+        {stepHint ? (
+          <Text className="text-[11px] text-muted-foreground">{stepHint}</Text>
+        ) : null}
+      </View>
     </View>
   );
 }
 
-/** True when a device has anything update-related worth surfacing. Screens that
- *  only want to show OTA when it is happening (the dashboard) gate on this;
- *  the settings updates panel renders the card unconditionally. */
 export function otaHasActivity(status?: OtaDeviceStatus): boolean {
   if (!status) return false;
   return (
     status.installing ||
-    status.availableTo != null ||
+    status.availableRelease != null ||
     status.phase === 'completed' ||
     status.error != null
   );
@@ -124,7 +136,7 @@ export function OtaCard({
   onInstall?: () => void;
   onPickVersion?: () => void;
 }) {
-  const available = status?.availableTo ?? null;
+  const available = status ? releaseLabel(status) : null;
   const installing = status?.installing ?? false;
 
   return (

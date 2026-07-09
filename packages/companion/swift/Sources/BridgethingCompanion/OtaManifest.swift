@@ -97,6 +97,8 @@ public struct OtaCompositeVersion: Sendable, Equatable {
         self.image = image
     }
 
+    public var composite: String { "\(daemon)+image.\(image)" }
+
     public static func parse(_ raw: String) -> OtaCompositeVersion? {
         guard let plus = raw.firstIndex(of: "+") else { return nil }
         let daemon = String(raw[..<plus])

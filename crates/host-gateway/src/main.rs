@@ -43,6 +43,11 @@ struct Cli {
   #[arg(long)]
   inject_disconnect: Option<u64>,
 
+  /// If set, pace the outbound link to this many bytes per second.
+  /// ~66000 emulates the phone's BT/EA link for wireless-OTA rehearsal.
+  #[arg(long)]
+  throttle: Option<u64>,
+
   /// Optional fixtures directory. Subcommands resolve relative paths
   /// against this when set.
   #[arg(long)]
@@ -122,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
   let chaos = ChaosConfig {
     inject_loss: cli.inject_loss,
     inject_disconnect: cli.inject_disconnect.map(std::time::Duration::from_secs),
+    throttle_bytes_per_sec: cli.throttle,
   };
 
   match cli.cmd {

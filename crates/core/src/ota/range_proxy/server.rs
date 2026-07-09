@@ -1,14 +1,16 @@
-//! axum loopback server. Routes `GET /<update_id>/<asset>` with a
-//! `Range:` header into wire `OtaAssetRange` requests, streams the
-//! resulting bytes back as `206 Partial Content` (single-range or
-//! `multipart/byteranges`). Bound to 127.0.0.1 only.
+//! axum loopback server. Routes `GET /<asset>` with a `Range:` header
+//! into wire `OtaAssetRange` requests, streams the resulting bytes back
+//! as `206 Partial Content` (single-range or `multipart/byteranges`).
+//! Bound to 127.0.0.1 only.
 //!
-//! The reply's `TransferBody` is either inline (small ranges, assembled
-//! directly) or a fragment stream with stream-relative offsets over the
-//! concatenated parts; fragments need not align to part boundaries, so
-//! the multipart writer splits them as it goes.
+//! libswupdate's delta channel resumes an interrupted download with
+//! `Range: bytes=N-` (`CURLOPT_RESUME_FROM_LARGE`), expecting the same
+//! response body continued from byte N. The broker remembers the parts a
+//! fresh GET requested; a resume rebuilds the body layout, replays it
+//! from N, and re-requests only the companion data still owed. A 416 on
+//! resume is a hard, unretryable swupdate abort, so resume must succeed.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
   Router,
@@ -24,44 +26,21 @@ use libbridgething::{
   wire::RequestError,
 };
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
-use tokio_util::{
-  bytes::{Bytes, BytesMut},
-  sync::CancellationToken,
-};
+use tokio_util::{bytes::Bytes, sync::CancellationToken};
 use uuid::Uuid;
 
-use super::{BeginRangeError, RangeProxy};
+use super::{
+  BeginRangeError, RangeProxy, RangeTally,
+  layout::{self, EmitStep, MULTIPART_BOUNDARY},
+  spool::{self, SpoolReader, SpoolWriter},
+};
 use crate::{
   bluetooth::{BluetoothMan, GatewayMan},
   transfer::sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
 };
 
-async fn maybe_ack_range(
-  gateway_man: &GatewayMan,
-  peer: Option<Address>,
-  request_id: Uuid,
-  produced: u64,
-  last_acked: &mut u32,
-) {
-  let received = produced as u32;
-  if received.saturating_sub(*last_acked) >= FORWARD_ACK_INTERVAL {
-    *last_acked = received;
-    if let Some(addr) = peer {
-      gateway_man
-        .send_event(
-          addr,
-          BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
-            transfer_id: request_id,
-            received,
-          }),
-        )
-        .await;
-    }
-  }
-}
-
-/// Multipart/byteranges separator. RFC 7233 §4.1 requires a unique boundary string
-const MULTIPART_BOUNDARY: &str = "bridgething-ota-range-boundary";
+const INGEST_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const SPOOL_READ_MAX: usize = 64 * 1024;
 
 #[derive(Clone)]
 struct AxumState {
@@ -105,6 +84,11 @@ pub(super) async fn spawn(
   Ok(handle)
 }
 
+enum Parsed {
+  Fresh(Vec<RangeSpec>),
+  Resume(u64),
+}
+
 async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>, headers: HeaderMap) -> Response<Body> {
   let range_header = match headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
     Some(v) => v,
@@ -115,15 +99,10 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
       );
     }
   };
-  let ranges = match parse_range_header(range_header) {
-    Ok(r) => r,
+  let parsed = match parse_range_header(range_header) {
+    Ok(p) => p,
     Err(reason) => return error_response(StatusCode::RANGE_NOT_SATISFIABLE, reason),
   };
-  if ranges.is_empty() {
-    return error_response(StatusCode::RANGE_NOT_SATISFIABLE, "Range header parsed to 0 ranges");
-  }
-
-  tracing::debug!(%asset, range_count = ranges.len(), "handling OTA range request");
 
   let request_id = Uuid::now_v7();
   // bind before the wire request so fragments racing the reply are kept
@@ -140,229 +119,325 @@ async fn handle_range(State(state): State<AxumState>, Path(asset): Path<String>,
     }
   };
 
+  match parsed {
+    Parsed::Fresh(ranges) => {
+      tracing::debug!(%asset, range_count = ranges.len(), "handling fresh OTA range request");
+      handle_fresh(state, request_id, begin, asset, ranges, body_rx).await
+    }
+    Parsed::Resume(offset) => {
+      tracing::debug!(%asset, offset, "handling OTA range resume");
+      handle_resume(state, request_id, begin, asset, offset, body_rx).await
+    }
+  }
+}
+
+async fn handle_fresh(
+  state: AxumState,
+  request_id: Uuid,
+  begin: super::RangeBegin,
+  asset: String,
+  ranges: Vec<RangeSpec>,
+  body_rx: mpsc::Receiver<TransferEvent>,
+) -> Response<Body> {
+  let reply = match request_companion(&state, request_id, &begin, &asset, ranges).await {
+    Ok(reply) => reply,
+    Err(resp) => {
+      state.proxy.end_range(request_id).await;
+      return resp;
+    }
+  };
+  if reply.parts.is_empty() {
+    state.proxy.end_range(request_id).await;
+    return error_response(StatusCode::BAD_GATEWAY, "companion returned 0 parts");
+  }
+
+  state
+    .proxy
+    .store_ranges(asset, reply.parts.clone(), reply.total_size)
+    .await;
+
+  let bl = layout::build(&reply.parts, reply.total_size);
+  let plan = layout::plan_from(&bl, 0).expect("offset 0 is always in range");
+  let meta = ResponseMeta {
+    is_multipart: bl.is_multipart(),
+    single: bl.single,
+    resume_offset: 0,
+    total: reply.total_size,
+  };
+  finish_response(state, request_id, begin, plan, meta, reply.body, body_rx).await
+}
+
+async fn handle_resume(
+  state: AxumState,
+  request_id: Uuid,
+  begin: super::RangeBegin,
+  asset: String,
+  offset: u64,
+  body_rx: mpsc::Receiver<TransferEvent>,
+) -> Response<Body> {
+  let (parts, total) = match state.proxy.load_ranges(asset.clone()).await {
+    Some(stored) => stored,
+    None => {
+      state.sinks.unbind(request_id);
+      state.proxy.end_range(request_id).await;
+      tracing::warn!(%asset, offset, "resume with no remembered ranges; cannot reconstruct body");
+      return error_response(StatusCode::RANGE_NOT_SATISFIABLE, "no ranges to resume");
+    }
+  };
+  let bl = layout::build(&parts, total);
+  let plan = match layout::plan_from(&bl, offset) {
+    Some(plan) => plan,
+    None => {
+      state.sinks.unbind(request_id);
+      state.proxy.end_range(request_id).await;
+      return error_response(StatusCode::RANGE_NOT_SATISFIABLE, "resume offset past end of body");
+    }
+  };
+  let meta = ResponseMeta {
+    is_multipart: bl.is_multipart(),
+    single: bl.single,
+    resume_offset: offset,
+    total,
+  };
+
+  if plan.companion_ranges.is_empty() {
+    state.sinks.unbind(request_id);
+    state.proxy.end_range(request_id).await;
+    let body = Body::from(layout::assemble(&plan.steps, &[]));
+    return build_headers(meta, plan.companion_bytes).body(body).unwrap();
+  }
+
+  let reply = match request_companion(&state, request_id, &begin, &asset, plan.companion_ranges.clone()).await {
+    Ok(reply) => reply,
+    Err(resp) => {
+      state.proxy.end_range(request_id).await;
+      return resp;
+    }
+  };
+  finish_response(state, request_id, begin, plan, meta, reply.body, body_rx).await
+}
+
+struct ResponseMeta {
+  is_multipart: bool,
+  single: Option<RangePart>,
+  resume_offset: u64,
+  total: u32,
+}
+
+async fn request_companion(
+  state: &AxumState,
+  request_id: Uuid,
+  begin: &super::RangeBegin,
+  asset: &str,
+  ranges: Vec<RangeSpec>,
+) -> Result<OtaAssetRangeReply, Response<Body>> {
   let req = OtaAssetRange {
     update_id: begin.update_id.clone(),
-    asset: asset.clone(),
+    asset: asset.to_string(),
     ranges,
   };
-  let reply = match state
+  match state
     .bluetooth
     .gateway_man
     .request_with_id::<OtaAssetRange>(request_id, begin.peer, req)
     .await
   {
-    Ok(reply) => reply,
+    Ok(reply) => Ok(reply),
     Err(RequestError::Domain(rejected)) => {
-      state.proxy.end_range(request_id).await;
       tracing::warn!(update_id = %begin.update_id, reason = %rejected.reason, "companion rejected OtaAssetRange");
-      return error_response(
+      Err(error_response(
         StatusCode::BAD_GATEWAY,
         format!("companion rejected: {}", rejected.reason),
-      );
+      ))
     }
     Err(err) => {
-      state.proxy.end_range(request_id).await;
       tracing::warn!(update_id = %begin.update_id, ?err, "OtaAssetRange wire request failed");
-      return error_response(StatusCode::BAD_GATEWAY, "wire request failed");
+      Err(error_response(StatusCode::BAD_GATEWAY, "wire request failed"))
     }
-  };
-
-  let gateway_man = state.bluetooth.gateway_man.clone();
-  build_response(state.proxy, gateway_man, begin.peer, request_id, reply, body_rx)
+  }
 }
 
-fn build_response(
-  proxy: RangeProxy,
-  gateway_man: GatewayMan,
-  peer: Option<Address>,
+async fn finish_response(
+  state: AxumState,
   request_id: Uuid,
-  reply: OtaAssetRangeReply,
+  begin: super::RangeBegin,
+  plan: layout::EmitPlan,
+  meta: ResponseMeta,
+  reply_body: TransferBody,
   body_rx: mpsc::Receiver<TransferEvent>,
 ) -> Response<Body> {
-  let total = reply.total_size;
-  let parts = reply.parts;
-  let end_now = |proxy: RangeProxy| {
-    tokio::spawn(async move { proxy.end_range(request_id).await });
-  };
-  if parts.is_empty() {
-    end_now(proxy);
-    return error_response(StatusCode::BAD_GATEWAY, "companion returned 0 parts");
-  }
-  let expected: u64 = parts.iter().map(|p| p.length as u64).sum();
+  let expected = plan.companion_bytes;
+  let gateway_man = state.bluetooth.gateway_man.clone();
+  let tally = state.proxy.tally();
 
-  let body = match reply.body {
+  let body = match reply_body {
     TransferBody::Inline(bytes) => {
-      end_now(proxy);
+      state.sinks.unbind(request_id);
+      let proxy = state.proxy.clone();
+      tokio::spawn(async move { proxy.end_range(request_id).await });
       if bytes.len() as u64 != expected {
         return error_response(
           StatusCode::BAD_GATEWAY,
-          "inline body length does not match declared parts",
+          "inline body length does not match requested ranges",
         );
       }
-      if parts.len() == 1 {
-        Body::from(bytes)
-      } else {
-        Body::from(assemble_multipart_inline(&parts, total, &bytes))
-      }
+      tally.add_expected(expected);
+      tally.add_served(expected);
+      Body::from(layout::assemble(&plan.steps, &bytes))
     }
     TransferBody::Stream(transfer) => {
       if transfer.id != request_id {
-        end_now(proxy);
+        let proxy = state.proxy.clone();
+        tokio::spawn(async move { proxy.end_range(request_id).await });
         return error_response(StatusCode::BAD_GATEWAY, "stream ref id does not match request id");
       }
       if transfer.total_size as u64 != expected {
-        end_now(proxy);
-        return error_response(StatusCode::BAD_GATEWAY, "stream length does not match declared parts");
+        let proxy = state.proxy.clone();
+        tokio::spawn(async move { proxy.end_range(request_id).await });
+        return error_response(StatusCode::BAD_GATEWAY, "stream length does not match requested ranges");
       }
-      if parts.len() == 1 {
-        Body::from_stream(body_stream_single_part(
-          expected,
-          body_rx,
-          proxy,
-          gateway_man,
-          peer,
-          request_id,
-        ))
-      } else {
-        Body::from_stream(body_stream_multipart(
-          parts.clone(),
-          total,
-          body_rx,
-          proxy,
-          gateway_man,
-          peer,
-          request_id,
-        ))
-      }
+      let spool_dir = crate::paths::state_dir().join("range-spool");
+      let (writer, reader) = match spool::create(&spool_dir, &request_id.to_string()).await {
+        Ok(pair) => pair,
+        Err(err) => {
+          tracing::error!(?err, "range spool create failed");
+          let proxy = state.proxy.clone();
+          tokio::spawn(async move { proxy.end_range(request_id).await });
+          return error_response(StatusCode::INTERNAL_SERVER_ERROR, "range spool create failed");
+        }
+      };
+      tally.add_expected(expected);
+      tokio::spawn(ingest_pump(
+        body_rx,
+        writer,
+        expected,
+        gateway_man,
+        begin.peer,
+        request_id,
+        tally,
+      ));
+      Body::from_stream(emit_stream(plan.steps, reader, state.proxy, request_id))
     }
   };
 
-  if parts.len() == 1 {
-    let p = parts[0];
-    let (start, end_inclusive) = (p.start, p.start + p.length - 1);
-    Response::builder()
-      .status(StatusCode::PARTIAL_CONTENT)
+  build_headers(meta, expected).body(body).unwrap()
+}
+
+async fn ingest_pump(
+  mut rx: mpsc::Receiver<TransferEvent>,
+  mut writer: SpoolWriter,
+  expected: u64,
+  gateway_man: GatewayMan,
+  peer: Option<Address>,
+  request_id: Uuid,
+  tally: Arc<RangeTally>,
+) {
+  let mut received: u64 = 0;
+  let mut last_acked: u64 = 0;
+  loop {
+    let (offset, bytes) = match tokio::time::timeout(INGEST_IDLE_TIMEOUT, rx.recv()).await {
+      Err(_) => {
+        tracing::warn!(%request_id, received, expected, "range ingest idle timeout; failing pull");
+        writer.fail("range ingest idle timeout");
+        return;
+      }
+      Ok(None) => {
+        writer.fail("companion fragment stream closed mid-range");
+        return;
+      }
+      Ok(Some(TransferEvent::Abandon { reason })) => {
+        tracing::warn!(%request_id, received, expected, %reason, "companion abandoned range stream");
+        writer.fail(format!("companion abandoned range stream: {reason}"));
+        return;
+      }
+      Ok(Some(TransferEvent::Fragment { offset, bytes })) => (offset, bytes),
+    };
+    if offset as u64 != received {
+      tracing::warn!(%request_id, offset, received, "range fragment offset out of order; failing pull");
+      writer.fail("companion fragment offset out of order");
+      return;
+    }
+    if received + bytes.len() as u64 > expected {
+      tracing::warn!(%request_id, received, expected, "range fragment overshoots declared stream length");
+      writer.fail("companion fragment overshoots declared stream length");
+      return;
+    }
+    if let Err(err) = writer.append(&bytes).await {
+      tracing::warn!(%request_id, ?err, "range spool write failed");
+      writer.fail(format!("range spool write failed: {err}"));
+      return;
+    }
+    received += bytes.len() as u64;
+    tally.add_served(bytes.len() as u64);
+    if received - last_acked >= FORWARD_ACK_INTERVAL as u64 || received == expected {
+      last_acked = received;
+      tracing::trace!(%request_id, received, expected, "range receipt ack");
+      if let Some(addr) = peer {
+        gateway_man
+          .send_event(
+            addr,
+            BridgeToGatewayTransferMsgEvent::Ack(TransferAck {
+              transfer_id: request_id,
+              received: received as u32,
+            }),
+          )
+          .await;
+      }
+    }
+    if received == expected {
+      writer.finish();
+      return;
+    }
+  }
+}
+
+fn build_headers(meta: ResponseMeta, expected: u64) -> axum::http::response::Builder {
+  let mut builder = Response::builder().status(StatusCode::PARTIAL_CONTENT);
+  if meta.is_multipart {
+    builder = builder.header(
+      header::CONTENT_TYPE,
+      HeaderValue::from_str(&format!("multipart/byteranges; boundary={MULTIPART_BOUNDARY}")).unwrap(),
+    );
+  } else {
+    // single raw range: the resume offset shifts the start; content-length is what remains
+    let p = meta.single.expect("single-range response carries its part");
+    let start = p.start + meta.resume_offset as u32;
+    let end_inclusive = p.start + p.length - 1;
+    builder = builder
       .header(header::CONTENT_TYPE, "application/octet-stream")
-      .header(header::CONTENT_LENGTH, p.length.to_string())
+      .header(header::CONTENT_LENGTH, expected.to_string())
       .header(
         header::CONTENT_RANGE,
-        HeaderValue::from_str(&format!("bytes {start}-{end_inclusive}/{total}")).unwrap(),
-      )
-      .body(body)
-      .unwrap()
-  } else {
-    Response::builder()
-      .status(StatusCode::PARTIAL_CONTENT)
-      .header(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(&format!("multipart/byteranges; boundary={MULTIPART_BOUNDARY}")).unwrap(),
-      )
-      .body(body)
-      .unwrap()
+        HeaderValue::from_str(&format!("bytes {start}-{end_inclusive}/{}", meta.total)).unwrap(),
+      );
   }
+  builder
 }
 
-fn multipart_part_header(part: &RangePart, total: u32) -> String {
-  format!(
-    "\r\n--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-Range: bytes {start}-{end}/{total}\r\n\r\n",
-    boundary = MULTIPART_BOUNDARY,
-    start = part.start,
-    end = part.start + part.length - 1,
-  )
-}
-
-fn assemble_multipart_inline(parts: &[RangePart], total: u32, bytes: &[u8]) -> Bytes {
-  let mut out = BytesMut::new();
-  let mut consumed = 0usize;
-  for part in parts {
-    out.extend_from_slice(multipart_part_header(part, total).as_bytes());
-    let next = consumed + part.length as usize;
-    out.extend_from_slice(&bytes[consumed..next]);
-    consumed = next;
-  }
-  out.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
-  out.freeze()
-}
-
-async fn next_fragment(rx: &mut mpsc::Receiver<TransferEvent>, produced: u64) -> Result<Bytes, std::io::Error> {
-  match rx.recv().await {
-    None => Err(io_err("companion fragment stream closed mid-range")),
-    Some(TransferEvent::Abandon { reason }) => Err(std::io::Error::other(format!(
-      "companion abandoned range stream: {reason}"
-    ))),
-    Some(TransferEvent::Fragment { offset, bytes }) => {
-      if offset as u64 != produced {
-        return Err(io_err("companion fragment offset out of order"));
-      }
-      Ok(bytes)
-    }
-  }
-}
-
-fn body_stream_single_part(
-  total: u64,
-  body_rx: mpsc::Receiver<TransferEvent>,
+fn emit_stream(
+  steps: Vec<EmitStep>,
+  reader: SpoolReader,
   proxy: RangeProxy,
-  gateway_man: GatewayMan,
-  peer: Option<Address>,
   request_id: Uuid,
 ) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
   let cleanup = OnDropEnd::new(proxy, request_id);
   async_stream::try_stream! {
-    let mut produced: u64 = 0;
-    let mut last_acked: u32 = 0;
-    let mut rx = body_rx;
-    while produced < total {
-      let bytes = next_fragment(&mut rx, produced).await?;
-      if produced + bytes.len() as u64 > total {
-        Err(io_err("companion sent more bytes than the range declared"))?;
-        unreachable!();
-      }
-      produced += bytes.len() as u64;
-      maybe_ack_range(&gateway_man, peer, request_id, produced, &mut last_acked).await;
-      yield bytes;
-    }
-    drop(cleanup);
-  }
-}
-
-fn body_stream_multipart(
-  parts: Vec<RangePart>,
-  total_size: u32,
-  body_rx: mpsc::Receiver<TransferEvent>,
-  proxy: RangeProxy,
-  gateway_man: GatewayMan,
-  peer: Option<Address>,
-  request_id: Uuid,
-) -> impl futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
-  let cleanup = OnDropEnd::new(proxy, request_id);
-  async_stream::try_stream! {
-    let mut rx = body_rx;
-    let mut produced: u64 = 0;
-    let mut last_acked: u32 = 0;
-    // fragments are stream-relative over the concatenated parts and may span part boundaries
-    let mut leftover = Bytes::new();
-    for part in parts.iter() {
-      yield Bytes::from(multipart_part_header(part, total_size));
-
-      let mut remaining = part.length as u64;
-      while remaining > 0 {
-        if leftover.is_empty() {
-          leftover = next_fragment(&mut rx, produced).await?;
-          if produced + leftover.len() as u64 > parts.iter().map(|p| p.length as u64).sum::<u64>() {
-            Err(io_err("companion sent more bytes than the ranges declared"))?;
-            unreachable!();
+    let mut reader = reader;
+    for step in steps {
+      match step {
+        EmitStep::Lit(bytes) => {
+          yield bytes;
+        }
+        EmitStep::Data(len) => {
+          let mut remaining = len as u64;
+          while remaining > 0 {
+            let piece = reader.next(remaining.min(SPOOL_READ_MAX as u64) as usize).await?;
+            remaining -= piece.len() as u64;
+            yield piece;
           }
         }
-        let take = remaining.min(leftover.len() as u64) as usize;
-        let piece = leftover.split_to(take);
-        produced += take as u64;
-        remaining -= take as u64;
-        maybe_ack_range(&gateway_man, peer, request_id, produced, &mut last_acked).await;
-        yield piece;
       }
     }
-    yield Bytes::from(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n"));
     drop(cleanup);
   }
 }
@@ -386,10 +461,6 @@ impl Drop for OnDropEnd {
   }
 }
 
-fn io_err(msg: &'static str) -> std::io::Error {
-  std::io::Error::other(msg)
-}
-
 fn error_response(status: StatusCode, body: impl Into<String>) -> Response<Body> {
   Response::builder()
     .status(status)
@@ -398,9 +469,22 @@ fn error_response(status: StatusCode, body: impl Into<String>) -> Response<Body>
     .unwrap()
 }
 
-fn parse_range_header(header_value: &str) -> Result<Vec<RangeSpec>, &'static str> {
+fn parse_range_header(header_value: &str) -> Result<Parsed, &'static str> {
   let trimmed = header_value.trim();
   let payload = trimmed.strip_prefix("bytes=").ok_or("Range must start with bytes=")?;
+
+  if let Some((start, end)) = payload.trim().split_once('-')
+    && end.trim().is_empty()
+    && !payload.contains(',')
+  {
+    let start = start.trim();
+    if start.is_empty() {
+      return Err("suffix ranges 'bytes=-N' are not supported");
+    }
+    let start: u64 = start.parse().map_err(|_| "resume offset parse failed")?;
+    return Ok(Parsed::Resume(start));
+  }
+
   let mut out = Vec::new();
   for piece in payload.split(',') {
     let piece = piece.trim();
@@ -421,24 +505,166 @@ fn parse_range_header(header_value: &str) -> Result<Vec<RangeSpec>, &'static str
       .ok_or("range length overflow")?;
     out.push(RangeSpec { start, length });
   }
-  Ok(out)
+  if out.is_empty() {
+    return Err("Range header parsed to 0 ranges");
+  }
+  Ok(Parsed::Fresh(out))
 }
 
 #[cfg(test)]
 mod tests {
+  use libbridgething::gateway::{BridgeToGatewayMsgData, BridgeToGatewayTransferMsg};
+
   use super::*;
+  use crate::transfer::sinks::TransferSinks;
+
+  fn spool_temp_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("bridgething-range-serve-test-{}", Uuid::now_v7()))
+  }
+
+  // the regression at the heart of the BT deadlock: receipt acks must flow while
+  // swupdate reads NOTHING (an emmc write burst), and the full body must still be
+  // servable from the spool afterwards.
+  #[tokio::test]
+  async fn acks_flow_on_receipt_while_reader_stalls() {
+    let sinks = TransferSinks::default();
+    let request_id = Uuid::now_v7();
+    let peer = Address::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
+    let body_rx = sinks.bind_forward(request_id);
+
+    let (gateway_man, mut gw_rx) = GatewayMan::capturing();
+    let acks: Arc<std::sync::Mutex<Vec<TransferAck>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let acks_sink = acks.clone();
+    tokio::spawn(async move {
+      while let Some(out) = gw_rx.recv().await {
+        if let BridgeToGatewayMsgData::Transfer(BridgeToGatewayTransferMsg::Ack(ack)) = &out.msg.data {
+          acks_sink.lock().unwrap().push(ack.clone());
+        }
+      }
+    });
+
+    let expected: u64 = 64 * 1024;
+    let (writer, mut reader) = spool::create(&spool_temp_dir(), "ack-test").await.unwrap();
+    let tally = Arc::new(RangeTally::default());
+    let pump = tokio::spawn(ingest_pump(
+      body_rx,
+      writer,
+      expected,
+      gateway_man,
+      Some(peer),
+      request_id,
+      tally.clone(),
+    ));
+
+    // feed the full stream in 4 KiB fragments with NO reader draining the spool
+    let body: Vec<u8> = (0..expected).map(|i| (i % 251) as u8).collect();
+    for (i, chunk) in body.chunks(4096).enumerate() {
+      sinks.fragment(request_id, (i * 4096) as u32, Bytes::copy_from_slice(chunk));
+      tokio::task::yield_now().await;
+    }
+    tokio::time::timeout(Duration::from_secs(5), pump)
+      .await
+      .expect("pump completes without any reader draining the spool")
+      .unwrap();
+
+    let got = acks.lock().unwrap().clone();
+    assert!(!got.is_empty(), "receipt acks must flow while the reader stalls");
+    assert_eq!(got.last().unwrap().received as u64, expected);
+    assert_eq!(tally.snapshot().0, expected);
+
+    // the stalled reader can still drain the complete body afterwards
+    let mut drained = Vec::new();
+    while (drained.len() as u64) < expected {
+      let piece = reader.next(SPOOL_READ_MAX).await.unwrap();
+      drained.extend_from_slice(&piece);
+    }
+    assert_eq!(drained, body);
+  }
+
+  #[tokio::test]
+  async fn emit_stream_interleaves_headers_with_spooled_data() {
+    let parts = vec![
+      RangePart { start: 100, length: 50 },
+      RangePart {
+        start: 1000,
+        length: 300,
+      },
+    ];
+    let bl = layout::build(&parts, 100_000);
+    let plan = layout::plan_from(&bl, 0).unwrap();
+    let companion: Vec<u8> = (0..plan.companion_bytes).map(|i| (i % 251) as u8).collect();
+    let want = layout::assemble(&plan.steps, &companion);
+
+    let (mut writer, reader) = spool::create(&spool_temp_dir(), "emit-test").await.unwrap();
+    let feeder = {
+      let companion = companion.clone();
+      tokio::spawn(async move {
+        for chunk in companion.chunks(64) {
+          writer.append(chunk).await.unwrap();
+          tokio::task::yield_now().await;
+        }
+        writer.finish();
+      })
+    };
+
+    let stream = emit_stream(plan.steps, reader, super::super::noop_proxy(), Uuid::now_v7());
+    let collected: Vec<_> = futures::StreamExt::collect::<Vec<_>>(stream).await;
+    let mut got = Vec::new();
+    for piece in collected {
+      got.extend_from_slice(&piece.unwrap());
+    }
+    assert_eq!(got, want.to_vec());
+    feeder.await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn abandon_mid_stream_fails_the_body() {
+    let sinks = TransferSinks::default();
+    let request_id = Uuid::now_v7();
+    let body_rx = sinks.bind_forward(request_id);
+    let (gateway_man, _gw_rx) = GatewayMan::capturing();
+
+    let (writer, reader) = spool::create(&spool_temp_dir(), "abandon-test").await.unwrap();
+    tokio::spawn(ingest_pump(
+      body_rx,
+      writer,
+      1024,
+      gateway_man,
+      None,
+      request_id,
+      Arc::new(RangeTally::default()),
+    ));
+
+    sinks.fragment(request_id, 0, Bytes::from_static(&[0u8; 512]));
+    sinks.abandon(request_id, "link died".into());
+
+    let parts = vec![RangePart { start: 0, length: 1024 }];
+    let bl = layout::build(&parts, 4096);
+    let plan = layout::plan_from(&bl, 0).unwrap();
+    let stream = emit_stream(plan.steps, reader, super::super::noop_proxy(), request_id);
+    let collected: Vec<_> = futures::StreamExt::collect::<Vec<_>>(stream).await;
+    assert!(
+      collected.iter().any(|r| r.is_err()),
+      "an abandoned pull must error the HTTP body, not hang"
+    );
+  }
+
+  fn fresh(header: &str) -> Vec<RangeSpec> {
+    match parse_range_header(header).unwrap() {
+      Parsed::Fresh(r) => r,
+      Parsed::Resume(_) => panic!("expected fresh"),
+    }
+  }
 
   #[test]
   fn parses_single_range() {
-    let r = parse_range_header("bytes=0-99").unwrap();
-    assert_eq!(r, vec![RangeSpec { start: 0, length: 100 }]);
+    assert_eq!(fresh("bytes=0-99"), vec![RangeSpec { start: 0, length: 100 }]);
   }
 
   #[test]
   fn parses_multi_range() {
-    let r = parse_range_header("bytes=0-99,200-299").unwrap();
     assert_eq!(
-      r,
+      fresh("bytes=0-99,200-299"),
       vec![
         RangeSpec { start: 0, length: 100 },
         RangeSpec {
@@ -450,8 +676,15 @@ mod tests {
   }
 
   #[test]
-  fn rejects_open_ended_ranges() {
-    assert!(parse_range_header("bytes=0-").is_err());
+  fn open_ended_range_parses_as_resume() {
+    assert!(matches!(
+      parse_range_header("bytes=134321-"),
+      Ok(Parsed::Resume(134321))
+    ));
+  }
+
+  #[test]
+  fn rejects_suffix_range() {
     assert!(parse_range_header("bytes=-100").is_err());
   }
 
@@ -463,18 +696,5 @@ mod tests {
   #[test]
   fn rejects_missing_prefix() {
     assert!(parse_range_header("0-99").is_err());
-  }
-
-  #[test]
-  fn inline_multipart_assembles_parts_in_order() {
-    let parts = vec![RangePart { start: 0, length: 2 }, RangePart { start: 10, length: 3 }];
-    let assembled = assemble_multipart_inline(&parts, 100, b"abcde");
-    let text = String::from_utf8_lossy(&assembled);
-    assert!(text.contains("bytes 0-1/100"));
-    assert!(text.contains("bytes 10-12/100"));
-    let ab = text.find("ab").unwrap();
-    let cde = text.find("cde").unwrap();
-    assert!(ab < cde);
-    assert!(text.trim_end().ends_with(&format!("--{MULTIPART_BOUNDARY}--")));
   }
 }

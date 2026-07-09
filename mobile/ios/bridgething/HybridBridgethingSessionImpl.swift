@@ -1351,18 +1351,31 @@ private func rnOtaEvent(
     kind: BridgethingOtaEventKind,
     updatedAt: String? = nil, reason: String? = nil, deviceId: String? = nil,
     otaKind: BridgethingOtaKind? = nil, fromVersion: String? = nil, toVersion: String? = nil,
-    phase: BridgethingOtaPhase? = nil, percent: Double? = nil,
+    releaseVersion: String? = nil, daemonVersion: String? = nil, imageVersion: String? = nil,
+    steps: [BridgethingOtaStep]? = nil, stepId: Double? = nil,
+    phase: BridgethingOtaPhase? = nil, percent: Double? = nil, dwlPercent: Double? = nil,
     deviceChannel: String? = nil, configuredChannel: String? = nil,
     stageAsset: String? = nil, stageReceived: Double? = nil, stageTotal: Double? = nil,
     stageRatePerSec: Double? = nil, stageEtaSeconds: Double? = nil
 ) -> BridgethingOtaEvent {
     BridgethingOtaEvent(
         kind: kind, updatedAt: updatedAt, reason: reason, deviceId: deviceId, otaKind: otaKind,
-        fromVersion: fromVersion, toVersion: toVersion, phase: phase, percent: percent,
+        fromVersion: fromVersion, toVersion: toVersion,
+        releaseVersion: releaseVersion, daemonVersion: daemonVersion, imageVersion: imageVersion,
+        steps: steps, stepId: stepId, phase: phase, percent: percent, dwlPercent: dwlPercent,
         deviceChannel: deviceChannel, configuredChannel: configuredChannel,
         stageAsset: stageAsset, stageReceived: stageReceived, stageTotal: stageTotal,
         stageRatePerSec: stageRatePerSec, stageEtaSeconds: stageEtaSeconds
     )
+}
+
+private func rnOtaStepKind(_ k: OtaStepKind) -> BridgethingOtaStepKind {
+    switch k {
+    case .download: .download
+    case .stream: .stream
+    case .apply: .apply
+    case .reboot: .reboot
+    }
 }
 
 private func bytePercent(_ n: UInt64, _ d: UInt64) -> Double {
@@ -1381,36 +1394,41 @@ private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
             reason: "device on \(deviceChannel), companion configured for \(configuredChannel)",
             deviceId: deviceId, deviceChannel: deviceChannel, configuredChannel: configuredChannel
         )
-    case let .updateAvailable(deviceId, kind, fromVersion, toVersion):
+    case let .updateAvailable(deviceId, release, daemonVersion, imageVersion):
         return rnOtaEvent(
             kind: .updateavailable, deviceId: deviceId,
-            otaKind: kind == .image ? .image : .daemon, fromVersion: fromVersion, toVersion: toVersion
+            toVersion: release, releaseVersion: release,
+            daemonVersion: daemonVersion, imageVersion: imageVersion
         )
-    case let .progress(deviceId, kind, snapshot):
+    case let .planned(deviceId, kind, release, daemonVersion, imageVersion, steps):
+        return rnOtaEvent(
+            kind: .planned, deviceId: deviceId, otaKind: kind == .image ? .image : .daemon,
+            releaseVersion: release, daemonVersion: daemonVersion, imageVersion: imageVersion,
+            steps: steps.map {
+                BridgethingOtaStep(id: Double($0.id), kind: rnOtaStepKind($0.kind), label: $0.label, bytes: Double($0.bytes))
+            }
+        )
+    case let .progress(deviceId, kind, stepId, snapshot):
         let otaKind: BridgethingOtaKind = kind == .image ? .image : .daemon
+        let sid = Double(stepId)
         switch snapshot {
         case .idle:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .idle, percent: 0)
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .idle, percent: 0)
         case let .downloading(asset, received, total, rate):
             return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind,
+                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
                 phase: .downloading, percent: bytePercent(received, total),
                 stageAsset: asset, stageReceived: Double(received), stageTotal: Double(total),
                 stageRatePerSec: rate
             )
-        case let .streaming(sent, total, rate, eta):
+        case let .streaming(asset, sent, total, rate, eta):
             return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind,
+                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
                 phase: .streaming, percent: bytePercent(sent, total),
-                stageReceived: Double(sent), stageTotal: Double(total),
+                stageAsset: asset, stageReceived: Double(sent), stageTotal: Double(total),
                 stageRatePerSec: rate, stageEtaSeconds: eta
             )
-        case let .rangePull(asset, served, rate):
-            return rnOtaEvent(
-                kind: .progress, deviceId: deviceId, otaKind: otaKind,
-                phase: .rangepull, stageAsset: asset, stageReceived: Double(served), stageRatePerSec: rate
-            )
-        case let .applying(phase: ph, percent: p):
+        case let .applying(phase: ph, writePercent: wp, dwlPercent: dp, dwlBytes: db):
             let mapped: BridgethingOtaPhase = switch ph {
             case .streaming: .streaming
             case .verifying: .verifying
@@ -1418,13 +1436,17 @@ private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
             case .confirming: .confirming
             case .reboot: .reboot
             }
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: mapped, percent: Double(p))
+            return rnOtaEvent(
+                kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid,
+                phase: mapped, percent: Double(wp), dwlPercent: Double(dp),
+                stageReceived: dp < 100 && db > 0 ? Double(db) : nil
+            )
         case .staged:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .writing, percent: 100)
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .writing, percent: 100)
         case .completed:
-            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, phase: .completed, percent: 100)
+            return rnOtaEvent(kind: .progress, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .completed, percent: 100)
         case let .failed(r):
-            return rnOtaEvent(kind: .progress, reason: r, deviceId: deviceId, otaKind: otaKind, phase: .failed, percent: 0)
+            return rnOtaEvent(kind: .progress, reason: r, deviceId: deviceId, otaKind: otaKind, stepId: sid, phase: .failed, percent: 0)
         }
     case let .updated(deviceId, kind, version):
         return rnOtaEvent(

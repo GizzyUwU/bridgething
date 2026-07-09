@@ -97,7 +97,14 @@ impl Link {
     if events_tx.send(Iap2Event::Established(peer_lsp.clone())).await.is_err() {
       tracing::debug!("iap2 events receiver dropped before Established could be delivered");
     }
-    tracing::info!("iap2 link Established");
+    tracing::info!(
+      max_outgoing = peer_lsp.max_outgoing,
+      max_len = peer_lsp.max_len,
+      rt_ms = peer_lsp.retransmission_timeout_ms,
+      ack_ms = peer_lsp.ack_timeout_ms,
+      max_ack = peer_lsp.max_ack,
+      "iap2 link Established"
+    );
 
     let mut state = EstablishedState::new(config.initial_psn, peer_initial_psn, &peer_lsp);
     Self::established_phase(
@@ -112,8 +119,6 @@ impl Link {
     .await
   }
 
-  /// Device-half (iPhone-side) role for the emulator. The accessory
-  /// initiates the SYN, so here we wait for it and reply SYN|ACK.
   #[cfg(feature = "emulator")]
   pub async fn run_device<S>(
     stream: S,
@@ -233,12 +238,6 @@ impl Link {
     }
   }
 
-  /// Device-role detect + negotiate, combined. Keeps emitting detect
-  /// markers on the interval until the SYN arrives (the accessory must
-  /// drain at least one of ours first). The codec skips the accessory's
-  /// detect markers via bad-magic resync and surfaces only the SYN. We
-  /// reply SYN|ACK (seq = our PSN, ack = the accessory's PSN). Returns
-  /// the peer LSP and the accessory's PSN.
   #[cfg(feature = "emulator")]
   async fn detect_and_negotiate_device<R, W>(
     reader: &mut R,

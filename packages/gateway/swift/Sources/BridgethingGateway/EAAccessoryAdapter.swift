@@ -371,17 +371,25 @@
       Task { @MainActor in owner?.linkDropped(self, reason: reason) }
     }
 
+    // ios accepts roughly one write() per ~0.5s space-available cycle regardless of size
+    private let coalesceCapBytes = 32 * 1024
+
     private func drainOutput() {
       guard let out = session.outputStream else { return }
       while out.hasSpaceAvailable {
         if currentWrite.isEmpty {
-          if !normalQueue.isEmpty {
-            currentWrite = normalQueue.removeFirst()
-          } else if !bulkQueue.isEmpty {
-            currentWrite = bulkQueue.removeFirst()
-          } else if !backgroundQueue.isEmpty {
-            currentWrite = backgroundQueue.removeFirst()
-          } else {
+          while currentWrite.count < coalesceCapBytes {
+            if !normalQueue.isEmpty {
+              currentWrite.append(normalQueue.removeFirst())
+            } else if !bulkQueue.isEmpty {
+              currentWrite.append(bulkQueue.removeFirst())
+            } else if !backgroundQueue.isEmpty {
+              currentWrite.append(backgroundQueue.removeFirst())
+            } else {
+              break
+            }
+          }
+          if currentWrite.isEmpty {
             break
           }
         }

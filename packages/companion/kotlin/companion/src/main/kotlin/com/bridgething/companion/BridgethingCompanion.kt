@@ -221,7 +221,6 @@ public class BridgethingCompanion(
             started = true
         }
         log(CompanionLogLevel.Info, "companion started")
-        // the device has no battery RTC; re-seed its clock on tz/wall-clock changes.
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 scope.launch { emitTimeSnapshot() }
@@ -382,7 +381,6 @@ public class BridgethingCompanion(
         }
     }
 
-    // subscribes to the daemon's tracing log over the gateway and forwards entries through logObserver.
     public suspend fun setDeviceLogStreaming(enabled: Boolean) {
         val toSubscribe = deviceLogMutex.withLock {
             if (enabled == deviceLogStreaming) return
@@ -541,7 +539,6 @@ public class BridgethingCompanion(
                 }
                 is GatewayEvent.Disconnected -> {
                     log(CompanionLogLevel.Info, "peer disconnected: ${event.deviceId}")
-                    // the daemon auto-releases the subscription token on peer disconnect.
                     deviceLogMutex.withLock {
                         connectedDeviceIds.remove(event.deviceId)
                         deviceLogTokens.remove(event.deviceId)
@@ -832,7 +829,6 @@ public class BridgethingCompanion(
     private fun noProviderReply(): LibraryErrorReply =
         LibraryErrorReply(LibraryError.NotSupported(LibraryErrorNotSupportedInner(reason = "no active music provider")))
 
-    // notImplemented maps to protocol Unimplemented (recognized verb, no backend); all other errors become domain replies.
     private suspend fun respondLibraryError(
         error: Throwable,
         onProtocol: suspend (WireError) -> Unit,
@@ -882,7 +878,7 @@ public class BridgethingCompanion(
         const val TAG = "bridgething.companion"
         const val ASSET_FRAGMENT_BYTES = 4 * 1024
         const val INLINE_BODY_MAX_BYTES = 8 * 1024
-        const val TRANSFER_WINDOW_BYTES = 8 * 1024
+        const val TRANSFER_WINDOW_BYTES = 64 * 1024
         const val TRANSFER_ACK_TIMEOUT_MS = 15_000L
     }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@bridgething/lib",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Wire protocol, codec, and framing for bridgething, the community daemon that replaces Spotify's app on the Car Thing.",
   "license": "MIT",
   "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
@@ -13,7 +13,13 @@
   "bugs": {
     "url": "https://github.com/JoeyEamigh/bridgething/issues"
   },
-  "keywords": ["bridgething", "spotify", "car-thing", "superbird", "wire-protocol"],
+  "keywords": [
+    "bridgething",
+    "spotify",
+    "car-thing",
+    "superbird",
+    "wire-protocol"
+  ],
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -62,7 +68,9 @@
       "default": "./dist/logger.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "prebuild": "bun run version && rm -rf dist",
     "build": "tsc -p tsconfig.build.json",

@@ -229,6 +229,13 @@ impl PeerTracker {
     let (_snapshot_tx, snapshot_rx) = watch::channel(PeerSnapshot::default());
     Self { cmd_tx, snapshot_rx }
   }
+
+  #[cfg(test)]
+  pub fn scripted() -> (Self, watch::Sender<PeerSnapshot>) {
+    let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+    let (snapshot_tx, snapshot_rx) = watch::channel(PeerSnapshot::default());
+    (Self { cmd_tx, snapshot_rx }, snapshot_tx)
+  }
 }
 
 struct PeerActor {
