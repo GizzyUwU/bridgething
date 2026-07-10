@@ -40,7 +40,8 @@ export ANDROID_NDK_HOME
 echo "== ndk: $ANDROID_NDK_HOME =="
 
 echo "== rustup android targets =="
-rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android >/dev/null
+# arm64-v8a only: arm32 is EOL and x86/x86_64 are emulator-only; no real phone needs them.
+rustup target add aarch64-linux-android >/dev/null
 
 echo "== generate kotlin bindings =="
 cargo build -q -p spotify --lib
@@ -48,10 +49,10 @@ cargo run -q --bin uniffi-bindgen -- generate \
   --library "$(host_dylib)" \
   --language kotlin --out-dir "$KOTLIN_OUT"
 
-echo "== build jniLibs (release, 4 abis) =="
+echo "== build jniLibs (release, arm64-v8a) =="
 rm -rf "$JNILIBS"; mkdir -p "$JNILIBS"
 cargo ndk \
-  -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+  -t arm64-v8a \
   -o "$JNILIBS" \
   build --release -p spotify --lib
 
