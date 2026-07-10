@@ -22,6 +22,14 @@ else
   INSTALLS="$GRADLE_JAVA"
 fi
 
+# Nitro Kotlin/C++ bindings are generated from packages/session-rn/src/specs/*.nitro.ts into a
+# gitignored dir (packages/session-rn/nitrogen/generated). Nothing else regenerates it - not gradle,
+# not git checkout - so a spec change silently leaves stale bindings and the Kotlin compile fails with
+# "Unresolved reference 'BridgethingOta...'". Always regenerate before gradle. Cheap + idempotent.
+command -v bun >/dev/null || { echo "bun not found (required for nitro:codegen)" >&2; exit 1; }
+echo "== nitro:codegen (session-rn) =="
+( cd ../packages/session-rn && bun run nitro:codegen )
+
 echo "== gradle assembleRelease (jdk: $GRADLE_JAVA) =="
 # rn settings-plugin prefers jdk 17, the rest 21; gradle 9 foojay auto-download is broken so pin installs and disable it.
 ( cd android && JAVA_HOME="$GRADLE_JAVA" ./gradlew assembleRelease \
