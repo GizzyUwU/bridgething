@@ -44,21 +44,33 @@ const useWebappsStore = create<WebappsState>(set => ({
     }),
 }));
 
+const REFRESH_ATTEMPTS = 3;
+
 export async function refreshWebapps(deviceId: string): Promise<void> {
   const store = useWebappsStore.getState();
   store.patch(deviceId, { loading: true, error: null });
-  try {
-    const session = getSession();
-    const [list, active] = await Promise.all([
-      session.listWebapps(deviceId),
-      session.currentWebapp(deviceId),
-    ]);
-    store.patch(deviceId, { list, active, loading: false, error: null });
-  } catch (err) {
-    store.patch(deviceId, {
-      loading: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
+
+  for (let attempt = 1; attempt <= REFRESH_ATTEMPTS; attempt++) {
+    try {
+      const session = getSession();
+      const [list, active] = await Promise.all([
+        session.listWebapps(deviceId),
+        session.currentWebapp(deviceId),
+      ]);
+      store.patch(deviceId, { list, active, loading: false, error: null });
+      return;
+    } catch (err) {
+      if (attempt < REFRESH_ATTEMPTS) {
+        await new Promise<void>(resolve =>
+          setTimeout(() => resolve(), attempt * 400),
+        );
+        continue;
+      }
+      store.patch(deviceId, {
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

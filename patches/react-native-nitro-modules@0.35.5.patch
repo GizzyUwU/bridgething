@@ -1,6 +1,59 @@
 diff --git a/node_modules/react-native-nitro-modules/.bun-tag-633dca7005a522c9 b/.bun-tag-633dca7005a522c9
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/cpp/core/Promise.cpp b/cpp/core/Promise.cpp
+index e39d5019466a2a7e75d7c68d03e874f8a18c5e6f..80e1e970826a3ae7e448c1a52cc949d8b9f5f9c0 100644
+--- a/cpp/core/Promise.cpp
++++ b/cpp/core/Promise.cpp
+@@ -9,10 +9,20 @@
+ 
+ namespace margelo::nitro {
+ 
++std::exception_ptr makeRuntimeErrorPtr(const std::string& message) {
++  // capture via a local throw/catch instead of std::make_exception_ptr: the latter routes through
++  // the weak __make_exception_ptr_via_throw<runtime_error> template, whose catch handler swiftc
++  // strips under -fignore-exceptions. if that linkonce_odr copy wins, capture terminates (SIGABRT).
++  try {
++    throw std::runtime_error(message);
++  } catch (...) {
++    return std::current_exception();
++  }
++}
++
+ Promise<void>::~Promise() {
+   if (isPending()) [[unlikely]] {
+-    std::runtime_error error("Timeouted: Promise<void> was destroyed!");
+-    reject(std::make_exception_ptr(error));
++    reject(makeRuntimeErrorPtr("Timeouted: Promise<void> was destroyed!"));
+   }
+ }
+ 
+diff --git a/cpp/core/Promise.hpp b/cpp/core/Promise.hpp
+index 2ec3fea48b7aca59cc16973fb758fa21a4b84639..06550c1d69b31ddeb2cebfbf8224fcae8df33b71 100644
+--- a/cpp/core/Promise.hpp
++++ b/cpp/core/Promise.hpp
+@@ -19,6 +19,12 @@ namespace margelo::nitro {
+ 
+ using namespace facebook;
+ 
++// captures a runtime_error into an exception_ptr out-of-line in Promise.cpp so it is always compiled
++// by clang with C++ exceptions. inlining std::make_exception_ptr here would let swiftc instantiate
++// the weak __make_exception_ptr_via_throw<runtime_error> template under -fignore-exceptions with its
++// catch handler stripped; if the linker picks that copy, every timeout rejection terminates (SIGABRT).
++std::exception_ptr makeRuntimeErrorPtr(const std::string& message);
++
+ template <typename TResult>
+ class Promise final {
+ public:
+@@ -36,7 +42,7 @@ public:
+   ~Promise() {
+     if (isPending()) [[unlikely]] {
+       auto message = std::string("Timeouted: Promise<") + TypeInfo::getFriendlyTypename<TResult>() + "> was destroyed!";
+-      reject(std::make_exception_ptr(std::runtime_error(message)));
++      reject(makeRuntimeErrorPtr(message));
+     }
+   }
+ 
 diff --git a/cpp/jsi/JSIConverter+Exception.hpp b/cpp/jsi/JSIConverter+Exception.hpp
 index f327bd2f3eccee7203b89f4d5a1da634f482269b..908acf72eb1346c54b45f56ec7df6ad2adf57e9c 100644
 --- a/cpp/jsi/JSIConverter+Exception.hpp
@@ -63,10 +116,10 @@ index f327bd2f3eccee7203b89f4d5a1da634f482269b..908acf72eb1346c54b45f56ec7df6ad2
  
  } // namespace margelo::nitro
 diff --git a/cpp/utils/CommonGlobals.cpp b/cpp/utils/CommonGlobals.cpp
-index 126fe49becd059e4e3986ffbbed01c00dd8c40a0..e3eced6ea6458b2ab75f1734d501e69b4f10678b 100644
+index 126fe49becd059e4e3986ffbbed01c00dd8c40a0..a009181f27d5642f7d614f50f1c54b9fa203d9d0 100644
 --- a/cpp/utils/CommonGlobals.cpp
 +++ b/cpp/utils/CommonGlobals.cpp
-@@ -216,3 +216,50 @@ const jsi::Function& CommonGlobals::getGlobalFunction(jsi::Runtime& runtime, con
+@@ -216,3 +216,57 @@ const jsi::Function& CommonGlobals::getGlobalFunction(jsi::Runtime& runtime, con
  }
  
  } // namespace margelo::nitro
@@ -87,7 +140,14 @@ index 126fe49becd059e4e3986ffbbed01c00dd8c40a0..e3eced6ea6458b2ab75f1734d501e69b
 +  jsi::Object object = error.asObject(runtime);
 +  std::string name = object.getProperty(runtime, PropNameIDCache::get(runtime, "name")).asString(runtime).utf8(runtime);
 +  std::string message = object.getProperty(runtime, PropNameIDCache::get(runtime, "message")).asString(runtime).utf8(runtime);
-+  return std::make_exception_ptr(std::runtime_error(name + ": " + message));
++  // capture via a local throw/catch instead of std::make_exception_ptr: the latter routes through
++  // the weak __make_exception_ptr_via_throw<runtime_error> template, whose catch handler swiftc
++  // strips under -fignore-exceptions. if that linkonce_odr copy wins, capture terminates (SIGABRT).
++  try {
++    throw std::runtime_error(name + ": " + message);
++  } catch (...) {
++    return std::current_exception();
++  }
 +}
 +
 +jsi::Value JSIConverter<std::exception_ptr>::toJSI(jsi::Runtime& runtime, const std::exception_ptr& exception) {
@@ -118,10 +178,10 @@ index 126fe49becd059e4e3986ffbbed01c00dd8c40a0..e3eced6ea6458b2ab75f1734d501e69b
 +
 +} // namespace margelo::nitro
 diff --git a/ios/platform/ThreadUtils.cpp b/ios/platform/ThreadUtils.cpp
-index a02b9c836ddeef6d7faacd8f434ec849d8e7a8c9..c7e052eb050459fc2e95a95f7971960c8f805968 100644
+index a02b9c836ddeef6d7faacd8f434ec849d8e7a8c9..076b0a8ae8c9ddc5d7df2ca851d847c90b6350c8 100644
 --- a/ios/platform/ThreadUtils.cpp
 +++ b/ios/platform/ThreadUtils.cpp
-@@ -50,3 +50,36 @@ std::shared_ptr<Dispatcher> ThreadUtils::createUIThreadDispatcher() {
+@@ -50,3 +50,43 @@ std::shared_ptr<Dispatcher> ThreadUtils::createUIThreadDispatcher() {
  }
  
  } // namespace margelo::nitro
@@ -139,7 +199,14 @@ index a02b9c836ddeef6d7faacd8f434ec849d8e7a8c9..c7e052eb050459fc2e95a95f7971960c
 +namespace margelo::nitro {
 +
 +std::exception_ptr makeException(const std::string& message) {
-+  return std::make_exception_ptr(std::runtime_error(message));
++  // capture via a local throw/catch instead of std::make_exception_ptr: the latter routes through
++  // the weak __make_exception_ptr_via_throw<runtime_error> template, whose catch handler swiftc
++  // strips under -fignore-exceptions. if that linkonce_odr copy wins, capture terminates (SIGABRT).
++  try {
++    throw std::runtime_error(message);
++  } catch (...) {
++    return std::current_exception();
++  }
 +}
 +
 +std::string getExceptionMessage(const std::exception_ptr& exception) {
