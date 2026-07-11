@@ -57,14 +57,22 @@ public object CompanionDevicePicker {
             deferred.complete(device?.let(::toWireDevice))
         }
 
-        val request = AssociationRequest.Builder()
+        val builder = AssociationRequest.Builder()
             .addDeviceFilter(
                 BluetoothDeviceFilter.Builder()
                     .setNamePattern(carThingNameRegex)
                     .build()
             )
             .setSingleDevice(false)
-            .build()
+        // The WATCH companion profile grants the phone / call-log / contacts / notifications /
+        // MANAGE_ONGOING_CALLS bundle via the companion role in a single consent. On Android 12+
+        // a role-less association CANNOT receive PHONE_STATE or the caller number, so this is what
+        // makes incoming-call display (and companion DTMF) work without claiming the default-dialer
+        // role. DEVICE_PROFILE_WATCH is fully public; the method itself is API 31+.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            builder.setDeviceProfile(AssociationRequest.DEVICE_PROFILE_WATCH)
+        }
+        val request = builder.build()
 
         manager.associate(request, object : CompanionDeviceManager.Callback() {
             override fun onDeviceFound(chooserLauncher: IntentSender) {
