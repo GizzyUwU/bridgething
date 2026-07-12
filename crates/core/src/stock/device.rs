@@ -66,6 +66,43 @@ pub enum StockPhoneCallSend {
   },
 }
 
+/// The stock webapp keeps a separate call store per phone platform and picks
+/// between them on the `phone_type` we report at connect. The iOS store reads
+/// `phone_call_info` (above); the Android store only ever reads this message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "payload")]
+pub enum StockLegacyPhoneCallSend {
+  #[serde(rename = "com.spotify.superbird.phone.state")]
+  PhoneState {
+    state: StockLegacyPhoneCallState,
+    phone_number: String,
+    display_name: String,
+  },
+}
+
+/// The Android store's whole vocabulary. It has no outgoing-call state at all
+/// (`isRingingOutgoing` is hardcoded false), so an outgoing call stays hidden
+/// until it goes `Active` and lands on `Offhook`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StockLegacyPhoneCallState {
+  Idle,
+  Ringing,
+  Offhook,
+}
+
+impl StockLegacyPhoneCallState {
+  pub fn from_call(status: &PhoneCallStatus, direction: &PhoneCallDirection) -> Self {
+    match status {
+      PhoneCallStatus::Active | PhoneCallStatus::Held => StockLegacyPhoneCallState::Offhook,
+      PhoneCallStatus::Ringing if matches!(direction, PhoneCallDirection::Incoming) => {
+        StockLegacyPhoneCallState::Ringing
+      }
+      _ => StockLegacyPhoneCallState::Idle,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StockPhoneCallStatus {
   Disconnected,

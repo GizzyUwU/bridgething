@@ -92,8 +92,9 @@ pub struct StockDeviceInfo {
   pub device_type: StockDeviceType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StockDeviceType {
+  #[default]
   Android,
   #[serde(rename = "iOS")]
   Ios,

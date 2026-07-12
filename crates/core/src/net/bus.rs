@@ -29,6 +29,12 @@ impl WireEventBus {
     Self { client_man }
   }
 
+  /// Records which call dialect the stock webapp will be listening for. Kept in
+  /// step with the `phone_type` reported to the webapp on the stock connect bundle.
+  pub fn set_stock_phone(&self, phone: crate::stock::StockDeviceType) {
+    self.client_man.set_stock_phone(phone);
+  }
+
   pub async fn broadcast(
     &self,
     data: impl Into<BridgeToClientMsgData> + Clone,

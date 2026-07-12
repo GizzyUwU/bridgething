@@ -81,6 +81,8 @@ pub enum StockSendMsg {
   #[from]
   PhoneCall(StockPhoneCallSend),
   #[from]
+  LegacyPhoneCall(StockLegacyPhoneCallSend),
+  #[from]
   Permissions(StockPermissionsSend),
   #[from]
   Configuration(StockConfigurationSend),
@@ -96,10 +98,34 @@ pub enum StockSendMsg {
 #[derive(Debug, Default)]
 pub struct StockCallSlot(std::sync::Mutex<Option<String>>);
 
+/// The connected peer's platform, as reported to the stock webapp at connect.
+/// The webapp routes call events to a per-platform store, so phone events have
+/// to be emitted in the matching dialect or they land in a store it never reads.
+/// Read on every stock translation, hence an atomic rather than a lock.
+#[derive(Debug, Default)]
+pub struct StockPeerPhone(std::sync::atomic::AtomicBool);
+
+impl StockPeerPhone {
+  pub fn set(&self, phone: StockDeviceType) {
+    self
+      .0
+      .store(phone == StockDeviceType::Ios, std::sync::atomic::Ordering::Relaxed);
+  }
+
+  pub fn get(&self) -> StockDeviceType {
+    if self.0.load(std::sync::atomic::Ordering::Relaxed) {
+      StockDeviceType::Ios
+    } else {
+      StockDeviceType::Android
+    }
+  }
+}
+
 pub fn server_event_to_stock(
   msg: BridgeToClientMsg,
   stock_msg_id: Option<usize>,
   call_slot: &StockCallSlot,
+  phone: StockDeviceType,
 ) -> StockSendMsg {
   match msg.data {
     BridgeToClientMsgData::Bluetooth(data) => StockSendMsg::Bluetooth(data.into()),
@@ -135,7 +161,7 @@ pub fn server_event_to_stock(
         StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
       }
     },
-    BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data, call_slot),
+    BridgeToClientMsgData::Phone(data) => phone_event_to_stock(data, call_slot, phone),
     BridgeToClientMsgData::Audio(data) => audio_event_to_stock(data, stock_msg_id),
     BridgeToClientMsgData::Ack | BridgeToClientMsgData::Done => {
       StockSendMsg::InterApp(StockInterAppSend::make_ack(stock_msg_id))
@@ -174,7 +200,11 @@ fn audio_event_to_stock(event: BridgeToClientAudioMsg, stock_msg_id: Option<usiz
   }
 }
 
-fn phone_event_to_stock(msg: BridgeToClientPhoneMsg, call_slot: &StockCallSlot) -> StockSendMsg {
+fn phone_event_to_stock(
+  msg: BridgeToClientPhoneMsg,
+  call_slot: &StockCallSlot,
+  phone: StockDeviceType,
+) -> StockSendMsg {
   let call = match msg {
     BridgeToClientPhoneMsg::CallStarted(c) | BridgeToClientPhoneMsg::CallUpdated(c) => c,
     BridgeToClientPhoneMsg::CallEnded(ended) => libbridgething::PhoneCall {
@@ -211,8 +241,18 @@ fn phone_event_to_stock(msg: BridgeToClientPhoneMsg, call_slot: &StockCallSlot) 
   } else {
     call.remote_id
   };
+  let remote_id = format_nanp(&remote_id);
+
+  if phone == StockDeviceType::Android {
+    return StockSendMsg::LegacyPhoneCall(StockLegacyPhoneCallSend::PhoneState {
+      state: StockLegacyPhoneCallState::from_call(&call.status, &call.direction),
+      phone_number: remote_id,
+      display_name: call.display_name,
+    });
+  }
+
   StockSendMsg::PhoneCall(StockPhoneCallSend::PhoneCallInfo {
-    remote_id: format_nanp(&remote_id),
+    remote_id,
     display_name: call.display_name,
     status: call.status.into(),
     call_dir: call.direction.into(),
@@ -283,7 +323,13 @@ mod test {
     PhoneCall, PhoneCallDirection, PhoneCallService, PhoneCallStatus, client::BridgeToClientPhoneMsg,
   };
 
-  use super::{StockCallSlot, StockPhoneCallSend, StockSendMsg, format_nanp, phone_event_to_stock};
+  use super::{
+    StockCallSlot, StockDeviceType, StockLegacyPhoneCallSend, StockLegacyPhoneCallState, StockPhoneCallSend,
+    StockSendMsg, format_nanp, phone_event_to_stock,
+  };
+
+  const IOS: StockDeviceType = StockDeviceType::Ios;
+  const ANDROID: StockDeviceType = StockDeviceType::Android;
 
   fn call(
     call_id: &str,
@@ -328,6 +374,7 @@ mod test {
         Some(PhoneCallService::Unknown),
       )),
       &slot,
+      IOS,
     );
     assert_eq!(remote_id_of(named), "WhatsApp");
 
@@ -340,6 +387,7 @@ mod test {
         Some(PhoneCallService::Unknown),
       )),
       &slot,
+      IOS,
     );
     assert_eq!(remote_id_of(nameless), "", "no name means empty number, never the uuid");
   }
@@ -351,6 +399,7 @@ mod test {
       let msg = phone_event_to_stock(
         BridgeToClientPhoneMsg::CallUpdated(call("c1", "+14081234567", "John", PhoneCallStatus::Active, service)),
         &slot,
+        IOS,
       );
       assert_eq!(remote_id_of(msg), "(408) 123-4567");
     }
@@ -368,12 +417,14 @@ mod test {
         Some(PhoneCallService::Telephony),
       )),
       &slot,
+      IOS,
     );
     assert!(matches!(shown, StockSendMsg::PhoneCall(_)));
 
     let stale = phone_event_to_stock(
       BridgeToClientPhoneMsg::CallUpdated(call("c1", "", "", PhoneCallStatus::Disconnected, None)),
       &slot,
+      IOS,
     );
     assert_eq!(
       stale,
@@ -384,6 +435,7 @@ mod test {
     let matching = phone_event_to_stock(
       BridgeToClientPhoneMsg::CallUpdated(call("c2", "", "", PhoneCallStatus::Disconnected, None)),
       &slot,
+      IOS,
     );
     assert!(
       matches!(matching, StockSendMsg::PhoneCall(_)),
@@ -397,8 +449,113 @@ mod test {
     let msg = phone_event_to_stock(
       BridgeToClientPhoneMsg::CallUpdated(call("c1", "", "", PhoneCallStatus::Disconnected, None)),
       &slot,
+      IOS,
     );
     assert!(matches!(msg, StockSendMsg::PhoneCall(_)));
+  }
+
+  fn legacy_of(msg: StockSendMsg) -> (StockLegacyPhoneCallState, String, String) {
+    match msg {
+      StockSendMsg::LegacyPhoneCall(StockLegacyPhoneCallSend::PhoneState {
+        state,
+        phone_number,
+        display_name,
+      }) => (state, phone_number, display_name),
+      other => panic!("expected com.spotify.superbird.phone.state, got {other:?}"),
+    }
+  }
+
+  fn directed(call_id: &str, status: PhoneCallStatus, direction: PhoneCallDirection) -> PhoneCall {
+    PhoneCall {
+      direction,
+      ..call(
+        call_id,
+        "+14081234567",
+        "John",
+        status,
+        Some(PhoneCallService::Telephony),
+      )
+    }
+  }
+
+  #[test]
+  fn android_peer_gets_the_legacy_dialect_not_phone_call_info() {
+    let slot = StockCallSlot::default();
+    let msg = phone_event_to_stock(
+      BridgeToClientPhoneMsg::CallStarted(call(
+        "c1",
+        "+14081234567",
+        "John",
+        PhoneCallStatus::Ringing,
+        Some(PhoneCallService::Telephony),
+      )),
+      &slot,
+      ANDROID,
+    );
+
+    let (state, number, name) = legacy_of(msg);
+    assert_eq!(state, StockLegacyPhoneCallState::Ringing);
+    assert_eq!(
+      number, "(408) 123-4567",
+      "the legacy dialect still gets a formatted number"
+    );
+    assert_eq!(name, "John");
+  }
+
+  #[test]
+  fn android_call_lifecycle_maps_onto_the_three_legacy_states() {
+    let slot = StockCallSlot::default();
+    let state_for = |status| {
+      legacy_of(phone_event_to_stock(
+        BridgeToClientPhoneMsg::CallUpdated(directed("c1", status, PhoneCallDirection::Incoming)),
+        &slot,
+        ANDROID,
+      ))
+      .0
+    };
+
+    assert_eq!(state_for(PhoneCallStatus::Ringing), StockLegacyPhoneCallState::Ringing);
+    assert_eq!(state_for(PhoneCallStatus::Active), StockLegacyPhoneCallState::Offhook);
+    assert_eq!(state_for(PhoneCallStatus::Held), StockLegacyPhoneCallState::Offhook);
+    assert_eq!(
+      state_for(PhoneCallStatus::Disconnected),
+      StockLegacyPhoneCallState::Idle,
+      "the android store only clears its overlay on IDLE"
+    );
+  }
+
+  #[test]
+  fn android_outgoing_call_stays_hidden_until_it_connects() {
+    let slot = StockCallSlot::default();
+    let state_for = |status| {
+      legacy_of(phone_event_to_stock(
+        BridgeToClientPhoneMsg::CallUpdated(directed("c1", status, PhoneCallDirection::Outgoing)),
+        &slot,
+        ANDROID,
+      ))
+      .0
+    };
+
+    // the android store hardcodes isRingingOutgoing = false, so there is no
+    // outgoing-ring state to map onto; it may only surface once connected
+    assert_eq!(state_for(PhoneCallStatus::Sending), StockLegacyPhoneCallState::Idle);
+    assert_eq!(state_for(PhoneCallStatus::Ringing), StockLegacyPhoneCallState::Idle);
+    assert_eq!(state_for(PhoneCallStatus::Active), StockLegacyPhoneCallState::Offhook);
+  }
+
+  #[test]
+  fn legacy_phone_state_serializes_the_shape_the_android_store_reads() {
+    let json = serde_json::to_value(StockLegacyPhoneCallSend::PhoneState {
+      state: StockLegacyPhoneCallState::Ringing,
+      phone_number: "(408) 123-4567".into(),
+      display_name: "John".into(),
+    })
+    .expect("serializes");
+
+    assert_eq!(json["type"], "com.spotify.superbird.phone.state");
+    assert_eq!(json["payload"]["state"], "RINGING");
+    assert_eq!(json["payload"]["phone_number"], "(408) 123-4567");
+    assert_eq!(json["payload"]["display_name"], "John");
   }
 
   #[test]
@@ -426,6 +583,7 @@ transitive_from! {
   StockConnectionSend    => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Connection(v)),
   StockHardwareSend      => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Hardware(v)),
   StockPhoneCallSend     => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::PhoneCall(v)),
+  StockLegacyPhoneCallSend => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::LegacyPhoneCall(v)),
   StockPermissionsSend   => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Permissions(v)),
   StockConfigurationSend => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Configuration(v)),
   StockVersionSend       => PossibleSendMsg: |v| PossibleSendMsg::Stock(StockSendMsg::Version(v)),

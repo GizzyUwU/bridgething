@@ -4,7 +4,8 @@ use crate::{
   capabilities::CapabilitiesRegistry,
   net::{WSError, WireEventBus},
   stock::{
-    StockConfigurationSend, StockConnectionSend, StockConnectionType, StockInterAppSend, StockInterAppSendPayload,
+    StockConfigurationSend, StockConnectionSend, StockConnectionType, StockDeviceType, StockInterAppSend,
+    StockInterAppSendPayload,
   },
 };
 
@@ -13,11 +14,16 @@ pub async fn broadcast_stock_connection(
   device: &Device,
   capabilities: &CapabilitiesRegistry,
 ) -> Result<(), Vec<WSError>> {
+  // the webapp picks its phone-call store off this, so the translator has to
+  // agree with what we report here or call events land in a store it never reads
+  let phone_type: StockDeviceType = device.device_type.clone().into();
+  bus.set_stock_phone(phone_type);
+
   bus
     .broadcast_stock(StockConnectionSend::RemoteStatus {
       payload: true,
       mac: device.mac.clone(),
-      phone_type: device.device_type.clone().into(),
+      phone_type,
     })
     .await?;
   bus

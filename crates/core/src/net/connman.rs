@@ -22,7 +22,7 @@ use super::{WSError, WSResult, connection::Connection};
 use crate::{
   handler::client::{ClientMode, PossibleSendMsg, RecvMsg, RecvMsgData, RecvRx, RecvTx, SendTx},
   state::State,
-  stock::{StockCallSlot, StockSendMsg},
+  stock::{StockCallSlot, StockDeviceType, StockPeerPhone, StockSendMsg},
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -112,6 +112,7 @@ pub struct ClientManager {
 
   tx: RecvTx,
   pending: Mutex<HashMap<Uuid, oneshot::Sender<ClientToBridgeMsgData>>>,
+  stock_phone: StockPeerPhone,
 
   #[cfg(feature = "test-tap")]
   frame_tap: tokio::sync::broadcast::Sender<TappedFrame>,
@@ -127,10 +128,17 @@ impl ClientManager {
 
       tx,
       pending: Mutex::new(HashMap::new()),
+      stock_phone: StockPeerPhone::default(),
 
       #[cfg(feature = "test-tap")]
       frame_tap: tokio::sync::broadcast::channel(FRAME_TAP_CAPACITY).0,
     }
+  }
+
+  /// Which call dialect the stock webapp is listening for. Set from the peer
+  /// connect path, which is what tells the webapp the phone type in the first place.
+  pub fn set_stock_phone(&self, phone: StockDeviceType) {
+    self.stock_phone.set(phone);
   }
 
   #[cfg(feature = "test-tap")]
@@ -162,7 +170,13 @@ impl ClientManager {
     tracing::trace!("sending message to {to} with data {:?}", data);
 
     let msg = BridgeToClientMsg { id, data, meta };
-    let msg = PossibleSendMsg::from_send_msg(msg, &client.mode, stock_msg_id, &client.stock_call);
+    let msg = PossibleSendMsg::from_send_msg(
+      msg,
+      &client.mode,
+      stock_msg_id,
+      &client.stock_call,
+      self.stock_phone.get(),
+    );
 
     Ok(client.tx.send(msg).await?)
   }
@@ -182,8 +196,9 @@ impl ClientManager {
 
     let mut errors: Vec<WSError> = Vec::new();
     let mut closed: Vec<SocketAddr> = Vec::new();
+    let phone = self.stock_phone.get();
     for c in self.connections.iter() {
-      let out = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None, &c.stock_call);
+      let out = PossibleSendMsg::from_send_msg(msg.clone(), &c.mode, None, &c.stock_call, phone);
       if let Err(err) = c.tx.try_send(out) {
         if matches!(err, TrySendError::Closed(_)) {
           closed.push(*c.key());

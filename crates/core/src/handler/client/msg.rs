@@ -174,10 +174,11 @@ impl PossibleSendMsg {
     mode: &ClientMode,
     stock_msg_id: Option<usize>,
     call_slot: &crate::stock::StockCallSlot,
+    phone: crate::stock::StockDeviceType,
   ) -> Self {
     match mode {
       ClientMode::Modern => Self::Modern(msg),
-      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id, call_slot)),
+      ClientMode::Stock => Self::Stock(crate::stock::server_event_to_stock(msg, stock_msg_id, call_slot, phone)),
     }
   }
 
