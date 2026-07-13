@@ -157,7 +157,7 @@ export function OtaCard({
         </View>
       ) : status?.phase === 'completed' ? (
         <Text className="mt-1 text-[12px] text-muted-foreground">
-          rebooting to complete installation...
+          update installed
         </Text>
       ) : (
         <Text className="mt-1 text-[12px] text-muted-foreground">

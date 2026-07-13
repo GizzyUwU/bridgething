@@ -278,16 +278,17 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         observer(.ok)
     }
 
-    public func handlePeerConnected() async {
+    public func handlePeerConnected(allowAutoResume: Bool) async {
         guard currentGateway() != nil else { return }
-        let fireWake = stateLock.withLock { () -> Bool in
-            if let count = lastKnownDeviceCount { return count == 0 }
-            wakeOnEmptyCluster = true
-            return false
-        }
-        if fireWake {
-            glueLog.info("connect cluster empty at peer connect; requesting spotify wake")
+        if allowAutoResume {
+            glueLog.info("fresh peer connect; requesting spotify wake")
             wakePhoneSpotify()
+            let clusterEmpty = stateLock.withLock { () -> Bool? in
+                if let count = lastKnownDeviceCount { return count == 0 }
+                wakeOnEmptyCluster = true
+                return nil
+            }
+            if clusterEmpty == true { spawnConnectResume() }
         }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
@@ -340,20 +341,28 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     fileprivate func onQueue(_ queue: SpQueue) {
         let thumb = artEdges().thumb
         let entries = Array(queue.next.prefix(queueMax).map { Self.queueItem(from: $0, maxEdge: thumb) })
+        glueLog.info("dealer queue: \(queue.next.count) upcoming (sending \(entries.count))")
         stateLock.withLock { lastQueueItems = entries }
         enqueue(.queue(entries: entries, thumbEdge: thumb))
     }
 
     fileprivate func onDevices(_ devices: [SpDevice]) {
-        let fireWake = stateLock.withLock { () -> Bool in
+        let fireResume = stateLock.withLock { () -> Bool in
             lastKnownDeviceCount = devices.count
             guard wakeOnEmptyCluster else { return false }
             wakeOnEmptyCluster = false
             return devices.isEmpty
         }
-        if fireWake {
-            glueLog.info("connect cluster empty at peer connect; requesting spotify wake")
-            wakePhoneSpotify()
+        if fireResume { spawnConnectResume() }
+    }
+
+    private func spawnConnectResume() {
+        glueLog.info("connect cluster empty; resuming playback via connect")
+        Task { [weak self] in
+            guard let client = self?.client else { return }
+            do { try await client.resume() } catch {
+                glueLog.info("connect auto-resume did not complete: \(error)")
+            }
         }
     }
 
@@ -713,14 +722,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         var want = scopes
         if onRemote { want.insert(.volume) }
         for scope in want {
-            let needs = stateLock.withLock { () -> Bool in
-                if heldScopes.contains(scope) { return false }
-                heldScopes.insert(scope)
-                return true
-            }
+            let needs = stateLock.withLock { !heldScopes.contains(scope) }
             if needs {
-                try? await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: spotifyAppBundle))
-                if scope == .volume { await emitRemoteVolumeFromCluster(force: true) }
+                do {
+                    try await gateway.authority.claim(AuthorityClaim(scope: scope, appBundle: spotifyAppBundle))
+                    stateLock.withLock { _ = heldScopes.insert(scope) }
+                    if scope == .volume { await emitRemoteVolumeFromCluster(force: true) }
+                } catch {}
             }
         }
         if !onRemote {

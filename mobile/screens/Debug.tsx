@@ -184,7 +184,6 @@ function StateDump({
 
       {snapshot?.otaPollConfig ? (
         <Section title="ota poll">
-          <Row label="channel" value={snapshot.otaPollConfig.channel} />
           <Row
             label="interval"
             value={`${snapshot.otaPollConfig.intervalSeconds}s`}

@@ -235,7 +235,7 @@ function DeviceSection({
 }) {
   const ledger = useSession(s => s.ledger);
   const meta = useSession(s => s.deviceMeta[peer.id]);
-  const channel = useSession(s => s.otaPollConfig?.channel ?? 'stable');
+  const channel = meta?.channel || 'stable';
   const ota = useOta(s => s.byDevice[peer.id]);
   const {
     list: webapps,

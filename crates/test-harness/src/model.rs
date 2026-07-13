@@ -40,9 +40,9 @@ const NONMUSIC_PREFIX: &str = "nonmusic-";
 /// One atomic inbound event, applied identically to the model and (via the
 /// harness drivers) to the daemon.
 ///
-/// `AuthorityClaim`/`AuthorityRelease` flip the registry but, like the daemon,
-/// do NOT refresh the player projection: a bare claim is latent until the next
-/// player command recomputes the merge against the new authority.
+/// `AuthorityClaim`/`AuthorityRelease` flip the registry AND refresh the player
+/// projection, like the daemon's authority handler kicking the player actor: a
+/// late claim surfaces already-staged companion state immediately.
 #[derive(Debug, Clone)]
 pub enum ModelEvent {
   Iap2NowPlaying(Iap2NowPlaying),
@@ -128,9 +128,9 @@ pub struct Model {
   shuffle: bool,
   repeat: RepeatMode,
 
-  // the daemon's player snapshot is recomputed only on player-actor commands, so
-  // the observable projection is cached and refreshed there - never on a bare
-  // authority change. mirror that exactly.
+  // the daemon's player snapshot is recomputed on every player-actor command,
+  // including the authority-change kick, so the observable projection is cached
+  // and refreshed on each applied event. mirror that exactly.
   cached: Projection,
 }
 
@@ -167,9 +167,11 @@ impl Model {
       ModelEvent::CompanionSnapshot(snapshot) => self.apply_companion_snapshot(snapshot),
       ModelEvent::AuthorityClaim(scope) => {
         self.authority.insert(*scope);
+        self.recompute();
       }
       ModelEvent::AuthorityRelease(scope) => {
         self.authority.remove(scope);
+        self.recompute();
       }
     }
   }

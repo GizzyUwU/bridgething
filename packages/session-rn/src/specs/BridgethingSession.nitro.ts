@@ -126,7 +126,6 @@ export type BridgethingCapabilityFlags = {
 };
 
 export type BridgethingOtaPollConfig = {
-  channel: string;
   intervalSeconds: number;
   autoPush: boolean;
   rootUrl?: string;
@@ -148,7 +147,6 @@ export type BridgethingOtaPhase =
 export type BridgethingOtaEventKind =
   | 'manifestPolled'
   | 'manifestPollFailed'
-  | 'channelMismatch'
   | 'updateAvailable'
   | 'planned'
   | 'progress'
@@ -189,8 +187,6 @@ export type BridgethingOtaEvent = {
   // during the apply leg: how far swupdate is through pulling zck deltas over BT (0-100).
   // 100 (or absent) means the pull is done and the eMMC write is underway.
   dwlPercent?: number;
-  deviceChannel?: string;
-  configuredChannel?: string;
   stageAsset?: string;
   stageReceived?: number;
   stageTotal?: number;
@@ -341,8 +337,11 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
 
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
+  setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void>;
+  isDeviceAutoResumeEnabled(deviceId: string): Promise<boolean>;
+
   setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void>;
-  checkForOtaUpdate(channel: string, rootUrl: string | null): Promise<void>;
+  checkForOtaUpdate(rootUrl: string | null): Promise<void>;
   fetchOtaManifest(rootUrl: string | null): Promise<BridgethingOtaManifest>;
   applyOtaUpdate(deviceId: string, channel: string, version: string, rootUrl: string | null): Promise<void>;
 

@@ -23,6 +23,7 @@ import {
   MoreHorizontal,
   Pencil,
   Phone,
+  Play,
   Plus,
   RadioTower,
   RefreshCw,
@@ -63,7 +64,6 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { ScrollScreen } from '../components/ScrollScreen';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
 import { ServiceHealthBanner } from '../components/ServiceHealthBanner';
-import { Segmented } from '../components/Segmented';
 import { installLatestOta, useOta } from '../lib/ota';
 import {
   connectedPeers,
@@ -85,7 +85,6 @@ import type { RootStackParamList } from '../navigation';
 
 const REPO_URL = 'https://github.com/JoeyEamigh/bridgething';
 const DISCORD_URL = 'https://tl.mt/d';
-const CHANNELS = ['stable', 'dev'] as const;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -104,7 +103,6 @@ export function SettingsScreen({ navigation }: Props) {
 
   const livePeers = connectedPeers(peers);
   const known = knownDevices(ledger, peers);
-  const selectedChannel = (pollConfig?.channel as 'stable' | 'dev') ?? 'stable';
 
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
@@ -151,7 +149,6 @@ export function SettingsScreen({ navigation }: Props) {
     partial: Partial<BridgethingOtaPollConfig>,
   ) => {
     const next: BridgethingOtaPollConfig = {
-      channel: partial.channel ?? pollConfig?.channel ?? selectedChannel,
       intervalSeconds:
         partial.intervalSeconds ??
         pollConfig?.intervalSeconds ??
@@ -168,7 +165,7 @@ export function SettingsScreen({ navigation }: Props) {
   const checkForUpdate = async () => {
     setPollBusy(true);
     try {
-      await session.checkForOtaUpdate(selectedChannel, null);
+      await session.checkForOtaUpdate(null);
     } finally {
       setPollBusy(false);
     }
@@ -176,7 +173,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   const installLatest = async (deviceId: string) => {
     try {
-      await installLatestOta(deviceId, selectedChannel);
+      await installLatestOta(deviceId, deviceChannel(deviceId));
     } catch (err) {
       Alert.alert(
         'install failed',
@@ -184,6 +181,9 @@ export function SettingsScreen({ navigation }: Props) {
       );
     }
   };
+
+  const deviceChannel = (deviceId: string) =>
+    metaByDevice[deviceId]?.channel || 'stable';
 
   const signIn = async (id: string) => {
     if (signInBusy) return;
@@ -301,11 +301,10 @@ export function SettingsScreen({ navigation }: Props) {
         ) : (
           <ListGroup>
             {known.map(device => (
-              <DeviceRow
-                key={device.id}
-                device={device}
-                meta={metaByDevice[device.id]}
-              />
+              <React.Fragment key={device.id}>
+                <DeviceRow device={device} meta={metaByDevice[device.id]} />
+                <AutoResumeRow deviceId={device.id} />
+              </React.Fragment>
             ))}
           </ListGroup>
         )}
@@ -328,15 +327,7 @@ export function SettingsScreen({ navigation }: Props) {
           hint="applies to every connected Car Thing"
         />
         <View className="rounded-2xl border border-border bg-surface p-4">
-          <Text className="mb-2 text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-            channel
-          </Text>
-          <Segmented
-            options={CHANNELS}
-            value={selectedChannel}
-            onChange={c => writePollConfig({ channel: c })}
-          />
-          <View className="mt-4 flex-row items-center justify-between">
+          <View className="flex-row items-center justify-between">
             <View className="flex-1 pr-3">
               <Text className="text-[14px] font-semibold text-foreground">
                 install updates automatically
@@ -372,7 +363,7 @@ export function SettingsScreen({ navigation }: Props) {
             onPickVersion={() =>
               navigation.navigate('OtaVersions', {
                 deviceId: peer.id,
-                channel: selectedChannel,
+                channel: deviceChannel(peer.id),
               })
             }
           />
@@ -613,6 +604,49 @@ function DeviceRow({
         onPress={() => (connected ? setRenameOpen(true) : setMenuOpen(true))}
       />
     </>
+  );
+}
+
+function AutoResumeRow({ deviceId }: { deviceId: string }) {
+  const session = getSession();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const value = await session.isDeviceAutoResumeEnabled(deviceId);
+        if (!cancelled) setEnabled(value);
+      } catch {
+        if (!cancelled) setEnabled(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, deviceId]);
+
+  const toggle = (next: boolean) => {
+    setEnabled(next);
+    void session.setDeviceAutoResume(deviceId, next).catch(() => {
+      setEnabled(!next);
+    });
+  };
+
+  return (
+    <ListRow
+      icon={Play}
+      iconTint={enabled ? 'primary' : 'default'}
+      title="resume playback on connect"
+      subtitle="wake spotify and pick up where you left off"
+      trailing={
+        <Switch
+          value={enabled ?? true}
+          onValueChange={toggle}
+          disabled={enabled == null}
+        />
+      }
+    />
   );
 }
 

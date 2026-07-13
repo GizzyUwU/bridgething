@@ -82,20 +82,17 @@ public enum WebappInstallResult: Sendable {
 
 public struct OtaPollConfig: Sendable, Equatable {
     public var rootURL: URL
-    public var channel: String
     public var intervalSeconds: TimeInterval
     public var cacheDirectory: URL?
     public var autoPush: Bool
 
     public init(
         rootURL: URL = URL(string: "https://ota.bridgething.com")!,
-        channel: String,
         intervalSeconds: TimeInterval = 3600,
         cacheDirectory: URL? = nil,
         autoPush: Bool = true
     ) {
         self.rootURL = rootURL
-        self.channel = channel
         self.intervalSeconds = intervalSeconds
         self.cacheDirectory = cacheDirectory
         self.autoPush = autoPush
@@ -105,7 +102,6 @@ public struct OtaPollConfig: Sendable, Equatable {
 public enum OtaPollEvent: Sendable, Equatable {
     case manifestPolled(updatedAt: String)
     case manifestPollFailed(reason: String)
-    case channelMismatch(deviceId: String, deviceChannel: String, configuredChannel: String)
     case updateAvailable(deviceId: String, release: String, daemonVersion: String, imageVersion: String)
     case planned(deviceId: String, kind: OtaKind, release: String, daemonVersion: String, imageVersion: String, steps: [OtaPlanStep])
     case progress(deviceId: String, kind: OtaKind, stepId: Int, snapshot: OtaPhaseSnapshot)
@@ -124,10 +120,7 @@ public actor OtaService {
     private var pollConfig: OtaPollConfig?
     private var deviceMeta: [String: BridgeThingMeta] = [:]
     private var inFlight: Set<String> = []
-    // deviceId -> target image version while an image install is in flight. the
-    // device's own post-reboot meta is the authoritative completion signal: the
-    // app can be suspended when the install finishes, so the in-task terminal
-    // may never fire. first of (meta match, task terminal) wins.
+    
     private var imageInstallTargets: [String: String] = [:]
     private var autoPushNextAt: [String: Date] = [:]
     private var autoPushFailures: [String: Int] = [:]
@@ -140,12 +133,6 @@ public actor OtaService {
     static let systemZckAsset = "system.img.zck"
     static let bootZckAsset = "boot.vfat.zck"
 
-    // ea throughput is dominated by a ~0.5s per-frame cost, so bytes/sec scales with
-    // frame size while preemption latency (one in-flight frame) stays sub-second;
-    // 16 KiB is the measured sweet spot between link speed and responsiveness.
-    // the window also bounds how long a dead stream's queued frames block the link
-    // after the daemon unbinds (swupdate's range resume must start within its retry
-    // patience), so it stays small: ~4 frames.
     private static let otaFragmentBytes: UInt64 = 16 * 1024
     private static let otaWindowBytes: UInt64 = 64 * 1024
     private static let otaAckTimeoutSeconds: Double = 15
@@ -442,9 +429,9 @@ public actor OtaService {
         await poll(config: config, gateway: gateway)
     }
 
-    public func checkNow(channel: String, rootURL: URL) async {
+    public func checkNow(rootURL: URL) async {
         guard let gateway = attachedGateway else { return }
-        let transient = OtaPollConfig(rootURL: rootURL, channel: channel, autoPush: false)
+        let transient = OtaPollConfig(rootURL: rootURL, autoPush: false)
         await poll(config: transient, gateway: gateway)
     }
 
@@ -466,7 +453,7 @@ public actor OtaService {
             return
         }
         if inFlight.contains(deviceId) { return }
-        let config = OtaPollConfig(rootURL: rootURL, channel: channel)
+        let config = OtaPollConfig(rootURL: rootURL)
         let urls = OtaArtifactURLs(
             rootURL: rootURL, channel: channel,
             daemonVersion: composite.daemon, imageVersion: composite.image,
@@ -476,7 +463,7 @@ public actor OtaService {
         if meta.imageVersion != composite.image {
             await runImageAuto(
                 deviceId: deviceId, targetVersion: composite.image,
-                release: version, daemonVersion: composite.daemon,
+                release: version, daemonVersion: composite.daemon, channel: channel,
                 swuURL: urls.imageSwu, zckURL: urls.imageZck, bootZckURL: urls.imageBootZck,
                 artifacts: artifacts, config: config, gateway: gateway
             )
@@ -595,23 +582,13 @@ public actor OtaService {
         }
         eventContinuation.yield(.manifestPolled(updatedAt: manifest.updatedAt))
 
-        guard let channel = manifest.channels[config.channel] else {
-            eventContinuation.yield(.manifestPollFailed(
-                reason: "configured channel '\(config.channel)' not in manifest"
-            ))
-            return
-        }
-        guard let composite = OtaCompositeVersion.parse(channel.latest) else {
-            eventContinuation.yield(.manifestPollFailed(
-                reason: "channel.latest '\(channel.latest)' is not a composite version"
-            ))
-            return
-        }
-        let release = manifest.releases[channel.latest]
-        if let release, release.yanked != nil || release.deprecated { return }
-
         let snapshot = deviceMeta
         for (deviceId, meta) in snapshot {
+            guard let channel = manifest.channels[meta.channel],
+                  let composite = OtaCompositeVersion.parse(channel.latest)
+            else { continue }
+            let release = manifest.releases[channel.latest]
+            if let release, release.yanked != nil || release.deprecated { continue }
             await reconcileDevice(
                 deviceId: deviceId,
                 meta: meta,
@@ -631,27 +608,18 @@ public actor OtaService {
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async {
-        if meta.channel != config.channel {
-            eventContinuation.yield(.channelMismatch(
-                deviceId: deviceId,
-                deviceChannel: meta.channel,
-                configuredChannel: config.channel
-            ))
-            return
-        }
         if inFlight.contains(deviceId) { return }
 
+        let channel = meta.channel
         let urls = OtaArtifactURLs(
             rootURL: config.rootURL,
-            channel: config.channel,
+            channel: channel,
             daemonVersion: latest.daemon,
             imageVersion: latest.image,
             imageVariant: meta.imageVariant
         )
 
-        // one availability signal per release: the whole update is daemon+image, not a
-        // per-leg version number. drift in either half means the composite is on offer.
-        let webappDrift = await builtinWebappDrift(deviceId: deviceId, release: release, config: config, gateway: gateway)
+        let webappDrift = await builtinWebappDrift(deviceId: deviceId, release: release, channel: channel, config: config, gateway: gateway)
         let imageDrift = meta.imageVersion != latest.image
         let daemonDrift = meta.appVersion != latest.daemon
         guard imageDrift || daemonDrift || !webappDrift.isEmpty else { return }
@@ -669,6 +637,7 @@ public actor OtaService {
                     targetVersion: latest.image,
                     release: latest.composite,
                     daemonVersion: latest.daemon,
+                    channel: channel,
                     swuURL: urls.imageSwu,
                     zckURL: urls.imageZck,
                     bootZckURL: urls.imageBootZck,
@@ -685,7 +654,7 @@ public actor OtaService {
             batch.append(BandaidPiece(
                 kind: .daemon,
                 url: urls.daemonBinary,
-                filename: "daemon-\(config.channel)-\(latest.daemon)",
+                filename: "daemon-\(channel)-\(latest.daemon)",
                 version: latest.daemon,
                 assetLabel: "daemon",
                 expected: release?.artifacts?.daemon
@@ -712,6 +681,7 @@ public actor OtaService {
     private func builtinWebappDrift(
         deviceId: String,
         release: OtaManifestRelease?,
+        channel: String,
         config: OtaPollConfig,
         gateway: BridgethingGateway
     ) async -> [WebappDrift] {
@@ -725,7 +695,7 @@ public actor OtaService {
             else { continue }
             let url = OtaArtifactURLs.builtinWebapp(
                 rootURL: config.rootURL,
-                channel: config.channel,
+                channel: channel,
                 name: builtin.slug,
                 version: available
             )
@@ -733,7 +703,7 @@ public actor OtaService {
                 piece: BandaidPiece(
                     kind: .builtinWebapp,
                     url: url,
-                    filename: "webapp-\(config.channel)-\(builtin.slug)-\(available)",
+                    filename: "webapp-\(channel)-\(builtin.slug)-\(available)",
                     version: available,
                     assetLabel: "webapp: \(builtin.slug)",
                     expected: release.artifacts?.webapps[builtin.slug]
@@ -777,7 +747,6 @@ public actor OtaService {
         }
     }
 
-    // an image run: download the three artifacts, stream the swu, let the device write, reboot.
     private static func imagePlan(artifacts: OtaReleaseArtifacts?) -> [OtaPlanStep] {
         let swu = artifacts?.imageSwu?.size ?? 0
         let zck = artifacts?.imageZck?.size ?? 0
@@ -793,7 +762,6 @@ public actor OtaService {
         ]
     }
 
-    // a bandaid run: download every piece, stream+stage every piece, activate, restart.
     private static func bandaidPlan(pieces: [BandaidPiece]) -> [OtaPlanStep] {
         var steps: [OtaPlanStep] = []
         var id = 0
@@ -868,6 +836,7 @@ public actor OtaService {
         targetVersion: String,
         release: String,
         daemonVersion: String,
+        channel: String,
         swuURL: URL,
         zckURL: URL,
         bootZckURL: URL,
@@ -891,15 +860,15 @@ public actor OtaService {
         let bootZckLocal: URL
         do {
             swuLocal = try await downloadIfNeeded(
-                url: swuURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion).swu",
+                url: swuURL, into: cacheDir, filename: "image-\(channel)-\(targetVersion).swu",
                 asset: Self.imageSwuAsset, expected: artifacts?.imageSwu, progress: continuation
             )
             zckLocal = try await downloadIfNeeded(
-                url: zckURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion).zck",
+                url: zckURL, into: cacheDir, filename: "image-\(channel)-\(targetVersion).zck",
                 asset: Self.systemZckAsset, expected: artifacts?.imageZck, progress: continuation
             )
             bootZckLocal = try await downloadIfNeeded(
-                url: bootZckURL, into: cacheDir, filename: "image-\(config.channel)-\(targetVersion)-boot.zck",
+                url: bootZckURL, into: cacheDir, filename: "image-\(channel)-\(targetVersion)-boot.zck",
                 asset: Self.bootZckAsset, expected: artifacts?.imageBootZck, progress: continuation
             )
         } catch {
@@ -931,8 +900,6 @@ public actor OtaService {
         terminal: OtaPhaseSnapshot
     ) {
         if kind == .image {
-            // meta-derived completion already concluded this install; the local
-            // terminal (often a stale watchdog verdict after app suspension) loses
             guard imageInstallTargets.removeValue(forKey: deviceId) != nil else { return }
         }
         switch terminal {
@@ -948,9 +915,6 @@ public actor OtaService {
         }
     }
 
-    // routes each raw snapshot to the plan leg it belongs to via a monotonic cursor:
-    // the run always advances through `plan` in order, so the first at-or-after-cursor
-    // leg matching the snapshot's kind (and label, for download/stream) is the one.
     private nonisolated func forwardProgress(
         stream: AsyncStream<OtaPhaseSnapshot>,
         deviceId: String,

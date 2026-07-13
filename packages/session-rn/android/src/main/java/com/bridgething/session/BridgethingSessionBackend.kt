@@ -53,8 +53,11 @@ public interface BridgethingSessionBackend {
 
     public suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags)
 
+    public suspend fun setDeviceAutoResume(deviceId: String, enabled: Boolean)
+    public suspend fun isDeviceAutoResumeEnabled(deviceId: String): Boolean
+
     public suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?)
-    public suspend fun checkForOtaUpdate(channel: String, rootUrl: String?)
+    public suspend fun checkForOtaUpdate(rootUrl: String?)
     public suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest
     public suspend fun applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?)
 

@@ -27,7 +27,7 @@ public protocol BridgethingGlue: Sendable {
     func setNowPlayingObserver(_ observer: @escaping @Sendable (GlueNowPlaying?) -> Void) async
     func setArtProfile(heroPx: Int, thumbPx: Int) async
 
-    func handlePeerConnected() async
+    func handlePeerConnected(allowAutoResume: Bool) async
 
     /// Inbound transport-control verbs. Default impls throw `GlueError.notImplemented`;
     func play(_ uri: PlayUri) async throws
@@ -124,7 +124,7 @@ public extension BridgethingGlue {
     func lyrics(for _: BridgethingLyrics.TrackIdentity) async throws -> BridgethingLyrics.Lyrics? { nil }
     func setNowPlayingObserver(_: @escaping @Sendable (GlueNowPlaying?) -> Void) async {}
     func setArtProfile(heroPx _: Int, thumbPx _: Int) async {}
-    func handlePeerConnected() async {}
+    func handlePeerConnected(allowAutoResume _: Bool) async {}
 
     /// Default for glues without an auth surface: report ready immediately.
     func setAuthObserver(_ observer: @escaping @Sendable (GlueAuthState) -> Void) async {

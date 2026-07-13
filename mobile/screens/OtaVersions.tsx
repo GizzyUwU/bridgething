@@ -1,4 +1,7 @@
-import type { BridgethingOtaRelease } from '@bridgething/session-react-native';
+import type {
+  BridgethingOtaManifest,
+  BridgethingOtaRelease,
+} from '@bridgething/session-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, View } from 'react-native';
@@ -8,6 +11,7 @@ import { ListGroup } from '../components/ListGroup';
 import { ListRow } from '../components/ListRow';
 import { Pill } from '../components/Pill';
 import { SectionEmpty, SectionHeader } from '../components/SectionHeader';
+import { Segmented } from '../components/Segmented';
 import { useOta } from '../lib/ota';
 import { getSession, useSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
@@ -15,46 +19,46 @@ import type { RootStackParamList } from '../navigation';
 type Props = NativeStackScreenProps<RootStackParamList, 'OtaVersions'>;
 
 export function OtaVersionsScreen({ route, navigation }: Props) {
-  const { deviceId, channel } = route.params;
+  const { deviceId, channel: initialChannel } = route.params;
   const meta = useSession(s => s.deviceMeta[deviceId]);
   const installing = useOta(s => s.byDevice[deviceId]?.installing ?? false);
 
-  const [releases, setReleases] = useState<BridgethingOtaRelease[] | null>(
-    null,
-  );
-  const [latest, setLatest] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<BridgethingOtaManifest | null>(null);
+  const [channel, setChannel] = useState(initialChannel);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const manifest = await getSession().fetchOtaManifest(null);
-      const ch = manifest.channels.find(c => c.slug === channel);
-      if (!ch) {
-        setError(`channel '${channel}' is not in the manifest`);
-        setReleases([]);
-        return;
-      }
-      setLatest(ch.latest);
-      setReleases(ch.releases);
+      setManifest(await getSession().fetchOtaManifest(null));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setReleases([]);
+      setManifest(null);
     }
-  }, [channel]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const channels = manifest?.channels.map(c => c.slug) ?? [];
+  const selected = manifest?.channels.find(c => c.slug === channel);
+  const releases = manifest ? (selected?.releases ?? []) : null;
+  const latest = selected?.latest ?? null;
+
   const current = meta
     ? `${meta.daemonVersion}+image.${meta.imageVersion}`
     : null;
+  const deviceChannel = meta?.channel;
 
   const install = (release: BridgethingOtaRelease) => {
+    const crossChannel =
+      deviceChannel && deviceChannel !== channel
+        ? ` this moves the device from the ${deviceChannel} channel to ${channel}.`
+        : '';
     Alert.alert(
       `install ${release.version}?`,
-      `pushes daemon ${release.daemonVersion} and image ${release.imageVersion} to this Car Thing.`,
+      `pushes daemon ${release.daemonVersion} and image ${release.imageVersion} to this Car Thing.${crossChannel}`,
       [
         { text: 'cancel', style: 'cancel' },
         {
@@ -77,13 +81,24 @@ export function OtaVersionsScreen({ route, navigation }: Props) {
           title={`${channel} channel`}
           hint={current ? `installed: ${current}` : undefined}
         />
-        {releases == null ? (
+        {channels.length > 1 ? (
+          <View className="mb-3">
+            <Segmented
+              options={channels}
+              value={channel}
+              onChange={setChannel}
+            />
+          </View>
+        ) : null}
+        {releases == null && !error ? (
           <View className="items-center py-10">
             <ActivityIndicator />
           </View>
         ) : error ? (
           <SectionEmpty>{error}</SectionEmpty>
-        ) : releases.length === 0 ? (
+        ) : !selected ? (
+          <SectionEmpty>{`channel '${channel}' is not in the manifest`}</SectionEmpty>
+        ) : releases == null || releases.length === 0 ? (
           <SectionEmpty>no releases on this channel</SectionEmpty>
         ) : (
           <ListGroup>

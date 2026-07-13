@@ -12,6 +12,7 @@ mod net;
 mod notifications;
 mod phone;
 mod player;
+pub use player::SpotifyWakeGate;
 mod system;
 mod time;
 mod tunnel;

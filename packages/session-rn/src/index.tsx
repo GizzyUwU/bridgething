@@ -240,12 +240,20 @@ export class BridgethingSession {
     await this.native.setCapabilityFlags(flags);
   }
 
+  async setDeviceAutoResume(deviceId: string, enabled: boolean): Promise<void> {
+    await this.native.setDeviceAutoResume(deviceId, enabled);
+  }
+
+  async isDeviceAutoResumeEnabled(deviceId: string): Promise<boolean> {
+    return this.native.isDeviceAutoResumeEnabled(deviceId);
+  }
+
   async setOtaPollConfig(config: BridgethingOtaPollConfig | null): Promise<void> {
     await this.native.setOtaPollConfig(config);
   }
 
-  async checkForOtaUpdate(channel: string, rootUrl: string | null = null): Promise<void> {
-    await this.native.checkForOtaUpdate(channel, rootUrl);
+  async checkForOtaUpdate(rootUrl: string | null = null): Promise<void> {
+    await this.native.checkForOtaUpdate(rootUrl);
   }
 
   async fetchOtaManifest(rootUrl: string | null = null): Promise<BridgethingOtaManifest> {

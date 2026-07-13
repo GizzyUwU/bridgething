@@ -44,6 +44,7 @@ enum PlayerCommand {
   ApplyTransportIntent(bool),
   ApplySeekIntent(u32),
   ResetCompanion,
+  NoteAuthorityChanged,
   NoteLibraryChanged,
 }
 
@@ -92,6 +93,10 @@ impl Player {
 
   pub async fn reset_companion(&self) -> PlayerResult<()> {
     self.send(PlayerCommand::ResetCompanion).await
+  }
+
+  pub async fn note_authority_changed(&self) -> PlayerResult<()> {
+    self.send(PlayerCommand::NoteAuthorityChanged).await
   }
 
   pub async fn note_library_changed(&self) -> PlayerResult<()> {
@@ -209,6 +214,7 @@ async fn run_actor(
           PlayerCommand::ApplyTransportIntent(playing) => state.set_transport_intent(playing),
           PlayerCommand::ApplySeekIntent(position_ms) => state.set_seek_intent(position_ms),
           PlayerCommand::ResetCompanion => state.reset_companion(),
+          PlayerCommand::NoteAuthorityChanged => state.note_authority_changed(),
           PlayerCommand::NoteLibraryChanged => state.note_library_changed(),
         }
         force = cmd_force || state.take_position_resync();

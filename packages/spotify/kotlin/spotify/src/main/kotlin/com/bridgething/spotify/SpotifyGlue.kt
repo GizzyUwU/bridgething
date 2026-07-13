@@ -228,13 +228,16 @@ class SpotifyGlue(
     override suspend fun debugState(): GlueDebugState =
         GlueDebugState(authorityPlaybackHeld = lastHadItem, authorityMetadataHeld = lastHadItem)
 
-    override suspend fun handlePeerConnected() {
+    override suspend fun handlePeerConnected(allowAutoResume: Boolean) {
         if (gateway == null) return
-        val fireWake = lastKnownDeviceCount?.let { it == 0 } ?: run {
-            wakeOnEmptyCluster = true
-            false
+        if (allowAutoResume) {
+            localWaker?.wakeDevice()
+            val clusterEmpty = lastKnownDeviceCount?.let { it == 0 } ?: run {
+                wakeOnEmptyCluster = true
+                null
+            }
+            if (clusterEmpty == true) spawnConnectResume()
         }
-        if (fireWake) localWaker?.wakeDevice()
         resetQueueDedup()
         val pending = lastState?.takeIf { it.track != null }
         if (pending != null) {
@@ -265,8 +268,12 @@ class SpotifyGlue(
         lastKnownDeviceCount = devices.size
         if (wakeOnEmptyCluster) {
             wakeOnEmptyCluster = false
-            if (devices.isEmpty()) localWaker?.wakeDevice()
+            if (devices.isEmpty()) spawnConnectResume()
         }
+    }
+
+    private fun spawnConnectResume() {
+        scope.launch { runCatching { client?.resume() } }
     }
 
     private fun onQueue(queue: SpQueue) {

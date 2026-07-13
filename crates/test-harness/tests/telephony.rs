@@ -72,7 +72,9 @@ async fn iap2_incoming_call_reaches_stock_with_pascal_case_fields() {
   assert_eq!(info["call_dir"].as_str(), Some("Incoming"));
   assert_eq!(info["display_name"].as_str(), Some("Test Caller"));
   assert_eq!(info["remote_id"].as_str(), Some("(555) 555-0100"));
-  assert_eq!(info["service"].as_str(), Some("Unknown"));
+  // service is daemon-internal; the translation substitutes display_name for the
+  // remote_id on unknown-service calls instead of surfacing the field to stock.
+  assert!(info.get("service").is_none(), "service must not cross to stock");
   assert_eq!(info["call_id"].as_str(), Some("call-1"));
 }
 

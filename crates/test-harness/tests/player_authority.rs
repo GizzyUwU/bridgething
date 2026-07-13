@@ -13,7 +13,8 @@ use bridgething_iap2::csm::now_playing::{
 use bridgething_test_harness::{Harness, Iap2Source, Iap2SourceDriver};
 use libbridgething::{
   CompanionAuthorityScope, GatewayCapabilities, GatewayInfo, MediaItem, Playback, PlaybackState as WirePlaybackState,
-  PlayerState, gateway::AuthorityClaim,
+  PlayerState, QueueItem,
+  gateway::{AuthorityClaim, QueueSnapshot},
 };
 
 const CONVERGE: Duration = Duration::from_secs(5);
@@ -72,6 +73,21 @@ fn iap2_spotify_tick(position_ms: Option<u32>) -> Iap2NowPlaying {
 
 fn is_player_frame(json: &str) -> bool {
   json.contains("\"type\":\"player\"")
+}
+
+fn queue_item(uri: &str, title: &str, artist: &str) -> QueueItem {
+  QueueItem {
+    uri: uri.into(),
+    title: Some(title.into()),
+    artist: Some(artist.into()),
+    artist_uri: None,
+    album: None,
+    album_uri: None,
+    artwork_id: None,
+    duration_ms: Some(200_000),
+    persistent_id: None,
+    queued: false,
+  }
 }
 
 // returns the phone gateway alongside the harness: dropping it disconnects the companion, which
@@ -230,5 +246,72 @@ async fn youtube_flip_is_one_hard_cut_not_a_burst() {
     tick_frames.is_empty(),
     "iap2 position ticks leaked {} broadcast(s)",
     tick_frames.len()
+  );
+}
+
+/// A dealer-confirmed context switch must survive stale iAP2 chatter that still names the
+/// previous song. The runway-held queue still leads with that song, so a wrongful optimistic
+/// promotion sticks until the next real song change: the dealer has nothing new to push.
+#[tokio::test]
+async fn context_switch_survives_a_stale_iap2_echo() {
+  let (harness, phone) = companion_owned_harness().await;
+  let source = harness.iap2_source().await.expect("iap2 source");
+
+  // steady state mid-playlist: the held queue still leads with the current track
+  phone
+    .player()
+    .queue_changed(QueueSnapshot {
+      order: vec!["spotify:track:x".into(), "spotify:track:y".into()],
+      items: vec![
+        queue_item("spotify:track:x", "Companion Song", "Companion Artist"),
+        queue_item("spotify:track:y", "Track Y", "Artist Y"),
+      ],
+    })
+    .await
+    .expect("queue");
+  source
+    .push_now_playing(iap2_spotify_tick(None))
+    .await
+    .expect("iap2 same-song tick");
+
+  // the user selects a track from a different playlist; the dealer confirms it
+  phone
+    .player()
+    .snapshot(PlayerState {
+      track: Some(MediaItem {
+        persistent_id: Some("spotify:track:t".into()),
+        title: Some("Fresh Pick".into()),
+        artist: Some("Fresh Artist".into()),
+        duration_ms: Some(210_000),
+        ..MediaItem::default()
+      }),
+      playback: Playback {
+        state: WirePlaybackState::Playing,
+        position_ms: 0,
+        ..Playback::default()
+      },
+      ..PlayerState::default()
+    })
+    .await
+    .expect("snapshot");
+  let switched = harness
+    .wait_for(
+      |s| s.player.state_reply().state.track.and_then(|t| t.title).as_deref() == Some("Fresh Pick"),
+      CONVERGE,
+    )
+    .await;
+  assert!(switched, "the dealer-confirmed context switch never applied");
+
+  // a stale iap2 echo still naming the old song lands before the new context queue arrives
+  source
+    .push_now_playing(iap2_spotify_tick(None))
+    .await
+    .expect("stale echo");
+  tokio::time::sleep(Duration::from_millis(400)).await;
+  let track = harness.state().player.state_reply().state.track;
+  assert_eq!(
+    track.as_ref().and_then(|t| t.persistent_id.as_deref()),
+    Some("spotify:track:t"),
+    "a stale iap2 echo reverted the card to the previous song"
   );
 }

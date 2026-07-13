@@ -95,9 +95,10 @@ interface BridgethingGlue : NowPlayingTransport {
 
     /**
      * A device peer (re)connected. The daemon drops companion authority on disconnect, so the glue
-     * resets its authority cache and re-emits current now-playing to re-establish it. Default no-op.
+     * resets its authority cache and re-emits current now-playing to re-establish it.
+     * allowAutoResume permits the glue to aggressively resume playback for this connect. Default no-op.
      */
-    suspend fun handlePeerConnected() {}
+    suspend fun handlePeerConnected(allowAutoResume: Boolean) {}
 
     /** default no-op; glues with interactive sign-in drive this to surface auth transitions. */
     suspend fun setAuthObserver(observer: (GlueAuthState) -> Unit) {}

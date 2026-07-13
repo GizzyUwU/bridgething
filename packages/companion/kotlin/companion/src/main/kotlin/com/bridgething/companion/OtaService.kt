@@ -135,7 +135,6 @@ public sealed class WebappInstallResult {
 
 public data class OtaPollConfig(
     val rootUrl: String = "https://ota.bridgething.com",
-    val channel: String,
     val intervalSeconds: Long = 60 * 60L,
     val cacheDirectory: File? = null,
     val autoPush: Boolean = true,
@@ -144,11 +143,6 @@ public data class OtaPollConfig(
 public sealed class OtaPollEvent {
     public data class ManifestPolled(val updatedAt: String) : OtaPollEvent()
     public data class ManifestPollFailed(val reason: String) : OtaPollEvent()
-    public data class ChannelMismatch(
-        val deviceId: String,
-        val deviceChannel: String,
-        val configuredChannel: String,
-    ) : OtaPollEvent()
     public data class UpdateAvailable(
         val deviceId: String,
         val release: String,
@@ -442,9 +436,9 @@ public class OtaService(
         if (cfg != null && gw != null) poll(cfg, gw)
     }
 
-    public suspend fun checkNow(channel: String, rootUrl: String) {
+    public suspend fun checkNow(rootUrl: String) {
         val gw = mutex.withLock { attachedGateway } ?: return
-        poll(OtaPollConfig(rootUrl = rootUrl, channel = channel, autoPush = false), gw)
+        poll(OtaPollConfig(rootUrl = rootUrl, autoPush = false), gw)
     }
 
     public suspend fun discoverManifest(rootUrl: String): OtaDiscoverManifest =
@@ -464,7 +458,7 @@ public class OtaService(
             return
         }
         if (mutex.withLock { deviceId in inFlight }) return
-        val config = OtaPollConfig(rootUrl = rootUrl, channel = channel)
+        val config = OtaPollConfig(rootUrl = rootUrl)
         val urls = OtaArtifactUrls.build(
             rootUrl = rootUrl,
             channel = channel,
@@ -475,7 +469,7 @@ public class OtaService(
         val artifacts = runCatching { discoverManifest(rootUrl) }.getOrNull()?.releases?.get(version)?.artifacts
         if (meta.imageVersion != composite.image) {
             runImageAuto(
-                deviceId, composite.image, version, composite.daemon,
+                deviceId, composite.image, version, composite.daemon, channel,
                 urls.imageSwu, urls.imageZck, urls.imageBootZck, artifacts, config, gateway,
             )
             return
@@ -580,21 +574,12 @@ public class OtaService(
         }
         eventsFlow.emit(OtaPollEvent.ManifestPolled(updatedAt = manifest.updatedAt))
 
-        val channel = manifest.channels[config.channel]
-        if (channel == null) {
-            eventsFlow.emit(OtaPollEvent.ManifestPollFailed(reason = "configured channel '${config.channel}' not in manifest"))
-            return
-        }
-        val composite = OtaCompositeVersion.parse(channel.latest)
-        if (composite == null) {
-            eventsFlow.emit(OtaPollEvent.ManifestPollFailed(reason = "channel.latest '${channel.latest}' is not a composite version"))
-            return
-        }
-        val release = manifest.releases[channel.latest]
-        if (release != null && (release.yanked != null || release.deprecated)) return
-
         val snapshot = deviceMetaMutex.withLock { deviceMeta.toMap() }
         for ((deviceId, meta) in snapshot) {
+            val channel = manifest.channels[meta.channel] ?: continue
+            val composite = OtaCompositeVersion.parse(channel.latest) ?: continue
+            val release = manifest.releases[channel.latest]
+            if (release != null && (release.yanked != null || release.deprecated)) continue
             reconcileDevice(deviceId, meta, composite, release, config, gateway)
         }
     }
@@ -607,27 +592,18 @@ public class OtaService(
         config: OtaPollConfig,
         gateway: BridgethingGateway,
     ) {
-        if (meta.channel != config.channel) {
-            eventsFlow.emit(
-                OtaPollEvent.ChannelMismatch(
-                    deviceId = deviceId,
-                    deviceChannel = meta.channel,
-                    configuredChannel = config.channel,
-                )
-            )
-            return
-        }
         if (mutex.withLock { deviceId in inFlight }) return
 
+        val channel = meta.channel
         val urls = OtaArtifactUrls.build(
             rootUrl = config.rootUrl,
-            channel = config.channel,
+            channel = channel,
             daemonVersion = latest.daemon,
             imageVersion = latest.image,
             imageVariant = meta.imageVariant,
         )
 
-        val webappDrift = builtinWebappDrift(deviceId, release, config, gateway)
+        val webappDrift = builtinWebappDrift(deviceId, release, channel, config, gateway)
         val imageDrift = meta.imageVersion != latest.image
         val daemonDrift = meta.appVersion != latest.daemon
         if (!imageDrift && !daemonDrift && webappDrift.isEmpty()) return
@@ -643,7 +619,7 @@ public class OtaService(
         if (imageDrift) {
             if (config.autoPush && autoPushReady(deviceId)) {
                 runImageAuto(
-                    deviceId, latest.image, latest.composite, latest.daemon,
+                    deviceId, latest.image, latest.composite, latest.daemon, channel,
                     urls.imageSwu, urls.imageZck, urls.imageBootZck, release?.artifacts, config, gateway,
                 )
             }
@@ -656,7 +632,7 @@ public class OtaService(
                 BandaidPiece(
                     kind = OtaKind.Daemon,
                     url = urls.daemonBinary,
-                    filename = "daemon-${config.channel}-${latest.daemon}",
+                    filename = "daemon-$channel-${latest.daemon}",
                     version = latest.daemon,
                     assetLabel = "daemon",
                     expected = release?.artifacts?.daemon,
@@ -686,6 +662,7 @@ public class OtaService(
     private suspend fun builtinWebappDrift(
         deviceId: String,
         release: OtaManifestRelease?,
+        channel: String,
         config: OtaPollConfig,
         gateway: BridgethingGateway,
     ): List<WebappDrift> {
@@ -696,13 +673,13 @@ public class OtaService(
             val available = release.builtinWebapps[slug] ?: continue
             val current = installed[id] ?: continue
             if (current == available) continue
-            val url = OtaArtifactUrls.builtinWebapp(config.rootUrl, config.channel, slug, available)
+            val url = OtaArtifactUrls.builtinWebapp(config.rootUrl, channel, slug, available)
             out.add(
                 WebappDrift(
                     piece = BandaidPiece(
                         kind = OtaKind.BuiltinWebapp,
                         url = url,
-                        filename = "webapp-${config.channel}-$slug-$available",
+                        filename = "webapp-$channel-$slug-$available",
                         version = available,
                         assetLabel = "webapp: $slug",
                         expected = release.artifacts?.webapps?.get(slug),
@@ -843,6 +820,7 @@ public class OtaService(
         targetVersion: String,
         release: String,
         daemonVersion: String,
+        channel: String,
         swuUrl: String,
         zckUrl: String,
         bootZckUrl: String,
@@ -868,15 +846,15 @@ public class OtaService(
             val bootZckLocal: File
             try {
                 swuLocal = downloadIfNeeded(
-                    swuUrl, cacheDir, "image-${config.channel}-$targetVersion.swu",
+                    swuUrl, cacheDir, "image-$channel-$targetVersion.swu",
                     IMAGE_SWU_ASSET, artifacts?.imageSwu, emit,
                 )
                 zckLocal = downloadIfNeeded(
-                    zckUrl, cacheDir, "image-${config.channel}-$targetVersion.zck",
+                    zckUrl, cacheDir, "image-$channel-$targetVersion.zck",
                     SYSTEM_ZCK_ASSET, artifacts?.imageZck, emit,
                 )
                 bootZckLocal = downloadIfNeeded(
-                    bootZckUrl, cacheDir, "image-${config.channel}-$targetVersion-boot.zck",
+                    bootZckUrl, cacheDir, "image-$channel-$targetVersion-boot.zck",
                     BOOT_ZCK_ASSET, artifacts?.imageBootZck, emit,
                 )
             } catch (e: Throwable) {
@@ -912,6 +890,9 @@ public class OtaService(
         terminal: OtaPhaseSnapshot,
     ) {
         if (kind == OtaKind.Image) {
+            // meta-derived completion already concluded this install; the local
+            // terminal (often a stale watchdog verdict after app suspension) loses
+            val claimed = mutex.withLock { imageInstallTargets.remove(deviceId) != null }
             if (!claimed) return
         }
         when (terminal) {

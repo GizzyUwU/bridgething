@@ -31,8 +31,11 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
 
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
+    func setDeviceAutoResume(deviceId: String, enabled: Bool) async
+    func isDeviceAutoResumeEnabled(deviceId: String) async -> Bool
+
     func setOtaPollConfig(config: BridgethingOtaPollConfig?) async
-    func checkForOtaUpdate(channel: String, rootUrl: String?) async
+    func checkForOtaUpdate(rootUrl: String?) async
     func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest
     func applyOtaUpdate(deviceId: String, channel: String, version: String, rootUrl: String?) async throws
 
@@ -321,6 +324,18 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
 
     // MARK: - OTA
 
+    public func setDeviceAutoResume(deviceId: String, enabled: Bool) throws -> Promise<Void> {
+        Promise.async {
+            await (try Self.backend()).setDeviceAutoResume(deviceId: deviceId, enabled: enabled)
+        }
+    }
+
+    public func isDeviceAutoResumeEnabled(deviceId: String) throws -> Promise<Bool> {
+        Promise.async {
+            await (try Self.backend()).isDeviceAutoResumeEnabled(deviceId: deviceId)
+        }
+    }
+
     public func setOtaPollConfig(config: Variant_NullType_BridgethingOtaPollConfig?) throws -> Promise<Void> {
         let unwrapped: BridgethingOtaPollConfig? = config.flatMap { variant in
             switch variant {
@@ -333,10 +348,10 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
-    public func checkForOtaUpdate(channel: String, rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
+    public func checkForOtaUpdate(rootUrl: Variant_NullType_String?) throws -> Promise<Void> {
         let url = Self.unwrapString(rootUrl)
         return Promise.async {
-            await (try Self.backend()).checkForOtaUpdate(channel: channel, rootUrl: url)
+            await (try Self.backend()).checkForOtaUpdate(rootUrl: url)
         }
     }
 

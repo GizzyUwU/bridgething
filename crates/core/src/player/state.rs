@@ -45,6 +45,7 @@ pub struct PlayerState {
 
   companion_queue: Vec<QueueItem>,
   recently_played: Vec<QueueItem>,
+  previous_track_uri: Option<String>,
   root_browse_gen: u64,
 
   present_ids: HashSet<String>,
@@ -95,6 +96,7 @@ impl PlayerState {
 
       companion_queue: Vec::new(),
       recently_played: Vec::new(),
+      previous_track_uri: None,
       root_browse_gen: 0,
 
       present_ids: HashSet::new(),
@@ -190,6 +192,7 @@ impl PlayerState {
       upcoming
         .iter()
         .take(OPTIMISTIC_MATCH_DEPTH)
+        .filter(|item| self.previous_track_uri.as_deref() != Some(item.uri.as_str()))
         .find(|item| iap2_track_matches_item(&title, artist.as_deref(), item))
         .cloned()
     };
@@ -208,7 +211,6 @@ impl PlayerState {
       duration_ms: item.duration_ms,
       ..MediaItemUpdate::default()
     };
-    // vacate the companion time half so the merge fallthrough lets iap2 drive until the dealer confirms
     self.companion_playback.playing = None;
     self.companion_playback.position_ms = None;
     self.companion_playback_at = None;
@@ -269,6 +271,7 @@ impl PlayerState {
         "companion queue: ordered uris without an item in the snapshot were dropped"
       );
     }
+    tracing::info!(items = rebuilt.len(), "companion queue applied");
     self.companion_queue = rebuilt;
   }
 
@@ -290,9 +293,14 @@ impl PlayerState {
     self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
   }
 
+  pub(crate) fn note_authority_changed(&mut self) {
+    let edge = self.note_ownership();
+    let merged_meta = self.merged_metadata();
+    let merged_play = self.merged_playback();
+    self.apply_merged(merged_meta, merged_play, edge);
+  }
+
   pub(crate) fn reset_companion(&mut self) {
-    // the held queue survives a companion blip; replies() stops sourcing it while authority is
-    // down, and the next queueChanged full-replaces it, so a reconnect resumes with no blank gap
     self.recently_played.clear();
     self.root_browse_gen = self.root_browse_gen.wrapping_add(1);
     self.companion_metadata = MediaItemUpdate::default();
@@ -604,6 +612,12 @@ impl PlayerState {
         (Some(existing), Some(new)) => existing == new,
         (None, _) | (_, None) => false,
       };
+      if !same_track
+        && media.persistent_id.is_some()
+        && let Some(existing) = self.track.as_ref().map(|t| t.id.clone())
+      {
+        self.previous_track_uri = Some(existing);
+      }
       let mut track = if same_track {
         self.track.clone().unwrap_or_default()
       } else {
@@ -2414,5 +2428,32 @@ mod tests {
     let pos = view_position(&state);
     assert!(pos >= 30_000, "the corrected playhead is the dealer's: {pos}");
     assert_eq!(upcoming_uris(&state), vec!["spotify:track:w"]);
+  }
+
+  #[test]
+  fn stale_iap2_echo_after_a_context_switch_never_reverts_the_card() {
+    let auth = AuthorityRegistry::new();
+    let mut state = spotify_owned_state(&auth);
+    // steady state mid-playlist: runway dedup means the held queue still leads with the current track
+    state.apply_companion_queue(qsnap(vec![
+      qitem("spotify:track:x", "Spotify Song", "Artist", None, Some(200_000)),
+      qitem("spotify:track:y", "Track Y", "Artist Y", None, None),
+    ]));
+    // iap2 has tracked the same song all along; already-current, nothing promotes
+    state.apply_now_playing(iap2_app("iap2:track:x", "Spotify Song", "com.spotify.client", true));
+    assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:x"));
+
+    // the user picks a track from another playlist; the dealer confirms it first
+    state.apply_companion_snapshot(companion_snapshot_pos("spotify:track:t", "Fresh Pick", true, 0));
+    assert_eq!(media(&state).persistent_id.as_deref(), Some("spotify:track:t"));
+
+    // a stale iap2 delta lands before the new context queue arrives: the held iap2 title still
+    // names the old song, which also sits at the head of the stale held queue
+    state.apply_now_playing(iap2_playback_delta("com.spotify.client", Some(true), None));
+    assert_eq!(
+      media(&state).persistent_id.as_deref(),
+      Some("spotify:track:t"),
+      "a stale iap2 echo must not promote the just-played track back onto the card"
+    );
   }
 }

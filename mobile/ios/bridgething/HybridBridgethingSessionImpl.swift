@@ -200,6 +200,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.unlock()
 
         await applyOtaPollConfig(Self.loadOtaPollConfig())
+        await applyDeviceAutoResume()
 
         if let restore = Self.registry.first(where: { $0.available && $0.hasCredentials() }) {
             try? await setActiveProvider(id: restore.id)
@@ -510,6 +511,30 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     // MARK: - OTA
 
+    public func setDeviceAutoResume(deviceId: String, enabled: Bool) async {
+        var map = Self.loadAutoResumeMap()
+        map[deviceId] = enabled
+        Self.defaults.set(map, forKey: PrefKey.autoResume)
+        let companion = stateLock.withLock { self.companion }
+        await companion?.setDeviceAutoResume(deviceId: deviceId, enabled: enabled)
+    }
+
+    public func isDeviceAutoResumeEnabled(deviceId: String) async -> Bool {
+        Self.loadAutoResumeMap()[deviceId] ?? true
+    }
+
+    private func applyDeviceAutoResume() async {
+        let companion = stateLock.withLock { self.companion }
+        guard let companion else { return }
+        for (deviceId, enabled) in Self.loadAutoResumeMap() {
+            await companion.setDeviceAutoResume(deviceId: deviceId, enabled: enabled)
+        }
+    }
+
+    private static func loadAutoResumeMap() -> [String: Bool] {
+        defaults.dictionary(forKey: PrefKey.autoResume) as? [String: Bool] ?? [:]
+    }
+
     public func setOtaPollConfig(config: BridgethingOtaPollConfig?) async {
         Self.saveOtaPollConfig(config)
         await applyOtaPollConfig(config)
@@ -521,7 +546,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         if let config {
             let mapped = OtaPollConfig(
                 rootURL: config.rootUrl.flatMap(URL.init(string:)) ?? URL(string: "https://ota.bridgething.com")!,
-                channel: config.channel,
                 intervalSeconds: max(60, config.intervalSeconds),
                 cacheDirectory: nil,
                 autoPush: config.autoPush
@@ -532,10 +556,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    public func checkForOtaUpdate(channel: String, rootUrl: String?) async {
+    public func checkForOtaUpdate(rootUrl: String?) async {
         let companion = stateLock.withLock { self.companion }
         let ota = await companion?.ota
-        await ota?.checkNow(channel: channel, rootURL: Self.otaRootURL(rootUrl))
+        await ota?.checkNow(rootURL: Self.otaRootURL(rootUrl))
     }
 
     public func fetchOtaManifest(rootUrl: String?) async throws -> BridgethingOtaManifest {
@@ -681,8 +705,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         static let capsNetFetch = "bridgething.caps.netFetch"
         static let capsNetWs = "bridgething.caps.netWs"
         static let capsAudioTts = "bridgething.caps.audioTts"
+        static let autoResume = "bridgething.autoresume"
         static let otaConfigured = "bridgething.ota.configured"
-        static let otaChannel = "bridgething.ota.channel"
         static let otaInterval = "bridgething.ota.intervalSeconds"
         static let otaAutoPush = "bridgething.ota.autoPush"
         static let otaRootUrl = "bridgething.ota.rootUrl"
@@ -724,11 +748,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private static func loadOtaPollConfig() -> BridgethingOtaPollConfig? {
         guard defaults.bool(forKey: PrefKey.otaConfigured) else {
-            return BridgethingOtaPollConfig(channel: "stable", intervalSeconds: 3600, autoPush: true, rootUrl: nil)
+            return BridgethingOtaPollConfig(intervalSeconds: 3600, autoPush: true, rootUrl: nil)
         }
         let root = defaults.string(forKey: PrefKey.otaRootUrl)
         return BridgethingOtaPollConfig(
-            channel: defaults.string(forKey: PrefKey.otaChannel) ?? "stable",
             intervalSeconds: defaults.double(forKey: PrefKey.otaInterval),
             autoPush: defaults.object(forKey: PrefKey.otaAutoPush) == nil ? true : defaults.bool(forKey: PrefKey.otaAutoPush),
             rootUrl: (root?.isEmpty == false) ? root : nil
@@ -741,7 +764,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             return
         }
         defaults.set(true, forKey: PrefKey.otaConfigured)
-        defaults.set(config.channel, forKey: PrefKey.otaChannel)
         defaults.set(config.intervalSeconds, forKey: PrefKey.otaInterval)
         defaults.set(config.autoPush, forKey: PrefKey.otaAutoPush)
         defaults.set(config.rootUrl, forKey: PrefKey.otaRootUrl)
@@ -1354,7 +1376,6 @@ private func rnOtaEvent(
     releaseVersion: String? = nil, daemonVersion: String? = nil, imageVersion: String? = nil,
     steps: [BridgethingOtaStep]? = nil, stepId: Double? = nil,
     phase: BridgethingOtaPhase? = nil, percent: Double? = nil, dwlPercent: Double? = nil,
-    deviceChannel: String? = nil, configuredChannel: String? = nil,
     stageAsset: String? = nil, stageReceived: Double? = nil, stageTotal: Double? = nil,
     stageRatePerSec: Double? = nil, stageEtaSeconds: Double? = nil
 ) -> BridgethingOtaEvent {
@@ -1363,7 +1384,6 @@ private func rnOtaEvent(
         fromVersion: fromVersion, toVersion: toVersion,
         releaseVersion: releaseVersion, daemonVersion: daemonVersion, imageVersion: imageVersion,
         steps: steps, stepId: stepId, phase: phase, percent: percent, dwlPercent: dwlPercent,
-        deviceChannel: deviceChannel, configuredChannel: configuredChannel,
         stageAsset: stageAsset, stageReceived: stageReceived, stageTotal: stageTotal,
         stageRatePerSec: stageRatePerSec, stageEtaSeconds: stageEtaSeconds
     )
@@ -1388,12 +1408,6 @@ private func toRNOtaEvent(_ event: OtaPollEvent) -> BridgethingOtaEvent {
         return rnOtaEvent(kind: .manifestpolled, updatedAt: updatedAt)
     case let .manifestPollFailed(reason):
         return rnOtaEvent(kind: .manifestpollfailed, reason: reason)
-    case let .channelMismatch(deviceId, deviceChannel, configuredChannel):
-        return rnOtaEvent(
-            kind: .channelmismatch,
-            reason: "device on \(deviceChannel), companion configured for \(configuredChannel)",
-            deviceId: deviceId, deviceChannel: deviceChannel, configuredChannel: configuredChannel
-        )
     case let .updateAvailable(deviceId, release, daemonVersion, imageVersion):
         return rnOtaEvent(
             kind: .updateavailable, deviceId: deviceId,

@@ -21,7 +21,6 @@ export const DEFAULT_CAPABILITY_FLAGS: BridgethingCapabilityFlags = {
 };
 
 export const DEFAULT_OTA_POLL_CONFIG: BridgethingOtaPollConfig = {
-  channel: 'stable',
   intervalSeconds: 3600,
   autoPush: true,
 };

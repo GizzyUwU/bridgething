@@ -141,6 +141,7 @@ public class HybridBridgethingSessionImpl(
         public var lyricsResolver: LyricsResolver = LrclibResolver()
 
         private const val REQUEST_DIALER_ROLE = 0xBA02
+        private const val AUTO_RESUME_PREFIX = "autoresume."
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -237,6 +238,7 @@ public class HybridBridgethingSessionImpl(
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
         runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
+        runCatching { applyDeviceAutoResume() }
 
         // wake-from-cold on presence + keep the link alive while a device is set up.
         CompanionDevicePicker.startObservingPresence(context)
@@ -535,6 +537,23 @@ public class HybridBridgethingSessionImpl(
         )
     }
 
+    override suspend fun setDeviceAutoResume(deviceId: String, enabled: Boolean) {
+        prefs.edit().putBoolean("$AUTO_RESUME_PREFIX$deviceId", enabled).apply()
+        stateLock.withLock { companion }?.setDeviceAutoResume(deviceId, enabled)
+    }
+
+    override suspend fun isDeviceAutoResumeEnabled(deviceId: String): Boolean =
+        prefs.getBoolean("$AUTO_RESUME_PREFIX$deviceId", true)
+
+    private suspend fun applyDeviceAutoResume() {
+        val companion = stateLock.withLock { companion } ?: return
+        for ((key, value) in prefs.all) {
+            if (key.startsWith(AUTO_RESUME_PREFIX) && value is Boolean) {
+                companion.setDeviceAutoResume(key.removePrefix(AUTO_RESUME_PREFIX), value)
+            }
+        }
+    }
+
     override suspend fun setOtaPollConfig(config: BridgethingOtaPollConfig?) {
         saveOtaPollConfig(config)
         applyOtaPollConfig(config)
@@ -548,7 +567,6 @@ public class HybridBridgethingSessionImpl(
             ota.setPollConfig(
                 KOtaPollConfig(
                     rootUrl = config.rootUrl ?: "https://ota.bridgething.com",
-                    channel = config.channel,
                     intervalSeconds = config.intervalSeconds.toLong().coerceAtLeast(60L),
                     cacheDirectory = context.cacheDir,
                     autoPush = config.autoPush,
@@ -557,8 +575,8 @@ public class HybridBridgethingSessionImpl(
         }
     }
 
-    override suspend fun checkForOtaUpdate(channel: String, rootUrl: String?) {
-        stateLock.withLock { companion }?.ota?.checkNow(channel, otaRootUrl(rootUrl))
+    override suspend fun checkForOtaUpdate(rootUrl: String?) {
+        stateLock.withLock { companion }?.ota?.checkNow(otaRootUrl(rootUrl))
     }
 
     override suspend fun fetchOtaManifest(rootUrl: String?): BridgethingOtaManifest {
@@ -723,7 +741,6 @@ public class HybridBridgethingSessionImpl(
     private fun loadOtaPollConfig(): BridgethingOtaPollConfig? {
         if (!prefs.getBoolean("ota.configured", false)) {
             return BridgethingOtaPollConfig(
-                channel = "stable",
                 intervalSeconds = 3600.0,
                 autoPush = true,
                 rootUrl = null,
@@ -731,7 +748,6 @@ public class HybridBridgethingSessionImpl(
         }
         val root = prefs.getString("ota.rootUrl", null)
         return BridgethingOtaPollConfig(
-            channel = prefs.getString("ota.channel", "stable") ?: "stable",
             intervalSeconds = prefs.getLong("ota.intervalSeconds", 3600L).toDouble(),
             autoPush = prefs.getBoolean("ota.autoPush", true),
             rootUrl = if (root.isNullOrEmpty()) null else root,
@@ -745,7 +761,6 @@ public class HybridBridgethingSessionImpl(
         }
         prefs.edit()
             .putBoolean("ota.configured", true)
-            .putString("ota.channel", config.channel)
             .putLong("ota.intervalSeconds", config.intervalSeconds.toLong())
             .putBoolean("ota.autoPush", config.autoPush)
             .putString("ota.rootUrl", config.rootUrl)
@@ -1135,10 +1150,6 @@ public class HybridBridgethingSessionImpl(
         is OtaPollEvent.ManifestPollFailed -> makeOtaEvent(
             kind = BridgethingOtaEventKind.MANIFESTPOLLFAILED, reason = ev.reason,
         )
-        is OtaPollEvent.ChannelMismatch -> makeOtaEvent(
-            kind = BridgethingOtaEventKind.CHANNELMISMATCH,
-            deviceId = ev.deviceId, deviceChannel = ev.deviceChannel, configuredChannel = ev.configuredChannel,
-        )
         is OtaPollEvent.UpdateAvailable -> makeOtaEvent(
             kind = BridgethingOtaEventKind.UPDATEAVAILABLE,
             deviceId = ev.deviceId, toVersion = ev.release,
@@ -1238,8 +1249,6 @@ public class HybridBridgethingSessionImpl(
         phase: BridgethingOtaPhase? = null,
         percent: Double? = null,
         dwlPercent: Double? = null,
-        deviceChannel: String? = null,
-        configuredChannel: String? = null,
         stageAsset: String? = null,
         stageReceived: Double? = null,
         stageTotal: Double? = null,
@@ -1261,8 +1270,6 @@ public class HybridBridgethingSessionImpl(
         phase = phase,
         percent = percent,
         dwlPercent = dwlPercent,
-        deviceChannel = deviceChannel,
-        configuredChannel = configuredChannel,
         stageAsset = stageAsset,
         stageReceived = stageReceived,
         stageTotal = stageTotal,

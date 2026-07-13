@@ -165,6 +165,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   let asset_wait = asset::wait::AssetWaitTracker::new();
   let _asset_invalidator = asset::wait::spawn_invalidator(assets.clone(), asset_wait.clone());
   let iap2_pending_art = handler::iap2::Iap2PendingArt::new();
+  let spotify_wake_gate = handler::gateway::SpotifyWakeGate::new();
   let peers = PeerTracker::new(
     bus.clone(),
     player.clone(),
@@ -246,6 +247,7 @@ pub async fn init(config: DaemonConfig) -> Daemon {
     assets,
     asset_wait,
     iap2_pending_art,
+    spotify_wake_gate,
     authority,
     capabilities,
     peers,

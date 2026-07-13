@@ -17,7 +17,10 @@ use std::time::Duration;
 use bridgething::{ClientMode, Iap2TransportCommand};
 use bridgething_iap2::{
   HidCommand,
-  csm::now_playing::{MediaItemAttributes as Iap2MediaItem, NowPlayingUpdate as Iap2NowPlaying},
+  csm::now_playing::{
+    MediaItemAttributes as Iap2MediaItem, NowPlayingUpdate as Iap2NowPlaying, PlaybackAttributes as Iap2Playback,
+    PlaybackState as Iap2PlaybackState,
+  },
 };
 use bridgething_test_harness::{
   CommandDriver, DeviceHarness, DeviceTier, FrameObserve, FrameObserver, GatewayDriver, Harness, Iap2OutboundObserve,
@@ -379,6 +382,143 @@ where
   Ok(())
 }
 
+/// A cold spotify wake (nothing owns iOS now-playing): the daemon must launch
+/// spotify and hold the play tap until spotify actually claims the now-playing
+/// session - a blind tap routes to whatever app iOS considers the default
+/// media handler. Bound on the headless-only outbound tap, so T1 only.
+async fn cold_spotify_wake_holds_play_until_spotify_claims<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: GatewayDriver + Iap2SourceDriver + Iap2OutboundObserve,
+{
+  const PLAY_PAUSE: u8 = 0x01;
+  let is_pulse = |c: &Iap2TransportCommand| matches!(c, Iap2TransportCommand::Hid(HidCommand::Pulse(mask)) if mask & PLAY_PAUSE != 0);
+
+  let mut outbound = tier.iap2_outbound().await?;
+  let gateway = tier.gateway().await?;
+  gateway.capabilities().announce(caps()).await.expect("announce");
+  let source = tier.iap2_source().await?;
+
+  gateway.player().request_spotify_wake().await.expect("wake");
+
+  let launch = outbound
+    .wait_for(Duration::from_secs(5), |c| {
+      matches!(c, Iap2TransportCommand::RequestAppLaunch(_))
+    })
+    .await;
+  anyhow::ensure!(launch.is_some(), "wake never requested the spotify app launch");
+
+  // spotify is still cold: a play tap now would land on ios's default media app.
+  let premature = outbound.collect_for(Duration::from_millis(2500)).await;
+  anyhow::ensure!(
+    !premature.iter().any(is_pulse),
+    "play tapped before spotify claimed now-playing: {premature:?}"
+  );
+
+  // spotify finishes launching and claims the now-playing session, paused.
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: None,
+      playback: Some(Iap2Playback {
+        state: Some(Iap2PlaybackState::Paused),
+        app_bundle: Some("com.spotify.client".into()),
+        ..Default::default()
+      }),
+    })
+    .await?;
+
+  let tapped = outbound.wait_for(Duration::from_secs(5), |c| is_pulse(c)).await;
+  anyhow::ensure!(tapped.is_some(), "play never tapped after spotify claimed now-playing");
+  Ok(())
+}
+
+/// Concurrent wake requests single-flight: the companion's connect trigger and
+/// the spotify client's wake-on-play can both fire, and two live claim watchers
+/// would each tap play on the same bundle flip - toggling playback right back
+/// off. Exactly one play tap may follow the claim. T1 only, same bounds.
+async fn duplicate_spotify_wakes_tap_play_exactly_once<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: GatewayDriver + Iap2SourceDriver + Iap2OutboundObserve,
+{
+  const PLAY_PAUSE: u8 = 0x01;
+  let is_pulse = |c: &Iap2TransportCommand| matches!(c, Iap2TransportCommand::Hid(HidCommand::Pulse(mask)) if mask & PLAY_PAUSE != 0);
+
+  let mut outbound = tier.iap2_outbound().await?;
+  let gateway = tier.gateway().await?;
+  gateway.capabilities().announce(caps()).await.expect("announce");
+  let source = tier.iap2_source().await?;
+
+  gateway.player().request_spotify_wake().await.expect("wake 1");
+  gateway.player().request_spotify_wake().await.expect("wake 2");
+  let launch = outbound
+    .wait_for(Duration::from_secs(5), |c| {
+      matches!(c, Iap2TransportCommand::RequestAppLaunch(_))
+    })
+    .await;
+  anyhow::ensure!(launch.is_some(), "wake never requested the spotify app launch");
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: None,
+      playback: Some(Iap2Playback {
+        state: Some(Iap2PlaybackState::Paused),
+        app_bundle: Some("com.spotify.client".into()),
+        ..Default::default()
+      }),
+    })
+    .await?;
+
+  let tapped = outbound.wait_for(Duration::from_secs(5), |c| is_pulse(c)).await;
+  anyhow::ensure!(tapped.is_some(), "play never tapped after spotify claimed now-playing");
+  let extra = outbound.collect_for(Duration::from_millis(2000)).await;
+  anyhow::ensure!(
+    !extra.iter().any(is_pulse),
+    "duplicate wake tapped play a second time: {extra:?}"
+  );
+  Ok(())
+}
+
+/// The same cold wake, but a different app claims now-playing while spotify is
+/// still launching: the play tap must be withheld entirely (tapping would
+/// resume the interloper, the reported failure mode). T1 only, same bounds.
+async fn cold_spotify_wake_withholds_play_when_another_app_claims<T>(tier: &T) -> anyhow::Result<()>
+where
+  T: GatewayDriver + Iap2SourceDriver + Iap2OutboundObserve,
+{
+  const PLAY_PAUSE: u8 = 0x01;
+  let is_pulse = |c: &Iap2TransportCommand| matches!(c, Iap2TransportCommand::Hid(HidCommand::Pulse(mask)) if mask & PLAY_PAUSE != 0);
+
+  let mut outbound = tier.iap2_outbound().await?;
+  let gateway = tier.gateway().await?;
+  gateway.capabilities().announce(caps()).await.expect("announce");
+  let source = tier.iap2_source().await?;
+
+  gateway.player().request_spotify_wake().await.expect("wake");
+  let launch = outbound
+    .wait_for(Duration::from_secs(5), |c| {
+      matches!(c, Iap2TransportCommand::RequestAppLaunch(_))
+    })
+    .await;
+  anyhow::ensure!(launch.is_some(), "wake never requested the spotify app launch");
+
+  source
+    .push_now_playing(Iap2NowPlaying {
+      media_item: None,
+      playback: Some(Iap2Playback {
+        state: Some(Iap2PlaybackState::Paused),
+        app_bundle: Some("com.apple.podcasts".into()),
+        ..Default::default()
+      }),
+    })
+    .await?;
+
+  let pulses = outbound.collect_for(Duration::from_millis(2500)).await;
+  anyhow::ensure!(
+    !pulses.iter().any(is_pulse),
+    "play tapped after a non-spotify app claimed now-playing: {pulses:?}"
+  );
+  Ok(())
+}
+
 /// An incoming call announced by the companion (the telephony family) must
 /// surface to webapps on the egress stream. Rides the same `Gateway` on every
 /// tier, so it lifts across the in-process duplex and both over-air transports.
@@ -473,6 +613,9 @@ where
 // lifts to T1 alone (over-air, the live session consumes the channel and the
 // iPhone is the observer).
 lift!(transport_routes_to_iap2_and_refuses_unknown_shuffle, [t1]);
+lift!(cold_spotify_wake_holds_play_until_spotify_claims, [t1]);
+lift!(cold_spotify_wake_withholds_play_when_another_app_claims, [t1]);
+lift!(duplicate_spotify_wakes_tap_play_exactly_once, [t1]);
 
 // Geo binds the T1-only command driver (a webapp issues the watch), so T1 only.
 lift!(geo_position_reaches_watching_webapp, [t1]);

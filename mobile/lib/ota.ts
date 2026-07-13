@@ -101,8 +101,33 @@ type OtaState = {
   byDevice: Record<string, OtaDeviceStatus>;
 
   ingest(event: BridgethingOtaEvent): void;
+  noteDeviceMeta(deviceId: string): void;
   clearDevice(deviceId: string): void;
 };
+
+const COMPLETED_DISMISS_MS = 8_000;
+const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelDismiss(deviceId: string): void {
+  const timer = dismissTimers.get(deviceId);
+  if (timer != null) {
+    clearTimeout(timer);
+    dismissTimers.delete(deviceId);
+  }
+}
+
+function scheduleDismiss(deviceId: string): void {
+  cancelDismiss(deviceId);
+  dismissTimers.set(
+    deviceId,
+    setTimeout(() => {
+      dismissTimers.delete(deviceId);
+      const status = useOtaStore.getState().byDevice[deviceId];
+      if (status?.phase === 'completed' && !status.installing)
+        useOtaStore.getState().clearDevice(deviceId);
+    }, COMPLETED_DISMISS_MS),
+  );
+}
 
 function patch(
   s: OtaState,
@@ -169,16 +194,9 @@ export const useOtaStore = create<OtaState>(set => ({
       case 'manifestPollFailed':
         set({ pollError: event.reason ?? 'manifest poll failed' });
         return;
-      case 'channelMismatch':
-        if (!id) return;
-        set(s => ({
-          byDevice: patch(s, id, {
-            error: `device on '${event.deviceChannel}', app set to '${event.configuredChannel}'`,
-          }),
-        }));
-        return;
       case 'updateAvailable':
         if (!id) return;
+        cancelDismiss(id);
         set(s => ({
           byDevice: patch(s, id, {
             availableRelease: event.releaseVersion ?? event.toVersion ?? null,
@@ -190,6 +208,7 @@ export const useOtaStore = create<OtaState>(set => ({
         return;
       case 'planned': {
         if (!id) return;
+        cancelDismiss(id);
         const plan = event.steps ?? [];
         const stepSecs = plan.map(stepSeconds);
         const totalSecs = stepSecs.reduce((a, b) => a + b, 0);
@@ -303,6 +322,7 @@ export const useOtaStore = create<OtaState>(set => ({
             ...clearedStage,
           }),
         }));
+        scheduleDismiss(id);
         return;
       case 'failed':
         if (!id) return;
@@ -318,6 +338,16 @@ export const useOtaStore = create<OtaState>(set => ({
     }
   },
 
+  noteDeviceMeta: deviceId =>
+    set(s => {
+      const status = s.byDevice[deviceId];
+      if (status?.phase !== 'completed' || status.installing) return s;
+      cancelDismiss(deviceId);
+      const next = { ...s.byDevice };
+      delete next[deviceId];
+      return { byDevice: next };
+    }),
+
   clearDevice: deviceId =>
     set(s => {
       const next = { ...s.byDevice };
@@ -332,6 +362,8 @@ export function startOta(): void {
   if (wired) return;
   getSession().subscribe(event => {
     if (event.type === 'otaEvent') useOtaStore.getState().ingest(event.event);
+    if (event.type === 'deviceMetaChanged')
+      useOtaStore.getState().noteDeviceMeta(event.deviceId);
   });
   wired = true;
 }

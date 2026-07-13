@@ -27,6 +27,7 @@ impl GatewayToBridgeAuthorityMsgEventDispatch for AuthorityHandler {
     {
       tracing::warn!(?err, "failed to publish authority claim");
     }
+    self.handle.state.player.note_authority_changed().await?;
     Ok(())
   }
 
@@ -35,6 +36,7 @@ impl GatewayToBridgeAuthorityMsgEventDispatch for AuthorityHandler {
     if let Err(err) = self.handle.state.capabilities.release_authority(params.scope).await {
       tracing::warn!(?err, "failed to publish authority release");
     }
+    self.handle.state.player.note_authority_changed().await?;
     Ok(())
   }
 }

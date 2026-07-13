@@ -208,6 +208,10 @@ public class BridgethingCompanion(
     private var deviceLogStreaming: Boolean = false
     private var localLogStreaming: Boolean = false
     private val connectedDeviceIds: MutableSet<String> = mutableSetOf()
+    
+    private val deviceAutoResume: MutableMap<String, Boolean> = mutableMapOf()
+    private val lastPeerDisconnectedAtMs: MutableMap<String, Long> = mutableMapOf()
+
     private val deviceLogTokens: MutableMap<String, String> = mutableMapOf()
     private var deviceLogJob: Job? = null
     private var volumeClaimed: Boolean = false
@@ -335,6 +339,16 @@ public class BridgethingCompanion(
         stateMutex.withLock { capFlags = flags }
         notificationsEnabled = flags.notifications
         announceCapabilities()
+    }
+
+    public suspend fun setDeviceAutoResume(deviceId: String, enabled: Boolean) {
+        deviceLogMutex.withLock { deviceAutoResume[deviceId] = enabled }
+    }
+
+    private suspend fun allowAutoResume(deviceId: String): Boolean = deviceLogMutex.withLock {
+        if (!(deviceAutoResume[deviceId] ?: true)) return@withLock false
+        val gone = lastPeerDisconnectedAtMs[deviceId] ?: return@withLock true
+        System.currentTimeMillis() - gone >= AUTO_RESUME_BLIP_GAP_MS
     }
 
     /** observer persists across [setActive] swaps and takes effect immediately for the current glue. */
@@ -527,7 +541,7 @@ public class BridgethingCompanion(
                     log(CompanionLogLevel.Info, "peer connected: ${event.device.name} [${event.device.id}]")
                     announceCapabilities()
                     emitTimeSnapshot()
-                    activeGlue?.handlePeerConnected()
+                    activeGlue?.handlePeerConnected(allowAutoResume(event.device.id))
                     nowPlayingHub.onConnect()
                     phoneDispatcher.announce(gateway)
                     notificationDispatcher.replay(gateway, event.device.id)
@@ -542,6 +556,7 @@ public class BridgethingCompanion(
                     deviceLogMutex.withLock {
                         connectedDeviceIds.remove(event.deviceId)
                         deviceLogTokens.remove(event.deviceId)
+                        lastPeerDisconnectedAtMs[event.deviceId] = System.currentTimeMillis()
                     }
                 }
                 is GatewayEvent.LinkFailed -> {
@@ -549,6 +564,7 @@ public class BridgethingCompanion(
                     deviceLogMutex.withLock {
                         connectedDeviceIds.remove(event.device.id)
                         deviceLogTokens.remove(event.device.id)
+                        lastPeerDisconnectedAtMs[event.device.id] = System.currentTimeMillis()
                     }
                 }
                 is GatewayEvent.DecodeError -> log(CompanionLogLevel.Warn, "[${event.deviceId}] decode error: ${event.description}")
@@ -875,6 +891,7 @@ public class BridgethingCompanion(
     )
 
     private companion object {
+        const val AUTO_RESUME_BLIP_GAP_MS = 5L * 60L * 1000L
         const val TAG = "bridgething.companion"
         const val ASSET_FRAGMENT_BYTES = 4 * 1024
         const val INLINE_BODY_MAX_BYTES = 8 * 1024

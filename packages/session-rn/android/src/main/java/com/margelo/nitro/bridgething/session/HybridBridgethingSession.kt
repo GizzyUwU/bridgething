@@ -202,6 +202,14 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setCapabilityFlags(flags)
     }
 
+    override fun setDeviceAutoResume(deviceId: String, enabled: Boolean): Promise<Unit> = Promise.async {
+        backend?.setDeviceAutoResume(deviceId, enabled)
+    }
+
+    override fun isDeviceAutoResumeEnabled(deviceId: String): Promise<Boolean> = Promise.async {
+        backend?.isDeviceAutoResumeEnabled(deviceId) ?: true
+    }
+
     override fun setOtaPollConfig(config: Variant_NullType_BridgethingOtaPollConfig?): Promise<Unit> = Promise.async {
         val unwrapped: BridgethingOtaPollConfig? = config?.let { variant ->
             when (variant) {
@@ -212,8 +220,8 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         backend?.setOtaPollConfig(unwrapped)
     }
 
-    override fun checkForOtaUpdate(channel: String, rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
-        backend?.checkForOtaUpdate(channel, unwrapString(rootUrl))
+    override fun checkForOtaUpdate(rootUrl: Variant_NullType_String?): Promise<Unit> = Promise.async {
+        backend?.checkForOtaUpdate(unwrapString(rootUrl))
     }
 
     override fun fetchOtaManifest(rootUrl: Variant_NullType_String?): Promise<BridgethingOtaManifest> = Promise.async {

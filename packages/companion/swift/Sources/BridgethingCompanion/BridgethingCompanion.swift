@@ -82,6 +82,11 @@ public actor BridgethingCompanion {
     private var ancsAuthState: AncsAuthState = .unknown
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
     private var deviceLogStreaming = false
+    
+    private var deviceAutoResume: [String: Bool] = [:]
+    private static let autoResumeBlipGap: TimeInterval = 300
+    private var lastPeerDisconnectedAt: [String: Date] = [:]
+
     private var localLogStreaming = false
     private var connectedDeviceIds: Set<String> = []
     private var deviceLogTokens: [String: String] = [:]
@@ -414,6 +419,16 @@ public actor BridgethingCompanion {
         await announceCapabilities()
     }
 
+    public func setDeviceAutoResume(deviceId: String, enabled: Bool) {
+        deviceAutoResume[deviceId] = enabled
+    }
+
+    private func allowAutoResume(_ deviceId: String) -> Bool {
+        guard deviceAutoResume[deviceId] ?? true else { return false }
+        guard let gone = lastPeerDisconnectedAt[deviceId] else { return true }
+        return Date().timeIntervalSince(gone) >= Self.autoResumeBlipGap
+    }
+
     // MARK: - capability composition
 
     private func announceCapabilities() async {
@@ -517,7 +532,7 @@ public actor BridgethingCompanion {
                 if deviceLogStreaming { await subscribeDeviceLogs(device.id) }
                 await announceCapabilities()
                 await emitTimeSnapshot()
-                await activeGlue?.handlePeerConnected()
+                await activeGlue?.handlePeerConnected(allowAutoResume: allowAutoResume(device.id))
                 #if os(iOS)
                     await reestablishAncsLink()
                     if wasEmpty { await audioKeepAlive.activate() }
@@ -537,6 +552,7 @@ public actor BridgethingCompanion {
 
     private func handlePeerGone(_ id: String, reason: String) async {
         guard connectedDeviceIds.remove(id) != nil else { return }
+        lastPeerDisconnectedAt[id] = Date()
         log(.info, "peer gone (\(reason)): \(id)")
         deviceLogTokens.removeValue(forKey: id)
         #if os(iOS)

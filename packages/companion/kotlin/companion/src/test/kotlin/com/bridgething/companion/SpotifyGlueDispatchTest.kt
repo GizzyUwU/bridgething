@@ -88,7 +88,8 @@ class SpotifyGlueDispatchTest {
         override fun setHttpTransport(transport: uniffi.spotify.HttpTransport) {}
         override fun setDeviceWaker(waker: uniffi.spotify.DeviceWaker) {}
         override suspend fun pause() {}
-        override suspend fun resume() {}
+        @Volatile var resumeCalls = 0
+        override suspend fun resume() { resumeCalls++ }
         override suspend fun skipNext() {}
         override suspend fun skipPrev() {}
         override suspend fun seek(positionMs: Long) {}
@@ -145,6 +146,7 @@ class SpotifyGlueDispatchTest {
         scope: CoroutineScope,
         fake: FakeClient,
         connectivity: ConnectivityWatcher = NoOpConnectivityWatcher,
+        autoResume: Boolean? = false,
         authSink: ((GlueAuthState) -> Unit)? = null,
     ): Harness {
         val glue = SpotifyGlue(
@@ -169,6 +171,7 @@ class SpotifyGlueDispatchTest {
         )
         companion.setActive(glue)
         companion.start()
+        if (autoResume != null) companion.setDeviceAutoResume("carthing-test", autoResume)
         val driver = WireDriver(adapter)
         driver.start(scope)
         driver.connect()
@@ -284,7 +287,7 @@ class SpotifyGlueDispatchTest {
         val stale = ((first.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
         assertEquals(0u, stale.playback.positionMs, "the cached now-playing position is frozen at the last dealer event")
 
-        h.glue.handlePeerConnected()
+        h.glue.handlePeerConnected(allowAutoResume = false)
         val replay = h.driver.waitOutbound(20.seconds) {
             val d = (it.data as? GatewayToBridgeMsgData.Player)?.data as? GatewayToBridgePlayerMsg.Snapshot
             d?.data?.playback?.positionMs == 90_000u
@@ -305,7 +308,7 @@ class SpotifyGlueDispatchTest {
         val fresh = ((first.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
         assertNull(fresh.playback.positionAgeMs, "a live dealer emit carries no age")
 
-        h.glue.handlePeerConnected()
+        h.glue.handlePeerConnected(allowAutoResume = false)
         val replay = h.driver.waitOutbound(20.seconds) {
             val d = (it.data as? GatewayToBridgeMsgData.Player)?.data as? GatewayToBridgePlayerMsg.Snapshot
             d?.data?.playback?.positionAgeMs != null
@@ -313,6 +316,62 @@ class SpotifyGlueDispatchTest {
         val ps = ((replay.data as GatewayToBridgeMsgData.Player).data as GatewayToBridgePlayerMsg.Snapshot).data
         assertNotNull(ps.playback.positionAgeMs, "a cached replay that could not be freshened stamps its age")
         h.companion.stop()
+    }
+
+    @Test
+    fun `aggressive connect resumes when the cluster is known empty`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onDevices(emptyList())
+
+        h.glue.handlePeerConnected(allowAutoResume = true)
+        waitFor("connect resume") { fake.resumeCalls == 1 }
+        h.companion.stop()
+    }
+
+    @Test
+    fun `aggressive connect defers resume until the cluster is known empty`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+
+        h.glue.handlePeerConnected(allowAutoResume = true)
+        delay(200)
+        assertEquals(0, fake.resumeCalls, "resume must wait for the device list")
+        h.observer()!!.onDevices(emptyList())
+        waitFor("deferred connect resume") { fake.resumeCalls == 1 }
+        h.companion.stop()
+    }
+
+    @Test
+    fun `non-aggressive connect never resumes`() = runBlocking {
+        val fake = FakeClient()
+        val h = boot(this, fake)
+        h.observer()!!.onDevices(emptyList())
+
+        h.glue.handlePeerConnected(allowAutoResume = false)
+        delay(500)
+        assertEquals(0, fake.resumeCalls, "non-aggressive connect must not resume")
+        h.companion.stop()
+    }
+
+    @Test
+    fun `companion connect defaults to aggressive resume`() = runBlocking {
+        val fake = FakeClient()
+        // pref left absent: the companion's boot-time peer connect must resume on its own.
+        val h = boot(this, fake, autoResume = null)
+        delay(200)
+        assertEquals(0, fake.resumeCalls, "resume must wait for the device list")
+        h.observer()!!.onDevices(emptyList())
+        waitFor("companion-driven connect resume") { fake.resumeCalls == 1 }
+        h.companion.stop()
+    }
+
+    private suspend fun waitFor(what: String, cond: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (!cond()) {
+            check(System.currentTimeMillis() < deadline) { "timed out waiting for $what" }
+            delay(50)
+        }
     }
 
     @Test
@@ -373,7 +432,7 @@ class SpotifyGlueDispatchTest {
             (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.QueueChanged
         }
 
-        h.glue.handlePeerConnected()
+        h.glue.handlePeerConnected(allowAutoResume = false)
         val resent = h.driver.waitOutbound(20.seconds) {
             (it.data as? GatewayToBridgeMsgData.Player)?.data is GatewayToBridgePlayerMsg.QueueChanged
         }
