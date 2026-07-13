@@ -3,6 +3,7 @@
   "name": "__PROJECT_NAME__",
   "version": "0.1.0",
   "description": "",
+  "settings": "settings.html",
   "config": [],
   "permissions": [],
   "art": { "heroPx": 248, "thumbPx": 96 }

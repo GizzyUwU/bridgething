@@ -25,6 +25,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         private var pendingAncsAuthStatusChanged: ((BridgethingAncsAuthStatus) -> Unit)? = null
         private var pendingLog: ((String, String) -> Unit)? = null
         private var pendingWebappsChanged: ((String) -> Unit)? = null
+        private var pendingWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
         private var pendingDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
         private var pendingOtaEvent: ((BridgethingOtaEvent) -> Unit)? = null
         private var pendingCatalogEvent: ((BridgethingCatalogEvent) -> Unit)? = null
@@ -51,6 +52,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                     ancs = pendingAncsAuthStatusChanged,
                     log = pendingLog,
                     webapps = pendingWebappsChanged,
+                    webappDoc = pendingWebappDocChanged,
                     deviceMeta = pendingDeviceMetaChanged,
                     ota = pendingOtaEvent,
                     catalog = pendingCatalogEvent,
@@ -65,6 +67,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
                 pendingAncsAuthStatusChanged = null
                 pendingLog = null
                 pendingWebappsChanged = null
+                pendingWebappDocChanged = null
                 pendingDeviceMetaChanged = null
                 pendingOtaEvent = null
                 pendingCatalogEvent = null
@@ -80,6 +83,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
             replay.ancs?.let(b::setOnAncsAuthStatusChanged)
             replay.log?.let(b::setOnLog)
             replay.webapps?.let(b::setOnWebappsChanged)
+            replay.webappDoc?.let(b::setOnWebappDocChanged)
             replay.deviceMeta?.let(b::setOnDeviceMetaChanged)
             replay.ota?.let(b::setOnOtaEvent)
             replay.catalog?.let(b::setOnCatalogEvent)
@@ -103,6 +107,7 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         val ancs: ((BridgethingAncsAuthStatus) -> Unit)?,
         val log: ((String, String) -> Unit)?,
         val webapps: ((String) -> Unit)?,
+        val webappDoc: ((String, String, String, String?) -> Unit)?,
         val deviceMeta: ((String, BridgethingDeviceMeta) -> Unit)?,
         val ota: ((BridgethingOtaEvent) -> Unit)?,
         val catalog: ((BridgethingCatalogEvent) -> Unit)?,
@@ -186,6 +191,10 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         else Variant_NullType_BridgethingWebappIcon.First(NullType.NULL)
     }
 
+    override fun webappSettingsPage(deviceId: String, id: String): Promise<String> = Promise.async {
+        require().webappSettingsPage(deviceId, id)
+    }
+
     override fun listWebappConfig(deviceId: String, id: String): Promise<Array<BridgethingConfigEntry>> = Promise.async {
         require().listWebappConfig(deviceId, id)
     }
@@ -196,6 +205,24 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun deleteWebappConfigField(deviceId: String, id: String, key: String): Promise<Unit> = Promise.async {
         require().deleteWebappConfigField(deviceId, id, key)
+    }
+
+    override fun getWebappDoc(deviceId: String, id: String, key: String): Promise<Variant_NullType_String> = Promise.async {
+        val value = require().getWebappDoc(deviceId, id, key)
+        if (value != null) Variant_NullType_String.Second(value)
+        else Variant_NullType_String.First(NullType.NULL)
+    }
+
+    override fun listWebappDoc(deviceId: String, id: String): Promise<Array<BridgethingDocEntry>> = Promise.async {
+        require().listWebappDoc(deviceId, id)
+    }
+
+    override fun setWebappDoc(deviceId: String, id: String, key: String, value: String): Promise<Unit> = Promise.async {
+        require().setWebappDoc(deviceId, id, key, value)
+    }
+
+    override fun deleteWebappDoc(deviceId: String, id: String, key: String): Promise<Unit> = Promise.async {
+        require().deleteWebappDoc(deviceId, id, key)
     }
 
     override fun setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<Unit> = Promise.async {
@@ -376,6 +403,18 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
 
     override fun setOnWebappsChanged(callback: (deviceId: String) -> Unit) {
         forwardOrBuffer(callback, BridgethingSessionBackend::setOnWebappsChanged) { pendingWebappsChanged = it }
+    }
+
+    override fun setOnWebappDocChanged(
+        callback: (deviceId: String, webappId: String, key: String, value: Variant_NullType_String?) -> Unit,
+    ) {
+        val wrapped: (String, String, String, String?) -> Unit = { deviceId, webappId, key, value ->
+            val variant =
+                if (value != null) Variant_NullType_String.Second(value)
+                else Variant_NullType_String.First(NullType.NULL)
+            callback(deviceId, webappId, key, variant)
+        }
+        forwardOrBuffer(wrapped, BridgethingSessionBackend::setOnWebappDocChanged) { pendingWebappDocChanged = it }
     }
 
     override fun setOnDeviceMetaChanged(callback: (deviceId: String, meta: BridgethingDeviceMeta) -> Unit) {

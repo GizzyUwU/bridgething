@@ -40,7 +40,7 @@ alsa = { version = "0.11", optional = true }
 headless_chrome = { version = "1.0.21", optional = true }
 
 # swupdate feature
-bridgething-swupdate-sys = { version = "0.1.0", path = "../swupdate-sys", optional = true }
+bridgething-swupdate-sys = { workspace = true, optional = true }
 
 
 # dependencies
@@ -53,8 +53,8 @@ base64 = "0.22.1"
 reqwest = { version = "0.13.3", features = ["json"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tower = { version = "0.5.3", features = ["util"] }
-bridgething-iap2 = { version = "0.1.0", path = "../iap2" }
-bridgething-mfi = { version = "0.1.0", path = "../mfi" }
+bridgething-iap2 = { workspace = true }
+bridgething-mfi = { workspace = true }
 anyhow = "1.0.102"
 sea-orm = { version = "1.1.20", default-features = false, features = [
   "sqlx-sqlite",

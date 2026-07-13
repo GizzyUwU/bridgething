@@ -400,7 +400,7 @@ function AppTile({
         <WebappIcon
           deviceId={deviceId}
           id={webapp.id}
-          iconAvailable={webapp.iconAvailable}
+          iconHash={webapp.iconHash}
           name={webapp.name}
           size={48}
           fallbackTextClass="text-[18px] font-extrabold text-foreground"

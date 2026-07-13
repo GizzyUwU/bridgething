@@ -30,7 +30,9 @@ bun run share   # writes <name>-<version>.zip from dist/
 
 Send that zip to anyone with a bridgething-flashed Car Thing. They install it
 from the bridgething companion app (no rebuild, no dev tools). The zip is just
-your built bundle with `manifest.json` at its root.
+your built bundle with `manifest.json` at its root. `bun run build` also emits
+`dist/settings.html` (the companion-side settings page); it ships in the same
+bundle when `manifest.json` declares `settings`.
 
 Bump `version` in `public/manifest.json` before sharing an update, so people can
 tell builds apart. Never touch `manifest.json`'s `id` - it is the webapp's

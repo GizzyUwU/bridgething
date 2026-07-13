@@ -20,15 +20,17 @@ uuid = { workspace = true, features = ["v7"] }
 anyhow = "1.0"
 tempfile = "3.23.0"
 tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect"] }
-bridgething-iap2 = { version = "0.1.0", path = "../iap2", features = ["emulator"] }
+bridgething-iap2 = { workspace = true, features = ["emulator"] }
 chromiumoxide = "0.9.1"
 serde.workspace = true
 serde_json.workspace = true
-bridgething-gateway = { version = "0.1.0", path = "../gateway-rs" }
+bridgething-gateway = { workspace = true }
 async-trait.workspace = true
-bridgething-client = { version = "0.1.0", path = "../client-rs" }
+bridgething-client = { workspace = true }
 
 [dev-dependencies]
 base64 = "0.22.1"
+hex = "0.4.3"
 proptest = "1.11.0"
+sha2 = "0.11.0"
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

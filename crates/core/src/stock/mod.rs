@@ -143,6 +143,7 @@ pub fn server_event_to_stock(
 
     BridgeToClientMsgData::Capabilities(_)
     | BridgeToClientMsgData::Config(_)
+    | BridgeToClientMsgData::Doc(_)
     | BridgeToClientMsgData::Geo(_)
     | BridgeToClientMsgData::Hardware(_)
     | BridgeToClientMsgData::Library(_)

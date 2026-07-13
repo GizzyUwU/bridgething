@@ -70,6 +70,12 @@ files for a specific method or type.
 - `config` - user-tunable settings (each becomes a `client.config` value).
 - `permissions` - capabilities you need (e.g. `net.fetch`, `net.proxy`, `geo`).
 - `art: { heroPx, thumbPx }` - the pixel sizes you want artwork delivered at.
+- `settings` - one self-contained HTML file (built from `settings/`) the
+  companion phone app renders as this webapp's settings page. It talks to the
+  companion over `@bridgething/client/settings`, not the on-device SDK. Capped
+  at 1 MiB at install. It loads from a `file://` origin: websocket APIs work
+  from it, but plain HTTP fetch is CORS-gated (`Origin: null`) - see the
+  network caveat in the `/bridgething` skill's sdk reference.
 
 ## Workflow
 

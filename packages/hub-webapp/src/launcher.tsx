@@ -41,7 +41,7 @@ export function Launcher({ client }: { client: BridgethingClient }) {
         const visible = listResult.response.webapps.filter(w => w.id !== selfId);
         const entries: TileEntry[] = await Promise.all(
           visible.map(async info => {
-            if (!info.iconAvailable) return { info, iconUrl: null };
+            if (!info.iconHash) return { info, iconUrl: null };
             const iconResult = await client.webapp.icon({ id: info.id });
             if (!iconResult.ok) return { info, iconUrl: null };
             const bytes = new Uint8Array(iconResult.response.bytes as unknown as number[]);

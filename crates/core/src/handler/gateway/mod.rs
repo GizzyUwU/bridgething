@@ -212,6 +212,9 @@ impl GatewayHandler {
         GatewayToBridgeTransferMsg::Abandon(a) => {
           self.state.transfer_sinks.abandon(a.transfer_id, a.reason);
         }
+        GatewayToBridgeTransferMsg::Ack(a) => {
+          self.state.transfer_outbound.note_ack(a.transfer_id, a.received);
+        }
       },
       GatewayToBridgeMsgData::Tunnel(tunnel_msg) => {
         if let Some(event) = tunnel_msg.into_event() {

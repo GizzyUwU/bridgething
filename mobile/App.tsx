@@ -35,6 +35,7 @@ import { SetupScreen } from './screens/Setup';
 import { StoreScreen } from './screens/Store';
 import { WebappBrowseScreen } from './screens/WebappBrowse';
 import { WebappDetailScreen } from './screens/WebappDetail';
+import { WebappSettingsScreen } from './screens/WebappSettings';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -48,9 +49,6 @@ export default function App() {
 
   const [boot, setBoot] = useState<BootRoute | null>(null);
 
-  // pick the initial route from the mmkv-stored "setup completed" flag, then
-  // start the session in the background. bootstrap failures don't block the
-  // route - we'd rather render Setup with an in-screen error than stick on splash.
   useEffect(() => {
     let cancelled = false;
     setBoot(getSetupCompleted() ? 'Dashboard' : 'Setup');
@@ -162,6 +160,11 @@ export default function App() {
             options={{ title: 'app', headerLargeTitle: false }}
           />
           <Stack.Screen
+            name="WebappSettings"
+            component={WebappSettingsScreen}
+            options={{ headerRight: undefined, headerLargeTitle: false }}
+          />
+          <Stack.Screen
             name="Settings"
             component={SettingsScreen}
             options={{ title: 'settings', headerRight: undefined }}
@@ -195,7 +198,6 @@ export default function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      {/* rn-primitives portals (ActionMenu, RenameSheet) render nothing without a mounted host */}
       <PortalHost />
     </SafeAreaProvider>
   );

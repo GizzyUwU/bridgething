@@ -89,6 +89,12 @@ impl Harness {
     &self.state
   }
 
+  /// The daemon's temp state dir, for scenarios that plant on-disk fixtures
+  /// (webapp bundles under `webapps/`) before a registry rescan.
+  pub fn state_dir(&self) -> &Path {
+    self._state_dir.path()
+  }
+
   /// Restart the daemon on the same state dir: abort the running task, wait for
   /// it to release its files, then re-assemble. The in-memory db resets, but the
   /// on-disk blob + transfer dirs persist, so an in-flight chunked transfer's

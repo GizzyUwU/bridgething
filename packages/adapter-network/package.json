@@ -1,6 +1,6 @@
 {
   "name": "@bridgething/adapter-network",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Network-gateway WebSocket transport for @bridgething/gateway.",
   "license": "MIT",
   "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",

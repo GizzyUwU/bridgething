@@ -79,8 +79,8 @@ export type BridgethingWebappInfo = {
   role: BridgethingWebappRole;
   version: string;
   description?: string;
-  iconAvailable: boolean;
-  iconMime?: string;
+  iconHash?: string;
+  settingsHash?: string;
   config: BridgethingConfigField[];
   permissions: string[];
 };
@@ -115,6 +115,11 @@ export type BridgethingWebappIcon = {
   fileUri?: string;
   svg?: string;
   mime?: string;
+};
+
+export type BridgethingDocEntry = {
+  key: string;
+  value: string;
 };
 
 export type BridgethingCapabilityFlags = {
@@ -331,9 +336,14 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   uninstallWebapp(deviceId: string, id: string): Promise<void>;
   switchWebapp(deviceId: string, id: string): Promise<void>;
   webappIcon(deviceId: string, id: string): Promise<BridgethingWebappIcon | null>;
+  webappSettingsPage(deviceId: string, id: string): Promise<string>;
   listWebappConfig(deviceId: string, id: string): Promise<BridgethingConfigEntry[]>;
   setWebappConfigField(deviceId: string, id: string, key: string, value: string): Promise<void>;
   deleteWebappConfigField(deviceId: string, id: string, key: string): Promise<void>;
+  getWebappDoc(deviceId: string, id: string, key: string): Promise<string | null>;
+  listWebappDoc(deviceId: string, id: string): Promise<BridgethingDocEntry[]>;
+  setWebappDoc(deviceId: string, id: string, key: string, value: string): Promise<void>;
+  deleteWebappDoc(deviceId: string, id: string, key: string): Promise<void>;
 
   setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void>;
 
@@ -393,6 +403,9 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   setLocalLogStreamingEnabled(enabled: boolean): void;
 
   setOnWebappsChanged(callback: (deviceId: string) => void): void;
+  setOnWebappDocChanged(
+    callback: (deviceId: string, webappId: string, key: string, value: string | null) => void,
+  ): void;
   setOnDeviceMetaChanged(callback: (deviceId: string, meta: BridgethingDeviceMeta) => void): void;
   setOnOtaEvent(callback: (event: BridgethingOtaEvent) => void): void;
   setOnCatalogEvent(callback: (event: BridgethingCatalogEvent) => void): void;

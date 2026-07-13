@@ -991,6 +991,20 @@ public struct Diagnostics: Codable, Sendable {
 	}
 }
 
+/// One key/value pair from a webapp's doc namespace: shared structured
+/// state writable from both the companion (gateway) and the webapp
+/// itself, last write wins. Values are strings; apps encode JSON as
+/// needed.
+public struct DocEntry: Codable, Sendable {
+	public let key: String
+	public let value: String
+
+	public init(key: String, value: String) {
+		self.key = key
+		self.value = value
+	}
+}
+
 /// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
 /// surface as `AudioError::EarconNotFound`.
 public struct Earcon: Codable, Sendable {
@@ -4423,9 +4437,64 @@ public struct WebappConfigSet: Codable, Sendable {
 	}
 }
 
-/// Icon byte fetch. Daemon reads the icon declared by the manifest from
-/// the bundle directory and returns the bytes + mime.
-public struct WebappIcon: Codable, Sendable {
+/// Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
+public struct WebappDocAck: Codable, Sendable {
+	public let key: String
+	public let value: String?
+
+	public init(key: String, value: String?) {
+		self.key = key
+		self.value = value
+	}
+}
+
+/// Broadcast when the WEBAPP writes its doc namespace, so an open
+/// companion settings page sees device-side changes live. Gateway-origin
+/// writes are not echoed back (the writer already holds the ack).
+public struct WebappDocChanged: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let key: String
+	public let value: String?
+
+	public init(id: UUID, key: String, value: String?) {
+		self.id = id
+		self.key = key
+		self.value = value
+	}
+}
+
+public struct WebappDocDelete: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let key: String
+
+	public init(id: UUID, key: String) {
+		self.id = id
+		self.key = key
+	}
+}
+
+public struct WebappDocGet: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let key: String
+
+	public init(id: UUID, key: String) {
+		self.id = id
+		self.key = key
+	}
+}
+
+public struct WebappDocGetReply: Codable, Sendable {
+	public let key: String
+	/// `None` when the key has never been written.
+	public let value: String?
+
+	public init(key: String, value: String?) {
+		self.key = key
+		self.value = value
+	}
+}
+
+public struct WebappDocList: Codable, Sendable {
 	@MsgpackUuid public var id: UUID
 
 	public init(id: UUID) {
@@ -4433,13 +4502,23 @@ public struct WebappIcon: Codable, Sendable {
 	}
 }
 
-public struct WebappIconReply: Codable, Sendable {
-	public let bytes: Data
-	public let mime: String?
+public struct WebappDocListReply: Codable, Sendable {
+	public let entries: [DocEntry]
 
-	public init(bytes: Data, mime: String?) {
-		self.bytes = bytes
-		self.mime = mime
+	public init(entries: [DocEntry]) {
+		self.entries = entries
+	}
+}
+
+public struct WebappDocSet: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let key: String
+	public let value: String
+
+	public init(id: UUID, key: String, value: String) {
+		self.id = id
+		self.key = key
+		self.value = value
 	}
 }
 
@@ -4542,11 +4621,13 @@ public struct WebappInfo: Codable, Sendable {
 	public let role: WebappRole
 	public let version: String
 	public let description: String?
-	public let iconAvailable: Bool
-	public let iconMime: String?
-	/// icon bytes, inlined on the gateway list so the companion never round-trips
-	/// a separate fetch per app. omitted on the on-device client list.
-	public let icon: Data?
+	/// sha256 of the icon bytes; presence means an icon exists. consumers
+	/// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
+	/// and cache keyed by this hash.
+	public let iconHash: String?
+	/// sha256 of the companion settings page declared by the manifest;
+	/// presence is the companion's cue to offer the settings UI.
+	public let settingsHash: String?
 	public let config: [ConfigField]
 	public let permissions: [String]
 	/// Plain-English description of the voice intents the webapp wants
@@ -4559,16 +4640,15 @@ public struct WebappInfo: Codable, Sendable {
 	/// means the canonical `{248, 96}` default applies.
 	public let art: ArtProfile?
 
-	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconAvailable: Bool, iconMime: String?, icon: Data?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?) {
+	public init(id: UUID, name: String, source: WebappSource, role: WebappRole, version: String, description: String?, iconHash: String?, settingsHash: String?, config: [ConfigField], permissions: [String], voiceGrammar: String?, art: ArtProfile?) {
 		self.id = id
 		self.name = name
 		self.source = source
 		self.role = role
 		self.version = version
 		self.description = description
-		self.iconAvailable = iconAvailable
-		self.iconMime = iconMime
-		self.icon = icon
+		self.iconHash = iconHash
+		self.settingsHash = settingsHash
 		self.config = config
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
@@ -4593,6 +4673,9 @@ public struct WebappManifest: Codable, Sendable {
 	public let version: String
 	public let description: String?
 	public let icon: String?
+	/// Bundle-relative path to one self-contained HTML file the companion
+	/// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
+	public let settings: String?
 	public let role: WebappRole?
 	public let config: [ConfigField]?
 	public let permissions: [String]?
@@ -4605,17 +4688,59 @@ public struct WebappManifest: Codable, Sendable {
 	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
 	public let art: ArtProfile?
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?) {
 		self.id = id
 		self.name = name
 		self.version = version
 		self.description = description
 		self.icon = icon
+		self.settings = settings
 		self.role = role
 		self.config = config
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
 		self.art = art
+	}
+}
+
+/// Which bundle file a `WebappResource` request targets.
+public enum WebappResourceKind: String, Codable, Sendable {
+	case icon
+	case settings
+}
+
+/// On-demand fetch of a webapp bundle resource (icon bytes, companion
+/// settings page). `have` carries the sha256 the requester already
+/// caches; a match returns a bodyless reply so unchanged resources
+/// never re-cross the link.
+public struct WebappResource: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let kind: WebappResourceKind
+	public let have: String?
+
+	public init(id: UUID, kind: WebappResourceKind, have: String?) {
+		self.id = id
+		self.kind = kind
+		self.have = have
+	}
+}
+
+/// Reply to `WebappResource`. `sha256` is the current content hash;
+/// `body` is absent when the requester's `have` already matched (its
+/// cache is current). Large bodies stream as fragments per `TransferBody`.
+public struct WebappResourceReply: Codable, Sendable {
+	@MsgpackUuid public var id: UUID
+	public let kind: WebappResourceKind
+	public let sha256: String
+	public let mime: String?
+	public let body: TransferBody?
+
+	public init(id: UUID, kind: WebappResourceKind, sha256: String, mime: String?, body: TransferBody?) {
+		self.id = id
+		self.kind = kind
+		self.sha256 = sha256
+		self.mime = mime
+		self.body = body
 	}
 }
 
@@ -5629,9 +5754,13 @@ public enum BridgeToGatewaySystemMsg: Codable, Sendable {
 
 public enum BridgeToGatewayTransferMsg: Codable, Sendable {
 	case ack(TransferAck)
+	case fragment(TransferFragment)
+	case abandon(TransferAbandon)
 
 	enum CodingKeys: String, CodingKey, Codable {
-		case ack
+		case ack,
+			fragment,
+			abandon
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -5647,6 +5776,16 @@ public enum BridgeToGatewayTransferMsg: Codable, Sendable {
 					self = .ack(content)
 					return
 				}
+			case .fragment:
+				if let content = try? container.decode(TransferFragment.self, forKey: .data) {
+					self = .fragment(content)
+					return
+				}
+			case .abandon:
+				if let content = try? container.decode(TransferAbandon.self, forKey: .data) {
+					self = .abandon(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(BridgeToGatewayTransferMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for BridgeToGatewayTransferMsg"))
@@ -5657,6 +5796,12 @@ public enum BridgeToGatewayTransferMsg: Codable, Sendable {
 		switch self {
 		case .ack(let content):
 			try container.encode(CodingKeys.ack, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .fragment(let content):
+			try container.encode(CodingKeys.fragment, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .abandon(let content):
+			try container.encode(CodingKeys.abandon, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -5804,10 +5949,15 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 	/// domain-level error response for any webapp op (e.g. WebappNotFound,
 	/// CannotUninstallBuiltin, IdReserved)
 	case webappError(WebappError)
-	case icon(WebappIconReply)
+	case resource(WebappResourceReply)
 	case configGet(WebappConfigGetReply)
 	case configList(WebappConfigListReply)
 	case configAck(WebappConfigAck)
+	case docGet(WebappDocGetReply)
+	case docList(WebappDocListReply)
+	case docAck(WebappDocAck)
+	/// event: the active webapp wrote/deleted a doc key
+	case docChanged(WebappDocChanged)
 	/// event: a webapp install (`OtaKind::InstalledWebapp`) completed
 	/// successfully; carries the installed webapp's metadata. The terminal
 	/// signal for an install; failures surface as `OtaError` on the system
@@ -5824,10 +5974,14 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			switched,
 			uninstalled,
 			webappError,
-			icon,
+			resource,
 			configGet,
 			configList,
 			configAck,
+			docGet,
+			docList,
+			docAck,
+			docChanged,
 			webappInstalled,
 			activeChanged
 	}
@@ -5865,9 +6019,9 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 					self = .webappError(content)
 					return
 				}
-			case .icon:
-				if let content = try? container.decode(WebappIconReply.self, forKey: .data) {
-					self = .icon(content)
+			case .resource:
+				if let content = try? container.decode(WebappResourceReply.self, forKey: .data) {
+					self = .resource(content)
 					return
 				}
 			case .configGet:
@@ -5883,6 +6037,26 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			case .configAck:
 				if let content = try? container.decode(WebappConfigAck.self, forKey: .data) {
 					self = .configAck(content)
+					return
+				}
+			case .docGet:
+				if let content = try? container.decode(WebappDocGetReply.self, forKey: .data) {
+					self = .docGet(content)
+					return
+				}
+			case .docList:
+				if let content = try? container.decode(WebappDocListReply.self, forKey: .data) {
+					self = .docList(content)
+					return
+				}
+			case .docAck:
+				if let content = try? container.decode(WebappDocAck.self, forKey: .data) {
+					self = .docAck(content)
+					return
+				}
+			case .docChanged:
+				if let content = try? container.decode(WebappDocChanged.self, forKey: .data) {
+					self = .docChanged(content)
 					return
 				}
 			case .webappInstalled:
@@ -5918,8 +6092,8 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 		case .webappError(let content):
 			try container.encode(CodingKeys.webappError, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .icon(let content):
-			try container.encode(CodingKeys.icon, forKey: .event)
+		case .resource(let content):
+			try container.encode(CodingKeys.resource, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .configGet(let content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
@@ -5929,6 +6103,18 @@ public enum BridgeToGatewayWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .configAck(let content):
 			try container.encode(CodingKeys.configAck, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docGet(let content):
+			try container.encode(CodingKeys.docGet, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docList(let content):
+			try container.encode(CodingKeys.docList, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docAck(let content):
+			try container.encode(CodingKeys.docAck, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docChanged(let content):
+			try container.encode(CodingKeys.docChanged, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .webappInstalled(let content):
 			try container.encode(CodingKeys.webappInstalled, forKey: .event)
@@ -6958,10 +7144,12 @@ public enum GatewayToBridgeTimeMsg: Codable, Sendable {
 public enum GatewayToBridgeTransferMsg: Codable, Sendable {
 	case fragment(TransferFragment)
 	case abandon(TransferAbandon)
+	case ack(TransferAck)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case fragment,
-			abandon
+			abandon,
+			ack
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -6982,6 +7170,11 @@ public enum GatewayToBridgeTransferMsg: Codable, Sendable {
 					self = .abandon(content)
 					return
 				}
+			case .ack:
+				if let content = try? container.decode(TransferAck.self, forKey: .data) {
+					self = .ack(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeTransferMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeTransferMsg"))
@@ -6995,6 +7188,9 @@ public enum GatewayToBridgeTransferMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .abandon(let content):
 			try container.encode(CodingKeys.abandon, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .ack(let content):
+			try container.encode(CodingKeys.ack, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -7127,23 +7323,31 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 	/// command: remove the named installed webapp; bridge replies with `Uninstalled`
 	/// (built-ins cannot be removed and surface as `WebappError::CannotUninstallBuiltin`)
 	case uninstall(WebappUninstall)
-	/// request: bridge replies with `Icon`
-	case icon(WebappIcon)
+	/// request: bridge replies with `Resource`
+	case resource(WebappResource)
 	case configGet(WebappConfigGet)
 	case configList(WebappConfigList)
 	case configSet(WebappConfigSet)
 	case configDelete(WebappConfigDelete)
+	case docGet(WebappDocGet)
+	case docList(WebappDocList)
+	case docSet(WebappDocSet)
+	case docDelete(WebappDocDelete)
 
 	enum CodingKeys: String, CodingKey, Codable {
 		case list,
 			getActive,
 			switchTo,
 			uninstall,
-			icon,
+			resource,
 			configGet,
 			configList,
 			configSet,
-			configDelete
+			configDelete,
+			docGet,
+			docList,
+			docSet,
+			docDelete
 	}
 
 	private enum ContainerCodingKeys: String, CodingKey {
@@ -7170,9 +7374,9 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 					self = .uninstall(content)
 					return
 				}
-			case .icon:
-				if let content = try? container.decode(WebappIcon.self, forKey: .data) {
-					self = .icon(content)
+			case .resource:
+				if let content = try? container.decode(WebappResource.self, forKey: .data) {
+					self = .resource(content)
 					return
 				}
 			case .configGet:
@@ -7195,6 +7399,26 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 					self = .configDelete(content)
 					return
 				}
+			case .docGet:
+				if let content = try? container.decode(WebappDocGet.self, forKey: .data) {
+					self = .docGet(content)
+					return
+				}
+			case .docList:
+				if let content = try? container.decode(WebappDocList.self, forKey: .data) {
+					self = .docList(content)
+					return
+				}
+			case .docSet:
+				if let content = try? container.decode(WebappDocSet.self, forKey: .data) {
+					self = .docSet(content)
+					return
+				}
+			case .docDelete:
+				if let content = try? container.decode(WebappDocDelete.self, forKey: .data) {
+					self = .docDelete(content)
+					return
+				}
 			}
 		}
 		throw DecodingError.typeMismatch(GatewayToBridgeWebappMsg.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GatewayToBridgeWebappMsg"))
@@ -7213,8 +7437,8 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 		case .uninstall(let content):
 			try container.encode(CodingKeys.uninstall, forKey: .event)
 			try container.encode(content, forKey: .data)
-		case .icon(let content):
-			try container.encode(CodingKeys.icon, forKey: .event)
+		case .resource(let content):
+			try container.encode(CodingKeys.resource, forKey: .event)
 			try container.encode(content, forKey: .data)
 		case .configGet(let content):
 			try container.encode(CodingKeys.configGet, forKey: .event)
@@ -7227,6 +7451,18 @@ public enum GatewayToBridgeWebappMsg: Codable, Sendable {
 			try container.encode(content, forKey: .data)
 		case .configDelete(let content):
 			try container.encode(CodingKeys.configDelete, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docGet(let content):
+			try container.encode(CodingKeys.docGet, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docList(let content):
+			try container.encode(CodingKeys.docList, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docSet(let content):
+			try container.encode(CodingKeys.docSet, forKey: .event)
+			try container.encode(content, forKey: .data)
+		case .docDelete(let content):
+			try container.encode(CodingKeys.docDelete, forKey: .event)
 			try container.encode(content, forKey: .data)
 		}
 	}
@@ -7537,8 +7773,8 @@ public struct WebappErrorInvalidManifestInner: Codable, Sendable {
 	}
 }
 
-/// Generated type representing the anonymous struct variant `IconNotAvailable` of the `WebappError` Rust enum
-public struct WebappErrorIconNotAvailableInner: Codable, Sendable {
+/// Generated type representing the anonymous struct variant `ResourceNotAvailable` of the `WebappError` Rust enum
+public struct WebappErrorResourceNotAvailableInner: Codable, Sendable {
 	public let id: String
 
 	public init(id: String) {
@@ -7557,6 +7793,17 @@ public struct WebappErrorUnknownConfigKeyInner: Codable, Sendable {
 
 /// Generated type representing the anonymous struct variant `InvalidConfigValue` of the `WebappError` Rust enum
 public struct WebappErrorInvalidConfigValueInner: Codable, Sendable {
+	public let key: String
+	public let reason: String
+
+	public init(key: String, reason: String) {
+		self.key = key
+		self.reason = reason
+	}
+}
+
+/// Generated type representing the anonymous struct variant `InvalidDocValue` of the `WebappError` Rust enum
+public struct WebappErrorInvalidDocValueInner: Codable, Sendable {
 	public let key: String
 	public let reason: String
 
@@ -7592,12 +7839,15 @@ public enum WebappError: Codable, Sendable {
 	case missingIndexHtml
 	/// manifest.json missing, unparseable, or failed schema validation.
 	case invalidManifest(WebappErrorInvalidManifestInner)
-	/// The webapp's manifest doesn't declare an icon (or the icon file is missing on disk).
-	case iconNotAvailable(WebappErrorIconNotAvailableInner)
+	/// The requested resource (icon / settings page) isn't declared by the
+	/// webapp's manifest or its file is missing on disk.
+	case resourceNotAvailable(WebappErrorResourceNotAvailableInner)
 	/// Config key is not declared in the webapp's manifest schema.
 	case unknownConfigKey(WebappErrorUnknownConfigKeyInner)
 	/// Value failed schema validation (out of range, regex mismatch, not in enum).
 	case invalidConfigValue(WebappErrorInvalidConfigValueInner)
+	/// Doc value rejected (oversized).
+	case invalidDocValue(WebappErrorInvalidDocValueInner)
 	/// Catch-all for genuinely-unexpected failures (io errors, daemon-side
 	/// bugs). Reason is human-readable; not a stable wire contract.
 	case `internal`(WebappErrorInternalInner)
@@ -7610,9 +7860,10 @@ public enum WebappError: Codable, Sendable {
 			zipMalformed,
 			missingIndexHtml,
 			invalidManifest,
-			iconNotAvailable,
+			resourceNotAvailable,
 			unknownConfigKey,
 			invalidConfigValue,
+			invalidDocValue,
 			`internal`
 	}
 
@@ -7657,9 +7908,9 @@ public enum WebappError: Codable, Sendable {
 					self = .invalidManifest(content)
 					return
 				}
-			case .iconNotAvailable:
-				if let content = try? container.decode(WebappErrorIconNotAvailableInner.self, forKey: .data) {
-					self = .iconNotAvailable(content)
+			case .resourceNotAvailable:
+				if let content = try? container.decode(WebappErrorResourceNotAvailableInner.self, forKey: .data) {
+					self = .resourceNotAvailable(content)
 					return
 				}
 			case .unknownConfigKey:
@@ -7670,6 +7921,11 @@ public enum WebappError: Codable, Sendable {
 			case .invalidConfigValue:
 				if let content = try? container.decode(WebappErrorInvalidConfigValueInner.self, forKey: .data) {
 					self = .invalidConfigValue(content)
+					return
+				}
+			case .invalidDocValue:
+				if let content = try? container.decode(WebappErrorInvalidDocValueInner.self, forKey: .data) {
+					self = .invalidDocValue(content)
 					return
 				}
 			case .internal:
@@ -7705,14 +7961,17 @@ public enum WebappError: Codable, Sendable {
 		case .invalidManifest(let content):
 			try container.encode(CodingKeys.invalidManifest, forKey: .type)
 			try container.encode(content, forKey: .data)
-		case .iconNotAvailable(let content):
-			try container.encode(CodingKeys.iconNotAvailable, forKey: .type)
+		case .resourceNotAvailable(let content):
+			try container.encode(CodingKeys.resourceNotAvailable, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .unknownConfigKey(let content):
 			try container.encode(CodingKeys.unknownConfigKey, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .invalidConfigValue(let content):
 			try container.encode(CodingKeys.invalidConfigValue, forKey: .type)
+			try container.encode(content, forKey: .data)
+		case .invalidDocValue(let content):
+			try container.encode(CodingKeys.invalidDocValue, forKey: .type)
 			try container.encode(content, forKey: .data)
 		case .internal(let content):
 			try container.encode(CodingKeys.internal, forKey: .type)

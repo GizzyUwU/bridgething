@@ -98,6 +98,8 @@ public actor BridgethingCompanion {
     private var timeChangeObservers: [NSObjectProtocol] = []
     public let ota: OtaService
     public let catalog: CatalogService
+    private let transferReceiver = TransferReceiver()
+    public let webappResources: WebappResourceService
     #if canImport(CoreLocation)
         private let geoController: GeoController
     #endif
@@ -128,6 +130,7 @@ public actor BridgethingCompanion {
         #endif
         ota = OtaService()
         catalog = CatalogService(installer: ota)
+        webappResources = WebappResourceService(receiver: transferReceiver)
         #if canImport(CoreLocation)
             geoController = GeoController(provider: geoProvider)
         #endif
@@ -185,6 +188,7 @@ public actor BridgethingCompanion {
         await audioDispatcher.stop()
         await ota.stop()
         await catalog.stop()
+        await transferReceiver.stop()
 
         if let glue = activeGlue {
             await glue.detach()
@@ -505,6 +509,11 @@ public actor BridgethingCompanion {
             guard let self else { return }
             await audioDispatcher.setGlueProvider { [weak self] in await self?.current() }
             await audioDispatcher.start(gateway: gateway)
+        })
+        tasks.append(Task { [weak self] in
+            guard let self else { return }
+            await transferReceiver.start(gateway: gateway)
+            await webappResources.start(gateway: gateway)
         })
         tasks.append(Task { [weak self] in
             guard let self else { return }

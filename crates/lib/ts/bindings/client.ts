@@ -13,6 +13,7 @@ import type {
   Device,
   Diagnostics,
   DismissReason,
+  DocEntry,
   DtmfTone,
   EndCallAction,
   FavoritesPage,
@@ -226,6 +227,17 @@ export type BridgeToClientConfigMsg =
   | { event: 'changed'; data: ConfigChanged };
 
 /**
+ * Daemon -> webapp doc replies and events. `Changed` broadcasts whenever
+ * the companion writes or deletes a doc value for the active webapp.
+ */
+export type BridgeToClientDocMsg =
+  | { event: 'get'; data: DocGetReply }
+  | { event: 'list'; data: DocListReply }
+  | { event: 'ack'; data: DocAck }
+  | { event: 'error'; data: WebappError }
+  | { event: 'changed'; data: DocChanged };
+
+/**
  * Daemon -> webapp location surface: the `Position` stream a watch
  * produces, plus replies to `geo.watch` and `geo.getOnce`.
  */
@@ -274,6 +286,7 @@ export type BridgeToClientMsgData =
   | { type: 'bluetooth'; data: BridgeToClientBluetoothMsg }
   | { type: 'capabilities'; data: BridgeToClientCapabilitiesMsg }
   | { type: 'config'; data: BridgeToClientConfigMsg }
+  | { type: 'doc'; data: BridgeToClientDocMsg }
   | { type: 'geo'; data: BridgeToClientGeoMsg }
   | { type: 'hardware'; data: BridgeToClientHardwareMsg }
   | { type: 'library'; data: BridgeToClientLibraryMsg }
@@ -476,6 +489,19 @@ export type ClientToBridgeCapabilitiesMsg = { event: 'get' };
 export type ClientToBridgeConfigMsg = { event: 'get'; data: ConfigGet } | { event: 'list' };
 
 /**
+ * Webapp -> daemon doc surface (`client.doc`). The doc namespace is
+ * shared structured state per webapp, writable from BOTH the webapp
+ * and the companion (which authors it from the app's settings page).
+ * Last write wins; the daemon broadcasts `BridgeToClientDocMsg::Changed`
+ * on companion-origin writes so the running app applies them live.
+ */
+export type ClientToBridgeDocMsg =
+  | { event: 'get'; data: DocGet }
+  | { event: 'list' }
+  | { event: 'set'; data: DocSet }
+  | { event: 'delete'; data: DocDelete };
+
+/**
  * Webapp -> daemon location surface: `watch`/`unwatch` register and
  * release a standing subscription, `getOnce` fetches a single fix.
  * Every fix originates from the connected phone; the device has no
@@ -529,6 +555,7 @@ export type ClientToBridgeMsgData =
   | { type: 'bluetooth'; data: ClientToBridgeBluetoothMsg }
   | { type: 'capabilities'; data: ClientToBridgeCapabilitiesMsg }
   | { type: 'config'; data: ClientToBridgeConfigMsg }
+  | { type: 'doc'; data: ClientToBridgeDocMsg }
   | { type: 'geo'; data: ClientToBridgeGeoMsg }
   | { type: 'hardware'; data: ClientToBridgeHardwareMsg }
   | { type: 'library'; data: ClientToBridgeLibraryMsg }
@@ -739,6 +766,57 @@ export type DisplaySetLevel = {
  * (`Manual`, via `displaySetLevel`).
  */
 export type DisplaySetMode = { mode: BrightnessMode };
+
+/**
+ * Ack for `DocSet` / `DocDelete`; echoes what's now stored.
+ */
+export type DocAck = { key: string; value: string | null };
+
+/**
+ * Broadcast when the COMPANION writes the active webapp's doc namespace.
+ * Webapp-origin writes are not echoed back (the writer already holds the
+ * ack).
+ */
+export type DocChanged = {
+  key: string;
+  /**
+   * `None` means the entry was deleted.
+   */
+  value: string | null;
+};
+
+/**
+ * Webapp request: delete the doc entry at `key`.
+ */
+export type DocDelete = { key: string };
+
+/**
+ * Webapp request: read one doc value for the currently active webapp.
+ */
+export type DocGet = { key: string };
+
+/**
+ * Reply to `DocGet`.
+ */
+export type DocGetReply = {
+  key: string;
+  /**
+   * `None` when the key has never been written.
+   */
+  value: string | null;
+};
+
+/**
+ * Reply to `DocList`.
+ */
+export type DocListReply = { entries: Array<DocEntry> };
+
+/**
+ * Webapp request: write a doc value. Last write wins against companion
+ * writes on the same key; the companion hears the change as a gateway
+ * `webapp.docChanged` event.
+ */
+export type DocSet = { key: string; value: string };
 
 /**
  * Payload for `earcon`.

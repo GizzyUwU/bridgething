@@ -299,6 +299,9 @@ impl<'a> TransferSurface<'a> {
   pub async fn abandon(&self, payload: TransferAbandon) -> Result<(), SdkError> {
     self.0.event(GatewayToBridgeTransferMsgEvent::Abandon(payload)).await
   }
+  pub async fn ack(&self, payload: TransferAck) -> Result<(), SdkError> {
+    self.0.event(GatewayToBridgeTransferMsgEvent::Ack(payload)).await
+  }
   /// Stream of `Transfer` events.
   pub fn events(&self) -> impl Stream<Item = BridgeToGatewayTransferMsgEvent> + 'static {
     BroadcastStream::new(self.0.events()).filter_map(|msg| {
@@ -368,7 +371,7 @@ impl<'a> WebappSurface<'a> {
   pub async fn uninstall(&self, request: WebappUninstall) -> Result<WebappActive, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
-  pub async fn icon(&self, request: WebappIcon) -> Result<WebappIconReply, RequestFailure<WebappError>> {
+  pub async fn resource(&self, request: WebappResource) -> Result<WebappResourceReply, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
   pub async fn config_get(
@@ -390,6 +393,18 @@ impl<'a> WebappSurface<'a> {
     &self,
     request: WebappConfigDelete,
   ) -> Result<WebappConfigAck, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
+  pub async fn doc_get(&self, request: WebappDocGet) -> Result<WebappDocGetReply, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
+  pub async fn doc_list(&self, request: WebappDocList) -> Result<WebappDocListReply, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
+  pub async fn doc_set(&self, request: WebappDocSet) -> Result<WebappDocAck, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
+  pub async fn doc_delete(&self, request: WebappDocDelete) -> Result<WebappDocAck, RequestFailure<WebappError>> {
     self.0.request(request).await
   }
   /// Stream of `Webapp` events.

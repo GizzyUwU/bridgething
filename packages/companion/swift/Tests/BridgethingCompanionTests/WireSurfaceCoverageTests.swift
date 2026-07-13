@@ -98,7 +98,7 @@ final class WireSurfaceCoverageTests: XCTestCase {
         // tunnel
         "tunnel.data", "tunnel.close",
         // transfer
-        "transfer.ack",
+        "transfer.ack", "transfer.fragment", "transfer.abandon",
         // system OTA
         "system.otaProgress", "system.otaError", "system.otaBeginAck",
         "system.otaBeginRejected", "system.otaAssetRangeAbandon",
@@ -110,8 +110,9 @@ final class WireSurfaceCoverageTests: XCTestCase {
         "voice.streamOpen", "voice.frame", "voice.streamClose", "voice.dispatched", "voice.dispatchFailed",
         // webapp
         "webapp.webapps", "webapp.active", "webapp.switched", "webapp.uninstalled",
-        "webapp.webappError", "webapp.icon", "webapp.configGet",
+        "webapp.webappError", "webapp.resource", "webapp.configGet",
         "webapp.configList", "webapp.configAck", "webapp.webappInstalled", "webapp.activeChanged",
+        "webapp.docGet", "webapp.docList", "webapp.docAck", "webapp.docChanged",
         // forward
         "forward.text", "forward.binary", "forward.json",
     ]

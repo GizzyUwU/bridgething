@@ -43,6 +43,13 @@ import type {
   DiagnosticsReply,
   DisplaySetLevel,
   DisplaySetMode,
+  DocAck,
+  DocChanged,
+  DocDelete,
+  DocGet,
+  DocGetReply,
+  DocListReply,
+  DocSet,
   Earcon,
   FavoriteChanged,
   FavoritesSet,
@@ -176,6 +183,14 @@ export type ConfigInboundHandlers = {
   get: (msg: ConfigGetReply) => void;
   list: (msg: ConfigListReply) => void;
   changed: (msg: ConfigChanged) => void;
+};
+
+export type DocInboundHandlers = {
+  get: (msg: DocGetReply) => void;
+  list: (msg: DocListReply) => void;
+  ack: (msg: DocAck) => void;
+  error: (msg: WebappError) => void;
+  changed: (msg: DocChanged) => void;
 };
 
 export type GeoInboundHandlers = {
@@ -921,6 +936,168 @@ export class ConfigSurface {
     if (d.type === 'config') {
       const inner = d.data;
       if (inner.event === 'list') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+}
+
+export class DocSurface {
+  constructor(private readonly _client: BridgethingClient) {}
+
+  /** Subscribe to `Doc::Get` from the daemon. */
+  onGet(handler: (msg: DocGetReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      if (inner.event !== 'get') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Doc::List` from the daemon. */
+  onList(handler: (msg: DocListReply) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      if (inner.event !== 'list') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Doc::Ack` from the daemon. */
+  onAck(handler: (msg: DocAck) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      if (inner.event !== 'ack') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Doc::Error` from the daemon. */
+  onError(handler: (msg: WebappError) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      if (inner.event !== 'error') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Doc::Changed` from the daemon. */
+  onChanged(handler: (msg: DocChanged) => void): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      if (inner.event !== 'changed') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Doc` variants. */
+  subscribe(handlers: DocInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<DocInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<DocInboundHandlers>, partial: boolean): () => void {
+    return this._client.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'doc') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'get': {
+          handlers.get?.(inner.data);
+          return;
+        }
+        case 'list': {
+          handlers.list?.(inner.data);
+          return;
+        }
+        case 'ack': {
+          handlers.ack?.(inner.data);
+          return;
+        }
+        case 'error': {
+          handlers.error?.(inner.data);
+          return;
+        }
+        case 'changed': {
+          handlers.changed?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._client.logger.warn('Doc: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async get(req: DocGet, options?: { timeoutMs?: number }): Promise<TypedRequestResult<DocGetReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'doc', data: { event: 'get', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'doc') {
+      const inner = d.data;
+      if (inner.event === 'get') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async list(options?: { timeoutMs?: number }): Promise<TypedRequestResult<DocListReply, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'doc', data: { event: 'list' } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'doc') {
+      const inner = d.data;
+      if (inner.event === 'list') return { ok: true, response: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async set(req: DocSet, options?: { timeoutMs?: number }): Promise<TypedRequestResult<DocAck, WebappError>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'doc', data: { event: 'set', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'doc') {
+      const inner = d.data;
+      if (inner.event === 'ack') return { ok: true, response: inner.data };
+      if (inner.event === 'error') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to the daemon: webapp sends, daemon responds. */
+  async delete(req: DocDelete, options?: { timeoutMs?: number }): Promise<TypedRequestResult<DocAck, never>> {
+    const wireData: ClientToBridgeMsg['data'] = { type: 'doc', data: { event: 'delete', data: req } };
+    const response = await this._client.request(wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'doc') {
+      const inner = d.data;
+      if (inner.event === 'ack') return { ok: true, response: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
     return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
@@ -3193,6 +3370,7 @@ export type ClientMessageHandlers = {
   bluetooth: BluetoothInboundHandlers;
   capabilities: CapabilitiesInboundHandlers;
   config: ConfigInboundHandlers;
+  doc: DocInboundHandlers;
   geo: GeoInboundHandlers;
   hardware: HardwareInboundHandlers;
   library: LibraryInboundHandlers;
@@ -3214,6 +3392,7 @@ export type PartialClientMessageHandlers = {
   bluetooth?: Partial<BluetoothInboundHandlers>;
   capabilities?: Partial<CapabilitiesInboundHandlers>;
   config?: Partial<ConfigInboundHandlers>;
+  doc?: Partial<DocInboundHandlers>;
   geo?: Partial<GeoInboundHandlers>;
   hardware?: Partial<HardwareInboundHandlers>;
   library?: Partial<LibraryInboundHandlers>;
@@ -3246,6 +3425,8 @@ export interface ClientSurfaces {
   readonly capabilities: CapabilitiesSurface;
   /** Methods scoped to the `Config` wire surface. */
   readonly config: ConfigSurface;
+  /** Methods scoped to the `Doc` wire surface. */
+  readonly doc: DocSurface;
   /** Methods scoped to the `Geo` wire surface. */
   readonly geo: GeoSurface;
   /** Methods scoped to the `Hardware` wire surface. */
@@ -3285,6 +3466,7 @@ type ClientSurfaceCache = {
   bluetooth?: BluetoothSurface;
   capabilities?: CapabilitiesSurface;
   config?: ConfigSurface;
+  doc?: DocSurface;
   geo?: GeoSurface;
   hardware?: HardwareSurface;
   library?: LibrarySurface;
@@ -3354,6 +3536,14 @@ export function applyDispatch(): void {
     get(this: BridgethingClient): ConfigSurface {
       const bucket = bucketFor(this);
       return (bucket.config ??= new ConfigSurface(this));
+    },
+  });
+  Object.defineProperty(BridgethingClient.prototype, 'doc', {
+    configurable: true,
+    enumerable: true,
+    get(this: BridgethingClient): DocSurface {
+      const bucket = bucketFor(this);
+      return (bucket.doc ??= new DocSurface(this));
     },
   });
   Object.defineProperty(BridgethingClient.prototype, 'geo', {
@@ -3620,6 +3810,40 @@ function outerSubscribe(c: BridgethingClient, handlers: PartialClientMessageHand
           }
           default: {
             if (!partial) c.logger.warn('Config: no handler for inner', inner);
+            return;
+          }
+        }
+      }
+      case 'doc': {
+        const innerHandlers = handlers.doc;
+        if (!innerHandlers) {
+          if (!partial) c.logger.warn('subscribe: no handler for doc');
+          return;
+        }
+        const inner = data.data;
+        switch (inner.event) {
+          case 'get': {
+            innerHandlers.get?.(inner.data);
+            return;
+          }
+          case 'list': {
+            innerHandlers.list?.(inner.data);
+            return;
+          }
+          case 'ack': {
+            innerHandlers.ack?.(inner.data);
+            return;
+          }
+          case 'error': {
+            innerHandlers.error?.(inner.data);
+            return;
+          }
+          case 'changed': {
+            innerHandlers.changed?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) c.logger.warn('Doc: no handler for inner', inner);
             return;
           }
         }

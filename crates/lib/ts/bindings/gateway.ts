@@ -10,6 +10,7 @@ import type {
   CompanionAuthorityScope,
   ConfigEntry,
   DismissReason,
+  DocEntry,
   DtmfTone,
   EndCallAction,
   FavoritesPage,
@@ -214,7 +215,10 @@ export type BridgeToGatewaySystemMsg =
   | { event: 'logEntry'; data: LogEntry }
   | { event: 'keepalive'; data: KeepalivePing };
 
-export type BridgeToGatewayTransferMsg = { event: 'ack'; data: TransferAck };
+export type BridgeToGatewayTransferMsg =
+  | { event: 'ack'; data: TransferAck }
+  | { event: 'fragment'; data: TransferFragment }
+  | { event: 'abandon'; data: TransferAbandon };
 
 export type BridgeToGatewayTunnelMsg =
   | { event: 'open'; data: TunnelOpen }
@@ -234,10 +238,14 @@ export type BridgeToGatewayWebappMsg =
   | { event: 'switched'; data: WebappActive }
   | { event: 'uninstalled'; data: WebappActive }
   | { event: 'webappError'; data: WebappError }
-  | { event: 'icon'; data: WebappIconReply }
+  | { event: 'resource'; data: WebappResourceReply }
   | { event: 'configGet'; data: WebappConfigGetReply }
   | { event: 'configList'; data: WebappConfigListReply }
   | { event: 'configAck'; data: WebappConfigAck }
+  | { event: 'docGet'; data: WebappDocGetReply }
+  | { event: 'docList'; data: WebappDocListReply }
+  | { event: 'docAck'; data: WebappDocAck }
+  | { event: 'docChanged'; data: WebappDocChanged }
   | { event: 'webappInstalled'; data: WebappInfo }
   | { event: 'activeChanged'; data: WebappActiveChanged };
 
@@ -455,7 +463,8 @@ export type GatewayToBridgeTimeMsg = { event: 'snapshot'; data: TimeInfo };
 
 export type GatewayToBridgeTransferMsg =
   | { event: 'fragment'; data: TransferFragment }
-  | { event: 'abandon'; data: TransferAbandon };
+  | { event: 'abandon'; data: TransferAbandon }
+  | { event: 'ack'; data: TransferAck };
 
 export type GatewayToBridgeTunnelMsg =
   | { event: 'openReply'; data: TunnelOpenReply }
@@ -473,11 +482,15 @@ export type GatewayToBridgeWebappMsg =
   | { event: 'getActive' }
   | { event: 'switchTo'; data: WebappSwitchTo }
   | { event: 'uninstall'; data: WebappUninstall }
-  | { event: 'icon'; data: WebappIcon }
+  | { event: 'resource'; data: WebappResource }
   | { event: 'configGet'; data: WebappConfigGet }
   | { event: 'configList'; data: WebappConfigList }
   | { event: 'configSet'; data: WebappConfigSet }
-  | { event: 'configDelete'; data: WebappConfigDelete };
+  | { event: 'configDelete'; data: WebappConfigDelete }
+  | { event: 'docGet'; data: WebappDocGet }
+  | { event: 'docList'; data: WebappDocList }
+  | { event: 'docSet'; data: WebappDocSet }
+  | { event: 'docDelete'; data: WebappDocDelete };
 
 export type GeoErrorReply = { error: GeoError };
 
@@ -999,14 +1012,62 @@ export type WebappConfigListReply = { entries: Array<ConfigEntry> };
 export type WebappConfigSet = { id: string; key: string; value: string };
 
 /**
- * Icon byte fetch. Daemon reads the icon declared by the manifest from
- * the bundle directory and returns the bytes + mime.
+ * Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
  */
-export type WebappIcon = { id: string };
+export type WebappDocAck = { key: string; value: string | null };
 
-export type WebappIconReply = { bytes: Uint8Array; mime: string | null };
+/**
+ * Broadcast when the WEBAPP writes its doc namespace, so an open
+ * companion settings page sees device-side changes live. Gateway-origin
+ * writes are not echoed back (the writer already holds the ack).
+ */
+export type WebappDocChanged = { id: string; key: string; value: string | null };
+
+export type WebappDocDelete = { id: string; key: string };
+
+export type WebappDocGet = { id: string; key: string };
+
+export type WebappDocGetReply = {
+  key: string;
+  /**
+   * `None` when the key has never been written.
+   */
+  value: string | null;
+};
+
+export type WebappDocList = { id: string };
+
+export type WebappDocListReply = { entries: Array<DocEntry> };
+
+export type WebappDocSet = { id: string; key: string; value: string };
 
 export type WebappList = { webapps: Array<WebappInfo> };
+
+/**
+ * On-demand fetch of a webapp bundle resource (icon bytes, companion
+ * settings page). `have` carries the sha256 the requester already
+ * caches; a match returns a bodyless reply so unchanged resources
+ * never re-cross the link.
+ */
+export type WebappResource = { id: string; kind: WebappResourceKind; have: string | null };
+
+/**
+ * Which bundle file a `WebappResource` request targets.
+ */
+export type WebappResourceKind = 'icon' | 'settings';
+
+/**
+ * Reply to `WebappResource`. `sha256` is the current content hash;
+ * `body` is absent when the requester's `have` already matched (its
+ * cache is current). Large bodies stream as fragments per `TransferBody`.
+ */
+export type WebappResourceReply = {
+  id: string;
+  kind: WebappResourceKind;
+  sha256: string;
+  mime: string | null;
+  body: TransferBody | null;
+};
 
 export type WebappSwitchTo = { id: string };
 

@@ -1733,6 +1733,40 @@ public struct TransferSurface: Sendable {
     }
   }
 
+  /// Cross-peer stream of `Transfer::Fragment` messages.
+  public var fragment: AsyncStream<(deviceId: String, msg: TransferFragment)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .transfer(let outer) = message.data,
+             case .fragment(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Transfer::Abandon` messages.
+  public var abandon: AsyncStream<(deviceId: String, msg: TransferAbandon)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .transfer(let outer) = message.data,
+             case .abandon(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Transfer::Fragment` to every connected peer (broadcast).
   public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
     let ids = await gateway.connectedDeviceIds()
@@ -1754,6 +1788,20 @@ public struct TransferSurface: Sendable {
       for deviceId in ids {
         group.addTask {
           let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
+          try await gateway.send(deviceId: deviceId, msg, priority: priority)
+        }
+      }
+      try await group.waitForAll()
+    }
+  }
+
+  /// Send `Transfer::Ack` to every connected peer (broadcast).
+  public func ack(_ payload: TransferAck, priority: Priority = .normal) async throws {
+    let ids = await gateway.connectedDeviceIds()
+    try await withThrowingTaskGroup(of: Void.self) { [gateway] group in
+      for deviceId in ids {
+        group.addTask {
+          let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.ack(payload)))
           try await gateway.send(deviceId: deviceId, msg, priority: priority)
         }
       }
@@ -2071,14 +2119,14 @@ public struct WebappSurface: Sendable {
     }
   }
 
-  /// Cross-peer stream of `Webapp::Icon` messages.
-  public var icon: AsyncStream<(deviceId: String, msg: WebappIconReply)> {
+  /// Cross-peer stream of `Webapp::Resource` messages.
+  public var resource: AsyncStream<(deviceId: String, msg: WebappResourceReply)> {
     AsyncStream { continuation in
       let task = Task { [gateway] in
         for await event in gateway.events {
           if case .message(let deviceId, let message) = event,
              case .webapp(let outer) = message.data,
-             case .icon(let inner) = outer {
+             case .resource(let inner) = outer {
             continuation.yield((deviceId: deviceId, msg: inner))
           }
         }
@@ -2130,6 +2178,74 @@ public struct WebappSurface: Sendable {
           if case .message(let deviceId, let message) = event,
              case .webapp(let outer) = message.data,
              case .configAck(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::DocGet` messages.
+  public var docGet: AsyncStream<(deviceId: String, msg: WebappDocGetReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .docGet(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::DocList` messages.
+  public var docList: AsyncStream<(deviceId: String, msg: WebappDocListReply)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .docList(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::DocAck` messages.
+  public var docAck: AsyncStream<(deviceId: String, msg: WebappDocAck)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .docAck(let inner) = outer {
+            continuation.yield((deviceId: deviceId, msg: inner))
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Cross-peer stream of `Webapp::DocChanged` messages.
+  public var docChanged: AsyncStream<(deviceId: String, msg: WebappDocChanged)> {
+    AsyncStream { continuation in
+      let task = Task { [gateway] in
+        for await event in gateway.events {
+          if case .message(let deviceId, let message) = event,
+             case .webapp(let outer) = message.data,
+             case .docChanged(let inner) = outer {
             continuation.yield((deviceId: deviceId, msg: inner))
           }
         }
@@ -2232,12 +2348,12 @@ public struct WebappSurface: Sendable {
   }
 
   /// Typed request to a specific peer: companion sends, daemon responds.
-  public func icon(deviceId: String, _ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+  public func resource(deviceId: String, _ req: WebappResource, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappResourceReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.resource(req)), timeout: timeout)
     switch response.data {
     case .webapp(let inner):
       switch inner {
-      case .icon(let value): return .ok(value)
+      case .resource(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
@@ -2298,6 +2414,66 @@ public struct WebappSurface: Sendable {
     case .webapp(let inner):
       switch inner {
       case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func docGet(deviceId: String, _ req: WebappDocGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func docList(deviceId: String, _ req: WebappDocList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func docSet(deviceId: String, _ req: WebappDocSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to a specific peer: companion sends, daemon responds.
+  public func docDelete(deviceId: String, _ req: WebappDocDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docAck(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
@@ -4100,6 +4276,42 @@ public struct TransferSurfaceForDevice: Sendable {
     }
   }
 
+  /// Stream of `Transfer::Fragment` from this peer.
+  public var fragment: AsyncStream<TransferFragment> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .transfer(let outer) = message.data,
+             case .fragment(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Transfer::Abandon` from this peer.
+  public var abandon: AsyncStream<TransferAbandon> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .transfer(let outer) = message.data,
+             case .abandon(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
   /// Send `Transfer::Fragment` to this peer.
   public func fragment(_ payload: TransferFragment, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.fragment(payload)))
@@ -4109,6 +4321,12 @@ public struct TransferSurfaceForDevice: Sendable {
   /// Send `Transfer::Abandon` to this peer.
   public func abandon(_ payload: TransferAbandon, priority: Priority = .normal) async throws {
     let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.abandon(payload)))
+    try await gateway.send(deviceId: deviceId, msg, priority: priority)
+  }
+
+  /// Send `Transfer::Ack` to this peer.
+  public func ack(_ payload: TransferAck, priority: Priority = .normal) async throws {
+    let msg = GatewayToBridgeMsg(id: UUID(), meta: .event, data: .transfer(.ack(payload)))
     try await gateway.send(deviceId: deviceId, msg, priority: priority)
   }
 
@@ -4398,15 +4616,15 @@ public struct WebappSurfaceForDevice: Sendable {
     }
   }
 
-  /// Stream of `Webapp::Icon` from this peer.
-  public var icon: AsyncStream<WebappIconReply> {
+  /// Stream of `Webapp::Resource` from this peer.
+  public var resource: AsyncStream<WebappResourceReply> {
     AsyncStream { continuation in
       let task = Task { [gateway, deviceId = self.deviceId] in
         for await event in gateway.events {
           if case .message(let evDeviceId, let message) = event,
              evDeviceId == deviceId,
              case .webapp(let outer) = message.data,
-             case .icon(let inner) = outer {
+             case .resource(let inner) = outer {
             continuation.yield(inner)
           }
         }
@@ -4461,6 +4679,78 @@ public struct WebappSurfaceForDevice: Sendable {
              evDeviceId == deviceId,
              case .webapp(let outer) = message.data,
              case .configAck(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::DocGet` from this peer.
+  public var docGet: AsyncStream<WebappDocGetReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .docGet(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::DocList` from this peer.
+  public var docList: AsyncStream<WebappDocListReply> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .docList(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::DocAck` from this peer.
+  public var docAck: AsyncStream<WebappDocAck> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .docAck(let inner) = outer {
+            continuation.yield(inner)
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Stream of `Webapp::DocChanged` from this peer.
+  public var docChanged: AsyncStream<WebappDocChanged> {
+    AsyncStream { continuation in
+      let task = Task { [gateway, deviceId = self.deviceId] in
+        for await event in gateway.events {
+          if case .message(let evDeviceId, let message) = event,
+             evDeviceId == deviceId,
+             case .webapp(let outer) = message.data,
+             case .docChanged(let inner) = outer {
             continuation.yield(inner)
           }
         }
@@ -4565,12 +4855,12 @@ public struct WebappSurfaceForDevice: Sendable {
   }
 
   /// Typed request to this peer: companion sends, daemon responds.
-  public func icon(_ req: WebappIcon, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappIconReply, WebappError> {
-    let response = try await gateway.request(deviceId: deviceId, .webapp(.icon(req)), timeout: timeout)
+  public func resource(_ req: WebappResource, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappResourceReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.resource(req)), timeout: timeout)
     switch response.data {
     case .webapp(let inner):
       switch inner {
-      case .icon(let value): return .ok(value)
+      case .resource(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }
@@ -4631,6 +4921,66 @@ public struct WebappSurfaceForDevice: Sendable {
     case .webapp(let inner):
       switch inner {
       case .configAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func docGet(_ req: WebappDocGet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocGetReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docGet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docGet(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func docList(_ req: WebappDocList, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocListReply, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docList(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docList(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func docSet(_ req: WebappDocSet, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docSet(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docAck(let value): return .ok(value)
+      case .webappError(let err): return .domain(err)
+      default: return .protocolError(.unsupported)
+      }
+    case .error(let err): return .protocolError(err)
+    default: return .protocolError(.unsupported)
+    }
+  }
+
+  /// Typed request to this peer: companion sends, daemon responds.
+  public func docDelete(_ req: WebappDocDelete, timeout: Duration = .seconds(30)) async throws -> RequestResult<WebappDocAck, WebappError> {
+    let response = try await gateway.request(deviceId: deviceId, .webapp(.docDelete(req)), timeout: timeout)
+    switch response.data {
+    case .webapp(let inner):
+      switch inner {
+      case .docAck(let value): return .ok(value)
       case .webappError(let err): return .domain(err)
       default: return .protocolError(.unsupported)
       }

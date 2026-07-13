@@ -11,6 +11,7 @@ import type {
   BridgethingConfigEntry,
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
+  BridgethingDocEntry,
   BridgethingNowPlaying,
   BridgethingOtaEvent,
   BridgethingOtaManifest,
@@ -43,6 +44,7 @@ export type {
   BridgethingDeviceLogLine,
   BridgethingDeviceMeta,
   BridgethingDeviceMetaEntry,
+  BridgethingDocEntry,
   BridgethingHostInfo,
   BridgethingNowPlaying,
   BridgethingNowPlayingPlayback,
@@ -117,6 +119,7 @@ export type SessionEvent =
   | { type: 'nowPlayingChanged'; nowPlaying: BridgethingNowPlaying | null }
   | { type: 'ancsAuthStatusChanged'; status: BridgethingAncsAuthStatus }
   | { type: 'webappsChanged'; deviceId: string }
+  | { type: 'webappDocChanged'; deviceId: string; webappId: string; key: string; value: string | null }
   | { type: 'deviceMetaChanged'; deviceId: string; meta: BridgethingDeviceMeta }
   | { type: 'otaEvent'; event: BridgethingOtaEvent }
   | { type: 'catalogEvent'; event: BridgethingCatalogEvent }
@@ -224,6 +227,10 @@ export class BridgethingSession {
     return this.native.webappIcon(deviceId, id);
   }
 
+  async webappSettingsPage(deviceId: string, id: string): Promise<string> {
+    return this.native.webappSettingsPage(deviceId, id);
+  }
+
   async listWebappConfig(deviceId: string, id: string): Promise<BridgethingConfigEntry[]> {
     return this.native.listWebappConfig(deviceId, id);
   }
@@ -234,6 +241,22 @@ export class BridgethingSession {
 
   async deleteWebappConfigField(deviceId: string, id: string, key: string): Promise<void> {
     await this.native.deleteWebappConfigField(deviceId, id, key);
+  }
+
+  async getWebappDoc(deviceId: string, id: string, key: string): Promise<string | null> {
+    return this.native.getWebappDoc(deviceId, id, key);
+  }
+
+  async listWebappDoc(deviceId: string, id: string): Promise<BridgethingDocEntry[]> {
+    return this.native.listWebappDoc(deviceId, id);
+  }
+
+  async setWebappDoc(deviceId: string, id: string, key: string, value: string): Promise<void> {
+    await this.native.setWebappDoc(deviceId, id, key, value);
+  }
+
+  async deleteWebappDoc(deviceId: string, id: string, key: string): Promise<void> {
+    await this.native.deleteWebappDoc(deviceId, id, key);
   }
 
   async setCapabilityFlags(flags: BridgethingCapabilityFlags): Promise<void> {
@@ -395,6 +418,9 @@ export class BridgethingSession {
     });
     this.native.setOnWebappsChanged(deviceId => {
       this.dispatch({ type: 'webappsChanged', deviceId });
+    });
+    this.native.setOnWebappDocChanged((deviceId, webappId, key, value) => {
+      this.dispatch({ type: 'webappDocChanged', deviceId, webappId, key, value: value ?? null });
     });
     this.native.setOnDeviceMetaChanged((deviceId, meta) => {
       this.dispatch({ type: 'deviceMetaChanged', deviceId, meta });

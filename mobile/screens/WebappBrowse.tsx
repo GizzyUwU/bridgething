@@ -140,7 +140,7 @@ function InstalledRow({
         <WebappIcon
           deviceId={deviceId}
           id={webapp.id}
-          iconAvailable={webapp.iconAvailable}
+          iconHash={webapp.iconHash}
           name={webapp.name}
           size={44}
           fallbackTextClass="text-[16px] font-extrabold text-foreground"

@@ -21,6 +21,7 @@
 //! recovered offset and continues.
 
 mod actor;
+pub mod outbound;
 pub mod sinks;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};

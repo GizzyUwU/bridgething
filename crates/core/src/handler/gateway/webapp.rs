@@ -1,19 +1,24 @@
 use libbridgething::{
-  ConfigEntry, ConfigField, WebappError,
-  client::{BridgeToClientConfigMsgEvent, ConfigChanged},
+  ConfigEntry, ConfigField, DocEntry, WebappError,
+  client::{BridgeToClientConfigMsgEvent, BridgeToClientDocMsgEvent, ConfigChanged, DocChanged},
   gateway::{
-    BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, WebappActive,
-    WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply, WebappConfigList,
-    WebappConfigListReply, WebappConfigSet, WebappIcon, WebappIconReply, WebappList, WebappSwitchTo, WebappUninstall,
+    BridgeToGatewayWebappMsgEvent, GatewayToBridgeWebappMsgRequestDispatch, GetActiveWebapp, ListWebapps, TransferBody,
+    TransferRef, WebappActive, WebappConfigAck, WebappConfigDelete, WebappConfigGet, WebappConfigGetReply,
+    WebappConfigList, WebappConfigListReply, WebappConfigSet, WebappDocAck, WebappDocDelete, WebappDocGet,
+    WebappDocGetReply, WebappDocList, WebappDocListReply, WebappDocSet, WebappList, WebappResource, WebappResourceKind,
+    WebappResourceReply, WebappSwitchTo, WebappUninstall,
   },
 };
 use uuid::Uuid;
 
 use super::{HandlerResult, MsgHandle};
-use crate::chrome::ChromeCommand;
+use crate::{chrome::ChromeCommand, state::sha256_hex};
 
 const KIOSK_HOME_URL: &str = "http://127.0.0.1:8891/";
 const KIOSK_HUB_URL_BASE: &str = "http://127.0.0.1:8891/_hub/";
+
+const RESOURCE_INLINE_MAX: usize = 16 * 1024;
+const DOC_VALUE_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Debug)]
 pub struct WebappHandler {
@@ -30,7 +35,7 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
   type Output = HandlerResult;
 
   async fn list(&self) -> HandlerResult {
-    let webapps = self.handle.state.webapps.list_with_icons().await;
+    let webapps = self.handle.state.webapps.list().await;
     self.handle.respond_to::<ListWebapps>(WebappList { webapps }).await;
     Ok(())
   }
@@ -105,22 +110,95 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
     Ok(())
   }
 
-  async fn icon(&self, params: WebappIcon) -> HandlerResult {
-    let WebappIcon { id } = params;
-    match self.handle.state.webapps.read_icon(id).await {
-      Some((bytes, mime)) => {
-        self
-          .handle
-          .respond_to::<WebappIcon>(WebappIconReply { bytes, mime })
-          .await;
-      }
-      None => {
-        self
-          .handle
-          .respond_err::<WebappIcon>(WebappError::IconNotAvailable { id: id.to_string() })
-          .await;
-      }
+  async fn resource(&self, params: WebappResource) -> HandlerResult {
+    let WebappResource { id, kind, have } = params;
+    let (bytes, mime) = match kind {
+      WebappResourceKind::Icon => match self.handle.state.webapps.read_icon(id).await {
+        Some((bytes, mime)) => (bytes, mime),
+        None => {
+          self
+            .handle
+            .respond_err::<WebappResource>(WebappError::ResourceNotAvailable { id: id.to_string() })
+            .await;
+          return Ok(());
+        }
+      },
+      WebappResourceKind::Settings => match self.handle.state.webapps.read_settings(id).await {
+        Some(bytes) => (bytes, Some("text/html".to_string())),
+        None => {
+          self
+            .handle
+            .respond_err::<WebappResource>(WebappError::ResourceNotAvailable { id: id.to_string() })
+            .await;
+          return Ok(());
+        }
+      },
+    };
+
+    let sha256 = sha256_hex(&bytes);
+    if have.as_deref() == Some(sha256.as_str()) {
+      self
+        .handle
+        .respond_to::<WebappResource>(WebappResourceReply {
+          id,
+          kind,
+          sha256,
+          mime,
+          body: None,
+        })
+        .await;
+      return Ok(());
     }
+
+    if bytes.len() <= RESOURCE_INLINE_MAX {
+      self
+        .handle
+        .respond_to::<WebappResource>(WebappResourceReply {
+          id,
+          kind,
+          sha256,
+          mime,
+          body: Some(TransferBody::Inline(bytes)),
+        })
+        .await;
+      return Ok(());
+    }
+
+    let Some(address) = self.handle.address else {
+      tracing::warn!("webapp resource stream requested by an addressless peer; refusing");
+      self
+        .handle
+        .respond_err::<WebappResource>(WebappError::Internal {
+          reason: "streaming reply needs an addressed peer".into(),
+        })
+        .await;
+      return Ok(());
+    };
+
+    let transfer = TransferRef {
+      id: self.handle.id,
+      total_size: bytes.len() as u32,
+      sha256: Some(sha256.clone()),
+    };
+    self
+      .handle
+      .respond_to::<WebappResource>(WebappResourceReply {
+        id,
+        kind,
+        sha256,
+        mime,
+        body: Some(TransferBody::Stream(transfer)),
+      })
+      .await;
+
+    let outbound = self.handle.state.transfer_outbound.clone();
+    let bluetooth = self.handle.bluetooth.clone();
+    let transfer_id = self.handle.id;
+    tokio::spawn(async move {
+      outbound
+        .send_stream(&bluetooth, address, transfer_id, bytes.into())
+        .await;
+    });
     Ok(())
   }
 
@@ -247,6 +325,98 @@ impl GatewayToBridgeWebappMsgRequestDispatch for WebappHandler {
       .await;
     Ok(())
   }
+
+  async fn doc_get(&self, params: WebappDocGet) -> HandlerResult {
+    let WebappDocGet { id, key } = params;
+    if self.handle.state.webapps.bundle(id).await.is_none() {
+      self
+        .handle
+        .respond_err::<WebappDocGet>(WebappError::WebappNotFound { id: id.to_string() })
+        .await;
+      return Ok(());
+    }
+    let value = self.handle.state.kv.doc_get(id, &key).await?;
+    self
+      .handle
+      .respond_to::<WebappDocGet>(WebappDocGetReply { key, value })
+      .await;
+    Ok(())
+  }
+
+  async fn doc_list(&self, params: WebappDocList) -> HandlerResult {
+    let WebappDocList { id } = params;
+    if self.handle.state.webapps.bundle(id).await.is_none() {
+      self
+        .handle
+        .respond_err::<WebappDocList>(WebappError::WebappNotFound { id: id.to_string() })
+        .await;
+      return Ok(());
+    }
+    let entries = self
+      .handle
+      .state
+      .kv
+      .doc_list(id)
+      .await?
+      .into_iter()
+      .map(|(key, value)| DocEntry { key, value })
+      .collect();
+    self
+      .handle
+      .respond_to::<WebappDocList>(WebappDocListReply { entries })
+      .await;
+    Ok(())
+  }
+
+  async fn doc_set(&self, params: WebappDocSet) -> HandlerResult {
+    let WebappDocSet { id, key, value } = params;
+    if self.handle.state.webapps.bundle(id).await.is_none() {
+      self
+        .handle
+        .respond_err::<WebappDocSet>(WebappError::WebappNotFound { id: id.to_string() })
+        .await;
+      return Ok(());
+    }
+    if value.len() > DOC_VALUE_MAX_BYTES {
+      self
+        .handle
+        .respond_err::<WebappDocSet>(WebappError::InvalidDocValue {
+          key,
+          reason: format!("value exceeds {DOC_VALUE_MAX_BYTES} bytes"),
+        })
+        .await;
+      return Ok(());
+    }
+
+    self.handle.state.kv.doc_set(id, &key, value.clone()).await?;
+    self.broadcast_doc_change_to_client(id, &key, Some(value.clone())).await;
+    self
+      .handle
+      .respond_to::<WebappDocSet>(WebappDocAck {
+        key,
+        value: Some(value),
+      })
+      .await;
+    Ok(())
+  }
+
+  async fn doc_delete(&self, params: WebappDocDelete) -> HandlerResult {
+    let WebappDocDelete { id, key } = params;
+    if self.handle.state.webapps.bundle(id).await.is_none() {
+      self
+        .handle
+        .respond_err::<WebappDocDelete>(WebappError::WebappNotFound { id: id.to_string() })
+        .await;
+      return Ok(());
+    }
+    self.handle.state.kv.doc_delete(id, &key).await?;
+    self.broadcast_doc_change_to_client(id, &key, None).await;
+    self
+      .handle
+      .respond_to::<WebappDocDelete>(WebappDocAck { key, value: None })
+      .await;
+    Ok(())
+  }
 }
 
 impl WebappHandler {
@@ -264,6 +434,23 @@ impl WebappHandler {
     });
     if let Err(errs) = self.handle.state.bus.broadcast_event(event).await {
       tracing::debug!("config-change broadcast: {} non-fatal errors", errs.len());
+    }
+  }
+
+  async fn broadcast_doc_change_to_client(&self, id: Uuid, key: &str, value: Option<String>) {
+    let active = match self.handle.state.active_webapp().await {
+      Ok(Some(active)) => active,
+      _ => return,
+    };
+    if active != id {
+      return;
+    }
+    let event = BridgeToClientDocMsgEvent::Changed(DocChanged {
+      key: key.to_string(),
+      value,
+    });
+    if let Err(errs) = self.handle.state.bus.broadcast_event(event).await {
+      tracing::debug!("doc-change broadcast: {} non-fatal errors", errs.len());
     }
   }
 

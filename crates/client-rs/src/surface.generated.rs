@@ -29,6 +29,10 @@ impl Client {
   pub fn config(&self) -> ConfigSurface<'_> {
     ConfigSurface(self)
   }
+  /// The `Doc` surface.
+  pub fn doc(&self) -> DocSurface<'_> {
+    DocSurface(self)
+  }
   /// The `Geo` surface.
   pub fn geo(&self) -> GeoSurface<'_> {
     GeoSurface(self)
@@ -237,6 +241,36 @@ impl<'a> ConfigSurface<'a> {
       ready(match msg {
         Ok(msg) => match msg.data {
           BridgeToClientMsgData::Config(inner) => inner.into_event(),
+          _ => None,
+        },
+        Err(_) => None,
+      })
+    })
+  }
+}
+
+/// Methods scoped to the `Doc` wire surface.
+pub struct DocSurface<'a>(&'a Client);
+
+impl<'a> DocSurface<'a> {
+  pub async fn get(&self, request: DocGet) -> Result<DocGetReply, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(request).await
+  }
+  pub async fn list(&self) -> Result<DocListReply, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(DocList).await
+  }
+  pub async fn set(&self, request: DocSet) -> Result<DocAck, RequestFailure<WebappError>> {
+    self.0.request(request).await
+  }
+  pub async fn delete(&self, request: DocDelete) -> Result<DocAck, RequestFailure<::core::convert::Infallible>> {
+    self.0.request(request).await
+  }
+  /// Stream of `Doc` events.
+  pub fn events(&self) -> impl Stream<Item = BridgeToClientDocMsgEvent> + 'static {
+    BroadcastStream::new(self.0.events()).filter_map(|msg| {
+      ready(match msg {
+        Ok(msg) => match msg.data {
+          BridgeToClientMsgData::Doc(inner) => inner.into_event(),
           _ => None,
         },
         Err(_) => None,

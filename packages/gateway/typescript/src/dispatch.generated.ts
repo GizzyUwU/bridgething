@@ -140,9 +140,17 @@ import type {
   WebappConfigList,
   WebappConfigListReply,
   WebappConfigSet,
-  WebappIcon,
-  WebappIconReply,
+  WebappDocAck,
+  WebappDocChanged,
+  WebappDocDelete,
+  WebappDocGet,
+  WebappDocGetReply,
+  WebappDocList,
+  WebappDocListReply,
+  WebappDocSet,
   WebappList,
+  WebappResource,
+  WebappResourceReply,
   WebappSwitchTo,
   WebappUninstall,
 } from '@bridgething/lib/gateway';
@@ -356,6 +364,18 @@ export type SystemDeviceInboundHandlers = {
   keepalive: (handle: KeepalivePingHandle, req: KeepalivePing) => Promise<void> | void;
 };
 
+export type TransferInboundHandlers = {
+  ack: (deviceId: string, msg: TransferAck) => void;
+  fragment: (deviceId: string, msg: TransferFragment) => void;
+  abandon: (deviceId: string, msg: TransferAbandon) => void;
+};
+
+export type TransferDeviceInboundHandlers = {
+  ack: (msg: TransferAck) => void;
+  fragment: (msg: TransferFragment) => void;
+  abandon: (msg: TransferAbandon) => void;
+};
+
 export type TunnelInboundHandlers = {
   data: (deviceId: string, msg: TunnelData) => void;
   close: (deviceId: string, msg: TunnelClosed) => void;
@@ -390,10 +410,14 @@ export type WebappInboundHandlers = {
   switched: (deviceId: string, msg: WebappActive) => void;
   uninstalled: (deviceId: string, msg: WebappActive) => void;
   webappError: (deviceId: string, msg: WebappError) => void;
-  icon: (deviceId: string, msg: WebappIconReply) => void;
+  resource: (deviceId: string, msg: WebappResourceReply) => void;
   configGet: (deviceId: string, msg: WebappConfigGetReply) => void;
   configList: (deviceId: string, msg: WebappConfigListReply) => void;
   configAck: (deviceId: string, msg: WebappConfigAck) => void;
+  docGet: (deviceId: string, msg: WebappDocGetReply) => void;
+  docList: (deviceId: string, msg: WebappDocListReply) => void;
+  docAck: (deviceId: string, msg: WebappDocAck) => void;
+  docChanged: (deviceId: string, msg: WebappDocChanged) => void;
   webappInstalled: (deviceId: string, msg: WebappInfo) => void;
   activeChanged: (deviceId: string, msg: WebappActiveChanged) => void;
 };
@@ -404,10 +428,14 @@ export type WebappDeviceInboundHandlers = {
   switched: (msg: WebappActive) => void;
   uninstalled: (msg: WebappActive) => void;
   webappError: (msg: WebappError) => void;
-  icon: (msg: WebappIconReply) => void;
+  resource: (msg: WebappResourceReply) => void;
   configGet: (msg: WebappConfigGetReply) => void;
   configList: (msg: WebappConfigListReply) => void;
   configAck: (msg: WebappConfigAck) => void;
+  docGet: (msg: WebappDocGetReply) => void;
+  docList: (msg: WebappDocListReply) => void;
+  docAck: (msg: WebappDocAck) => void;
+  docChanged: (msg: WebappDocChanged) => void;
   webappInstalled: (msg: WebappInfo) => void;
   activeChanged: (msg: WebappActiveChanged) => void;
 };
@@ -2510,6 +2538,67 @@ export class TransferSurface {
     });
   }
 
+  /** Subscribe to `Transfer::Fragment` across all peers. */
+  onFragment(handler: (deviceId: string, msg: TransferFragment) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'fragment') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Transfer::Abandon` across all peers. */
+  onAbandon(handler: (deviceId: string, msg: TransferAbandon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'abandon') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Transfer` variants. */
+  subscribe(handlers: TransferInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<TransferInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<TransferInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'ack': {
+          handlers.ack?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'fragment': {
+          handlers.fragment?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'abandon': {
+          handlers.abandon?.(event.deviceId, inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Transfer: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
   /** Send `Transfer::Fragment` to every connected peer (broadcast). */
   async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
     const ids = this._gateway.connectedDeviceIds;
@@ -2534,6 +2623,21 @@ export class TransferSurface {
           id: newUuid(),
           meta: { kind: 'event' },
           data: { type: 'transfer', data: { event: 'abandon', data: payload } },
+        };
+        return this._gateway.send(deviceId, msg, options);
+      }),
+    );
+  }
+
+  /** Send `Transfer::Ack` to every connected peer (broadcast). */
+  async ack(payload: TransferAck, options?: { priority?: Priority }): Promise<void> {
+    const ids = this._gateway.connectedDeviceIds;
+    await Promise.all(
+      ids.map(deviceId => {
+        const msg: GatewayToBridgeMsg = {
+          id: newUuid(),
+          meta: { kind: 'event' },
+          data: { type: 'transfer', data: { event: 'ack', data: payload } },
         };
         return this._gateway.send(deviceId, msg, options);
       }),
@@ -2883,14 +2987,14 @@ export class WebappSurface {
     });
   }
 
-  /** Subscribe to `Webapp::Icon` across all peers. */
-  onIcon(handler: (deviceId: string, msg: WebappIconReply) => void): () => void {
+  /** Subscribe to `Webapp::Resource` across all peers. */
+  onResource(handler: (deviceId: string, msg: WebappResourceReply) => void): () => void {
     return this._gateway.on(event => {
       if (event.type !== 'message') return;
       const data = event.message.data;
       if (data.type !== 'webapp') return;
       const inner = data.data;
-      if (inner.event !== 'icon') return;
+      if (inner.event !== 'resource') return;
       handler(event.deviceId, inner.data);
     });
   }
@@ -2927,6 +3031,54 @@ export class WebappSurface {
       if (data.type !== 'webapp') return;
       const inner = data.data;
       if (inner.event !== 'configAck') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocGet` across all peers. */
+  onDocGet(handler: (deviceId: string, msg: WebappDocGetReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docGet') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocList` across all peers. */
+  onDocList(handler: (deviceId: string, msg: WebappDocListReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docList') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocAck` across all peers. */
+  onDocAck(handler: (deviceId: string, msg: WebappDocAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docAck') return;
+      handler(event.deviceId, inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocChanged` across all peers. */
+  onDocChanged(handler: (deviceId: string, msg: WebappDocChanged) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docChanged') return;
       handler(event.deviceId, inner.data);
     });
   }
@@ -2992,8 +3144,8 @@ export class WebappSurface {
           handlers.webappError?.(event.deviceId, inner.data);
           return;
         }
-        case 'icon': {
-          handlers.icon?.(event.deviceId, inner.data);
+        case 'resource': {
+          handlers.resource?.(event.deviceId, inner.data);
           return;
         }
         case 'configGet': {
@@ -3006,6 +3158,22 @@ export class WebappSurface {
         }
         case 'configAck': {
           handlers.configAck?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'docGet': {
+          handlers.docGet?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'docList': {
+          handlers.docList?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'docAck': {
+          handlers.docAck?.(event.deviceId, inner.data);
+          return;
+        }
+        case 'docChanged': {
+          handlers.docChanged?.(event.deviceId, inner.data);
           return;
         }
         case 'webappInstalled': {
@@ -3090,17 +3258,17 @@ export class WebappSurface {
   }
 
   /** Typed request to a specific peer: companion sends, daemon responds. */
-  async icon(
+  async resource(
     deviceId: string,
-    req: WebappIcon,
+    req: WebappResource,
     options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+  ): Promise<TypedRequestResult<WebappResourceReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'resource', data: req } };
     const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
     const d = response.data;
     if (d.type === 'webapp') {
       const inner = d.data;
-      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'resource') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -3173,6 +3341,78 @@ export class WebappSurface {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async docGet(
+    deviceId: string,
+    req: WebappDocGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docGet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async docList(
+    deviceId: string,
+    req: WebappDocList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docList', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async docSet(
+    deviceId: string,
+    req: WebappDocSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docSet', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to a specific peer: companion sends, daemon responds. */
+  async docDelete(
+    deviceId: string,
+    req: WebappDocDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docDelete', data: req } };
+    const response = await this._gateway.request(deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -5455,6 +5695,70 @@ export class TransferSurfaceForDevice {
     });
   }
 
+  /** Subscribe to `Transfer::Fragment` from this peer. */
+  onFragment(handler: (msg: TransferFragment) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'fragment') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Transfer::Abandon` from this peer. */
+  onAbandon(handler: (msg: TransferAbandon) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      if (inner.event !== 'abandon') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Exhaustive subscribe over all inbound `Transfer` variants from this peer. */
+  subscribe(handlers: TransferDeviceInboundHandlers): () => void {
+    return this._subscribe(handlers, false);
+  }
+
+  /** Same as `subscribe` but every handler is optional. */
+  subscribePartial(handlers: Partial<TransferDeviceInboundHandlers>): () => void {
+    return this._subscribe(handlers, true);
+  }
+
+  private _subscribe(handlers: Partial<TransferDeviceInboundHandlers>, partial: boolean): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'transfer') return;
+      const inner = data.data;
+      switch (inner.event) {
+        case 'ack': {
+          handlers.ack?.(inner.data);
+          return;
+        }
+        case 'fragment': {
+          handlers.fragment?.(inner.data);
+          return;
+        }
+        case 'abandon': {
+          handlers.abandon?.(inner.data);
+          return;
+        }
+        default: {
+          if (!partial) this._gateway.logger.warn('Transfer: no handler for inner', inner);
+          return;
+        }
+      }
+    });
+  }
+
   /** Send `Transfer::Fragment` to this peer. */
   async fragment(payload: TransferFragment, options?: { priority?: Priority }): Promise<void> {
     const msg: GatewayToBridgeMsg = {
@@ -5471,6 +5775,16 @@ export class TransferSurfaceForDevice {
       id: newUuid(),
       meta: { kind: 'event' },
       data: { type: 'transfer', data: { event: 'abandon', data: payload } },
+    };
+    await this._gateway.send(this.deviceId, msg, options);
+  }
+
+  /** Send `Transfer::Ack` to this peer. */
+  async ack(payload: TransferAck, options?: { priority?: Priority }): Promise<void> {
+    const msg: GatewayToBridgeMsg = {
+      id: newUuid(),
+      meta: { kind: 'event' },
+      data: { type: 'transfer', data: { event: 'ack', data: payload } },
     };
     await this._gateway.send(this.deviceId, msg, options);
   }
@@ -5817,15 +6131,15 @@ export class WebappSurfaceForDevice {
     });
   }
 
-  /** Subscribe to `Webapp::Icon` from this peer. */
-  onIcon(handler: (msg: WebappIconReply) => void): () => void {
+  /** Subscribe to `Webapp::Resource` from this peer. */
+  onResource(handler: (msg: WebappResourceReply) => void): () => void {
     return this._gateway.on(event => {
       if (event.type !== 'message') return;
       if (event.deviceId !== this.deviceId) return;
       const data = event.message.data;
       if (data.type !== 'webapp') return;
       const inner = data.data;
-      if (inner.event !== 'icon') return;
+      if (inner.event !== 'resource') return;
       handler(inner.data);
     });
   }
@@ -5865,6 +6179,58 @@ export class WebappSurfaceForDevice {
       if (data.type !== 'webapp') return;
       const inner = data.data;
       if (inner.event !== 'configAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocGet` from this peer. */
+  onDocGet(handler: (msg: WebappDocGetReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docGet') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocList` from this peer. */
+  onDocList(handler: (msg: WebappDocListReply) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docList') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocAck` from this peer. */
+  onDocAck(handler: (msg: WebappDocAck) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docAck') return;
+      handler(inner.data);
+    });
+  }
+
+  /** Subscribe to `Webapp::DocChanged` from this peer. */
+  onDocChanged(handler: (msg: WebappDocChanged) => void): () => void {
+    return this._gateway.on(event => {
+      if (event.type !== 'message') return;
+      if (event.deviceId !== this.deviceId) return;
+      const data = event.message.data;
+      if (data.type !== 'webapp') return;
+      const inner = data.data;
+      if (inner.event !== 'docChanged') return;
       handler(inner.data);
     });
   }
@@ -5933,8 +6299,8 @@ export class WebappSurfaceForDevice {
           handlers.webappError?.(inner.data);
           return;
         }
-        case 'icon': {
-          handlers.icon?.(inner.data);
+        case 'resource': {
+          handlers.resource?.(inner.data);
           return;
         }
         case 'configGet': {
@@ -5947,6 +6313,22 @@ export class WebappSurfaceForDevice {
         }
         case 'configAck': {
           handlers.configAck?.(inner.data);
+          return;
+        }
+        case 'docGet': {
+          handlers.docGet?.(inner.data);
+          return;
+        }
+        case 'docList': {
+          handlers.docList?.(inner.data);
+          return;
+        }
+        case 'docAck': {
+          handlers.docAck?.(inner.data);
+          return;
+        }
+        case 'docChanged': {
+          handlers.docChanged?.(inner.data);
           return;
         }
         case 'webappInstalled': {
@@ -6026,16 +6408,16 @@ export class WebappSurfaceForDevice {
   }
 
   /** Typed request to this peer: companion sends, daemon responds. */
-  async icon(
-    req: WebappIcon,
+  async resource(
+    req: WebappResource,
     options?: { timeoutMs?: number },
-  ): Promise<TypedRequestResult<WebappIconReply, WebappError>> {
-    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'icon', data: req } };
+  ): Promise<TypedRequestResult<WebappResourceReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'resource', data: req } };
     const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
     const d = response.data;
     if (d.type === 'webapp') {
       const inner = d.data;
-      if (inner.event === 'icon') return { ok: true, response: inner.data };
+      if (inner.event === 'resource') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -6104,6 +6486,74 @@ export class WebappSurfaceForDevice {
     if (d.type === 'webapp') {
       const inner = d.data;
       if (inner.event === 'configAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async docGet(
+    req: WebappDocGet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocGetReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docGet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docGet') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async docList(
+    req: WebappDocList,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocListReply, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docList', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docList') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async docSet(
+    req: WebappDocSet,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docSet', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docAck') return { ok: true, response: inner.data };
+      if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
+    }
+    if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
+    return { ok: false, kind: 'protocol', error: { type: 'unsupported' } };
+  }
+
+  /** Typed request to this peer: companion sends, daemon responds. */
+  async docDelete(
+    req: WebappDocDelete,
+    options?: { timeoutMs?: number },
+  ): Promise<TypedRequestResult<WebappDocAck, WebappError>> {
+    const wireData: GatewayToBridgeMsg['data'] = { type: 'webapp', data: { event: 'docDelete', data: req } };
+    const response = await this._gateway.request(this.deviceId, wireData, options?.timeoutMs);
+    const d = response.data;
+    if (d.type === 'webapp') {
+      const inner = d.data;
+      if (inner.event === 'docAck') return { ok: true, response: inner.data };
       if (inner.event === 'webappError') return { ok: false, kind: 'domain', error: inner.data };
     }
     if (d.type === 'error') return { ok: false, kind: 'protocol', error: d.data };
@@ -6348,7 +6798,7 @@ export type BridgeMessageHandlers = {
   phone: PhoneInboundHandlers;
   player: PlayerInboundHandlers;
   system: SystemInboundHandlers;
-  transfer: (deviceId: string, msg: TransferAck) => void;
+  transfer: TransferInboundHandlers;
   tunnel: TunnelInboundHandlers;
   voice: VoiceInboundHandlers;
   webapp: WebappInboundHandlers;
@@ -6366,7 +6816,7 @@ export type PartialBridgeMessageHandlers = {
   phone?: Partial<PhoneInboundHandlers>;
   player?: Partial<PlayerInboundHandlers>;
   system?: Partial<SystemInboundHandlers>;
-  transfer?: (deviceId: string, msg: TransferAck) => void;
+  transfer?: Partial<TransferInboundHandlers>;
   tunnel?: Partial<TunnelInboundHandlers>;
   voice?: Partial<VoiceInboundHandlers>;
   webapp?: Partial<WebappInboundHandlers>;
@@ -6384,7 +6834,7 @@ export type BridgeMessageDeviceHandlers = {
   phone: PhoneDeviceInboundHandlers;
   player: PlayerDeviceInboundHandlers;
   system: SystemDeviceInboundHandlers;
-  transfer: (msg: TransferAck) => void;
+  transfer: TransferDeviceInboundHandlers;
   tunnel: TunnelDeviceInboundHandlers;
   voice: VoiceDeviceInboundHandlers;
   webapp: WebappDeviceInboundHandlers;
@@ -6402,7 +6852,7 @@ export type PartialBridgeMessageDeviceHandlers = {
   phone?: Partial<PhoneDeviceInboundHandlers>;
   player?: Partial<PlayerDeviceInboundHandlers>;
   system?: Partial<SystemDeviceInboundHandlers>;
-  transfer?: (msg: TransferAck) => void;
+  transfer?: Partial<TransferDeviceInboundHandlers>;
   tunnel?: Partial<TunnelDeviceInboundHandlers>;
   voice?: Partial<VoiceDeviceInboundHandlers>;
   webapp?: Partial<WebappDeviceInboundHandlers>;
@@ -7796,13 +8246,30 @@ function outerSubscribeGateway(
         }
       }
       case 'transfer': {
-        const handler = handlers.transfer;
-        if (!handler) {
+        const innerHandlers = handlers.transfer;
+        if (!innerHandlers) {
           if (!partial) g.logger.warn('subscribe: no handler for transfer');
           return;
         }
-        handler(event.deviceId, data.data.data);
-        return;
+        const inner = data.data;
+        switch (inner.event) {
+          case 'ack': {
+            innerHandlers.ack?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'fragment': {
+            innerHandlers.fragment?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'abandon': {
+            innerHandlers.abandon?.(event.deviceId, inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Transfer: no handler for inner', inner);
+            return;
+          }
+        }
       }
       case 'tunnel': {
         const innerHandlers = handlers.tunnel;
@@ -7901,8 +8368,8 @@ function outerSubscribeGateway(
             innerHandlers.webappError?.(event.deviceId, inner.data);
             return;
           }
-          case 'icon': {
-            innerHandlers.icon?.(event.deviceId, inner.data);
+          case 'resource': {
+            innerHandlers.resource?.(event.deviceId, inner.data);
             return;
           }
           case 'configGet': {
@@ -7915,6 +8382,22 @@ function outerSubscribeGateway(
           }
           case 'configAck': {
             innerHandlers.configAck?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'docGet': {
+            innerHandlers.docGet?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'docList': {
+            innerHandlers.docList?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'docAck': {
+            innerHandlers.docAck?.(event.deviceId, inner.data);
+            return;
+          }
+          case 'docChanged': {
+            innerHandlers.docChanged?.(event.deviceId, inner.data);
             return;
           }
           case 'webappInstalled': {
@@ -8499,13 +8982,30 @@ function outerSubscribeDevice(
         }
       }
       case 'transfer': {
-        const handler = handlers.transfer;
-        if (!handler) {
+        const innerHandlers = handlers.transfer;
+        if (!innerHandlers) {
           if (!partial) g.logger.warn('subscribe: no handler for transfer');
           return;
         }
-        handler(data.data.data);
-        return;
+        const inner = data.data;
+        switch (inner.event) {
+          case 'ack': {
+            innerHandlers.ack?.(inner.data);
+            return;
+          }
+          case 'fragment': {
+            innerHandlers.fragment?.(inner.data);
+            return;
+          }
+          case 'abandon': {
+            innerHandlers.abandon?.(inner.data);
+            return;
+          }
+          default: {
+            if (!partial) g.logger.warn('Transfer: no handler for inner', inner);
+            return;
+          }
+        }
       }
       case 'tunnel': {
         const innerHandlers = handlers.tunnel;
@@ -8604,8 +9104,8 @@ function outerSubscribeDevice(
             innerHandlers.webappError?.(inner.data);
             return;
           }
-          case 'icon': {
-            innerHandlers.icon?.(inner.data);
+          case 'resource': {
+            innerHandlers.resource?.(inner.data);
             return;
           }
           case 'configGet': {
@@ -8618,6 +9118,22 @@ function outerSubscribeDevice(
           }
           case 'configAck': {
             innerHandlers.configAck?.(inner.data);
+            return;
+          }
+          case 'docGet': {
+            innerHandlers.docGet?.(inner.data);
+            return;
+          }
+          case 'docList': {
+            innerHandlers.docList?.(inner.data);
+            return;
+          }
+          case 'docAck': {
+            innerHandlers.docAck?.(inner.data);
+            return;
+          }
+          case 'docChanged': {
+            innerHandlers.docChanged?.(inner.data);
             return;
           }
           case 'webappInstalled': {

@@ -217,6 +217,53 @@
       "handlers": []
     },
     {
+      "name": "doc",
+      "title": "Doc",
+      "description": "Daemon -> webapp doc replies and events. `Changed` broadcasts whenever\nthe companion writes or deletes a doc value for the active webapp.",
+      "events": [
+        {
+          "method": "onChanged",
+          "payload": "DocChanged",
+          "payload_ref": "DocChanged"
+        }
+      ],
+      "requests": [
+        {
+          "method": "get",
+          "description": "Webapp request: read one doc value for the currently active webapp.",
+          "payload": "DocGet",
+          "payload_ref": "DocGet",
+          "response": "DocGetReply",
+          "response_event": "onGet"
+        },
+        {
+          "method": "list",
+          "description": "Marker request: read every doc entry for the currently active webapp.",
+          "response": "DocListReply",
+          "response_event": "onList"
+        },
+        {
+          "method": "set",
+          "description": "Webapp request: write a doc value. Last write wins against companion\nwrites on the same key; the companion hears the change as a gateway\n`webapp.docChanged` event.",
+          "payload": "DocSet",
+          "payload_ref": "DocSet",
+          "response": "DocAck",
+          "error": "WebappError",
+          "response_event": "onAck"
+        },
+        {
+          "method": "delete",
+          "description": "Webapp request: delete the doc entry at `key`.",
+          "payload": "DocDelete",
+          "payload_ref": "DocDelete",
+          "response": "DocAck",
+          "response_event": "onAck"
+        }
+      ],
+      "commands": [],
+      "handlers": []
+    },
+    {
       "name": "geo",
       "title": "Geo",
       "description": "Daemon -> webapp location surface: the `Position` stream a watch\nproduces, plus replies to `geo.watch` and `geo.getOnce`.",
@@ -890,7 +937,7 @@
         },
         {
           "method": "icon",
-          "description": "Icon byte fetch. Daemon reads the icon declared by the manifest from\nthe bundle directory and returns the bytes + mime.",
+          "description": "Fetch the icon bytes for an installed webapp. Returns the raw bytes\ndeclared by the manifest's `icon` field.",
           "payload": "WebappIcon",
           "payload_ref": "WebappIcon",
           "response": "WebappIconReply",
@@ -1844,6 +1891,112 @@
           "name": "mode",
           "type": "BrightnessMode",
           "type_ref": "BrightnessMode"
+        }
+      ]
+    },
+    "DocAck": {
+      "kind": "struct",
+      "description": "Ack for `DocSet` / `DocDelete`; echoes what's now stored.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ]
+    },
+    "DocChanged": {
+      "kind": "struct",
+      "description": "Broadcast when the COMPANION writes the active webapp's doc namespace.\nWebapp-origin writes are not echoed back (the writer already holds the\nack).",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true,
+          "description": "`None` means the entry was deleted."
+        }
+      ]
+    },
+    "DocDelete": {
+      "kind": "struct",
+      "description": "Webapp request: delete the doc entry at `key`.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        }
+      ]
+    },
+    "DocEntry": {
+      "kind": "struct",
+      "description": "One key/value pair from a webapp's doc namespace: shared structured\nstate writable from both the companion (gateway) and the webapp\nitself, last write wins. Values are strings; apps encode JSON as\nneeded.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        }
+      ]
+    },
+    "DocGet": {
+      "kind": "struct",
+      "description": "Webapp request: read one doc value for the currently active webapp.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        }
+      ]
+    },
+    "DocGetReply": {
+      "kind": "struct",
+      "description": "Reply to `DocGet`.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true,
+          "description": "`None` when the key has never been written."
+        }
+      ]
+    },
+    "DocListReply": {
+      "kind": "struct",
+      "description": "Reply to `DocList`.",
+      "fields": [
+        {
+          "name": "entries",
+          "type": "DocEntry[]",
+          "type_ref": "DocEntry"
+        }
+      ]
+    },
+    "DocSet": {
+      "kind": "struct",
+      "description": "Webapp request: write a doc value. Last write wins against companion\nwrites on the same key; the companion hears the change as a gateway\n`webapp.docChanged` event.",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string"
         }
       ]
     },
@@ -4989,8 +5142,8 @@
           "description": "manifest.json missing, unparseable, or failed schema validation."
         },
         {
-          "name": "IconNotAvailable",
-          "description": "The webapp's manifest doesn't declare an icon (or the icon file is missing on disk)."
+          "name": "ResourceNotAvailable",
+          "description": "The requested resource (icon / settings page) isn't declared by the\nwebapp's manifest or its file is missing on disk."
         },
         {
           "name": "UnknownConfigKey",
@@ -5001,6 +5154,10 @@
           "description": "Value failed schema validation (out of range, regex mismatch, not in enum)."
         },
         {
+          "name": "InvalidDocValue",
+          "description": "Doc value rejected (oversized)."
+        },
+        {
           "name": "Internal",
           "description": "Catch-all for genuinely-unexpected failures (io errors, daemon-side\nbugs). Reason is human-readable; not a stable wire contract."
         }
@@ -5008,16 +5165,18 @@
     },
     "WebappIcon": {
       "kind": "struct",
-      "description": "Icon byte fetch. Daemon reads the icon declared by the manifest from\nthe bundle directory and returns the bytes + mime.",
+      "description": "Fetch the icon bytes for an installed webapp. Returns the raw bytes\ndeclared by the manifest's `icon` field.",
       "fields": [
         {
           "name": "id",
-          "type": "string"
+          "type": "string",
+          "description": "Id of an installed webapp, from `webapp.list`."
         }
       ]
     },
     "WebappIconReply": {
       "kind": "struct",
+      "description": "Reply to the `icon` request: the raw icon bytes declared by the webapp's manifest.",
       "fields": [
         {
           "name": "bytes",
@@ -5026,7 +5185,8 @@
         {
           "name": "mime",
           "type": "string",
-          "optional": true
+          "optional": true,
+          "description": "MIME type declared by the manifest's icon; `None` if the manifest didn't declare one."
         }
       ]
     },
@@ -5061,19 +5221,16 @@
           "optional": true
         },
         {
-          "name": "iconAvailable",
-          "type": "boolean"
-        },
-        {
-          "name": "iconMime",
+          "name": "iconHash",
           "type": "string",
-          "optional": true
+          "optional": true,
+          "description": "sha256 of the icon bytes; presence means an icon exists. consumers\nfetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)\nand cache keyed by this hash."
         },
         {
-          "name": "icon",
-          "type": "number[]",
+          "name": "settingsHash",
+          "type": "string",
           "optional": true,
-          "description": "icon bytes, inlined on the gateway list so the companion never round-trips\na separate fetch per app. omitted on the on-device client list."
+          "description": "sha256 of the companion settings page declared by the manifest;\npresence is the companion's cue to offer the settings UI."
         },
         {
           "name": "config",

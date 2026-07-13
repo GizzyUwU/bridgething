@@ -37,7 +37,7 @@ private func makeCatalog(_ apps: [CatalogApp]) -> Catalog {
 
 private func installed(_ id: String, _ ver: String, source: WebappSource = .installed, role: WebappRole = .standard) -> WebappInfo {
     WebappInfo(id: UUID(uuidString: id)!, name: "x", source: source, role: role, version: ver,
-               description: nil, iconAvailable: false, iconMime: nil, icon: nil, config: [], permissions: [], voiceGrammar: nil, art: nil)
+               description: nil, iconHash: nil, settingsHash: nil, config: [], permissions: [], voiceGrammar: nil, art: nil)
 }
 
 final class SemverCompatTests: XCTestCase {

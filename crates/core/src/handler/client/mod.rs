@@ -3,6 +3,7 @@ mod audio;
 mod bluetooth;
 mod capabilities;
 mod config;
+mod doc;
 mod geo;
 mod hardware;
 mod library;
@@ -22,6 +23,7 @@ use audio::*;
 use bluetooth::*;
 use capabilities::*;
 use config::*;
+use doc::*;
 use geo::*;
 use hardware::*;
 use libbridgething::{ForwardMessage, wire::WireError};
@@ -96,6 +98,9 @@ impl ClientHandler {
           handle,
           move |h| async move { msg.dispatch(&ConfigHandler::new(h)).await },
         );
+      }
+      RecvMsgData::Doc(msg) => {
+        dispatch(handle, move |h| async move { msg.dispatch(&DocHandler::new(h)).await });
       }
       RecvMsgData::Geo(msg) => {
         dispatch(handle, move |h| async move { msg.dispatch(&GeoHandler::new(h)).await });

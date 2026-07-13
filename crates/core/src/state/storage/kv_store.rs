@@ -69,6 +69,34 @@ impl KvStore {
     Ok(())
   }
 
+  pub async fn doc_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
+    self.read_raw(&doc_namespace_key(app_id, key)).await
+  }
+
+  pub async fn doc_set(&self, app_id: Uuid, key: &str, value: String) -> StateResult<()> {
+    self.write_raw(doc_namespace_key(app_id, key), value).await
+  }
+
+  pub async fn doc_delete(&self, app_id: Uuid, key: &str) -> StateResult<()> {
+    self.delete_raw(&doc_namespace_key(app_id, key)).await
+  }
+
+  pub async fn doc_list(&self, app_id: Uuid) -> StateResult<Vec<(String, String)>> {
+    let prefix = doc_namespace_prefix(app_id);
+    let pattern = format!("{prefix}%");
+    let rows = KvEntity::find()
+      .filter(KvColumn::Key.like(&pattern))
+      .all(&self.db)
+      .await
+      .map_err(StateError::from)?;
+    Ok(
+      rows
+        .into_iter()
+        .filter_map(|m| m.key.strip_prefix(&prefix).map(|k| (k.to_string(), m.value)))
+        .collect(),
+    )
+  }
+
   pub async fn config_get(&self, app_id: Uuid, key: &str) -> StateResult<Option<String>> {
     self.read_raw(&config_namespace_key(app_id, key)).await
   }
@@ -156,6 +184,7 @@ impl KvStore {
   pub async fn webapp_purge(&self, app_id: Uuid) -> StateResult<()> {
     let data_pattern = format!("{}:data:%", app_id.simple());
     let config_pattern = format!("{}:config:%", app_id.simple());
+    let doc_pattern = format!("{}:doc:%", app_id.simple());
     let tx = self.db.begin().await?;
     KvEntity::delete_many()
       .filter(KvColumn::Key.like(&data_pattern))
@@ -163,6 +192,10 @@ impl KvStore {
       .await?;
     KvEntity::delete_many()
       .filter(KvColumn::Key.like(&config_pattern))
+      .exec(&tx)
+      .await?;
+    KvEntity::delete_many()
+      .filter(KvColumn::Key.like(&doc_pattern))
       .exec(&tx)
       .await?;
     tx.commit().await?;
@@ -184,4 +217,12 @@ fn config_namespace_key(app_id: Uuid, key: &str) -> String {
 
 fn config_namespace_prefix(app_id: Uuid) -> String {
   format!("{}:config:", app_id.simple())
+}
+
+fn doc_namespace_key(app_id: Uuid, key: &str) -> String {
+  format!("{}:doc:{key}", app_id.simple())
+}
+
+fn doc_namespace_prefix(app_id: Uuid) -> String {
+  format!("{}:doc:", app_id.simple())
 }

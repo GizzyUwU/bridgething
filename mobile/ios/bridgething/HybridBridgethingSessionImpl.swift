@@ -69,6 +69,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var otaEventsTask: Task<Void, Never>?
     private var deviceMetaTask: Task<Void, Never>?
     private var catalogEventsTask: Task<Void, Never>?
+    private var webappDocTask: Task<Void, Never>?
     private var peers: [String: BridgethingSessionPeer] = [:]
     private var lastNowPlaying: BridgethingNowPlaying?
     private var activeRegistration: ProviderRegistration?
@@ -83,6 +84,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     private var onAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
     private var onLog: (@Sendable (String, String) -> Void)?
     private var onWebappsChanged: (@Sendable (String) -> Void)?
+    private var onWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private var onDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private var onOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
     private var onCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
@@ -134,6 +136,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             onAncsAuthStatusChanged = nil
             onLog = nil
             onWebappsChanged = nil
+            onWebappDocChanged = nil
             onDeviceMetaChanged = nil
             onOtaEvent = nil
             onCatalogEvent = nil
@@ -192,11 +195,18 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
                 self?.emitCatalogEvent(toRNCatalogEvent(event))
             }
         }
+        let docStream = companion.gateway.webapp.docChanged
+        let docTask = Task { [weak self] in
+            for await (deviceId, msg) in docStream {
+                self?.emitWebappDocChanged(deviceId, msg.id.uuidString.lowercased(), msg.key, msg.value)
+            }
+        }
         stateLock.lock()
         eventsTask = task
         otaEventsTask = otaTask
         deviceMetaTask = metaTask
         catalogEventsTask = catalogTask
+        webappDocTask = docTask
         stateLock.unlock()
 
         await applyOtaPollConfig(Self.loadOtaPollConfig())
@@ -214,12 +224,14 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let ota = otaEventsTask
         let deviceMeta = deviceMetaTask
         let catalog = catalogEventsTask
+        let webappDoc = webappDocTask
         let companion = self.companion
         self.companion = nil
         eventsTask = nil
         otaEventsTask = nil
         deviceMetaTask = nil
         catalogEventsTask = nil
+        webappDocTask = nil
         authTask = nil
         stateLock.unlock()
 
@@ -228,6 +240,7 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         ota?.cancel()
         deviceMeta?.cancel()
         catalog?.cancel()
+        webappDoc?.cancel()
 
         await companion?.stop()
 
@@ -459,19 +472,29 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
     public func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon? {
         let uuid = try parseUuid(id)
         let companion = try requirePeerConnected(deviceId)
-        let req = WebappIcon(id: uuid)
-        let result = try await companion.gateway.webapp.icon(deviceId: deviceId, req)
-        switch result {
-        case let .ok(reply):
-            if reply.mime == "image/svg+xml", let svg = String(data: reply.bytes, encoding: .utf8) {
-                return BridgethingWebappIcon(fileUri: nil, svg: svg, mime: reply.mime)
+        do {
+            let resolved = try await companion.webappResources.fetch(deviceId: deviceId, webappId: uuid, kind: .icon)
+            if resolved.mime == "image/svg+xml", let svg = try? String(contentsOf: resolved.url, encoding: .utf8) {
+                return BridgethingWebappIcon(fileUri: nil, svg: svg, mime: resolved.mime)
             }
-            let url = try Self.writeIconToCache(deviceId: deviceId, id: id, mime: reply.mime, bytes: reply.bytes)
-            return BridgethingWebappIcon(fileUri: url.absoluteString, svg: nil, mime: reply.mime)
-        case let .domain(err):
-            if case .iconNotAvailable = err { return nil }
+            return BridgethingWebappIcon(fileUri: resolved.url.absoluteString, svg: nil, mime: resolved.mime)
+        } catch let WebappResourceError.domain(err) {
+            if case .resourceNotAvailable = err { return nil }
             throw SessionError.webappError(err)
-        case let .protocolError(err):
+        } catch let WebappResourceError.wire(err) {
+            throw SessionError.protocolError(err)
+        }
+    }
+
+    public func webappSettingsPage(deviceId: String, id: String) async throws -> String {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        do {
+            let resolved = try await companion.webappResources.fetch(deviceId: deviceId, webappId: uuid, kind: .settings)
+            return resolved.url.absoluteString
+        } catch let WebappResourceError.domain(err) {
+            throw SessionError.webappError(err)
+        } catch let WebappResourceError.wire(err) {
             throw SessionError.protocolError(err)
         }
     }
@@ -499,6 +522,40 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         let req = WebappConfigDelete(id: uuid, key: key)
         let result = try await companion.gateway.webapp.configDelete(deviceId: deviceId, req)
         _ = try unwrapWebappErr(result, label: "deleteWebappConfigField")
+    }
+
+    public func getWebappDoc(deviceId: String, id: String, key: String) async throws -> String? {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappDocGet(id: uuid, key: key)
+        let result = try await companion.gateway.webapp.docGet(deviceId: deviceId, req)
+        return try unwrapWebappErr(result, label: "getWebappDoc").value
+    }
+
+    public func listWebappDoc(deviceId: String, id: String) async throws -> [BridgethingDocEntry] {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappDocList(id: uuid)
+        let result = try await companion.gateway.webapp.docList(deviceId: deviceId, req)
+        return try unwrapWebappErr(result, label: "listWebappDoc").entries.map {
+            BridgethingDocEntry(key: $0.key, value: $0.value)
+        }
+    }
+
+    public func setWebappDoc(deviceId: String, id: String, key: String, value: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappDocSet(id: uuid, key: key, value: value)
+        let result = try await companion.gateway.webapp.docSet(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "setWebappDoc")
+    }
+
+    public func deleteWebappDoc(deviceId: String, id: String, key: String) async throws {
+        let uuid = try parseUuid(id)
+        let companion = try requirePeerConnected(deviceId)
+        let req = WebappDocDelete(id: uuid, key: key)
+        let result = try await companion.gateway.webapp.docDelete(deviceId: deviceId, req)
+        _ = try unwrapWebappErr(result, label: "deleteWebappDoc")
     }
 
     // MARK: - Capability flags
@@ -846,6 +903,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         stateLock.withLock { onWebappsChanged = callback }
     }
 
+    public func setOnWebappDocChanged(_ callback: @escaping @Sendable (String, String, String, String?) -> Void) {
+        stateLock.withLock { onWebappDocChanged = callback }
+    }
+
     public func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void) {
         stateLock.withLock { onDeviceMetaChanged = callback }
     }
@@ -1017,27 +1078,6 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
-    /// same (deviceId, id) always writes the same path so the RN image cache stays valid.
-    private static func writeIconToCache(deviceId: String, id: String, mime: String?, bytes: Data) throws -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let dir = caches.appendingPathComponent("bridgething-webapp-icons", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let ext: String = {
-            switch mime {
-            case "image/png": return "png"
-            case "image/jpeg", "image/jpg": return "jpg"
-            case "image/webp": return "webp"
-            case "image/svg+xml": return "svg"
-            default: return "bin"
-            }
-        }()
-        let safeDevice = deviceId.replacingOccurrences(of: "/", with: "_")
-        let safeId = id.replacingOccurrences(of: "/", with: "_")
-        let url = dir.appendingPathComponent("\(safeDevice)__\(safeId).\(ext)")
-        try bytes.write(to: url, options: .atomic)
-        return url
-    }
-
     // MARK: - Emit helpers
 
     private func emitProvider(_ info: BridgethingProviderInfo?) {
@@ -1086,6 +1126,10 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
 
     private func emitWebappsChanged(_ deviceId: String) {
         stateLock.withLock { foreground ? onWebappsChanged : nil }?(deviceId)
+    }
+
+    private func emitWebappDocChanged(_ deviceId: String, _ webappId: String, _ key: String, _ value: String?) {
+        stateLock.withLock { foreground ? onWebappDocChanged : nil }?(deviceId, webappId, key, value)
     }
 
     private func emitDeviceMetaChanged(_ deviceId: String, _ meta: BridgethingDeviceMeta) {
@@ -1176,8 +1220,8 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
             role: info.role == .launcher ? .launcher : .standard,
             version: info.version,
             description: info.description,
-            iconAvailable: info.iconAvailable,
-            iconMime: info.iconMime,
+            iconHash: info.iconHash,
+            settingsHash: info.settingsHash,
             config: info.config.map(toRNConfigField),
             permissions: info.permissions
         )

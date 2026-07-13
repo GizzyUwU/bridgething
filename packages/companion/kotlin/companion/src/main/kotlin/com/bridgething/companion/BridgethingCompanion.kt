@@ -173,6 +173,12 @@ public class BridgethingCompanion(
     public val gateway: BridgethingGateway = BridgethingGateway(adapter)
     public val ota: OtaService = OtaService(httpClient = httpClient)
     private val transferAcks = ota.transferAcks
+    private val transferReceiver = TransferReceiver(gateway)
+    public val webappResources: WebappResourceService = WebappResourceService(
+        cacheDir = context.cacheDir ?: java.io.File(System.getProperty("java.io.tmpdir") ?: "."),
+        gateway = gateway,
+        receiver = transferReceiver,
+    )
     public val catalog: CatalogService = CatalogService(
         installer = ota,
         store = FileCatalogStore(
@@ -503,6 +509,7 @@ public class BridgethingCompanion(
                 gateway.transfer.ack.collect { (_, ack) -> transferAcks.note(ack.transferId, ack.received) }
             },
         )
+        transferReceiver.start(scope)
         dispatchers.add(scope.launch { runPlayerDispatch() })
         dispatchers.add(scope.launch { runAssetDispatch() })
         dispatchers.add(scope.launch { runLyricsDispatch() })

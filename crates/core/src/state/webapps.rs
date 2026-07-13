@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::StateResult;
 
 const ICON_MAX_BYTES: u64 = 64 * 1024;
+pub const SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
 const EXTRACTED_SIZE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 const STOCK_ICON_SVG: &str = include_str!("stock_icon.svg");
 
@@ -34,7 +35,8 @@ pub struct WebappBundle {
   pub source: WebappSource,
   pub manifest: Arc<WebappManifest>,
   pub icon_mime: Option<String>,
-  pub icon_size: Option<u64>,
+  pub icon_hash: Option<String>,
+  pub settings_hash: Option<String>,
   pub bundle_hash: String,
 }
 
@@ -130,18 +132,6 @@ impl WebappRegistry {
     infos.into_values().collect()
   }
 
-  pub async fn list_with_icons(&self) -> Vec<WebappInfo> {
-    let mut infos = self.list().await;
-    for info in &mut infos {
-      if info.icon_available {
-        if let Some((bytes, _)) = self.read_icon(info.id).await {
-          info.icon = Some(bytes);
-        }
-      }
-    }
-    infos
-  }
-
   pub async fn list_for_clients(&self) -> Vec<WebappInfo> {
     self
       .list()
@@ -214,6 +204,13 @@ impl WebappRegistry {
       });
     }
 
+    if bundle.manifest.settings.is_some() && bundle.settings_hash.is_none() {
+      let _ = fs::remove_dir_all(&staging).await;
+      return Err(WebappError::InvalidManifest {
+        reason: format!("declared settings page is missing or exceeds {SETTINGS_MAX_BYTES} bytes"),
+      });
+    }
+
     let final_dir_name = bundle.manifest.id.simple().to_string();
     let final_path = self.installed_root.join(&final_dir_name);
 
@@ -246,10 +243,19 @@ impl WebappRegistry {
       return Some((STOCK_ICON_SVG.as_bytes().to_vec(), Some("image/svg+xml".to_string())));
     }
     let rel = bundle.manifest.icon.as_deref()?;
-    bundle.icon_size?;
+    bundle.icon_hash.as_ref()?;
     let path = bundle.path.join(rel);
     let bytes = fs::read(&path).await.ok()?;
     Some((bytes, bundle.icon_mime.clone()))
+  }
+
+  pub async fn read_settings(&self, id: Uuid) -> Option<Vec<u8>> {
+    let bundle = self.bundle(id).await?;
+    bundle.settings_hash.as_ref()?;
+    let rel = bundle.manifest.settings.as_deref()?;
+    let path = bundle.path.join(rel);
+    let bytes = fs::read(&path).await.ok()?;
+    (bytes.len() as u64 <= SETTINGS_MAX_BYTES).then_some(bytes)
   }
 
   pub async fn uninstall(&self, id: Uuid) -> StateResult<bool> {
@@ -337,35 +343,28 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     }
   };
 
-  let (icon_mime, icon_size) = match manifest.icon.as_deref() {
-    Some(rel) => {
-      let p = path.join(rel);
-      match fs::metadata(&p).await {
-        Ok(meta) if meta.is_file() && meta.len() <= ICON_MAX_BYTES => {
-          (Some(guess_mime_from_ext(rel)), Some(meta.len()))
-        }
-        Ok(meta) if meta.is_file() => {
-          tracing::warn!(
-            "webapp '{}' icon {} is {} bytes (cap {}); ignoring",
-            dir_name,
-            p.display(),
-            meta.len(),
-            ICON_MAX_BYTES
-          );
-          (None, None)
-        }
-        _ => (None, None),
-      }
-    }
+  let (icon_mime, icon_hash) = match manifest.icon.as_deref() {
+    Some(rel) => match hash_bundle_file(path, rel, ICON_MAX_BYTES, &dir_name, "icon").await {
+      Some(hash) => (Some(guess_mime_from_ext(rel)), Some(hash)),
+      None => (None, None),
+    },
     None => (None, None),
+  };
+
+  let settings_hash = match manifest.settings.as_deref() {
+    Some(rel) => hash_bundle_file(path, rel, SETTINGS_MAX_BYTES, &dir_name, "settings page").await,
+    None => None,
   };
 
   let bundle_hash = compute_bundle_hash(path).await;
 
-  let (icon_mime, icon_size) = if manifest.id == STOCK_WEBAPP_ID {
-    (Some("image/svg+xml".to_string()), Some(STOCK_ICON_SVG.len() as u64))
+  let (icon_mime, icon_hash) = if manifest.id == STOCK_WEBAPP_ID {
+    (
+      Some("image/svg+xml".to_string()),
+      Some(sha256_hex(STOCK_ICON_SVG.as_bytes())),
+    )
   } else {
-    (icon_mime, icon_size)
+    (icon_mime, icon_hash)
   };
 
   Some(WebappBundle {
@@ -373,9 +372,39 @@ async fn load_bundle(path: &Path, source: WebappSource) -> Option<WebappBundle> 
     source,
     manifest: Arc::new(manifest),
     icon_mime,
-    icon_size,
+    icon_hash,
+    settings_hash,
     bundle_hash,
   })
+}
+
+async fn hash_bundle_file(root: &Path, rel: &str, cap: u64, dir_name: &str, what: &str) -> Option<String> {
+  let p = root.join(rel);
+  match fs::metadata(&p).await {
+    Ok(meta) if meta.is_file() && meta.len() <= cap => {
+      let bytes = fs::read(&p).await.ok()?;
+      Some(sha256_hex(&bytes))
+    }
+    Ok(meta) if meta.is_file() => {
+      tracing::warn!(
+        "webapp '{}' {} {} is {} bytes (cap {}); ignoring",
+        dir_name,
+        what,
+        p.display(),
+        meta.len(),
+        cap
+      );
+      None
+    }
+    _ => None,
+  }
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+  use sha2::{Digest, Sha256};
+  let mut hasher = Sha256::new();
+  hasher.update(bytes);
+  hex::encode(hasher.finalize())
 }
 
 async fn compute_bundle_hash(root: &Path) -> String {
@@ -515,9 +544,8 @@ fn bundle_to_info(b: &WebappBundle) -> WebappInfo {
     role: b.manifest.role,
     version: b.manifest.version.clone(),
     description: b.manifest.description.clone(),
-    icon_available: b.icon_size.is_some(),
-    icon_mime: b.icon_mime.clone(),
-    icon: None,
+    icon_hash: b.icon_hash.clone(),
+    settings_hash: b.settings_hash.clone(),
     config: b.manifest.config.clone(),
     permissions: b.manifest.permissions.clone(),
     voice_grammar: b.manifest.voice_grammar.clone(),

@@ -18,6 +18,7 @@ import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingConfigField
 import com.margelo.nitro.bridgething.session.BridgethingConfigKind
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
+import com.margelo.nitro.bridgething.session.BridgethingDocEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMetaEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingHostInfo
@@ -91,7 +92,11 @@ import com.bridgething.schema.WebappConfigDelete
 import com.bridgething.schema.WebappConfigList
 import com.bridgething.schema.WebappConfigSet
 import com.bridgething.schema.WebappError
-import com.bridgething.schema.WebappIcon
+import com.bridgething.schema.WebappDocDelete
+import com.bridgething.schema.WebappDocGet
+import com.bridgething.schema.WebappDocList
+import com.bridgething.schema.WebappDocSet
+import com.bridgething.schema.WebappResourceKind
 import com.bridgething.schema.WebappInfo
 import com.bridgething.schema.WebappRole
 import com.bridgething.schema.WebappSource
@@ -151,6 +156,7 @@ public class HybridBridgethingSessionImpl(
     private var otaJob: Job? = null
     private var deviceMetaJob: Job? = null
     private var catalogJob: Job? = null
+    private var webappDocJob: Job? = null
     private var authJob: Job? = null
 
     private val peers = ConcurrentHashMap<String, BridgethingSessionPeer>()
@@ -190,6 +196,9 @@ public class HybridBridgethingSessionImpl(
     private var onWebappsChanged: ((String) -> Unit)? = null
 
     @Volatile
+    private var onWebappDocChanged: ((String, String, String, String?) -> Unit)? = null
+
+    @Volatile
     private var onDeviceMetaChanged: ((String, BridgethingDeviceMeta) -> Unit)? = null
 
     @Volatile
@@ -213,7 +222,6 @@ public class HybridBridgethingSessionImpl(
     private var localLogStreamingDesired: Boolean = false
 
     override suspend fun start() {
-        // the foreground service owns the companion's lifetime; the UI just borrows the reference.
         val c = CompanionHolder.ensureStarted(context)
         val firstAttach = stateLock.withLock {
             if (companion != null) return@withLock false
@@ -235,18 +243,25 @@ public class HybridBridgethingSessionImpl(
             }
         }
         catalogJob = scope.launch { c.catalog.events.collect { ev -> safeEmit { if (CompanionHolder.foreground) onCatalogEvent?.invoke(toRnCatalogEvent(ev)) } } }
+        webappDocJob = scope.launch {
+            c.gateway.webapp.docChanged.collect { (deviceId, msg) ->
+                safeEmit {
+                    if (CompanionHolder.foreground) {
+                        onWebappDocChanged?.invoke(deviceId, msg.id.toString().lowercase(), msg.key, msg.value)
+                    }
+                }
+            }
+        }
 
         runCatching { applyCapabilityFlags(loadCapabilityFlags()) }
         runCatching { applyOtaPollConfig(loadOtaPollConfig()) }
         runCatching { applyDeviceAutoResume() }
 
-        // wake-from-cold on presence + keep the link alive while a device is set up.
         CompanionDevicePicker.startObservingPresence(context)
         if (CompanionDevicePicker.associations(context.applicationContext).isNotEmpty()) {
             BridgethingConnectionService.start(context)
         }
 
-        // restore the last signed-in provider so the app opens already authenticated.
         registry.firstOrNull { it.available && it.hasCredentials() }?.let {
             runCatching { setActiveProvider(it.id) }
         }
@@ -257,6 +272,7 @@ public class HybridBridgethingSessionImpl(
         var priorOta: Job? = null
         var priorDeviceMeta: Job? = null
         var priorCatalog: Job? = null
+        var priorWebappDoc: Job? = null
         var priorAuth: Job? = null
         var priorCompanion: BridgethingCompanion? = null
         stateLock.withLock {
@@ -264,6 +280,7 @@ public class HybridBridgethingSessionImpl(
             priorOta = otaJob
             priorDeviceMeta = deviceMetaJob
             priorCatalog = catalogJob
+            priorWebappDoc = webappDocJob
             priorAuth = authJob
             priorCompanion = companion
             companion = null
@@ -271,12 +288,14 @@ public class HybridBridgethingSessionImpl(
             otaJob = null
             deviceMetaJob = null
             catalogJob = null
+            webappDocJob = null
             authJob = null
         }
         priorEvents?.cancel()
         priorOta?.cancel()
         priorDeviceMeta?.cancel()
         priorCatalog?.cancel()
+        priorWebappDoc?.cancel()
         priorAuth?.cancel()
         // detach UI observers but leave the companion running in the foreground service.
         priorCompanion?.setNowPlayingObserver(null)
@@ -480,25 +499,20 @@ public class HybridBridgethingSessionImpl(
     override suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon? {
         val uuid = parseUuid(id)
         val c = requireCompanion(deviceId)
-        return when (val result = c.gateway.webapp.icon(deviceId, WebappIcon(uuid))) {
-            is RequestResult.Ok -> {
-                // svg ships inline as markup for <SvgXml>; raster goes through the file cache for <Image>.
-                if (result.response.mime == "image/svg+xml") {
-                    BridgethingWebappIcon(
-                        fileUri = null,
-                        svg = result.response.bytes.toString(Charsets.UTF_8),
-                        mime = result.response.mime,
-                    )
-                } else {
-                    val file = writeIconToCache(deviceId, id, result.response.mime, result.response.bytes)
-                    BridgethingWebappIcon(fileUri = Uri.fromFile(file).toString(), svg = null, mime = result.response.mime)
-                }
-            }
-            is RequestResult.DomainErr ->
-                if (result.error is WebappError.IconNotAvailable) null
-                else throw IllegalStateException("webappIcon: ${result.error}")
-            is RequestResult.ProtocolErr -> throw IllegalStateException("webappIcon: ${result.error}")
+        val resolved = c.webappResources.fetch(deviceId, uuid, WebappResourceKind.Icon) ?: return null
+        return if (resolved.mime == "image/svg+xml") {
+            BridgethingWebappIcon(fileUri = null, svg = resolved.file.readText(), mime = resolved.mime)
+        } else {
+            BridgethingWebappIcon(fileUri = Uri.fromFile(resolved.file).toString(), svg = null, mime = resolved.mime)
         }
+    }
+
+    override suspend fun webappSettingsPage(deviceId: String, id: String): String {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        val resolved = c.webappResources.fetch(deviceId, uuid, WebappResourceKind.Settings)
+            ?: throw IllegalStateException("webappSettingsPage: resource unavailable")
+        return Uri.fromFile(resolved.file).toString()
     }
 
     override suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry> {
@@ -518,6 +532,31 @@ public class HybridBridgethingSessionImpl(
         val uuid = parseUuid(id)
         val c = requireCompanion(deviceId)
         unwrapWebapp(c.gateway.webapp.configDelete(deviceId, WebappConfigDelete(uuid, key)), "deleteWebappConfigField")
+    }
+
+    override suspend fun getWebappDoc(deviceId: String, id: String, key: String): String? {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        return unwrapWebapp(c.gateway.webapp.docGet(deviceId, WebappDocGet(uuid, key)), "getWebappDoc").value
+    }
+
+    override suspend fun listWebappDoc(deviceId: String, id: String): Array<BridgethingDocEntry> {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        val reply = unwrapWebapp(c.gateway.webapp.docList(deviceId, WebappDocList(uuid)), "listWebappDoc")
+        return reply.entries.map { BridgethingDocEntry(it.key, it.value) }.toTypedArray()
+    }
+
+    override suspend fun setWebappDoc(deviceId: String, id: String, key: String, value: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.docSet(deviceId, WebappDocSet(uuid, key, value)), "setWebappDoc")
+    }
+
+    override suspend fun deleteWebappDoc(deviceId: String, id: String, key: String) {
+        val uuid = parseUuid(id)
+        val c = requireCompanion(deviceId)
+        unwrapWebapp(c.gateway.webapp.docDelete(deviceId, WebappDocDelete(uuid, key)), "deleteWebappDoc")
     }
 
     override suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags) {
@@ -900,6 +939,7 @@ public class HybridBridgethingSessionImpl(
     }
 
     override fun setOnWebappsChanged(callback: (String) -> Unit) { onWebappsChanged = callback }
+    override fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit) { onWebappDocChanged = callback }
     override fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit) { onDeviceMetaChanged = callback }
     override fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit) { onOtaEvent = callback }
     override fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit) { onCatalogEvent = callback }
@@ -961,20 +1001,6 @@ public class HybridBridgethingSessionImpl(
     }
 
 
-    private fun writeIconToCache(deviceId: String, id: String, mime: String?, bytes: ByteArray): File {
-        val dir = File(context.cacheDir, "bridgething-webapp-icons").apply { mkdirs() }
-        val ext = when (mime) {
-            "image/png" -> "png"
-            "image/jpeg", "image/jpg" -> "jpg"
-            "image/webp" -> "webp"
-            "image/svg+xml" -> "svg"
-            else -> "bin"
-        }
-        val file = File(dir, "${deviceId.replace("/", "_")}__${id.replace("/", "_")}.$ext")
-        file.writeBytes(bytes)
-        return file
-    }
-
     private fun toRnWebappInfo(info: WebappInfo): BridgethingWebappInfo = BridgethingWebappInfo(
         id = info.id.toString(),
         name = info.name,
@@ -982,8 +1008,8 @@ public class HybridBridgethingSessionImpl(
         role = if (info.role == WebappRole.Launcher) BridgethingWebappRole.LAUNCHER else BridgethingWebappRole.STANDARD,
         version = info.version,
         description = info.description,
-        iconAvailable = info.iconAvailable,
-        iconMime = info.iconMime,
+        iconHash = info.iconHash,
+        settingsHash = info.settingsHash,
         config = info.config.map(::toRnConfigField).toTypedArray(),
         permissions = info.permissions.toTypedArray(),
     )

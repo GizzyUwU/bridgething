@@ -95,8 +95,15 @@ export default function App() {
       }
       if (cancelled) return;
 
-      const stored = await client.store.get({ key: SELECTION_KEY });
-      const ids = stored.ok && stored.response.value ? splitIds(stored.response.value) : [];
+      const doc = await client.doc.get({ key: SELECTION_KEY });
+      const docValue = doc.ok ? doc.response.value : null;
+      let ids: string[];
+      if (docValue) {
+        ids = splitIds(docValue);
+      } else {
+        const stored = await client.store.get({ key: SELECTION_KEY });
+        ids = stored.ok && stored.response.value ? splitIds(stored.response.value) : [];
+      }
       if (cancelled) return;
 
       if (ids.length === 0) {
@@ -111,10 +118,31 @@ export default function App() {
 
     boot().catch(err => !cancelled && flash(err instanceof Error ? err.message : String(err)));
 
+    const applyLive = (value: string | null) => {
+      const conn = connRef.current;
+      if (!conn || cancelled) return;
+      const ids = value ? splitIds(value) : [];
+      if (ids.length === 0) {
+        conn
+          .getStates()
+          .then(all => !cancelled && setMode({ kind: 'picker', all }))
+          .catch(e => flash(errText(e)));
+        return;
+      }
+      setSelection(ids);
+      setEntities({});
+      setMode({ kind: 'dashboard' });
+      conn.subscribeEntities(ids, e => !cancelled && ingest(e)).catch(e => flash(errText(e)));
+    };
+
     const offChanged = client.config.onChanged(() => setReloadKey(k => k + 1));
+    const offDoc = client.doc.onChanged(({ key, value }) => {
+      if (key === SELECTION_KEY) applyLive(value);
+    });
     return () => {
       cancelled = true;
       offChanged();
+      offDoc();
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       connRef.current?.close();
@@ -236,7 +264,7 @@ function mergeState(
 function Center({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-bt-charcoal px-10">
-      <div className={`max-w-[34rem] text-center text-sm ${muted ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>
+      <div className={`max-w-136 text-center text-sm ${muted ? 'text-bt-soft-gray' : 'text-bt-off-white'}`}>
         {children}
       </div>
     </div>

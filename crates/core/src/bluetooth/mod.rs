@@ -604,6 +604,22 @@ impl GatewayMan {
       .await;
   }
 
+  pub async fn send_event_bulk<E: WireEvent<BridgeToGatewayMsgData>>(&self, address: Address, event: E) {
+    self
+      .send_all(
+        OutboundGatewayMessage::to(
+          address,
+          BridgeToGatewayMsg {
+            id: uuid::Uuid::now_v7(),
+            meta: MsgMeta::Event,
+            data: event.into(),
+          },
+        )
+        .bulk(),
+      )
+      .await;
+  }
+
   pub async fn broadcast_command<C: WireCommand<BridgeToGatewayMsgData>>(&self, cmd: C) {
     self.broadcast_command_with_priority(cmd, Priority::Normal).await;
   }

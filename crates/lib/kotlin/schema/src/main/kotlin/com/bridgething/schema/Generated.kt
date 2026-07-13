@@ -576,6 +576,16 @@ data class Diagnostics (
 	val bootId: String
 )
 
+/// One key/value pair from a webapp's doc namespace: shared structured
+/// state writable from both the companion (gateway) and the webapp
+/// itself, last write wins. Values are strings; apps encode JSON as
+/// needed.
+@Serializable
+data class DocEntry (
+	val key: String,
+	val value: String
+)
+
 /// Play a named earcon from `AudioCapabilities.earcons`. Unknown names
 /// surface as `AudioError::EarconNotFound`.
 @Serializable
@@ -2818,17 +2828,57 @@ data class WebappConfigSet (
 	val value: String
 )
 
-/// Icon byte fetch. Daemon reads the icon declared by the manifest from
-/// the bundle directory and returns the bytes + mime.
+/// Ack for WebappDocSet / WebappDocDelete; echoes what's now stored.
 @Serializable
-data class WebappIcon (
+data class WebappDocAck (
+	val key: String,
+	val value: String? = null
+)
+
+/// Broadcast when the WEBAPP writes its doc namespace, so an open
+/// companion settings page sees device-side changes live. Gateway-origin
+/// writes are not echoed back (the writer already holds the ack).
+@Serializable
+data class WebappDocChanged (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val key: String,
+	val value: String? = null
+)
+
+@Serializable
+data class WebappDocDelete (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val key: String
+)
+
+@Serializable
+data class WebappDocGet (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val key: String
+)
+
+@Serializable
+data class WebappDocGetReply (
+	val key: String,
+	/// `None` when the key has never been written.
+	val value: String? = null
+)
+
+@Serializable
+data class WebappDocList (
 	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID
 )
 
 @Serializable
-data class WebappIconReply (
-	val bytes: ByteArray,
-	val mime: String? = null
+data class WebappDocListReply (
+	val entries: List<DocEntry>
+)
+
+@Serializable
+data class WebappDocSet (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val key: String,
+	val value: String
 )
 
 @Serializable
@@ -2881,11 +2931,13 @@ data class WebappInfo (
 	val role: WebappRole,
 	val version: String,
 	val description: String? = null,
-	val iconAvailable: Boolean,
-	val iconMime: String? = null,
-	/// icon bytes, inlined on the gateway list so the companion never round-trips
-	/// a separate fetch per app. omitted on the on-device client list.
-	val icon: ByteArray? = null,
+	/// sha256 of the icon bytes; presence means an icon exists. consumers
+	/// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
+	/// and cache keyed by this hash.
+	val iconHash: String? = null,
+	/// sha256 of the companion settings page declared by the manifest;
+	/// presence is the companion's cue to offer the settings UI.
+	val settingsHash: String? = null,
 	val config: List<ConfigField>,
 	val permissions: List<String>,
 	/// Plain-English description of the voice intents the webapp wants
@@ -2914,6 +2966,9 @@ data class WebappManifest (
 	val version: String,
 	val description: String? = null,
 	val icon: String? = null,
+	/// Bundle-relative path to one self-contained HTML file the companion
+	/// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
+	val settings: String? = null,
 	val role: WebappRole? = null,
 	val config: List<ConfigField>? = null,
 	val permissions: List<String>? = null,
@@ -2925,6 +2980,38 @@ data class WebappManifest (
 	val voiceGrammar: String? = null,
 	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
 	val art: ArtProfile? = null
+)
+
+/// Which bundle file a `WebappResource` request targets.
+@Serializable
+enum class WebappResourceKind(val string: String) {
+	@SerialName("icon")
+	Icon("icon"),
+	@SerialName("settings")
+	Settings("settings"),
+}
+
+/// On-demand fetch of a webapp bundle resource (icon bytes, companion
+/// settings page). `have` carries the sha256 the requester already
+/// caches; a match returns a bodyless reply so unchanged resources
+/// never re-cross the link.
+@Serializable
+data class WebappResource (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val kind: WebappResourceKind,
+	val have: String? = null
+)
+
+/// Reply to `WebappResource`. `sha256` is the current content hash;
+/// `body` is absent when the requester's `have` already matched (its
+/// cache is current). Large bodies stream as fragments per `TransferBody`.
+@Serializable
+data class WebappResourceReply (
+	@Serializable(with = MsgpackUuidSerializer::class) val id: UUID,
+	val kind: WebappResourceKind,
+	val sha256: String,
+	val mime: String? = null,
+	val body: TransferBody? = null
 )
 
 @Serializable
@@ -3235,6 +3322,12 @@ sealed class BridgeToGatewayTransferMsg {
 	@Serializable
 	@SerialName("ack")
 	data class Ack(val data: TransferAck): BridgeToGatewayTransferMsg()
+	@Serializable
+	@SerialName("fragment")
+	data class Fragment(val data: TransferFragment): BridgeToGatewayTransferMsg()
+	@Serializable
+	@SerialName("abandon")
+	data class Abandon(val data: TransferAbandon): BridgeToGatewayTransferMsg()
 }
 
 @Serializable(with = BridgeToGatewayTunnelMsgSerializer::class)
@@ -3293,8 +3386,8 @@ sealed class BridgeToGatewayWebappMsg {
 	@SerialName("webappError")
 	data class WebappError(val data: com.bridgething.schema.WebappError): BridgeToGatewayWebappMsg()
 	@Serializable
-	@SerialName("icon")
-	data class Icon(val data: WebappIconReply): BridgeToGatewayWebappMsg()
+	@SerialName("resource")
+	data class Resource(val data: WebappResourceReply): BridgeToGatewayWebappMsg()
 	@Serializable
 	@SerialName("configGet")
 	data class ConfigGet(val data: WebappConfigGetReply): BridgeToGatewayWebappMsg()
@@ -3304,6 +3397,19 @@ sealed class BridgeToGatewayWebappMsg {
 	@Serializable
 	@SerialName("configAck")
 	data class ConfigAck(val data: WebappConfigAck): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("docGet")
+	data class DocGet(val data: WebappDocGetReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("docList")
+	data class DocList(val data: WebappDocListReply): BridgeToGatewayWebappMsg()
+	@Serializable
+	@SerialName("docAck")
+	data class DocAck(val data: WebappDocAck): BridgeToGatewayWebappMsg()
+	/// event: the active webapp wrote/deleted a doc key
+	@Serializable
+	@SerialName("docChanged")
+	data class DocChanged(val data: WebappDocChanged): BridgeToGatewayWebappMsg()
 	/// event: a webapp install (`OtaKind::InstalledWebapp`) completed
 	/// successfully; carries the installed webapp's metadata. The terminal
 	/// signal for an install; failures surface as `OtaError` on the system
@@ -3595,6 +3701,9 @@ sealed class GatewayToBridgeTransferMsg {
 	@Serializable
 	@SerialName("abandon")
 	data class Abandon(val data: TransferAbandon): GatewayToBridgeTransferMsg()
+	@Serializable
+	@SerialName("ack")
+	data class Ack(val data: TransferAck): GatewayToBridgeTransferMsg()
 }
 
 @Serializable(with = GatewayToBridgeTunnelMsgSerializer::class)
@@ -3645,10 +3754,10 @@ sealed class GatewayToBridgeWebappMsg {
 	@Serializable
 	@SerialName("uninstall")
 	data class Uninstall(val data: WebappUninstall): GatewayToBridgeWebappMsg()
-	/// request: bridge replies with `Icon`
+	/// request: bridge replies with `Resource`
 	@Serializable
-	@SerialName("icon")
-	data class Icon(val data: WebappIcon): GatewayToBridgeWebappMsg()
+	@SerialName("resource")
+	data class Resource(val data: WebappResource): GatewayToBridgeWebappMsg()
 	@Serializable
 	@SerialName("configGet")
 	data class ConfigGet(val data: WebappConfigGet): GatewayToBridgeWebappMsg()
@@ -3661,6 +3770,18 @@ sealed class GatewayToBridgeWebappMsg {
 	@Serializable
 	@SerialName("configDelete")
 	data class ConfigDelete(val data: WebappConfigDelete): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("docGet")
+	data class DocGet(val data: WebappDocGet): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("docList")
+	data class DocList(val data: WebappDocList): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("docSet")
+	data class DocSet(val data: WebappDocSet): GatewayToBridgeWebappMsg()
+	@Serializable
+	@SerialName("docDelete")
+	data class DocDelete(val data: WebappDocDelete): GatewayToBridgeWebappMsg()
 }
 
 @Serializable
@@ -3811,9 +3932,9 @@ data class WebappErrorInvalidManifestInner (
 	val reason: String
 )
 
-/// Generated type representing the anonymous struct variant `IconNotAvailable` of the `WebappError` Rust enum
+/// Generated type representing the anonymous struct variant `ResourceNotAvailable` of the `WebappError` Rust enum
 @Serializable
-data class WebappErrorIconNotAvailableInner (
+data class WebappErrorResourceNotAvailableInner (
 	val id: String
 )
 
@@ -3826,6 +3947,13 @@ data class WebappErrorUnknownConfigKeyInner (
 /// Generated type representing the anonymous struct variant `InvalidConfigValue` of the `WebappError` Rust enum
 @Serializable
 data class WebappErrorInvalidConfigValueInner (
+	val key: String,
+	val reason: String
+)
+
+/// Generated type representing the anonymous struct variant `InvalidDocValue` of the `WebappError` Rust enum
+@Serializable
+data class WebappErrorInvalidDocValueInner (
 	val key: String,
 	val reason: String
 )
@@ -3869,10 +3997,11 @@ sealed class WebappError {
 	@Serializable
 	@SerialName("invalidManifest")
 	data class InvalidManifest(val data: WebappErrorInvalidManifestInner): WebappError()
-	/// The webapp's manifest doesn't declare an icon (or the icon file is missing on disk).
+	/// The requested resource (icon / settings page) isn't declared by the
+	/// webapp's manifest or its file is missing on disk.
 	@Serializable
-	@SerialName("iconNotAvailable")
-	data class IconNotAvailable(val data: WebappErrorIconNotAvailableInner): WebappError()
+	@SerialName("resourceNotAvailable")
+	data class ResourceNotAvailable(val data: WebappErrorResourceNotAvailableInner): WebappError()
 	/// Config key is not declared in the webapp's manifest schema.
 	@Serializable
 	@SerialName("unknownConfigKey")
@@ -3881,6 +4010,10 @@ sealed class WebappError {
 	@Serializable
 	@SerialName("invalidConfigValue")
 	data class InvalidConfigValue(val data: WebappErrorInvalidConfigValueInner): WebappError()
+	/// Doc value rejected (oversized).
+	@Serializable
+	@SerialName("invalidDocValue")
+	data class InvalidDocValue(val data: WebappErrorInvalidDocValueInner): WebappError()
 	/// Catch-all for genuinely-unexpected failures (io errors, daemon-side
 	/// bugs). Reason is human-readable; not a stable wire contract.
 	@Serializable

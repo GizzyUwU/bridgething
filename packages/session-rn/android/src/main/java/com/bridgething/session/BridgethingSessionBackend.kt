@@ -12,6 +12,7 @@ import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
 import com.margelo.nitro.bridgething.session.BridgethingConfigEntry
 import com.margelo.nitro.bridgething.session.BridgethingDeviceLogLine
 import com.margelo.nitro.bridgething.session.BridgethingDeviceMeta
+import com.margelo.nitro.bridgething.session.BridgethingDocEntry
 import com.margelo.nitro.bridgething.session.BridgethingNowPlaying
 import com.margelo.nitro.bridgething.session.BridgethingOtaEvent
 import com.margelo.nitro.bridgething.session.BridgethingOtaManifest
@@ -47,9 +48,14 @@ public interface BridgethingSessionBackend {
     public suspend fun uninstallWebapp(deviceId: String, id: String)
     public suspend fun switchWebapp(deviceId: String, id: String)
     public suspend fun webappIcon(deviceId: String, id: String): BridgethingWebappIcon?
+    public suspend fun webappSettingsPage(deviceId: String, id: String): String
     public suspend fun listWebappConfig(deviceId: String, id: String): Array<BridgethingConfigEntry>
     public suspend fun setWebappConfigField(deviceId: String, id: String, key: String, value: String)
     public suspend fun deleteWebappConfigField(deviceId: String, id: String, key: String)
+    public suspend fun getWebappDoc(deviceId: String, id: String, key: String): String?
+    public suspend fun listWebappDoc(deviceId: String, id: String): Array<BridgethingDocEntry>
+    public suspend fun setWebappDoc(deviceId: String, id: String, key: String, value: String)
+    public suspend fun deleteWebappDoc(deviceId: String, id: String, key: String)
 
     public suspend fun setCapabilityFlags(flags: BridgethingCapabilityFlags)
 
@@ -102,6 +108,7 @@ public interface BridgethingSessionBackend {
     public fun setLogStreamingEnabled(enabled: Boolean)
     public fun setLocalLogStreamingEnabled(enabled: Boolean)
     public fun setOnWebappsChanged(callback: (String) -> Unit)
+    public fun setOnWebappDocChanged(callback: (String, String, String, String?) -> Unit)
     public fun setOnDeviceMetaChanged(callback: (String, BridgethingDeviceMeta) -> Unit)
     public fun setOnOtaEvent(callback: (BridgethingOtaEvent) -> Unit)
     public fun setOnCatalogEvent(callback: (BridgethingCatalogEvent) -> Unit)

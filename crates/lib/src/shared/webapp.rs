@@ -27,12 +27,15 @@ pub enum WebappError {
   MissingIndexHtml,
   /// manifest.json missing, unparseable, or failed schema validation.
   InvalidManifest { reason: String },
-  /// The webapp's manifest doesn't declare an icon (or the icon file is missing on disk).
-  IconNotAvailable { id: String },
+  /// The requested resource (icon / settings page) isn't declared by the
+  /// webapp's manifest or its file is missing on disk.
+  ResourceNotAvailable { id: String },
   /// Config key is not declared in the webapp's manifest schema.
   UnknownConfigKey { key: String },
   /// Value failed schema validation (out of range, regex mismatch, not in enum).
   InvalidConfigValue { key: String, reason: String },
+  /// Doc value rejected (oversized).
+  InvalidDocValue { key: String, reason: String },
   /// Catch-all for genuinely-unexpected failures (io errors, daemon-side
   /// bugs). Reason is human-readable; not a stable wire contract.
   Internal { reason: String },
@@ -84,7 +87,6 @@ impl Default for ArtProfile {
 }
 
 #[typeshare]
-#[serde_with::serde_as]
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
@@ -98,15 +100,13 @@ pub struct WebappInfo {
   pub role: WebappRole,
   pub version: String,
   pub description: Option<String>,
-  pub icon_available: bool,
-  pub icon_mime: Option<String>,
-  /// icon bytes, inlined on the gateway list so the companion never round-trips
-  /// a separate fetch per app. omitted on the on-device client list.
-  #[debug(skip)]
-  #[serde_as(as = "Option<serde_with::Bytes>")]
-  #[ts(type = "Uint8Array | null")]
-  #[typeshare(serialized_as = "Option<Vec<u8>>")]
-  pub icon: Option<Vec<u8>>,
+  /// sha256 of the icon bytes; presence means an icon exists. consumers
+  /// fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
+  /// and cache keyed by this hash.
+  pub icon_hash: Option<String>,
+  /// sha256 of the companion settings page declared by the manifest;
+  /// presence is the companion's cue to offer the settings UI.
+  pub settings_hash: Option<String>,
   pub config: Vec<ConfigField>,
   pub permissions: Vec<String>,
   /// Plain-English description of the voice intents the webapp wants
@@ -136,6 +136,9 @@ pub struct WebappManifest {
   pub version: String,
   pub description: Option<String>,
   pub icon: Option<String>,
+  /// Bundle-relative path to one self-contained HTML file the companion
+  /// renders in a webview as this webapp's settings UI. Capped at 1 MiB.
+  pub settings: Option<String>,
   #[serde(default)]
   pub role: WebappRole,
   #[serde(default)]
@@ -249,6 +252,20 @@ impl ConfigField {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "shared.ts")]
 pub struct ConfigEntry {
+  pub key: String,
+  pub value: String,
+}
+
+/// One key/value pair from a webapp's doc namespace: shared structured
+/// state writable from both the companion (gateway) and the webapp
+/// itself, last write wins. Values are strings; apps encode JSON as
+/// needed.
+#[typeshare]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct DocEntry {
   pub key: String,
   pub value: String,
 }

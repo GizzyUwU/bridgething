@@ -4,6 +4,8 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
+use crate::gateway::{TransferAbandon, TransferFragment};
+
 /// Receiver-side progress for an in-flight fragment stream: cumulative contiguous bytes received.
 #[typeshare]
 #[serde_with::skip_serializing_none]
@@ -26,4 +28,8 @@ pub struct TransferAck {
 pub enum BridgeToGatewayTransferMsg {
   #[bridge_event]
   Ack(TransferAck),
+  #[bridge_event]
+  Fragment(TransferFragment),
+  #[bridge_event]
+  Abandon(TransferAbandon),
 }

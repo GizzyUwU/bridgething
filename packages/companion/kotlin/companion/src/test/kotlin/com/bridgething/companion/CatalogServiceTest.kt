@@ -49,7 +49,6 @@ private fun installed(id: String, version: String, source: WebappSource = Webapp
         source = source,
         role = role,
         version = version,
-        iconAvailable = false,
         config = emptyList(),
         permissions = emptyList(),
     )

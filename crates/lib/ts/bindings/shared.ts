@@ -284,6 +284,14 @@ export type Diagnostics = {
 export type DismissReason = 'userDismissed' | 'acted' | 'remoteDismissed';
 
 /**
+ * One key/value pair from a webapp's doc namespace: shared structured
+ * state writable from both the companion (gateway) and the webapp
+ * itself, last write wins. Values are strings; apps encode JSON as
+ * needed.
+ */
+export type DocEntry = { key: string; value: string };
+
+/**
  * DTMF tones the accessory can play during an active call.
  */
 export type DtmfTone = 'd0' | 'd1' | 'd2' | 'd3' | 'd4' | 'd5' | 'd6' | 'd7' | 'd8' | 'd9' | 'star' | 'hash';
@@ -1266,9 +1274,10 @@ export type WebappError =
   | { type: 'zipMalformed'; data: { reason: string } }
   | { type: 'missingIndexHtml' }
   | { type: 'invalidManifest'; data: { reason: string } }
-  | { type: 'iconNotAvailable'; data: { id: string } }
+  | { type: 'resourceNotAvailable'; data: { id: string } }
   | { type: 'unknownConfigKey'; data: { key: string } }
   | { type: 'invalidConfigValue'; data: { key: string; reason: string } }
+  | { type: 'invalidDocValue'; data: { key: string; reason: string } }
   | { type: 'internal'; data: { reason: string } };
 
 export type WebappInfo = {
@@ -1278,13 +1287,17 @@ export type WebappInfo = {
   role: WebappRole;
   version: string;
   description: string | null;
-  iconAvailable: boolean;
-  iconMime: string | null;
   /**
-   * icon bytes, inlined on the gateway list so the companion never round-trips
-   * a separate fetch per app. omitted on the on-device client list.
+   * sha256 of the icon bytes; presence means an icon exists. consumers
+   * fetch bytes on demand (gateway `webapp.resource`, client `webapp.icon`)
+   * and cache keyed by this hash.
    */
-  icon?: Uint8Array | null;
+  iconHash: string | null;
+  /**
+   * sha256 of the companion settings page declared by the manifest;
+   * presence is the companion's cue to offer the settings UI.
+   */
+  settingsHash: string | null;
   config: Array<ConfigField>;
   permissions: Array<string>;
   /**
@@ -1313,6 +1326,11 @@ export type WebappManifest = {
   version: string;
   description: string | null;
   icon: string | null;
+  /**
+   * Bundle-relative path to one self-contained HTML file the companion
+   * renders in a webview as this webapp's settings UI. Capped at 1 MiB.
+   */
+  settings: string | null;
   role: WebappRole;
   config: Array<ConfigField>;
   permissions: Array<string>;

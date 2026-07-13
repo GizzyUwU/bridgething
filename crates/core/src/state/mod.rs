@@ -16,7 +16,7 @@ use crate::{
   net::{ClientMan, WireEventBus},
   paths,
   peer::PeerTracker,
-  transfer::{TransferError, sinks::TransferSinks},
+  transfer::{TransferError, outbound::TransferOutbound, sinks::TransferSinks},
 };
 
 mod audio;
@@ -43,8 +43,8 @@ use storage::{device::Entity as DeviceEntity, kv_storage::Entity as KvEntity, me
 pub use telephony::TelephonyManager;
 pub use time::TimeManager;
 pub use tunnel_routes::{TunnelInbound, TunnelRoutes};
-pub(crate) use webapps::extract_zip;
 pub use webapps::{BROWSER_WEBAPP_ID, HUB_WEBAPP_ID, STOCK_WEBAPP_ID, WebappRegistry};
+pub(crate) use webapps::{extract_zip, sha256_hex};
 
 pub type State = Arc<AppState>;
 
@@ -78,6 +78,7 @@ pub struct AppState {
   pub root_browse: RootBrowseCache,
   pub browse_content: BrowseContentCache,
   pub transfer_sinks: TransferSinks,
+  pub transfer_outbound: TransferOutbound,
 
   db: DatabaseConnection,
   meta_store: MetaStore,
@@ -152,6 +153,7 @@ impl AppState {
       root_browse: RootBrowseCache::default(),
       browse_content: BrowseContentCache::default(),
       transfer_sinks,
+      transfer_outbound: TransferOutbound::default(),
       db,
       meta_store,
       _asset_cache_handle: asset_cache_handle,

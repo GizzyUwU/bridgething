@@ -103,7 +103,7 @@ impl ClientToBridgeWebappMsgDispatch for WebappHandler {
       None => {
         self
           .handle
-          .respond_err::<WebappIcon>(WebappError::IconNotAvailable { id: id.to_string() })
+          .respond_err::<WebappIcon>(WebappError::ResourceNotAvailable { id: id.to_string() })
           .await?;
       }
     }

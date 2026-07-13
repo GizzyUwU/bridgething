@@ -7,13 +7,10 @@ import { getSession } from '../lib/session';
 
 type IconData = { svg?: string; fileUri?: string };
 
-/** Fetches and renders a webapp icon. Vector icons arrive as inline markup
- *  (rendered via SvgXml); raster icons arrive as a cached file uri. Falls back
- *  to the name initial, or a generic glyph when there is no name. */
 export function WebappIcon({
   deviceId,
   id,
-  iconAvailable,
+  iconHash,
   name,
   size,
   radiusClass = 'rounded-xl',
@@ -21,7 +18,7 @@ export function WebappIcon({
 }: {
   deviceId: string;
   id: string;
-  iconAvailable: boolean;
+  iconHash?: string;
   name: string;
   size: number;
   radiusClass?: string;
@@ -31,7 +28,7 @@ export function WebappIcon({
   const [icon, setIcon] = useState<IconData | null>(null);
 
   useEffect(() => {
-    if (!iconAvailable) {
+    if (!iconHash) {
       setIcon(null);
       return;
     }
@@ -49,7 +46,7 @@ export function WebappIcon({
     return () => {
       cancelled = true;
     };
-  }, [deviceId, iconAvailable, id, session]);
+  }, [deviceId, iconHash, id, session]);
 
   const dims = { width: size, height: size };
 

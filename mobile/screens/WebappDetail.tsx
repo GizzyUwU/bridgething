@@ -13,6 +13,7 @@ import {
   Play,
   RotateCcw,
   Shield,
+  SlidersHorizontal,
   Speaker,
   Trash2,
   Wifi,
@@ -168,7 +169,7 @@ export function WebappDetailScreen({ navigation, route }: Props) {
         <WebappIcon
           deviceId={deviceId}
           id={info.id}
-          iconAvailable={info.iconAvailable}
+          iconHash={info.iconHash}
           name={info.name}
           size={64}
           radiusClass="rounded-2xl"
@@ -230,6 +231,24 @@ export function WebappDetailScreen({ navigation, route }: Props) {
           </View>
         ) : null}
       </View>
+
+      {info.settingsHash ? (
+        <View className="mb-8">
+          <Button
+            onPress={() =>
+              navigation.navigate('WebappSettings', {
+                deviceId,
+                id,
+                name: info.name,
+              })
+            }
+            variant="secondary"
+            icon={SlidersHorizontal}
+          >
+            open {info.name} settings
+          </Button>
+        </View>
+      ) : null}
 
       {info.config.length > 0 ? (
         <View className="mb-8">

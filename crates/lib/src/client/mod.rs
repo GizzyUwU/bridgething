@@ -44,6 +44,8 @@ pub enum ClientToBridgeMsgData {
   #[from]
   Config(ClientToBridgeConfigMsg),
   #[from]
+  Doc(ClientToBridgeDocMsg),
+  #[from]
   Geo(ClientToBridgeGeoMsg),
   #[from]
   Hardware(ClientToBridgeHardwareMsg),
@@ -104,6 +106,8 @@ pub enum BridgeToClientMsgData {
   Capabilities(BridgeToClientCapabilitiesMsg),
   #[from]
   Config(BridgeToClientConfigMsg),
+  #[from]
+  Doc(BridgeToClientDocMsg),
   #[from]
   Geo(BridgeToClientGeoMsg),
   #[from]

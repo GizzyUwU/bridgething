@@ -17,5 +17,6 @@
       "data": { "key": "token", "label": "Long-Lived Access Token (HA profile, bottom of the Security tab)" }
     }
   ],
-  "permissions": ["net.ws"]
+  "permissions": ["net.ws"],
+  "settings": "settings.html"
 }

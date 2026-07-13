@@ -5,10 +5,10 @@ use libbridgething::{
   client::{
     BridgeToClientMsg, ClientLegacyStockCommand, ClientToBridgeAssetMsg, ClientToBridgeAudioMsgCommand,
     ClientToBridgeBluetoothMsg, ClientToBridgeCapabilitiesMsgRequest, ClientToBridgeConfigMsgRequest,
-    ClientToBridgeGeoMsg, ClientToBridgeHardwareMsg, ClientToBridgeLibraryMsg, ClientToBridgeMsg,
-    ClientToBridgeMsgData, ClientToBridgeNetMsg, ClientToBridgeNotificationsMsg, ClientToBridgePhoneMsg,
-    ClientToBridgePlayerMsg, ClientToBridgeStoreMsgRequest, ClientToBridgeSystemMsg, ClientToBridgeTimeMsgRequest,
-    ClientToBridgeVoiceMsg, ClientToBridgeWebappMsg,
+    ClientToBridgeDocMsgRequest, ClientToBridgeGeoMsg, ClientToBridgeHardwareMsg, ClientToBridgeLibraryMsg,
+    ClientToBridgeMsg, ClientToBridgeMsgData, ClientToBridgeNetMsg, ClientToBridgeNotificationsMsg,
+    ClientToBridgePhoneMsg, ClientToBridgePlayerMsg, ClientToBridgeStoreMsgRequest, ClientToBridgeSystemMsg,
+    ClientToBridgeTimeMsgRequest, ClientToBridgeVoiceMsg, ClientToBridgeWebappMsg,
   },
 };
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,7 @@ pub enum RecvMsgData {
   Bluetooth(ClientToBridgeBluetoothMsg),
   Capabilities(ClientToBridgeCapabilitiesMsgRequest),
   Config(ClientToBridgeConfigMsgRequest),
+  Doc(ClientToBridgeDocMsgRequest),
   Geo(ClientToBridgeGeoMsg),
   Hardware(ClientToBridgeHardwareMsg),
   Library(ClientToBridgeLibraryMsg),
@@ -94,6 +95,10 @@ impl From<ClientToBridgeMsg> for RecvMsgData {
       },
       ClientToBridgeMsgData::Config(inner) => match inner.into_request() {
         Some(req) => Self::Config(req),
+        None => Self::Hole,
+      },
+      ClientToBridgeMsgData::Doc(inner) => match inner.into_request() {
+        Some(req) => Self::Doc(req),
         None => Self::Hole,
       },
       ClientToBridgeMsgData::Geo(inner) => Self::Geo(inner),

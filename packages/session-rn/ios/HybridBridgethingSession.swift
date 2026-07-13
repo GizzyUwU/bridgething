@@ -25,9 +25,14 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func uninstallWebapp(deviceId: String, id: String) async throws
     func switchWebapp(deviceId: String, id: String) async throws
     func webappIcon(deviceId: String, id: String) async throws -> BridgethingWebappIcon?
+    func webappSettingsPage(deviceId: String, id: String) async throws -> String
     func listWebappConfig(deviceId: String, id: String) async throws -> [BridgethingConfigEntry]
     func setWebappConfigField(deviceId: String, id: String, key: String, value: String) async throws
     func deleteWebappConfigField(deviceId: String, id: String, key: String) async throws
+    func getWebappDoc(deviceId: String, id: String, key: String) async throws -> String?
+    func listWebappDoc(deviceId: String, id: String) async throws -> [BridgethingDocEntry]
+    func setWebappDoc(deviceId: String, id: String, key: String, value: String) async throws
+    func deleteWebappDoc(deviceId: String, id: String, key: String) async throws
 
     func setCapabilityFlags(flags: BridgethingCapabilityFlags) async
 
@@ -81,6 +86,7 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func setLocalLogStreamingEnabled(_ enabled: Bool)
 
     func setOnWebappsChanged(_ callback: @escaping @Sendable (String) -> Void)
+    func setOnWebappDocChanged(_ callback: @escaping @Sendable (String, String, String, String?) -> Void)
     func setOnDeviceMetaChanged(_ callback: @escaping @Sendable (String, BridgethingDeviceMeta) -> Void)
     func setOnOtaEvent(_ callback: @escaping @Sendable (BridgethingOtaEvent) -> Void)
     func setOnCatalogEvent(_ callback: @escaping @Sendable (BridgethingCatalogEvent) -> Void)
@@ -101,6 +107,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     private static var pendingAncsAuthStatusChanged: (@Sendable (BridgethingAncsAuthStatus) -> Void)?
     private static var pendingLog: (@Sendable (String, String) -> Void)?
     private static var pendingWebappsChanged: (@Sendable (String) -> Void)?
+    private static var pendingWebappDocChanged: (@Sendable (String, String, String, String?) -> Void)?
     private static var pendingDeviceMetaChanged: (@Sendable (String, BridgethingDeviceMeta) -> Void)?
     private static var pendingOtaEvent: (@Sendable (BridgethingOtaEvent) -> Void)?
     private static var pendingCatalogEvent: (@Sendable (BridgethingCatalogEvent) -> Void)?
@@ -119,6 +126,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         let ancsCb = pendingAncsAuthStatusChanged
         let logCb = pendingLog
         let webappsCb = pendingWebappsChanged
+        let webappDocCb = pendingWebappDocChanged
         let deviceMetaCb = pendingDeviceMetaChanged
         let otaCb = pendingOtaEvent
         let catalogCb = pendingCatalogEvent
@@ -132,6 +140,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         pendingAncsAuthStatusChanged = nil
         pendingLog = nil
         pendingWebappsChanged = nil
+        pendingWebappDocChanged = nil
         pendingDeviceMetaChanged = nil
         pendingOtaEvent = nil
         pendingCatalogEvent = nil
@@ -147,6 +156,7 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if let ancsCb { backend.setOnAncsAuthStatusChanged(ancsCb) }
         if let logCb { backend.setOnLog(logCb) }
         if let webappsCb { backend.setOnWebappsChanged(webappsCb) }
+        if let webappDocCb { backend.setOnWebappDocChanged(webappDocCb) }
         if let deviceMetaCb { backend.setOnDeviceMetaChanged(deviceMetaCb) }
         if let otaCb { backend.setOnOtaEvent(otaCb) }
         if let catalogCb { backend.setOnCatalogEvent(catalogCb) }
@@ -296,6 +306,12 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         }
     }
 
+    public func webappSettingsPage(deviceId: String, id: String) throws -> Promise<String> {
+        Promise.async {
+            try await Self.backend().webappSettingsPage(deviceId: deviceId, id: id)
+        }
+    }
+
     public func listWebappConfig(deviceId: String, id: String) throws -> Promise<[BridgethingConfigEntry]> {
         Promise.async {
             try await Self.backend().listWebappConfig(deviceId: deviceId, id: id)
@@ -311,6 +327,31 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func deleteWebappConfigField(deviceId: String, id: String, key: String) throws -> Promise<Void> {
         Promise.async {
             try await Self.backend().deleteWebappConfigField(deviceId: deviceId, id: id, key: key)
+        }
+    }
+
+    public func getWebappDoc(deviceId: String, id: String, key: String) throws -> Promise<Variant_NullType_String> {
+        Promise.async {
+            let value = try await Self.backend().getWebappDoc(deviceId: deviceId, id: id, key: key)
+            return value.map { .second($0) } ?? .first(NullType.null)
+        }
+    }
+
+    public func listWebappDoc(deviceId: String, id: String) throws -> Promise<[BridgethingDocEntry]> {
+        Promise.async {
+            try await Self.backend().listWebappDoc(deviceId: deviceId, id: id)
+        }
+    }
+
+    public func setWebappDoc(deviceId: String, id: String, key: String, value: String) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().setWebappDoc(deviceId: deviceId, id: id, key: key, value: value)
+        }
+    }
+
+    public func deleteWebappDoc(deviceId: String, id: String, key: String) throws -> Promise<Void> {
+        Promise.async {
+            try await Self.backend().deleteWebappDoc(deviceId: deviceId, id: id, key: key)
         }
     }
 
@@ -588,6 +629,17 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
         if backend == nil { Self.pendingWebappsChanged = wrapped }
         Self.stateLock.unlock()
         backend?.setOnWebappsChanged(wrapped)
+    }
+
+    public func setOnWebappDocChanged(callback: @escaping (String, String, String, Variant_NullType_String?) -> Void) throws {
+        let wrapped: @Sendable (String, String, String, String?) -> Void = { deviceId, webappId, key, value in
+            callback(deviceId, webappId, key, value.map { .second($0) } ?? .first(NullType.null))
+        }
+        Self.stateLock.lock()
+        let backend = Self._backend
+        if backend == nil { Self.pendingWebappDocChanged = wrapped }
+        Self.stateLock.unlock()
+        backend?.setOnWebappDocChanged(wrapped)
     }
 
     public func setOnDeviceMetaChanged(callback: @escaping (String, BridgethingDeviceMeta) -> Void) throws {

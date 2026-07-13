@@ -133,6 +133,21 @@ const r = await client.config.get({ key: 'units' });
 const all = await client.config.list();
 ```
 
+The user edits these in the companion phone app. The scaffold ships a
+companion-side settings page under `settings/` that reads and writes them via a
+separate SDK, `@bridgething/client/settings` (a `postMessage` bridge to the
+companion host, not this WebSocket). `manifest.json`'s `settings` field points
+the companion at the built `dist/settings.html`.
+
+NETWORK CAVEAT for the settings page: it runs on the phone with real internet,
+but it loads from a `file://` origin and the webview enforces CORS on
+fetch/XHR. WebSocket APIs work (the WS handshake is not CORS-gated); plain HTTP
+APIs work only when the server sends permissive CORS headers (requests arrive
+with `Origin: null`). Prefer the service's websocket API from the settings
+page; for a CORS-strict HTTP-only service, fetch from the device webapp via
+`client.net` (phone-tunneled, not origin-restricted) and keep the settings page
+for typing and choosing.
+
 **Internet through the phone (`client.net`)** - the device has no direct network;
 `net.fetch` / websockets / a SOCKS proxy all tunnel through the phone. Needs the
 matching `permissions` entry in `manifest.json` (`net.fetch`, `net.ws`,

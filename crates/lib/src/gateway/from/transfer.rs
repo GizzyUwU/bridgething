@@ -5,6 +5,8 @@ use ts_rs::TS;
 use typeshare::typeshare;
 use uuid::Uuid;
 
+use crate::gateway::TransferAck;
+
 /// Handle to a fragment stream, embedded in the typed message that
 /// opens a transfer (a pull reply or a push begin). The bytes travel
 /// out-of-band as `TransferFragment` events keyed by `id`; the
@@ -91,4 +93,6 @@ pub enum GatewayToBridgeTransferMsg {
   Fragment(TransferFragment),
   #[bridge_event]
   Abandon(TransferAbandon),
+  #[bridge_event]
+  Ack(TransferAck),
 }

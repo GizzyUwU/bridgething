@@ -61,3 +61,10 @@ to bring the connected Car Thing to the latest bridgething release. Multiple dev
 - `src/index.css` - `@import "tailwindcss";`.
 - `vite.config.ts` - vite + tailwind plugin, `es2022` target.
 - `index.html` - 800x480 viewport, no overscroll, no tap highlight.
+- `settings/` - the companion-side settings page (preact), built by
+  `vite.settings.config.ts` into a single self-contained `dist/settings.html`.
+  It reads and writes settings over `@bridgething/client/settings`.
+
+`bun run build` runs both configs: the main app into `dist/`, then the settings
+page as `dist/settings.html`. `manifest.json`'s `settings` field points the
+companion at it.
