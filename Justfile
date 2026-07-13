@@ -90,9 +90,16 @@ test-device:
 
 # --- Device iteration ---
 
+# Check out vendored submodules. swupdate's IPC sources are a submodule, and a
+# plain clone leaves them empty - the cross image then COPYs an empty directory
+# and dies on "ipc/network_ipc.c: No such file or directory", which reads like a
+# broken Dockerfile rather than a missing checkout.
+submodules:
+  git submodule update --init --recursive
+
 # Build the daemon build image. runs at the host's native arch and
 # cross-compiles to aarch64, so it is emulation-free on both x86_64 and arm64.
-build-image:
+build-image: submodules
   docker build -t bridgething-build -f scripts/cross-aarch64.Dockerfile .
 
 # Cross-build the daemon for the Car Thing.

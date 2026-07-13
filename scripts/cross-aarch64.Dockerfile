@@ -6,6 +6,10 @@
 #
 # deps:
 #   - gcc-aarch64-linux-gnu: the aarch64 linker for the rust target
+#   - libc6-dev-arm64-cross: the aarch64 libc headers. debian ships these as a
+#     *Recommends* of gcc-aarch64-linux-gnu, so --no-install-recommends drops
+#     them and the cross compiler cannot even #include <stdio.h>. must be named
+#     explicitly or the libswupdate stub below fails on bits/libc-header-start.h.
 #   - libusb-1.0, libdbus-1, libasound2 (:arm64): bluer + alsa-sys link deps
 #   - pkg-config + clang/libclang-dev: pkg-config resolves the arm64 .pc files;
 #     bindgen (swupdate-sys) needs libclang
@@ -25,6 +29,7 @@ RUN dpkg --add-architecture arm64 && \
     apt-get update && \
     apt-get install --assume-yes --no-install-recommends \
       gcc-aarch64-linux-gnu \
+      libc6-dev-arm64-cross \
       libusb-1.0-0-dev:arm64 \
       libdbus-1-dev:arm64 \
       libasound2-dev:arm64 \
