@@ -48,6 +48,18 @@ public sealed class AdapterException(message: String) : RuntimeException(message
     public class UnknownDevice(deviceId: String) : AdapterException("unknown device: $deviceId")
     public class SendFailed(detail: String) : AdapterException("send failed: $detail")
     public class TransportFailure(detail: String) : AdapterException("transport failure: $detail")
+
+    /**
+     * The peer is not bonded, so the transport refused to open a link to it.
+     *
+     * On Android, connecting an RFCOMM socket to an unbonded device makes the
+     * OS start pairing on our behalf. That is never what a background reconnect
+     * wants, so it is a hard error rather than a retryable one: callers must
+     * bond first (explicitly, in the foreground) and connect afterwards. Retry
+     * loops must treat this as terminal - retrying is what produces duplicate
+     * system pairing dialogs.
+     */
+    public class NotBonded(deviceId: String) : AdapterException("device not bonded: $deviceId")
 }
 
 /**

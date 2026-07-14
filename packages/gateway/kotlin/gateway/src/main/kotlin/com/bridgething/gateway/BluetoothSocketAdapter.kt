@@ -1,15 +1,18 @@
 package com.bridgething.gateway
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.util.Log
 import com.bridgething.schema.BridgethingProtocol
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -52,6 +55,7 @@ import java.util.UUID
  */
 public class BluetoothSocketAdapter(
     private val serviceUuid: UUID = BridgethingProtocol.PROFILE_UUID,
+    private val bluetooth: BluetoothAdapter? = null,
 ) : Adapter {
 
     internal val ioScope: CoroutineScope =
@@ -61,6 +65,7 @@ public class BluetoothSocketAdapter(
     private val sessions = mutableMapOf<String, Session>()
     private val devices = mutableMapOf<String, BluetoothDevice>()
     private val reconnectJobs = mutableMapOf<String, Job>()
+    private val pending = mutableMapOf<String, Deferred<Device>>()
     @Volatile private var stopped = false
 
     private val incomingEvents: Channel<AdapterEvent> = Channel(Channel.UNLIMITED)
@@ -81,6 +86,8 @@ public class BluetoothSocketAdapter(
             devices.clear()
             reconnectJobs.values.forEach { it.cancel() }
             reconnectJobs.clear()
+            pending.values.forEach { it.cancel() }
+            pending.clear()
         }
         toClose.forEach { it.close() }
         incomingEvents.close()
@@ -91,6 +98,7 @@ public class BluetoothSocketAdapter(
         val session = mutex.withLock {
             devices.remove(deviceId)
             reconnectJobs.remove(deviceId)?.cancel()
+            pending.remove(deviceId)?.cancel()
             sessions.remove(deviceId)
         } ?: throw AdapterException.UnknownDevice(deviceId)
         session.close()
@@ -112,75 +120,136 @@ public class BluetoothSocketAdapter(
      * Open an RFCOMM session to a bonded BluetoothDevice and begin pumping its
      * bytes into the [events] flow. Must be invoked with the
      * `BLUETOOTH_CONNECT` runtime permission already granted.
+     *
+     * Concurrent callers for one device share a single attempt. [connect] is
+     * driven from four independent places - the reconnect loop, CDM presence
+     * wakeups, the foreground service's START_STICKY restarts and the pair flow
+     * - and two RFCOMM connects racing on the same device make the stack
+     * renegotiate link security mid-flight, which the OS can escalate into a
+     * pairing dialog on an already-bonded peer.
+     *
+     * Unbonded devices are refused with [AdapterException.NotBonded] instead of
+     * being connected: an RFCOMM connect to an unbonded peer is *how* Android
+     * starts pairing, so a retry loop doing it spawns one system dialog per
+     * attempt. Bonding is the caller's job - explicit, foregrounded, once.
      */
-    @SuppressLint("MissingPermission")
-    public suspend fun connect(device: BluetoothDevice, scheduleOnFailure: Boolean = true): Device = withContext(Dispatchers.IO) {
+    public suspend fun connect(device: BluetoothDevice, scheduleOnFailure: Boolean = true): Device {
         val deviceId = device.address
-        mutex.withLock {
+
+        val attempt = mutex.withLock {
+            sessions[deviceId]?.let { return it.device }
             devices[deviceId] = device
-            sessions[deviceId]
-        }?.let { return@withContext it.device }
-
-        val deviceName = try {
-            device.name ?: deviceId
-        } catch (_: SecurityException) {
-            deviceId
+            pending[deviceId] ?: ioScope.async { openSession(device, scheduleOnFailure) }
+                .also { pending[deviceId] = it }
         }
-        val info = Device(id = deviceId, name = deviceName)
-
-        Log.i(TAG, "opening rfcomm to $deviceId ($deviceName) uuid=$serviceUuid bonded=${device.bondState == BluetoothDevice.BOND_BONDED}")
-
-        val socket: BluetoothSocket = try {
-            device.createRfcommSocketToServiceRecord(serviceUuid)
-        } catch (e: IOException) {
-            Log.w(TAG, "createRfcommSocket for $deviceId failed: ${e.message}")
-            throw AdapterException.TransportFailure(
-                "createRfcommSocket for $deviceId failed: ${e.message}"
-            )
-        } ?: throw AdapterException.TransportFailure(
-            "createRfcommSocket returned null for $deviceId"
-        )
-
         try {
-            socket.connect()
-        } catch (e: IOException) {
-            runCatching { socket.close() }
-            val aclUp = isAclConnected(device)
-            val bonded = device.bondState == BluetoothDevice.BOND_BONDED
-            Log.w(TAG, "rfcomm connect to $deviceId failed (aclConnected=$aclUp bonded=$bonded): ${e.message}")
-            // A first connect to an unbonded Car Thing is expected to fail - it's
-            // what kicks off Android pairing. Retry so a later attempt lands once
-            // the bond completes. Only surface LinkFailed when we're already
-            // bonded AND link-connected but the daemon still won't answer; that's
-            // the real "can't reach the daemon" case, not pairing-in-progress.
-            if (aclUp && bonded) {
-                incomingEvents.send(
-                    AdapterEvent.LinkFailed(info, "rfcomm connect to $deviceId failed: ${e.message}")
-                )
-            }
-            if (scheduleOnFailure && !stopped && mutex.withLock { devices.containsKey(deviceId) }) {
-                scheduleReconnect(deviceId, device)
-            }
-            throw AdapterException.TransportFailure("rfcomm connect to $deviceId failed: ${e.message}")
+            return attempt.await()
+        } finally {
+            mutex.withLock { if (pending[deviceId] === attempt) pending.remove(deviceId) }
         }
-        Log.i(TAG, "rfcomm connected to $deviceId")
+    }
 
-        val session = Session(this@BluetoothSocketAdapter, info, socket)
-        val installed = mutex.withLock {
-            if (sessions.containsKey(deviceId)) {
-                false
-            } else {
-                sessions[deviceId] = session
-                true
+    @SuppressLint("MissingPermission")
+    private suspend fun openSession(device: BluetoothDevice, scheduleOnFailure: Boolean): Device =
+        withContext(Dispatchers.IO) {
+            val deviceId = device.address
+            val deviceName = try {
+                device.name ?: deviceId
+            } catch (_: SecurityException) {
+                deviceId
             }
+            val info = Device(id = deviceId, name = deviceName)
+
+            if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                Log.i(TAG, "refusing rfcomm to $deviceId: not bonded (bondState=${device.bondState})")
+                throw AdapterException.NotBonded(deviceId)
+            }
+
+            // Discovery hogs the baseband and makes socket connects slow and
+            // flaky; Android's own docs require cancelling it before connecting.
+            // Needs BLUETOOTH_SCAN on S+, which we may not hold - best effort.
+            bluetooth?.let { ba ->
+                if (runCatching { ba.isDiscovering }.getOrDefault(false)) {
+                    Log.i(TAG, "cancelling discovery before connecting $deviceId")
+                    runCatching { ba.cancelDiscovery() }
+                }
+            }
+
+            Log.i(TAG, "opening rfcomm to $deviceId ($deviceName) uuid=$serviceUuid")
+
+            val socket: BluetoothSocket = try {
+                // Insecure on purpose. The daemon registers this profile with
+                // require_authentication=false, so the secure variant demands an
+                // authenticated link the peer never asked for - and every connect
+                // that re-negotiates authentication is a chance for the stack to
+                // decide the link key is unusable and pop a pairing dialog on a
+                // perfectly healthy bond. Pairing still happens once, explicitly,
+                // in the pair flow; a bonded link stays encrypted.
+                device.createInsecureRfcommSocketToServiceRecord(serviceUuid)
+            } catch (e: IOException) {
+                Log.w(TAG, "createRfcommSocket for $deviceId failed: ${e.message}")
+                throw AdapterException.TransportFailure(
+                    "createRfcommSocket for $deviceId failed: ${e.message}"
+                )
+            } ?: throw AdapterException.TransportFailure(
+                "createRfcommSocket returned null for $deviceId"
+            )
+
+            try {
+                socket.connect()
+            } catch (e: IOException) {
+                runCatching { socket.close() }
+                val aclUp = isAclConnected(device)
+                Log.w(TAG, "rfcomm connect to $deviceId failed (aclConnected=$aclUp): ${e.message}")
+                // We only get here bonded, so a link-level connection that still
+                // won't carry the service is the real "daemon unreachable" case.
+                if (aclUp) {
+                    incomingEvents.send(
+                        AdapterEvent.LinkFailed(info, "rfcomm connect to $deviceId failed: ${e.message}")
+                    )
+                }
+                if (scheduleOnFailure && !stopped && mutex.withLock { devices.containsKey(deviceId) }) {
+                    scheduleReconnect(deviceId, device)
+                }
+                throw AdapterException.TransportFailure("rfcomm connect to $deviceId failed: ${e.message}")
+            }
+            Log.i(TAG, "rfcomm connected to $deviceId")
+
+            val session = Session(this@BluetoothSocketAdapter, info, socket)
+            val installed = mutex.withLock {
+                if (sessions.containsKey(deviceId)) {
+                    false
+                } else {
+                    sessions[deviceId] = session
+                    true
+                }
+            }
+            if (!installed) {
+                runCatching { socket.close() }
+                return@withContext mutex.withLock { sessions[deviceId] }?.device ?: info
+            }
+            session.start()
+            incomingEvents.send(AdapterEvent.Connected(info))
+            info
         }
-        if (!installed) {
-            runCatching { socket.close() }
-            return@withContext mutex.withLock { sessions[deviceId] }?.device ?: info
-        }
-        session.start()
-        incomingEvents.send(AdapterEvent.Connected(info))
-        info
+
+    /**
+     * Drop [deviceId] completely: close any session, stop its reconnect loop and
+     * forget it, so nothing reconnects until someone connects it again. Unlike
+     * [disconnect] this is a no-op on an unknown device.
+     *
+     * The bond-state watcher calls this when a peer loses its bond, so the retry
+     * loop cannot sit there hammering an unbonded device.
+     */
+    public suspend fun forget(deviceId: String) {
+        val session = mutex.withLock {
+            devices.remove(deviceId)
+            reconnectJobs.remove(deviceId)?.cancel()
+            pending.remove(deviceId)?.cancel()
+            sessions.remove(deviceId)
+        } ?: return
+        session.close()
+        incomingEvents.send(AdapterEvent.Disconnected(deviceId))
     }
 
     internal suspend fun emitBytes(deviceId: String, bytes: ByteArray) {
@@ -204,7 +273,16 @@ public class BluetoothSocketAdapter(
                 if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
                 kotlinx.coroutines.delay(delayMs)
                 if (mutex.withLock { sessions.containsKey(deviceId) || !devices.containsKey(deviceId) }) return@launch
-                if (runCatching { connect(device, scheduleOnFailure = false) }.isSuccess) return@launch
+                val outcome = runCatching { connect(device, scheduleOnFailure = false) }
+                if (outcome.isSuccess) return@launch
+                // Unbonded is terminal, never retried: retrying an unbonded connect
+                // is exactly what re-triggers Android pairing, once per attempt.
+                // Whoever re-bonds the device - the pair flow, or the user in system
+                // settings - drives the next connect through the bond-state watcher.
+                if (outcome.exceptionOrNull() is AdapterException.NotBonded) {
+                    Log.i(TAG, "reconnect loop for $deviceId stopping: not bonded")
+                    return@launch
+                }
                 delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
             }
         }

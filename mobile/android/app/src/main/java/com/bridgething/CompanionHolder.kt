@@ -2,6 +2,7 @@ package com.bridgething
 
 import android.app.Activity
 import android.app.Application
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.ComponentName
 import android.util.Log
@@ -52,7 +53,10 @@ public object CompanionHolder {
         (context.applicationContext as? Application)?.let { ensureLifecycleObserver(it) }
         companion?.let { return it }
         val appCtx = context.applicationContext
-        val transport = BluetoothSocketAdapter()
+        BondWatcher.register(appCtx)
+        val transport = BluetoothSocketAdapter(
+            bluetooth = (appCtx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter,
+        )
         val notificationBackend = AndroidNotificationBackend(
             activeShade = { NotificationBridgeRegistry.listener?.activeWireNotifications() ?: emptyList() },
             resolveAction = { id, positive -> NotificationBridgeRegistry.listener?.actionIntent(id, positive) },
@@ -79,6 +83,18 @@ public object CompanionHolder {
         c
     }
 
+    /**
+     * Reconnect every associated device that is actually bonded.
+     *
+     * Unbonded associations are skipped rather than connected: a CDM association
+     * outlives its BT bond, and connecting RFCOMM to an unbonded peer is how
+     * Android starts pairing - which is what made reconnects re-pair in the
+     * background. If such a device ever bonds again, [BondWatcher] connects it.
+     *
+     * Safe to call concurrently and repeatedly (the foreground service restarts,
+     * CDM presence wakeups and the pair flow all land here); the adapter folds
+     * concurrent connects for one device into a single attempt.
+     */
     public fun reconnectAssociated(context: Context) {
         val transport = adapter
         if (transport == null) {
@@ -102,12 +118,36 @@ public object CompanionHolder {
                 Log.w(TAG, "reconnectAssociated: getRemoteDevice($mac) failed")
                 continue
             }
-            Log.i(TAG, "reconnectAssociated: connecting $mac (bondState=${device.bondState})")
+            val bond = runCatching { device.bondState }.getOrDefault(BluetoothDevice.BOND_NONE)
+            if (bond != BluetoothDevice.BOND_BONDED) {
+                Log.i(TAG, "reconnectAssociated: skipping $mac, not bonded (bondState=$bond)")
+                continue
+            }
+            Log.i(TAG, "reconnectAssociated: connecting $mac")
             scope.launch {
                 runCatching { transport.connect(device) }
                     .onFailure { Log.w(TAG, "reconnectAssociated: connect($mac) failed: ${it.message}") }
             }
         }
+    }
+
+    /** Bring up a peer that just reached BOND_BONDED. Called by [BondWatcher]. */
+    public suspend fun connectBonded(context: Context, device: BluetoothDevice) {
+        if (adapter == null) runCatching { ensureStarted(context) }
+        val transport = adapter ?: run {
+            Log.w(TAG, "connectBonded: no adapter for ${device.address}")
+            return
+        }
+        Log.i(TAG, "connectBonded: ${device.address} bonded, connecting")
+        runCatching { transport.connect(device) }
+            .onFailure { Log.w(TAG, "connectBonded: connect(${device.address}) failed: ${it.message}") }
+    }
+
+    /** Stop tracking a peer that lost its bond, so nothing reconnects (or re-pairs) to it. */
+    public suspend fun forgetDevice(mac: String) {
+        val transport = adapter ?: return
+        runCatching { transport.forget(mac.uppercase()) }
+            .onFailure { Log.w(TAG, "forgetDevice($mac) failed: ${it.message}") }
     }
 
     private fun ensureLifecycleObserver(app: Application) {

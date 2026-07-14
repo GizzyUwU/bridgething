@@ -11,6 +11,7 @@ import com.margelo.nitro.bridgething.session.BridgethingAncsSetupKind
 import com.margelo.nitro.bridgething.session.BridgethingAncsSetupResult
 import com.margelo.nitro.bridgething.session.BridgethingAuthState
 import com.margelo.nitro.bridgething.session.BridgethingAuthKind
+import com.margelo.nitro.bridgething.session.BridgethingBtBondState
 import com.margelo.nitro.bridgething.session.BridgethingBtDevice
 import com.margelo.nitro.bridgething.session.BridgethingCapabilityFlags
 import com.margelo.nitro.bridgething.session.BridgethingCompanionDebug
@@ -902,8 +903,20 @@ public class HybridBridgethingSessionImpl(
         val picked = CompanionDevicePicker.pick(context.applicationContext) ?: return null
         CompanionDevicePicker.startObservingPresence(context)
         BridgethingConnectionService.start(context)
-        CompanionHolder.reconnectAssociated(context)
-        return picked
+
+        // pick() kicked off the bond (the only place that does). Wait for it to
+        // land and report the truth in bondState: a failed bond used to be
+        // invisible to the UI, which sat on a 45s "still connecting" timeout and
+        // then told the user to tap a Pair prompt that had already gone away.
+        // BondWatcher opens the RFCOMM session itself the moment BOND_BONDED
+        // arrives, so there is nothing to connect here.
+        val bonded = CompanionDevicePicker.awaitBond(context.applicationContext, picked.address)
+        return BridgethingBtDevice(
+            address = picked.address,
+            name = picked.name,
+            bondState = if (bonded) BridgethingBtBondState.BONDED else BridgethingBtBondState.NONE,
+            isCarThing = picked.isCarThing,
+        )
     }
 
     override fun setOnProviderChanged(callback: (BridgethingProviderInfo?) -> Unit) { onProviderChanged = callback }

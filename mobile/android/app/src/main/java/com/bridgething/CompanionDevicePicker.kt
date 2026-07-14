@@ -45,12 +45,19 @@ public object CompanionDevicePicker {
                 } else {
                     @Suppress("DEPRECATION") data.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE)
                 }
-            // Kick off bonding here, straight off the user's selection while we're
-            // foreground, so Android shows the pairing DIALOG. If we instead let
-            // the background RFCOMM connect trigger the bond, the system only
-            // posts a tap-to-open notification.
+            // The one and only place a bond is started. Kicking it off straight
+            // off the user's selection, while we're foreground, is what makes
+            // Android show the pairing DIALOG - a bond triggered by a background
+            // RFCOMM connect only gets a tap-to-open notification, and a retry
+            // loop doing that produces one per attempt. Nothing else opens a
+            // socket to an unbonded device any more, so this is the sole trigger.
+            //
+            // Open the pairing window first: it tells BondWatcher that the Car
+            // Thing's BOND_NONE dips over the next couple of minutes are pairing
+            // noise, not an unpair.
             device?.let {
                 if (it.bondState != BluetoothDevice.BOND_BONDED) {
+                    BondWatcher.beginPairing(it.address)
                     runCatching { it.createBond() }
                 }
             }
@@ -158,15 +165,33 @@ public object CompanionDevicePicker {
         runCatching { @Suppress("DEPRECATION") manager.stopObservingDevicePresence(mac) }
     }
 
+    /**
+     * Wait for the bond [pick] started to land, so the pair flow can report a real
+     * outcome instead of guessing. Returns false if it failed or timed out.
+     */
+    public suspend fun awaitBond(context: Context, mac: String): Boolean {
+        val ba = (context.applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)
+            ?.adapter ?: return false
+        val device = runCatching { ba.getRemoteDevice(mac.uppercase()) }.getOrNull() ?: return false
+        return BondWatcher.awaitBonded(device)
+    }
+
     private fun toWireDevice(device: BluetoothDevice): BridgethingBtDevice {
         val name = try { device.name } catch (_: SecurityException) { null }
         return BridgethingBtDevice(
             address = device.address ?: "",
             name = name,
-            bondState = BridgethingBtBondState.BONDED,
+            bondState = bondStateOf(device),
             isCarThing = true,
         )
     }
+
+    internal fun bondStateOf(device: BluetoothDevice): BridgethingBtBondState =
+        when (try { device.bondState } catch (_: SecurityException) { BluetoothDevice.BOND_NONE }) {
+            BluetoothDevice.BOND_BONDED -> BridgethingBtBondState.BONDED
+            BluetoothDevice.BOND_BONDING -> BridgethingBtBondState.BONDING
+            else -> BridgethingBtBondState.NONE
+        }
 
     private const val TAG = "bridgething.cdm"
 }

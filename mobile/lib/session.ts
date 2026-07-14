@@ -251,6 +251,7 @@ export type PairOutcome =
   | { kind: 'connected' }
   | { kind: 'cancelled' }
   | { kind: 'permissionDenied' }
+  | { kind: 'pairingFailed' }
   | { kind: 'timeout' }
   | { kind: 'notificationsFailed'; message?: string }
   | { kind: 'error'; message: string };
@@ -262,6 +263,10 @@ export async function runPairFlow(): Promise<PairOutcome> {
       if (bt !== 'granted') return { kind: 'permissionDenied' };
       const picked = await getSession().presentPairPicker();
       if (picked == null) return { kind: 'cancelled' };
+      // Android resolves this only once the bond has actually landed or failed.
+      // A failed bond needs a deliberate retry - we never silently re-pair, since
+      // that is what used to stack up duplicate system pairing dialogs.
+      if (picked.bondState !== 'bonded') return { kind: 'pairingFailed' };
       return (await waitForPeer(45000))
         ? { kind: 'connected' }
         : { kind: 'timeout' };
@@ -292,11 +297,17 @@ export function alertPairOutcome(outcome: PairOutcome): void {
         'bridgething needs Bluetooth access to connect to your Car Thing. enable it in settings, then try pairing again.',
       );
       return;
+    case 'pairingFailed':
+      Alert.alert(
+        'pairing failed',
+        'your Car Thing did not finish pairing. make sure it is powered on and nearby, then try again.',
+      );
+      return;
     case 'timeout':
       Alert.alert(
         Platform.OS === 'android' ? 'still connecting' : 'could not connect',
         Platform.OS === 'android'
-          ? 'if a Bluetooth pairing prompt appeared, tap Pair to continue. make sure your Car Thing is on and nearby - it can take a few seconds.'
+          ? 'your Car Thing paired but has not connected yet. make sure it is on and nearby - it can take a few seconds.'
           : 'pairing finished but your Car Thing did not connect. make sure it is powered on and nearby, then try again.',
       );
       return;
