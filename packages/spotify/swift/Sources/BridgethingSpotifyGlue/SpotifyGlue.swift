@@ -76,8 +76,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private var likedOverride: [String: Bool] = [:]
     private var artHeroEdge = defaultHeroEdge
     private var artThumbEdge = defaultThumbEdge
-    private var lastKnownDeviceCount: Int?
-    private var wakeOnEmptyCluster = false
 
     private var emitTask: Task<Void, Never>?
     private var emitContinuation: AsyncStream<EmitJob>.Continuation?
@@ -135,9 +133,23 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     private func currentGateway() -> BridgethingGateway? { stateLock.withLock { gateway } }
     private func setGateway(_ g: BridgethingGateway?) { stateLock.withLock { gateway = g } }
 
-    fileprivate func wakePhoneSpotify() {
+    var isAppForeground: @MainActor @Sendable () -> Bool = {
+        #if canImport(UIKit)
+            UIApplication.shared.applicationState == .active
+        #else
+            false
+        #endif
+    }
+
+    fileprivate func wakePhoneSpotify(reason: WakeReason) {
         guard let gateway = currentGateway() else { return }
-        Task { try? await gateway.player.requestSpotifyWake() }
+        Task { @MainActor in
+            if reason == .connectResume, self.isAppForeground() {
+                glueLog.info("suppressing connect-resume wake: the app is foreground")
+                return
+            }
+            try? await gateway.player.requestSpotifyWake()
+        }
     }
     private func currentNowPlayingObserver() -> (@Sendable (GlueNowPlaying?) -> Void)? {
         stateLock.withLock { nowPlayingObserver }
@@ -281,14 +293,13 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
     public func handlePeerConnected(allowAutoResume: Bool) async {
         guard currentGateway() != nil else { return }
         if allowAutoResume {
-            glueLog.info("fresh peer connect; requesting spotify wake")
-            wakePhoneSpotify()
-            let clusterEmpty = stateLock.withLock { () -> Bool? in
-                if let count = lastKnownDeviceCount { return count == 0 }
-                wakeOnEmptyCluster = true
-                return nil
+            glueLog.info("fresh peer connect; reconciling playback via connect resume")
+            Task { [weak self] in
+                guard let client = self?.client else { return }
+                do { try await client.resumeOnConnect() } catch {
+                    glueLog.info("connect auto-resume did not complete: \(error)")
+                }
             }
-            if clusterEmpty == true { spawnConnectResume() }
         }
         stateLock.withLock { heldScopes.removeAll() }
         resetQueueDedup()
@@ -344,26 +355,6 @@ public final class SpotifyGlue: BridgethingGlue, @unchecked Sendable {
         glueLog.info("dealer queue: \(queue.next.count) upcoming (sending \(entries.count))")
         stateLock.withLock { lastQueueItems = entries }
         enqueue(.queue(entries: entries, thumbEdge: thumb))
-    }
-
-    fileprivate func onDevices(_ devices: [SpDevice]) {
-        let fireResume = stateLock.withLock { () -> Bool in
-            lastKnownDeviceCount = devices.count
-            guard wakeOnEmptyCluster else { return false }
-            wakeOnEmptyCluster = false
-            return devices.isEmpty
-        }
-        if fireResume { spawnConnectResume() }
-    }
-
-    private func spawnConnectResume() {
-        glueLog.info("connect cluster empty; resuming playback via connect")
-        Task { [weak self] in
-            guard let client = self?.client else { return }
-            do { try await client.resume() } catch {
-                glueLog.info("connect auto-resume did not complete: \(error)")
-            }
-        }
     }
 
     fileprivate func onLibraryChanged(_ scope: SpLibraryScope) {
@@ -987,7 +978,7 @@ private final class ObserverBridge: Spotify.Observer, @unchecked Sendable {
     init(_ glue: SpotifyGlue) { self.glue = glue }
     func onPlayer(state: SpPlayerState) { glue?.onPlayer(state) }
     func onQueue(queue: SpQueue) { glue?.onQueue(queue) }
-    func onDevices(devices: [SpDevice]) { glue?.onDevices(devices) }
+    func onDevices(devices _: [SpDevice]) {}
     func onAuth(state: SpAuthState) { glue?.onAuth(state) }
     func onLibraryChanged(scope: SpLibraryScope) { glue?.onLibraryChanged(scope) }
 }
@@ -1025,7 +1016,7 @@ final class GatewayDeviceWaker: Spotify.DeviceWaker, @unchecked Sendable {
         self.glue = glue
     }
 
-    func wakeDevice() {
-        glue?.wakePhoneSpotify()
+    func wakeDevice(reason: WakeReason) {
+        glue?.wakePhoneSpotify(reason: reason)
     }
 }

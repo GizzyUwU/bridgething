@@ -1,5 +1,6 @@
 use libbridgething::{
-  Device, DeviceType, GatewayCapabilities, PeerCompanionStatus, gateway::GatewayToBridgeCapabilitiesMsgEventDispatch,
+  Device, DeviceType, GatewayCapabilities, PeerCompanionStatus,
+  gateway::{BridgeToGatewayNotificationsMsgEvent, GatewayToBridgeCapabilitiesMsgEventDispatch},
 };
 
 use super::{HandlerResult, MsgHandle};
@@ -48,6 +49,13 @@ impl GatewayToBridgeCapabilitiesMsgEventDispatch for CapabilitiesHandler {
       if let Err(err) = self.handle.state.capabilities.set_announce(mac, params).await {
         tracing::warn!(?err, "failed to publish capabilities snapshot");
       }
+      let ancs = self.handle.bluetooth.le.ancs_auth_state();
+      self
+        .handle
+        .bluetooth
+        .gateway_man
+        .send_event(mac, BridgeToGatewayNotificationsMsgEvent::AncsAuthStateChanged(ancs))
+        .await;
     }
     Ok(())
   }

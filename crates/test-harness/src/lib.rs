@@ -205,6 +205,11 @@ impl Harness {
     Ok(MockWsClient { stream })
   }
 
+  /// The daemon's bound modern (http + ws) address.
+  pub fn modern_addr(&self) -> std::net::SocketAddr {
+    self.server_addrs.modern
+  }
+
   /// Launch headless chromium against the daemon and render the real stock SPA
   /// (Tier-2 observer). Requires `start_with_stock_webapp`. Errors when no
   /// chromium binary is present, which lets callers skip rather than fail.

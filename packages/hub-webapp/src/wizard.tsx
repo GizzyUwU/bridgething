@@ -1,9 +1,4 @@
-import {
-  type BluetoothPairingResult,
-  type BluetoothPin,
-  type BridgethingClient,
-  type ConnectedDevice,
-} from '@bridgething/client';
+import { type BluetoothPairingResult, type BridgethingClient, type ConnectedDevice } from '@bridgething/client';
 import { useEffect, useState } from 'react';
 
 import frame from './carthing-frame.png';
@@ -68,7 +63,6 @@ function StepIndicator({ step }: { step: Step }) {
 
 function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () => void }) {
   const [alias, setAlias] = useState<string | null>(null);
-  const [pin, setPin] = useState<BluetoothPin | null>(null);
   const [connected, setConnected] = useState<ConnectedDevice | null>(null);
   const [pairResult, setPairResult] = useState<BluetoothPairingResult | null>(null);
 
@@ -85,11 +79,9 @@ function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () =>
   }, [client]);
 
   useEffect(() => {
-    const offPin = client.bluetooth.onPin(setPin);
     const offConnected = client.bluetooth.onConnectedDevice(setConnected);
     const offResult = client.bluetooth.onPairingResult(setPairResult);
     return () => {
-      offPin();
       offConnected();
       offResult();
     };
@@ -101,20 +93,13 @@ function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () =>
     <div className="flex h-full flex-col items-center justify-between px-8 pt-6 pb-8">
       <div className="flex flex-1 flex-col items-center justify-center gap-6">
         <div className="bt-wordmark text-2xl font-medium text-bt-off-white">pair your phone</div>
-        <div className="max-w-[26rem] text-center text-sm text-bt-soft-gray">
+        <div className="max-w-104 text-center text-sm text-bt-soft-gray">
           {ready ? 'paired. you can move on.' : 'open bluetooth on your phone and look for this device.'}
         </div>
 
         {!ready && alias && (
           <div className="rounded-2xl border border-bt-soft-gray/30 bg-black/30 px-6 py-4">
             <div className="bt-wordmark text-xl font-medium text-bt-off-white">{alias}</div>
-          </div>
-        )}
-
-        {pin && !ready && (
-          <div className="flex flex-col items-center gap-1">
-            <div className="text-xs uppercase tracking-widest text-bt-soft-gray">pin</div>
-            <div className="bt-wordmark text-4xl font-medium tracking-[0.4em] text-bt-blue">{pin.pin}</div>
           </div>
         )}
 
@@ -126,7 +111,7 @@ function PairStep({ client, onNext }: { client: BridgethingClient; onNext: () =>
         )}
       </div>
 
-      <div className="flex w-full max-w-[26rem] items-center justify-between">
+      <div className="flex w-full max-w-104 items-center justify-between">
         <button
           type="button"
           onClick={onNext}
@@ -150,14 +135,14 @@ function GestureStep({ onNext }: { onNext: () => void }) {
     <div className="flex h-full flex-col items-center justify-between px-8 pt-6 pb-8">
       <div className="flex flex-1 flex-col items-center justify-center gap-8">
         <div className="bt-wordmark text-2xl font-medium text-bt-off-white">jump back to apps</div>
-        <div className="max-w-[26rem] text-center text-sm text-bt-soft-gray">
+        <div className="max-w-104 text-center text-sm text-bt-soft-gray">
           push m five times to return here from any app.
         </div>
 
         <GestureHint />
       </div>
 
-      <div className="flex w-full max-w-[26rem] items-center justify-end">
+      <div className="flex w-full max-w-104 items-center justify-end">
         <button
           type="button"
           onClick={onNext}

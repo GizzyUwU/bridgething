@@ -9,6 +9,7 @@ public protocol SpotifyClientProviding: AnyObject, Sendable {
 
     func pause() async throws
     func resume() async throws
+    func resumeOnConnect() async throws
     func skipNext() async throws
     func skipPrev() async throws
     func seek(positionMs: Int64) async throws

@@ -79,6 +79,7 @@ pub struct AppState {
   pub browse_content: BrowseContentCache,
   pub transfer_sinks: TransferSinks,
   pub transfer_outbound: TransferOutbound,
+  pub modern_port: std::sync::OnceLock<u16>,
 
   db: DatabaseConnection,
   meta_store: MetaStore,
@@ -154,6 +155,7 @@ impl AppState {
       browse_content: BrowseContentCache::default(),
       transfer_sinks,
       transfer_outbound: TransferOutbound::default(),
+      modern_port: std::sync::OnceLock::new(),
       db,
       meta_store,
       _asset_cache_handle: asset_cache_handle,
@@ -185,7 +187,31 @@ impl AppState {
     if prev != Some(id) {
       self.tunnel_routes.kill_all();
     }
+    self.sync_overlay(false).await;
     Ok(())
+  }
+
+  pub async fn sync_overlay(&self, run_immediately: bool) {
+    let profile = match self.active_webapp().await.ok().flatten() {
+      Some(id) => self.webapps.manifest(id).await.map(|m| m.overlays).unwrap_or_default(),
+      None => libbridgething::OverlayProfile::default(),
+    };
+    let port = self
+      .modern_port
+      .get()
+      .copied()
+      .unwrap_or(libbridgething::BRIDGETHING_WS_MODERN_PORT);
+    let script = crate::overlay::overlay_script(&profile, port).map(chrome::OverlayScript);
+    if let Err(e) = self
+      .chrome
+      .send(chrome::ChromeCommand::SetOverlay {
+        script,
+        run_immediately,
+      })
+      .await
+    {
+      tracing::warn!("failed to sync overlay injection: {e:?}");
+    }
   }
 
   pub fn gateway_info(&self) -> Option<GatewayInfo> {

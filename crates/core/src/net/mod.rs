@@ -69,6 +69,7 @@ impl Server {
       .fallback(axum::routing::any(stock_ws_handler))
       .with_state(Arc::new(tx.clone()));
 
+    let state_for_port = state.clone();
     let modern_state = ModernRouterState { state, tx };
     let modern_app = Router::new()
       .fallback(axum::routing::any(modern_handler))
@@ -78,6 +79,7 @@ impl Server {
     let modern_listener = TcpListener::bind(modern_bind).await?;
     let stock_addr = stock_listener.local_addr().unwrap_or(stock_bind);
     let modern_addr = modern_listener.local_addr().unwrap_or(modern_bind);
+    let _ = state_for_port.modern_port.set(modern_addr.port());
     tracing::info!("listening on {stock_addr} (stock) and {modern_addr} (modern + file serve)");
 
     let stock_cancel_token = cancel_token.clone();

@@ -55,3 +55,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [build-dependencies]
 protobuf-codegen = "3.7.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

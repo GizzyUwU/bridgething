@@ -3058,6 +3058,33 @@ public struct OtaProgress: Codable, Sendable {
 	}
 }
 
+/// Which system overlays the daemon injects into the active webapp's page.
+/// Every surface defaults to on, so a minimal webapp gets call / pairing /
+/// notification / connection / volume UI for free; a full-service webapp
+/// declares off the surfaces it draws itself. The wire events the webapp
+/// receives are unchanged either way; this only gates the injected UI.
+public struct OverlayProfile: Codable, Sendable {
+	/// Notification toasts.
+	public let notifications: Bool
+	/// Incoming / active call banner.
+	public let call: Bool
+	/// Bluetooth pairing PIN modal.
+	public let pairing: Bool
+	/// Companion-disconnected banner, shown only while a paired phone has
+	/// no useful link.
+	public let connection: Bool
+	/// Transient volume level indicator.
+	public let volume: Bool
+
+	public init(notifications: Bool, call: Bool, pairing: Bool, connection: Bool, volume: Bool) {
+		self.notifications = notifications
+		self.call = call
+		self.pairing = pairing
+		self.connection = connection
+		self.volume = volume
+	}
+}
+
 public enum PeerIap2Status: String, Codable, Sendable {
 	case none
 	case linkUp
@@ -4687,8 +4714,11 @@ public struct WebappManifest: Codable, Sendable {
 	public let voiceGrammar: String?
 	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
 	public let art: ArtProfile?
+	/// Which system overlays the daemon injects into this webapp's page.
+	/// Omitted surfaces (and an omitted field) default to on.
+	public let overlays: OverlayProfile?
 
-	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?) {
+	public init(id: UUID, name: String, version: String, description: String?, icon: String?, settings: String?, role: WebappRole?, config: [ConfigField]?, permissions: [String]?, voiceGrammar: String?, art: ArtProfile?, overlays: OverlayProfile?) {
 		self.id = id
 		self.name = name
 		self.version = version
@@ -4700,6 +4730,7 @@ public struct WebappManifest: Codable, Sendable {
 		self.permissions = permissions
 		self.voiceGrammar = voiceGrammar
 		self.art = art
+		self.overlays = overlays
 	}
 }
 

@@ -17,7 +17,7 @@ use tokio::{
 use crate::{
   aplogin,
   auth::{Auth, DeviceFlow, TokenStore},
-  dealer::{Dealer, DealerEvent, DealerWriter, active_device},
+  dealer::{Dealer, DealerEvent, DealerWriter, active_device, cluster_playing, phone_device},
   error::{Error, Result},
   http::SpHttp,
   httpx::{HttpExecutor, HttpTransport},
@@ -50,12 +50,22 @@ pub trait Observer: Send + Sync {
   fn on_library_changed(&self, scope: LibraryScope);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum WakeReason {
+  UserPlay,
+  ConnectResume,
+}
+
 #[uniffi::export(with_foreign)]
 pub trait DeviceWaker: Send + Sync {
-  fn wake_device(&self);
+  fn wake_device(&self, reason: WakeReason);
 }
 
 const DEVICE_WAKE_TIMEOUT: Duration = Duration::from_secs(8);
+const CONNECT_RESUME_CLUSTER_TIMEOUT: Duration = Duration::from_secs(10);
+const CONNECT_RESUME_WAKE_TIMEOUT: Duration = Duration::from_secs(20);
+const CONNECT_RESUME_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
+const TRANSFER_SETTLE_TIMEOUT: Duration = Duration::from_secs(4);
 
 struct Shared {
   writer: Mutex<Option<DealerWriter>>,
@@ -63,6 +73,7 @@ struct Shared {
   last_active: Mutex<Option<String>>,
   device_waker: std::sync::Mutex<Option<Arc<dyn DeviceWaker>>>,
   cluster_changed: Notify,
+  connect_resume: Mutex<()>,
 }
 
 #[derive(uniffi::Object)]
@@ -134,6 +145,7 @@ impl SpotifyClient {
         last_active: Mutex::new(None),
         device_waker: std::sync::Mutex::new(None),
         cluster_changed: Notify::new(),
+        connect_resume: Mutex::new(()),
       }),
       username: Mutex::new(None),
       liked: Arc::new(Mutex::new(None)),
@@ -193,7 +205,7 @@ impl SpotifyClient {
       return self.target().await;
     };
     tracing::info!("spotify play: no live device; asking platform to wake the phone's spotify");
-    waker.wake_device();
+    waker.wake_device(WakeReason::UserPlay);
     match tokio::time::timeout(DEVICE_WAKE_TIMEOUT, self.await_device()).await {
       Ok(res) => res,
       Err(_) => {
@@ -210,6 +222,87 @@ impl SpotifyClient {
       notified.as_mut().enable();
       if let Ok(t) = self.target().await {
         return Ok(t);
+      }
+      notified.as_mut().await;
+      notified.set(self.shared.cluster_changed.notified());
+    }
+  }
+
+  fn fire_waker(&self, reason: WakeReason) -> bool {
+    let waker = self.shared.device_waker.lock().unwrap().clone();
+    match waker {
+      Some(w) => {
+        w.wake_device(reason);
+        true
+      }
+      None => false,
+    }
+  }
+
+  async fn await_cluster(&self) -> Cluster {
+    let notified = self.shared.cluster_changed.notified();
+    tokio::pin!(notified);
+    loop {
+      notified.as_mut().enable();
+      if let Some(c) = self.shared.cluster.lock().await.clone() {
+        return c;
+      }
+      notified.as_mut().await;
+      notified.set(self.shared.cluster_changed.notified());
+    }
+  }
+
+  async fn await_phone(&self, me: &str) -> String {
+    let notified = self.shared.cluster_changed.notified();
+    tokio::pin!(notified);
+    loop {
+      notified.as_mut().enable();
+      if let Some(phone) = self
+        .shared
+        .cluster
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|c| phone_device(c, me))
+      {
+        return phone;
+      }
+      notified.as_mut().await;
+      notified.set(self.shared.cluster_changed.notified());
+    }
+  }
+
+  async fn await_active(&self, device_id: &str) {
+    let notified = self.shared.cluster_changed.notified();
+    tokio::pin!(notified);
+    loop {
+      notified.as_mut().enable();
+      if self
+        .shared
+        .cluster
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(|c| c.active_device_id == device_id)
+      {
+        return;
+      }
+      notified.as_mut().await;
+      notified.set(self.shared.cluster_changed.notified());
+    }
+  }
+
+  async fn cluster_playing_now(&self) -> bool {
+    self.shared.cluster.lock().await.as_ref().is_some_and(cluster_playing)
+  }
+
+  async fn await_playing(&self) {
+    let notified = self.shared.cluster_changed.notified();
+    tokio::pin!(notified);
+    loop {
+      notified.as_mut().enable();
+      if self.cluster_playing_now().await {
+        return;
       }
       notified.as_mut().await;
       notified.set(self.shared.cluster_changed.notified());
@@ -661,6 +754,115 @@ impl SpotifyClient {
   }
   pub async fn resume(&self) -> Result<()> {
     self.writer().await?.resume(&self.target_or_wake().await?).await?;
+    Ok(())
+  }
+
+  pub async fn resume_on_connect(&self) -> Result<()> {
+    let Ok(_running) = self.shared.connect_resume.try_lock() else {
+      tracing::debug!("connect resume already in flight; dropping duplicate");
+      return Ok(());
+    };
+    let cluster = match tokio::time::timeout(CONNECT_RESUME_CLUSTER_TIMEOUT, self.await_cluster()).await {
+      Ok(c) => c,
+      Err(_) => {
+        tracing::info!("connect resume: no cluster within timeout; falling back to platform wake");
+        self.fire_waker(WakeReason::ConnectResume);
+        return Ok(());
+      }
+    };
+    if cluster_playing(&cluster) {
+      tracing::info!("connect resume: a device is actively playing; standing down");
+      return Ok(());
+    }
+    let me = self.dealer.device_id().to_string();
+    let mut woke = false;
+    let phone = match phone_device(&cluster, &me) {
+      Some(p) => p,
+      None => {
+        tracing::info!("connect resume: phone spotify not in the cluster; waking it");
+        woke = true;
+        if !self.fire_waker(WakeReason::ConnectResume) {
+          return Ok(());
+        }
+        match tokio::time::timeout(CONNECT_RESUME_WAKE_TIMEOUT, self.await_phone(&me)).await {
+          Ok(p) => p,
+          Err(_) => {
+            tracing::warn!("connect resume: no phone registered after wake; standing down");
+            return Ok(());
+          }
+        }
+      }
+    };
+    if self.cluster_playing_now().await {
+      tracing::info!("connect resume: playback started while reconciling; standing down");
+      return Ok(());
+    }
+    let active = self
+      .shared
+      .cluster
+      .lock()
+      .await
+      .as_ref()
+      .map(|c| c.active_device_id.clone())
+      .unwrap_or_default();
+    let writer = self.writer().await?;
+    if !active.is_empty() && active != phone {
+      tracing::info!(from = %active, to = %phone, "connect resume: transferring parked session to the phone");
+      match writer.transfer(&phone).await {
+        Ok(_) => {
+          let _ = tokio::time::timeout(TRANSFER_SETTLE_TIMEOUT, self.await_active(&phone)).await;
+          if self.cluster_playing_now().await {
+            return Ok(());
+          }
+        }
+        Err(e) => tracing::warn!(error = %e, "connect resume: transfer failed; attempting direct resume"),
+      }
+    }
+    tracing::info!(target = %phone, "connect resume: resuming playback on the phone");
+    if let Err(e) = writer.resume(&phone).await {
+      tracing::warn!(error = %e, "connect resume: resume command failed");
+    }
+    if tokio::time::timeout(CONNECT_RESUME_CONFIRM_TIMEOUT, self.await_playing())
+      .await
+      .is_ok()
+    {
+      return Ok(());
+    }
+    if woke {
+      tracing::warn!("connect resume: playback never started after wake + resume; standing down");
+      return Ok(());
+    }
+
+    tracing::info!("connect resume: playback did not start; escalating to platform wake");
+    let changed = self.shared.cluster_changed.notified();
+    tokio::pin!(changed);
+    changed.as_mut().enable();
+    if !self.fire_waker(WakeReason::ConnectResume) {
+      return Ok(());
+    }
+    if tokio::time::timeout(CONNECT_RESUME_WAKE_TIMEOUT, changed).await.is_err() {
+      tracing::warn!("connect resume: no cluster update after wake; standing down");
+      return Ok(());
+    }
+    if self.cluster_playing_now().await {
+      tracing::info!("connect resume: the wake resumed playback on its own");
+      return Ok(());
+    }
+    let phone = match self.shared.cluster.lock().await.as_ref().and_then(|c| phone_device(c, &me)) {
+      Some(p) => p,
+      None => {
+        tracing::warn!("connect resume: no phone in the cluster after wake; standing down");
+        return Ok(());
+      }
+    };
+    tracing::info!(target = %phone, "connect resume: retrying resume after wake");
+    writer.resume(&phone).await?;
+    if tokio::time::timeout(CONNECT_RESUME_CONFIRM_TIMEOUT, self.await_playing())
+      .await
+      .is_err()
+    {
+      tracing::warn!("connect resume: playback never started after wake + resume; standing down");
+    }
     Ok(())
   }
   pub async fn skip_next(&self) -> Result<()> {
@@ -1314,18 +1516,22 @@ impl Emitter<'_> {
 #[cfg(test)]
 mod tests {
   use std::sync::{
-    Arc,
+    Arc, Mutex as StdMutex,
     atomic::{AtomicUsize, Ordering},
   };
 
-  use librespot_protocol::connect::Cluster;
+  use librespot_protocol::{
+    connect::{Cluster, DeviceInfo},
+    devices::DeviceType,
+  };
 
   use super::*;
+  use crate::httpx::{HttpRequest, HttpResponse, HttpSink, HttpTransport};
 
-  struct NullStore;
-  impl TokenStore for NullStore {
+  struct SeedStore;
+  impl TokenStore for SeedStore {
     fn load_refresh_token(&self) -> Option<String> {
-      None
+      Some("refresh-token".to_string())
     }
     fn save_refresh_token(&self, _token: String) {}
     fn load_username(&self) -> Option<String> {
@@ -1343,28 +1549,165 @@ mod tests {
     fn on_library_changed(&self, _scope: LibraryScope) {}
   }
 
-  // records wake calls; optionally injects a device into the cluster to simulate the phone's spotify
+  // routes worker auth to a canned token, refuses client-token minting, records every spclient hit.
+  // when resume_flip is set, a resume command flips the cluster to that state, simulating a
+  // reachable phone that actually starts playback.
+  #[derive(Default)]
+  struct RouteTransport {
+    hits: Arc<StdMutex<Vec<(String, String)>>>,
+    #[allow(clippy::type_complexity)]
+    resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+  }
+  impl HttpTransport for RouteTransport {
+    fn execute(&self, request: HttpRequest, sink: Arc<HttpSink>) {
+      let url = request.url.clone();
+      if url.contains("clienttoken") {
+        sink.fail("no client token in tests".to_string());
+        return;
+      }
+      if url.contains("/api/token") {
+        sink.complete(HttpResponse {
+          status: 200,
+          headers: Vec::new(),
+          body: br#"{"access_token":"bearer","expires_in":3600}"#.to_vec(),
+        });
+        return;
+      }
+      let body = String::from_utf8_lossy(&request.body).into_owned();
+      let resumed = body.contains("\"endpoint\":\"resume\"");
+      self.hits.lock().unwrap().push((url, body));
+      if resumed && let Some((shared, cluster)) = self.resume_flip.lock().unwrap().clone() {
+        tokio::spawn(async move {
+          *shared.cluster.lock().await = Some(cluster);
+          shared.cluster_changed.notify_waiters();
+        });
+      }
+      sink.complete(HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: Vec::new(),
+      });
+    }
+  }
+
+  type Hits = Arc<StdMutex<Vec<(String, String)>>>;
+
+  fn command_hits(hits: &Hits) -> Vec<(String, String)> {
+    hits
+      .lock()
+      .unwrap()
+      .iter()
+      .filter(|(url, _)| url.contains("connect-state"))
+      .cloned()
+      .collect()
+  }
+
+  fn transfer_targets(hits: &Hits) -> Vec<String> {
+    command_hits(hits)
+      .iter()
+      .filter_map(|(url, _)| url.split("/connect/transfer/from/me-device/to/").nth(1))
+      .map(str::to_string)
+      .collect()
+  }
+
+  fn resume_targets(hits: &Hits) -> Vec<String> {
+    command_hits(hits)
+      .iter()
+      .filter(|(_, body)| body.contains("\"endpoint\":\"resume\""))
+      .filter_map(|(url, _)| url.split("/player/command/from/me-device/to/").nth(1))
+      .map(str::to_string)
+      .collect()
+  }
+
+  // records wake calls; optionally publishes a cluster on wake to simulate the phone's spotify
   // registering after being woken.
   struct FakeWaker {
     calls: Arc<AtomicUsize>,
-    inject: Option<Arc<Shared>>,
+    reasons: Arc<StdMutex<Vec<WakeReason>>>,
+    inject: Option<(Arc<Shared>, Cluster)>,
   }
   impl DeviceWaker for FakeWaker {
-    fn wake_device(&self) {
+    fn wake_device(&self, reason: WakeReason) {
       self.calls.fetch_add(1, Ordering::SeqCst);
-      if let Some(shared) = self.inject.clone() {
+      self.reasons.lock().unwrap().push(reason);
+      if let Some((shared, cluster)) = self.inject.clone() {
         tokio::spawn(async move {
-          *shared.cluster.lock().await = Some(active_cluster("dev1"));
+          *shared.cluster.lock().await = Some(cluster);
           shared.cluster_changed.notify_waiters();
         });
       }
     }
   }
 
+  fn device_info(kind: DeviceType) -> DeviceInfo {
+    let mut di = DeviceInfo::new();
+    di.device_type = kind.into();
+    di
+  }
+
+  fn cluster(active: &str, playing: bool, devices: &[(&str, DeviceType)]) -> Cluster {
+    let mut c = Cluster::new();
+    c.active_device_id = active.to_string();
+    let ps = c.player_state.mut_or_insert_default();
+    ps.is_playing = playing;
+    ps.is_paused = !playing;
+    for (id, kind) in devices {
+      c.device.insert(id.to_string(), device_info(*kind));
+    }
+    c
+  }
+
   fn active_cluster(id: &str) -> Cluster {
-    librespot_protocol::connect::Cluster {
-      active_device_id: id.to_string(),
-      ..Default::default()
+    cluster(id, false, &[])
+  }
+
+  struct Rig {
+    client: SpotifyClient,
+    hits: Hits,
+    wake_calls: Arc<AtomicUsize>,
+    wake_reasons: Arc<StdMutex<Vec<WakeReason>>>,
+    #[allow(clippy::type_complexity)]
+    resume_flip: Arc<StdMutex<Option<(Arc<Shared>, Cluster)>>>,
+  }
+
+  impl Rig {
+    // a subsequent resume command flips the cluster to this state (a reachable phone that
+    // actually starts playing when commanded).
+    async fn flip_to_on_resume(&self, cluster: Cluster) {
+      *self.resume_flip.lock().unwrap() = Some((self.client.shared.clone(), cluster));
+    }
+  }
+
+  async fn rig(initial_cluster: Option<Cluster>, wake_inject: Option<Cluster>) -> Rig {
+    let transport = RouteTransport::default();
+    let hits = transport.hits.clone();
+    let resume_flip = transport.resume_flip.clone();
+    let exec = HttpExecutor::new();
+    exec.set(Arc::new(transport));
+    let auth = Arc::new(Auth::new(
+      "https://worker.invalid",
+      "psk",
+      Box::new(SeedStore),
+      exec.clone(),
+    ));
+    let client = SpotifyClient::new(auth, "me-device".to_string(), exec, Arc::new(NullObserver));
+    *client.shared.writer.lock().await = Some(DealerWriter::for_test(client.http.clone(), "me-device"));
+    if let Some(c) = initial_cluster {
+      *client.shared.cluster.lock().await = Some(c);
+    }
+    let wake_calls = Arc::new(AtomicUsize::new(0));
+    let wake_reasons = Arc::new(StdMutex::new(Vec::new()));
+    client.set_device_waker(Arc::new(FakeWaker {
+      calls: wake_calls.clone(),
+      reasons: wake_reasons.clone(),
+      inject: wake_inject.map(|c| (client.shared.clone(), c)),
+    }));
+    Rig {
+      client,
+      hits,
+      wake_calls,
+      wake_reasons,
+      resume_flip,
     }
   }
 
@@ -1373,7 +1716,7 @@ mod tests {
     let auth = Arc::new(Auth::new(
       "https://example.invalid",
       "psk",
-      Box::new(NullStore),
+      Box::new(SeedStore),
       exec.clone(),
     ));
     SpotifyClient::new(auth, "me-device".to_string(), exec, observer)
@@ -1386,6 +1729,7 @@ mod tests {
     let calls = Arc::new(AtomicUsize::new(0));
     client.set_device_waker(Arc::new(FakeWaker {
       calls: calls.clone(),
+      reasons: Arc::new(StdMutex::new(Vec::new())),
       inject: None,
     }));
 
@@ -1398,13 +1742,287 @@ mod tests {
   async fn target_or_wake_wakes_and_resolves_when_device_registers() {
     let client = test_client(Arc::new(NullObserver));
     let calls = Arc::new(AtomicUsize::new(0));
+    let reasons = Arc::new(StdMutex::new(Vec::new()));
     client.set_device_waker(Arc::new(FakeWaker {
       calls: calls.clone(),
-      inject: Some(client.shared.clone()),
+      reasons: reasons.clone(),
+      inject: Some((client.shared.clone(), active_cluster("dev1"))),
     }));
 
     let target = client.target_or_wake().await.unwrap();
     assert_eq!(target, "dev1");
     assert_eq!(calls.load(Ordering::SeqCst), 1, "woke exactly once");
+    assert_eq!(
+      *reasons.lock().unwrap(),
+      [WakeReason::UserPlay],
+      "user-initiated play wakes as UserPlay"
+    );
+  }
+
+  // ---- resume_on_connect: phone-preferred-unless-actively-playing ----------
+
+  #[tokio::test]
+  async fn connect_resume_stands_down_when_a_device_is_actively_playing() {
+    let r = rig(
+      Some(cluster(
+        "avr-1",
+        true,
+        &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+      )),
+      None,
+    )
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 0, "active playback must not wake");
+    assert!(
+      command_hits(&r.hits).is_empty(),
+      "active playback must not be disturbed: {:?}",
+      command_hits(&r.hits)
+    );
+  }
+
+  #[tokio::test]
+  async fn connect_resume_transfers_parked_session_to_the_phone() {
+    // the b16tran repro: idle session parked on an always-on speaker, phone present
+    let r = rig(
+      Some(cluster(
+        "avr-1",
+        false,
+        &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+      )),
+      None,
+    )
+    .await;
+    r.flip_to_on_resume(cluster(
+      "phone-1",
+      true,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    ))
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 0, "a confirmed resume never wakes");
+    assert_eq!(
+      transfer_targets(&r.hits),
+      ["phone-1"],
+      "parked session moves to the phone"
+    );
+    assert_eq!(resume_targets(&r.hits), ["phone-1"], "resume lands on the phone");
+    assert!(
+      !command_hits(&r.hits).iter().any(|(url, _)| url.contains("avr-1")),
+      "the idle speaker is never commanded"
+    );
+  }
+
+  #[tokio::test]
+  async fn connect_resume_resumes_directly_when_the_phone_is_active() {
+    let r = rig(
+      Some(cluster(
+        "phone-1",
+        false,
+        &[("phone-1", DeviceType::SMARTPHONE), ("avr-1", DeviceType::AUDIO_DONGLE)],
+      )),
+      None,
+    )
+    .await;
+    r.flip_to_on_resume(cluster(
+      "phone-1",
+      true,
+      &[("phone-1", DeviceType::SMARTPHONE), ("avr-1", DeviceType::AUDIO_DONGLE)],
+    ))
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(transfer_targets(&r.hits), Vec::<String>::new(), "no transfer needed");
+    assert_eq!(resume_targets(&r.hits), ["phone-1"]);
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 0, "a confirmed resume never wakes");
+  }
+
+  #[tokio::test]
+  async fn connect_resume_resumes_at_the_phone_when_no_session_is_active() {
+    let r = rig(
+      Some(cluster(
+        "",
+        false,
+        &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+      )),
+      None,
+    )
+    .await;
+    r.flip_to_on_resume(cluster(
+      "phone-1",
+      true,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    ))
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(transfer_targets(&r.hits), Vec::<String>::new(), "nothing to transfer");
+    assert_eq!(
+      resume_targets(&r.hits),
+      ["phone-1"],
+      "the phone wins over the idle speaker"
+    );
+  }
+
+  #[tokio::test]
+  async fn connect_resume_wakes_and_targets_the_phone_when_absent() {
+    // only an idle speaker registered: the phone's spotify is cold. wake it, then resume at the
+    // phone that appears, never the speaker.
+    let woken = cluster(
+      "",
+      false,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    );
+    let r = rig(
+      Some(cluster("", false, &[("avr-1", DeviceType::AUDIO_DONGLE)])),
+      Some(woken),
+    )
+    .await;
+    r.flip_to_on_resume(cluster(
+      "phone-1",
+      true,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    ))
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "woke exactly once");
+    assert_eq!(
+      *r.wake_reasons.lock().unwrap(),
+      [WakeReason::ConnectResume],
+      "on-connect wakes as ConnectResume"
+    );
+    assert_eq!(resume_targets(&r.hits), ["phone-1"]);
+    assert!(
+      !command_hits(&r.hits).iter().any(|(url, _)| url.contains("avr-1")),
+      "the speaker is never the fallback target"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_stands_down_when_no_phone_appears_after_wake() {
+    let r = rig(Some(cluster("", false, &[("avr-1", DeviceType::AUDIO_DONGLE)])), None).await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "the wake is still attempted");
+    assert!(
+      command_hits(&r.hits).is_empty(),
+      "no phone means no playback command at all: {:?}",
+      command_hits(&r.hits)
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_escalates_to_wake_when_the_resume_lands_nowhere() {
+    // the killed base case: the cluster still lists the phone but its spotify is suspended and
+    // unreachable, so the resume goes into the void. escalate to the platform wake, then resume
+    // again at the phone once it re-registers.
+    let woken = cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)]);
+    let r = rig(
+      Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
+      Some(woken),
+    )
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "unconfirmed resume escalates to a wake");
+    assert_eq!(*r.wake_reasons.lock().unwrap(), [WakeReason::ConnectResume]);
+    assert_eq!(
+      resume_targets(&r.hits),
+      ["phone-1", "phone-1"],
+      "resume is retried after the wake"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_escalation_stands_down_when_spotify_never_registers() {
+    let r = rig(Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])), None).await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "the wake is still attempted");
+    assert_eq!(
+      resume_targets(&r.hits),
+      ["phone-1"],
+      "no blind retry without a cluster update"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_escalation_targets_the_phone_that_registers_after_wake() {
+    // the relaunched spotify can come back under a fresh device id; the retry must re-resolve.
+    let woken = cluster("", false, &[("phone-2", DeviceType::SMARTPHONE)]);
+    let r = rig(
+      Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
+      Some(woken),
+    )
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+      resume_targets(&r.hits),
+      ["phone-1", "phone-2"],
+      "the post-wake resume targets the freshly registered phone"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_escalation_stands_down_when_the_wake_resumes_playback() {
+    // the daemon wake leg can resume playback by itself (hid play tap); no second resume then.
+    let woken = cluster("phone-1", true, &[("phone-1", DeviceType::SMARTPHONE)]);
+    let r = rig(
+      Some(cluster("", false, &[("phone-1", DeviceType::SMARTPHONE)])),
+      Some(woken),
+    )
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+      resume_targets(&r.hits),
+      ["phone-1"],
+      "no resume retry once the wake started playback"
+    );
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_never_wakes_twice() {
+    // the wake path already woke once; an unconfirmed resume afterwards stands down instead of
+    // launching spotify again.
+    let woken = cluster(
+      "",
+      false,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    );
+    let r = rig(
+      Some(cluster("", false, &[("avr-1", DeviceType::AUDIO_DONGLE)])),
+      Some(woken),
+    )
+    .await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(r.wake_calls.load(Ordering::SeqCst), 1, "exactly one wake per connect resume");
+    assert_eq!(resume_targets(&r.hits), ["phone-1"]);
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_falls_back_to_the_platform_wake_when_the_dealer_never_connects() {
+    let r = rig(None, None).await;
+    r.client.resume_on_connect().await.unwrap();
+    assert_eq!(
+      r.wake_calls.load(Ordering::SeqCst),
+      1,
+      "offline: the platform wake is the only lever"
+    );
+    assert!(command_hits(&r.hits).is_empty(), "no cluster means no dealer commands");
+  }
+
+  #[tokio::test(start_paused = true)]
+  async fn connect_resume_is_single_flight() {
+    let r = rig(None, None).await;
+    let client = Arc::new(r.client);
+    let first = {
+      let c = client.clone();
+      tokio::spawn(async move { c.resume_on_connect().await })
+    };
+    tokio::task::yield_now().await;
+    client.resume_on_connect().await.unwrap();
+    first.await.unwrap().unwrap();
+    assert_eq!(
+      r.wake_calls.load(Ordering::SeqCst),
+      1,
+      "overlapping connect resumes collapse to one run"
+    );
   }
 }

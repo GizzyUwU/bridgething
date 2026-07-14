@@ -53,8 +53,11 @@ final class SpotifyGlueTests: XCTestCase {
         func pause() async throws {}
         private let resumeLock = NSLock()
         private var resumeCount = 0
+        private var resumeOnConnectCount = 0
         var resumeCalls: Int { resumeLock.withLock { resumeCount } }
+        var resumeOnConnectCalls: Int { resumeLock.withLock { resumeOnConnectCount } }
         func resume() async throws { resumeLock.withLock { resumeCount += 1 } }
+        func resumeOnConnect() async throws { resumeLock.withLock { resumeOnConnectCount += 1 } }
         func skipNext() async throws {}
         func skipPrev() async throws {}
         func seek(positionMs _: Int64) async throws {}
@@ -276,40 +279,20 @@ final class SpotifyGlueTests: XCTestCase {
         XCTAssertNotNil(ps.playback.positionAgeMs, "a cached replay that could not be freshened stamps its age")
     }
 
-    func testAggressiveConnectWakesAndResumesOnEmptyCluster() async throws {
-        let fake = FakeClient()
-        let h = try await boot(fake)
-        addTeardownBlock { await h.companion.stop() }
-        fake.observer?.onDevices(devices: [])
-
-        await h.glue.handlePeerConnected(allowAutoResume: true)
-        _ = try await h.driver.waitOutbound(timeout: .seconds(10)) {
-            if case .player(.requestSpotifyWake) = $0.data { return true }
-            return false
-        }
-        try await waitFor("connect resume") { fake.resumeCalls == 1 }
-    }
-
-    func testAggressiveConnectDefersResumeUntilClusterKnownEmpty() async throws {
+    func testAggressiveConnectRunsConnectResume() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
 
         await h.glue.handlePeerConnected(allowAutoResume: true)
-        _ = try await h.driver.waitOutbound(timeout: .seconds(10)) {
-            if case .player(.requestSpotifyWake) = $0.data { return true }
-            return false
-        }
-        XCTAssertEqual(fake.resumeCalls, 0, "resume must wait for the device list")
-        fake.observer?.onDevices(devices: [])
-        try await waitFor("deferred connect resume") { fake.resumeCalls == 1 }
+        try await waitFor("connect resume") { fake.resumeOnConnectCalls == 1 }
+        XCTAssertEqual(fake.resumeCalls, 0, "the user resume path is never the connect trigger")
     }
 
     func testNonAggressiveConnectNeverWakesOrResumes() async throws {
         let fake = FakeClient()
         let h = try await boot(fake)
         addTeardownBlock { await h.companion.stop() }
-        fake.observer?.onDevices(devices: [])
 
         await h.glue.handlePeerConnected(allowAutoResume: false)
         let wake = try? await h.driver.waitOutbound(timeout: .seconds(2)) {
@@ -317,21 +300,56 @@ final class SpotifyGlueTests: XCTestCase {
             return false
         }
         XCTAssertNil(wake, "non-aggressive connect must not request a wake")
+        XCTAssertEqual(fake.resumeOnConnectCalls, 0, "non-aggressive connect must not reconcile playback")
         XCTAssertEqual(fake.resumeCalls, 0, "non-aggressive connect must not resume")
+    }
+
+    func testConnectResumeWakeIsSuppressedWhileAppForeground() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        h.glue.isAppForeground = { true }
+
+        GatewayDeviceWaker(glue: h.glue).wakeDevice(reason: .connectResume)
+        let wake = try? await h.driver.waitOutbound(timeout: .seconds(2)) {
+            if case .player(.requestSpotifyWake) = $0.data { return true }
+            return false
+        }
+        XCTAssertNil(wake, "a connect-resume wake must never fire while the app is foreground")
+    }
+
+    func testUserPlayWakeFiresWhileAppForeground() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        h.glue.isAppForeground = { true }
+
+        GatewayDeviceWaker(glue: h.glue).wakeDevice(reason: .userPlay)
+        _ = try await h.driver.waitOutbound(timeout: .seconds(5)) {
+            if case .player(.requestSpotifyWake) = $0.data { return true }
+            return false
+        }
+    }
+
+    func testConnectResumeWakeFiresWhileAppBackground() async throws {
+        let fake = FakeClient()
+        let h = try await boot(fake)
+        addTeardownBlock { await h.companion.stop() }
+        h.glue.isAppForeground = { false }
+
+        GatewayDeviceWaker(glue: h.glue).wakeDevice(reason: .connectResume)
+        _ = try await h.driver.waitOutbound(timeout: .seconds(5)) {
+            if case .player(.requestSpotifyWake) = $0.data { return true }
+            return false
+        }
     }
 
     func testCompanionConnectDefaultsToAggressiveResume() async throws {
         let fake = FakeClient()
-        // pref left absent: the companion's boot-time peer connect must wake on its own.
+        // pref left absent: the companion's boot-time peer connect must reconcile on its own.
         let h = try await boot(fake, autoResume: nil)
         addTeardownBlock { await h.companion.stop() }
-        _ = try await h.driver.waitOutbound(timeout: .seconds(10)) {
-            if case .player(.requestSpotifyWake) = $0.data { return true }
-            return false
-        }
-        XCTAssertEqual(fake.resumeCalls, 0, "resume must wait for the device list")
-        fake.observer?.onDevices(devices: [])
-        try await waitFor("companion-driven connect resume") { fake.resumeCalls == 1 }
+        try await waitFor("companion-driven connect resume") { fake.resumeOnConnectCalls == 1 }
     }
 
     private func waitFor(

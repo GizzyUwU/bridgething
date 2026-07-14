@@ -611,7 +611,7 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 public protocol DeviceWaker: AnyObject, Sendable {
     
-    func wakeDevice() 
+    func wakeDevice(reason: WakeReason) 
     
 }
 open class DeviceWakerImpl: DeviceWaker, @unchecked Sendable {
@@ -667,9 +667,10 @@ open class DeviceWakerImpl: DeviceWaker, @unchecked Sendable {
     
 
     
-open func wakeDevice()  {try! rustCall() {
+open func wakeDevice(reason: WakeReason)  {try! rustCall() {
     uniffi_spotify_fn_method_devicewaker_wake_device(
-            self.uniffiCloneHandle(),$0
+            self.uniffiCloneHandle(),
+        FfiConverterTypeWakeReason_lower(reason),$0
     )
 }
 }
@@ -704,6 +705,7 @@ fileprivate struct UniffiCallbackInterfaceDeviceWaker {
         },
         wakeDevice: { (
             uniffiHandle: UInt64,
+            reason: RustBuffer,
             uniffiOutReturn: UnsafeMutableRawPointer,
             uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
         ) in
@@ -713,6 +715,7 @@ fileprivate struct UniffiCallbackInterfaceDeviceWaker {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
                 return uniffiObj.wakeDevice(
+                     reason: try FfiConverterTypeWakeReason_lift(reason)
                 )
             }
 
@@ -1163,6 +1166,8 @@ public protocol SpotifyClientProtocol: AnyObject, Sendable {
     
     func resume() async throws 
     
+    func resumeOnConnect() async throws 
+    
     func resync() async 
     
     func rootBrowse(sections: UInt32?, preview: UInt32?) async throws  -> [Shelf]
@@ -1520,6 +1525,23 @@ open func resume()async throws   {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_spotify_fn_method_spotifyclient_resume(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_spotify_rust_future_poll_void,
+            completeFunc: ffi_spotify_rust_future_complete_void,
+            freeFunc: ffi_spotify_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeError_lift
+        )
+}
+    
+open func resumeOnConnect()async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_spotify_fn_method_spotifyclient_resume_on_connect(
                     self.uniffiCloneHandle()
                     
                 )
@@ -3673,6 +3695,79 @@ public func FfiConverterTypeRepeatMode_lower(_ value: RepeatMode) -> RustBuffer 
 }
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * why the platform is being asked to wake the phone's spotify. user-initiated
+ * wakes must always fire; connect-resume wakes may be suppressed by the platform
+ * (ios skips them while the companion app is foreground so an iap2 app-launch
+ * never yanks the user out of the app mid-pairing).
+ */
+
+public enum WakeReason: Equatable, Hashable {
+    
+    case userPlay
+    case connectResume
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension WakeReason: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWakeReason: FfiConverterRustBuffer {
+    typealias SwiftType = WakeReason
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WakeReason {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .userPlay
+        
+        case 2: return .connectResume
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: WakeReason, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .userPlay:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .connectResume:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWakeReason_lift(_ buf: RustBuffer) throws -> WakeReason {
+    return try FfiConverterTypeWakeReason.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWakeReason_lower(_ value: WakeReason) -> RustBuffer {
+    return FfiConverterTypeWakeReason.lower(value)
+}
+
+
 
 
 
@@ -4629,7 +4724,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_spotify_checksum_func_init_logging() != 6520) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_spotify_checksum_method_devicewaker_wake_device() != 19739) {
+    if (uniffi_spotify_checksum_method_devicewaker_wake_device() != 58994) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_active_device_volume_percent() != 9625) {
@@ -4678,6 +4773,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_spotify_checksum_method_spotifyclient_resume_on_connect() != 65194) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {

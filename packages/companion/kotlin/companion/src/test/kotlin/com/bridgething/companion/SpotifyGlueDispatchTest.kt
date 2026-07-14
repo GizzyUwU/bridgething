@@ -90,6 +90,8 @@ class SpotifyGlueDispatchTest {
         override suspend fun pause() {}
         @Volatile var resumeCalls = 0
         override suspend fun resume() { resumeCalls++ }
+        @Volatile var resumeOnConnectCalls = 0
+        override suspend fun resumeOnConnect() { resumeOnConnectCalls++ }
         override suspend fun skipNext() {}
         override suspend fun skipPrev() {}
         override suspend fun seek(positionMs: Long) {}
@@ -319,26 +321,13 @@ class SpotifyGlueDispatchTest {
     }
 
     @Test
-    fun `aggressive connect resumes when the cluster is known empty`() = runBlocking {
-        val fake = FakeClient()
-        val h = boot(this, fake)
-        h.observer()!!.onDevices(emptyList())
-
-        h.glue.handlePeerConnected(allowAutoResume = true)
-        waitFor("connect resume") { fake.resumeCalls == 1 }
-        h.companion.stop()
-    }
-
-    @Test
-    fun `aggressive connect defers resume until the cluster is known empty`() = runBlocking {
+    fun `aggressive connect runs connect resume`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
 
         h.glue.handlePeerConnected(allowAutoResume = true)
-        delay(200)
-        assertEquals(0, fake.resumeCalls, "resume must wait for the device list")
-        h.observer()!!.onDevices(emptyList())
-        waitFor("deferred connect resume") { fake.resumeCalls == 1 }
+        waitFor("connect resume") { fake.resumeOnConnectCalls == 1 }
+        assertEquals(0, fake.resumeCalls, "the user resume path is never the connect trigger")
         h.companion.stop()
     }
 
@@ -346,10 +335,10 @@ class SpotifyGlueDispatchTest {
     fun `non-aggressive connect never resumes`() = runBlocking {
         val fake = FakeClient()
         val h = boot(this, fake)
-        h.observer()!!.onDevices(emptyList())
 
         h.glue.handlePeerConnected(allowAutoResume = false)
         delay(500)
+        assertEquals(0, fake.resumeOnConnectCalls, "non-aggressive connect must not reconcile playback")
         assertEquals(0, fake.resumeCalls, "non-aggressive connect must not resume")
         h.companion.stop()
     }
@@ -357,12 +346,9 @@ class SpotifyGlueDispatchTest {
     @Test
     fun `companion connect defaults to aggressive resume`() = runBlocking {
         val fake = FakeClient()
-        // pref left absent: the companion's boot-time peer connect must resume on its own.
+        // pref left absent: the companion's boot-time peer connect must reconcile on its own.
         val h = boot(this, fake, autoResume = null)
-        delay(200)
-        assertEquals(0, fake.resumeCalls, "resume must wait for the device list")
-        h.observer()!!.onDevices(emptyList())
-        waitFor("companion-driven connect resume") { fake.resumeCalls == 1 }
+        waitFor("companion-driven connect resume") { fake.resumeOnConnectCalls == 1 }
         h.companion.stop()
     }
 

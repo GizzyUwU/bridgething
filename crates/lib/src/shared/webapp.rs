@@ -64,6 +64,56 @@ pub enum WebappRole {
   Launcher,
 }
 
+/// Which system overlays the daemon injects into the active webapp's page.
+/// Every surface defaults to on, so a minimal webapp gets call / pairing /
+/// notification / connection / volume UI for free; a full-service webapp
+/// declares off the surfaces it draws itself. The wire events the webapp
+/// receives are unchanged either way; this only gates the injected UI.
+#[typeshare]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "shared.ts")]
+pub struct OverlayProfile {
+  /// Notification toasts.
+  #[serde(default = "overlay_surface_default")]
+  pub notifications: bool,
+  /// Incoming / active call banner.
+  #[serde(default = "overlay_surface_default")]
+  pub call: bool,
+  /// Bluetooth pairing PIN modal.
+  #[serde(default = "overlay_surface_default")]
+  pub pairing: bool,
+  /// Companion-disconnected banner, shown only while a paired phone has
+  /// no useful link.
+  #[serde(default = "overlay_surface_default")]
+  pub connection: bool,
+  /// Transient volume level indicator.
+  #[serde(default = "overlay_surface_default")]
+  pub volume: bool,
+}
+
+fn overlay_surface_default() -> bool {
+  true
+}
+
+impl Default for OverlayProfile {
+  fn default() -> Self {
+    Self {
+      notifications: true,
+      call: true,
+      pairing: true,
+      connection: true,
+      volume: true,
+    }
+  }
+}
+
+impl OverlayProfile {
+  pub fn any_enabled(&self) -> bool {
+    self.notifications || self.call || self.pairing || self.connection || self.volume
+  }
+}
+
 /// Art render sizes a webapp declares so the companion warms exactly the
 /// pixels it renders: hero (now-playing / detail views) and thumb (queue /
 /// grid). Omitted in a manifest falls back to the canonical `{248, 96}`,
@@ -154,6 +204,10 @@ pub struct WebappManifest {
   /// Declared art render sizes. Omitted falls back to `{248, 96}`.
   #[serde(default)]
   pub art: Option<ArtProfile>,
+  /// Which system overlays the daemon injects into this webapp's page.
+  /// Omitted surfaces (and an omitted field) default to on.
+  #[serde(default)]
+  pub overlays: OverlayProfile,
 }
 
 /// One declared user-tunable setting. Adjacent-tagged on the wire to

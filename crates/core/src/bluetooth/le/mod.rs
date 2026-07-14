@@ -62,16 +62,29 @@ enum LeCommand {
 #[derive(Debug, Clone)]
 pub struct LeManager {
   tx: mpsc::Sender<LeCommand>,
+  ancs_auth: Arc<std::sync::Mutex<AncsAuthState>>,
 }
 
 pub(crate) struct LeBootstrap {
   rx: mpsc::Receiver<LeCommand>,
+  ancs_auth: Arc<std::sync::Mutex<AncsAuthState>>,
 }
 
 impl LeManager {
   pub(crate) fn allocate() -> (Self, LeBootstrap) {
     let (tx, rx) = mpsc::channel(COMMAND_MAILBOX_CAP);
-    (Self { tx }, LeBootstrap { rx })
+    let ancs_auth = Arc::new(std::sync::Mutex::new(AncsAuthState::Unknown));
+    (
+      Self {
+        tx,
+        ancs_auth: ancs_auth.clone(),
+      },
+      LeBootstrap { rx, ancs_auth },
+    )
+  }
+
+  pub fn ancs_auth_state(&self) -> AncsAuthState {
+    *self.ancs_auth.lock().unwrap()
   }
 
   pub async fn attach(&self, address: Address) {
@@ -147,7 +160,7 @@ impl LeBootstrap {
       bus,
       audio,
       session: None,
-      auth_reporter: AuthStateReporter::new(bluetooth),
+      auth_reporter: AuthStateReporter::new(bluetooth, self.ancs_auth),
       advertisement,
       acl_down_since: None,
       _pair_trigger: pair_trigger,

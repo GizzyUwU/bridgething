@@ -82,6 +82,7 @@ import uniffi.spotify.RepeatMode as SpRepeat
 import uniffi.spotify.Shelf as SpShelf
 import uniffi.spotify.SpotifyClient
 import uniffi.spotify.SpotifyClientInterface
+import uniffi.spotify.WakeReason
 import uniffi.spotify.initLogging
 import uniffi.spotify.Track as SpTrack
 import uniffi.spotify.Device as SpDevice
@@ -158,8 +159,6 @@ class SpotifyGlue(
     @Volatile private var lastSentQueueOrder: List<String> = emptyList()
     @Volatile private var lastSentThumbEdge = DEFAULT_THUMB_EDGE
     @Volatile private var lastHadItem = false
-    @Volatile private var lastKnownDeviceCount: Int? = null
-    @Volatile private var wakeOnEmptyCluster = false
     @Volatile private var lastConnectivityAvailable: Boolean? = null
 
     @Volatile private var sink: NowPlayingSink? = null
@@ -231,12 +230,8 @@ class SpotifyGlue(
     override suspend fun handlePeerConnected(allowAutoResume: Boolean) {
         if (gateway == null) return
         if (allowAutoResume) {
-            localWaker?.wakeDevice()
-            val clusterEmpty = lastKnownDeviceCount?.let { it == 0 } ?: run {
-                wakeOnEmptyCluster = true
-                null
-            }
-            if (clusterEmpty == true) spawnConnectResume()
+            val client = client
+            if (client != null) scope.launch { runCatching { client.resumeOnConnect() } }
         }
         resetQueueDedup()
         val pending = lastState?.takeIf { it.track != null }
@@ -262,18 +257,6 @@ class SpotifyGlue(
         val hasItem = state.track != null
         lastHadItem = hasItem
         sink?.submitPlayer(name, makeSnapshot(state, heroEdge, liked, likeSupported), SPOTIFY_APP_BUNDLE, hasItem)
-    }
-
-    private fun onDevices(devices: List<SpDevice>) {
-        lastKnownDeviceCount = devices.size
-        if (wakeOnEmptyCluster) {
-            wakeOnEmptyCluster = false
-            if (devices.isEmpty()) spawnConnectResume()
-        }
-    }
-
-    private fun spawnConnectResume() {
-        scope.launch { runCatching { client?.resume() } }
     }
 
     private fun onQueue(queue: SpQueue) {
@@ -523,8 +506,6 @@ class SpotifyGlue(
 
     private fun monotonicNowMs(): Long = System.nanoTime() / 1_000_000
 
-    // how stale the cached lastState position already is; stamped onto re-sends of cached
-    // snapshots so the daemon re-anchors them onto live time instead of reading a rewind
     private fun cachedPositionAgeMs(): UInt? =
         lastStateAtMs?.let { (monotonicNowMs() - it).coerceAtLeast(0L).toUInt() }
 
@@ -615,10 +596,6 @@ class SpotifyGlue(
 
     // MARK: - liked
 
-    /**
-     * the liked flag for a track: rust-provided saved (cluster-first, warm-cache fallback)
-     * unless a pending user toggle overrides it. the override drops once rust catches up.
-     */
     private fun likeFields(track: SpTrack?): Pair<Boolean?, Boolean?> {
         if (track == null || !isSpotifyUri(track.uri)) return null to null
         val liked = stateLock.withLock {
@@ -646,12 +623,11 @@ class SpotifyGlue(
         )
     }
 
-    /** adapts the FFI Observer callbacks to the glue (weak, so the rust handle never pins it). */
     private class ObserverBridge(glue: SpotifyGlue) : SpObserver {
         private val glue = WeakReference(glue)
         override fun onPlayer(state: SpPlayerState) { glue.get()?.onPlayer(state) }
         override fun onQueue(queue: SpQueue) { glue.get()?.onQueue(queue) }
-        override fun onDevices(devices: List<SpDevice>) { glue.get()?.onDevices(devices) }
+        override fun onDevices(devices: List<SpDevice>) {}
         override fun onAuth(state: SpAuthState) { glue.get()?.onAuth(state) }
         override fun onLibraryChanged(scope: SpLibraryScope) { glue.get()?.onLibraryChanged(scope) }
     }
@@ -835,7 +811,8 @@ class SpotifyGlue(
 private class IntentDeviceWaker(context: android.content.Context) : DeviceWaker {
     private val appContext = context.applicationContext
 
-    override fun wakeDevice() {
+    // a broadcast media keypress never steals foreground on android, so every reason fires.
+    override fun wakeDevice(reason: WakeReason) {
         for (action in intArrayOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
             val intent = android.content.Intent(android.content.Intent.ACTION_MEDIA_BUTTON).apply {
                 setPackage(SPOTIFY_ANDROID_PACKAGE)

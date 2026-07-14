@@ -9,6 +9,7 @@ import {
   Activity,
   BatteryCharging,
   Bell,
+  Bluetooth,
   Cable,
   ChevronDown,
   ChevronRight,
@@ -415,6 +416,7 @@ export function SettingsScreen({ navigation }: Props) {
                 }
               />
             ) : null}
+            {Platform.OS === 'ios' ? <AncsPairingRow /> : null}
             {Platform.OS === 'android' ? (
               <NotificationListenerRow
                 value={flags.notifications}
@@ -865,6 +867,52 @@ function BackgroundLocationRow() {
       trailing={
         <Switch value={granted} onValueChange={handleToggle} disabled={busy} />
       }
+    />
+  );
+}
+
+function AncsPairingRow() {
+  const status = useSession(s => s.ancsAuthStatus);
+  const peers = useSession(s => s.peers);
+  const connected = peers.some(p => p.status === 'connected');
+  const [busy, setBusy] = useState(false);
+
+  const subtitle = !connected
+    ? 'connect your Car Thing first'
+    : status === 'authorized'
+      ? 'paired and authorized'
+      : status === 'unauthorized'
+        ? 'paired but not authorized - tap to fix'
+        : 'tap to pair for notifications and volume';
+
+  const run = async () => {
+    if (busy || !connected) return;
+    setBusy(true);
+    try {
+      const result = await getSession().enableAncsNotifications();
+      if (result.kind === 'failed') {
+        Alert.alert(
+          'LE pairing failed',
+          result.message ?? 'try again with the Car Thing nearby.',
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        'LE pairing failed',
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ListRow
+      icon={Bluetooth}
+      iconTint={status === 'authorized' ? 'primary' : 'default'}
+      title="notification pairing"
+      subtitle={subtitle}
+      onPress={connected && status !== 'authorized' && !busy ? run : undefined}
     />
   );
 }

@@ -775,6 +775,37 @@ export type OtaProgress = {
   etaMs: number | null;
 };
 
+/**
+ * Which system overlays the daemon injects into the active webapp's page.
+ * Every surface defaults to on, so a minimal webapp gets call / pairing /
+ * notification / connection / volume UI for free; a full-service webapp
+ * declares off the surfaces it draws itself. The wire events the webapp
+ * receives are unchanged either way; this only gates the injected UI.
+ */
+export type OverlayProfile = {
+  /**
+   * Notification toasts.
+   */
+  notifications: boolean;
+  /**
+   * Incoming / active call banner.
+   */
+  call: boolean;
+  /**
+   * Bluetooth pairing PIN modal.
+   */
+  pairing: boolean;
+  /**
+   * Companion-disconnected banner, shown only while a paired phone has
+   * no useful link.
+   */
+  connection: boolean;
+  /**
+   * Transient volume level indicator.
+   */
+  volume: boolean;
+};
+
 export type Peer = {
   device: Device;
   paired: boolean;
@@ -1346,6 +1377,11 @@ export type WebappManifest = {
    * Declared art render sizes. Omitted falls back to `{248, 96}`.
    */
   art?: ArtProfile | null;
+  /**
+   * Which system overlays the daemon injects into this webapp's page.
+   * Omitted surfaces (and an omitted field) default to on.
+   */
+  overlays: OverlayProfile;
 };
 
 /**

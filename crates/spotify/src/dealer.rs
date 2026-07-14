@@ -227,6 +227,16 @@ pub struct DealerWriter {
 }
 
 impl DealerWriter {
+  #[cfg(test)]
+  pub(crate) fn for_test(http: SpHttp, device_id: &str) -> Self {
+    DealerWriter {
+      http,
+      device_id: device_id.to_string(),
+      name: "bridgething".to_string(),
+      connection_id: "test-connection".to_string(),
+    }
+  }
+
   pub fn connection_id(&self) -> &str {
     &self.connection_id
   }
@@ -418,6 +428,34 @@ fn decode_payload(p: &str, gzipped: bool) -> Result<Vec<u8>> {
   Ok(out)
 }
 
+pub fn cluster_playing(cluster: &Cluster) -> bool {
+  cluster.player_state.is_playing && !cluster.player_state.is_paused
+}
+
+fn is_phone(info: &DeviceInfo) -> bool {
+  matches!(
+    info.device_type.enum_value_or_default(),
+    DeviceType::SMARTPHONE | DeviceType::TABLET
+  )
+}
+
+pub fn phone_device(cluster: &Cluster, me: &str) -> Option<String> {
+  if !cluster.active_device_id.is_empty()
+    && cluster.active_device_id != me
+    && cluster.device.get(&cluster.active_device_id).is_some_and(is_phone)
+  {
+    return Some(cluster.active_device_id.clone());
+  }
+  let mut ids: Vec<&String> = cluster
+    .device
+    .iter()
+    .filter(|(id, info)| id.as_str() != me && is_phone(info))
+    .map(|(id, _)| id)
+    .collect();
+  ids.sort();
+  ids.first().map(|s| s.to_string())
+}
+
 pub fn active_device(cluster: &Cluster, me: &str, last_active: Option<&str>) -> Option<String> {
   if !cluster.active_device_id.is_empty() {
     return Some(cluster.active_device_id.clone());
@@ -442,4 +480,97 @@ pub fn active_device(cluster: &Cluster, me: &str, last_active: Option<&str>) -> 
     }
   }
   speaker.or(any)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn device_info(kind: DeviceType) -> DeviceInfo {
+    let mut di = DeviceInfo::new();
+    di.device_type = kind.into();
+    di
+  }
+
+  fn cluster(active: &str, playing: bool, devices: &[(&str, DeviceType)]) -> Cluster {
+    let mut c = Cluster::new();
+    c.active_device_id = active.to_string();
+    let ps = c.player_state.mut_or_insert_default();
+    ps.is_playing = playing;
+    ps.is_paused = !playing;
+    for (id, kind) in devices {
+      c.device.insert(id.to_string(), device_info(*kind));
+    }
+    c
+  }
+
+  // pins for the user-initiated targeting path: these document as-built behavior on purpose.
+  // the on-connect auto-resume policy lives in resume_on_connect, not here.
+  #[test]
+  fn active_device_honors_the_cluster_active_id_unconditionally() {
+    let c = cluster(
+      "avr-1",
+      false,
+      &[("avr-1", DeviceType::AUDIO_DONGLE), ("phone-1", DeviceType::SMARTPHONE)],
+    );
+    assert_eq!(active_device(&c, "me", None), Some("avr-1".to_string()));
+  }
+
+  #[test]
+  fn active_device_falls_back_to_last_active_still_in_the_cluster() {
+    let c = cluster("", false, &[("avr-1", DeviceType::AUDIO_DONGLE)]);
+    assert_eq!(active_device(&c, "me", Some("avr-1")), Some("avr-1".to_string()));
+    assert_eq!(active_device(&c, "me", Some("gone")), Some("avr-1".to_string()));
+  }
+
+  #[test]
+  fn active_device_prefers_a_speaker_when_nothing_is_active() {
+    let c = cluster(
+      "",
+      false,
+      &[("phone-1", DeviceType::SMARTPHONE), ("spk-1", DeviceType::SPEAKER)],
+    );
+    assert_eq!(active_device(&c, "me", None), Some("spk-1".to_string()));
+  }
+
+  #[test]
+  fn active_device_never_targets_me() {
+    let c = cluster("", false, &[("me", DeviceType::OBSERVER)]);
+    assert_eq!(active_device(&c, "me", Some("me")), None);
+  }
+
+  #[test]
+  fn phone_device_picks_smartphone_or_tablet_only() {
+    let c = cluster(
+      "",
+      false,
+      &[
+        ("spk-1", DeviceType::SPEAKER),
+        ("tab-1", DeviceType::TABLET),
+        ("phone-1", DeviceType::SMARTPHONE),
+      ],
+    );
+    assert_eq!(phone_device(&c, "me"), Some("phone-1".to_string()), "sorted id order");
+    let no_phone = cluster("", false, &[("spk-1", DeviceType::SPEAKER)]);
+    assert_eq!(phone_device(&no_phone, "me"), None);
+  }
+
+  #[test]
+  fn phone_device_prefers_the_active_phone() {
+    let c = cluster(
+      "phone-2",
+      false,
+      &[("phone-1", DeviceType::SMARTPHONE), ("phone-2", DeviceType::SMARTPHONE)],
+    );
+    assert_eq!(phone_device(&c, "me"), Some("phone-2".to_string()));
+  }
+
+  #[test]
+  fn cluster_playing_requires_playing_and_not_paused() {
+    assert!(cluster_playing(&cluster("x", true, &[])));
+    assert!(!cluster_playing(&cluster("x", false, &[])));
+    let mut both = cluster("x", true, &[]);
+    both.player_state.mut_or_insert_default().is_paused = true;
+    assert!(!cluster_playing(&both));
+  }
 }

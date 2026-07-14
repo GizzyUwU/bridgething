@@ -31,7 +31,7 @@ use libbridgething::{
   client::{BridgeToClientNotificationsMsgEvent, NotificationRemoved},
   gateway::BridgeToGatewayNotificationsMsgEvent,
 };
-use tokio::{sync::Mutex, time::Instant};
+use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::{bluetooth::BluetoothMan, net::WireEventBus};
@@ -81,24 +81,22 @@ type NotifyStream = Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>;
 #[derive(Clone)]
 pub struct AuthStateReporter {
   bluetooth: BluetoothMan,
-  state: std::sync::Arc<Mutex<AncsAuthState>>,
+  state: std::sync::Arc<std::sync::Mutex<AncsAuthState>>,
 }
 
 impl AuthStateReporter {
-  pub fn new(bluetooth: BluetoothMan) -> Self {
-    Self {
-      bluetooth,
-      state: std::sync::Arc::new(Mutex::new(AncsAuthState::Unknown)),
-    }
+  pub fn new(bluetooth: BluetoothMan, state: std::sync::Arc<std::sync::Mutex<AncsAuthState>>) -> Self {
+    Self { bluetooth, state }
   }
 
   pub async fn report(&self, next: AncsAuthState) {
-    let mut guard = self.state.lock().await;
-    if *guard == next {
-      return;
+    {
+      let mut guard = self.state.lock().unwrap();
+      if *guard == next {
+        return;
+      }
+      *guard = next;
     }
-    *guard = next;
-    drop(guard);
     self
       .bluetooth
       .gateway_man

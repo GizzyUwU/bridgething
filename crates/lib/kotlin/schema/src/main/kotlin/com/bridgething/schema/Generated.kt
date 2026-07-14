@@ -1894,6 +1894,26 @@ data class OtaProgress (
 	val etaMs: UInt? = null
 )
 
+/// Which system overlays the daemon injects into the active webapp's page.
+/// Every surface defaults to on, so a minimal webapp gets call / pairing /
+/// notification / connection / volume UI for free; a full-service webapp
+/// declares off the surfaces it draws itself. The wire events the webapp
+/// receives are unchanged either way; this only gates the injected UI.
+@Serializable
+data class OverlayProfile (
+	/// Notification toasts.
+	val notifications: Boolean,
+	/// Incoming / active call banner.
+	val call: Boolean,
+	/// Bluetooth pairing PIN modal.
+	val pairing: Boolean,
+	/// Companion-disconnected banner, shown only while a paired phone has
+	/// no useful link.
+	val connection: Boolean,
+	/// Transient volume level indicator.
+	val volume: Boolean
+)
+
 @Serializable
 enum class PeerIap2Status(val string: String) {
 	@SerialName("none")
@@ -2979,7 +2999,10 @@ data class WebappManifest (
 	/// of voice integration.
 	val voiceGrammar: String? = null,
 	/// Declared art render sizes. Omitted falls back to `{248, 96}`.
-	val art: ArtProfile? = null
+	val art: ArtProfile? = null,
+	/// Which system overlays the daemon injects into this webapp's page.
+	/// Omitted surfaces (and an omitted field) default to on.
+	val overlays: OverlayProfile? = null
 )
 
 /// Which bundle file a `WebappResource` request targets.

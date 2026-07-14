@@ -26,6 +26,7 @@ mod transport;
 mod stock;
 
 mod monitoring;
+mod overlay;
 
 use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin};
 
@@ -293,6 +294,9 @@ pub async fn init(config: DaemonConfig) -> Daemon {
   )
   .await
   .expect("failed to bind client servers");
+
+  state.sync_overlay(true).await;
+
   #[cfg(feature = "test-tap")]
   let server_addrs = ServerAddrs {
     stock: server.stock_addr(),

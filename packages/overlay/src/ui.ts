@@ -1,0 +1,147 @@
+const STYLE = `
+:host {
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #fff;
+}
+.top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 92%;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  font-size: 15px;
+  line-height: 1.2;
+  animation: bt-drop 160ms ease-out;
+}
+.banner .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.banner.connection .dot { background: #f06050; }
+.banner.call .dot { background: #35d06a; }
+.banner.call.ringing .dot { animation: bt-pulse 1s infinite; }
+.banner .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.banner .sub { opacity: 0.65; white-space: nowrap; }
+.toasts {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 46%;
+  max-width: 300px;
+}
+.toast {
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(18, 18, 22, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  animation: bt-drop 160ms ease-out;
+}
+.toast .app { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; }
+.toast .title { font-size: 14px; font-weight: 600; margin-top: 1px; }
+.toast .msg {
+  font-size: 13px;
+  opacity: 0.8;
+  margin-top: 1px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: bt-fade 160ms ease-out;
+}
+.modal {
+  background: rgba(24, 24, 28, 0.98);
+  border-radius: 20px;
+  padding: 26px 34px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  max-width: 80%;
+}
+.modal .head { font-size: 15px; opacity: 0.7; }
+.modal .pin { font-size: 44px; font-weight: 700; letter-spacing: 0.35em; margin: 10px 0 6px; padding-left: 0.35em; }
+.modal .name { font-size: 14px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.volume {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 18px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: rgba(18, 18, 22, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: bt-fade 120ms ease-out;
+}
+.volume .label { font-size: 13px; opacity: 0.7; flex: none; width: 44px; }
+.volume .track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
+.volume .fill { height: 100%; border-radius: 3px; background: #fff; transition: width 90ms linear; }
+.volume.muted .fill { background: #f06050; }
+.hidden { display: none; }
+@keyframes bt-drop { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes bt-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+`;
+
+export type OverlayRoot = {
+  top: HTMLElement;
+  toasts: HTMLElement;
+  layer: HTMLElement;
+};
+
+export function mountRoot(container?: HTMLElement): OverlayRoot {
+  const host = document.createElement('bridgething-overlay');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = STYLE;
+  const top = el('div', 'top');
+  const toasts = el('div', 'toasts');
+  const layer = el('div', '');
+  shadow.append(style, top, toasts, layer);
+  if (container) {
+    host.style.position = 'absolute';
+    container.appendChild(host);
+  } else {
+    (document.body ?? document.documentElement).appendChild(host);
+  }
+  return { top, toasts, layer };
+}
+
+export function el(tag: string, className: string, text?: string): HTMLElement {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}

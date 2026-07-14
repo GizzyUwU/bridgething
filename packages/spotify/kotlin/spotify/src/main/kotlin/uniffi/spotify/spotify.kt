@@ -651,7 +651,7 @@ internal interface UniffiCallbackInterfaceLogSinkMethod0 : com.sun.jna.Callback 
     fun callback(`uniffiHandle`: Long,`level`: RustBuffer.ByValue,`target`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceDeviceWakerMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+    fun callback(`uniffiHandle`: Long,`reason`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceHttpTransportMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`request`: RustBuffer.ByValue,`sink`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
@@ -865,6 +865,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resume(
     ): Int
+    external fun uniffi_spotify_checksum_method_spotifyclient_resume_on_connect(
+    ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_resync(
     ): Int
     external fun uniffi_spotify_checksum_method_spotifyclient_root_browse(
@@ -963,7 +965,7 @@ external fun uniffi_spotify_fn_free_devicewaker(`handle`: Long,uniffi_out_err: U
 ): Unit
 external fun uniffi_spotify_fn_init_callback_vtable_devicewaker(`vtable`: UniffiVTableCallbackInterfaceDeviceWaker,
 ): Unit
-external fun uniffi_spotify_fn_method_devicewaker_wake_device(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_spotify_fn_method_devicewaker_wake_device(`ptr`: Long,`reason`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_spotify_fn_clone_spotifyclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1002,6 +1004,8 @@ external fun uniffi_spotify_fn_method_spotifyclient_queue_uri(`ptr`: Long,`uri`:
 external fun uniffi_spotify_fn_method_spotifyclient_resolve_context(`ptr`: Long,`uri`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_resume(`ptr`: Long,
+): Long
+external fun uniffi_spotify_fn_method_spotifyclient_resume_on_connect(`ptr`: Long,
 ): Long
 external fun uniffi_spotify_fn_method_spotifyclient_resync(`ptr`: Long,
 ): Long
@@ -1199,7 +1203,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_spotify_checksum_func_init_logging() != 6520) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_spotify_checksum_method_devicewaker_wake_device() != 19739) {
+    if (lib.uniffi_spotify_checksum_method_devicewaker_wake_device() != 58994) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_active_device_volume_percent() != 9625) {
@@ -1248,6 +1252,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resume() != 52345) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_spotify_checksum_method_spotifyclient_resume_on_connect() != 65194) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_spotify_checksum_method_spotifyclient_resync() != 57837) {
@@ -1919,7 +1926,7 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 
 public interface DeviceWaker {
     
-    fun `wakeDevice`()
+    fun `wakeDevice`(`reason`: WakeReason)
     
     companion object
 }
@@ -2020,13 +2027,13 @@ open class DeviceWakerImpl: Disposable, AutoCloseable, DeviceWaker
         }
     }
 
-    override fun `wakeDevice`()
+    override fun `wakeDevice`(`reason`: WakeReason)
         = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_spotify_fn_method_devicewaker_wake_device(
         it,
-        _status)
+        FfiConverterTypeWakeReason.lower(`reason`),_status)
 }
     }
     
@@ -2051,10 +2058,11 @@ open class DeviceWakerImpl: Disposable, AutoCloseable, DeviceWaker
 // Put the implementation in an object so we don't pollute the top-level namespace
 internal object uniffiCallbackInterfaceDeviceWaker {
     internal object `wakeDevice`: UniffiCallbackInterfaceDeviceWakerMethod0 {
-        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+        override fun callback(`uniffiHandle`: Long,`reason`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeDeviceWaker.handleMap.get(uniffiHandle)
             val makeCall = { ->
                 uniffiObj.`wakeDevice`(
+                    FfiConverterTypeWakeReason.lift(`reason`),
                 )
             }
             val writeReturn = { _: Unit -> Unit }
@@ -2824,6 +2832,8 @@ public interface SpotifyClientInterface {
     
     suspend fun `resume`()
     
+    suspend fun `resumeOnConnect`()
+    
     suspend fun `resync`()
     
     suspend fun `rootBrowse`(`sections`: kotlin.UInt?, `preview`: kotlin.UInt?): List<Shelf>
@@ -3277,6 +3287,28 @@ open class SpotifyClient: Disposable, AutoCloseable, SpotifyClientInterface
         return uniffiRustCallAsync(
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_spotify_fn_method_spotifyclient_resume(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_spotify_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_spotify_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_spotify_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        Exception.ErrorHandler,
+    )
+    }
+
+    
+    @Throws(Exception::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `resumeOnConnect`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_spotify_fn_method_spotifyclient_resume_on_connect(
                 uniffiHandle,
                 
             )
@@ -5416,6 +5448,46 @@ public object FfiConverterTypeRepeatMode: FfiConverterRustBuffer<RepeatMode> {
     override fun allocationSize(value: RepeatMode) = 4UL
 
     override fun write(value: RepeatMode, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * why the platform is being asked to wake the phone's spotify. user-initiated
+ * wakes must always fire; connect-resume wakes may be suppressed by the platform
+ * (ios skips them while the companion app is foreground so an iap2 app-launch
+ * never yanks the user out of the app mid-pairing).
+ */
+
+enum class WakeReason {
+    
+    USER_PLAY,
+    CONNECT_RESUME;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWakeReason: FfiConverterRustBuffer<WakeReason> {
+    override fun read(buf: ByteBuffer) = try {
+        WakeReason.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: WakeReason) = 4UL
+
+    override fun write(value: WakeReason, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }

@@ -63,12 +63,8 @@ public struct AncsSetupResult: Sendable {
         private var centralDelegate: CentralDelegate?
         private var sessionActivated = false
         private var activationContinuation: CheckedContinuation<Void, Never>?
-        private var pendingPair: PendingPair?
+        private var pendingPairs: [CheckedContinuation<AncsSetupResult, Never>] = []
         private var lastAuthState: AncsAuthState = .unknown
-
-        struct PendingPair {
-            let continuation: CheckedContinuation<AncsSetupResult, Never>
-        }
 
         override init() {
             super.init()
@@ -95,9 +91,10 @@ public struct AncsSetupResult: Sendable {
                 return AncsSetupResult(kind: .alreadyPaired, authState: lastAuthState)
             }
 
+            let alreadyShowing = !pendingPairs.isEmpty
             return await withCheckedContinuation { (continuation: CheckedContinuation<AncsSetupResult, Never>) in
-                pendingPair = PendingPair(continuation: continuation)
-                showPicker()
+                pendingPairs.append(continuation)
+                if !alreadyShowing { showPicker() }
             }
         }
 
@@ -105,6 +102,11 @@ public struct AncsSetupResult: Sendable {
             await activateIfNeeded()
             guard sessionActivated, let accessory = currentAccessory() else { return }
             triggerConnect(for: accessory, requiresAncs: false)
+        }
+
+        func hasPairedAccessory() async -> Bool {
+            await activateIfNeeded()
+            return sessionActivated && hasMatchingExistingAccessory()
         }
 
         // MARK: - ASK plumbing
@@ -207,13 +209,17 @@ public struct AncsSetupResult: Sendable {
         }
 
         private func completePending(_ kind: AncsSetupKind) {
-            guard let pending = pendingPair else { return }
-            pendingPair = nil
-            pending.continuation.resume(returning: AncsSetupResult(kind: kind, authState: lastAuthState))
+            guard !pendingPairs.isEmpty else { return }
+            let pending = pendingPairs
+            pendingPairs = []
+            let result = AncsSetupResult(kind: kind, authState: lastAuthState)
+            for continuation in pending {
+                continuation.resume(returning: result)
+            }
         }
 
         private func completePendingIfNeeded(_ kind: AncsSetupKind) {
-            guard pendingPair != nil else { return }
+            guard !pendingPairs.isEmpty else { return }
             completePending(kind)
         }
 

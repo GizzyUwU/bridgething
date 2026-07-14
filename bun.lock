@@ -283,6 +283,17 @@
         "vite": "^7.1.13",
       },
     },
+    "packages/overlay": {
+      "name": "@bridgething/overlay",
+      "version": "0.1.0",
+      "dependencies": {
+        "@bridgething/client": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vite": "^7.1.13",
+      },
+    },
     "packages/session-rn": {
       "name": "@bridgething/session-react-native",
       "version": "0.1.0",
@@ -599,6 +610,8 @@
     "@bridgething/lib": ["@bridgething/lib@workspace:crates/lib"],
 
     "@bridgething/mobile": ["@bridgething/mobile@workspace:mobile"],
+
+    "@bridgething/overlay": ["@bridgething/overlay@workspace:packages/overlay"],
 
     "@bridgething/session-react-native": ["@bridgething/session-react-native@workspace:packages/session-rn"],
 

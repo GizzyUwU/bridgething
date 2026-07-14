@@ -7,7 +7,10 @@ use headless_chrome::{
   Browser, Tab,
   protocol::cdp::{
     Network,
-    Page::{GetNavigationHistory, NavigateToHistoryEntry},
+    Page::{
+      AddScriptToEvaluateOnNewDocument, GetNavigationHistory, NavigateToHistoryEntry,
+      RemoveScriptToEvaluateOnNewDocument,
+    },
   },
 };
 use serde::Deserialize;
@@ -51,6 +54,19 @@ pub enum ChromeCommand {
   HistoryForward,
   Reload,
   ClearHttpCache,
+  SetOverlay {
+    script: Option<OverlayScript>,
+    run_immediately: bool,
+  },
+}
+
+#[derive(Clone)]
+pub struct OverlayScript(pub Arc<String>);
+
+impl std::fmt::Debug for OverlayScript {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "OverlayScript({} bytes)", self.0.len())
+  }
 }
 
 #[derive(Debug)]
@@ -106,6 +122,7 @@ struct ChromeWorker {
   external: Arc<AtomicBool>,
   browser: Option<Browser>,
   http: reqwest::Client,
+  overlay_id: Option<String>,
 
   rx: ChromeRx,
   cancel_token: CancellationToken,
@@ -129,6 +146,7 @@ impl ChromeWorker {
       external,
       browser: None,
       http,
+      overlay_id: None,
 
       rx,
       cancel_token,
@@ -155,6 +173,9 @@ impl ChromeWorker {
               self.handle_reload().await
             }
             ChromeCommand::ClearHttpCache => self.handle_clear_http_cache().await,
+            ChromeCommand::SetOverlay { script, run_immediately } => {
+              self.handle_set_overlay(script, run_immediately).await
+            }
           }
         }
         _ = self.cancel_token.cancelled() => {
@@ -207,6 +228,34 @@ impl ChromeWorker {
       .await;
   }
 
+  async fn handle_set_overlay(&mut self, script: Option<OverlayScript>, run_immediately: bool) {
+    tracing::debug!(
+      installed = script.is_some(),
+      run_immediately,
+      "setting overlay injection"
+    );
+    let prior = self.overlay_id.take();
+    let new_id = std::sync::Mutex::new(None);
+    self
+      .with_first_tab("set-overlay", |tab| {
+        if let Some(id) = &prior {
+          let _ = tab.call_method(RemoveScriptToEvaluateOnNewDocument { identifier: id.clone() });
+        }
+        if let Some(src) = &script {
+          let installed = tab.call_method(AddScriptToEvaluateOnNewDocument {
+            source: (*src.0).clone(),
+            world_name: None,
+            include_command_line_api: None,
+            run_immediately: run_immediately.then_some(true),
+          })?;
+          *new_id.lock().unwrap() = Some(installed.identifier);
+        }
+        Ok(())
+      })
+      .await;
+    self.overlay_id = new_id.into_inner().unwrap();
+  }
+
   async fn handle_clear_http_cache(&mut self) {
     tracing::debug!("clearing chromium http cache");
     self
@@ -224,8 +273,7 @@ impl ChromeWorker {
       let tab = match self.first_tab().await {
         Some(tab) => tab,
         None => {
-          // first_tab() already logged + slept on connect failure;
-          // don't retry-spin here.
+          // first_tab() already logged + slept on connect failure
           return;
         }
       };

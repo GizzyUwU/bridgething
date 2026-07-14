@@ -82,7 +82,7 @@ public actor BridgethingCompanion {
     private var ancsAuthState: AncsAuthState = .unknown
     private var logObserver: (@Sendable (CompanionLogLevel, String) -> Void)?
     private var deviceLogStreaming = false
-    
+
     private var deviceAutoResume: [String: Bool] = [:]
     private static let autoResumeBlipGap: TimeInterval = 300
     private var lastPeerDisconnectedAt: [String: Date] = [:]
@@ -353,6 +353,7 @@ public actor BridgethingCompanion {
 
     #if os(iOS)
         private var ancsCoordinator: AncsPairCoordinator?
+        private var ancsPromotionInFlight = false
 
         private func makeOrReuseCoordinator() async -> AncsPairCoordinator {
             if let existing = ancsCoordinator { return existing }
@@ -366,12 +367,25 @@ public actor BridgethingCompanion {
             await coordinator.setLastAuthState(ancsAuthState)
             await coordinator.reconnectIfPaired()
         }
+
+        private func ensureAncsPairing() async {
+            guard !connectedDeviceIds.isEmpty else { return }
+            guard !ancsPromotionInFlight else { return }
+            ancsPromotionInFlight = true
+            defer { ancsPromotionInFlight = false }
+            let coordinator = await makeOrReuseCoordinator()
+            await coordinator.setLastAuthState(ancsAuthState)
+            if await coordinator.hasPairedAccessory() {
+                await coordinator.reconnectIfPaired()
+                return
+            }
+            let result = await coordinator.pair()
+            log(.info, "ancs promotion: \(String(describing: result.kind)) (auth \(String(describing: result.authState)))")
+        }
     #endif
 
     public func presentPairPicker() async -> AccessoryPickResult? {
         #if os(iOS)
-            // the gateway rides iAP2/EA over BR/EDR, which needs a classic bond + MFi auth that
-            // AccessorySetupKit (LE/wifi only) can't do; the EA picker is the path for an MFi accessory.
             return await Self.presentBluetoothAccessoryPicker()
         #else
             return nil
@@ -487,7 +501,7 @@ public actor BridgethingCompanion {
                     named: UIApplication.didBecomeActiveNotification
                 ) {
                     guard let self else { return }
-                    await self.reestablishAncsLink()
+                    Task { await self.ensureAncsPairing() }
                 }
             })
         #endif
@@ -543,7 +557,7 @@ public actor BridgethingCompanion {
                 await emitTimeSnapshot()
                 await activeGlue?.handlePeerConnected(allowAutoResume: allowAutoResume(device.id))
                 #if os(iOS)
-                    await reestablishAncsLink()
+                    Task { [weak self] in await self?.ensureAncsPairing() }
                     if wasEmpty { await audioKeepAlive.activate() }
                 #endif
             case let .disconnected(id):
