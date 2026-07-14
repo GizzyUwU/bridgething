@@ -12,7 +12,7 @@
     "update": "bunx @bridgething/updater"
   },
   "dependencies": {
-    "@bridgething/client": "^0.2.0",
+    "@bridgething/client": "^0.2.1",
     "preact": "^10.29.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

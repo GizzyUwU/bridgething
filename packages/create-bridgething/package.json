@@ -1,6 +1,6 @@
 {
   "name": "create-bridgething",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Scaffold a new bridgething webapp (React + Vite + Tailwind v4)",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@bridgething/updater",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Transport-agnostic OTA updater for bridgething: library + bunx/npx CLI.",
   "license": "MIT",
   "author": "Joey Eamigh <55670930+JoeyEamigh@users.noreply.github.com> (https://github.com/JoeyEamigh)",
