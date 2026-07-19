@@ -465,6 +465,9 @@ public class BridgethingCompanion(
             LogLevel.Error -> CompanionLogLevel.Error
         }
         val message = "[${entry.target}] ${entry.message}"
+        // mirror to logcat so the persistent log store picks these up: daemon
+        // lines arrive over the wire and would otherwise never hit our buffer
+        android.util.Log.d("bridgething-device", message)
         DeviceLogRing.push(level.raw, message)
         logObserver?.invoke(level, message)
     }

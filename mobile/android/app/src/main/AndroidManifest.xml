@@ -114,6 +114,21 @@
         </intent-filter>
       </service>
 
+      <!--
+        Grants transient read access to exported log bundles so the share sheet
+        can hand one to another app. exported=false + grantUriPermissions means
+        only recipients we explicitly grant can read, and only that one URI.
+      -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+      </provider>
+
       <!-- re-arms presence observation after reboot; BOOT_COMPLETED is system-only so exported is safe. -->
       <receiver
         android:name=".BootReceiver"

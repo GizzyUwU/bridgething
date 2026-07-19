@@ -1,6 +1,6 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pause, Play, Share2, Trash2 } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Press } from '../components/Press';
 import { Segmented } from '../components/Segmented';
 import { type DeviceLogLine, useDiagnostics } from '../lib/diagnostics';
+import { getSession } from '../lib/session';
 import type { RootStackParamList } from '../navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Logs'>;
@@ -36,7 +37,28 @@ export function LogsScreen({}: Props) {
     return entries.filter(e => e.level === filter);
   }, [entries, filter]);
 
+  const [storedBytes, setStoredBytes] = useState(0);
+
+  const refreshStored = useCallback(() => {
+    getSession()
+      .persistedLogSize()
+      .then(setStoredBytes)
+      .catch(() => setStoredBytes(0));
+  }, []);
+
+  useEffect(refreshStored, [refreshStored]);
+
+  /**
+   * Prefers the on-disk bundle (full logcat across the last few launches) and
+   * falls back to dumping the in-memory buffer as text on platforms that have
+   * no persistent store.
+   */
   const share = async () => {
+    try {
+      if (await getSession().shareLogs()) return;
+    } catch {
+      // fall through to the in-memory path
+    }
     if (entries.length === 0) {
       Alert.alert('Nothing to share', 'Log buffer is empty.');
       return;
@@ -52,6 +74,26 @@ export function LogsScreen({}: Props) {
     }
   };
 
+  const clearStored = () => {
+    Alert.alert(
+      'Clear stored logs?',
+      'Deletes the log files kept on disk from previous app launches.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            getSession()
+              .clearPersistedLogs()
+              .catch(() => {})
+              .finally(refreshStored);
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <View className="border-b border-border bg-surface px-5 py-3">
@@ -64,10 +106,20 @@ export function LogsScreen({}: Props) {
           />
         </View>
         <View className="mt-3 flex-row items-center justify-between">
-          <Text className="text-[12px] text-muted-foreground">
-            {filtered.length} / {entries.length} entries
-            {streaming ? ' · streaming' : ' · stopped'}
-          </Text>
+          <View>
+            <Text className="text-[12px] text-muted-foreground">
+              {filtered.length} / {entries.length} entries
+              {streaming ? ' · streaming' : ' · stopped'}
+            </Text>
+            {storedBytes > 0 ? (
+              <Press onPress={clearStored} scaleTo={0.96}>
+                <Text className="mt-0.5 text-[11px] text-muted-foreground">
+                  {formatBytes(storedBytes)} stored on disk ·{' '}
+                  <Text className="text-destructive">clear</Text>
+                </Text>
+              </Press>
+            ) : null}
+          </View>
           <View className="flex-row gap-1.5">
             <ToolbarBtn
               icon={deviceStreaming ? Pause : Play}
@@ -206,6 +258,12 @@ function formatTime(ts: number): string {
     '.' +
     String(d.getMilliseconds()).padStart(3, '0')
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatEntry(e: DeviceLogLine): string {

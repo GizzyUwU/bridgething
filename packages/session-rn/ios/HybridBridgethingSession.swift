@@ -16,6 +16,11 @@ public protocol BridgethingSessionBackend: AnyObject, Sendable {
     func deviceLogSnapshot(limit: Double) async -> [BridgethingDeviceLogLine]
     func companionDebug() async -> BridgethingCompanionDebug
 
+    func persistedLogSize() async -> Double
+    func exportLogs() async throws -> String
+    func shareLogs() async -> Bool
+    func clearPersistedLogs() async
+
     func enableAncsNotifications() async -> BridgethingAncsSetupResult
     func ancsAuthStatus() async -> BridgethingAncsAuthStatus
 
@@ -249,6 +254,30 @@ public final class HybridBridgethingSession: HybridBridgethingSessionSpec, @unch
     public func companionDebug() throws -> Promise<BridgethingCompanionDebug> {
         Promise.async {
             await (try Self.backend()).companionDebug()
+        }
+    }
+
+    public func persistedLogSize() throws -> Promise<Double> {
+        Promise.async {
+            await (try Self.backend()).persistedLogSize()
+        }
+    }
+
+    public func exportLogs() throws -> Promise<String> {
+        Promise.async {
+            try await (try Self.backend()).exportLogs()
+        }
+    }
+
+    public func shareLogs() throws -> Promise<Bool> {
+        Promise.async {
+            await (try Self.backend()).shareLogs()
+        }
+    }
+
+    public func clearPersistedLogs() throws -> Promise<Void> {
+        Promise.async {
+            await (try Self.backend()).clearPersistedLogs()
         }
     }
 

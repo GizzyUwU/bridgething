@@ -327,6 +327,15 @@ export interface BridgethingSession extends HybridObject<{ ios: 'swift'; android
   deviceLogSnapshot(limit: number): Promise<BridgethingDeviceLogLine[]>;
   companionDebug(): Promise<BridgethingCompanionDebug>;
 
+  /** Bytes of persisted log currently retained on disk across all launches. */
+  persistedLogSize(): Promise<number>;
+  /** Writes every retained launch into one text bundle; resolves to its path. */
+  exportLogs(): Promise<string>;
+  /** Writes a bundle and opens the OS share sheet. False when no UI is available to host it. */
+  shareLogs(): Promise<boolean>;
+  /** Drops retained launches and truncates the live one. */
+  clearPersistedLogs(): Promise<void>;
+
   enableAncsNotifications(): Promise<BridgethingAncsSetupResult>;
   ancsAuthStatus(): Promise<BridgethingAncsAuthStatus>;
 

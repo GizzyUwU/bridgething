@@ -39,6 +39,11 @@ public interface BridgethingSessionBackend {
     public suspend fun deviceLogSnapshot(limit: Double): Array<BridgethingDeviceLogLine>
     public suspend fun companionDebug(): BridgethingCompanionDebug
 
+    public suspend fun persistedLogSize(): Double
+    public suspend fun exportLogs(): String
+    public suspend fun shareLogs(): Boolean
+    public suspend fun clearPersistedLogs()
+
     public suspend fun enableAncsNotifications(): BridgethingAncsSetupResult
     public suspend fun ancsAuthStatus(): BridgethingAncsAuthStatus
 

@@ -195,6 +195,22 @@ export class BridgethingSession {
     return this.native.companionDebug();
   }
 
+  async persistedLogSize(): Promise<number> {
+    return this.native.persistedLogSize();
+  }
+
+  async exportLogs(): Promise<string> {
+    return this.native.exportLogs();
+  }
+
+  async shareLogs(): Promise<boolean> {
+    return this.native.shareLogs();
+  }
+
+  async clearPersistedLogs(): Promise<void> {
+    return this.native.clearPersistedLogs();
+  }
+
   async enableAncsNotifications(): Promise<BridgethingAncsSetupResult> {
     return this.native.enableAncsNotifications();
   }

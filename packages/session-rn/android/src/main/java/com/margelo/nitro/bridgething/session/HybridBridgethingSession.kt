@@ -151,6 +151,16 @@ public class HybridBridgethingSession : HybridBridgethingSessionSpec() {
         require().companionDebug()
     }
 
+    override fun persistedLogSize(): Promise<Double> = Promise.async {
+        backend?.persistedLogSize() ?: 0.0
+    }
+
+    override fun exportLogs(): Promise<String> = Promise.async { require().exportLogs() }
+
+    override fun shareLogs(): Promise<Boolean> = Promise.async { backend?.shareLogs() ?: false }
+
+    override fun clearPersistedLogs(): Promise<Unit> = Promise.async { backend?.clearPersistedLogs() }
+
     override fun enableAncsNotifications(): Promise<BridgethingAncsSetupResult> = Promise.async {
         backend?.enableAncsNotifications() ?: BridgethingAncsSetupResult(
             kind = BridgethingAncsSetupKind.UNSUPPORTED,

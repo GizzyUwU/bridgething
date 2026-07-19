@@ -69,6 +69,7 @@ import com.bridgething.companion.OtaPollEvent
 import com.bridgething.companion.OtaStepKind
 import com.bridgething.companion.WebappInstallResult
 import com.bridgething.gateway.GatewayEvent
+import com.bridgething.gateway.LogStore
 import com.bridgething.gateway.RequestResult
 import com.bridgething.gateway.device
 import com.bridgething.gateway.system
@@ -416,6 +417,23 @@ public class HybridBridgethingSessionImpl(
         DeviceLogRing.tail(limit.toInt())
             .map { BridgethingDeviceLogLine(seq = it.seq.toDouble(), ts = it.timestampMs, level = it.level, message = it.message) }
             .toTypedArray()
+
+    override suspend fun persistedLogSize(): Double = withContext(Dispatchers.IO) {
+        LogStore.retainedBytes().toDouble()
+    }
+
+    override suspend fun exportLogs(): String = withContext(Dispatchers.IO) {
+        LogExport.writeBundle(context).absolutePath
+    }
+
+    override suspend fun shareLogs(): Boolean {
+        // the bundle write is IO, but startActivity has to run on the main thread
+        val file = withContext(Dispatchers.IO) { runCatching { LogExport.writeBundle(context) }.getOrNull() }
+            ?: return false
+        return withContext(Dispatchers.Main) { LogExport.share(context, file) }
+    }
+
+    override suspend fun clearPersistedLogs(): Unit = withContext(Dispatchers.IO) { LogStore.clear() }
 
     override suspend fun companionDebug(): BridgethingCompanionDebug {
         val c = stateLock.withLock { companion }

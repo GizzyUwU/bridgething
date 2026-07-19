@@ -139,4 +139,6 @@ dependencies {
     implementation project(":packages:tidal:kotlin:tidal")
     implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation "androidx.security:security-crypto:1.1.0"
+    // FileProvider, for handing log bundles to the share sheet
+    implementation "androidx.core:core:1.13.1"
 }

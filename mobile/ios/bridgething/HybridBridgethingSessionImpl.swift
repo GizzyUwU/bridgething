@@ -364,6 +364,19 @@ public final class HybridBridgethingSessionImpl: BridgethingSessionBackend, @unc
         }
     }
 
+    // Persistent log capture is Android-only for now: the logcat-backed store
+    // has no iOS counterpart, so these report "nothing retained" rather than
+    // pretending to have a bundle to hand over.
+    public func persistedLogSize() async -> Double { 0 }
+
+    public func exportLogs() async throws -> String {
+        throw SessionError.unsupportedOnPlatform
+    }
+
+    public func shareLogs() async -> Bool { false }
+
+    public func clearPersistedLogs() async {}
+
     public func companionDebug() async -> BridgethingCompanionDebug {
         let companion = stateLock.withLock { self.companion }
         let glue = await companion?.current()
