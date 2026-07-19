@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises';
 
-import type { ArtifactSource } from './source';
+import type { ArtifactSource } from './source.js';
 
 export async function fileArtifactSource(path: string): Promise<ArtifactSource> {
   const handle = await open(path, 'r');

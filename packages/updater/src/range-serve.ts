@@ -1,9 +1,9 @@
 import type { RangePart } from '@bridgething/lib';
 
-import type { AckRegistry } from './ack-window';
-import { streamRangeFragments } from './fragments';
-import type { GatewayDevice } from './gateway-device';
-import type { ArtifactSource } from './source';
+import type { AckRegistry } from './ack-window.js';
+import { streamRangeFragments } from './fragments.js';
+import type { GatewayDevice } from './gateway-device.js';
+import type { ArtifactSource } from './source.js';
 
 const RANGE_INLINE_MAX_BYTES = 16 * 1024;
 const RANGE_CHUNK_BYTES = 64 * 1024;

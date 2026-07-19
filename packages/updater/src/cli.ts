@@ -10,14 +10,14 @@ import { join } from 'node:path';
 import type { BridgeThingMeta } from '@bridgething/gateway';
 import { BridgethingGateway } from '@bridgething/gateway';
 
-import { OtaDriver, type OtaProgressSnapshot } from './driver';
-import { fetchManifest, otaArtifactUrls, parseCompositeVersion } from './manifest';
-import { fileArtifactSource } from './node';
-import { NetworkAdapter } from './websocket';
+import { OtaDriver, type OtaProgressSnapshot } from './driver.js';
+import { fetchManifest, imageVariantForChannel, otaArtifactUrls, parseCompositeVersion } from './manifest.js';
+import { fileArtifactSource } from './node.js';
+import { NetworkAdapter } from './websocket.js';
 
 type Args = {
   root: string;
-  channel: string;
+  channel: string | null;
   host: string;
   cacheDir: string;
   daemonOnly: boolean;
@@ -29,7 +29,7 @@ const CONNECT_TIMEOUT_MS = 15_000;
 
 function parseArgs(argv: string[]): Args {
   let root = DEFAULT_ROOT;
-  let channel = 'stable';
+  let channel: string | null = null;
   let host = DEFAULT_HOST;
   let cacheDir = join(tmpdir(), 'bridgething-updater');
   let daemonOnly = false;
@@ -70,7 +70,7 @@ release on a channel, per the discover manifest.
 
 Options:
   --root <url>       Manifest root URL. Default ${DEFAULT_ROOT}.
-  --channel <name>    Channel to track. Default 'stable'.
+  --channel <name>    Channel to track. Defaults to the channel the device reports.
   --host <ws-url>     Daemon network gateway URL. Default ${DEFAULT_HOST}.
   --cache-dir <path>  Artifact download cache. Default a bridgething-updater dir under the OS tmpdir.
   --daemon-only       Skip the image OTA even if the manifest's image half changed.
@@ -91,11 +91,12 @@ async function main(): Promise<void> {
     `connected: ${meta.modelName} (${deviceId}) - daemon ${meta.appVersion}, image ${meta.imageVersion} (${meta.imageVariant}/${meta.channel})`,
   );
 
-  console.log(`fetching manifest from ${args.root} ...`);
+  const channelName = args.channel ?? meta.channel;
+  console.log(`fetching manifest from ${args.root} (channel ${channelName}) ...`);
   const manifest = await fetchManifest(args.root);
-  const channel = manifest.channels[args.channel];
+  const channel = manifest.channels[channelName];
   if (!channel) {
-    fail(`channel '${args.channel}' not present in manifest`);
+    fail(`channel '${channelName}' not present in manifest`);
   }
   const composite = parseCompositeVersion(channel.latest);
   if (!composite) {
@@ -110,17 +111,17 @@ async function main(): Promise<void> {
 
   const urls = otaArtifactUrls({
     rootURL: args.root,
-    channel: args.channel,
+    channel: channelName,
     daemonVersion: composite.daemon,
     imageVersion: composite.image,
-    imageVariant: meta.imageVariant,
+    imageVariant: imageVariantForChannel(channelName),
   });
 
   const driver = new OtaDriver(gateway, deviceId);
   let ok = true;
   try {
     if (!args.daemonOnly && meta.imageVersion !== composite.image) {
-      ok = await runImagePush(driver, args, urls);
+      ok = await runImagePush(driver, args, urls, `${channelName}-${composite.image}`);
     } else if (meta.appVersion !== composite.daemon) {
       ok = await runDaemonPush(driver, args, urls.daemonBinary, composite.daemon);
     } else {
@@ -134,11 +135,16 @@ async function main(): Promise<void> {
   process.exit(ok ? 0 : 1);
 }
 
-async function runImagePush(driver: OtaDriver, args: Args, urls: ReturnType<typeof otaArtifactUrls>): Promise<boolean> {
+async function runImagePush(
+  driver: OtaDriver,
+  args: Args,
+  urls: ReturnType<typeof otaArtifactUrls>,
+  tag: string,
+): Promise<boolean> {
   console.log('downloading image artifacts ...');
-  const swuPath = await downloadIfNeeded(urls.imageSwu, args.cacheDir, 'image.swu');
-  const zckPath = await downloadIfNeeded(urls.imageZck, args.cacheDir, 'image.zck');
-  const bootZckPath = await downloadIfNeeded(urls.imageBootZck, args.cacheDir, 'image-boot.zck');
+  const swuPath = await downloadIfNeeded(urls.imageSwu, args.cacheDir, `image-${tag}.swu`);
+  const zckPath = await downloadIfNeeded(urls.imageZck, args.cacheDir, `image-${tag}.zck`);
+  const bootZckPath = await downloadIfNeeded(urls.imageBootZck, args.cacheDir, `image-${tag}-boot.zck`);
 
   const source = await fileArtifactSource(swuPath);
   const zcks = new Map([

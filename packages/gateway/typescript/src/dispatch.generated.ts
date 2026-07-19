@@ -155,7 +155,7 @@ import type {
   WebappUninstall,
 } from '@bridgething/lib/gateway';
 import { newUuid } from '@bridgething/lib/uuid';
-import { BridgethingGateway, type GatewayEvent } from './index';
+import { BridgethingGateway, type GatewayEvent } from './index.js';
 
 export type TypedRequestResult<R, E> =
   | { ok: true; response: R }

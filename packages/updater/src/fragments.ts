@@ -1,9 +1,9 @@
 import type { Priority, RangePart } from '@bridgething/lib';
 
-import type { AckWindow } from './ack-window';
-import { TransferStalledError } from './ack-window';
-import type { GatewayDevice } from './gateway-device';
-import type { ArtifactSource } from './source';
+import type { AckWindow } from './ack-window.js';
+import { TransferStalledError } from './ack-window.js';
+import type { GatewayDevice } from './gateway-device.js';
+import type { ArtifactSource } from './source.js';
 
 export const DEFAULT_FRAGMENT_BYTES = 64 * 1024;
 

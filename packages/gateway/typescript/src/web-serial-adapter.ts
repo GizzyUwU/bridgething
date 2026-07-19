@@ -1,6 +1,6 @@
 import { BRIDGETHING_PROFILE_UUID } from '@bridgething/lib';
 
-import type { Adapter, AdapterEvent, AdapterListener, Device } from './index';
+import type { Adapter, AdapterEvent, AdapterListener, Device } from './index.js';
 
 /**
  * Web Serial adapter for the bridgething wire protocol.

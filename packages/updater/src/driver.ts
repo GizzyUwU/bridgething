@@ -1,13 +1,13 @@
 import type { BridgethingGateway, OtaKind, OtaPhase, WebappInfo } from '@bridgething/gateway';
 import { newUuid } from '@bridgething/lib/uuid';
 
-import type { AckWindowOptions } from './ack-window';
-import { AckRegistry } from './ack-window';
-import { DEFAULT_FRAGMENT_BYTES, streamSourceFragments } from './fragments';
-import type { GatewayDevice } from './gateway-device';
-import { serveOtaAssetRanges } from './range-serve';
-import type { ArtifactSource } from './source';
-import { sha256Hex } from './source';
+import type { AckWindowOptions } from './ack-window.js';
+import { AckRegistry } from './ack-window.js';
+import { DEFAULT_FRAGMENT_BYTES, streamSourceFragments } from './fragments.js';
+import type { GatewayDevice } from './gateway-device.js';
+import { serveOtaAssetRanges } from './range-serve.js';
+import type { ArtifactSource } from './source.js';
+import { sha256Hex } from './source.js';
 
 const OTA_IDLE_DEADLINE_MS = 60_000;
 const OTA_IDLE_CHECK_INTERVAL_MS = 15_000;

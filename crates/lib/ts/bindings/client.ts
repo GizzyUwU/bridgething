@@ -59,8 +59,8 @@ import type {
   WebappInfo,
   WsError,
   WsFrame,
-} from './shared';
-import type { MsgMeta, WireError } from './wire';
+} from './shared.js';
+import type { MsgMeta, WireError } from './wire.js';
 
 /**
  * 0..=100 ambient-brightness indicator derived from the on-board ALS +

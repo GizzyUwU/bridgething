@@ -1,7 +1,7 @@
 import type { Adapter, AdapterEvent, AdapterListener, Device } from '@bridgething/gateway';
 import { Logger, LogVerbosity } from '@bridgething/lib';
 
-import { StaticDiscoverer, type Discoverer, type DiscoveryListener, type Endpoint } from './discovery';
+import { StaticDiscoverer, type Discoverer, type DiscoveryListener, type Endpoint } from './discovery.js';
 
 export { StaticDiscoverer, type Discoverer, type DiscoveryListener, type Endpoint };
 

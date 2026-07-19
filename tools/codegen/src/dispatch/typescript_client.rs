@@ -101,7 +101,7 @@ fn push_imports(out: &mut String, surfaces: &[Surface], binding_locations: &BTre
 
   emit_grouped_imports(out, &imports, binding_locations, BindingProtocol::Client);
   out.push_str("import { newUuid } from '@bridgething/lib/uuid';\n");
-  out.push_str("import { BridgethingClient, type ClientEvent } from './index';\n\n");
+  out.push_str("import { BridgethingClient, type ClientEvent } from './index.js';\n\n");
 }
 
 pub(super) fn emit_grouped_imports(

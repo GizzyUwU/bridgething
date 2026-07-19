@@ -107,7 +107,7 @@ fn push_imports(out: &mut String, surfaces: &[Surface], binding_locations: &BTre
 
   emit_grouped_imports(out, &imports, binding_locations, BindingProtocol::Gateway);
   out.push_str("import { newUuid } from '@bridgething/lib/uuid';\n");
-  out.push_str("import { BridgethingGateway, type GatewayEvent } from './index';\n\n");
+  out.push_str("import { BridgethingGateway, type GatewayEvent } from './index.js';\n\n");
 }
 
 fn push_typed_request_result(out: &mut String) {

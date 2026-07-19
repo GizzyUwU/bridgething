@@ -145,7 +145,7 @@ import type {
   WebappUninstalled,
 } from '@bridgething/lib/client';
 import { newUuid } from '@bridgething/lib/uuid';
-import { BridgethingClient, type ClientEvent } from './index';
+import { BridgethingClient, type ClientEvent } from './index.js';
 
 export type TypedRequestResult<R, E> =
   | { ok: true; response: R }

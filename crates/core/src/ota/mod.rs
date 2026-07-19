@@ -71,7 +71,7 @@ use tokio::{
 use crate::{
   asset::AssetCache,
   bluetooth::GatewayMan,
-  peer::PeerTracker,
+  peer::{PeerSnapshot, PeerTracker},
   transfer::{
     ChunkOutcome, ChunkedTransfer, TransferError,
     sinks::{FORWARD_ACK_INTERVAL, TransferEvent, TransferSinks},
@@ -276,13 +276,7 @@ impl OtaActor {
                 if peer_watch.changed().await.is_err() {
                   std::future::pending::<()>().await;
                 }
-                let connected = peer_watch
-                  .borrow()
-                  .peers
-                  .get(&addr)
-                  .map(|p| matches!(p.companion, PeerCompanionStatus::Connected(_)))
-                  .unwrap_or(false);
-                if !connected {
+                if !Self::peer_link_alive(&peer_watch.borrow(), &addr) {
                   return;
                 }
               },
@@ -324,6 +318,13 @@ impl OtaActor {
       }
     }
     tracing::info!("ota orchestrator exiting");
+  }
+
+  fn peer_link_alive(snapshot: &PeerSnapshot, addr: &Address) -> bool {
+    snapshot
+      .peers
+      .get(addr)
+      .is_some_and(|p| !matches!(p.companion, PeerCompanionStatus::None))
   }
 
   async fn handle_begin(
@@ -591,13 +592,8 @@ impl OtaActor {
               if snapshot_rx.changed().await.is_err() {
                 return;
               }
-              let connected = snapshot_rx
-                .borrow()
-                .peers
-                .get(&addr)
-                .map(|p| matches!(p.companion, PeerCompanionStatus::Connected(_)))
-                .unwrap_or(false);
-              if !connected {
+              let alive = Self::peer_link_alive(&snapshot_rx.borrow(), &addr);
+              if !alive {
                 tracing::warn!(%addr, "pinned peer disconnected mid-write; signalling cancel + emitting OtaError");
                 emit_error(
                   &events_tx,

@@ -1,8 +1,8 @@
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { gzip, ungzip } from 'pako';
-import type { Priority } from './bindings/shared';
-import { uuidFromString, uuidToString } from './uuid';
-import { UUID_FIELD_NAMES } from './uuid-fields.generated';
+import type { Priority } from './bindings/shared.js';
+import { UUID_FIELD_NAMES } from './uuid-fields.generated.js';
+import { uuidFromString, uuidToString } from './uuid.js';
 
 export const Compression = {
   None: 0x00,

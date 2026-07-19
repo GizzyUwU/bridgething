@@ -105,6 +105,10 @@ export type OtaArtifactURLs = {
   imageBootZck: string;
 };
 
+export function imageVariantForChannel(channel: string): string {
+  return channel === 'dev' ? 'dev' : 'prod';
+}
+
 export function otaArtifactUrls(opts: {
   rootURL: string;
   channel: string;

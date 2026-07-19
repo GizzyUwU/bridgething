@@ -2,13 +2,13 @@ import { Codec, FrameAccumulator, Logger, LogVerbosity, type Priority } from '@b
 import type { BridgeToGatewayMsg, GatewayToBridgeMsg, GatewayToBridgeMsgData } from '@bridgething/lib/gateway';
 import { newUuid } from '@bridgething/lib/uuid';
 
-import type { GatewaySurfaces } from './dispatch.generated';
+import type { GatewaySurfaces } from './dispatch.generated.js';
 
-import { version } from './version';
+import { version } from './version.js';
 
 export * from '@bridgething/lib';
 export * from '@bridgething/lib/gateway';
-export type { GatewaySurfaces } from './dispatch.generated';
+export type { GatewaySurfaces } from './dispatch.generated.js';
 
 export type Device = {
   id: string;
@@ -270,7 +270,7 @@ const GATEWAY_VERSION = `v${version}`;
 export { GATEWAY_VERSION };
 
 // function call rather than a bare import so the class is defined before generated code references it
-import { applyDispatch } from './dispatch.generated';
+import { applyDispatch } from './dispatch.generated.js';
 applyDispatch();
 
-export { WebSerialAdapter, type WebSerialAdapterOptions } from './web-serial-adapter';
+export { WebSerialAdapter, type WebSerialAdapterOptions } from './web-serial-adapter.js';

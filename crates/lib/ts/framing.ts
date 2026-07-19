@@ -1,4 +1,4 @@
-import { CodecError, FRAME_HEADER_LENGTH, parseFrameHeader } from './codec';
+import { CodecError, FRAME_HEADER_LENGTH, parseFrameHeader } from './codec.js';
 
 /**
  * Per-stream buffer that takes raw byte chunks and yields complete frames.

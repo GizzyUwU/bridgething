@@ -2,11 +2,11 @@ import { Logger, LogVerbosity } from '@bridgething/lib';
 import type { BridgeToClientMsg, ClientToBridgeMsg, ClientToBridgeMsgData } from '@bridgething/lib/client';
 import { newUuid } from '@bridgething/lib/uuid';
 
-import type { ClientSurfaces } from './dispatch.generated';
+import type { ClientSurfaces } from './dispatch.generated.js';
 
 export * from '@bridgething/lib';
 export * from '@bridgething/lib/client';
-export type { ClientSurfaces } from './dispatch.generated';
+export type { ClientSurfaces } from './dispatch.generated.js';
 
 const DEFAULT_URL = 'ws://127.0.0.1:8891/';
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -319,5 +319,5 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
-import { applyDispatch } from './dispatch.generated';
+import { applyDispatch } from './dispatch.generated.js';
 applyDispatch();

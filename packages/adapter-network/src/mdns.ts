@@ -1,6 +1,6 @@
 import { BRIDGETHING_MDNS_SERVICE_TYPE, BRIDGETHING_NETWORK_GATEWAY_PORT } from '@bridgething/lib';
 
-import type { Discoverer, DiscoveryListener, Endpoint } from './discovery';
+import type { Discoverer, DiscoveryListener, Endpoint } from './discovery.js';
 
 /**
  * Browse for `_bridgething._tcp` services and surface each as an `Endpoint`.

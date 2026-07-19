@@ -114,6 +114,7 @@ fn gen_typescript() -> Result<()> {
   }
   run("cargo", &["test", "-p", "libbridgething", "--quiet"])?;
   run("bunx", &["prettier", TS_BINDINGS_DIR, "--write", "--log-level", "warn"])?;
+  add_ts_import_extensions(TS_BINDINGS_DIR).context("add .js extensions to ts bindings")?;
 
   println!("    emitting ts dispatch helpers");
   let inv = dispatch::inventory(LIB_SRC).context("dispatch inventory")?;
@@ -148,6 +149,28 @@ fn gen_typescript() -> Result<()> {
       "warn",
     ],
   )?;
+  Ok(())
+}
+
+/// ts-rs emits extensionless relative specifiers, which node's ESM resolver
+/// rejects once the package is published. Rewrite them to explicit `.js`.
+fn add_ts_import_extensions(dir: &str) -> Result<()> {
+  let specifier = regex::Regex::new(r#"(from\s+|import\s*\(\s*)(['"])(\.{1,2}/[^'"]+)(['"])"#)?;
+  for entry in std::fs::read_dir(dir).with_context(|| format!("read {dir}"))? {
+    let path = entry?.path();
+    if path.extension().and_then(|e| e.to_str()) != Some("ts") {
+      continue;
+    }
+    let input = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let output = specifier.replace_all(&input, |caps: &regex::Captures| {
+      let spec = &caps[3];
+      let suffix = if spec.ends_with(".js") { "" } else { ".js" };
+      format!("{}{}{}{}{}", &caps[1], &caps[2], spec, suffix, &caps[4])
+    });
+    if output != input {
+      std::fs::write(&path, output.as_ref()).with_context(|| format!("write {}", path.display()))?;
+    }
+  }
   Ok(())
 }
 

@@ -61,8 +61,8 @@ import type {
   WebappInfo,
   WsError,
   WsFrame,
-} from './shared';
-import type { MsgMeta, WireError } from './wire';
+} from './shared.js';
+import type { MsgMeta, WireError } from './wire.js';
 
 /**
  * Invalidate the daemon-side cached asset for `id`. The companion's
